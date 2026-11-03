@@ -723,6 +723,17 @@ pub struct SketchView {
     pub three_d: bool,
 }
 
+/// Where a sketch's 2D geometry lies for its 3D curves ([`Sketch::frame`]): derived from the
+/// model each time the sketch's links are refreshed, so two sketches compare equal whatever it is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SketchFrame(pub Option<solidcore_record::Plane>);
+
+impl PartialEq for SketchFrame {
+    fn eq(&self, _: &SketchFrame) -> bool {
+        true
+    }
+}
+
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
@@ -751,6 +762,11 @@ pub struct Sketch {
     /// joint deleted stays deleted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub wires_joined: bool,
+    /// The plane the 2D geometry lies on, in the drawn 3D curves' component coordinates, as the
+    /// document last resolved it (#10616): a 3D point on a 2D point or curve is placed through it.
+    /// Not saved; set when the sketch's links are refreshed.
+    #[serde(skip)]
+    pub frame: SketchFrame,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
@@ -785,6 +801,7 @@ impl Sketch {
             wires: Vec::new(),
             wire_constraints: Vec::new(),
             wires_joined: false,
+            frame: SketchFrame(None),
             equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),

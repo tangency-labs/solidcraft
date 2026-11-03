@@ -324,53 +324,67 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 // To an origin plane: the plane the paste turns it onto, the side it was on, and
                 // the paste's shift along it (a point on the plane is then that far from it).
-                // One the paste turns onto no origin plane goes.
-                solidcraft_sketch::WireConstraintKind::ParallelToPlane { line, plane } => match onto_plane(matrix(line), *plane) {
-                    Some((to, _, _)) => {
-                        *plane = to;
-                        true
-                    }
-                    None => false,
-                },
-                solidcraft_sketch::WireConstraintKind::PlaneAngle { line, plane, reversed, .. } => match onto_plane(matrix(line), *plane) {
-                    Some((to, flip, _)) => {
-                        *plane = to;
-                        *reversed ^= flip;
-                        true
-                    }
-                    None => false,
-                },
-                solidcraft_sketch::WireConstraintKind::PlaneDistance { p, plane, reversed, value } => match onto_plane(matrix(&p.wire), *plane) {
-                    // Turned only: the value (and the parameter that drives it) stays, the side turns.
-                    Some((to, flip, shift)) if shift.abs() <= 1e-9 => {
-                        (*plane, *reversed) = (to, *reversed ^ flip);
-                        true
-                    }
-                    // Shifted: the signed distance along the new normal is the shift and the old
-                    // distance, on its side; the parameter says so, so a solve keeps it.
-                    Some((to, flip, shift)) => {
-                        let side = if *reversed != flip { -1.0 } else { 1.0 };
-                        let w = shift + side * *value;
-                        (*plane, *reversed, *value) = (to, false, w);
-                        if let Some(name) = &c.param {
-                            shifted.push((name.clone(), format!("{} mm {} ({{old}})", shift, if side < 0.0 { "-" } else { "+" })));
+                // One the paste turns onto no origin plane goes, and so does one held to a plane
+                // or face of the design it came from (#10616), which this design does not have.
+                solidcraft_sketch::WireConstraintKind::ParallelToPlane { line, plane } => {
+                    match plane.origin_plane().and_then(|o| onto_plane(matrix(line), o)) {
+                        Some((to, _, _)) => {
+                            *plane = to.into();
+                            true
                         }
-                        true
+                        None => false,
                     }
-                    None => false,
-                },
-                solidcraft_sketch::WireConstraintKind::OnPlane { p, plane } => match onto_plane(matrix(&p.wire), *plane) {
-                    Some((to, _, shift)) if shift.abs() <= 1e-9 => {
-                        *plane = to;
-                        true
+                }
+                solidcraft_sketch::WireConstraintKind::PlaneAngle { line, plane, reversed, .. } => {
+                    match plane.origin_plane().and_then(|o| onto_plane(matrix(line), o)) {
+                        Some((to, flip, _)) => {
+                            *plane = to.into();
+                            *reversed ^= flip;
+                            true
+                        }
+                        None => false,
                     }
-                    Some((to, _, shift)) => {
-                        c.kind = solidcraft_sketch::WireConstraintKind::PlaneDistance { p: p.clone(), plane: to, reversed: false, value: shift };
-                        to_param.push((c.id.clone(), format!("{shift} mm")));
-                        true
+                }
+                solidcraft_sketch::WireConstraintKind::PlaneDistance { p, plane, reversed, value } => {
+                    match plane.origin_plane().and_then(|o| onto_plane(matrix(&p.wire), o)) {
+                        // Turned only: the value (and the parameter that drives it) stays, the side turns.
+                        Some((to, flip, shift)) if shift.abs() <= 1e-9 => {
+                            (*plane, *reversed) = (to.into(), *reversed ^ flip);
+                            true
+                        }
+                        // Shifted: the signed distance along the new normal is the shift and the old
+                        // distance, on its side; the parameter says so, so a solve keeps it.
+                        Some((to, flip, shift)) => {
+                            let side = if *reversed != flip { -1.0 } else { 1.0 };
+                            let w = shift + side * *value;
+                            (*plane, *reversed, *value) = (to.into(), false, w);
+                            if let Some(name) = &c.param {
+                                shifted.push((name.clone(), format!("{} mm {} ({{old}})", shift, if side < 0.0 { "-" } else { "+" })));
+                            }
+                            true
+                        }
+                        None => false,
                     }
-                    None => false,
-                },
+                }
+                solidcraft_sketch::WireConstraintKind::OnPlane { p, plane } => {
+                    match plane.origin_plane().and_then(|o| onto_plane(matrix(&p.wire), o)) {
+                        Some((to, _, shift)) if shift.abs() <= 1e-9 => {
+                            *plane = to.into();
+                            true
+                        }
+                        Some((to, _, shift)) => {
+                            c.kind = solidcraft_sketch::WireConstraintKind::PlaneDistance {
+                                p: p.clone(),
+                                plane: to.into(),
+                                reversed: false,
+                                value: shift,
+                            };
+                            to_param.push((c.id.clone(), format!("{shift} mm")));
+                            true
+                        }
+                        None => false,
+                    }
+                }
                 _ => true,
             });
             for (name, expr) in shifted {

@@ -58,7 +58,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&ON_PLANE_CONTRACT)
         .output(output_schema_for::<OnPlaneResult>)
-        .params("point: a 3D point ref (`w1.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) | points: [refs]; plane: xy|yz|xz (the origin planes of the sketch's 3D space); sketch?: id|name. Holds each point on the plane; refused when that conflicts with the sketch's other 3D constraints. Returns one constraint id per point"),
+        .params("point: a 3D point ref (`w1.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) | points: [refs]; plane: xy|yz|xz (the origin planes of the sketch's 3D space), a construction plane's name, or {face: [x,y,z], body?} (the planar model face through that point, kept by its face name); sketch?: id|name. Holds each point on the plane; refused when that conflicts with the sketch's other 3D constraints. Returns one constraint id per point"),
 ];
 
 /// The `points` of a 3D drawing command as given (each `[x, y, z]`, checked by [`expr_point3`]).
@@ -317,17 +317,24 @@ pub(super) fn coincident_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opt
     if !is_3d(sk, &a) && !is_3d(sk, &b) {
         return Ok(None);
     }
-    if is_3d(sk, &a) != is_3d(sk, &b) {
-        return Err(bad(cmd, "joining 3D sketch geometry to planar sketch geometry is not supported yet (#10616)"));
-    }
-    let line = |r: &str| sk.is_drawn_line(r).then(|| r.to_string());
-    let kind = match (sk.wire_point(&a), sk.wire_point(&b), line(&a), line(&b)) {
-        (Some(x), Some(y), _, _) => WireConstraintKind::Coincident { a: x, b: y },
-        (Some(x), None, _, Some(l)) | (None, Some(x), Some(l), _) => WireConstraintKind::PointOnLine { p: x, line: l },
+    // Either side may be fixed geometry the drawn 3D one is held to (#10616): a model curve
+    // included in the sketch (its ends, its line or its circle), or a 2D point or curve.
+    let line = |r: &str| sk.is_line_operand(r).then(|| r.to_string());
+    let curve = |r: &str| (!sk.is_line_operand(r) && sk.is_curve_operand(r)).then(|| r.to_string());
+    let kind = match (sk.point_operand(&a), sk.point_operand(&b)) {
+        (Some(x), Some(y)) => WireConstraintKind::Coincident { a: x, b: y },
+        (Some(x), None) | (None, Some(x)) => {
+            let other = if sk.point_operand(&a).is_some() { &b } else { &a };
+            match (line(other), curve(other)) {
+                (Some(l), _) => WireConstraintKind::PointOnLine { p: x, line: l },
+                (None, Some(c)) => WireConstraintKind::PointOnCurve { p: x, curve: c },
+                _ => return Err(bad(cmd, format!("`{other}` is not a point, line or circle a 3D point can be held to"))),
+            }
+        }
         _ => {
             return Err(bad(
                 cmd,
-                "give two 3D points (`<curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point), or a 3D point and a drawn 3D line",
+                "give two points, or a point and a line or circle, at least one of them drawn 3D geometry: a 3D point (`<curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id), a model curve included with sketch.include_3d (`<curve>.start`, `.end`, the curve), or a 2D point or curve of the sketch",
             ));
         }
     };
@@ -335,9 +342,39 @@ pub(super) fn coincident_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opt
     Ok(Some(json!({"constraint": ids.first(), "sketch": info})))
 }
 
-/// Whether a ref names drawn 3D geometry: a 3D point, or a drawn 3D curve.
+/// Whether a ref names 3D sketch geometry: a 3D point, a drawn or included 3D curve, or an
+/// included curve's end.
 fn is_3d(sk: &solidcraft_sketch::Sketch, r: &str) -> bool {
-    sk.wire_point(r).is_some() || sk.wire_index(r).is_some()
+    sk.wire_point(r).is_some() || sk.wire_index(r).is_some() || r.rsplit_once('.').is_some_and(|(id, _)| sk.wire_index(id).is_some())
+}
+
+/// The plane a 3D constraint of sketch `id` is held to, from a command's value (#10616): an
+/// origin plane of the sketch's 3D space (`xy`, `yz`, `xz`, any case), a construction plane by
+/// name, or `{face: [x,y,z], body?}`, the planar model face through that point (picked exactly,
+/// kept by its face name). A model plane comes resolved, so the edit's own solve can use it.
+/// `None` when the value names none of these.
+fn plane_target(s: &Session, id: u64, v: &Value, cmd: &str) -> Result<Option<solidcraft_sketch::PlaneOf>> {
+    use solidcraft_sketch::{LinkSource, ModelPlane, PlaneOf};
+    if let Some(origin) = v.as_str().and_then(OriginPlane::from_name) {
+        return Ok(Some(PlaneOf::Origin(origin)));
+    }
+    let source = match v {
+        Value::String(name) if s.doc.find_feature(name).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionPlane { .. })) => {
+            (LinkSource::Plane { name: name.clone() }, None)
+        }
+        Value::Object(o) if o.contains_key("face") => {
+            let at = o.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be [x,y,z], a point on a planar face"))?;
+            let body = o.get("body").and_then(Value::as_str);
+            let (_, st, _) = super::sketch_project::wire_context(s, id).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+            let (body, face, _) = solidcraft_doc::project::pick_planar_face(&st, body, at).map_err(|why| bad(cmd, why))?;
+            (LinkSource::Face { body, at }, Some(face))
+        }
+        _ => return Ok(None),
+    };
+    let mut m = ModelPlane { source: source.0, face_name: source.1, resolved: None };
+    let (vals, st, _) = super::sketch_project::wire_context(s, id).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+    solidcraft_doc::project::resolve_model_plane(&s.doc, &vals, &st, &mut m).map_err(|why| bad(cmd, why))?;
+    Ok(Some(PlaneOf::Model(Box::new(m))))
 }
 
 /// `sketch.constraint.fix` on 3D refs: each 3D point (or every fit point of a drawn 3D curve)
@@ -481,44 +518,56 @@ fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, i
 /// parallel: or a line and an origin plane, `xy`, `yz` or `xz`). `None` when neither operand is
 /// 3D, for the planar command.
 pub(super) fn relation_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Value>> {
-    let a = p.get("a").and_then(Value::as_str).map(str::to_string);
-    let b = p.get("b").and_then(Value::as_str).map(str::to_string);
-    let (Some(a), Some(b)) = (a, b) else { return Ok(None) };
+    let text = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string);
     let id = sketch_store::target(s, p, cmd)?;
     let sk = sketch_store::read(&s.doc, id)?;
-    if !is_3d(sk, &a) && !is_3d(sk, &b) {
+    let three = |k: &str| text(k).is_some_and(|r| is_3d(sk, &r));
+    if !three("a") && !three("b") {
         return Ok(None);
     }
-    let plane = OriginPlane::from_name(&b).filter(|_| !is_3d(sk, &b)).or_else(|| OriginPlane::from_name(&a).filter(|_| !is_3d(sk, &a)));
-    let (line_of, other) = if OriginPlane::from_name(&a).is_some() && !is_3d(sk, &a) { (b.clone(), a.clone()) } else { (a.clone(), b.clone()) };
-    if plane.is_none() && is_3d(sk, &a) != is_3d(sk, &b) {
-        return Err(bad(cmd, "joining 3D sketch geometry to planar sketch geometry is not supported yet (#10616)"));
-    }
+    // The side that is not 3D geometry may be a plane (an origin or construction plane, or a
+    // planar model face).
+    let (line_key, plane_key) = if three("a") { ("a", "b") } else { ("b", "a") };
+    let plane = match p.get(plane_key) {
+        Some(v) if !three(plane_key) => plane_target(s, id, v, cmd)?,
+        _ => None,
+    };
+    let sk = sketch_store::read(&s.doc, id)?;
+    let line_of = text(line_key).unwrap_or_default();
+    let other = p.get(plane_key).map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).unwrap_or_default();
+    let (Some(a), Some(b)) =
+        (text("a").or_else(|| (line_key == "b").then(|| other.clone())), text("b").or_else(|| (line_key == "a").then(|| other.clone())))
+    else {
+        return Ok(None);
+    };
     let kind = match (cmd, plane) {
         ("sketch.constraint.parallel", Some(plane)) if sk.is_drawn_line(&line_of) => WireConstraintKind::ParallelToPlane { line: line_of, plane },
         ("sketch.constraint.parallel", Some(_)) => {
-            return Err(bad(
-                cmd,
-                format!("parallel to the origin plane `{other}` takes a drawn 3D line (sketch.constraint.on_plane holds a point on it)"),
-            ));
+            return Err(bad(cmd, format!("parallel to the plane `{other}` takes a drawn 3D line (sketch.constraint.on_plane holds a point on it)")));
         }
         (_, Some(_)) => {
             return Err(bad(
                 cmd,
                 format!(
-                    "`{other}`: of the relations, only Parallel takes an origin plane (a line square to it is sketch.constraint.along_axis; a point on it, sketch.constraint.on_plane)"
+                    "`{other}`: of the relations, only Parallel takes a plane (a line square to an origin plane is sketch.constraint.along_axis; a point on a plane, sketch.constraint.on_plane)"
                 ),
             ));
         }
-        ("sketch.constraint.parallel", None) if sk.is_drawn_line(&a) && sk.is_drawn_line(&b) => WireConstraintKind::Parallel { a, b },
-        ("sketch.constraint.perpendicular", None) if sk.is_drawn_line(&a) && sk.is_drawn_line(&b) => WireConstraintKind::Perpendicular { a, b },
-        ("sketch.constraint.collinear", None) if sk.is_drawn_line(&a) && sk.is_drawn_line(&b) => WireConstraintKind::Collinear { a, b },
+        // One of the lines may be fixed (#10616): a straight included model edge or a 2D line.
+        ("sketch.constraint.parallel", None) if sk.is_line_operand(&a) && sk.is_line_operand(&b) => WireConstraintKind::Parallel { a, b },
+        ("sketch.constraint.perpendicular", None) if sk.is_line_operand(&a) && sk.is_line_operand(&b) => WireConstraintKind::Perpendicular { a, b },
+        ("sketch.constraint.collinear", None) if sk.is_line_operand(&a) && sk.is_line_operand(&b) => WireConstraintKind::Collinear { a, b },
         ("sketch.constraint.equal", None) => sk.equal_kind(&a, &b).ok_or_else(|| bad(cmd, "Equal takes two drawn 3D lines or two drawn 3D arcs"))?,
         ("sketch.constraint.tangent", None) => sk
             .tangent_kind(&a, &b)
             .or_else(|| sk.tangent_kind(&b, &a))
             .ok_or_else(|| bad(cmd, "Tangent takes a drawn 3D line and a drawn 3D arc that meet at an end (join them first)"))?,
-        _ => return Err(bad(cmd, "this takes two drawn 3D lines")),
+        _ => {
+            return Err(bad(
+                cmd,
+                "this takes two lines, at least one a drawn 3D line (the other may be an included straight model edge or a 2D line)",
+            ));
+        }
     };
     let (ids, info) = add_3d(s, p, cmd, vec![kind])?;
     Ok(Some(json!({"constraint": ids.first(), "sketch": info})))
@@ -534,12 +583,17 @@ fn on_plane(s: &mut Session, p: &Value) -> Result<Value> {
     if refs.is_empty() || refs.len() > 1000 {
         return Err(bad(cmd, "`point` or `points` must name 1 to 1000 3D points"));
     }
-    let plane = p.get("plane").and_then(Value::as_str).and_then(OriginPlane::from_name).ok_or_else(|| bad(cmd, "`plane` must be xy, yz or xz"))?;
     let id = sketch_store::target(s, p, cmd)?;
+    let plane = plane_target(s, id, p.get("plane").unwrap_or(&Value::Null), cmd)?
+        .ok_or_else(|| bad(cmd, "`plane` must be xy, yz or xz, a construction plane's name, or {face: [x,y,z], body?} on a planar model face"))?;
     let sk = sketch_store::read(&s.doc, id)?;
     let kinds = refs
         .iter()
-        .map(|r| sk.wire_point(r).map(|q| WireConstraintKind::OnPlane { p: q, plane }).ok_or_else(|| bad(cmd, format!("`{r}` is not a 3D point"))))
+        .map(|r| {
+            sk.wire_point(r)
+                .map(|q| WireConstraintKind::OnPlane { p: q, plane: plane.clone() })
+                .ok_or_else(|| bad(cmd, format!("`{r}` is not a 3D point")))
+        })
         .collect::<Result<Vec<_>>>()?;
     let (ids, info) = add_3d(s, p, cmd, kinds)?;
     Ok(json!({"constraints": ids, "sketch": info}))
@@ -549,31 +603,41 @@ fn on_plane(s: &mut Session, p: &Value) -> Result<Value> {
 /// (or along X, Y or Z only), the angle between two drawn 3D lines, or a drawn 3D arc's radius.
 /// `None` when no entity is 3D, for the planar command.
 pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Value>> {
-    let ents: Vec<String> =
-        p.get("entities").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    let given: Vec<Value> = p.get("entities").and_then(Value::as_array).cloned().unwrap_or_default();
+    let ents: Vec<String> = given.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
     let id = sketch_store::target(s, p, cmd)?;
     let stored = sketch_store::read(&s.doc, id)?;
-    // An origin plane beside a 3D entity: the distance from it, or the angle to it.
-    let planar = |r: &str| OriginPlane::from_name(r).filter(|_| !is_3d(stored, r));
-    let three: Vec<bool> = ents.iter().map(|r| is_3d(stored, r) || (planar(r).is_some() && ents.iter().any(|o| is_3d(stored, o)))).collect();
-    if !three.iter().any(|t| *t) {
+    if !ents.iter().any(|r| is_3d(stored, r)) {
         return Ok(None);
     }
-    // A model edge or vertex beside a 3D ref is a mix too, not a ref to leave out.
-    let given = p.get("entities").and_then(Value::as_array).map_or(0, Vec::len);
-    if given != ents.len() {
-        return Err(bad(cmd, "dimension one or two 3D entities, not a mix of 3D and planar ones or model geometry (#10616)"));
+    if given.len() > 2 {
+        return Err(bad(cmd, "dimension one or two entities, at least one of them 3D sketch geometry"));
     }
-    if let Some(r) = ents.iter().find(|r| stored.wire_index(r).and_then(|i| stored.wires.get(i)).is_some_and(|w| w.link.is_some())) {
-        return Err(bad(cmd, format!("`{r}` is projected from the model: 3D dimensions take drawn 3D curves for now (#10616)")));
+    // Beside a 3D entity, the other may be a plane: the distance from it, or the angle to it
+    // (an origin or construction plane, or {face: [x,y,z], body?}, a planar model face, #10616).
+    let mut to_plane = None;
+    if let [x, y] = given.as_slice() {
+        let three = |v: &Value| v.as_str().is_some_and(|r| is_3d(stored, r));
+        for (entity, plane) in [(x, y), (y, x)] {
+            if three(entity) && !three(plane) && to_plane.is_none() {
+                to_plane = plane_target(s, id, plane, cmd)?.map(|pl| (entity.as_str().unwrap_or_default().to_string(), pl));
+            }
+        }
     }
-    if three.len() > 2 || !three.iter().all(|t| *t) {
-        return Err(bad(cmd, "dimension one or two 3D entities, not a mix of 3D and planar ones (#10616)"));
+    let stored = sketch_store::read(&s.doc, id)?;
+    if to_plane.is_none() && ents.len() != given.len() {
+        return Err(bad(
+            cmd,
+            "a model entity beside a 3D one: include model edges with sketch.include_3d and dimension the included curve, or give a plane",
+        ));
     }
-    // Measured as the design's parameters solve it now: the stored sketch keeps the geometry of
-    // its last edit, from before a parameter changed.
+    // Measured as the design's parameters solve it now, with the 2D geometry and model planes
+    // where they are: the stored sketch keeps the geometry of its last edit.
     let mut solved = stored.clone();
     s.doc.apply_wire_values(&s.doc.param_values().0, &mut solved)?;
+    if let Some((vals, st, plane)) = super::sketch_project::wire_context(s, id) {
+        solidcraft_doc::project::refresh_wire_targets(&s.doc, &vals, &st, &plane, &mut solved);
+    }
     let counted = solved.solve_wires(None);
     // A count the work ran out on says nothing about redundancy.
     let dof_before = (!counted.uncounted).then_some(counted.dof);
@@ -591,31 +655,25 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
             (Some(a), Some(b)) => Some((a, b)),
             _ => None,
         },
-        [a, b] => sk.wire_point(a).zip(sk.wire_point(b)),
-        _ => None,
-    };
-    let to_plane = match ents.as_slice() {
-        [x, y] => match (planar(y), planar(x)) {
-            (Some(plane), None) => Some((x.clone(), plane)),
-            (None, Some(plane)) => Some((y.clone(), plane)),
-            _ => None,
-        },
+        // Either point may be fixed (#10616): an included model point or a 2D point.
+        [a, b] => sk.point_operand(a).zip(sk.point_operand(b)),
         _ => None,
     };
     let kind = if let Some((r, plane)) = to_plane.clone() {
+        let (o, n) = plane.frame().ok_or_else(|| bad(cmd, "that plane cannot be found now"))?;
         match (sk.wire_point(&r), sk.is_drawn_line(&r)) {
             (Some(q), _) if matches!(ty.as_str(), "auto" | "distance" | "plane_distance") => {
-                let d = sk.wire_point_at(&q).map(|at| at.dot(plane.normal())).unwrap_or(0.0);
+                let d = sk.wire_point_at(&q).map(|at| (at - o).dot(n)).unwrap_or(0.0);
                 WireConstraintKind::PlaneDistance { p: q, plane, reversed: d < -SIDE, value: 0.0 }
             }
             (None, true) if matches!(ty.as_str(), "auto" | "angle" | "plane_angle") => {
                 // Rising from the line's start towards the normal, or away from it: the side it
                 // was measured on (a line lying in the plane to rounding rises towards it).
                 let run = ends(&r).0.zip(ends(&r).1).and_then(|(a, b)| Some(sk.wire_point_at(&b)? - sk.wire_point_at(&a)?));
-                let reversed = run.is_some_and(|d| d.dot(plane.normal()) < -SIDE * d.len().max(1.0));
+                let reversed = run.is_some_and(|d| d.dot(n) < -SIDE * d.len().max(1.0));
                 WireConstraintKind::PlaneAngle { line: r, plane, reversed, value: 0.0 }
             }
-            _ => return Err(bad(cmd, "to an origin plane: a 3D point (distance) or a drawn 3D line (angle)")),
+            _ => return Err(bad(cmd, "to a plane: a 3D point (distance) or a drawn 3D line (angle)")),
         }
     } else {
         match (ents.as_slice(), pair, axis) {
@@ -632,7 +690,7 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
             _ => {
                 return Err(bad(
                     cmd,
-                    "3D dimensions: a drawn 3D line (length; distance_x/y/z for its run along an axis), two 3D points (distance, or distance_x/y/z), two drawn 3D lines (angle), a drawn 3D arc (radius), or a 3D point or line and an origin plane xy/yz/xz",
+                    "3D dimensions: a drawn 3D line (length; distance_x/y/z for its run along an axis), two points at least one a 3D point (distance, or distance_x/y/z; the other may be an included model point or a 2D point), two drawn 3D lines (angle), a drawn 3D arc (radius), or a 3D point or line and a plane (xy/yz/xz, a construction plane's name, or {face: [x,y,z], body?})",
                 ));
             }
         }
@@ -774,7 +832,7 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
         // Only as it turns driving: a driving one keeps the side it was given.
         if let (false, true, WireConstraintKind::PlaneAngle { plane, reversed, .. }) = (driven, slot.driven, &mut slot.kind) {
             // It measured the angle whichever side the line rose to: it drives it on that side.
-            *reversed = rise.is_some_and(|d| d.dot(plane.normal()) < -SIDE * d.len().max(1.0));
+            *reversed = rise.zip(plane.frame()).is_some_and(|(d, (_, n))| d.dot(n) < -SIDE * d.len().max(1.0));
         }
         if driven != slot.driven {
             slot.driven = driven;

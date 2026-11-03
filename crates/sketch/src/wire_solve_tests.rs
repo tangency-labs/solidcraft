@@ -670,11 +670,11 @@ fn plane_relations_and_dimensions_use_the_origin_planes() {
     let l = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 1.0, 7.0));
     fix_all(&mut sk, &format!("{l}.start"));
     // Parallel to XY: the end comes down to z = 0.
-    sk.add_wire_constraint(WireConstraintKind::ParallelToPlane { line: l.clone(), plane: OriginPlane::Xy }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::ParallelToPlane { line: l.clone(), plane: OriginPlane::Xy.into() }).unwrap();
     let q = sk.add_drawn_wire_in(&[v(3.0, 4.0, 5.0)], WireSpace::Component).unwrap();
-    sk.add_wire_constraint(WireConstraintKind::OnPlane { p: sk.wire_point(&q).unwrap(), plane: OriginPlane::Yz }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::OnPlane { p: sk.wire_point(&q).unwrap(), plane: OriginPlane::Yz.into() }).unwrap();
     let r = sk.add_drawn_wire_in(&[v(1.0, -2.0, 3.0)], WireSpace::Component).unwrap();
-    let dist = WireConstraintKind::PlaneDistance { p: sk.wire_point(&r).unwrap(), plane: OriginPlane::Xz, reversed: true, value: 6.0 };
+    let dist = WireConstraintKind::PlaneDistance { p: sk.wire_point(&r).unwrap(), plane: OriginPlane::Xz.into(), reversed: true, value: 6.0 };
     sk.add_wire_dimension(dist, None, false).unwrap();
     let rep = sk.solve_wires(None);
     assert!(rep.ok, "{rep:?}");
@@ -683,7 +683,7 @@ fn plane_relations_and_dimensions_use_the_origin_planes() {
     assert!(close(at(&sk, &r), v(1.0, -6.0, 3.0)), "6 behind XZ: {:?}", at(&sk, &r));
     // A line at 30° to XY, measured.
     let m = line(&mut sk, v(0.0, 0.0, 0.0), v(3.0f64.sqrt(), 0.0, 1.0));
-    let k = WireConstraintKind::PlaneAngle { line: m, plane: OriginPlane::Xy, reversed: false, value: 0.0 };
+    let k = WireConstraintKind::PlaneAngle { line: m, plane: OriginPlane::Xy.into(), reversed: false, value: 0.0 };
     assert!((sk.measure_wire_dimension(&k).unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-12);
     assert_eq!(OriginPlane::from_name("ZX"), Some(OriginPlane::Xz));
 }
@@ -700,7 +700,7 @@ fn angles_to_a_plane_drive_from_lying_in_it_to_standing_square() {
         fix_all(&mut sk, &format!("{l}.start"));
     }
     for (l, deg) in [(&flat, 80.0), (&slope, 0.0), (&up, 90.0)] {
-        let k = WireConstraintKind::PlaneAngle { line: l.clone(), plane: OriginPlane::Xy, reversed: false, value: f64::to_radians(deg) };
+        let k = WireConstraintKind::PlaneAngle { line: l.clone(), plane: OriginPlane::Xy.into(), reversed: false, value: f64::to_radians(deg) };
         sk.add_wire_dimension(k, None, false).unwrap();
     }
     let rep = sk.solve_wires(None);
@@ -785,7 +785,7 @@ fn no_constraint_reads_more_points_than_its_jacobian_holds() {
         WireConstraintKind::Collinear { a: "a".into(), b: "b".into() },
         WireConstraintKind::Angle { a: "a".into(), b: "b".into(), a_reversed: false, b_reversed: false, value: 1.0 },
         WireConstraintKind::PointOnLine { p: p("q"), line: "l".into() },
-        WireConstraintKind::PlaneDistance { p: p("q"), plane: OriginPlane::Xy, reversed: false, value: 1.0 },
+        WireConstraintKind::PlaneDistance { p: p("q"), plane: OriginPlane::Xy.into(), reversed: false, value: 1.0 },
     ];
     for k in kinds {
         assert!(3 * k.points().len() <= dual::N, "{k:?}");
@@ -846,4 +846,135 @@ fn a_tangent_at_the_arc_s_start_from_the_line_s_end_runs_back_before_it() {
     assert!(rep.ok, "{rep:?}");
     let d = at(&sk, &format!("{l}.start")) - at(&sk, &format!("{l}.end"));
     assert!(d.y < 0.0 && d.x.abs() < 1e-9 && d.z.abs() < 1e-9, "{d:?}");
+}
+
+/// A 3D curve included from the model (a link's wire), with its exact curve.
+fn included(sk: &mut Sketch, pts: &[Vec3], curve: Option<solidcore_record::brep::Curve>) -> String {
+    let source = crate::LinkSource::Edge { body: "Body1".into(), at: pts[0] };
+    let link = sk.add_link_with_wires(crate::LinkKind::Include, source, &[], &[pts.to_vec()]).unwrap();
+    if let Some(curve) = curve {
+        sk.set_link_wire_curves(&link, &[vec![crate::WireCurve { curve, interval: [0.0, 1.0] }]]).unwrap();
+    }
+    sk.wires.iter().find(|w| w.link.as_deref() == Some(link.as_str())).unwrap().id.clone()
+}
+
+#[test]
+fn a_drawn_point_is_held_to_an_included_model_edge_its_end_line_and_circle() {
+    use solidcore_record::brep::{Curve, Frame};
+    let mut sk = Sketch::new();
+    // A straight model edge from (0,0,10) to (50,0,10), and a circular one of radius 20 about
+    // (0,0,30) in a plane parallel to XY.
+    let straight = Curve::Line { start: [0.0, 0.0, 10.0], end: [50.0, 0.0, 10.0] };
+    let edge = included(&mut sk, &[v(0.0, 0.0, 10.0), v(50.0, 0.0, 10.0)], Some(straight));
+    let rim_pts: Vec<Vec3> = (0..=16)
+        .map(|k| {
+            let t = k as f64 * std::f64::consts::TAU / 16.0;
+            v(20.0 * t.cos(), 20.0 * t.sin(), 30.0)
+        })
+        .collect();
+    let circle = Curve::Circle { frame: Frame { origin: [0.0, 0.0, 30.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 20.0 };
+    let rim = included(&mut sk, &rim_pts, Some(circle));
+    let a = line(&mut sk, v(1.0, 2.0, 12.0), v(30.0, 5.0, 15.0));
+    let q = sk.add_drawn_wire_in(&[v(3.0, 25.0, 31.0)], WireSpace::Component).unwrap();
+    // a's start on the edge's end, a's end on the edge's line, q on the rim.
+    let edge_start = sk.point_operand(&format!("{edge}.start")).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Coincident { a: sk.wire_point(&format!("{a}.start")).unwrap(), b: edge_start }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::PointOnLine { p: sk.wire_point(&format!("{a}.end")).unwrap(), line: edge.clone() }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::PointOnCurve { p: sk.wire_point(&q).unwrap(), curve: rim.clone() }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    assert!(close(at(&sk, &format!("{a}.start")), v(0.0, 0.0, 10.0)));
+    let end = at(&sk, &format!("{a}.end"));
+    assert!(end.y.abs() < 1e-7 && (end.z - 10.0).abs() < 1e-7, "{end:?}");
+    let qa = at(&sk, &q);
+    assert!((qa.z - 30.0).abs() < 1e-7 && ((qa.x * qa.x + qa.y * qa.y).sqrt() - 20.0).abs() < 1e-7, "{qa:?}");
+    // The included curves never move: a's start is held, its end slides along the edge's line
+    // (1 freedom), q runs round the rim (1 freedom).
+    assert_eq!(rep.dof, 2);
+    // A distance from the model edge's end: 10 along the line from (50,0,10).
+    let from = sk.point_operand(&format!("{edge}.end")).unwrap();
+    let to = sk.wire_point(&format!("{a}.end")).unwrap();
+    sk.add_wire_dimension(WireConstraintKind::Distance { a: from, b: to, value: 10.0 }, None, false).unwrap();
+    assert!(sk.solve_wires(None).ok);
+    let end = at(&sk, &format!("{a}.end"));
+    assert!(close(end, v(40.0, 0.0, 10.0)) || close(end, v(60.0, 0.0, 10.0)), "{end:?}");
+}
+
+#[test]
+fn a_drawn_point_is_held_to_the_sketchs_own_2d_point_line_and_circle() {
+    use solidcore_record::Vec2;
+    let mut sk = Sketch::new();
+    // The sketch on a plane 10 above XY, its x along world X and y along world Y.
+    sk.frame = crate::model::SketchFrame(solidcore_record::Plane::new(v(0.0, 0.0, 10.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0)));
+    let p2 = sk.add_point(Vec2::new(5.0, 5.0), None).unwrap();
+    let p2 = sk.points[p2].id.clone();
+    let l2 = sk.add_line(Vec2::new(0.0, 20.0), Vec2::new(10.0, 20.0), None, None, None).unwrap();
+    let l2 = sk.curves[l2].id.clone();
+    let c2 = sk.add_circle(Vec2::new(40.0, 0.0), 8.0, None, None).unwrap();
+    let c2 = sk.curves[c2].id.clone();
+    let a = line(&mut sk, v(4.0, 6.0, 30.0), v(3.0, 22.0, 31.0));
+    let q = sk.add_drawn_wire_in(&[v(45.0, 3.0, 14.0)], WireSpace::Component).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Coincident { a: sk.wire_point(&format!("{a}.start")).unwrap(), b: sk.point_operand(&p2).unwrap() })
+        .unwrap();
+    sk.add_wire_constraint(WireConstraintKind::PointOnLine { p: sk.wire_point(&format!("{a}.end")).unwrap(), line: l2.clone() }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::PointOnCurve { p: sk.wire_point(&q).unwrap(), curve: c2.clone() }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    assert!(close(at(&sk, &format!("{a}.start")), v(5.0, 5.0, 10.0)), "{:?}", at(&sk, &format!("{a}.start")));
+    let end = at(&sk, &format!("{a}.end"));
+    assert!((end.y - 20.0).abs() < 1e-7 && (end.z - 10.0).abs() < 1e-7, "on the 2D line, in the sketch plane: {end:?}");
+    let qa = at(&sk, &q);
+    assert!((qa.z - 10.0).abs() < 1e-7 && (((qa.x - 40.0).powi(2) + qa.y * qa.y).sqrt() - 8.0).abs() < 1e-7, "{qa:?}");
+    // Without the sketch's plane the 2D geometry has no place: the constraints do not solve.
+    sk.frame = crate::model::SketchFrame(None);
+    let rep = sk.solve_wires(None);
+    assert!(!rep.ok && rep.failing.len() == 3, "{rep:?}");
+}
+
+#[test]
+fn a_drawn_point_is_held_on_a_model_plane_once_it_is_resolved() {
+    let mut sk = Sketch::new();
+    let q = sk.add_drawn_wire_in(&[v(10.0, 0.0, 10.0)], WireSpace::Component).unwrap();
+    // A face plane through (0,0,5) whose normal leans in XZ.
+    let source = crate::LinkSource::Face { body: "Body1".into(), at: v(0.0, 0.0, 5.0) };
+    let plane = ModelPlane { source, face_name: Some("f1".into()), resolved: None };
+    let k = sk.add_wire_constraint(WireConstraintKind::OnPlane { p: sk.wire_point(&q).unwrap(), plane: PlaneOf::Model(Box::new(plane)) }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(!rep.ok && rep.failing == vec![k.clone()], "unresolved: {rep:?}");
+    let n = v(1.0, 0.0, 1.0) * std::f64::consts::FRAC_1_SQRT_2;
+    let resolved = solidcore_record::Plane::from_normal(v(0.0, 0.0, 5.0), n).unwrap();
+    if let Some(PlaneOf::Model(m)) = sk.wire_constraints[0].kind.plane_mut() {
+        m.resolved = Some(resolved);
+    }
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    assert!((at(&sk, &q) - v(0.0, 0.0, 5.0)).dot(n).abs() < 1e-9, "{:?}", at(&sk, &q));
+    // Saved, it keeps the reference and not where it was: it is resolved again on open.
+    let text = serde_json::to_string(&sk.wire_constraints).unwrap();
+    assert!(text.contains(r#""face_name":"f1""#) && !text.contains("resolved"), "{text}");
+    let back: Vec<WireConstraint> = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, sk.wire_constraints);
+    // Origin planes still save as their names.
+    assert_eq!(serde_json::to_string(&PlaneOf::from(OriginPlane::Xz)).unwrap(), r#""xz""#);
+}
+
+#[test]
+fn constraints_that_move_nothing_or_fix_fixed_geometry_are_refused() {
+    let mut sk = Sketch::new();
+    let edge = included(&mut sk, &[v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0)], None);
+    let other = included(&mut sk, &[v(0.0, 5.0, 0.0), v(10.0, 5.0, 0.0)], None);
+    let s = sk.point_operand(&format!("{edge}.start")).unwrap();
+    let e = sk.point_operand(&format!("{other}.end")).unwrap();
+    let err = sk.add_wire_constraint(WireConstraintKind::Coincident { a: s.clone(), b: e }).unwrap_err().to_string();
+    assert!(err.contains("nothing the 3D sketch can move"), "{err}");
+    let err = sk.add_wire_constraint(WireConstraintKind::Fix { p: s, at: Vec3::ZERO, exprs: None }).unwrap_err().to_string();
+    assert!(err.contains("only those can be fixed"), "{err}");
+    // A curve fixed in the world cannot lean on the sketch's 2D geometry.
+    sk.frame = crate::model::SketchFrame(solidcore_record::Plane::new(Vec3::ZERO, v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0)));
+    let p2 = sk.add_point(solidcore_record::Vec2::new(1.0, 1.0), None).unwrap();
+    let p2 = sk.points[p2].id.clone();
+    let w = sk.add_drawn_wire_in(&[v(2.0, 2.0, 2.0)], WireSpace::World).unwrap();
+    let held = WireConstraintKind::Coincident { a: sk.wire_point(&w).unwrap(), b: sk.point_operand(&p2).unwrap() };
+    let err = sk.add_wire_constraint(held).unwrap_err().to_string();
+    assert!(err.contains("fixed in the world"), "{err}");
 }

@@ -165,7 +165,69 @@ impl OriginPlane {
     }
 }
 
-/// What a 3D constraint asks for.
+/// A plane of the model a 3D constraint is held to (#10616): an origin or construction plane by
+/// name (`LinkSource::Plane`), or a planar face of a body (`LinkSource::Face`, kept by its face
+/// name like other face references). The document resolves it, exactly, whenever the sketch's
+/// links are refreshed; until then it is unresolved and the constraint does not solve.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelPlane {
+    pub source: crate::LinkSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face_name: Option<String>,
+    /// Where it is now, in the 3D curves' component coordinates. Not saved.
+    #[serde(skip)]
+    pub resolved: Option<solidcore_record::Plane>,
+}
+
+impl PartialEq for ModelPlane {
+    /// The same plane reference, wherever it was last resolved.
+    fn eq(&self, o: &ModelPlane) -> bool {
+        self.source == o.source && self.face_name == o.face_name
+    }
+}
+
+/// The plane a 3D plane constraint is held to: an origin plane of the curves' space (saved as
+/// `"xy"`, `"yz"` or `"xz"`) or a plane of the model.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PlaneOf {
+    Origin(OriginPlane),
+    Model(Box<ModelPlane>),
+}
+
+impl From<OriginPlane> for PlaneOf {
+    fn from(p: OriginPlane) -> PlaneOf {
+        PlaneOf::Origin(p)
+    }
+}
+
+impl PlaneOf {
+    /// A point on the plane and its unit normal; `None` for a model plane not resolved yet.
+    pub fn frame(&self) -> Option<(Vec3, Vec3)> {
+        match self {
+            PlaneOf::Origin(p) => Some((Vec3::ZERO, p.normal())),
+            PlaneOf::Model(m) => m.resolved.map(|p| (p.origin, p.normal())),
+        }
+    }
+    /// The origin plane, when it is one.
+    pub fn origin_plane(&self) -> Option<OriginPlane> {
+        match self {
+            PlaneOf::Origin(p) => Some(*p),
+            PlaneOf::Model(_) => None,
+        }
+    }
+    /// The model plane, when it is one.
+    pub fn model(&self) -> Option<&ModelPlane> {
+        match self {
+            PlaneOf::Model(m) => Some(m),
+            PlaneOf::Origin(_) => None,
+        }
+    }
+}
+
+/// What a 3D constraint asks for. Its points and lines are drawn 3D geometry, which the solve
+/// moves, or fixed geometry it is held to (#10616): a 3D curve included from the model (its
+/// ends, and its line or circle), or a point or curve of the sketch's own 2D geometry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WireConstraintKind {
@@ -226,29 +288,32 @@ pub enum WireConstraintKind {
     /// (0: start, 1: end) on the arc's end `arc_end` (0: start, 2: end), the line leaving it the
     /// way the arc runs on past that end (in its plane, without folding back over the arc).
     Tangent { line: String, arc: String, line_end: usize, arc_end: usize },
-    /// A drawn 3D line parallel to an origin plane.
-    ParallelToPlane { line: String, plane: OriginPlane },
-    /// A fit point on an origin plane.
-    OnPlane { p: WirePoint, plane: OriginPlane },
-    /// The signed distance of a fit point from an origin plane, along its normal (`reversed`:
-    /// on the plane's back side, the way it was measured).
+    /// A drawn 3D line parallel to a plane.
+    ParallelToPlane { line: String, plane: PlaneOf },
+    /// A fit point on a plane.
+    OnPlane { p: WirePoint, plane: PlaneOf },
+    /// The signed distance of a fit point from a plane, along its normal (`reversed`: on the
+    /// plane's back side, the way it was measured).
     PlaneDistance {
         p: WirePoint,
-        plane: OriginPlane,
+        plane: PlaneOf,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed: bool,
         value: f64,
     },
-    /// The angle (radians, 0 to π/2) between a drawn 3D line and an origin plane, the line
-    /// rising from its start towards the plane's normal (`reversed`: away from it, the way it
-    /// was measured).
+    /// The angle (radians, 0 to π/2) between a drawn 3D line and a plane, the line rising from
+    /// its start towards the plane's normal (`reversed`: away from it, the way it was measured).
     PlaneAngle {
         line: String,
-        plane: OriginPlane,
+        plane: PlaneOf,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed: bool,
         value: f64,
     },
+    /// A drawn 3D point on a curve it is held to (#10616): a straight or circular 3D curve
+    /// included from the model, a 2D line, circle or arc of the sketch, or a drawn 3D arc's
+    /// circle. A straight curve is taken as its infinite line, a circular one as its whole circle.
+    PointOnCurve { p: WirePoint, curve: String },
 }
 
 impl WireConstraintKind {
@@ -279,6 +344,8 @@ impl WireConstraintKind {
             }
             WireConstraintKind::ParallelToPlane { line, .. } | WireConstraintKind::PlaneAngle { line, .. } => ends(line).to_vec(),
             WireConstraintKind::OnPlane { p, .. } | WireConstraintKind::PlaneDistance { p, .. } => vec![p.clone()],
+            // The curve's points are its own (see `Sketch::operands`).
+            WireConstraintKind::PointOnCurve { p, .. } => vec![p.clone()],
         }
     }
 
@@ -299,7 +366,40 @@ impl WireConstraintKind {
             WireConstraintKind::Tangent { line, arc, .. } => vec![line, arc],
             WireConstraintKind::ParallelToPlane { line, .. } | WireConstraintKind::PlaneAngle { line, .. } => vec![line],
             WireConstraintKind::OnPlane { p, .. } | WireConstraintKind::PlaneDistance { p, .. } => vec![&p.wire],
+            WireConstraintKind::PointOnCurve { p, curve } => vec![&p.wire, curve],
         }
+    }
+
+    /// The model plane it is held to, if any.
+    pub fn model_plane(&self) -> Option<&ModelPlane> {
+        self.plane().and_then(PlaneOf::model)
+    }
+
+    /// The plane it is held to, if any.
+    pub fn plane(&self) -> Option<&PlaneOf> {
+        match self {
+            WireConstraintKind::ParallelToPlane { plane, .. }
+            | WireConstraintKind::OnPlane { plane, .. }
+            | WireConstraintKind::PlaneDistance { plane, .. }
+            | WireConstraintKind::PlaneAngle { plane, .. } => Some(plane),
+            _ => None,
+        }
+    }
+
+    /// Mutable view of [`Self::plane`].
+    pub fn plane_mut(&mut self) -> Option<&mut PlaneOf> {
+        match self {
+            WireConstraintKind::ParallelToPlane { plane, .. }
+            | WireConstraintKind::OnPlane { plane, .. }
+            | WireConstraintKind::PlaneDistance { plane, .. }
+            | WireConstraintKind::PlaneAngle { plane, .. } => Some(plane),
+            _ => None,
+        }
+    }
+
+    /// Whether it can be solved now: a model plane it is held to has been resolved.
+    fn resolved(&self) -> bool {
+        self.plane().is_none_or(|p| p.frame().is_some())
     }
 
     /// Whether it is a dimension (it has a value).
@@ -377,12 +477,14 @@ impl WireConstraintKind {
                 a.dist(b) * b.dist(c) * c.dist(a) / (2.0 * twice_area)
             }
             WireConstraintKind::PlaneDistance { plane, reversed, .. } => {
-                let d = p(0).dot(plane.normal());
+                let (o, n) = plane.frame()?;
+                let d = (p(0) - o).dot(n);
                 if *reversed { -d } else { d }
             }
             WireConstraintKind::PlaneAngle { plane, .. } => {
+                let (_, n) = plane.frame()?;
                 let u = p(1) - p(0);
-                u.dot(plane.normal()).abs().atan2(u.cross(plane.normal()).len())
+                u.dot(n).abs().atan2(u.cross(n).len())
             }
             _ => return None,
         };
@@ -474,15 +576,36 @@ impl WireConstraintKind {
             }
             WireConstraintKind::ParallelToPlane { plane, .. } => {
                 let u = p(1) - p(0);
-                out.push(unit(u).dot(V::of(plane.normal())) * weight(u.len()));
+                out.push(unit(u).dot(V::of(plane_frame(plane).1)) * weight(u.len()));
             }
-            WireConstraintKind::OnPlane { plane, .. } => out.push(p(0).dot(V::of(plane.normal()))),
+            WireConstraintKind::OnPlane { plane, .. } => {
+                let (o, n) = plane_frame(plane);
+                out.push((p(0) - V::of(o)).dot(V::of(n)));
+            }
             WireConstraintKind::PlaneDistance { plane, reversed, value, .. } => {
-                let d = p(0).dot(V::of(plane.normal()));
+                let (o, n) = plane_frame(plane);
+                let d = (p(0) - V::of(o)).dot(V::of(n));
                 out.push(if *reversed { -d } else { d } - T::num(*value));
             }
+            WireConstraintKind::PointOnCurve { .. } if at.len() >= 4 => {
+                // On the circle through the curve's three points: in its plane, at its radius.
+                let (a, b, c) = (p(1), p(2), p(3));
+                let center = circumcenter(a, b, c);
+                let n = unit((b - a).cross(c - a));
+                let d = p(0) - center;
+                let h = d.dot(n);
+                out.push(h);
+                out.push((d - n.scale(h)).len() - (a - center).len());
+            }
+            WireConstraintKind::PointOnCurve { .. } => {
+                // On the infinite line through the curve's two points, as Point On Line.
+                let d = p(2) - p(1);
+                let n = d.len();
+                let n = if n.val() > 1e-12 { n } else { T::num(1e-12) };
+                out.extend((p(0) - p(1)).cross(d).scale(T::num(1.0) / n).xyz());
+            }
             WireConstraintKind::PlaneAngle { plane, reversed, value, .. } => {
-                let (run, normal) = (p(1) - p(0), V::<T>::of(plane.normal()));
+                let (run, normal) = (p(1) - p(0), V::<T>::of(plane_frame(plane).1));
                 let (u, length) = (unit(run), weight(run.len()));
                 let normal = if *reversed { V { x: -normal.x, y: -normal.y, z: -normal.z } } else { normal };
                 if *value >= std::f64::consts::FRAC_PI_2 - PARALLEL_ANGLE {
@@ -505,9 +628,9 @@ impl WireConstraintKind {
         out
     }
 
-    /// How many residuals it has.
-    fn rows(&self) -> usize {
-        self.residuals_at(&vec![Vec3::ZERO; self.points().len()]).len()
+    /// How many residuals it has with `operands` points.
+    fn rows(&self, operands: usize) -> usize {
+        self.residuals_at(&vec![Vec3::ZERO; operands]).len()
     }
 
     /// The same relation, whichever order its operands were given in.
@@ -525,6 +648,7 @@ impl WireConstraintKind {
             (Tangent { line, arc, .. }, Tangent { line: m, arc: r, .. }) => line == m && arc == r,
             (ParallelToPlane { line, plane }, ParallelToPlane { line: m, plane: q }) => line == m && plane == q,
             (OnPlane { p, plane }, OnPlane { p: q, plane: r }) => p == q && plane == r,
+            (PointOnCurve { p, curve }, PointOnCurve { p: q, curve: c }) => p == q && curve == c,
             _ => false,
         }
     }
@@ -544,6 +668,12 @@ impl WireConstraintKind {
             _ => false,
         }
     }
+}
+
+/// A plane's point and unit normal for a residual; an unresolved model plane (which the solve
+/// leaves out, see `WireConstraintKind::resolved`) reads as no plane.
+fn plane_frame(plane: &PlaneOf) -> (Vec3, Vec3) {
+    plane.frame().unwrap_or((Vec3::ZERO, Vec3::ZERO))
 }
 
 /// The weight two directions are compared with in mm: the geometric mean of their lengths, as a
@@ -640,6 +770,61 @@ impl WireReport {
     }
 }
 
+/// The sketch's 3D curves, 2D points and 2D curves by id, built once for a pass over many
+/// constraints (the sketch's own lookups search).
+struct Ids<'a> {
+    wires: HashMap<&'a str, &'a Wire>,
+    points: HashMap<&'a str, usize>,
+    curves: HashMap<&'a str, usize>,
+}
+
+impl<'a> Ids<'a> {
+    fn of(sk: &'a Sketch) -> Ids<'a> {
+        Ids {
+            wires: sk.wires.iter().map(|w| (w.id.as_str(), w)).collect(),
+            points: sk.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect(),
+            curves: sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect(),
+        }
+    }
+    fn drawn(&self, id: &str) -> Option<&'a Wire> {
+        self.wires.get(id).copied().filter(|w| w.link.is_none() && !w.fit.is_empty())
+    }
+    fn linked(&self, id: &str) -> Option<&'a Wire> {
+        self.wires.get(id).copied().filter(|w| w.link.is_some() && !w.pts.is_empty())
+    }
+}
+
+/// A constraint operand as the sketch has it: a drawn 3D point the solve moves, or a fixed one.
+#[derive(Clone, Copy)]
+enum Op {
+    Moving(Vec3),
+    Fixed(Vec3),
+}
+
+impl Op {
+    fn at(&self) -> Vec3 {
+        match self {
+            Op::Moving(at) | Op::Fixed(at) => *at,
+        }
+    }
+}
+
+/// A constraint operand for the solve: a drawn point's slot, or where fixed geometry is.
+#[derive(Clone, Copy)]
+enum Ref {
+    Slot(usize),
+    At(Vec3),
+}
+
+/// Three points on the circle about `c` of radius `r` in the plane of the unit axes `x`, `y`,
+/// a third of a turn apart from the angle `from`: the circle a curve operand stands for.
+fn circle_points(c: Vec3, x: Vec3, y: Vec3, r: f64, from: f64) -> [Vec3; 3] {
+    [0.0, 1.0, 2.0].map(|k: f64| {
+        let t = from + k * std::f64::consts::TAU / 3.0;
+        c + x * (r * t.cos()) + y * (r * t.sin())
+    })
+}
+
 /// A point of one group's constraint: an unknown (its index), or a constant.
 #[derive(Clone, Copy)]
 enum Pt {
@@ -717,11 +902,6 @@ impl Sketch {
         self.wires.iter().find(|w| w.id == id && w.link.is_none() && !w.fit.is_empty())
     }
 
-    /// The drawn 3D curves by id, for looking up many.
-    fn drawn_wires(&self) -> HashMap<&str, &Wire> {
-        self.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()).map(|w| (w.id.as_str(), w)).collect()
-    }
-
     /// Whether `id` is a drawn straight 3D line (two fit points, not an arc).
     pub fn is_drawn_line(&self, id: &str) -> bool {
         self.drawn_wire(id).is_some_and(|w| w.fit.len() == 2 && w.arc.is_none())
@@ -750,10 +930,147 @@ impl Sketch {
         self.drawn_wire(&p.wire).and_then(|w| w.fit.get(p.index)).copied()
     }
 
+    /// A point a 3D constraint may be held to (#10616), by reference: a drawn 3D point
+    /// ([`Sketch::wire_point`]), the start or end of a 3D curve included from the model
+    /// (`<curve>.start`, `.end`, or an included point's own id), or a 2D point of the sketch.
+    pub fn point_operand(&self, r: &str) -> Option<WirePoint> {
+        if let Some(p) = self.wire_point(r) {
+            return Some(p);
+        }
+        if self.linked_wire(r).is_some_and(|w| w.pts.len() == 1) || self.point_index(r).is_some() {
+            return Some(WirePoint { wire: r.to_string(), index: 0 });
+        }
+        let (id, role) = r.rsplit_once('.')?;
+        self.linked_wire(id)?;
+        let index = match role {
+            "start" => 0,
+            "end" => 1,
+            _ => return None,
+        };
+        Some(WirePoint { wire: id.to_string(), index })
+    }
+
+    /// A 3D curve included from the model, by id.
+    fn linked_wire(&self, id: &str) -> Option<&Wire> {
+        self.wires.iter().find(|w| w.id == id && w.link.is_some() && !w.pts.is_empty())
+    }
+
+    /// Whether `id` can stand for a line in a 3D constraint: a drawn 3D line, a straight 3D curve
+    /// included from the model, or a 2D line of the sketch.
+    pub fn is_line_operand(&self, id: &str) -> bool {
+        self.is_drawn_line(id) || matches!(self.curve_operand(&Ids::of(self), id), Some(points) if points.len() == 2) && !self.is_drawn_arc(id)
+    }
+
+    /// Whether `id` names a curve a 3D point can be held on ([`WireConstraintKind::PointOnCurve`]).
+    pub fn is_curve_operand(&self, id: &str) -> bool {
+        self.curve_operand(&Ids::of(self), id).is_some()
+    }
+
+    fn is_drawn_arc(&self, id: &str) -> bool {
+        self.drawn_wire(id).is_some_and(|w| w.arc.is_some())
+    }
+
+    /// Where a point operand is, and whether the solve moves it (a drawn 3D point) or it is
+    /// held fixed (an included curve's end, a 2D point through the sketch's plane).
+    fn operand(&self, ids: &Ids, p: &WirePoint) -> Option<Op> {
+        if let Some(w) = ids.drawn(&p.wire) {
+            return w.fit.get(p.index).map(|at| Op::Moving(*at));
+        }
+        if let Some(w) = ids.linked(&p.wire) {
+            return match p.index {
+                0 => w.pts.first(),
+                1 if w.pts.len() > 1 => w.pts.last(),
+                _ => None,
+            }
+            .map(|at| Op::Fixed(*at));
+        }
+        let frame = self.frame.0?;
+        if p.index == 0
+            && let Some(q) = ids.points.get(p.wire.as_str()).and_then(|i| self.points.get(*i))
+        {
+            return Some(Op::Fixed(frame.to_world(q.pos)));
+        }
+        // A 2D line's ends, for a line operand.
+        match ids.curves.get(p.wire.as_str()).and_then(|i| self.curves.get(*i)).map(|c| &c.kind) {
+            Some(crate::model::CurveKind::Line { a, b }) => {
+                let i = if p.index == 0 {
+                    *a
+                } else if p.index == 1 {
+                    *b
+                } else {
+                    return None;
+                };
+                self.points.get(i).map(|q| Op::Fixed(frame.to_world(q.pos)))
+            }
+            _ => None,
+        }
+    }
+
+    /// The points a curve operand stands for: two on a line, three on a circle. A drawn 3D
+    /// line or arc gives its own fit points (they move); an included model edge gives two
+    /// points of its line or three of its circle, from its exact curve; a 2D line, circle or
+    /// arc gives them through the sketch's plane. `None` for any other curve.
+    fn curve_operand(&self, ids: &Ids, id: &str) -> Option<Vec<Op>> {
+        if let Some(w) = ids.drawn(id) {
+            return match (w.fit.len(), w.arc.is_some()) {
+                (2, false) | (3, true) => Some(w.fit.iter().map(|at| Op::Moving(*at)).collect()),
+                _ => None,
+            };
+        }
+        if let Some(w) = ids.linked(id) {
+            use solidcore_record::brep::Curve;
+            let v = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
+            return match w.exact.as_slice() {
+                [c] => match &c.curve {
+                    Curve::Line { start, end } => Some(vec![Op::Fixed(v(*start)), Op::Fixed(v(*end))]),
+                    Curve::Circle { frame, radius } => {
+                        let (o, x, y) = (v(frame.origin), v(frame.x_axis), v(frame.y_axis));
+                        Some(circle_points(o, x, y, *radius, 0.0).into_iter().map(Op::Fixed).collect())
+                    }
+                    _ => None,
+                },
+                // Known only by its points: straight when it is two.
+                [] if w.pts.len() == 2 => Some(w.pts.iter().map(|at| Op::Fixed(*at)).collect()),
+                _ => None,
+            };
+        }
+        let frame = self.frame.0?;
+        let pos = |i: usize| self.points.get(i).map(|q| q.pos);
+        match &self.curves.get(*ids.curves.get(id)?)?.kind {
+            crate::model::CurveKind::Line { a, b } => Some(vec![Op::Fixed(frame.to_world(pos(*a)?)), Op::Fixed(frame.to_world(pos(*b)?))]),
+            crate::model::CurveKind::Circle { c, r } => {
+                let c = frame.to_world(pos(*c)?);
+                Some(circle_points(c, frame.x, frame.y, *r, 0.0).into_iter().map(Op::Fixed).collect())
+            }
+            crate::model::CurveKind::Arc { c, a, .. } => {
+                let (c2, a2) = (pos(*c)?, pos(*a)?);
+                let r = c2.dist(a2);
+                let start = (a2 - c2).angle();
+                Some(circle_points(frame.to_world(c2), frame.x, frame.y, r, start).into_iter().map(Op::Fixed).collect())
+            }
+            _ => None,
+        }
+    }
+
+    /// Every operand of a 3D constraint, in the order its residuals read them; `None` when one
+    /// is missing (a curve gone, a 2D point with no plane resolved yet).
+    fn operands(&self, ids: &Ids, k: &WireConstraintKind) -> Option<Vec<Op>> {
+        let mut ops: Vec<Op> = k.points().iter().map(|p| self.operand(ids, p)).collect::<Option<_>>()?;
+        if let WireConstraintKind::PointOnCurve { curve, .. } = k {
+            ops.extend(self.curve_operand(ids, curve)?);
+        }
+        Some(ops)
+    }
+
+    /// Where every operand of a 3D constraint is now.
+    fn operand_positions(&self, ids: &Ids, k: &WireConstraintKind) -> Option<Vec<Vec3>> {
+        self.operands(ids, k).map(|ops| ops.iter().map(Op::at).collect())
+    }
+
     /// Check a 3D constraint against the sketch: its curves exist, are drawn, are lines where a
     /// line is needed, and share one coordinate space.
     pub fn validate_wire_constraint(&self, k: &WireConstraintKind) -> Result<()> {
-        validate_in(k, false, &|id| self.drawn_wire(id))
+        validate_in(self, &Ids::of(self), k, false)
     }
 
     /// Check every stored 3D constraint.
@@ -761,7 +1078,6 @@ impl Sketch {
         if self.wire_constraints.len() > MAX_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
-        let drawn = self.drawn_wires();
         // Not another entity's id either: a delete by id would take the wrong one.
         let others: std::collections::HashSet<&str> = self
             .points
@@ -773,12 +1089,13 @@ impl Sketch {
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .collect();
+        let lookup = Ids::of(self);
         let mut ids = std::collections::BTreeSet::new();
         for c in &self.wire_constraints {
             if c.id.is_empty() || c.id.len() > 512 || others.contains(c.id.as_str()) || !ids.insert(c.id.as_str()) {
                 return Err(SketchError::Invalid("3D constraint ids are invalid".into()));
             }
-            validate_in(&c.kind, c.driven, &|id| drawn.get(id).copied()).map_err(|e| match e {
+            validate_in(self, &lookup, &c.kind, c.driven).map_err(|e| match e {
                 SketchError::Invalid(m) => SketchError::Invalid(format!("{}: {m}", c.id)),
                 e => e,
             })?;
@@ -796,7 +1113,7 @@ impl Sketch {
     /// another dimension of that kind already measures is refused, naming it.
     pub fn add_wire_dimension(&mut self, kind: WireConstraintKind, param: Option<String>, driven: bool) -> Result<String> {
         let driven = driven && kind.is_dimension();
-        validate_in(&kind, driven, &|id| self.drawn_wire(id))?;
+        validate_in(self, &Ids::of(self), &kind, driven)?;
         if let Some(same) = self.wire_constraints.iter().find(|c| c.kind.same_as(&kind)) {
             return Ok(same.id.clone());
         }
@@ -869,8 +1186,7 @@ impl Sketch {
 
     /// What a 3D dimension measures now.
     pub fn measure_wire_dimension(&self, k: &WireConstraintKind) -> Option<f64> {
-        let at: Option<Vec<Vec3>> = k.points().iter().map(|p| self.wire_point_at(p)).collect();
-        k.measure_at(&at?)
+        k.measure_at(&self.operand_positions(&Ids::of(self), k)?)
     }
 
     /// The model parameters that drive the sketch's dimensions, planar and 3D.
@@ -984,8 +1300,8 @@ impl Sketch {
     /// Drop the 3D constraints that no longer check out: they name a curve the sketch no longer
     /// has, a fit point it no longer has, or are damaged. Returns how many went.
     pub fn prune_wire_constraints(&mut self) -> usize {
-        let drawn = self.drawn_wires();
-        let keep: Vec<bool> = self.wire_constraints.iter().map(|c| validate_in(&c.kind, c.driven, &|id| drawn.get(id).copied()).is_ok()).collect();
+        let ids = Ids::of(self);
+        let keep: Vec<bool> = self.wire_constraints.iter().map(|c| validate_in(self, &ids, &c.kind, c.driven).is_ok()).collect();
         let before = self.wire_constraints.len();
         let mut keep = keep.into_iter();
         self.wire_constraints.retain(|_| keep.next().unwrap_or(false));
@@ -1012,6 +1328,12 @@ impl Sketch {
             for c in &self.wire_constraints {
                 match &c.kind {
                     WireConstraintKind::Fix { p, .. } if *p == q => return true,
+                    // Joined to fixed geometry (an included curve's end, a 2D point).
+                    WireConstraintKind::Coincident { a, b }
+                        if (*a == q && self.drawn_wire(&b.wire).is_none()) || (*b == q && self.drawn_wire(&a.wire).is_none()) =>
+                    {
+                        return true;
+                    }
                     WireConstraintKind::Coincident { a, b } if *a == q && !joined.contains(b) => joined.push(b.clone()),
                     WireConstraintKind::Coincident { a, b } if *b == q && !joined.contains(a) => joined.push(a.clone()),
                     _ => {}
@@ -1023,26 +1345,19 @@ impl Sketch {
 
     /// The 3D constraints that hold as the curves are now (no solve).
     pub fn wire_constraints_holding(&self) -> std::collections::HashSet<String> {
-        let drawn = self.drawn_wires();
-        self.wire_constraints
-            .iter()
-            .filter(|c| {
-                let at: Option<Vec<Vec3>> =
-                    c.kind.points().iter().map(|p| drawn.get(p.wire.as_str()).and_then(|w| w.fit.get(p.index)).copied()).collect();
-                at.is_some_and(|at| c.kind.residuals_at(&at).iter().all(|v| v.abs() <= ACCEPT))
-            })
-            .map(|c| c.id.clone())
-            .collect()
+        let ids = Ids::of(self);
+        self.wire_constraints.iter().filter(|c| self.holds(&ids, &c.kind)).map(|c| c.id.clone()).collect()
     }
 
     /// Whether every 3D constraint holds as the curves are now (no solve).
     pub fn wire_constraints_hold(&self) -> bool {
-        let drawn = self.drawn_wires();
-        self.wire_constraints.iter().filter(|c| !c.driven).all(|c| {
-            let at: Option<Vec<Vec3>> =
-                c.kind.points().iter().map(|p| drawn.get(p.wire.as_str()).and_then(|w| w.fit.get(p.index)).copied()).collect();
-            at.is_some_and(|at| c.kind.residuals_at(&at).iter().all(|v| v.abs() <= ACCEPT))
-        })
+        let ids = Ids::of(self);
+        self.wire_constraints.iter().filter(|c| !c.driven).all(|c| self.holds(&ids, &c.kind))
+    }
+
+    /// Whether a 3D constraint holds as its operands are now.
+    fn holds(&self, ids: &Ids, k: &WireConstraintKind) -> bool {
+        k.resolved() && self.operand_positions(ids, k).is_some_and(|at| k.residuals_at(&at).iter().all(|v| v.abs() <= ACCEPT))
     }
 
     /// [`Sketch::solve_wires_with`], counting the freedoms left.
@@ -1069,16 +1384,24 @@ impl Sketch {
             return rep;
         }
         let slot = |p: &WirePoint| first.get(&p.wire).filter(|(_, n)| p.index < *n).map(|(s, _)| s + p.index);
-        let cons: Vec<(&str, &WireConstraintKind, Vec<usize>)> = self
-            .wire_constraints
-            .iter()
-            .filter(|c| !c.driven)
-            .filter_map(|c| c.kind.points().iter().map(slot).collect::<Option<Vec<usize>>>().map(|pts| (c.id.as_str(), &c.kind, pts)))
-            .collect();
+        // Each constraint's operands: a drawn point's slot, or where fixed geometry is. A
+        // constraint on a model plane not resolved yet, or on geometry that is gone, fails.
+        let ids = Ids::of(self);
+        let mut cons: Vec<(&str, &WireConstraintKind, Vec<Ref>)> = Vec::new();
+        for c in self.wire_constraints.iter().filter(|c| !c.driven) {
+            let refs = c.kind.resolved().then(|| self.operand_refs(&ids, &c.kind, &slot)).flatten();
+            match refs {
+                Some(refs) => cons.push((c.id.as_str(), &c.kind, refs)),
+                None => {
+                    rep.ok = false;
+                    rep.failing.push(c.id.clone());
+                }
+            }
+        }
         // Points made coincident are one: classes of points, each one unknown (or constant).
         let mut parent: Vec<usize> = (0..positions.len()).collect();
         for (_, k, pts) in &cons {
-            if let (WireConstraintKind::Coincident { .. }, [a, b]) = (k, pts.as_slice()) {
+            if let (WireConstraintKind::Coincident { .. }, [Ref::Slot(a), Ref::Slot(b)]) = (k, pts.as_slice()) {
                 union(&mut parent, *a, *b);
             }
         }
@@ -1102,7 +1425,14 @@ impl Sketch {
         let mut failed: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut fixed: HashMap<usize, Vec3> = HashMap::new();
         for (id, k, pts) in &cons {
-            if let (WireConstraintKind::Fix { at, .. }, Some(c)) = (k, pts.first().and_then(|s| class.get(*s))) {
+            // A Fix, or a point made coincident with fixed geometry: held at that place.
+            let held_at = match (k, pts.as_slice()) {
+                (WireConstraintKind::Fix { at, .. }, [Ref::Slot(s)]) => Some((*s, *at)),
+                (WireConstraintKind::Coincident { .. }, [Ref::Slot(s), Ref::At(at)] | [Ref::At(at), Ref::Slot(s)]) => Some((*s, *at)),
+                _ => None,
+            };
+            if let Some((c, at)) = held_at.and_then(|(s, at)| class.get(s).map(|c| (c, at))) {
+                let at = &at;
                 match fixed.get(c) {
                     // Two fixes of one point (joined points) in different places.
                     Some(was) if was.dist(*at) > ACCEPT => {
@@ -1122,10 +1452,14 @@ impl Sketch {
         let rel: Vec<usize> = (0..cons.len())
             .filter(|i| cons.get(*i).is_some_and(|c| !matches!(c.1, WireConstraintKind::Coincident { .. } | WireConstraintKind::Fix { .. })))
             .collect();
+        let class_of = |r: &Ref| match r {
+            Ref::Slot(s) => class.get(*s).copied(),
+            Ref::At(_) => None,
+        };
         let mut gparent: Vec<usize> = (0..positions.len()).collect();
         for i in &rel {
             let Some((_, _, pts)) = cons.get(*i) else { continue };
-            let free: Vec<usize> = pts.iter().filter_map(|s| class.get(*s).copied()).filter(|c| !fixed.contains_key(c)).collect();
+            let free: Vec<usize> = pts.iter().filter_map(class_of).filter(|c| !fixed.contains_key(c)).collect();
             for w in free.windows(2) {
                 union(&mut gparent, w[0], w[1]);
             }
@@ -1133,15 +1467,21 @@ impl Sketch {
         let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
         for i in &rel {
             let Some((id, k, pts)) = cons.get(*i) else { continue };
-            match pts.iter().filter_map(|s| class.get(*s).copied()).find(|c| !fixed.contains_key(c)) {
+            match pts.iter().filter_map(class_of).find(|c| !fixed.contains_key(c)) {
                 Some(c) => groups.entry(find(&mut gparent, c)).or_default().push(*i),
                 // Every point fixed: it holds or it doesn't.
                 None => {
-                    let at: Vec<Vec3> = pts.iter().filter_map(|s| class.get(*s).and_then(|c| start.get(c)).copied()).collect();
+                    let at: Vec<Vec3> = pts
+                        .iter()
+                        .filter_map(|r| match r {
+                            Ref::Slot(s) => class.get(*s).and_then(|c| start.get(c)).copied(),
+                            Ref::At(at) => Some(*at),
+                        })
+                        .collect();
                     if k.residuals_at(&at).iter().any(|v| v.abs() > ACCEPT) {
                         rep.ok = false;
                         rep.failing.push(id.to_string());
-                        failed.extend(pts.iter().filter_map(|s| class.get(*s).copied()));
+                        failed.extend(pts.iter().filter_map(class_of));
                     }
                 }
             }
@@ -1163,21 +1503,24 @@ impl Sketch {
                 let Some((id, k, pts)) = cons.get(*i) else { continue };
                 let pts: Vec<Pt> = pts
                     .iter()
-                    .map(|s| {
-                        let c = class.get(*s).copied().unwrap_or(*s);
-                        match fixed.get(&c) {
-                            Some(at) => Pt::At(*at),
-                            None => Pt::Var(*var_of.entry(c).or_insert_with(|| {
-                                vars.push(c);
-                                vars.len() - 1
-                            })),
+                    .map(|r| match r {
+                        Ref::At(at) => Pt::At(*at),
+                        Ref::Slot(s) => {
+                            let c = class.get(*s).copied().unwrap_or(*s);
+                            match fixed.get(&c) {
+                                Some(at) => Pt::At(*at),
+                                None => Pt::Var(*var_of.entry(c).or_insert_with(|| {
+                                    vars.push(c);
+                                    vars.len() - 1
+                                })),
+                            }
                         }
                     })
                     .collect();
                 blocks.push(Block::new(id, k, pts));
             }
             let n = vars.len().saturating_mul(3);
-            let rows: usize = blocks.iter().map(|b| b.kind.rows()).sum();
+            let rows: usize = blocks.iter().map(|b| b.kind.rows(b.pts.len())).sum();
             for c in &vars {
                 group_of.insert(*c, group_cons.len());
             }
@@ -1311,10 +1654,38 @@ impl Sketch {
         rep
     }
 
+    /// A constraint's operands for the solve: a drawn point by its slot, fixed geometry by place.
+    fn operand_refs(&self, ids: &Ids, k: &WireConstraintKind, slot: &dyn Fn(&WirePoint) -> Option<usize>) -> Option<Vec<Ref>> {
+        let mut refs: Vec<Ref> = k
+            .points()
+            .iter()
+            .map(|p| match self.operand(ids, p)? {
+                Op::Moving(_) => slot(p).map(Ref::Slot),
+                Op::Fixed(at) => Some(Ref::At(at)),
+            })
+            .collect::<Option<_>>()?;
+        if let WireConstraintKind::PointOnCurve { curve, .. } = k {
+            match self.curve_operand(ids, curve)? {
+                // A drawn curve's own fit points move with it.
+                ops if ids.drawn(curve).is_some() => {
+                    for index in 0..ops.len() {
+                        refs.push(Ref::Slot(slot(&WirePoint { wire: curve.clone(), index })?));
+                    }
+                }
+                ops => refs.extend(ops.iter().map(|o| Ref::At(o.at()))),
+            }
+        }
+        Some(refs)
+    }
+
     /// Driven 3D dimensions take what they measure (one that measures nothing keeps its value).
     fn measure_driven(&mut self) {
-        let measured: Vec<Option<f64>> =
-            self.wire_constraints.iter().map(|c| if c.driven { self.measure_wire_dimension(&c.kind) } else { None }).collect();
+        let ids = Ids::of(self);
+        let measured: Vec<Option<f64>> = self
+            .wire_constraints
+            .iter()
+            .map(|c| if c.driven { self.operand_positions(&ids, &c.kind).and_then(|at| c.kind.measure_at(&at)) } else { None })
+            .collect();
         for (c, m) in self.wire_constraints.iter_mut().zip(measured) {
             if let Some(v) = m {
                 c.kind.set_value(v);
@@ -1330,19 +1701,60 @@ impl Sketch {
     }
 }
 
-/// [`Sketch::validate_wire_constraint`], with the drawn curves looked up by `drawn`.
+/// [`Sketch::validate_wire_constraint`]: its operands exist, at least one of them is drawn 3D
+/// geometry the solve can move, lines are lines and arcs arcs where needed, and drawn curves
+/// share one coordinate space (component space, when it is held to 2D geometry).
 /// A driven dimension's value need only be a number: it is whatever it measures.
-fn validate_in<'a>(k: &WireConstraintKind, driven: bool, drawn: &dyn Fn(&str) -> Option<&'a Wire>) -> Result<()> {
+fn validate_in(sk: &Sketch, ids: &Ids, k: &WireConstraintKind, driven: bool) -> Result<()> {
     let bad = |m: String| Err(SketchError::Invalid(m));
+    let drawn = |id: &str| ids.drawn(id);
     for p in k.points() {
-        if drawn(&p.wire).and_then(|w| w.fit.get(p.index)).is_none() {
-            return bad(format!("`{}` has no drawn 3D point {}", p.wire, p.index));
+        let known = drawn(&p.wire).and_then(|w| w.fit.get(p.index)).is_some()
+            || ids.linked(&p.wire).is_some_and(|w| p.index == 0 || (p.index == 1 && w.pts.len() > 1))
+            || (p.index <= 1
+                && ids
+                    .curves
+                    .get(p.wire.as_str())
+                    .is_some_and(|i| matches!(sk.curves.get(*i).map(|c| &c.kind), Some(crate::model::CurveKind::Line { .. }))))
+            || (p.index == 0 && ids.points.contains_key(p.wire.as_str()));
+        if !known {
+            return bad(format!("`{}` has no 3D point {} (a drawn 3D point, an included model point or a 2D point)", p.wire, p.index));
         }
     }
-    let line = |id: &str| drawn(id).is_some_and(|w| w.fit.len() == 2 && w.arc.is_none());
+    if let WireConstraintKind::Fix { p, .. } = k
+        && drawn(&p.wire).is_none()
+    {
+        return bad(format!("`{}` is not a drawn 3D point (only those can be fixed)", p.wire));
+    }
+    let moving =
+        k.points().iter().any(|p| drawn(&p.wire).is_some()) || matches!(k, WireConstraintKind::PointOnCurve { curve, .. } if drawn(curve).is_some());
+    if !moving {
+        return bad("this holds nothing the 3D sketch can move: name a drawn 3D point or curve".into());
+    }
+    // A line: two moving or fixed points, not a drawn arc's chord.
+    let line = |id: &str| {
+        drawn(id).is_some_and(|w| w.fit.len() == 2 && w.arc.is_none())
+            || (drawn(id).is_none() && matches!(sk.curve_operand(ids, id), Some(points) if points.len() == 2))
+            || (drawn(id).is_none()
+                && ids.curves.get(id).is_some_and(|i| matches!(sk.curves.get(*i).map(|c| &c.kind), Some(crate::model::CurveKind::Line { .. }))))
+    };
     match k {
         WireConstraintKind::PointOnLine { line: l, .. } | WireConstraintKind::AlongAxis { line: l, .. } if !line(l) => {
-            return bad(format!("`{l}` is not a drawn 3D line"));
+            return bad(format!("`{l}` is not a 3D line, an included straight model edge or a 2D line"));
+        }
+        WireConstraintKind::PointOnCurve { p, curve } => {
+            // A 2D curve is checked by kind: its place needs the sketch's plane, resolved later.
+            let flat = ids.curves.get(curve.as_str()).and_then(|i| sk.curves.get(*i)).is_some_and(|c| {
+                matches!(c.kind, crate::model::CurveKind::Line { .. } | crate::model::CurveKind::Circle { .. } | crate::model::CurveKind::Arc { .. })
+            });
+            if sk.curve_operand(ids, curve).is_none() && !flat {
+                return bad(format!(
+                    "`{curve}` is not a curve a 3D point can be held on (a straight or circular included model edge, a 2D line, circle or arc, or a drawn 3D line or arc)"
+                ));
+            }
+            if p.wire == *curve {
+                return bad("a curve's own point is already on it".into());
+            }
         }
         WireConstraintKind::Coincident { a, b } if a == b => return bad("a point cannot be coincident with itself".into()),
         // A line's or an arc's own ends together would squeeze it away; a spline may close.
@@ -1411,9 +1823,19 @@ fn validate_in<'a>(k: &WireConstraintKind, driven: bool, drawn: &dyn Fn(&str) ->
     {
         return bad("a 3D point's expression must be 1 to 4096 characters".into());
     }
-    let spaces: Vec<_> = k.wires().iter().filter_map(|id| drawn(id).map(|w| w.space)).collect();
+    let spaces: Vec<_> = k.wires().iter().filter_map(|id| ids.wires.get(id).map(|w| w.space)).collect();
     if spaces.windows(2).any(|w| w[0] != w[1]) {
         return bad("these 3D curves are in different coordinate spaces (one fixed in the world, one in its component)".into());
+    }
+    // 2D geometry lies in the sketch's component: a curve fixed in the world cannot be held to it.
+    let on_2d = k.wires().iter().any(|id| ids.points.contains_key(id) || ids.curves.contains_key(id));
+    if on_2d && spaces.contains(&crate::WireSpace::World) {
+        return bad("a 3D curve fixed in the world cannot be held to the sketch's 2D geometry".into());
+    }
+    if let Some(m) = k.model_plane()
+        && !matches!(m.source, crate::LinkSource::Plane { .. } | crate::LinkSource::Face { .. })
+    {
+        return bad("a 3D constraint is held to an origin or construction plane or a planar model face".into());
     }
     Ok(())
 }
