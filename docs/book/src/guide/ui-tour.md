@@ -40,7 +40,11 @@ view.
   when the whole tree is collapsed). Components start closed, so a large assembly opens as a
   short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
   down to it (**Preferences › Interface › Components start open** opens every component from the
-  start, as before). Rows drag into groups and other components. **Preferences ›
+  start, as before). **Preferences › Layout › Browser rows start closed** (off by default) starts
+  folders closed too, and components whatever **Components start open** says: they open with
+  their arrow, **Expand All**, or **Find in Browser** on a body, face or edge in the view, which
+  opens just the rows down to that body, and a pick in the view leaves the Browser as it is. Rows
+  drag into groups and other components. **Preferences ›
   Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
   **Several bodies only** (the default) lists a component's body straight under it when it has
   only one and no groups, **Never** lists every component's bodies and groups straight under it

@@ -405,6 +405,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.browser_components_open,
                     "browser_components_open",
                 );
+                // Folders and placements start closed and open only on request (#8768).
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_rows_start_closed"),
+                    app.tr("prefs.browser_rows_start_closed_note"),
+                    &mut app.preferences.browser_rows_start_closed,
+                    "browser_rows_start_closed",
+                );
                 layout_check(
                     ui,
                     app.tr("prefs.browser_eye_left"),

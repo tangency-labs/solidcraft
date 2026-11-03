@@ -279,6 +279,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pending.view_changed(before, app.session.revision);
     }
     app.jobs_view_changed(before, app.session.revision);
+    crate::browser::forget_found(app);
     put_work(app, slot.work, before);
     out
 }
