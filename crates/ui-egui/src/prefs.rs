@@ -1603,7 +1603,8 @@ preference_settings! {
     /// fixed screen size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
     /// The Ellipse tool draws the major and minor axes as construction lines with the ellipse, so
-    /// its half-axes and axes can be dimensioned. Off: the ellipse alone, as before.
+    /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
+    /// minor radius, labelled R, as before.
     ellipse_axes: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
