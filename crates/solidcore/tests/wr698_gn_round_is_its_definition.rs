@@ -356,6 +356,17 @@ fn rounds_of(b: &Brep) -> Vec<(FaceId, Surface)> {
 
 /// The body reopened: each round rebuilt from its record (re-certified), as a design read
 /// back from SolidCraft's record is. Returns the rebuilt rounds.
+///
+/// Each rebuilt round is owned by its face, as every face surface is upstream
+/// (`SmFace::SetSurface` sets it). The surface keeps the face's identity and its edge uses'
+/// UV trims: the record rebuilds the same parameters. A surface written into the face slot
+/// without an owner has no `SmSurface::GetFace()`. A fillet whose rail merges onto that face
+/// (`MergeCurveOnSurfaces`) then fails with `SM_ERR_NULL_POINTER`, 1006, as upstream does.
+/// Since #2364 the smooth-vertex End merges the second round's rail onto the reopened round
+/// (#2550). The old WR-674 path never merged a rail onto that face, so it hid the missing
+/// owner. `set_surface` would also notify a change of geometry, which drops the UV trims;
+/// the fillet would then re-drop them onto S outside its net scope, which is not what a
+/// reopened body has to do.
 fn reopen(k: &Kernel, b: &mut Brep) -> Vec<(FaceId, Surface)> {
     use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
     let mut out = Vec::new();
@@ -363,8 +374,19 @@ fn reopen(k: &Kernel, b: &mut Brep) -> Vec<(FaceId, Surface)> {
         let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
             unreachable!()
         };
-        let back = Surface::from(rebuild(k, &to_record(k, pb).unwrap()).unwrap());
-        b.face_mut(f).unwrap().surface = Some(back.clone());
+        let mut back = Surface::from(rebuild(k, &to_record(k, pb).unwrap()).unwrap());
+        let this = b.owner_identity(solidcore::EntityRef::Face(f));
+        back.set_owner(Some(this));
+        b.face_mut(f).unwrap().surface = Some(back);
+        // the surface reads the face's tolerance through `GetFace()`, as `SetSurface` sets it
+        b.sync_face_surface_tolerance(f).unwrap();
+        let owned = b.face(f).unwrap().surface.as_ref().unwrap();
+        assert_eq!(
+            owned.owner(),
+            Some(this),
+            "the reopened round is owned by its face"
+        );
+        let back = owned.clone();
         out.push((f, back));
     }
     out
@@ -824,7 +846,6 @@ fn solidcraft_kernel(definition: bool) -> Kernel {
 /// round is the plain B-spline's, its rail within the bound of the plain one's, the
 /// body's volume the plain one's to rounding.
 #[test]
-#[ignore = "fails on main since #2364, #2550"]
 fn a_round_on_a_reopened_round_lies_on_it() {
     let mut runs = Vec::new();
     for definition in [true, false] {
