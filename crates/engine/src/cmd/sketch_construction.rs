@@ -2,7 +2,8 @@
 //! analytic solutions.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};

@@ -8,9 +8,10 @@
 //! the preview draws.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"))

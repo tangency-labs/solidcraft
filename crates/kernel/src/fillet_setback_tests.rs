@@ -1,4 +1,5 @@
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::*;
 
@@ -45,8 +46,8 @@ fn a_setback_off_the_rounded_corner_is_refused() {
 
 /// A setback that does not reach past where the corner's rounds meet without one (on faces square
 /// to each other, the radius) is refused before SMLib runs, naming that least setback. Past it, a
-/// setback still too short for SMLib's corner fill (certified convex only from a setback on,
-/// smlib_blend_fit_size's SMLIB_FIT_SETBACK_AT_LEAST) is refused naming the smallest that builds,
+/// setback still too short for the corner fill (certified convex only from a setback on, as SMLib
+/// f916a8d's setback corner does) is refused naming the smallest that builds,
 /// at most twice the one asked for (the certificate scales the setbacks up to 2); that one builds.
 #[test]
 fn a_setback_not_past_the_radius_is_refused_naming_the_least() {

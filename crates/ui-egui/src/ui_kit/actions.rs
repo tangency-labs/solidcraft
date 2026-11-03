@@ -703,7 +703,7 @@ pub(crate) fn icon_action(ui: &mut Ui, label: &str, icon: &str, enabled: bool, d
 }
 
 /// Compact stage actions share the icon-label button's frame, typography and hit target.
-pub(super) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary: bool) -> f32 {
+pub(crate) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary: bool) -> f32 {
     let t = Tokens::get();
     let font = if primary { crate::fonts::semibold(t.font_button) } else { egui::FontId::proportional(t.font_label) };
     ui.painter().layout_no_wrap(label.into(), font, t.form_ink).size().x.ceil()

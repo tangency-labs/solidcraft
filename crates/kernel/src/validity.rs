@@ -33,8 +33,8 @@ impl Validity {
 pub fn validity(body: &Body) -> Validity {
     let record = brep_record(body).map_err(|e| e.to_string());
     let checked = record.as_ref().map_err(Clone::clone).and_then(|r| {
-        r.validate_built().map_err(|e| format!("structure: {e}"))?;
-        r.check_geometry().map_err(|e| format!("geometry: {e}"))
+        solidcraft_geom::brep::check::validate_built(r).map_err(|e| format!("structure: {e}"))?;
+        solidcraft_geom::brep::geometry::check(r).map_err(|e| format!("geometry: {e}"))
     });
     Validity { record: checked, smlib: smlib_validity(body) }
 }
@@ -54,22 +54,9 @@ fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
     })
 }
 
-/// Whether this build links SMLib (the `smlib` feature).
-pub fn smlib_built() -> bool {
-    cfg!(feature = "smlib")
-}
-
-/// Where every SMLib call that fails from now on leaves its inputs for replay (the C API's
-/// `smlib_set_dump_dir`: the call's arguments and B-reps, which `smlib_brep_read` reads back);
-/// `None` stops it. A build without SMLib makes no calls to dump.
-pub fn smlib_dump_dir(dir: Option<&std::path::Path>) -> crate::Result<()> {
-    #[cfg(feature = "smlib")]
-    {
-        solidcraft_smlib::set_dump_dir(dir).map_err(|e| crate::KernelError::Failed(format!("SMLib dump folder: {e}")))
-    }
-    #[cfg(not(feature = "smlib"))]
-    {
-        let _ = dir;
-        Ok(())
-    }
+/// Where every kernel call that fails from now on leaves its inputs for replay
+/// (`solidcraft_smlib::set_dump_dir`: the call and its B-reps, which `Brep::read` reads back);
+/// `None` stops it.
+pub fn smlib_dump_dir(dir: Option<&std::path::Path>) {
+    solidcraft_smlib::set_dump_dir(dir);
 }

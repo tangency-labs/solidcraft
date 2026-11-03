@@ -5,11 +5,12 @@
 
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
+use solidcraft_engine::geom::prelude::*;
 use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::kernel::Continuity;
 
 use crate::SolveApp;
@@ -507,12 +508,7 @@ pub struct Lined {
 
 /// The points the cursor can line up with: the sketch's visible points on screen (line ends,
 /// centres, standalone points, the origin) and the shape's own points so far.
-fn align_targets(
-    proj: &Proj,
-    sk: &solidcraft_engine::sketch::Sketch,
-    plane: &solidcraft_engine::geom::Plane,
-    own: &[Vec2],
-) -> Vec<(Option<String>, Vec2)> {
+fn align_targets(proj: &Proj, sk: &solidcraft_engine::sketch::Sketch, plane: &solidcore_record::Plane, own: &[Vec2]) -> Vec<(Option<String>, Vec2)> {
     let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
     let on_screen = |p: Vec2| proj.to_screen(plane.to_world(p)).is_some_and(|q| proj.rect.contains(q));
     let mut out: Vec<(Option<String>, Vec2)> =
@@ -590,7 +586,7 @@ pub fn refine_snap(
     app: &SolveApp,
     proj: &Proj,
     sk: &solidcraft_engine::sketch::Sketch,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     lp: Vec2,
 ) -> Option<(Vec2, Option<String>)> {
     crate::inference::clear();

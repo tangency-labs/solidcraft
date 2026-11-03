@@ -10,7 +10,9 @@
 //! puts them; every other line is set glyph by glyph, as it always was.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Ring, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Ring;
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::{FontData, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};

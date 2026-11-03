@@ -3,8 +3,9 @@
 
 use crate::test_support::app_with_script as app_with;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 #[test]
@@ -1517,7 +1518,7 @@ pub(crate) fn thread_face(app: &SolveApp, body: &str) -> Sel {
 
 #[test]
 fn thread_size_suggestion_matches_the_feature_for_shafts_and_holes() {
-    for (diameter, internal, expected) in [(8.0, false, "M8"), (20.0, false, "M20"), (5.0, true, "M6")] {
+    for (diameter, internal, expected) in [(8.0, false, "M8"), (20.0, false, "M20"), (5.0, true, "M5")] {
         let mut app = app_with(json!([]));
         if internal {
             app.run("solid.box", json!({"corner":[-10,-10,0],"length":20,"width":20,"height":10})).unwrap();
@@ -1978,6 +1979,47 @@ fn align_snaps_to_centres_and_edge_middles() {
     assert_eq!(p["to"]["snap"], json!("edge_mid"));
 }
 
+/// Align by frames (#6257): a sketch circle or point picked as To is a frame whatever the snap, a
+/// face with the Joint Origin snap is the joint origin the Joint dialog makes of it, and Angle is
+/// sent when given; As Picked builds what it built before.
+#[test]
+fn align_takes_sketch_frames_and_joint_origins() {
+    let mut app = boxed();
+    app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [60, 5], "radius": 3, "id": "ring"})).unwrap();
+    app.run("sketch.point", json!({"point": [70, 5], "id": "p"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    let bottom = face(&app, Vec3::new(20.0, 15.0, 0.0));
+    d.inputs[1].items = vec![bottom.clone()];
+    d.active = 2;
+    let ring = d
+        .candidate(&app.session, &crate::viewport::Hit::SketchCurve { sketch, id: "ring".into(), straight: false, point: Vec3::new(63.0, 5.0, 0.0) });
+    assert!(ring.is_some(), "the To input takes a sketch circle");
+    d.pick(&app.session, ring.unwrap());
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["to_frame"], json!({"sketch": sketch, "curve": "ring"}));
+    assert!(p["from_face"].is_array() && p.get("from_frame").is_none() && p.get("angle").is_none(), "{p}");
+    // The Joint Origin snap, and a turn.
+    d.extra.insert("from_snap".into(), json!("origin"));
+    if let Kind::Align { angle, .. } = &mut d.kind {
+        *angle = "45".into();
+    }
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["from_frame"], crate::dialogs_assembly::snap_of(&app.session, &bottom).unwrap().param);
+    assert!(p.get("from_face").is_none() && p["angle"] == json!("45"), "{p}");
+    // A sketch point is a frame too, and the command runs.
+    d.inputs[2].items.clear();
+    let at = solidcore_record::Vec2::new(70.0, 5.0);
+    let point = d.candidate(&app.session, &crate::viewport::Hit::SketchPoint { sketch, id: "p".into(), at }).unwrap();
+    d.pick(&app.session, point);
+    assert_eq!(apply_commands(&app, &d).unwrap().remove(0).1["to_frame"], json!({"sketch": sketch, "point": "p"}));
+    let id = apply(&mut app, &d);
+    assert!(app.session.model.result(id).is_some_and(|r| r.error.is_none()));
+}
+
 /// The Align dialog takes a plane (viewport or browser click) and the origin plane stays a plane
 /// in the command, so the bodies follow it when it moves.
 #[test]
@@ -2014,7 +2056,7 @@ fn align_components_input_picks_occurrence_from_viewport_body_and_skips_root_bod
     let second = app.run("occurrence.copy", json!({"component": comp, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
 
     let mut d = start(&mut app, vec![], "solid.align");
-    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3] };
+    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3], angle: String::new() };
     d.inputs[0].label = "Components";
     d.active = 0;
 

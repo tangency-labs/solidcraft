@@ -197,8 +197,7 @@ pub struct ProfileParams {
 /// One category's share of the recorded self time.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ProfileCategory {
-    /// `smlib` (SMLib's own time, measured by its C API), `kernel`, `feature`, `doc`, `command`,
-    /// `import`, `io`.
+    /// `solidcore` (the kernel's own calls), `kernel`, `feature`, `doc`, `command`, `import`, `io`.
     pub category: String,
     pub self_ms: f64,
     /// Of all recorded self time, 0–1.

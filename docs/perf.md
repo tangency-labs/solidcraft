@@ -9,7 +9,7 @@ What it records, as nested spans on each thread:
 
 | Category | Spans |
 |---|---|
-| `smlib` | every SMLib C API call, timed by the C API itself (`steady_clock`) |
+| `solidcore` | every call into solidcore, the kernel |
 | `kernel` | booleans, blends, sweeps, lofts, shell/draft/offset, healing, sewing, conversions, meshing, measuring |
 | `import` | the stages of a STEP or IGES import: parse, index, each solid, placement, mesh check, convert batches |
 | `feature` | each feature computed, by its type; `doc evaluate` around them |

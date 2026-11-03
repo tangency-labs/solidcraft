@@ -1749,7 +1749,7 @@ mod tests {
         h.app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10.0, 0.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(10.0, 0.0, 0.0);
         h.settle();
         h.step(&json!({"start":"sketch.dimension"})).unwrap();
         for point in [[0, 0, 0], [20, 0, 0], [10, 5, 0]] {

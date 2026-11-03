@@ -4,9 +4,9 @@ use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{FeatureKind, SweepOrientation};
-use solidcraft_engine::geom::Vec3;
 
 /// A square `Q` on XY and a path `P` 40 up the Z axis; the square's sketch id.
 fn setup(h: &mut Harness) -> u64 {

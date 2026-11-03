@@ -34,7 +34,7 @@ mod component_clone;
 mod component_clone_assembly;
 mod construct;
 mod delete;
-mod diagnostics;
+pub(crate) mod diagnostics;
 mod edit;
 mod face;
 mod features;
@@ -87,6 +87,7 @@ pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
 #[cfg(test)]
 mod kernel_heal_tests;
+mod panels;
 mod parameter_sweep;
 mod parameters;
 mod plastic;
@@ -340,6 +341,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());

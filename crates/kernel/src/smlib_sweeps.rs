@@ -17,7 +17,8 @@
 //! revolutions); the face in the start plane is the start cap, the one in the end plane (or,
 //! where the sweep has no end plane, the planar face left over) the end cap.
 
-use solidcraft_geom::{Plane, Region2, Seg2, Vec3};
+use solidcore_record::{Plane, Region2, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::numbered::{NumberedLoop, NumberedRegion};
@@ -86,15 +87,15 @@ mod imp {
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use solidcraft_smlib::{Brep, CheckLevel};
 
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     use super::*;
     use crate::history::FaceProv;
     use crate::provenance::{closest_on_tri, face_tris};
     use crate::record;
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib {what}"), e)
     }
 
     fn corner(c: crate::DraftCorner) -> DraftCorner {
@@ -172,7 +173,7 @@ mod imp {
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
     /// modeller's own record (no healing) and checked there.
-    pub(crate) fn body_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
+    pub(crate) fn body_from_record(record: &solidcore_record::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
         body_of(brep, what)
     }
@@ -187,7 +188,7 @@ mod imp {
         plane: &Plane,
         segs: &[Seg2],
         direction: Vec3,
-    ) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    ) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         let c = segs.iter().map(|s| curve(plane, s)).collect::<Result<Vec<_>>>()?;
         let out = body
             .smlib()?
@@ -198,7 +199,12 @@ mod imp {
 
     /// The face of `body` at `face_at` cut by the plane through `plane_point` square to `normal`,
     /// SMLib's section curves on that face, as record curves on their intervals.
-    pub(crate) fn face_section(body: &Body, face_at: Vec3, plane_point: Vec3, normal: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    pub(crate) fn face_section(
+        body: &Body,
+        face_at: Vec3,
+        plane_point: Vec3,
+        normal: Vec3,
+    ) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         let out = body
             .smlib()?
             .face_section(p(face_at), pick_reach(body), p(plane_point), p(normal), curve_tolerance(body))
@@ -226,12 +232,12 @@ mod imp {
     }
 
     /// SMLib's NURBS curves as record curves (rational splines) on their intervals.
-    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         out.into_iter()
             .map(|(c, interval)| match c {
                 Curve::Nurbs { points, knots, .. } => {
                     let homogeneous = points.iter().map(|q| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]]).collect();
-                    Ok((solidcraft_geom::brep::Curve::RationalSpline { knots, homogeneous }, interval))
+                    Ok((solidcore_record::brep::Curve::RationalSpline { knots, homogeneous }, interval))
                 }
                 _ => Err(failed(what, "a curve SMLib made is not a B-spline")),
             })
@@ -1083,7 +1089,7 @@ mod imp {
 
     /// The centre and radius of `lp` when it is one circle (in one or several arcs) centred on the
     /// line through `start` along the unit `k`.
-    fn circle_on_axis(plane: &Plane, lp: &solidcraft_geom::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
+    fn circle_on_axis(plane: &Plane, lp: &solidcore_record::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
         let mut circle: Option<(Vec3, f64)> = None;
         let mut turn = 0.0;
         for s in &lp.segs {

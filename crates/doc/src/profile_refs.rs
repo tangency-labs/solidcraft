@@ -1,4 +1,5 @@
 //! Exact profile references through analytic offset topology transitions.
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
 use crate::{DocError, ProfileSel, Result, SolvedSketch, WholeProfileBoundary};
@@ -364,7 +365,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
     use serde_json::json;
-    use solidcraft_geom::{Plane, Vec2};
+    use solidcore_record::{Plane, Vec2};
     use solidcraft_sketch::{Sketch, find_profiles, solve};
 
     fn rounded_source(sketch: &mut Sketch, radius: f64) -> Vec<(String, bool)> {

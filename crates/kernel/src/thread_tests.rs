@@ -2,7 +2,7 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 
 use crate::{BoolOp, cylinder, faceted_boolean, sweep_helix_mesh};
 

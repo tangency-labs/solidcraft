@@ -4,10 +4,11 @@
 //! design, many sizes) can be checked across its whole range before it is trusted, and the
 //! report says what moved where, so a lost face or a flipped joint is found before a part is.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_};

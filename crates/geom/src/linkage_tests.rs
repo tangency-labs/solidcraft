@@ -1,5 +1,5 @@
 use super::*;
-use crate::brep::{Frame, Surface};
+use solidcore_record::brep::{Frame, Surface};
 
 fn frame() -> Frame {
     Frame { origin: [1.0, -2.0, 0.5], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }

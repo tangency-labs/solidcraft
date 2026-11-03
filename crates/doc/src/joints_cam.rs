@@ -12,10 +12,12 @@
 //! oscillating one from its arm pointing away from the cam's axis) and stops where it first
 //! touches the profile: the follower stays in contact, as a spring would hold it.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Aabb3, Ring, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Aabb3, Ring};
 
 use super::{JointKind, JointOrigin, MotionLink, Size, component_bodies, component_of, flip_of, occurrence_world, size_of};
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
@@ -486,7 +488,7 @@ pub fn sketch_profile<'a>(sk: &'a crate::SolvedSketch, curves: &[String]) -> Opt
 }
 
 /// A loop's polyline within `tol`, segment by segment: `None` past `MAX_PROFILE_POINTS` points.
-fn sampled(lp: &solidcraft_geom::Loop2, tol: f64) -> Option<Vec<Vec2>> {
+fn sampled(lp: &solidcore_record::Loop2, tol: f64) -> Option<Vec<Vec2>> {
     let mut out = Vec::new();
     for seg in &lp.segs {
         let p = seg.polyline(tol);

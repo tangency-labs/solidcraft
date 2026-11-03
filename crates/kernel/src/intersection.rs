@@ -5,8 +5,8 @@
 //! tolerance, or the line, circle or ellipse it is) on its interval. Which edges are new comes from
 //! the imprint's own history: an edge no edge of either operand became.
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::Curve;
+use solidcore_record::Vec3;
+use solidcore_record::brep::Curve;
 
 use crate::body::{Body, MeshTolerance};
 use crate::{KernelError, Result};
@@ -22,8 +22,8 @@ pub struct MeetingEdge {
     pub points: Vec<Vec3>,
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib intersection curve: {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib intersection curve: {what}"), e)
 }
 
 /// `body` itself, or its faces `faces` (in its face order) alone as a surface body.

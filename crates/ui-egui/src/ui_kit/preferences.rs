@@ -1,5 +1,6 @@
 //! Shared preference compositions and explanatory figures. Figures are cheap painter content,
 //! never additional application viewports; every colour and control metric comes from tokens.
+pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
 use crate::{
     scenario,
@@ -392,7 +393,23 @@ pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl
 }
 
 /// A settings disclosure with a real item count, using the shared section badge.
-pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, false, add)
+}
+
+/// A list section directly following its search toolbar uses the compact page rhythm.
+pub(crate) fn settings_list_section<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, true, add)
+}
+
+fn settings_section_count_spaced<R>(
+    ui: &mut Ui,
+    key: &str,
+    title: &str,
+    count: Option<&str>,
+    compact: bool,
+    mut add: impl FnMut(&mut Ui) -> R,
+) -> Option<R> {
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::begin_section(ui, title);
         if !ui.is_visible() {
@@ -415,6 +432,8 @@ pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, cou
         if !gained {
             return Some(missed);
         }
+        // Keep search headings outside wrapped rows in this section.
+        crate::prefs_search::reveal(ui);
         let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
         let result = add(&mut child);
         crate::prefs_search::place_search_child(ui, &child);
@@ -424,7 +443,7 @@ pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, cou
     let page = super::settings_page_active(ui);
     if page {
         // The page's 10 pt item gap plus the shared disclosure's 2 pt inset complete 38 pt.
-        ui.add_space(t.space_24 + t.space_14 - t.space_10 - t.space_2);
+        ui.add_space(if compact { 0.0 } else { t.space_24 + t.space_14 - t.space_10 - t.space_2 });
     } else {
         ui.add_space(t.space_8);
     }
@@ -545,8 +564,14 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, ink);
 }
 
+pub(crate) use super::preferences_figure_data::{
+    paint_select_bodies, paint_select_faces_edges, paint_sketch_conflict, paint_sketch_exit_keep, paint_sketch_exit_previous,
+    paint_sketch_exit_unless_turned, paint_sketch_guides, paint_sketch_hide_glyphs, paint_sketch_state_icons,
+};
+
 #[derive(Clone, Copy)]
 pub(crate) enum PreferenceFigure {
+    #[cfg(test)]
     Pivot(usize),
     Quality(usize),
     Antialiasing(u32),
@@ -569,9 +594,14 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     let t = Tokens::get();
     let width = match figure {
         PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0 + t.space_16,
+        PreferenceFigure::UpAxis(_) => t.space_24 * 6.0 + t.space_6,
         _ => t.form_label_width + t.space_24 * 2.0 + t.space_6,
     };
-    let preview_height = if matches!(figure, PreferenceFigure::Antialiasing(_)) { t.space_24 * 3.0 } else { t.space_24 * 3.0 + t.space_3 };
+    let preview_height = match figure {
+        PreferenceFigure::UpAxis(_) => t.space_24 * 4.0 + t.space_2,
+        PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0,
+        _ => t.space_24 * 3.0 + t.space_3,
+    };
     let label_height = if matches!(figure, PreferenceFigure::ContactShading(_)) { t.space_16 * 2.0 } else { t.space_16 };
     let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
     let enabled = enabled && ui.is_enabled();
@@ -602,7 +632,12 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     if matches!(figure, PreferenceFigure::Antialiasing(_)) {
         preview = Rect::from_center_size(preview.center(), vec2(preview.height(), preview.height()));
     }
-    paint_preference_figure(ui.painter(), preview, figure, enabled);
+    let figure_rect = if matches!(figure, PreferenceFigure::UpAxis(_)) {
+        Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0))
+    } else {
+        preview
+    };
+    paint_preference_figure(ui.painter(), figure_rect, figure, enabled);
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
     centred_text_rows(
@@ -651,7 +686,7 @@ fn point(r: Rect, x: f32, y: f32) -> Pos2 {
     pos2(r.left() + r.width() * x, r.top() + r.height() * y)
 }
 
-fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
+pub(crate) fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
     if !p.clip_rect().intersects(rect) {
         return;
     }
@@ -705,6 +740,7 @@ fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigu
             }
         }
         PreferenceFigure::UpAxis(y_up) => super::preferences_figures::paint_orientation(&p, rect, y_up),
+        #[cfg(test)]
         PreferenceFigure::Pivot(pivot) => super::preferences_figures::paint_orbit(&p, rect, pivot),
         PreferenceFigure::ContactShading(on) => super::preferences_figures::paint_contact_shading(&p, rect, on),
     }
@@ -730,15 +766,20 @@ pub(super) fn rounded_perimeter(r: Rect, radius: f32) -> Vec<Pos2> {
         .collect()
 }
 
+pub(crate) use super::preferences_figure_data::{
+    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
+};
+
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutPreview {
     pub compact: bool,
     pub labels: bool,
     pub history: usize,
     pub translucent: bool,
+    pub dialog_left: bool,
 }
 
-/// One live shell specimen follows all four layout choices; it is a schematic, not a second scene.
+/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices.
 pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview) {
     super::preferences_figures::paint_layout(ui, state);
 }

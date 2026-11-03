@@ -1,5 +1,14 @@
 # SolidCraft UI kit
 
+The internal opt-in [universal panel foundation](panel-foundation.md) separates
+engine layout/specs from retained UI controllers and host-local services.
+`panel_runtime::EguiPanelHost` mounts bounded Header/Body/Footer slots through one
+existing `ui_kit::Container`; content controls its own scrolling. This reference
+adapter requires a full rectangular paint/input surface, rejects sparse geometry,
+and preserves parent clipping. `SolveApp::mount_panels` uses the enabled runtime's
+injected services. It adds no default
+placement/content change. Production docking and panel migrations remain separate.
+
 `viewport_status_item` and `viewport_status_row` draw persistent viewport pills on
 `Surface::ViewportStatus`. Callers supply translated names, formatted settings,
 kind, stable identity and key availability, and dispatch returned clear/edit actions.
@@ -264,13 +273,14 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | navigation_menu: `navigation_menu`, `NavigationMenuRow`, `navigation_context`, `navigation_tooltip` | Upward menus, checked rows, headings, separators and the delayed shortcut tooltip; context menus retain kit popup hosts and Container's shared elevation | `dialog_body/border/rule`, `form_ink/dim/primary`, `selected_bg`, `nav_hover/tip/tip_ink/tip_key_border` |
 | navigation_settings: `navigation_stage`, `navigation_tile`, `navigation_drag_ghost` | Custom preview stage, draggable slot tiles and drag feedback. Ordinary preferences reuse `settings_section`, `settings_form`, `row`, default `segmented`, `checkbox`, `button`, `divider` and text hints | `dialog_border`, `control_border`, `form_ink/dim`, `nav_field/hover/viewport` |
 | `settings_card` | Full-width settings detail group; uses Container chrome and preserves its width with empty or changing content | `dialog_footer`, `border`, `radius_md`, `space_12/10` |
+| `settings_plugin_card`, `checkbox_at` | Installed plugin card with 36 pt content, 12 pt padding, 36 pt tile, 13 pt semibold title, 11 pt version, 12 pt description and 2 pt text gap. The unframed 24 pt folder action and 16 pt checkbox are centred; actions wrap on narrow cards. | `control_fill`, `dialog_border`, `radius_lg`, `space_12/16/24` |
 | `mirrored_icon_button_at` | Directional counterpart of an existing icon master, sharing icon-button presentation and accessible label | Shared icon-button tokens |
 | `icon_button_at` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
 | `button_pair`, `PairButton` | Equal secondary actions, optional icons and selected state | `form_button_height`, control/selection/icon tokens |
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
 | `action_menu`, `command_menu_button` | Nested dense action menu or ribbon overflow action retaining its icon, shortcut and enabled state | form control/font tokens, `space_16`, icon palette |
-| table: `table`, `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim dashed line and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
+| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim dashed line and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
 | `name_list`, `NameList::row`, `NameRow::name`, `NameRow::cell` | A list of named rows on the table grid (the web app's stored files): the name column takes the width the other columns leave; the other columns are as wide as their widest cell, measured as drawn (a changed measurement discards the frame). A name is cut with an ellipsis, and given its full text on hover, only when it does not fit; `dialog:name:NAME:cut` reports it | `form_label_width`, `font_label`, `form_ink`, `space_8`, `table_row_height` |
 | `removable_header`, `plus_header`, `bin_button`, `active_pill` | Hover-only column removal, anchored Add Column menu with insertion brackets, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
 | `compact_button`, `summary_row` | Borderless stars and chevrons with enabled/selected states; named two-line rule summary beside an enable checkbox and compact actions. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
@@ -373,7 +383,8 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |
 | Bar 11 | Context width 232; bar has Customise / Hide / Reset, slot has Remove | `NAV_CONTEXT_WIDTH`, `navigation_bar_view::context_menu` |
-| Settings 1, 8 | Stage height 58, radius 8, padding 12 inside its 1 border; position follows preference live | `NAV_STAGE_HEIGHT/RADIUS/INSET`, `editor_layout` |
+| Settings 1, 8 | Stage height 96, radius 8, padding 12 inside its 1 border; a miniature of the 3D view (the view's gradient and grid colours); the bar follows the chosen anchor (side and top or bottom edge) live, and the slot count sits beside it on the side facing the view's middle | `NAV_STAGE_HEIGHT/RADIUS/INSET`, `navigation_stage`, `editor_layout` |
+| Settings 5 | Position is one picker of six anchors on a miniature of the view (`prefs:navbar:anchor:0..5`, top row then bottom row); the separator source is a dashed chip at the end of the Available heading, apart from the button tiles | `navigation_anchor_picker`, `navigation_separator_source` |
 | Settings 1–3 | Standard settings section and full-width detail card; actions stay on one line, with name truncation before icon-only actions | `settings_section`, `settings_card`, `inspector_header_layout` |
 | Settings 4, 5 | Marker 2×24 radius 1; ghost 70%, dragged tile 55%, hidden slot 40% and dashed border | `insertion_marker_with_ink`, `NAV_MARKER_HEIGHT/GHOST_OPACITY/TILE_DRAG_OPACITY/HIDDEN_OPACITY` |
 | Settings 6 | Enabled Add buttons answer with “Remove a slot to add another.” at the 16-slot cap | Pure list operations in `navigation_bar.rs`; `warning` |
@@ -873,12 +884,18 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | --- | --- | --- |
 | `picture_card(ui, &Card, width)` | A radio card: a figure, a label, an optional sub-label, an optional "has options" disc (its text is the hover) and an optional accent check. The figure keeps its aspect ratio and fills the card's inside width; the card sizes to the `width` its container gives it (`card_width(available, columns, gap)` divides a row). Selected: 2 pt `form_primary` border, `selected_bg` fill, `selected_ink` semibold label. Disabled: dimmed, no hover, no click, no focus ring. Keyboard focus draws a ring outside the border. Reports `RadioButton` to accessibility. | `form_primary`, `selected_bg`, `selected_ink`, `hover`, `control_fill`, `dialog_border`, `form_ink`, `form_dim`, `on_accent`, `radius_lg`, `space_*`, `font_label/small` |
 | `toggle_tile(ui, &Card, width)` | The same picture with a 15 pt checkbox in the top-right corner (`Card::selected` is "on"). Reports `Checkbox`. | as above, `control_border` |
+| `settings_picture_choices`, `settings_picture_choices_sized`, `PictureChoice`, `PictureChoiceSize` | A labelled, wrapping radio group with stable option handles and one search result for the row or matching choice. Returns the picked index. The sized variant accepts the card width, figure aspect and caption visibility used by independent Preferences pages. | card tokens, `space_10/12/16/24` |
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
 | `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
+| `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
 | `carousel(ui, id, count, item_width, item_height, item)` | A row of items between a previous and a next arrow (both labelled from the `prefs.carousel_*` messages). `carousel_window(count, offset, available, item_width, gap, arrow)` says which items show; the arrow at an end is dimmed (0.35) and inert. The first shown index is kept in the Ui's temporary memory under `id`. | `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 
 `card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
 dimming, focus ring) apart from the painting so they can be tested.
+
+Standalone picture cards, toggle tiles, preset cards and settings chips participate in Preferences
+search and reveal their own bounds. Labelled rows retain ownership of their search result.
+`section_heading` is available to production callers for groups that stay expanded.
 
 ### Figures
 
@@ -911,3 +928,5 @@ New pieces and figures each have an entry in `gallery::ELEMENTS` (`picture_card`
 in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rendered boards
 (`preferences-widgets-*.png`, `preferences-figures-*.png`) from
 `preference_widgets_and_figures_board_in_both_themes`.
+
+Assistant permission cards accept an optional `SettingsChoice.icon`; Do everything uses the existing warning artwork, including its exclamation mark.

@@ -9,9 +9,10 @@
 //! evaluated on the GPU into the vertex buffer the pass draws (see [`PlannedBody`]), with nothing
 //! built or read back on the CPU.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, Mutex};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::pbr;
 use wgpu::util::DeviceExt;
@@ -4345,7 +4346,8 @@ mod tests {
     #[test]
     fn shared_tris_share_each_vertex_once() {
         use super::{SHARED_SIZE, SharedTris};
-        use solidcraft_geom::{Mesh, Vec3};
+        use solidcore_record::Vec3;
+        use solidcraft_geom::Mesh;
         let p = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
         // Two triangles of a square, each corner its own vertex (as an STL is read).
         let mut flat = Mesh::default();

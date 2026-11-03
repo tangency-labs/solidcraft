@@ -2,15 +2,13 @@
 # (scripts/ci/kernel_rig_plan.py). One git pathspec glob a line, relative to the repository root:
 # `*` stays within a folder, `**` crosses folders. Each area's own sources are in <area>/PATHS.
 #
-# SMLib: the bindings, the schema 4 record bridge and the pinned revision (SMLIB_REV,
-# SMLIB_PREBUILT), and the script that fetches it.
+# The kernel: solidcore's wrapper and the schema 4 record bridge.
 crates/smlib/**
-scripts/fetch-smlib.sh
 # The geometry every body is made of: B-rep record, curves, surfaces, meshes.
 crates/geom/**
 # The kernel's core, which every case goes through: bodies, extrude/revolve/primitives, booleans
-# and placements, the planar prisms, the SMLib sweeps and booleans, history and provenance, the
-# native bridge to SMLib, tessellation, and what the grader measures (measure, validity, counts).
+# and placements, the planar prisms, the sweeps and booleans, history and provenance, the
+# native bridge to the kernel, tessellation, and what the grader measures (measure, validity, counts).
 crates/kernel/Cargo.toml
 crates/kernel/src/body.rs
 crates/kernel/src/boolean_record.rs

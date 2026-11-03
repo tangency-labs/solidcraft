@@ -1,6 +1,6 @@
-//! Schema 4 records (`solidcraft_geom::brep::Brep`) into SMLib: the record is laid out as the C
-//! API's flat arrays (`capi/include/smlib.h`, "Flat B-rep arrays"), which `smlib_brep_import`
-//! builds into an `SmBrep`.
+//! Schema 4 records (`solidcore_record::brep::Brep`) into SMLib: the record is laid out as the C
+//! API's flat arrays (`capi/include/smlib.h`, "Flat B-rep arrays"), which solidcore builds into
+//! its B-rep ([`crate::core::from_arrays`]).
 //!
 //! The two models differ in four places, and the mapping takes care of each:
 //! - A closed shell is one record listed by the two regions it separates; SMLib keeps one shell
@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 
 use crate::flat;
 
@@ -83,7 +83,7 @@ fn z_axis(f: &b::Frame) -> [f64; 3] {
 /// The record as flat arrays. `trusted`: the record comes from a modeller that keeps SMLib's
 /// rules (SMLib then skips its healer); otherwise SMLib heals it on import.
 pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
-    brep.validate_built().map_err(|e| Unsupported::Invalid(e.0))?;
+    solidcraft_geom::brep::check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
     let brep = analytic::analytic(brep)?;
     laid_out(brep.as_ref(), trusted, true, &HashSet::new())
 }
@@ -93,7 +93,7 @@ pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
 /// bilinear patch, to compare what SMLib makes of splines with what it makes of its own analytic
 /// surfaces. A revolution is still refused (SMLib has no such surface).
 pub fn arrays_keeping_splines(brep: &b::Brep, trusted: bool) -> R<Arrays> {
-    brep.validate_built().map_err(|e| Unsupported::Invalid(e.0))?;
+    solidcraft_geom::brep::check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
     laid_out(brep, trusted, false, &HashSet::new())
 }
 
@@ -666,15 +666,22 @@ mod analytic;
 mod tests;
 
 impl crate::Brep {
+    /// A body from flat arrays.
+    pub(crate) fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
+        crate::core::from_arrays(a).map(crate::Brep::made_core)
+    }
+
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let a = arrays(brep, trusted).map_err(crate::Error::Record)?;
-        crate::flat::Flat::from_arrays(&a)?.import()
+        let r = arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a));
+        crate::trace::imported(&r, brep, trusted, false);
+        r
     }
 
     /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].
     pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let a = arrays_keeping_splines(brep, trusted).map_err(crate::Error::Record)?;
-        crate::flat::Flat::from_arrays(&a)?.import()
+        let r = arrays_keeping_splines(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a));
+        crate::trace::imported(&r, brep, trusted, true);
+        r
     }
 }

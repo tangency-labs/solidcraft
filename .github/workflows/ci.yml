@@ -442,9 +442,6 @@ jobs:
         with:
           key: quick-compile
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Cargo check
         run: cargo check --workspace --all-targets --locked
 
@@ -464,9 +461,6 @@ jobs:
         with:
           key: native-clippy
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Clippy
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -510,9 +504,6 @@ jobs:
         with:
           key: native-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -584,9 +575,6 @@ jobs:
         with:
           key: native-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -703,9 +691,6 @@ jobs:
         with:
           key: native-gpu
           save-if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && matrix.shard == 1 }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -862,9 +847,6 @@ jobs:
         with:
           key: doc-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -923,9 +905,6 @@ jobs:
         with:
           key: oracle
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -965,9 +944,6 @@ jobs:
         with:
           key: windows-fxc
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # One test at a time: WARP's shader JIT crashes now and then (a null read in
       # d3d10warp.dll's JIT optimizer, about 1 run in 60) when several devices compile compute
       # pipelines at once, which the parallel tests do. Minidumps showed it in WARP itself, not
@@ -992,9 +968,6 @@ jobs:
         with:
           key: windows-startup
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
@@ -1132,9 +1105,6 @@ jobs:
         with:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - run: cargo xtask wasm
 
   riscv64-gates:
@@ -1157,9 +1127,6 @@ jobs:
         with:
           key: riscv64
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh riscv64gc-unknown-linux-gnu
       - name: Install cross-compilation dependencies
         run: |
           # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
@@ -1180,8 +1147,6 @@ jobs:
       - name: Cargo check on RISC-V
         env:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
-          # SMLib has no prebuilt library for RISC-V: its sources are compiled with this.
-          CXX_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-g++
           PKG_CONFIG_SYSROOT_DIR: /
           PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_ALLOW_CROSS: 1

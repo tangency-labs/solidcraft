@@ -1256,7 +1256,7 @@ fn comb_options_draw_the_combs_shown_again() {
     let combs = shown_combs(&h.app);
     assert_eq!(combs.len(), 1, "{:?}", h.app.status);
     assert_eq!(combs[0].len(), 40);
-    let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
+    let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
     let auto = tooth(&combs[0]);
     assert!(auto > 0.0);
     let slider = |name: &str| crate::scenario::rect_of(&format!("dialog:slider_track:{name}")).unwrap_or_else(|| panic!("no slider {name}"));
@@ -1300,7 +1300,7 @@ fn combs_shown_together_share_one_scale() {
     let ratio = |h: &Harness| {
         let combs = shown_combs(&h.app);
         assert_eq!(combs.len(), 2, "{:?}", h.app.status);
-        let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
+        let tooth = |c: &[[solidcore_record::Vec3; 2]]| c[0][0].dist(c[0][1]);
         tooth(&combs[0]) / tooth(&combs[1])
     };
     assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));

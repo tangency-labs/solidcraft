@@ -2,12 +2,13 @@ use crate::scenario::Harness;
 use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef};
+use solidcraft_engine::geom::prelude::*;
 
 fn tool(h: &Harness) -> Option<&str> {
     h.app.tool.as_ref().map(|t| t.cmd)
 }
 
-fn normal(h: &Harness) -> solidcraft_engine::geom::Vec3 {
+fn normal(h: &Harness) -> solidcore_record::Vec3 {
     let active = h.app.session.active_sketch;
     h.app.session.world_state().unwrap().sketches.iter().find(|s| Some(s.feature) == active).map(|s| s.plane.normal()).unwrap_or_default()
 }

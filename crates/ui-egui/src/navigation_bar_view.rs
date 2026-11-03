@@ -119,7 +119,12 @@ pub(crate) fn editor_layout(stage: Rect, prefs: &NavigationBar, label_width: imp
         Position::Centre => stage.center().x - bar.rect.width() / 2.0,
         Position::Right => stage.right() - ui_kit::NAV_BORDER - ui_kit::NAV_STAGE_INSET - bar.rect.width(),
     };
-    let delta = pos2(x, stage.center().y - bar.rect.height() / 2.0) - bar.rect.min;
+    // The same inset from the top or bottom edge as from the side, as in the live view.
+    let y = match prefs.edge {
+        navigation_bar::Edge::Top => stage.top() + ui_kit::NAV_BORDER + ui_kit::NAV_STAGE_INSET,
+        navigation_bar::Edge::Bottom => stage.bottom() - ui_kit::NAV_BORDER - ui_kit::NAV_STAGE_INSET - bar.rect.height(),
+    };
+    let delta = pos2(x, y) - bar.rect.min;
     bar.rect = bar.rect.translate(delta);
     for (_, rect) in &mut bar.slots {
         *rect = rect.translate(delta);

@@ -12,14 +12,16 @@
 //! centre that drags it across the model (snapping as a pick would) and takes it out when
 //! clicked, and a pick elsewhere on a face that already has a hole moves the hole there.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use egui::{Pos2, vec2};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -351,7 +353,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
 
     /// A square face (two triangles) at z = 5 with a round edge about (2, 3) on it.
     fn mesh() -> Mesh {

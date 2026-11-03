@@ -2,7 +2,8 @@
 //! text keeps the expression, follows the parameters, and a number typed instead replaces it.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::LinkSource;
 
 use crate::Session;

@@ -5,14 +5,16 @@ mod placed_mesh;
 #[path = "placement_reuse.rs"]
 mod placement_reuse;
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::brep::part::Contact;
+use solidcore_record::brep::part::Contact;
+use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::tess::TessPlan;
-use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
+use solidcraft_geom::{Mesh, UnitVec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
 use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
@@ -309,7 +311,7 @@ impl ModelBody {
                 return None;
             }
             let body = self.clone();
-            let started = std::thread::Builder::new().name("plan-mesh".into()).spawn(move || {
+            let started = kernel::kernel_thread("plan-mesh").spawn(move || {
                 let _ = body.plan_mesh_at(q);
                 if let Ok(mut warming) = WARMING.lock() {
                     warming.retain(|k| *k != key);
@@ -444,8 +446,12 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
+    // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
+    // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
+    // search finds none.
     match search() {
-        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; the largest {size} that fits is {} mm", show_mm(largest))),
+        Ok(Some((largest, _))) if kernel::names_largest_fit(&why) => kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest)),
+        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest))),
         Ok(None) => kernel::KernelError::TooLarge(why),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");
@@ -1026,6 +1032,10 @@ pub struct FeatureResult {
     pub id: u64,
     pub name: String,
     pub error: Option<String>,
+    /// `error` is the kernel's internal error (a panic it caught, [`kernel::KernelError::Internal`]),
+    /// not the feature's failure: the command that made the feature reports it as one.
+    #[serde(skip)]
+    pub internal: bool,
     pub warning: Option<String>,
     /// An Import feature's warnings by kind and part, with what came in of the file's parts
     /// (`warning` is the first of them as the kernel words them).
@@ -2081,6 +2091,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: None,
+                    internal: false,
                     warning: None,
                     import_report: None,
                     repair: None,
@@ -2114,6 +2125,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: Some(e),
+                    internal: false,
                     warning: None,
                     import_report: None,
                     repair: None,
@@ -2152,6 +2164,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: c.error,
+                    internal: false,
                     warning: c.warning,
                     import_report: c.import_report,
                     repair: c.repair,
@@ -2220,7 +2233,11 @@ impl Model {
                 None => kernel::guard(&f.name, || {
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
-                    r.map_err(|e| kernel::KernelError::Failed(e.in_feature(&f.name).to_string()))?;
+                    r.map_err(|e| match e {
+                        // A panic the kernel caught stays one.
+                        crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
+                        e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                    })?;
                     // The checks the feature's steps left to its end: the bodies it keeps.
                     if deferred { check_kept(&state, &next) } else { Ok(()) }
                 }),
@@ -2240,6 +2257,7 @@ impl Model {
                 note_join_apart(&state, &next, f, &mut warning);
             }
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
             let error = match r {
                 Ok(()) => {
                     // Copies are named after their sources through the instance transforms.
@@ -2283,7 +2301,8 @@ impl Model {
                 }
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
-            if !self.no_cache && !watched.cancelled() {
+            // A panic is no result to reuse: the kernel was replaced after it.
+            if !self.no_cache && !watched.cancelled() && !internal {
                 let e = CachedEval {
                     error: error.clone(),
                     warning: warning.clone(),
@@ -2305,6 +2324,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error,
+                internal,
                 warning,
                 import_report,
                 repair,
@@ -3400,7 +3420,7 @@ fn groups_from_body(mb: &ModelBody, groups: &[Vec<usize>]) -> Option<Vec<bool>> 
     let holds = |k: usize| {
         let shells = regions.get(k).and_then(|&r| record.regions.get(r)).map(|r| r.shells.as_slice()).unwrap_or_default();
         shells.iter().any(|&s| match record.shells.get(s as usize) {
-            Some(solidcraft_geom::brep::Shell::Faces { faces, .. }) => faces.iter().any(|f| from.get(f.face as usize) == Some(&true)),
+            Some(solidcore_record::brep::Shell::Faces { faces, .. }) => faces.iter().any(|f| from.get(f.face as usize) == Some(&true)),
             _ => false,
         })
     };
@@ -4566,7 +4586,7 @@ fn hole_tools_and_prisms(
     let seam = std::cell::Cell::new(0.0);
     let disc = |rad: f64| {
         seam.set(seam.get() + 0.613);
-        Region2 { outer: solidcraft_geom::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
+        Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
     };
     let cyl = |rad: f64, lo: f64, hi: f64, part: &str| -> Result<(Traced, Option<more::PrimitivePrism>)> {
         let tool = kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
@@ -4596,7 +4616,7 @@ fn hole_tools_and_prisms(
                 let side = up.any_perp();
                 let rp = Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
                 let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tip)];
-                let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: vec![] };
+                let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: vec![] };
                 return Ok(kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?
                     .into_iter()
                     .map(|tool| (crate::lineage::part_tool(tool, "bore"), None))
@@ -4632,7 +4652,7 @@ fn hole_tools_and_prisms(
             let up = -dir;
             let rp = Plane::new(*position, up.any_perp(), up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
             let pts = [Vec2::new(rc, 0.0), Vec2::new(r_end, -len), Vec2::new(0.0, -len), Vec2::new(0.0, top), Vec2::new(rc, top)];
-            let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: vec![] };
+            let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: vec![] };
             tools.extend(
                 kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?
                     .into_iter()
@@ -5080,7 +5100,7 @@ fn feature_tools_with_constructor(
                             cap_bindings.as_ref().and_then(|bindings| bindings.get(body_index)).cloned().unwrap_or_else(|| vec![None; curves.len()]);
                         // A cap moved off its designed height (into a Join target, or past a
                         // curved To face) is not the feature's start or end face.
-                        let nominal = |plane: &solidcraft_geom::Plane| {
+                        let nominal = |plane: &solidcore_record::Plane| {
                             let height = (plane.origin - ss.plane.origin).dot(n);
                             let tolerance = 1e-9 * (1.0 + height.abs() + (lo + off).abs() + (hi + off).abs());
                             (height - (lo + off)).abs() <= tolerance || (height - (hi + off)).abs() <= tolerance
@@ -5284,10 +5304,10 @@ fn feature_tools_with_constructor(
             let plane = Plane { origin: *base, x, y: k };
             let c = Vec2::new(r, 0.0);
             let outer = match section {
-                crate::CoilSection::Circular => solidcraft_geom::Loop2::circle(c, s / 2.0),
+                crate::CoilSection::Circular => solidcore_record::Loop2::circle(c, s / 2.0),
                 crate::CoilSection::Square => {
                     let h = s / 2.0;
-                    solidcraft_geom::Loop2::polygon(&[c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)])
+                    solidcore_record::Loop2::polygon(&[c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)])
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
@@ -5485,11 +5505,11 @@ fn pipe_region(vals: &BTreeMap<String, Value>, r: f64, wall: &Option<crate::Expr
             if !(wt > 0.0 && wt < r) {
                 return Err(DocError::Invalid("the wall must be thinner than the radius".into()));
             }
-            vec![solidcraft_geom::Loop2::circle(Vec2::ZERO, r - wt).reversed()]
+            vec![solidcore_record::Loop2::circle(Vec2::ZERO, r - wt).reversed()]
         }
         None => Vec::new(),
     };
-    Ok(Region2 { outer: solidcraft_geom::Loop2::circle(Vec2::ZERO, r), holes })
+    Ok(Region2 { outer: solidcore_record::Loop2::circle(Vec2::ZERO, r), holes })
 }
 
 pub fn map_wire(wire: &mut solidcraft_sketch::Wire, matrix: &Mat) {
@@ -5567,8 +5587,8 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
                 Some(solidcraft_sketch::Wire { arc: Some(arc), .. }) => {
                     let x = (arc.start - arc.center).normalized().ok_or_else(|| DocError::Invalid("a 3D arc of no radius".into()))?;
                     let y = arc.normal.cross(x);
-                    let frame = solidcraft_geom::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
-                    let circle = solidcraft_geom::brep::Curve::Circle { frame, radius: arc.radius };
+                    let frame = solidcore_record::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
+                    let circle = solidcore_record::brep::Curve::Circle { frame, radius: arc.radius };
                     kernel::PathPiece::Segs(kernel::curve_path(&circle, [0.0, solidcraft_sketch::arc_sweep(arc)])?)
                 }
                 Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },
@@ -5638,14 +5658,14 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
     }
     // Each curve as its exact pieces (Béziers, conics) where it has them, in its own direction
     // of travel. A curve is turned round whole: its pieces stay one run.
-    let mut curves: Vec<Vec<solidcraft_geom::Seg2>> = Vec::with_capacity(ids.len());
+    let mut curves: Vec<Vec<solidcore_record::Seg2>> = Vec::with_capacity(ids.len());
     for id in ids {
         let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
         curves.push(ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci)));
     }
     curves.retain(|c| !c.is_empty());
-    let ends = |c: &[solidcraft_geom::Seg2]| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()));
-    let reversed = |c: Vec<solidcraft_geom::Seg2>| c.into_iter().rev().map(|s| s.reversed()).collect::<Vec<_>>();
+    let ends = |c: &[solidcore_record::Seg2]| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()));
+    let reversed = |c: Vec<solidcore_record::Seg2>| c.into_iter().rev().map(|s| s.reversed()).collect::<Vec<_>>();
     // Where two curves meet: one tolerance for telling which ends touch and for the joint.
     const JOINT: f64 = 1e-5;
     // Orient the first curve: it runs toward the second where it meets it at one end only;
@@ -5664,9 +5684,9 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
         }
     }
     // Each next curve starts where the previous one ended.
-    let mut segs: Vec<solidcraft_geom::Seg2> = Vec::new();
+    let mut segs: Vec<solidcore_record::Seg2> = Vec::new();
     for curve in curves {
-        let (Some(prev_end), Some((a, b))) = (segs.last().map(solidcraft_geom::Seg2::end), ends(&curve)) else {
+        let (Some(prev_end), Some((a, b))) = (segs.last().map(solidcore_record::Seg2::end), ends(&curve)) else {
             segs.extend(curve);
             continue;
         };
@@ -5686,9 +5706,9 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
 /// `start`: the curve there split in two, its second part first and its first part last (or the
 /// chain begun at the joint there). Unchanged when the chain is open, already starts on the
 /// profile's plane, or its point nearest `start` is off that plane.
-fn from_profile_on_closed_path(segs: Vec<solidcraft_geom::Seg2>, path: &Plane, profile: &Plane, start: Vec3) -> Vec<solidcraft_geom::Seg2> {
+fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, profile: &Plane, start: Vec3) -> Vec<solidcore_record::Seg2> {
     let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return segs };
-    let size: f64 = segs.iter().map(solidcraft_geom::Seg2::length).sum();
+    let size: f64 = segs.iter().map(solidcore_record::Seg2::length).sum();
     let on_plane = |p: Vec2| profile.height(path.to_world(p)).abs() <= (size * 1e-9).max(1e-9);
     if !start.is_finite() || !(size > 0.0 && size.is_finite()) || last.end().dist(first.start()) > 1e-5 || on_plane(first.start()) {
         return segs;
@@ -6998,7 +7018,7 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st),
+        FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st, warning),
         FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {
             let t = val(vals, thickness, Kind::Length)?;
             // No face opened (a closed hollow body) picks no body: the one there is, or the named one.
@@ -7178,7 +7198,7 @@ fn eval_feature(
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
                     // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcraft_geom::Seg2>> = (0..ss.sketch.curves.len())
+                    let curves: Vec<Vec<solidcore_record::Seg2>> = (0..ss.sketch.curves.len())
                         .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
                         .map(|ci| ss.sketch.segs(ci))
                         .filter(|segs| !segs.is_empty())
@@ -8646,7 +8666,7 @@ pub fn sketch_line_plane(st: &ModelState, sketch: u64, line: &str) -> Result<Pla
     let ss = st.sketch(sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
     let ci = ss.sketch.curve_index(line).ok_or_else(|| DocError::Unknown(format!("curve `{line}`")))?;
     let (a, b) = match ss.sketch.segs(ci).as_slice() {
-        [solidcraft_geom::Seg2::Line { a, b }] => (*a, *b),
+        [solidcore_record::Seg2::Line { a, b }] => (*a, *b),
         _ => return Err(DocError::Invalid(format!("`{line}` is not a straight line: split by a sketch line"))),
     };
     let (wa, wb) = (ss.plane.to_world(a), ss.plane.to_world(b));

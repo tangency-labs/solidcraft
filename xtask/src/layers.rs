@@ -42,10 +42,10 @@ pub const TABLE: &[(&str, Class)] = &[
     ("derive", Class::Standalone),
     // the 3Dconnexion driver's client API on macOS (no workspace dependencies)
     ("3dx-client", Class::Standalone),
-    // the profiler: timed spans for every layer, SMLib's calls to commands (no workspace dependencies)
+    // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
     ("sketch", Class::Layer(1)),
-    // NVIDIA's SMLib behind its C API (kernel-smlib branch, ADR 0002); only the kernel uses it
+    // the B-rep kernel, solidcore (the Rust port of NVIDIA's SMLib, ADR 0002); only the kernel uses it
     ("smlib", Class::Layer(1)),
     // STEP (ISO 10303) exchange structure and geometry, no modelling backend
     ("step", Class::Layer(1)),

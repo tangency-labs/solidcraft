@@ -6,7 +6,8 @@
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::tess::EvalSurface;
 
 use super::uv::Domain;

@@ -4196,7 +4196,11 @@ mod header_report_tests {
         assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx));
         assert!(crate::scenario::rect_of("titlebar:search").is_none());
         let report = rect("titlebar:report");
-        assert_eq!(report.right(), 1400.0 - crate::titlebar::WIDTH - RIGHT_GROUP);
+        // A pre-release's longer version takes more room than RIGHT_GROUP and moves the button left.
+        let t = Tokens::get();
+        let version = format!("v{}", crate::update::current_version());
+        let version = h.ctx.fonts_mut(|f| f.layout_no_wrap(version, FontId::proportional(t.font_small), t.app_bar_text).size().x);
+        assert_eq!(report.right(), 1400.0 - crate::titlebar::WIDTH - RIGHT_GROUP.max(12.0 + version + 8.0));
         assert_eq!(report.height(), 26.0);
         assert!(report.width() > 100.0, "Report a bug carries its label: {report:?}");
         assert_eq!(rect("titlebar:preferences").center().x, report.left() - 52.0);
@@ -4350,7 +4354,7 @@ mod header_report_tests {
         h.app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10.0, 0.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(10.0, 0.0, 0.0);
         h.settle();
         h.step(&json!({"start":"sketch.dimension"})).unwrap();
         for point in [[0, 0, 0], [20, 0, 0], [10, 5, 0]] {

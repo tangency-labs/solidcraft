@@ -1,5 +1,6 @@
 use super::*;
 use solidcraft_doc::render_settings::RenderJob;
+use solidcraft_geom::prelude::*;
 
 fn save(s: &mut Session, patch: Value) {
     s.execute("render.settings.set", &json!({"name":"Studio", "set":patch})).unwrap();
@@ -181,7 +182,7 @@ fn light_fixture(s: &mut Session, method: &str) {
 #[test]
 fn render_lights_small_area_pose_and_resize_preserve_aspect_and_emitting_side() {
     use crate::schema::render_lights::Geometry;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     save(
         &mut s,

@@ -4,7 +4,8 @@
 //! SMLib's controlled sweeps skin through ([`crate::smlib_sweeps`]). A solid along points is
 //! SMLib's sweep along the lines between them ([`sweep_path_with`]).
 
-use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::numbered::NumberedLoop;
@@ -440,9 +441,10 @@ pub(crate) fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &crate::
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_geom::prelude::*;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
     use super::{SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 

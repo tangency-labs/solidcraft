@@ -1,3 +1,4 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use serde_json::{Value, json};
@@ -60,7 +61,7 @@ fn plain_solid_sheet_operations_explain_how_to_start_sheet_metal() {
 
 #[test]
 fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     for shape in ["round", "rectangular"] {
         for reverse in [false, true] {
@@ -132,8 +133,8 @@ fn shallow_sheet_pocket_preserves_material_depth_export_undo_and_reopen() {
         assert!((volume(&mut s) - 14900.0).abs() < 1e-6);
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(25.0, 25.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
     }
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert!((volume(&mut reopened) - 14900.0).abs() < 1e-6);
@@ -286,10 +287,10 @@ fn intersect_preserves_both_material_regions_of_a_logical_ring_sheet() {
         let area: f64 = regions.iter().map(|r| r.area()).sum();
         assert!((area - (900.0 - PI * 75.0)).abs() < 1e-8, "area={area}");
         let body = &state.bodies[0].body;
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(50.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(57.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(64.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(70.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(50.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(57.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(64.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(70.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert!((volume(&mut s) - (900.0 - PI * 75.0) * 2.5).abs() < 0.2);
     }
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
@@ -298,14 +299,14 @@ fn intersect_preserves_both_material_regions_of_a_logical_ring_sheet() {
 
 #[test]
 fn machining_a_folded_parallel_panel_preserves_its_pocket_on_unfold() {
+    use solidcore_record::Vec3;
     use solidcraft_doc::{apply_point, apply_vector};
-    use solidcraft_geom::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges":[[50,0,2.5]],"height":20}));
     let sh = s.model.state().sheets[0].clone();
     let points = sh.panel(&sh.flanges[0]).outer.polyline(1e-3);
-    let c = points.iter().copied().fold(solidcraft_geom::Vec2::ZERO, |sum, p| sum + p) / (points.len() as f64);
+    let c = points.iter().copied().fold(solidcore_record::Vec2::ZERO, |sum, p| sum + p) / (points.len() as f64);
     let w = sh.world(Some(0));
     let origin = apply_point(&w, Vec3::ZERO);
     let x = apply_vector(&w, Vec3::X);
@@ -343,10 +344,13 @@ fn flipped_sheet_pocket_keeps_depth_in_the_local_thickness_direction() {
         assert!((volume(&mut s) - 14900.0).abs() < 1e-6);
         let state = s.model.state();
         assert_eq!(
-            state.bodies[0].body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, -0.5)).unwrap(),
+            state.bodies[0].body.classify_point(solidcore_record::Vec3::new(25.0, 25.0, -0.5)).unwrap(),
             solidcraft_kernel::PointClass::Outside
         );
-        assert_eq!(state.bodies[0].body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, -1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(
+            state.bodies[0].body.classify_point(solidcore_record::Vec3::new(25.0, 25.0, -1.5)).unwrap(),
+            solidcraft_kernel::PointClass::Inside
+        );
     }
 }
 
@@ -381,17 +385,17 @@ fn multiple_profile_intersect_keeps_tool_union_for_solids_and_sheet_groups() {
                 state
                     .bodies
                     .iter()
-                    .any(|b| b.body.classify_point(solidcraft_geom::Vec3::new(x, 25.0, 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+                    .any(|b| b.body.classify_point(solidcore_record::Vec3::new(x, 25.0, 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
             );
         }
         assert!(
             !state
                 .bodies
                 .iter()
-                .any(|b| b.body.classify_point(solidcraft_geom::Vec3::new(50.0, 25.0, 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+                .any(|b| b.body.classify_point(solidcore_record::Vec3::new(50.0, 25.0, 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
         );
         assert!(state.bodies.iter().any(|b| b.name == "Control"
-            && b.body.classify_point(solidcraft_geom::Vec3::new(205.0, 5.0, 5.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
+            && b.body.classify_point(solidcore_record::Vec3::new(205.0, 5.0, 5.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
     }
 }
 
@@ -417,7 +421,7 @@ fn deleting_sheet_material_prunes_cosmetic_threads_and_undo_restores_them() {
 
 #[test]
 fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     fn check(s: &Session, name: &str, owner: u64, local_origin: Vec3, local_y: Vec3, transferred: bool) {
         let state = s.model.state();
         let mb = state.body(name).unwrap();
@@ -429,8 +433,8 @@ fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
         assert!(sh.frame.y.dist(local_y) < 1e-8);
         assert_eq!(sh.pockets.len(), 1);
         assert_eq!((sh.pockets[0].z0, sh.pockets[0].z1), (0.0, 1.0));
-        let cut = sh.frame.to_world(solidcraft_geom::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 0.5;
-        let floor = sh.frame.to_world(solidcraft_geom::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 1.5;
+        let cut = sh.frame.to_world(solidcore_record::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 0.5;
+        let floor = sh.frame.to_world(solidcore_record::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 1.5;
         assert_eq!(mb.body.classify_point(cut).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert_eq!(mb.body.classify_point(floor).unwrap(), solidcraft_kernel::PointClass::Inside);
         let world = s.world_state().unwrap();
@@ -1345,7 +1349,7 @@ fn contains(s: &Session, p: [f64; 3]) -> bool {
         .state()
         .bodies
         .first()
-        .is_some_and(|b| b.body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
+        .is_some_and(|b| b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 #[test]
@@ -2152,7 +2156,7 @@ fn malformed_fold_points_are_rejected_atomically() {
 
 #[test]
 fn flat_dxf_preserves_exact_cutout_entities() {
-    use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     let mut sh = s.model.state().sheets[0].clone();
@@ -2253,8 +2257,8 @@ fn inherited_round_hole_survives_flange_and_unfold_in_flipped_frames() {
         let sh = s.model.state().sheets[0].clone();
         let regions = sh.flat_regions().unwrap();
         assert_eq!(regions[0].holes[0].segs.len(), 2);
-        assert!(regions[0].holes[0].segs.iter().all(|s| matches!(s, solidcraft_geom::Seg2::Arc { radius, .. } if (*radius - 5.0).abs() < 1e-9)));
-        let expected = regions.iter().map(solidcraft_geom::Region2::area).sum::<f64>() * 2.5;
+        assert!(regions[0].holes[0].segs.iter().all(|s| matches!(s, solidcore_record::Seg2::Arc { radius, .. } if (*radius - 5.0).abs() < 1e-9)));
+        let expected = regions.iter().map(solidcore_record::Region2::area).sum::<f64>() * 2.5;
         run(&mut s, "sheet.unfold", json!({}));
         assert!((volume(&mut s) - expected).abs() < 0.1);
         run(&mut s, "sheet.refold", json!({}));
@@ -2269,7 +2273,7 @@ fn faces(s: &mut Session) -> (u64, u64) {
 
 #[test]
 fn elliptic_cut_out_stays_exact_in_the_flat_pattern_and_follows_arcs_when_folded() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
@@ -2319,7 +2323,7 @@ fn flipped_base_flange_keeps_its_elliptic_outline() {
         let regions = s.model.state().sheets[0].flat_regions().unwrap();
         let outline = &regions[0].outer.segs;
         assert!(
-            outline.len() == 4 && outline.iter().all(|x| matches!(x, solidcraft_geom::Seg2::Conic { .. })),
+            outline.len() == 4 && outline.iter().all(|x| matches!(x, solidcore_record::Seg2::Conic { .. })),
             "flip {flip}: {} segments",
             outline.len()
         );
@@ -2457,7 +2461,7 @@ fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_ref
             let regions = s.model.state().sheets[0].flat_regions().unwrap();
             let rim = &regions[0].outer.segs;
             assert!(
-                !rim.is_empty() && rim.iter().all(|seg| matches!(seg, solidcraft_geom::Seg2::Arc { radius, .. } if (*radius - 10.0).abs() < 1e-12)),
+                !rim.is_empty() && rim.iter().all(|seg| matches!(seg, solidcore_record::Seg2::Arc { radius, .. } if (*radius - 10.0).abs() < 1e-12)),
                 "{rim:?}"
             );
             assert_eq!(regions[0].holes.len(), 1);
@@ -2508,8 +2512,8 @@ fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
         assert_eq!(s.model.state().bodies.len(), 2);
         let state = s.model.state();
         let body = &state.bodies.iter().find(|b| b.name == sheet_name).unwrap().body;
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(50.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(57.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(50.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(57.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
 }
 
@@ -2544,9 +2548,9 @@ fn specialized_sheet_cuts_respect_component_and_explicit_participants() {
 fn ring_cut_preserves_retained_island_through_unfold_and_refold() {
     fn material_probes(s: &Session) {
         let body = &s.model.state().bodies[0].body;
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(50.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(57.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
-        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(65.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(50.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(57.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(65.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
     }
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
@@ -2564,9 +2568,9 @@ fn ring_cut_preserves_retained_island_through_unfold_and_refold() {
     material_probes(&s);
     assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(2));
     let regions = s.model.state().sheets[0].flat_regions().unwrap();
-    assert!(regions.iter().any(|r| r.contains(solidcraft_geom::Vec2::new(50.0, 30.0))));
-    assert!(!regions.iter().any(|r| r.contains(solidcraft_geom::Vec2::new(57.0, 30.0))));
-    assert!(regions.iter().any(|r| r.contains(solidcraft_geom::Vec2::new(65.0, 30.0))));
+    assert!(regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(50.0, 30.0))));
+    assert!(!regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(57.0, 30.0))));
+    assert!(regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(65.0, 30.0))));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
     let mut reopened = Session::default();
     run(&mut reopened, "sketch.insert_dxf", json!({"text": dxf, "name": "RingBlank"}));
@@ -2582,7 +2586,7 @@ fn ring_cut_preserves_retained_island_through_unfold_and_refold() {
 }
 
 fn retained_depth_check(s: &mut Session, want: f64, z0: f64, z1: f64) {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     assert!((volume(s) - want).abs() < 1e-6, "{} vs {want}", volume(s));
     let state = s.model.state();
     assert_eq!(state.sheets.len(), 1);
@@ -2599,7 +2603,7 @@ fn retained_depth_check(s: &mut Session, want: f64, z0: f64, z1: f64) {
     assert!((bounds.min.z - z0).abs() < 1e-8 && (bounds.max.z - z1).abs() < 1e-8, "{bounds:?}");
 }
 
-fn depth_step_reopen(s: &mut Session, suffix: &str, want: f64, inside: solidcraft_geom::Vec3, outside: solidcraft_geom::Vec3) {
+fn depth_step_reopen(s: &mut Session, suffix: &str, want: f64, inside: solidcore_record::Vec3, outside: solidcore_record::Vec3) {
     let path = std::env::temp_dir().join(format!("solidcraft-depth-intersect-{suffix}-{}.step", std::process::id()));
     run(s, "file.export", json!({"path":path.to_string_lossy()}));
     let mut imported = Session::default();
@@ -2636,7 +2640,7 @@ fn dxf_outline_only(text: &str) -> String {
 
 #[test]
 fn partial_depth_intersect_retains_bottom_top_and_middle_material_through_history_and_exports() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for (offset, z0, z1, layers) in [
         (0.0, 0.0, 1.0, vec![("top", 1.0, 2.5)]),
         (1.5, 1.5, 2.5, vec![("bottom", 0.0, 1.5)]),
@@ -2684,7 +2688,7 @@ fn partial_depth_intersect_retains_bottom_top_and_middle_material_through_histor
 
 #[test]
 fn partial_depth_intersect_preserves_prior_pockets_and_actual_interval_intersections() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "OldPocket", [20.0, 20.0], [25.0, 30.0]);
@@ -2718,7 +2722,7 @@ fn partial_depth_intersect_preserves_prior_pockets_and_actual_interval_intersect
 
 #[test]
 fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "Islands", [20.0, 20.0], [30.0, 30.0]);
@@ -2779,7 +2783,7 @@ fn partial_depth_intersect_of_material_already_removed_by_a_pocket_is_refused() 
 
 #[test]
 fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_and_world_pose() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut flipped = Session::default();
     base(&mut flipped, 100.0, 60.0);
     run(&mut flipped, "sketch.create", json!({"name":"FlippedTool","plane":{"origin":[0,0,2.5],"x_dir":[1,0,0],"y_dir":[0,-1,0]}}));
@@ -2836,7 +2840,7 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
 
 #[test]
 fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for (angle, translate) in [(37.0, [30.0, 20.0, 10.0]), (121.0, [12345.678, 98765.432, 4321.123])] {
         let mut s = Session::default();
         base(&mut s, 100.0, 60.0);
@@ -2914,7 +2918,7 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
 
 #[test]
 fn partial_depth_intersect_planar_to_object_retains_current_target_depth() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     let name = s.model.state().sheets[0].body.clone();
@@ -2962,7 +2966,7 @@ fn partial_depth_intersect_curved_to_object_refuses_unrepresentable_depth_atomic
 
 #[test]
 fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footprint() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     let name = s.model.state().sheets[0].body.clone();
@@ -3737,7 +3741,7 @@ fn has_round_cutout(f: &Value, c: [f64; 2], r: f64) -> bool {
 /// Whether the flat DXF holds the circle of radius `r` about `c` as a `CIRCLE`.
 fn dxf_has_circle(s: &mut Session, c: [f64; 2], r: f64) -> bool {
     let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    let centre = solidcraft_geom::Vec2::new(c[0], c[1]);
+    let centre = solidcore_record::Vec2::new(c[0], c[1]);
     solidcraft_io::read_dxf(&dxf)
         .unwrap_or_default()
         .iter()
@@ -3989,7 +3993,7 @@ fn closed_corners_reach_the_flat_pattern_and_the_dxf() {
 
 #[test]
 fn corner_reliefs_of_the_rule_reach_the_part_the_flat_pattern_and_the_dxf() {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     // The tray at 72°: its bends meet at the corners of the base, s0 = 3·tan 36° in from the sheet's
     // edges, and are BA = 2θ wide in the flat. A relief 8 mm across reaches r = 4 mm along both edges
     // and takes, at each corner, r²·π/4 (round) or r² (rectangular) of the base and r of two bends.
@@ -4241,7 +4245,7 @@ fn a_tear_of_the_rule_reaches_the_part_the_flat_pattern_and_the_dxf() {
         // The DXF: the outline in straight lines, each cut one of them, and four bend lines.
         let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
         assert_eq!(dxf.matches("0\nLINE\n").count(), outline.len() + 4, "{deg}");
-        let cut_end = solidcraft_geom::Vec2::new(x_end(s0), s0 - ba);
+        let cut_end = solidcore_record::Vec2::new(x_end(s0), s0 - ba);
         let read = solidcraft_io::read_dxf(&dxf).unwrap_or_default();
         let at_cut_end = |g: &solidcraft_io::Geom2| matches!(g, solidcraft_io::Geom2::Line(a, b) if a.dist(cut_end) < 1e-6 || b.dist(cut_end) < 1e-6);
         assert!(read.iter().any(at_cut_end), "{deg}");
@@ -4317,7 +4321,7 @@ fn two_flange_groups(rule: Value, near: Value, far: Value) -> Session {
 
 /// What the DXF of the flat pattern draws of the corner reliefs: the arcs (centre, radius) and the
 /// lines' end points.
-fn relief_drawing(s: &mut Session) -> (Vec<(solidcraft_geom::Vec2, f64)>, Vec<solidcraft_geom::Vec2>) {
+fn relief_drawing(s: &mut Session) -> (Vec<(solidcore_record::Vec2, f64)>, Vec<solidcore_record::Vec2>) {
     let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
     let read = solidcraft_io::read_dxf(&dxf).unwrap_or_default();
     let arcs = read.iter().filter_map(|g| if let solidcraft_io::Geom2::Arc { c, a, .. } = g { Some((*c, a.dist(*c))) } else { None }).collect();
@@ -4327,7 +4331,7 @@ fn relief_drawing(s: &mut Session) -> (Vec<(solidcraft_geom::Vec2, f64)>, Vec<so
 
 #[test]
 fn each_edge_flange_feature_chooses_the_corner_relief_of_its_own_corners() {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     // At 90° the bends of a corner meet at (s0, s0) in from the sheet's edges, s0 = (R + T)·tan 45° = 3,
     // and are BA = π/2·(R + K·T) = π wide. A relief d across reaches r = d/2 along both bends and takes,
     // at its corner, r²·π/4 (round) or r² (rectangular) of the base and r of each bend, 2 mm thick.
@@ -4373,7 +4377,7 @@ fn each_edge_flange_feature_chooses_the_corner_relief_of_its_own_corners() {
 
 #[test]
 fn an_edge_flange_feature_follows_the_rule_for_the_relief_it_leaves_out() {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     let s0 = 3.0;
     let at = |ends: &[Vec2], x: f64, y: f64| ends.iter().any(|p| p.dist(Vec2::new(x, y)) < 1e-6);
     let round8 = json!({"corner_relief_shape": "round", "corner_relief": "8 mm"});
@@ -5445,7 +5449,7 @@ fn fold_fixed_point_must_touch_the_sheet_but_any_face_will_do() {
 }
 
 /// The middle of the largest triangle of each flat face of the first body: well inside it.
-fn flat_face_points(s: &Session) -> Vec<(usize, solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
+fn flat_face_points(s: &Session) -> Vec<(usize, solidcore_record::Vec3, solidcore_record::Vec3)> {
     let state = s.model.state();
     let body = &state.bodies[0].body;
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
@@ -5543,7 +5547,7 @@ fn a_hole_drilled_into_a_rim_is_a_bore_the_sheet_keeps_when_it_unfolds() {
     assert_eq!(f["bores"].as_array().map(Vec::len), Some(1), "{f}");
     assert_eq!(f["cutouts"], json!([]));
     let inside = |s: &Session, p: [f64; 3]| {
-        s.model.state().bodies[0].body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+        s.model.state().bodies[0].body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
     };
     // The flat pattern loses the same bore (the bends unroll to their own length).
     let flat_after = unfolded_volume(&mut s);
@@ -5572,7 +5576,7 @@ fn a_rim_hole_in_a_flange_follows_it_into_the_flat_pattern() {
     let before = volume(&mut s);
     let flat_before = unfolded_volume(&mut s);
     let inside = |s: &Session, p: [f64; 3]| {
-        s.model.state().bodies[0].body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+        s.model.state().bodies[0].body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
     };
     // Halfway up the flange, in the middle of its thickness (whichever way the rule put it).
     let mid = [[40.0 - t / 2.0, 15.0], [40.0 - t / 2.0, -15.0], [40.0 + t / 2.0, 15.0], [40.0 + t / 2.0, -15.0]]
@@ -5910,7 +5914,7 @@ fn parted_note(area: f64, at: [f64; 2]) -> String {
 }
 
 fn flat_pieces(s: &Session) -> Vec<f64> {
-    s.model.state().sheets[0].flat_regions().unwrap().iter().map(solidcraft_geom::Region2::area).collect()
+    s.model.state().sheets[0].flat_regions().unwrap().iter().map(solidcore_record::Region2::area).collect()
 }
 
 #[test]
@@ -6048,7 +6052,7 @@ fn flat_exports(s: &mut Session) -> Vec<std::result::Result<Value, String>> {
 /// opposite hand's blank, each bend turning the same way, its pocket on the same face.
 #[test]
 fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     run(&mut s, "sheet.manage_rules", json!({"name": "S", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.4}));
     base(&mut s, 100.0, 60.0);
@@ -6272,7 +6276,7 @@ fn a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern
     let in_copy =
         |p: [f64; 3]| {
             s.model.state().bodies.iter().find(|b| b.name == "Body1 (2)").is_some_and(|b| {
-                b.body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+                b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
             })
         };
     assert!(!in_copy([-25.0, 40.0, 1.0]) && in_copy([-35.0, 40.0, 1.0]));

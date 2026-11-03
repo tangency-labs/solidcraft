@@ -3,7 +3,8 @@
 //! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348).
 
 use serde_json::json;
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -112,7 +113,7 @@ fn collinear_with_an_edge_of_a_mirrored_body_projects_the_edge() {
     h.app.run("solid.mirror", json!({"bodies":["Body1"],"plane":"YZ"})).unwrap();
     h.app.run("sketch.create", json!({"plane":{"face":[70,25,20]},"name":"Top"})).unwrap();
     h.app.run("sketch.line", json!({"points":[[-100,10],[-100,40]],"ids":["side"]})).unwrap();
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(-60.0, 25.0, 20.0);
+    h.app.cam.target = solidcore_record::Vec3::new(-60.0, 25.0, 20.0);
     h.app.cam.distance = 300.0;
     h.settle();
     let sketch = h.app.session.active_sketch.unwrap();

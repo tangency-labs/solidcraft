@@ -1,5 +1,6 @@
 use crate::{Document, ModelBody, ModelState};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
 use std::sync::Arc;

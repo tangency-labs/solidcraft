@@ -233,20 +233,19 @@ fn occurrence_move_dialog_keeps_other_pending_moves_and_reuses_initial_baseline(
     let movement = items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
     let mut m = h.app.tree.occurrence_move.clone().unwrap();
-    m.pivot =
-        Some(solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcraft_engine::geom::Vec3::ZERO));
+    m.pivot = Some(solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcore_record::Vec3::ZERO));
     m.translate = [10.0, 0.0, 0.0];
     crate::browser::apply_occurrence_move(&mut h.app, &m);
     let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcraft_engine::geom::Vec3::ZERO).x - 65.0).abs() < 1e-8);
+    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 65.0).abs() < 1e-8);
     m.translate = [3.0, 0.0, 0.0];
     crate::browser::apply_occurrence_move(&mut h.app, &m);
     let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcraft_engine::geom::Vec3::ZERO).x - 58.0).abs() < 1e-8);
+    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 58.0).abs() < 1e-8);
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
     crate::browser::revert_occurrence_dialog(&mut h.app, &m);
     let restored = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&restored.world, solidcraft_engine::geom::Vec3::ZERO).x - 55.0).abs() < 1e-8);
+    assert!((solidcraft_engine::doc::apply_point(&restored.world, solidcore_record::Vec3::ZERO).x - 55.0).abs() < 1e-8);
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
     h.app.run("component.revert_position", json!({"occurrences":[second]})).unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);

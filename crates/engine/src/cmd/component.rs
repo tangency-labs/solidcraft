@@ -3,11 +3,12 @@
 //! belong to their feature's component unless moved; occurrences place components (instances
 //! share contents, "paste new" copies them) and can be grounded and moved.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
-use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};

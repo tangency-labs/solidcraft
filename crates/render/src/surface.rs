@@ -1,9 +1,10 @@
 //! Bounded opaque metallic/roughness surfaces in linear sRGB.
 //! This numerical contract does not enable a renderer or persist appearances.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// Lowest admitted perceptual roughness. Perfect delta mirrors need another integrator.
 pub const MIN_ROUGHNESS: f64 = 0.045;

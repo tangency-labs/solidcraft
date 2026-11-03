@@ -10,10 +10,12 @@
 //! straight edge between the moved corners. Anything else (curved neighbours, a gap the
 //! neighbours cannot close) is refused, naming the face.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 
-use solidcraft_geom::brep::Curve;
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcore_record::brep::Curve;
+use solidcraft_geom::Aabb3;
 
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
@@ -325,7 +327,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
 
 #[cfg(test)]
 mod tests {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     use super::delete_faces;
     use crate::{BoolOp, boolean, box_solid, chamfer, cylinder, fillet};

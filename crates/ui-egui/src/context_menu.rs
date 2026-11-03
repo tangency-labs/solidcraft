@@ -15,6 +15,7 @@ use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, doc::FeatureKind};
 
 use crate::SolveApp;
@@ -1370,7 +1371,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
 }
 
 /// Where on the active sketch's plane the viewport menu was opened (sketch coordinates).
-fn menu_sketch_point(app: &SolveApp, plane: &solidcraft_engine::geom::Plane) -> Option<solidcraft_engine::geom::Vec2> {
+fn menu_sketch_point(app: &SolveApp, plane: &solidcore_record::Plane) -> Option<solidcore_record::Vec2> {
     let (at, _) = app.menu.opened?;
     let proj = crate::viewport::projection(app, app.viewport.rect?);
     let (o, d) = proj.ray(at);
@@ -1825,7 +1826,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
-            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(solidcraft_engine::geom::Plane::named) {
+            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(solidcore_record::Plane::named) {
                 let mut to = app.cam.looking_from(crate::dialogs::facing(app, plane.normal(), true));
                 to.target = plane.origin;
                 app.animate_to(to);
@@ -2823,7 +2824,8 @@ mod tests {
 
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
-        use solidcraft_engine::{geom::Vec2, sketch::Shape};
+        use solidcore_record::Vec2;
+        use solidcraft_engine::sketch::Shape;
 
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -2867,7 +2869,7 @@ mod tests {
     /// sketch geometry that Trim then cuts. A line drawn in the sketch is offered no Break Link.
     #[test]
     fn projected_geometry_context_menu_breaks_its_link_and_allows_trim() {
-        use solidcraft_engine::geom::Vec2;
+        use solidcore_record::Vec2;
 
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -2969,7 +2971,7 @@ mod tests {
         assert!(item.enabled);
         let p = item.params.clone().unwrap();
         assert_eq!(p["curve"], json!(fit));
-        let clicked = solidcraft_engine::geom::Vec2::new(p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
+        let clicked = solidcore_record::Vec2::new(p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
         assert!(clicked.dist(at) < 0.5, "the item carries the clicked spot: {clicked:?} for {at:?}");
         h.step(&json!({"click":{"handle":"menu:sketch.spline.insert_point"}})).unwrap();
         assert_eq!(count(&h, &fit), 5);

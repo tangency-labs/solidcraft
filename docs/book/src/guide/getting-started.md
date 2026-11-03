@@ -110,6 +110,15 @@ The same app runs in the browser: [open SolidCraft on the web](../app/) (`?sampl
 part, `?webgl` forces WebGL2 where WebGPU is missing or misbehaves; the browser remembers it until
 `?webgpu`, and an app installed from Chrome or Edge starts with it too). Designs are saved in the
 browser's private file storage, which needs HTTPS or localhost.
+
+The web app at `/app/` is always the latest release. Two more builds are there to try early:
+the [release candidate](../app-rc/) (the newest `-rc` pre-release; a page saying so appears
+until the first one is out) and the [edge build](../app-edge/) (the current `main`, rebuilt on
+every change). **Both can break, and a design saved in them may not open in the release.** Each
+keeps its designs, settings and recovery copies apart from the release's, so trying one never
+changes what the release sees, and nothing is copied between them: to move a design, save it to
+a file in one and open the file in the other. Search engines are told to skip both.
+
 Planned worker and tiered-storage integration is
 described in [web-runtime.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/web-runtime.md)
 (design; not yet wired in the shipped wasm build).
@@ -334,7 +343,7 @@ To find the slow steps of a script, `--timings` prints how long each command too
 the measurement: `{"timings": [{"index", "command", "ms"}], "total_ms"}`, with `index` counted
 from 0. `--profile` adds each command's `profile: {"boolean_ms", "tessellate_ms", "other_ms"}`,
 its wall time in the kernel's booleans, in tessellation and in everything else, and prints the
-profiler's table on stderr: where the time went, SMLib's calls to the commands
+profiler's table on stderr: where the time went, the kernel's calls to the commands
 (`docs/perf.md`, "Where the time goes"); `--profile-out trace.json` also writes the spans as a
 Chrome trace. `--profile` works on a design or STEP file too. With
 `--results` as well, the results go in the same object as `results`; `--results` alone still

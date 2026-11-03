@@ -1522,11 +1522,11 @@ mod tests {
 
     #[test]
     fn construction_history_matches_the_tool_that_created_it() {
+        use solidcore_record::Vec3;
         use solidcraft_engine::doc::{
             FeatureKind, PlaneRef,
             construct::{AxisDef, GeoRef, PointDef},
         };
-        use solidcraft_engine::geom::Vec3;
         let point = || GeoRef::Point { p: Vec3::ZERO };
         let reference = || Box::new(point());
         let mut cases = Vec::new();
@@ -2014,9 +2014,9 @@ mod tests {
             let names = solidcraft_engine::doc::naming::face_names(body);
             let index = names.iter().position(|name| solidcraft_engine::doc::persistent_name::made_by(name) == Some(hole)).unwrap();
             let plate = body.name.clone();
-            h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: plate.clone(), index, point: solidcraft_engine::geom::Vec3::ZERO });
+            h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: plate.clone(), index, point: solidcore_record::Vec3::ZERO });
             assert_eq!(crate::timeline::hovered_feature(&h.app), Some(hole), "left={left}: hovering the hole's face finds the hole");
-            h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: plate.clone(), point: solidcraft_engine::geom::Vec3::ZERO });
+            h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: plate.clone(), point: solidcore_record::Vec3::ZERO });
             assert_eq!(crate::timeline::hovered_feature(&h.app), Some(block), "left={left}: a vertex finds the feature that made its body");
             h.app.viewport.hover = None;
 

@@ -1,6 +1,7 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::*;
 
@@ -779,7 +780,7 @@ fn moving_a_body_with_an_intersection_curve_edge_ends() {
         cut.record()
             .edges
             .iter()
-            .any(|e| !matches!(e.curve, solidcraft_geom::brep::Curve::Line { .. } | solidcraft_geom::brep::Curve::Circle { .. }))
+            .any(|e| !matches!(e.curve, solidcore_record::brep::Curve::Line { .. } | solidcore_record::brep::Curve::Circle { .. }))
     );
     let t = Vec3::new(0.6911, -0.3337, -0.6127) * 2.334;
     let moved = crate::ops::transform(&cut, t, Vec3::ZERO, Vec3::Z, 0.0).unwrap();
@@ -1328,7 +1329,7 @@ fn circle_loop_fillets_and_chamfers() {
 
 #[test]
 fn trimmed_revolved_faces_measure_exactly() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::FRAC_PI_2;
     // A slot with concave ends sketched on the plane x = 12.5, cut 4 deep into a revolved shaft
     // of radius 12.5 (the cut faces' triangulation spans wide angles unless refined).
@@ -1384,7 +1385,7 @@ fn shell_with_cylindrical_faces() {
 
 #[test]
 fn draft_of_a_round_ended_pocket() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::FRAC_PI_2;
     let block = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 25.0)).unwrap();
     let segs = vec![
@@ -1576,7 +1577,7 @@ fn fillet_where_a_branch_pipe_meets_a_main_pipe() {
 
 #[test]
 fn fillet_an_open_curved_edge() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     // A D-shaped block: the round top edge only, ending at the flat wall's sharp corners.
     let d = Loop2 {
         segs: vec![
@@ -1595,7 +1596,7 @@ fn fillet_an_open_curved_edge() {
 }
 
 fn mixed_arc_and_line_prism() -> Body {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let d = Loop2 {
         segs: vec![
             Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep: PI },
@@ -1607,7 +1608,7 @@ fn mixed_arc_and_line_prism() -> Body {
 
 #[test]
 fn fillet_smooth_arc_and_line_loop_keeps_exact_removal() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     // A stadium: four tangent joints, none of which should use a sharp-corner mitre.
     let outline = Loop2 {
         segs: vec![
@@ -1680,7 +1681,7 @@ fn fillet_rounded_rectangle_with_tiny_end_edges() {
 
 #[test]
 fn fillet_sharp_arc_and_arc_loop() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     // The intersection of two radius-10 disks whose centres are 10 mm apart.
     let outline = Loop2 {
         segs: vec![
@@ -1724,17 +1725,14 @@ fn tabbed_plate_area(da: f64, dt: f64) -> f64 {
     0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
 }
 
-#[test]
-fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
-    use solidcraft_geom::Seg2;
-    // Reconstruct the outer outline from its seven public pick coordinates:
-    // R25 plate, x=+/-4 tab sides, R2 corners and a 4 mm straight top.
-    // The hole's dimensions come from the public reproduction, not an original design file.
+/// The tabbed plate's outer outline, reconstructed from its seven public pick coordinates: an R25
+/// plate, x = ±4 tab sides, R2 corners centred at (±2, 280/9) and a 4 mm straight top.
+fn tabbed_plate_outline() -> Loop2 {
+    use solidcore_record::Seg2;
     let theta = (4.0_f64 / 25.0).acos();
     let y = (625.0_f64 - 16.0).sqrt();
     let corner_y = 280.0 / 9.0;
-    let hole_y = 262.0 / 9.0;
-    let outline = Loop2 {
+    Loop2 {
         segs: vec![
             Seg2::Arc { center: Vec2::ZERO, radius: 25.0, start: PI - theta, sweep: PI + 2.0 * theta },
             Seg2::Line { a: Vec2::new(4.0, y), b: Vec2::new(4.0, corner_y) },
@@ -1743,7 +1741,44 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
             Seg2::Arc { center: Vec2::new(-2.0, corner_y), radius: 2.0, start: PI / 2.0, sweep: PI / 2.0 },
             Seg2::Line { a: Vec2::new(-4.0, corner_y), b: Vec2::new(-4.0, y) },
         ],
-    };
+    }
+}
+
+/// solidcore#2223: the tabbed plate's R25 rim and one R2 tab corner arc, which share no vertex,
+/// rounded together at r 0.5 on the plate 2 high (no hole). Each rounds alone; together they
+/// failed 1001 in cliff_overflow. They take off the sum: the rim alone's closed form,
+/// 7.958672911836132 (its spandrel (1 − π/4) r² revolved about the disc's axis outside |x| < 4,
+/// solidcore#2176's test; the rim's End, `fillet_blend_corner`, builds it to 5e-8), and the
+/// corner arc's Pappus volume with flat ends, 0.15913583972191622 (the spandrel about the
+/// corner's axis at 2 − its centroid over a quarter turn), 8.117808752.
+#[test]
+fn fillet_tabbed_plate_rim_and_one_corner_arc_together() {
+    let body = extrude(&Plane::XY, &[Region2 { outer: tabbed_plate_outline(), holes: vec![] }], 0.0, 2.0).unwrap().pop().unwrap();
+    let r = 0.5;
+    let (spandrel, centroid) = ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    let corner = spandrel * (PI / 2.0) * (2.0 - centroid);
+    assert!((corner - 0.159_135_839_721_916_22).abs() < 1e-12, "{corner}");
+    let want = 7.958_672_911_836_132 + corner;
+    let picks = [
+        Vec3::new(-24.91935125502191, -2.0064727829797544, 2.0),
+        Vec3::new(24.919351255429795, -2.006472777913911, 2.0),
+        Vec3::new(3.4142135598750105, 32.525324672801695, 2.0),
+    ];
+    let blended = fillet(&body, &picks, r).unwrap_or_else(|e| panic!("rim and corner arc together: {e}"));
+    assert!(blended.validity().is_empty(), "{:?}", blended.validity());
+    assert_eq!(blended.face_count(), 12);
+    let got = measure(&body).unwrap().volume - measure(&blended).unwrap().volume;
+    assert!((got - want).abs() < 1e-7, "removed {got}, expected {want}");
+}
+
+#[test]
+fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
+    // The hole's dimensions come from the public reproduction, not an original design file.
+    let theta = (4.0_f64 / 25.0).acos();
+    let y = (625.0_f64 - 16.0).sqrt();
+    let corner_y = 280.0 / 9.0;
+    let hole_y = 262.0 / 9.0;
+    let outline = tabbed_plate_outline();
     let body =
         extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![Loop2::circle(Vec2::new(0.0, hole_y), 1.5)] }], 0.0, 2.0).unwrap().pop().unwrap();
     let r = 0.5;
@@ -1812,7 +1847,7 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
 }
 
 fn partial_mixed_run_prism() -> Body {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let outline = Loop2 {
         segs: vec![
             Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(40.0, 0.0) },
@@ -1988,7 +2023,7 @@ fn fillet_three_edges_at_a_corner() {
 #[test]
 fn shell_with_spherical_and_conical_faces() {
     // A cylinder capped by a hemisphere (a dome), revolved, opened at the bottom.
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
     let segs = vec![
         Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) },

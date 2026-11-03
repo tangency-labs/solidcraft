@@ -1,5 +1,6 @@
 //! Undo/redo, the timeline, deletion and selection.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -1276,7 +1277,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
 fn selection_item(s: &Session, value: Value) -> Result<Sel> {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let kind = value.get("type").and_then(Value::as_str);
     if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
@@ -1748,6 +1749,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    // A thread saved before holes were sized by their nominal diameter keeps the size it had
+    // when it is edited without naming one.
+    if let FeatureKind::Thread { old_auto_size: true, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
+    {
+        parameters.entry("old_auto_size").or_insert_with(|| json!(true));
     }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
