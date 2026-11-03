@@ -343,8 +343,7 @@ mod web {
             }
             let prefs = self.persisted_prefs();
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
-            let stored =
-                web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
+            let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
                 log::warn!("settings: the browser's storage did not take them; they are saved again later");
                 self.prefs_writer = crate::PrefsWriter::default();
