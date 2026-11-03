@@ -102,6 +102,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 mod certify;
+mod convexity;
 mod graph;
 mod qp;
 mod scale;

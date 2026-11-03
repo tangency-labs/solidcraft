@@ -20,10 +20,8 @@
 //! `m_bUncertified` are [`super::FillStats`]. A probe that asks neither the fill nor its
 //! margin answers feasibility with an empty fill, as the fork's leaves `rFill` empty.
 
-use super::certify::{
-    affine_fundamentals, affine_net, certified_convex, net_surface, t_make, t_nonneg, t_pieces,
-    t_scale, AffinePatch,
-};
+use super::certify::{affine_net, certified_convex, net_surface, t_make, AffinePatch};
+use super::convexity::{patch_curvatures, sector_conditions, SectorConditions};
 use super::qp::{dual_qp_rows, QpOutcome};
 use super::{
     affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
@@ -36,10 +34,6 @@ use crate::math::{Point3, Vec3, PI};
 
 /// `SM_SB_GRAPH_DEPTH`: the certificate's halvings.
 pub(super) const GRAPH_DEPTH: usize = 6;
-/// `SM_SB_GRAPH_LEVELS`: the sector conditions' halvings.
-const GRAPH_LEVELS: usize = 1;
-/// `SM_SB_GRAPH_DIRECTIONS`: their directions over a half turn.
-const GRAPH_DIRECTIONS: usize = 16;
 /// The cubic across: rows 0, 1 the round's, 2, 3 F's.
 const NC: usize = 3;
 
@@ -715,32 +709,11 @@ pub(super) fn graph_g1(
 
         // each patch's curvature determinants, affine in y, and the side its normal faces
         // (o of one sign, certified, or the fill folds)
-        let mut q0s: Vec<[Tensor; 3]> = Vec::with_capacity(2 * n);
-        let mut qjs: Vec<[Vec<Tensor>; 3]> = Vec::with_capacity(2 * n);
-        let mut signs = vec![0.0; 2 * n];
-        for (p, patch) in patches.iter().enumerate() {
-            let af = affine_fundamentals(patch, e)?;
-            let mut neg_o = af.o.clone();
-            for x in &mut neg_o.c {
-                *x = -*x;
-            }
-            let d_o = 1.0e-12 * t_scale(&af.o);
-            let s = if t_nonneg(&af.o, d_o, GRAPH_DEPTH)? == 1 {
-                1.0
-            } else if t_nonneg(&neg_o, d_o, GRAPH_DEPTH)? == 1 {
-                -1.0
-            } else {
-                0.0
-            };
-            *el_mut(&mut signs, p)? = s;
-            if s == 0.0 {
-                return Err(Refusal::sm_err(
-                    "SmBlendSetback: the fill folds (a patch's normal turns across the corner's axis)",
-                ));
-            }
-            q0s.push(af.q0);
-            qjs.push(af.qj);
-        }
+        let Ok(curvatures) = patch_curvatures(&patches, e, GRAPH_DEPTH)? else {
+            return Err(Refusal::sm_err(
+                "SmBlendSetback: the fill folds (a patch's normal turns across the corner's axis)",
+            ));
+        };
         // the energy as a quadratic programme: G = 2 B'B (a least nudge where it leaves a
         // direction free: the energy only chooses), g = 2 B'c
         let mut gm = vec![0.0; free * free];
@@ -798,101 +771,8 @@ pub(super) fn graph_g1(
         }
 
         // the sector conditions on every piece's coefficient matrices, in t: C t >= b
-        let mut cm: Vec<f64> = Vec::new();
-        let mut bv: Vec<f64> = Vec::new();
-        for (p, patch) in patches.iter().enumerate() {
-            let mut theta: Vec<f64> = (0..GRAPH_DIRECTIONS)
-                .map(|k| PI * k as f64 / GRAPH_DIRECTIONS as f64)
-                .collect();
-            let kp = el(&kernel, p)?;
-            if kp >= 0.0 {
-                theta.push(kp);
-            }
-            theta.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-            theta.push(el(&theta, 0)? + PI);
-            let q0p = el_ref(&q0s, p)?;
-            let qjp = el_ref(&qjs, p)?;
-            let (mut big_p, mut big_q) = (0, 0);
-            for t in q0p {
-                big_p = if big_p > t.p { big_p } else { t.p };
-                big_q = if big_q > t.q { big_q } else { t.q };
-            }
-            // l, m, n over t: at t = 0 (y = yp) and per free direction, at common degrees, in
-            // pieces
-            let mut pc0: Vec<Vec<Tensor>> = vec![Vec::new(); 3];
-            let mut pcf: Vec<Vec<Tensor>> = vec![Vec::new(); 3 * free];
-            let mut scale = 0.0;
-            for k in 0..3 {
-                let q0k = el_ref(q0p, k)?;
-                let mut s0 = tensor_elevate(q0k, big_p, big_q)?;
-                let mut sf = vec![t_make(big_p, big_q); free];
-                let qjk = el_ref(qjp, k)?;
-                for (t, &u) in patch.index.iter().enumerate() {
-                    let sj = tensor_elevate(el_ref(qjk, t)?, big_p, big_q)?;
-                    scale = smax(scale, t_scale(&sj));
-                    let ypu = el(&yp, u)?;
-                    for (s0i, &sji) in s0.c.iter_mut().zip(&sj.c) {
-                        *s0i += ypu * sji;
-                    }
-                    for (f, sff) in sf.iter_mut().enumerate() {
-                        let z = el(el_ref(&zn, f)?, u)?;
-                        if z == 0.0 {
-                            continue;
-                        }
-                        for (sfi, &sji) in sff.c.iter_mut().zip(&sj.c) {
-                            *sfi += z * sji;
-                        }
-                    }
-                }
-                scale = smax(scale, t_scale(q0k));
-                *el_mut(&mut pc0, k)? = t_pieces(&s0, GRAPH_LEVELS)?;
-                for (f, sff) in sf.iter().enumerate() {
-                    *el_mut(&mut pcf, k * free + f)? = t_pieces(sff, GRAPH_LEVELS)?;
-                }
-            }
-            let sp = el(&signs, p)?;
-            let mut row_t = vec![0.0; free];
-            let pc00 = el_ref(&pc0, 0)?;
-            for pc in 0..pc00.len() {
-                for i in 0..el_ref(pc00, pc)?.c.len() {
-                    for a in 0..theta.len() - 1 {
-                        for pair in 0..2 {
-                            let ta = el(&theta, a)?;
-                            let (c0, s0) = (ta.cos(), ta.sin());
-                            let (c1, s1) = if pair == 0 {
-                                (c0, s0)
-                            } else {
-                                let tb = el(&theta, a + 1)?;
-                                (tb.cos(), tb.sin())
-                            };
-                            let w = [c0 * c1, c0 * s1 + s0 * c1, s0 * s1];
-                            let mut cst = 0.0;
-                            let mut dmax = 0.0;
-                            for (k, &wk) in w.iter().enumerate() {
-                                cst += sp * wk * el(&el_ref(el_ref(&pc0, k)?, pc)?.c, i)?;
-                            }
-                            for (f, rf) in row_t.iter_mut().enumerate() {
-                                let mut s = 0.0;
-                                for (k, &wk) in w.iter().enumerate() {
-                                    s += sp
-                                        * wk
-                                        * el(&el_ref(el_ref(&pcf, k * free + f)?, pc)?.c, i)?;
-                                }
-                                *rf = s;
-                                dmax = smax(dmax, s.abs());
-                            }
-                            if !(dmax > 1.0e-11 * scale) {
-                                continue; // no free height in it: the certificate decides it
-                            }
-                            for &rf in &row_t {
-                                cm.push(rf / dmax);
-                            }
-                            bv.push((-cst + 1.0e-12 * scale) / dmax); // held a little inside
-                        }
-                    }
-                }
-            }
-        }
+        let SectorConditions { c: cm, b: bv } =
+            sector_conditions(&patches, &curvatures, &kernel, &yp, &zn, free)?;
         stats.solves += 1;
         if let Some(pr) = probe.as_deref_mut().filter(|p| !p.fill && p.margin) {
             // the least tau with C t + tau >= b (tau >= -1): min tau + eps (|t|^2 + tau^2)
