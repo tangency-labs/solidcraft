@@ -3305,14 +3305,11 @@ fn half_axes_held(sk: &Sketch, e: usize, c: usize, m: usize, major: Option<(usiz
     for k in sk.constraints.iter().filter(|k| !k.driven) {
         match k.kind {
             ConstraintKind::Distance { p, q, .. } => {
-                let major_end = |x: usize| x == m || major.is_some_and(|(_, m2)| x == m2);
                 let minor_end = |x: usize| minor.is_some_and(|(_, n1, n2)| x == n1 || x == n2);
                 if pair(p, q, c, m) || major.is_some_and(|(_, m2)| pair(p, q, c, m2) || pair(p, q, m, m2)) {
                     held.0 = true;
                 } else if minor.is_some_and(|(_, n1, n2)| pair(p, q, n1, n2)) || (p == c && minor_end(q)) || (q == c && minor_end(p)) {
                     held.1 = true;
-                } else if (p == c && major_end(q)) || (q == c && major_end(p)) {
-                    held.0 = true;
                 }
             }
             ConstraintKind::Length { l, .. } => {
