@@ -37,3 +37,4 @@ solidcraft-kernel::fillet_setback_tests::a_setback_not_past_the_radius_is_refuse
 solidcraft-kernel::modify_history_tests::fillet_variable_and_chord the variable round r 2 to 5 along the cube's edge fails status 1001 at solidcore 8ddce9016, as variable_radius_on_a_box_edge
 solidcraft-kernel::native::tests::box_and_fillet_have_stable_wire_records the box-edge round's wire record differs from the fixture at solidcore 8ddce9016 (a value 3 is 5): the fixture is re-blessed (NATIVE_BREP_BLESS=1) once the change is shown right
 solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union solidcore refuses a variable fillet whose law has a corner (solidcore#430)
+solidcraft-ui-egui::preselect_tests::variable_fillet_round_trip the dialog's variable round fails status 1001 at solidcore 8ddce9016, as variable_radius_on_a_box_edge
