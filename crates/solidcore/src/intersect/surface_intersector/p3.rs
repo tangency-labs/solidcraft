@@ -1421,6 +1421,29 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
         return Ok(Some(true));
     }
 
+    // Not upstream (#2500): an extension stops where it comes back onto the traced
+    // curve, in 3D, once it has left that point
+    if let Some(closure) = v.intersector().extension_closes_at {
+        let p1 = need_prev()?;
+        let on_span = super::p1::is_point_on_tsect_span_3d(
+            k,
+            closure,
+            v.intersector().point(p1)?,
+            v.intersector().point(next)?,
+            tol,
+        )?;
+        if v.intersector().extension_left_closure {
+            if on_span {
+                v.intersector_mut().extension_closed = true;
+                return Ok(Some(true));
+            }
+        } else {
+            // left once a span no longer reaches it and the curve is clear of it
+            let away = v.intersector().point(next)?.crv_pos().distance(closure) > 10.0 * tol;
+            v.intersector_mut().extension_left_closure = away && !on_span;
+        }
+    }
+
     // Check whether the point is inside of the domain of the surfaces.
     let next_tsp = v.intersector().point(next)?.clone();
     let mut on_boundary = false;

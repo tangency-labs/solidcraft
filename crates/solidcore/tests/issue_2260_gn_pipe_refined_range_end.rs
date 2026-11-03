@@ -171,7 +171,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_split_edge_keeps_near_half",
     "fillet_statuses_pass_on",
     "fillet_tangent_point_one_sided_step",
-    "fillet_through_extended_rail_end",
     "fillet_torus_center_on_axis",
     "fillet_torus_rail_on_axis",
     "fillet_torus_span_from_start_section",

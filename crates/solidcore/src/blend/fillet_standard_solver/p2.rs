@@ -2643,6 +2643,35 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
+/// Not the fork's (#2500): the face a round's ball rolls on, for the round by its
+/// definition: the offset's base surface, or, for a surface of revolution of a circle's arc
+/// that the offset extends as itself (`offset_extension_as_itself`, the fork's 43fd6b6) and
+/// whose extension it holds, that extension. Past its generator's interval a surface of
+/// revolution revolves the generator's extrapolation, not its circle, so a ball the trace
+/// rolls on past the face (out to an End, round the tube) has no foot on the base there: the
+/// station solve failed and the round was built as the trace's B-spline. A cylinder, cone,
+/// sphere or torus continues as itself on its own, and keeps its analytic kind in the
+/// definition.
+fn rolled_on<'a>(
+    k: &Kernel,
+    offset: &'a crate::surface::offset_surface::OffsetSurface,
+) -> &'a Surface {
+    let base = offset.base_surface();
+    match offset.extended_base_surface() {
+        Some(extended)
+            if k.fixes.offset_extension_as_itself
+                && matches!(
+                    base.kind(),
+                    crate::surface::surface::SurfaceKind::SurfOfRevolution(_)
+                )
+                && crate::surface::offset_surface::extends_as_itself(k, base) =>
+        {
+            extended
+        }
+        _ => base,
+    }
+}
+
 impl CircularCrossSectionFsg {
     /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
     /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`,
@@ -2711,7 +2740,7 @@ impl CircularCrossSectionFsg {
         if !arcs.is_exact_circle() {
             return Ok(None);
         }
-        let bases = [o1.base_surface(), o2.base_surface()];
+        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
         // (a face that is itself a blend by its definition takes a ball of one radius, on a
         // round of one radius between NURBS faces: the definition its certificate encloses;
         // c5b6bb7, WR-714)
@@ -2868,7 +2897,7 @@ impl super::p1::LinearCrossSectionFsg {
         else {
             return Ok(None);
         };
-        let bases = [o1.base_surface(), o2.base_surface()];
+        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
         let mut planes = true;
         for b in bases {
             match b.kind() {

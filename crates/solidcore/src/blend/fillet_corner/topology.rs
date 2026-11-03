@@ -276,6 +276,19 @@ pub(crate) fn check_tangential_edgeuse_at_vertex(
     })())
 }
 
+/// Whether a corner takes a tangent seam its rail crosses as the rail's tangent end (the
+/// rail end a rail/edge crossing, the end rib solved from the tangent end, the cap edge
+/// the seam's own curve): WR-600's `fillet_nx1_tangent_side_edge_same_convexity` (the
+/// fork's tangency-labs/smlib@7992ec7 and 856b54e), or the blend corner
+/// (`fillet_blend_corner`), whose End is that corner's construction and carries those
+/// commits as the fork's does (#2500). Without it an End on a tangent seam took the rail
+/// end as the rail's crossing of the end face, which touches the rail there and has no
+/// crossing, and marched its cap edge into that tangency.
+#[must_use]
+pub fn tangent_seam_ends(k: &Kernel) -> bool {
+    k.fixes.fillet_nx1_tangent_side_edge_same_convexity || k.fixes.fillet_blend_corner
+}
+
 /// With `Kernel::fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600, the fork's
 /// tangency-labs/smlib@7992ec7): a side edge of an Nx1 corner whose faces meet
 /// tangentially at `vertex` (a bar's flat side running onto the cylinder its round end
@@ -294,7 +307,7 @@ fn tangent_sides_same_convexity(
     mut same: [bool; 2],
 ) -> Result<([bool; 2], [bool; 2])> {
     let mut tangent_side = [false, false];
-    if k.fixes.fillet_nx1_tangent_side_edge_same_convexity {
+    if tangent_seam_ends(k) {
         for ((side, same), tangent) in sides
             .into_iter()
             .zip(same.iter_mut())

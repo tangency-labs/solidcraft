@@ -1417,14 +1417,14 @@ impl FilletBrep {
             // do Surface/surface xSect
             let ang_tol = fs1.ang_tol_rad;
             let mut dir = end_pnt - start_pnt;
-            // With `fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600's flag; the
+            // With `tangent_seam_ends` (WR-600's flag or the blend corner; the
             // fork's tangency-labs/smlib@856b54e): at a tangent end
             // (`make_nx1_corner_topology`) the fillet surface and the end face touch where
             // the rail crosses the seam, and the end rib is built from that end outward
             // (`tangent_end_rib`), never intersected into it.
             let start_tangent = self.fillet_vertex(start_fv)?.is_tangent_end();
             let end_tangent = self.fillet_vertex(end_fv)?.is_tangent_end();
-            let intersection = if k.fixes.fillet_nx1_tangent_side_edge_same_convexity
+            let intersection = if crate::blend::fillet_corner::topology::tangent_seam_ends(k)
                 && (start_tangent || end_tangent)
             {
                 if start_tangent && end_tangent {
@@ -1647,14 +1647,14 @@ impl FilletBrep {
             return Err(SolidError::sm_err(OP_EXT_EDGE));
         }
         let the_corner = corners.corner(corner)?;
-        // With `fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600's flag; the
+        // With `tangent_seam_ends` (WR-600's flag or the blend corner; the
         // fork's tangency-labs/smlib@856b54e): a tangent seam T, the edge whose faces meet
         // tangentially, where a tangent end's rail crosses it
         // (`make_nx1_corner_topology`). The cap edge from that end to the corner's vertex
         // is a piece of T, on the edge or on its continuation past the vertex: the edge's
         // own curve, continued as itself. Its faces' surfaces touch along T, so it is
         // never their intersection.
-        if k.fixes.fillet_nx1_tangent_side_edge_same_convexity {
+        if crate::blend::fillet_corner::topology::tangent_seam_ends(k) {
             if let (Some(&seam_eu), Some(vertex)) = (
                 edge::edgeuses(target, orig_edge, None, None)?.first(),
                 the_corner.vertex,

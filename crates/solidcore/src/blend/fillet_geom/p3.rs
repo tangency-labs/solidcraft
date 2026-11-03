@@ -1007,8 +1007,7 @@ impl FilletBrep {
     /// last (`ends[1]`). Not upstream (#2406, `fixes.fillet_blend_corner`): a rail end on
     /// an End's plane (an extended-edge-use end) gives the trace no point, as upstream,
     /// so a geometry traced again up to such an End runs through the End's section
-    /// there, as the first trace runs through the edge's end (the fork's
-    /// `CalcFilletGeom`, `fillet_through_extended_rail_end`).
+    /// there.
     ///
     /// # Errors
     /// As [`FilletBrep::re_calc_fillet_geom`].

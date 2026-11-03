@@ -158,7 +158,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.fillet_point_bigger_step_retry = true;
     k.fixes.fillet_tangent_point_one_sided_step = true;
-    k.fixes.fillet_through_extended_rail_end = true;
     k.fixes.precise_properties_body_length_scale = true;
     k.fixes.precise_properties_split_at_surface_knots = true;
     k.fixes.brep_area_between_solid_and_void = true;

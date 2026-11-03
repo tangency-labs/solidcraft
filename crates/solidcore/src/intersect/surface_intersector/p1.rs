@@ -619,6 +619,28 @@ pub struct SurfaceIntersector<'s> {
     pub extension_distance: f64,
     /// `m_bDoingExtensionClipping`.
     pub doing_extension_clipping: bool,
+    /// Not upstream (#2500): an extension of the trace (past its end without an end
+    /// point, or back from its start) stops where it comes back onto the curve already
+    /// traced, compared in 3D only ([`is_point_on_tsect_span_3d`]): where a surface is
+    /// extended round past the closure of its turn, a closed intersection does not
+    /// repeat its UV, and the end-point and loop checks, which compare UV too, do not
+    /// see it close. Off by default.
+    pub extension_stops_on_closure: bool,
+    /// Not upstream (#2500): while an extension runs with
+    /// [`Self::extension_stops_on_closure`], the traced curve's point it must not pass:
+    /// the start for the extension after the end, the end for the one back from the
+    /// start.
+    pub extension_closes_at: Option<Point3>,
+    /// Not upstream (#2500): whether that extension has left
+    /// [`Self::extension_closes_at`] (by ten times the tolerance) since it was set: only
+    /// then does coming back onto it close the curve.
+    pub extension_left_closure: bool,
+    /// Not upstream (#2500): that extension came back onto
+    /// [`Self::extension_closes_at`]: the curve is closed, and the extension keeps half of
+    /// the gap it ran over (the other half is the other end's), as the extension of a
+    /// surface of revolution round its axis keeps half the gap of its turn either end
+    /// (WR-650).
+    pub extension_closed: bool,
     /// `m_bCurveIsClosed`.
     pub curve_is_closed: bool,
     /// Not upstream: the `trace_step` calls left to the start-point loop of
@@ -762,6 +784,10 @@ impl<'s> SurfaceIntersector<'s> {
             last_through_parameter: 0.0,
             extension_distance: 0.0,
             doing_extension_clipping: false,
+            extension_stops_on_closure: false,
+            extension_closes_at: None,
+            extension_left_closure: false,
+            extension_closed: false,
             curve_is_closed: false,
             trace_steps_left: u64::MAX,
             start_loop_trace_steps: super::p4::MAX_START_LOOP_TRACE_STEPS,
@@ -2127,6 +2153,50 @@ pub fn is_point_on_tsect_curve(
 
     // The point is not on the curve.
     Ok(false)
+}
+
+/// Not upstream (#2500): whether `point` lies on the traced span from `prev` to `next`
+/// in 3D, within `approx_tol_3d`: its foot on the span's 3D Hermite curve (as
+/// [`is_point_on_tsect_curve`] builds it) is within the tolerance. Neither the UV boxes
+/// nor the point's direction are tested: a curve traced round a surface extended past its
+/// turn comes back to its own points in 3D with other UV.
+///
+/// # Errors
+///
+/// Those of the Hermite curve's point solve.
+pub fn is_point_on_tsect_span_3d(
+    k: &Kernel,
+    point: Point3,
+    prev: &TsectPnt,
+    next: &TsectPnt,
+    approx_tol_3d: f64,
+) -> Result<bool> {
+    let delta_t = next.curve_parameter - prev.curve_parameter;
+    let herm_3d = HermiteCurve::new(
+        prev.crv_pos(),
+        prev.crv_deriv() * delta_t,
+        next.crv_pos(),
+        next.crv_deriv() * delta_t,
+        3,
+    );
+    let domain = herm_3d.natural_interval();
+    let mut box_3d = Extent3d::new();
+    herm_3d.calculate_bounding_box(Some(&mut box_3d), None, None)?;
+    let mut pnt_box = Extent3d::from_point(point);
+    pnt_box.expand_absolute(approx_tol_3d);
+    if box_3d.are_disjoint(&pnt_box, 0.0) {
+        return Ok(false);
+    }
+    let curve = Curve::from(herm_3d);
+    let (success, sol) = curve.local_point_solve::<()>(
+        k,
+        &domain,
+        SolverOperation::Minimize,
+        point,
+        &PointSolveOptions::default(),
+        domain.evaluate(0.5),
+    )?;
+    Ok(success && sol.start.solution_value <= approx_tol_3d)
 }
 
 /// Appends the piecewise cubic, C0 B-spline of `cntrl_poly` over the unique `knots`

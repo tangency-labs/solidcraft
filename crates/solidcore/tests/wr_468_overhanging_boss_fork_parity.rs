@@ -1,22 +1,18 @@
-//! WR-468 (`fillet_through_extended_rail_end`, the fork's tangency-labs/smlib@d33890f) on
-//! overhanging bosses, with the fork's other Nx1 corner fixes on: WR-499
+//! Overhanging bosses rounded with the fork's Nx1 corner fixes on: WR-499
 //! (`fillet_nx1_opposite_continuation_side_edge`, 420e47d) and WR-457
 //! (`fillet_nx1_tangent_side_edge`), without which a boss's base arc that runs on past a
-//! wall as the overhang's rim fails at its corner (#1021).
+//! wall as the overhang's rim fails at its corner (#1021). These cases were written for
+//! WR-468 (`fillet_through_extended_rail_end`, the fork's tangency-labs/smlib@d33890f),
+//! which is removed (#2500); both rounded the same with and without it.
 //!
 //! - The fork's own case (its capi test for SolidCraft rig fillets/4369): a 60 x 40 x 10
 //!   block rounded r 10 in plan, a boss r 10 x 10 at (12, 32) overhanging its corner, the
 //!   boss's base arc over the block rounded R 2. The round adds the material within 2 of
 //!   the boss's foot under the quarter disc over the block's outline, to 1e-7 as the
-//!   fork's test holds it. The port gives that with and without WR-468, and so does the
-//!   fork's main (83748ba) C++ built with and without d33890f's hunk.
+//!   fork's test holds it.
 //! - A 30 x 60 x 10 block with a boss r 5 x 10 at (4, 33) overhanging its wall x = 0
-//!   (WR-641): without WR-468 the round succeeds, 18807.824471783 here and
-//!   18807.824471782 in the fork's main without the hunk. With WR-468 the trace point
-//!   it adds at the edge's end cannot be solved (`sm_FindFilletTsectPnt` from a guess
-//!   point past the wall). The fork's main C++ then fails the round with 1001 "Fillet
-//!   Surface Computation Failure" (WR-641, the fork's defect). Under the same flag the
-//!   port now skips that knot (#1952), so the round builds as it does without WR-468.
+//!   (WR-641): the round succeeds, 18807.824471783 here and 18807.824471782 in the fork's
+//!   main without d33890f's hunk (the fork's main with it fails the round with 1001).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -46,12 +42,11 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-9, &attrs).unwrap()
 }
 
-/// The fork's Nx1 corner fixes on, WR-468 as `wr468` says.
-fn kernel(wr468: bool) -> Kernel {
+/// The fork's Nx1 corner fixes on.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_through_extended_rail_end = wr468;
     k
 }
 
@@ -130,7 +125,7 @@ fn added_by_the_round() -> f64 {
 }
 
 #[test]
-fn fork_4369_boss_rounds_to_its_closed_form_with_and_without_wr468() {
+fn fork_4369_boss_rounds_to_its_closed_form() {
     let added = added_by_the_round();
     let foot = [
         Point3::new(12.0, 22.0, 10.0),
@@ -140,26 +135,22 @@ fn fork_4369_boss_rounds_to_its_closed_form_with_and_without_wr468() {
             10.0,
         ),
     ];
-    for wr468 in [false, true] {
-        let mut k = kernel(wr468);
-        let block = rounded_block(&mut k);
-        let boss = create_cylinder(&mut k, Point3::new(12.0, 32.0, 10.0), 10.0, 10.0).unwrap();
-        let mut b = boolean_union(&mut k, block, boss).unwrap();
-        let joined = volume(&k, &mut b);
-        round(&mut k, &mut b, &foot, 2.0).unwrap();
-        assert!(is_manifold_solid(&b).unwrap(), "WR-468 {wr468}");
-        let (v, want) = (volume(&k, &mut b), joined + added);
-        assert!(
-            ((v - want) / want).abs() < 1e-7,
-            "WR-468 {wr468}: {v} against {want}"
-        );
-    }
+    let mut k = kernel();
+    let block = rounded_block(&mut k);
+    let boss = create_cylinder(&mut k, Point3::new(12.0, 32.0, 10.0), 10.0, 10.0).unwrap();
+    let mut b = boolean_union(&mut k, block, boss).unwrap();
+    let joined = volume(&k, &mut b);
+    round(&mut k, &mut b, &foot, 2.0).unwrap();
+    assert!(is_manifold_solid(&b).unwrap());
+    let (v, want) = (volume(&k, &mut b), joined + added);
+    assert!(((v - want) / want).abs() < 1e-7, "{v} against {want}");
 }
 
 /// The 30 x 60 x 10 block with the boss r 5 x 10 at (4, 33) over its wall x = 0, its base
-/// arc over the block (two edges, split at the cylinder's seam) rounded R 2.
-fn wall_boss(wr468: bool) -> (Kernel, Brep, solidcore::Result<()>) {
-    let mut k = kernel(wr468);
+/// arc over the block (two edges, split at the cylinder's seam) rounded R 2 (WR-641).
+#[test]
+fn wr_641_wall_boss_rounds() {
+    let mut k = kernel();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 30.0, 60.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(4.0, 33.0, 10.0), 5.0, 10.0).unwrap();
     let mut b = boolean_union(&mut k, block, boss).unwrap();
@@ -168,27 +159,7 @@ fn wall_boss(wr468: bool) -> (Kernel, Brep, solidcore::Result<()>) {
         Point3::new(4.0 + 5.0 * a.cos(), 33.0 + 5.0 * a.sin(), 10.0),
         Point3::new(4.0 + 5.0 * a.cos(), 33.0 - 5.0 * a.sin(), 10.0),
     ];
-    let r = round(&mut k, &mut b, &picks, 2.0);
-    (k, b, r)
-}
-
-#[test]
-fn wr_641_wall_boss_rounds_without_wr468() {
-    let (k, mut b, r) = wall_boss(false);
-    r.unwrap();
-    assert!(is_manifold_solid(&b).unwrap());
-    let v = volume(&k, &mut b);
-    // the fork's main without d33890f's hunk: 18807.824471782
-    assert!((v - 18807.824471782).abs() < 1e-9 * v, "{v}");
-}
-
-/// WR-641: the fork's main C++ (with d33890f) fails on this boss with 1001. With WR-468
-/// the port skips the end knot whose section it cannot solve (#1952) and rounds the boss
-/// as it does without WR-468.
-#[test]
-fn wr_641_wr468_rounds_the_wall_boss_as_without_it() {
-    let (k, mut b, r) = wall_boss(true);
-    r.unwrap();
+    round(&mut k, &mut b, &picks, 2.0).unwrap();
     assert!(is_manifold_solid(&b).unwrap());
     let v = volume(&k, &mut b);
     // the fork's main without d33890f's hunk: 18807.824471782

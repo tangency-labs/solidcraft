@@ -178,7 +178,6 @@ fn mitred_rounds_follow_the_moved_top_under_solidcraft_preset() {
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_setback_from_start_vertex = true;
-    k.fixes.fillet_through_extended_rail_end = true;
     k.fixes.fillet_torus_center_on_axis = true;
     k.fixes.fillet_torus_rail_on_axis = true;
     k.fixes.fillet_torus_span_from_start_section = true;

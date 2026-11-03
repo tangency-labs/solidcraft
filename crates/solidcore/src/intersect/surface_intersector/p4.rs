@@ -1468,6 +1468,41 @@ pub fn do_point_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 }
 
 #[allow(clippy::too_many_lines)]
+/// Not upstream (#2500): an extension that came back onto the curve already traced
+/// (`extension_closed`) keeps the curve points up to half its length past `from` (the
+/// curve parameter it started at), the other half of the gap being the other end's; the
+/// point at the half is the last kept one past it. Clears `extension_closed`.
+///
+/// # Errors
+///
+/// An unknown curve point.
+fn keep_half_of_closed_extension<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    from: f64,
+) -> Result<()> {
+    v.intersector_mut().extension_closed = false;
+    let Some(&last) = v.intersector().curve_points.last() else {
+        return Ok(());
+    };
+    let half = from + 0.5 * (v.intersector().point(last)?.curve_parameter - from);
+    while v.intersector().curve_points.len() > 2 {
+        let n = v.intersector().curve_points.len();
+        let (Some(&before), Some(&tail)) = (
+            v.intersector().curve_points.get(n - 2),
+            v.intersector().curve_points.get(n - 1),
+        ) else {
+            break;
+        };
+        if v.intersector().point(before)?.curve_parameter < half
+            || v.intersector().point(tail)?.curve_parameter <= half
+        {
+            break;
+        }
+        v.intersector_mut().curve_points.pop();
+    }
+    Ok(())
+}
+
 fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     v: &mut V,
     k: &Kernel,
@@ -1496,6 +1531,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // init the through and start point lists
     v.intersector_mut().through_points.clear();
     v.intersector_mut().start_points.clear();
+    v.intersector_mut().extension_closes_at = None;
 
     // an optional start direction as the 3D tangent of a previous point
     let temp_tsp = opts.start_direction.map(|d| {
@@ -1599,6 +1635,16 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     {
         v.intersector_mut().doing_extension_clipping = true;
     }
+    // Not upstream (#2500): an extension past the end stops back at the start
+    v.intersector_mut().extension_closed = false;
+    if v.intersector().extension_stops_on_closure
+        && opts.extend_after_end
+        && v.intersector().end_point.is_none()
+    {
+        let start = v.intersector().point(tsp_id)?.crv_pos();
+        v.intersector_mut().extension_closes_at = Some(start);
+        v.intersector_mut().extension_left_closure = false;
+    }
 
     // Reverse direction of tracing if indicated by the start direction
     if let Some(d) = opts.start_direction {
@@ -1620,6 +1666,12 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => false,
     };
+    if traced && v.intersector().extension_closed {
+        // the extension past the end came back to the start: half of it
+        let from = v.intersector().last_through_parameter;
+        keep_half_of_closed_extension(v, from)?;
+    }
+    v.intersector_mut().extension_closes_at = None;
     if traced {
         // trace backwards from the first point too
         if opts.extend_before_start
@@ -1629,7 +1681,35 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         {
             v.intersector_mut().reverse_curve_direction()?;
             v.intersector_mut().curve_trace_direction *= -1.0;
-            trace_curve_with(v, k, tsp_id, &out.curves_3d)?;
+            // Not upstream (#2500): the extension back from the start stops at the
+            // traced curve's end (the reversed curve's first point)
+            v.intersector_mut().extension_closes_at = None;
+            v.intersector_mut().extension_closed = false;
+            let start_param = match v.intersector().curve_points.last().copied() {
+                Some(id) => v.intersector().point(id)?.curve_parameter,
+                None => 0.0,
+            };
+            if v.intersector().extension_stops_on_closure {
+                let ends = (
+                    v.intersector().curve_points.first().copied(),
+                    v.intersector().curve_points.last().copied(),
+                );
+                if let (Some(first), Some(last)) = ends {
+                    let end = v.intersector().point(first)?.crv_pos();
+                    let start = v.intersector().point(last)?.crv_pos();
+                    // a curve traced away from its start closes back on its end
+                    if end.distance(start) > 10.0 * v.intersector().this_approx_tol_3d {
+                        v.intersector_mut().extension_closes_at = Some(end);
+                        v.intersector_mut().extension_left_closure = false;
+                    }
+                }
+            }
+            let backward = trace_curve_with(v, k, tsp_id, &out.curves_3d);
+            v.intersector_mut().extension_closes_at = None;
+            backward?;
+            if v.intersector().extension_closed {
+                keep_half_of_closed_extension(v, start_param)?;
+            }
             v.intersector_mut().reverse_curve_direction()?;
             v.intersector_mut().curve_trace_direction *= -1.0;
         }

@@ -620,13 +620,13 @@ fn run_side_edge_on_along_its_line(
         let (side_start, side_end) = edge::start_end_vertices(b, side_edge)?;
         let corner_at_start = on_filleted(side_start);
         let corner_at_end = on_filleted(side_end);
-        // With `fixes.fillet_nx1_tangent_side_edge_same_convexity` too (WR-600's flag; the
+        // With `tangent_seam_ends` (WR-600's flag or the blend corner; the
         // fork's tangency-labs/smlib@856b54e), a tangent seam T (the side edge's faces meet
         // tangentially at that vertex) is the exception: past the vertex T runs on in the
         // rail's face, which continues across it into the end face, and a rail that leaves
         // the filleted edge's end on that side (a concave round on the wall above a flat
         // side running tangent into it) crosses T there.
-        let tangent_seam = if k.fixes.fillet_nx1_tangent_side_edge_same_convexity
+        let tangent_seam = if crate::blend::fillet_corner::topology::tangent_seam_ends(k)
             && (corner_at_start || corner_at_end)
         {
             let corner_vertex = if corner_at_start {

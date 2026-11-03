@@ -313,7 +313,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_setback_from_start_vertex = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.fillet_tangent_point_one_sided_step = true;
-    k.fixes.fillet_through_extended_rail_end = true;
     k.fixes.fillet_torus_center_on_axis = true;
     k.fixes.fillet_torus_rail_on_axis = true;
     k.fixes.fillet_torus_span_from_start_section = true;

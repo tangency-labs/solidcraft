@@ -397,6 +397,8 @@ enum Here {
     Passes(&'static str),
     /// Both fail, for a different reason or by a different amount here.
     FailsOtherwise(&'static str),
+    /// The fork marks it passing; it fails here.
+    Fails(&'static str),
 }
 
 /// The fork's mark of a case at one revision: its reason the case fails there (`None`: it
@@ -411,7 +413,7 @@ impl Mark {
     fn fails_here(&self) -> bool {
         match self.here {
             Some(Here::Passes(_)) => false,
-            Some(Here::FailsOtherwise(_)) => true,
+            Some(Here::FailsOtherwise(_) | Here::Fails(_)) => true,
             None => self.fails_today.is_some(),
         }
     }
@@ -471,8 +473,15 @@ const ROUNDS_R2: &str = "the corner patch where the rounds meet stands 0.0374 ou
 const ROUNDS_R5: &str = "the corner patch where the rounds meet stands 0.128 out of the front face (box y min -0.1278205)";
 const ROUNDS_R2_HERE: &str = "the rounds together build within the box and check clean (with fillet_blend_corner, as the blend corner's Mixed corner, built in solidcore from smlib#82)";
 const ROUNDS_R5_HERE: &str = "the blend corner's Mixed corner (fillet_blend_corner, built in solidcore from smlib#82) builds the rounds together within the box; without it the pinned corner patch stands 0.00156 out of the front face (box y min -0.0015609)";
-const ROUNDS_R2_HERE_AT_9BEBF34: &str = "the rounds together build within the box and check clean (the pinned corner patch: this profile has no fillet_blend_corner, whose Mixed corner builds them at cd47efd)";
-const ROUNDS_R5_HERE_AT_9BEBF34: &str = "the pinned corner patch stands 0.00156 out of the front face (box y min -0.0015609): this profile has no fillet_blend_corner, whose Mixed corner builds the rounds together within the box at cd47efd";
+const ROUNDS_R2_HERE_AT_9BEBF34: &str = "the pinned corner patch stands 0.00117 out of the front face (box y min -0.0011736; within the box with WR-641's through point, removed in #2500): this profile has no fillet_blend_corner, whose Mixed corner builds them at cd47efd";
+const ROUNDS_R5_HERE_AT_9BEBF34: &str = "the pinned corner patch stands 0.0438 out of the front face (box y min -0.0437708; 0.00156 with WR-641's through point): this profile has no fillet_blend_corner, whose Mixed corner builds the rounds together within the box at cd47efd";
+// Since #2500 this profile has no WR-468/WR-641 `fillet_through_extended_rail_end`, the
+// fork's d33890f: on this old path (no `fillet_blend_corner`) the front round's rail on the
+// front face ends on the extended edge at V, which gives the trace no point, so its trace
+// stops at its last known section short of V and its surface reaches V as the trace's
+// extension (WR-468's defect). The pinned corner, built on that extension, leaves the front
+// face; the blend corner's trace runs on to the edge's end (`c2_trace_to_edge_ends`) and
+// builds the same cases at cd47efd.
 const CHAMFERS_HERE: &str = "the blend corner's Mixed corner (fillet_blend_corner, built in solidcore from smlib#82) builds the chamfers together at the tangent seam";
 
 const TANGENT_END_CASES: [TangentEndCase; 13] = [
@@ -542,13 +551,19 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
     TangentEndCase {
         name: "front_curvature_round_r2",
         run: front_curvature_round_r2,
-        at_9bebf34: PASSES,
+        at_9bebf34: Mark {
+            fails_today: None,
+            here: Some(Here::Fails("the corner's trim on the cylinder gets a 2D cusp (check_brep #13, radius of curvature 7.1e-5 against 9.8e-5): the trace stops short of V without WR-641's through point (removed, #2500)")),
+        },
         at_cd47efd: PASSES,
     },
     TangentEndCase {
         name: "front_round_r1_5_then_concave_round_r3",
         run: front_round_r1_5_then_concave_round_r3,
-        at_9bebf34: PASSES,
+        at_9bebf34: Mark {
+            fails_today: None,
+            here: Some(Here::Fails("the corner patch stands 7.1e-5 out of the front face (box y min -7.13e-5): the trace stops short of V without WR-641's through point (removed, #2500)")),
+        },
         at_cd47efd: PASSES,
     },
     TangentEndCase {
@@ -568,7 +583,7 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         run: rounds_together_r2,
         at_9bebf34: Mark {
             fails_today: Some(ROUNDS_R2),
-            here: Some(Here::Passes(ROUNDS_R2_HERE_AT_9BEBF34)),
+            here: Some(Here::FailsOtherwise(ROUNDS_R2_HERE_AT_9BEBF34)),
         },
         at_cd47efd: Mark {
             fails_today: Some(ROUNDS_R2),
@@ -639,16 +654,15 @@ fn tangent_end_cases_known_failing_at_cd47efd() {
 }
 
 /// The rounds together at r 5: without the blend corner (9bebf34's profile) the pinned corner
-/// patch stands 0.00156 out of the front face; with it (cd47efd's) the Mixed corner builds them
-/// within the box (`issue_2360_mixed_corner.rs`). The round on a line spine sits on its exact
-/// spine under `fillet_exact_round_classes` (WR-669 addendum, #2405), which moves the patch's
-/// lowest y from -0.0015609462817799 (the solved stations' spine) to -0.0015609462949179.
+/// patch stands 0.0438 out of the front face (0.00156 before #2500 removed WR-641's through
+/// point, the front round's trace now stopping short of V on this old path); with it
+/// (cd47efd's) the Mixed corner builds them within the box (`issue_2360_mixed_corner.rs`).
 #[test]
 fn rounds_together_r5_needs_the_mixed_corner() {
     let before = rounds_together_r5(&mut kernel());
     assert_eq!(before.failed.len(), 1, "{:?}", before.failed);
     assert!(
-        before.failed[0].contains("y: -0.00156094629"),
+        before.failed[0].contains("y: -0.0437707967"),
         "{:?}",
         before.failed
     );
@@ -683,7 +697,8 @@ fn rounds_together_refused_by_wr710() {
 }
 
 /// The fork's marks are kept as they are: solidcore's outcome is the fork's except where a
-/// case says how it differs, and every passing case of the fork passes here.
+/// case says how it differs, and every passing case of the fork passes here, but on 9bebf34's
+/// old path where WR-641's through point, removed in #2500, built it.
 #[test]
 fn tangent_end_marks_are_the_fork_s() {
     for revision in [Revision::At9bebf34, Revision::AtCd47efd] {
@@ -695,6 +710,15 @@ fn tangent_end_marks_are_the_fork_s() {
                 Some(Here::Passes(why) | Here::FailsOtherwise(why)) => {
                     assert!(
                         m.fails_today.is_some() && !why.is_empty(),
+                        "{revision:?} {}",
+                        c.name
+                    );
+                }
+                Some(Here::Fails(why)) => {
+                    assert!(
+                        matches!(revision, Revision::At9bebf34)
+                            && m.fails_today.is_none()
+                            && why.contains("#2500"),
                         "{revision:?} {}",
                         c.name
                     );

@@ -222,7 +222,6 @@
   "analytic_copy_keeps_parameterization",
   "fillet_point_bigger_step_retry",
   "fillet_tangent_point_one_sided_step",
-  "fillet_through_extended_rail_end",
   "precise_properties_body_length_scale",
   "integrator_propagates_failure",
   "precise_properties_split_at_surface_knots",

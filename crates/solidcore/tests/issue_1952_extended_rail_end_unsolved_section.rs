@@ -1,25 +1,21 @@
-//! tangency-labs/solidcore#1952 (WR-641): with `Kernel::fixes.fillet_through_extended_rail_end`
-//! (WR-468, the fork's tangency-labs/smlib@d33890f) on, the filleted edge's end at a rail
-//! that ends on an extended edge is a through point of the trace. Where no section can
-//! be solved there, `CalcFilletGeom` failed and the round with it (1001, "Fillet Surface
-//! Computation Failure"), on rounds that build without the flag. The knot is now skipped
-//! when its section is not found, so the trace goes on as it does without the flag.
+//! tangency-labs/solidcore#1952 (WR-641): a box joined with a cylinder, the concave arc
+//! where the box's top meets the cylinder rounded r 2. The issue was about
+//! `fillet_through_extended_rail_end` (WR-468), which made the filleted edge's end at a
+//! rail ending on an extended edge a through point of the trace; that flag is removed
+//! (#2500), and these cases keep the arc's rounds with and without
+//! `fillet_torus_span_from_start_section`.
 //!
 //! The case is a box 40 long, 10 wide and 15 high joined with `create_cylinder` r 10, h 30
-//! at the origin (bases coplanar). The concave arc where the box's top meets the cylinder
-//! is rounded r 2, with the box along +X, -X, +Y and -Y, so the cylinder's seam (+X)
-//! falls at the arc's middle, opposite it, and a quarter turn either way. At the arc's
-//! ends the section's rail on the top face lies past the box's side face (y 6 against
-//! the face's y 5), off the top plane's domain, so the flag's through point there
-//! cannot be solved.
+//! at the origin (bases coplanar), with the box along +X, -X, +Y and -Y, so the
+//! cylinder's seam (+X) falls at the arc's middle, opposite it, and a quarter turn either
+//! way. At the arc's ends the section's rail on the top face lies past the box's side
+//! face (y 6 against the face's y 5), off the top plane's domain.
 //!
-//! - Flag off: the +X and +Y boxes round. The -X and -Y boxes fail with 1001 at their
+//! - No flag: the +X and +Y boxes round. The -X and -Y boxes fail with 1001 at their
 //!   corner, and so does the pinned C++ (`blend.fillet_executive_p3`,
 //!   `attributed-box-cylinder-arc-round-*`). That is WR-568, which
 //!   `fillet_torus_span_from_start_section` fixes.
-//! - `fillet_through_extended_rail_end` alone: every box failed with 1001. Now it rounds
-//!   as with the flag off.
-//! - With `fillet_torus_span_from_start_section` as well, every box rounds.
+//! - With `fillet_torus_span_from_start_section`, every box rounds.
 //!
 //! The rounded volume is the box-cylinder union plus the material under the round:
 //! `6000 + 3000 pi - 15 (2 (2.5 sqrt 75 + 50 asin 0.5))` plus
@@ -103,14 +99,12 @@ fn round(k: &mut Kernel, origin: [f64; 3], size: [f64; 3]) -> (Brep, solidcore::
     (b, r)
 }
 
-fn check(torus_span: bool, extended_rail_end: bool) {
+fn check(torus_span: bool) {
     for (origin, size, rounds_unflagged) in BOXES {
         let mut k = Kernel::default();
         k.fixes.fillet_torus_span_from_start_section = torus_span;
-        k.fixes.fillet_through_extended_rail_end = extended_rail_end;
         let (mut b, r) = round(&mut k, origin, size);
-        let case =
-            format!("box at {origin:?}, torus span {torus_span}, rail end {extended_rail_end}");
+        let case = format!("box at {origin:?}, torus span {torus_span}");
         if rounds_unflagged || torus_span {
             r.unwrap_or_else(|e| panic!("{case}: {e:?}"));
             assert!(is_manifold_solid(&b).unwrap(), "{case}");
@@ -128,23 +122,11 @@ fn check(torus_span: bool, extended_rail_end: bool) {
 /// No flag: the pinned behaviour (the C++ fails the -X and -Y boxes too).
 #[test]
 fn issue_1952_flags_off_round_as_the_pinned_cpp() {
-    check(false, false);
+    check(false);
 }
 
-/// The extended rail end alone: was 1001 for every box, now as with the flag off.
+/// The torus span fix rounds every box (WR-568).
 #[test]
-fn issue_1952_extended_rail_end_skips_an_unsolved_end_section() {
-    check(false, true);
-}
-
-/// With the torus span fix as well, every box rounds.
-#[test]
-fn issue_1952_extended_rail_end_with_torus_span_rounds_every_box() {
-    check(true, true);
-}
-
-/// The torus span fix alone rounds every box (WR-568).
-#[test]
-fn issue_1952_torus_span_alone_rounds_every_box() {
-    check(true, false);
+fn issue_1952_torus_span_rounds_every_box() {
+    check(true);
 }

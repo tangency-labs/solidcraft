@@ -2408,7 +2408,7 @@ fn revolution_of<'a>(
 /// Whether `sm_ExtendSurface` extends `surface` as itself (`extend_as_itself`, its
 /// `bAsItself`): a cylinder, cone, sphere or torus, or (the fork's tangency-labs/smlib@43fd6b6) a surface of revolution whose
 /// generator is an arc of one circle. A NURB that cannot be made is not one.
-fn extends_as_itself(k: &Kernel, surface: &Surface) -> bool {
+pub(crate) fn extends_as_itself(k: &Kernel, surface: &Surface) -> bool {
     match surface.kind() {
         SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => true,
         SurfaceKind::SurfOfRevolution(_) => match surface.kind_with_nurb(k) {

@@ -792,24 +792,15 @@ fn c1_collect_points(
 
     // Now, compute 'through points' from all internal G1 knots
     // (the size is re-read every iteration, as upstream's GetSize())
-    // SolidCraft (tangency-labs/solidcore#1022, WR-468, opt-in): then from the edge's
-    // ends where a rail of geometry 0 ends on an extended edge
-    // ([`c1_extended_rail_end_knots`]).
-    let extra_knots = if cx.k.fixes.fillet_through_extended_rail_end {
-        c1_extended_rail_end_knots(ops, cx, st)?
-    } else {
-        Vec::new()
-    };
     let mut k = 0;
-    while k < ops.solver().g1_knots.len() + extra_knots.len() {
+    while k < ops.solver().g1_knots.len() {
         // get position and tangent at G1 knot (status checked, values unused)
-        let knot = match ops.solver().g1_knots.get(k) {
-            Some(&knot) => knot,
-            None => extra_knots
-                .get(k - ops.solver().g1_knots.len())
-                .copied()
-                .ok_or_else(|| invalid("G1 knot index out of range"))?,
-        };
+        let knot = ops
+            .solver()
+            .g1_knots
+            .get(k)
+            .copied()
+            .ok_or_else(|| invalid("G1 knot index out of range"))?;
         st.edge_curve.evaluate(cx.k, knot, 1, true, false)?;
 
         // guess point: GetSurface(0) point nearest to the end of the binormal (half
@@ -830,17 +821,6 @@ fn c1_collect_points(
         ) {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // SolidCraft (tangency-labs/solidcore#1952, WR-641, under
-            // `fillet_through_extended_rail_end`): an extended rail end's knot is a
-            // through point only where its section can be solved. Where the edge's end
-            // meets the wall obliquely, or the section's rail lies past the side face's
-            // edge, the guess is off the face and no section is found there: the trace
-            // goes on without that point, as it does without the flag, rather than
-            // failing the fillet.
-            Err(_) if k >= ops.solver().g1_knots.len() => {
-                k += 1;
-                continue;
-            }
             Err(_) => return Err(SolidError::sm_err(OP)),
         }
         // add new TsectPnt to sAllTsectPnts array (and sDeletePnts)
@@ -911,85 +891,6 @@ fn c1_collect_points(
     }
 
     Ok(Some(SurfPass { uv_curve, all }))
-}
-
-/// Not upstream: the SolidCraft fork's addition to `CalcFilletGeom`
-/// (tangency-labs/solidcore#1022, WR-468; opt-in
-/// `Kernel::fixes.fillet_through_extended_rail_end`). A rail end on an extended edge
-/// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`) is found on the fillet surface only once that is
-/// made, so it gives the trace no point, and the surface can stop short of the
-/// filleted edge's end when the other rail ends well inside it. At such an end the
-/// corner's cap edges meet at the filleted edge's end, so the fillet runs at least to
-/// it: the edge's end parameter (`sIvl.GetMin()` / `GetMax()`, whichever end is the
-/// corner's filleted vertex) is a through point too. Returns those parameters not
-/// already among the G1 knots, in rail and end order; none for a closed edge or
-/// without the executive's corners.
-///
-/// # Errors
-///
-/// `SM_ERR_NULL_POINTER` for a missing edge use, edge, rail or corner.
-fn c1_extended_rail_end_knots(
-    ops: &dyn FilletSolverOps,
-    cx: &Cx<'_>,
-    st: &CalcState,
-) -> Result<Vec<f64>> {
-    use crate::blend::fillet_geom::p1::FilletVertexType;
-    use crate::topology::edge as topo_edge;
-
-    // a standalone entry point has no executive corners to resolve the rail ends'
-    // corners with: nothing to add
-    let corners = match &cx.solvers {
-        GeometrySolvers::Live(context) => context.corners(),
-        GeometrySolvers::Indexed(_) => return Ok(Vec::new()),
-    };
-    let eu0 = ops
-        .solver()
-        .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let start = topo_edge::start_vertex(cx.target, edge)?;
-    let end = topo_edge::end_vertex(cx.target, edge)?;
-    let mut knots = Vec::new();
-    // a closed edge has no end the fillet stops at
-    if start == end {
-        return Ok(knots);
-    }
-    for which_rail in 0..2 {
-        let rail = cx
-            .fillets
-            .geom(st.geom0)?
-            .rail(which_rail)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let brep = cx.fillets.brep();
-        let first = topo_edge::vertex(brep, rail)?;
-        let second = match first {
-            Some(v) => topo_edge::other_vertex(brep, rail, Some(v))?,
-            None => None,
-        };
-        for fv in [first, second].into_iter().flatten() {
-            let fillet_vertex = cx.fillets.fillet_vertex(fv)?;
-            if fillet_vertex.fillet_vertex_type() != FilletVertexType::RailXExtendedEdgeuse {
-                continue;
-            }
-            let Some(corner) = fillet_vertex.fillet_corner() else {
-                continue;
-            };
-            let Some(corner_vertex) = corners.corner(corner)?.filleted_vertex() else {
-                continue;
-            };
-            let param = if Some(corner_vertex) == start {
-                st.ivl.min()
-            } else if Some(corner_vertex) == end {
-                st.ivl.max()
-            } else {
-                continue;
-            };
-            if !ops.solver().g1_knots.contains(&param) && !knots.contains(&param) {
-                knots.push(param);
-            }
-        }
-    }
-    Ok(knots)
 }
 
 #[cfg(test)]
@@ -1399,117 +1300,6 @@ mod tests_c1 {
             }
         );
     }
-
-    /// The executive's corner table, for [`c1_extended_rail_end_knots`]; the other
-    /// context calls are not reached.
-    struct CornersOnly(
-        Vec<crate::blend::fillet_corner::p3::FilletCorner>,
-        NoCorners,
-    );
-
-    impl FilletGeometryContext for CornersOnly {
-        fn set_extension_flags(
-            &self,
-            _solver: &mut dyn FilletSolverOps,
-            _k: &Kernel,
-            _target: &Brep,
-        ) -> Result<()> {
-            Ok(())
-        }
-        fn solver<'s>(
-            &'s self,
-            _id: FilletSolverId,
-            current: &'s FilletSolver,
-        ) -> Result<&'s FilletSolver> {
-            Ok(current)
-        }
-        fn corners(&self) -> CornerLookup<'_> {
-            CornerLookup::table(&self.0)
-        }
-        fn split_corners(&mut self) -> &mut dyn SplitCorners {
-            &mut self.1
-        }
-    }
-
-    /// tangency-labs/solidcore#1022: a rail of geometry 0 that ends on an extended edge
-    /// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`) at the corner of the filleted edge's start
-    /// (or end) makes that end parameter a through knot, once, and only for a corner at
-    /// one of the edge's ends.
-    #[test]
-    fn issue_1022_extended_rail_end_adds_the_edge_end_as_a_through_knot() {
-        use crate::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
-        use crate::blend::fillet_geom::p1::FilletCornerId;
-
-        let k = Kernel::default();
-        // the target edge v0 -> v1 with a vertex use on each edge use (start, end)
-        let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
-        let edge = eu::edge(&tb, eus[0]).unwrap().unwrap();
-        let [v0, v1] = tb.edge(edge).unwrap().vertices;
-        for (e, v) in [(eus[0], v0), (eus[1], v1)] {
-            let vu = tb
-                .add_vertexuse_record(Vertexuse {
-                    vertex: Some(v),
-                    ..Vertexuse::default()
-                })
-                .unwrap();
-            tb.edgeuse_mut(e).unwrap().vertexuse = Some(vu);
-        }
-        // ROWS: rail 1's first end is the only SM_FV_RAIL_X_EXTENDED_EDGEUSE vertex
-        let (mut fb, _g, _) = fillets(&k, ROWS);
-        let extended: Vec<_> = crate::topology::brep::p1::vertices(fb.brep(), None)
-            .unwrap()
-            .into_iter()
-            .filter(|&v| {
-                fb.fillet_vertex(v)
-                    .is_ok_and(|f| f.fillet_vertex_type() == FilletVertexType::RailXExtendedEdgeuse)
-            })
-            .collect();
-        assert_eq!(extended.len(), 1);
-        fb.fillet_vertex_mut(extended[0])
-            .unwrap()
-            .set_fillet_corner(Some(FilletCornerId(0)));
-
-        for (corner_vertex, want) in [(v0, vec![0.0]), (v1, vec![1.0])] {
-            let corner = FilletCorner::new(
-                FilletCornerKind::Open,
-                Some(corner_vertex),
-                None,
-                None,
-                1e-6,
-                1e-3,
-            );
-            let mut ctx = CornersOnly(vec![corner], NoCorners);
-            let mut ops = solver(&k, eus);
-            let mut cx = Cx {
-                k: &k,
-                target: &mut tb,
-                fillets: &mut fb,
-                solvers: GeometrySolvers::Live(&mut ctx),
-                error_info: None,
-            };
-            let st = c1_setup(&mut ops, &mut cx).unwrap();
-            assert_eq!(c1_extended_rail_end_knots(&ops, &cx, &st).unwrap(), want);
-            // a knot already among the G1 knots is not added again
-            ops.0.g1_knots.push(want[0]);
-            assert!(c1_extended_rail_end_knots(&ops, &cx, &st)
-                .unwrap()
-                .is_empty());
-        }
-
-        // without the executive's corners (a standalone entry point): none
-        let mut ops = solver(&k, eus);
-        let mut cx = Cx {
-            k: &k,
-            target: &mut tb,
-            fillets: &mut fb,
-            solvers: GeometrySolvers::Indexed(&[]),
-            error_info: None,
-        };
-        let st = c1_setup(&mut ops, &mut cx).unwrap();
-        assert!(c1_extended_rail_end_knots(&ops, &cx, &st)
-            .unwrap()
-            .is_empty());
-    }
 }
 
 // P4-CHUNK(C1) END
@@ -1652,6 +1442,14 @@ fn c2_offset_point_ignored(
 /// short of that end (a corner whose rails cross before the edge's vertex, the Mixed
 /// one), the edge's section there is a through point (made as the G1 knots' are, solved
 /// over the trace's extended domains), and the extension runs on past it.
+///
+/// Not the fork's (#2500): a rail end on an End's plane (an extended-edge-use end) gives
+/// the trace no point, as upstream, since it is found on the surface once that is made.
+/// A blend both of whose ends are such Ends, with no G1 knot between (a chamfer of a rim
+/// running from one smooth vertex to another), so has no point at all: its trace starts
+/// from the edge's sections at those ends on the faces themselves (a section solved on the
+/// faces' extensions, past a tangent edge the ball has rolled over, is no point of the
+/// round), an end without one skipped.
 fn c2_trace_to_edge_ends(
     ops: &mut dyn FilletSolverOps,
     cx: &mut Cx<'_>,
@@ -1659,7 +1457,6 @@ fn c2_trace_to_edge_ends(
 ) -> Result<()> {
     use crate::geom::global_solver::{SolutionRequested, SolverOperation};
     use crate::intersect::surface_intersector::p1::SrfIndex;
-    use crate::math::BIG_DOUBLE;
     use crate::topology::edge as topo_edge;
 
     let eu0 = ops
@@ -1668,21 +1465,22 @@ fn c2_trace_to_edge_ends(
         .ok_or_else(|| invalid("no edge use 0"))?;
     let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
     if !st.do_sorting
-        || st.tsect_pnts.is_empty()
         || topo_edge::start_vertex(cx.target, edge)? == topo_edge::end_vertex(cx.target, edge)?
     {
         return Ok(());
     }
-    let tol = ops.solver().this_approx_tol_3d();
-    for end in 0..2 {
-        let extended = if end == 0 {
-            ops.solver().extend_before
-        } else {
-            ops.solver().extend_after
-        };
-        if !extended {
-            continue;
+    let extended = [ops.solver().extend_before, ops.solver().extend_after];
+    if st.tsect_pnts.is_empty() {
+        // no point to run on from: the trace starts from the edge's end sections
+        for (end, _) in extended.iter().enumerate().filter(|(_, &e)| e) {
+            if let Some(r) = c2_edge_end_section(ops, cx, st, end, false)? {
+                st.tsect_pnts.push(r);
+            }
         }
+        return Ok(());
+    }
+    let tol = ops.solver().this_approx_tol_3d();
+    for (end, _) in extended.iter().enumerate().filter(|(_, &e)| e) {
         // the trace's point nearest that end: its ball's centre dropped to the edge
         let near = if end == 0 {
             st.tsect_pnts.first()
@@ -1710,52 +1508,82 @@ fn c2_trace_to_edge_ends(
         if at.distance(end_pnt) <= tol {
             continue;
         }
-        // the edge's section at its end, as the G1 knots' through points are made
-        let base0 = st.base_surfaces[0].clone();
-        let (pnt, tangent) = binormal_guess_point(ops, cx, &base0, end_param, true)?;
-        // solved where the trace itself runs: its base surfaces' extended domains
-        let mut domain1 = st.base_surfaces[0].natural_uv_domain_if_built();
-        let mut domain2 = st.base_surfaces[1].natural_uv_domain_if_built();
+        if let Some(r) = c2_edge_end_section(ops, cx, st, end, true)? {
+            if end == 0 {
+                st.tsect_pnts.insert(0, r);
+            } else {
+                st.tsect_pnts.push(r);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The edge's section at its start (`end` 0) or end (1), as the G1 knots' through points
+/// are made: `on_extended`, solved over the trace's extended domains for a trace run on to
+/// the edge's end ([`c2_trace_to_edge_ends`]), `None` where it is not found at an End at a
+/// smooth vertex past a tangent edge of a face of the edge ([`c2_end_past_tangent_edge`]);
+/// else on the faces' own surfaces, a seed of a trace with no point, `None` where it is not
+/// found there.
+///
+/// # Errors
+///
+/// Those of the guess, the domains and the section's solve elsewhere.
+fn c2_edge_end_section(
+    ops: &mut dyn FilletSolverOps,
+    cx: &mut Cx<'_>,
+    st: &mut CalcState,
+    end: usize,
+    on_extended: bool,
+) -> Result<Option<TsRef>> {
+    use crate::math::BIG_DOUBLE;
+
+    let end_param = if end == 0 { st.ivl.min() } else { st.ivl.max() };
+    let base0 = st.base_surfaces[0].clone();
+    let (pnt, tangent) = binormal_guess_point(ops, cx, &base0, end_param, true)?;
+    // solved where the trace itself runs (its base surfaces' extended domains), or on the
+    // faces' own surfaces
+    let mut domain1 = st.base_surfaces[0].natural_uv_domain_if_built();
+    let mut domain2 = st.base_surfaces[1].natural_uv_domain_if_built();
+    if on_extended {
         ops.solver()
             .setup_offset_extension(cx.k, &st.base_surfaces[0], &mut domain1)?;
         ops.solver()
             .setup_offset_extension(cx.k, &st.base_surfaces[1], &mut domain2)?;
-        let mut end_tsect = TsectPnt::new();
-        match super::p3::find_fillet_tsect_pnt_in(
-            ops,
-            cx.k,
-            Some(&mut *cx.target),
-            &st.base_surfaces[0],
-            &st.base_surfaces[1],
-            pnt,
-            tangent,
-            &mut end_tsect,
-            Some(&domain1),
-            Some(&domain2),
-        ) {
-            Ok(()) => {}
-            // Not the fork's (#2406): at an End at a smooth vertex past a tangent edge of
-            // a face of the edge the ball may have left that face before the edge's end,
-            // its section there not on these faces: the trace goes on without it, out to
-            // its extended domains, and the rails' rollover traces it again on the face
-            // beyond (the End's rail ends then found on its plane)
-            Err(e)
-                if !e.is_unported_or_cancelled()
-                    && c2_end_past_tangent_edge(ops, cx, st, end == 1)? =>
-            {
-                continue;
-            }
-            Err(e) => return Err(e),
-        }
-        end_tsect.curve_parameter = -BIG_DOUBLE;
-        let r = st.store.alloc(end_tsect);
-        if end == 0 {
-            st.tsect_pnts.insert(0, r);
-        } else {
-            st.tsect_pnts.push(r);
-        }
     }
-    Ok(())
+    let mut end_tsect = TsectPnt::new();
+    match super::p3::find_fillet_tsect_pnt_in(
+        ops,
+        cx.k,
+        Some(&mut *cx.target),
+        &st.base_surfaces[0],
+        &st.base_surfaces[1],
+        pnt,
+        tangent,
+        &mut end_tsect,
+        on_extended.then_some(&domain1),
+        on_extended.then_some(&domain2),
+    ) {
+        Ok(()) => {}
+        // A seed of a trace with no point is a section on the faces themselves: where the
+        // edge's end has none there (the ball has left a face before it), the trace starts
+        // from the other end's and is extended to it
+        Err(e) if !on_extended && !e.is_unported_or_cancelled() => return Ok(None),
+        // Not the fork's (#2406): at an End at a smooth vertex past a tangent edge of
+        // a face of the edge the ball may have left that face before the edge's end,
+        // its section there not on these faces: the trace goes on without it, out to
+        // its extended domains, and the rails' rollover traces it again on the face
+        // beyond (the End's rail ends then found on its plane)
+        Err(e)
+            if !e.is_unported_or_cancelled()
+                && c2_end_past_tangent_edge(ops, cx, st, end == 1)? =>
+        {
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    }
+    end_tsect.curve_parameter = -BIG_DOUBLE;
+    Ok(Some(st.store.alloc(end_tsect)))
 }
 
 /// Not the fork's (#2406): whether the corner at the edge's end (`at_end`, else its start)
@@ -2211,6 +2039,13 @@ fn c3_make_intersector<'s>(
     let [domain1, domain2] = &st.trace.domains;
     // the solver (`*this`) is passed to each intersector call instead
     let mut fi = TraceIntersector::new(k, surface1, domain1, surface2, domain2, None)?;
+    // Not upstream (#2500): with `offset_extension_as_itself` an offset extends a surface
+    // of revolution round its axis past the closure of its turn, so the offsets'
+    // intersection can be closed (a round run onto a torus's tube meets its offset in a
+    // closed oval) without repeating its UV: an extension stops where it comes back onto
+    // the curve traced, compared in 3D, or it runs round past the trace's own span and the
+    // fillet surface covers that span twice.
+    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
 
     // If we need to trace beyond the end and we are tracing along an arc, put a stop
     // tracing criterion to avoid possible infinite looping (`IsArc` only runs when an
@@ -4625,6 +4460,13 @@ pub(crate) fn point_intersection_on_surfaces(
     let [surface1, surface2] = surfaces;
     let [domain1, domain2] = &domains;
     let mut fi = TraceIntersector::new(k, surface1, domain1, surface2, domain2, None)?;
+    // Not upstream (#2500): with `offset_extension_as_itself` an offset extends a surface
+    // of revolution round its axis past the closure of its turn, so the offsets'
+    // intersection can be closed (a round run onto a torus's tube meets its offset in a
+    // closed oval) without repeating its UV: an extension stops where it comes back onto
+    // the curve traced, compared in 3D, or it runs round past the trace's own span and the
+    // fillet surface covers that span twice.
+    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
     let mut cx = Cx {
         k,
         target,
