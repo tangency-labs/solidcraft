@@ -1468,7 +1468,7 @@ pub fn joint_values(asm: &Assembly) -> BTreeMap<u64, Vec<f64>> {
 /// unless flipped. Two datum references (a plane or an axis on each side) both point along the
 /// geometry's own normal rather than out of a body, so they mate aligned - each part keeps its
 /// side of the datum - and `flip` asks for the mated relation.
-fn flip_of(j: &Joint) -> Mat {
+pub fn flip_of(j: &Joint) -> Mat {
     // An angle relation's `angle` is its tilt (`tail`); a perpendicular one has none.
     let turn = if matches!(j.kind, JointKind::Angle | JointKind::Perpendicular) { 0.0 } else { j.angle };
     let mut m = rot_z(turn);
