@@ -1,8 +1,12 @@
 use super::*;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
+fn normal_map(angle: f64, scale: Scale, bands: &[Band]) -> Result<BreakMap> {
+    BreakMap::new(angle, Vec2::new(-angle.sin(), angle.cos()), scale, bands)
+}
+
 fn map(factor: f64, bands: &[Band]) -> BreakMap {
-    BreakMap::new(-FRAC_PI_2, Scale::new(factor, 1.0).unwrap(), bands).unwrap()
+    normal_map(-FRAC_PI_2, Scale::new(factor, 1.0).unwrap(), bands).unwrap()
 }
 
 fn band(start: f64, end: f64, gap_mm: f64) -> Band {
@@ -54,9 +58,59 @@ fn multiple_unsorted_reversed_bands_and_removal() {
 }
 
 #[test]
+fn oblique_cuts_keep_a_horizontal_plate_and_its_holes_aligned() {
+    let m = BreakMap::new((-42.0_f64).to_radians(), Vec2::new(1.0, 0.0), Scale::new(1.0, 1.0).unwrap(), &[band(75.0, 130.0, 8.0)]).unwrap();
+    let left = m.to_paper(Vec2::new(25.0, 35.0)).unwrap().unwrap();
+    let right = m.to_paper(Vec2::new(215.0, 35.0)).unwrap().unwrap();
+    assert!((left.y - right.y).abs() < 1e-9, "hole centres drifted: {left:?}, {right:?}");
+    for y in [0.0, 70.0] {
+        let pieces = m.line(Vec2::new(0.0, y), Vec2::new(240.0, y)).unwrap();
+        assert_eq!(pieces.len(), 2);
+        assert!(pieces.iter().flatten().all(|p| (p.y - y).abs() < 1e-9));
+    }
+}
+
+#[test]
+fn alignment_and_axis_gap_survive_rotation_scaling_and_reversed_axis() {
+    for angle in [-140.0_f64, -90.0, -42.0, 30.0, 90.0, 135.0] {
+        for factor in [0.25, 0.5, 1.0, 2.0] {
+            for axis in [Vec2::new(1.0, 0.0), Vec2::new(-2.0, 0.0)] {
+                let n = Vec2::new(-angle.to_radians().sin(), angle.to_radians().cos());
+                let m = BreakMap::new(angle.to_radians(), axis, Scale::new(factor, 1.0).unwrap(), &[band(n.x * 80.0, n.x * 160.0, 5.0)]).unwrap();
+                let a = m.to_paper(Vec2::new(25.0, 0.0)).unwrap().unwrap();
+                let b = m.to_paper(Vec2::new(215.0, 0.0)).unwrap().unwrap();
+                near(a, Vec2::new(a.x, 0.0));
+                near(b, Vec2::new(b.x, 0.0));
+                near(m.to_model(a).unwrap().unwrap(), Vec2::new(25.0, 0.0));
+                near(m.to_model(b).unwrap().unwrap(), Vec2::new(215.0, 0.0));
+                let pieces = m.line(Vec2::ZERO, Vec2::new(240.0, 0.0)).unwrap();
+                assert_eq!(pieces.len(), 2);
+                assert!((pieces[1][0].x - pieces[0][1].x - 5.0).abs() < 1e-8);
+                assert!((m.shortening_mm() - (80.0 * factor - 5.0)).abs() < 1e-8);
+            }
+        }
+    }
+    let m = BreakMap::new(-FRAC_PI_4, Vec2::new(0.0, 1.0), Scale::new(1.0, 1.0).unwrap(), &[band(30.0, 60.0, 5.0)]).unwrap();
+    let p = m.to_paper(Vec2::new(10.0, 100.0)).unwrap().unwrap();
+    assert_eq!(p.x, 10.0);
+    near(m.to_model(p).unwrap().unwrap(), Vec2::new(10.0, 100.0));
+}
+
+#[test]
+fn invalid_shortening_axes_are_refused() {
+    let scale = Scale::new(1.0, 1.0).unwrap();
+    for axis in [Vec2::ZERO, Vec2::new(1e-20, 0.0), Vec2::new(f64::NAN, 0.0), Vec2::new(f64::INFINITY, 1.0), Vec2::new(f64::MAX, f64::MAX)] {
+        assert!(BreakMap::new(-FRAC_PI_2, axis, scale, &[]).is_err());
+    }
+    for angle in [0.0, 1e-8, std::f64::consts::PI] {
+        assert!(BreakMap::new(angle, Vec2::new(1.0, 0.0), scale, &[band(0.0, 100.0, 5.0)]).is_err());
+    }
+}
+
+#[test]
 fn oblique_and_horizontal_lines_use_the_same_map() {
     for angle in [0.0, FRAC_PI_4, FRAC_PI_2, -FRAC_PI_4] {
-        let m = BreakMap::new(angle, Scale::new(1.0, 2.0).unwrap(), &[band(20.0, 60.0, 5.0)]).unwrap();
+        let m = normal_map(angle, Scale::new(1.0, 2.0).unwrap(), &[band(20.0, 60.0, 5.0)]).unwrap();
         let normal = m.normal();
         let tangent = Vec2::new(normal.y, -normal.x);
         let original = normal * 100.0 + tangent * 30.0;
@@ -69,7 +123,7 @@ fn oblique_and_horizontal_lines_use_the_same_map() {
 
 #[test]
 fn boundaries_remain_and_lines_in_removed_spans_disappear() {
-    let m = BreakMap::new(0.0, Scale::new(1.0, 1.0).unwrap(), &[band(20.0, 60.0, 5.0)]).unwrap();
+    let m = normal_map(0.0, Scale::new(1.0, 1.0).unwrap(), &[band(20.0, 60.0, 5.0)]).unwrap();
     near(m.to_paper(Vec2::new(10.0, 20.0)).unwrap().unwrap(), Vec2::new(10.0, 20.0));
     near(m.to_paper(Vec2::new(10.0, 60.0)).unwrap().unwrap(), Vec2::new(10.0, 25.0));
     assert!(m.line(Vec2::new(0.0, 40.0), Vec2::new(100.0, 40.0)).unwrap().is_empty());
@@ -80,7 +134,7 @@ fn boundaries_remain_and_lines_in_removed_spans_disappear() {
 fn oblique_boundary_points_survive_projection_roundoff() {
     for end in [60.0, 800_000_000.0] {
         for degrees in -179..180 {
-            let m = BreakMap::new(f64::from(degrees).to_radians(), Scale::new(1.0, 2.0).unwrap(), &[band(20.0, end, 5.0)]).unwrap();
+            let m = normal_map(f64::from(degrees).to_radians(), Scale::new(1.0, 2.0).unwrap(), &[band(20.0, end, 5.0)]).unwrap();
             let normal = m.normal();
             let tangent = Vec2::new(normal.y, -normal.x);
             assert!(m.to_model(normal * 12.5 + tangent * 3.5).unwrap().is_none());
@@ -106,19 +160,19 @@ fn hostile_bands_limits_and_coordinates_are_refused() {
         band(0.0, 10.0, f64::NAN),
         band(0.0, 2e9, 1.0),
     ] {
-        assert!(BreakMap::new(0.0, scale, &[b]).is_err(), "{b:?}");
+        assert!(normal_map(0.0, scale, &[b]).is_err(), "{b:?}");
     }
-    assert!(BreakMap::new(f64::NAN, scale, &[]).is_err());
-    assert!(BreakMap::new(0.0, scale, &[band(1e9 - 1e-6, 1e9, 1e-8)]).is_err());
-    assert!(BreakMap::new(0.0, scale, &[band(100_000.0, 100_010.0, 1.1e-9)]).is_err());
-    assert!(BreakMap::new(0.0, scale, &[band(0.0, 800_000_000.0, 1e-6)]).is_err());
-    assert!(BreakMap::new(0.0, scale, &[band(0.0, 20.0, 1.0), band(10.0, 30.0, 1.0)]).is_err());
-    assert!(BreakMap::new(0.0, scale, &[band(0.0, 20.0, 1.0), band(20.0, 30.0, 1.0)]).is_err());
+    assert!(normal_map(f64::NAN, scale, &[]).is_err());
+    assert!(normal_map(0.0, scale, &[band(1e9 - 1e-6, 1e9, 1e-8)]).is_err());
+    assert!(normal_map(0.0, scale, &[band(100_000.0, 100_010.0, 1.1e-9)]).is_err());
+    assert!(normal_map(0.0, scale, &[band(0.0, 800_000_000.0, 1e-6)]).is_err());
+    assert!(normal_map(0.0, scale, &[band(0.0, 20.0, 1.0), band(10.0, 30.0, 1.0)]).is_err());
+    assert!(normal_map(0.0, scale, &[band(0.0, 20.0, 1.0), band(20.0, 30.0, 1.0)]).is_err());
     let bands: Vec<_> = (0..MAX_BREAKS).map(|i| band(i as f64 * 20.0, i as f64 * 20.0 + 10.0, 1.0)).collect();
-    assert!(BreakMap::new(0.0, scale, &bands).is_ok());
+    assert!(normal_map(0.0, scale, &bands).is_ok());
     let mut excessive = bands;
     excessive.push(band(2000.0, 2010.0, 1.0));
-    assert!(BreakMap::new(0.0, scale, &excessive).is_err());
+    assert!(normal_map(0.0, scale, &excessive).is_err());
     let m = map(1.0, &[]);
     assert!(m.shortening_mm().is_sign_positive());
     assert!(m.to_paper(Vec2::new(f64::NAN, 0.0)).is_err());

@@ -42,6 +42,37 @@ fn bad_previews_refuse_atomically_including_record_and_output_caps() {
         }
     }
     let bands: Vec<_> = (0..64).map(|i| json!({"start":i*20+5,"end":i*20+15,"gap_mm":1})).collect();
-    assert!(s.execute("drawing.break.preview", &json!({"angle_rad":0,"scale":"1:1","breaks":bands,"lines":vec![[[0,0],[0,1300]];400]})).is_err());
+    assert!(
+        s.execute(
+            "drawing.break.preview",
+            &json!({"angle_rad":0,"shortening_axis":[0,1],"scale":"1:1","breaks":bands,"lines":vec![[[0,0],[0,1300]];400]})
+        )
+        .is_err()
+    );
     assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+}
+
+#[test]
+fn oblique_preview_defaults_to_horizontal_alignment_and_accepts_vertical_axis() {
+    let mut s = crate::Session::new(Default::default());
+    let r = s
+        .execute(
+            "drawing.break.preview",
+            &json!({"angle_rad":-42_f64.to_radians(),"scale":"1:1",
+        "breaks":[{"start":75,"end":130,"gap_mm":8}], "lines":[[[0,0],[240,0]],[[0,70],[240,70]]]}),
+        )
+        .unwrap();
+    assert_eq!(r["shortening_axis"], json!([1.0, 0.0]));
+    for line in r["lines"].as_array().unwrap() {
+        assert_eq!(line[0][1], line[1][1]);
+        assert!([0.0, 70.0].contains(&line[0][1].as_f64().unwrap()));
+    }
+    let r = s
+        .execute(
+            "drawing.break.preview",
+            &json!({"angle_rad":0,"shortening_axis":[0,1],"scale":"1:1",
+        "breaks":[{"start":30,"end":60,"gap_mm":5}],"lines":[[[10,0],[10,100]]]}),
+        )
+        .unwrap();
+    assert_eq!(r["lines"][1], json!([[10.0, 35.0], [10.0, 75.0]]));
 }

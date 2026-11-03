@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn oblique_sample_preserves_the_plate_height_and_hole_alignment() {
+    let mut p = BreakPreview::oblique_sample();
+    assert_eq!(p.bands.len(), 1);
+    assert!(p.error.is_none());
+    for scale in [0, 1] {
+        p.scale = scale;
+        assert!(p.refresh());
+        let factor = if scale == 0 { 1.0 } else { 0.5 };
+        let output = p.output.as_ref().unwrap();
+        assert_eq!(output.shortening_axis, [1.0, 0.0]);
+        assert!(output.lines.iter().flatten().all(|point| point[1] >= -1e-9 && point[1] <= 70.0 * factor + 1e-9));
+        let map = p.map().unwrap();
+        for x in [25.0, 215.0] {
+            let paper = map.to_paper(Vec2::new(x, 35.0)).unwrap().unwrap();
+            assert_eq!(paper.y, 35.0 * factor);
+        }
+    }
+}
+
+#[test]
 fn repeated_pairs_pending_cancel_and_history_preserve_completed_breaks() {
     let mut p = BreakPreview { active: true, ..Default::default() };
     p.place(Vec2::new(60.0, 35.0));

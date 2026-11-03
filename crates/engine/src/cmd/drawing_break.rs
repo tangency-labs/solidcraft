@@ -22,7 +22,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<PreviewResult>)
         .noundo()
         .doc_only()
-        .params("angle_rad: line angle; scale: paper:model; breaks: [{start,end,gap_mm}] in original view-plane mm with paper-mm gaps; lines?: [[[x,y],[x,y]]]; paper_points?: [[x,y]] → clipped straight lines, paper gaps and inverse picks (null inside gaps); read-only preview, no drawing objects"),
+        .params("angle_rad: cut-line angle; shortening_axis?: [x,y] (default [1,0], normalized independently of the cut); scale: paper:model; breaks: [{start,end,gap_mm}] along the cut normal in original view-plane mm, gaps in paper mm along the shortening axis; lines?: [[[x,y],[x,y]]]; paper_points?: [[x,y]] → clipped straight lines, normal-coordinate paper gaps and inverse picks (null inside gaps); read-only preview, no drawing objects"),
 ];
 
 fn run(session: &mut Session, value: &Value) -> Result<Value> {
@@ -44,7 +44,7 @@ fn preview(_session: &mut Session, value: &Value) -> Result<Value> {
     let p: PreviewParams = serde_json::from_value(value.clone()).map_err(|e| bad(ID, e.to_string()))?;
     let scale: Scale = p.scale.parse().map_err(|e: solidcraft_geom::drawing_view::Invalid| bad(ID, e.to_string()))?;
     let bands: Vec<_> = p.breaks.iter().map(|b| Band { start: b.start, end: b.end, gap_mm: b.gap_mm }).collect();
-    let map = BreakMap::new(p.angle_rad, scale, &bands).map_err(|e| bad(ID, e.to_string()))?;
+    let map = BreakMap::new(p.angle_rad, Vec2::new(p.shortening_axis[0], p.shortening_axis[1]), scale, &bands).map_err(|e| bad(ID, e.to_string()))?;
     let mut lines = Vec::new();
     for [a, b] in p.lines {
         for [a, b] in map.line(Vec2::new(a[0], a[1]), Vec2::new(b[0], b[1])).map_err(|e| bad(ID, e.to_string()))? {
@@ -60,8 +60,10 @@ fn preview(_session: &mut Session, value: &Value) -> Result<Value> {
         .map(|p| map.to_model(Vec2::new(p[0], p[1])).map(|p| p.map(|p| [p.x, p.y])).map_err(|e| bad(ID, e.to_string())))
         .collect::<Result<Vec<_>>>()?;
     let n = map.normal();
+    let axis = map.axis();
     let reply = PreviewResult {
         normal: [n.x, n.y],
+        shortening_axis: [axis.x, axis.y],
         shortening_mm: map.shortening_mm(),
         breaks: map.bands().iter().map(|b| BreakBand { start: b.start, end: b.end, gap_mm: b.gap_mm }).collect(),
         gaps: map.paper_gaps(),

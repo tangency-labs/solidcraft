@@ -1,7 +1,9 @@
 //! Parallel view breaks (W36): a piecewise translation after uniform view scaling.
 //!
 //! Bands are in the original view plane's model millimetres along the normal to the
-//! break lines. Gaps are paper millimetres. Removed model points and empty paper gaps
+//! break lines. Translation follows a separate shortening axis, preserving alignment
+//! across that axis. Gaps are paper millimetres measured along the shortening axis.
+//! Removed model points and empty paper gaps
 //! have no image/preimage. Measurements must use the original geometry, never this map.
 //! This first slice handles parallel, disjoint bands and exact straight-line clipping;
 //! it neither changes a model nor creates persistent drawing objects.
@@ -41,6 +43,8 @@ pub struct Band {
 #[derive(Clone, Debug)]
 pub struct BreakMap {
     normal: Vec2,
+    axis: Vec2,
+    projection: f64,
     factor: f64,
     bands: Vec<Band>,
     paper_tolerance: f64,
@@ -63,13 +67,26 @@ fn strictly_inside(value: f64, low: f64, high: f64, tolerance: f64) -> bool {
 }
 
 impl BreakMap {
-    /// `line_angle` is the break line's angle, anticlockwise in radians in the view plane.
-    pub fn new(line_angle: f64, scale: Scale, bands: &[Band]) -> Result<Self> {
+    /// `line_angle` is the cut's angle, anticlockwise in radians in the view plane.
+    /// `shortening_axis` is normalized independently: (1, 0) preserves all y coordinates,
+    /// (0, 1) preserves x. Cuts parallel or almost parallel to that axis are refused.
+    pub fn new(line_angle: f64, shortening_axis: Vec2, scale: Scale, bands: &[Band]) -> Result<Self> {
         if !line_angle.is_finite() || line_angle.abs() > 1e6 {
             return Err(Invalid("line angle must be finite and within 1e6 radians"));
         }
         if bands.len() > MAX_BREAKS {
             return Err(Invalid("more than 64 breaks"));
+        }
+        let length = shortening_axis.len();
+        if !shortening_axis.is_finite() || !length.is_finite() || length <= EPS {
+            return Err(Invalid("shortening axis must have finite magnitude greater than 1e-9"));
+        }
+        let axis = shortening_axis * (1.0 / length);
+        let (sin, cos) = line_angle.sin_cos();
+        let normal = Vec2::new(-sin, cos);
+        let projection = normal.dot(axis);
+        if projection.abs() < 1e-6 {
+            return Err(Invalid("break lines must cross the shortening axis, not run parallel to it"));
         }
         let factor = scale.factor();
         let mut checked = Vec::with_capacity(bands.len());
@@ -81,14 +98,14 @@ impl BreakMap {
                 || !band.gap_mm.is_finite()
                 || band.gap_mm <= EPS
                 || band.gap_mm > MAX_COORDINATE_MM
-                || band.gap_mm >= (end - start) * factor
+                || band.gap_mm * projection.abs() >= (end - start) * factor
             {
                 return Err(Invalid("finite, distinct break lines must remove more paper than the positive gap"));
             }
             checked.push(Band { start, end, gap_mm: band.gap_mm });
         }
         checked.sort_by(|a, b| a.start.total_cmp(&b.start));
-        let shortening = checked.iter().fold(0.0, |sum, b| sum + ((b.end - b.start) * factor - b.gap_mm));
+        let shortening = checked.iter().fold(0.0, |sum, b| sum + ((b.end - b.start) * factor - b.gap_mm * projection.abs())) / projection.abs();
         let extent = checked.iter().fold(MAX_COORDINATE_MM, |extent, b| extent.max(b.start.abs() * factor).max(b.end.abs() * factor));
         // A small displayed gap can follow a large subtraction. Its classification must
         // account for the original coordinates and translation, not just its paper position.
@@ -100,24 +117,32 @@ impl BreakMap {
         if checked.windows(2).any(|pair| pair.first().zip(pair.get(1)).is_some_and(|(a, b)| b.start - a.end <= 4.0 * model_tolerance)) {
             return Err(Invalid("breaks overlap, touch or have an indistinguishable retained span"));
         }
-        if checked.iter().any(|band| band.gap_mm <= 4.0 * paper_tolerance) {
+        if checked.iter().any(|band| band.gap_mm * projection.abs() <= 4.0 * paper_tolerance) {
             return Err(Invalid("paper gap is indistinguishable at these coordinates"));
         }
-        let (sin, cos) = line_angle.sin_cos();
-        Ok(Self { normal: Vec2::new(-sin, cos), factor, bands: checked, paper_tolerance })
+        Ok(Self { normal, axis, projection, factor, bands: checked, paper_tolerance })
     }
 
     pub fn normal(&self) -> Vec2 {
         self.normal
     }
 
+    /// Unit shortening axis. Its sign does not change the map; band order chooses the fixed side.
+    pub fn axis(&self) -> Vec2 {
+        self.axis
+    }
+
     pub fn bands(&self) -> &[Band] {
         &self.bands
     }
 
-    /// Total shortening, in paper millimetres.
+    /// Total shortening along the selected axis, in paper millimetres.
     pub fn shortening_mm(&self) -> f64 {
-        self.bands.iter().fold(0.0, |sum, b| sum + ((b.end - b.start) * self.factor - b.gap_mm))
+        self.bands.iter().fold(0.0, |sum, b| sum + self.removed_normal_mm(b)) / self.projection.abs()
+    }
+
+    fn removed_normal_mm(&self, band: &Band) -> f64 {
+        (band.end - band.start) * self.factor - band.gap_mm * self.projection.abs()
     }
 
     /// The two displayed break-line coordinates along the normal, in paper mm.
@@ -127,8 +152,8 @@ impl BreakMap {
             .iter()
             .map(|b| {
                 let low = b.start * self.factor - shift;
-                shift += (b.end - b.start) * self.factor - b.gap_mm;
-                [low, low + b.gap_mm]
+                shift += self.removed_normal_mm(b);
+                [low, low + b.gap_mm * self.projection.abs()]
             })
             .collect()
     }
@@ -141,7 +166,7 @@ impl BreakMap {
                 return None;
             }
             if coordinate >= band.end || at_boundary(coordinate, band.end, tolerance) {
-                shift += (band.end - band.start) * self.factor - band.gap_mm;
+                shift += self.removed_normal_mm(band);
             } else {
                 break;
             }
@@ -150,7 +175,7 @@ impl BreakMap {
     }
 
     fn translated(&self, point: Vec2, shift: f64) -> Result<Vec2> {
-        let result = point * self.factor - self.normal * shift;
+        let result = point * self.factor - self.axis * (shift / self.projection);
         if !point_ok(result, MAX_COORDINATE_MM) {
             return Err(Invalid("mapped point exceeds paper coordinate limits"));
         }
@@ -174,17 +199,17 @@ impl BreakMap {
         let mut shift = 0.0;
         for band in &self.bands {
             let low = band.start * self.factor - shift;
-            let high = low + band.gap_mm;
+            let high = low + band.gap_mm * self.projection.abs();
             if strictly_inside(coordinate, low, high, self.paper_tolerance) {
                 return Ok(None);
             }
             if coordinate >= high || at_boundary(coordinate, high, self.paper_tolerance) {
-                shift += (band.end - band.start) * self.factor - band.gap_mm;
+                shift += self.removed_normal_mm(band);
             } else {
                 break;
             }
         }
-        let model = (paper + self.normal * shift) * (1.0 / self.factor);
+        let model = (paper + self.axis * (shift / self.projection)) * (1.0 / self.factor);
         if !point_ok(model, MAX_MODEL_MM) {
             return Err(Invalid("inverse point exceeds model coordinate limits"));
         }
