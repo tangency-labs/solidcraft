@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
@@ -39,7 +40,7 @@ fn ballooned() -> (Drawing, [u64; 2]) {
     let mut added = [0; 2];
     for ((path, at), id) in [(vec![3], [40.0, 25.0]), (vec![3, 7], [-35.5, 60.0])].into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.add_balloons([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at })]);
+        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -80,7 +81,7 @@ fn balloons_save_what_they_point_at_and_read_back_as_saved() {
         })
     );
     assert_eq!(balloon(&mut v, &placed)["edge"]["path"], json!([3]));
-    assert_eq!(d.balloon(added[1]).unwrap().occurrence(), [3, 7], "the part it numbers is its edge's path");
+    assert_eq!(d.balloons.by_id(added[1]).unwrap().occurrence(), [3, 7], "the part it numbers is its edge's path");
     let listed: Vec<u64> = v["balloons"].as_array().unwrap().iter().map(|x| ids::decode(x["id"].as_str().unwrap()).unwrap()).collect();
     let mut by_id = added.to_vec();
     by_id.sort_unstable();

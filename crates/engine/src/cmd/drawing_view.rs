@@ -41,7 +41,7 @@ use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, MAX_PATH_IDS, MAX_PATHS, OnSheet, ShownSet, Unmeasured};
+use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, MAX_PATH_IDS, MAX_PATHS, OnSheet, ShownSet, Styles, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult,
@@ -162,6 +162,8 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     if !on_paper {
         return Err(bad(CMD, format!("at scale {scale} the view reaches past ±{MAX_COORDINATE_MM} mm on paper: choose a smaller scale")));
     }
+    let styles =
+        Styles { display: settings.display_style, reference: settings.reference_style, reference_hides_model: settings.reference_hides_model };
     let asked = LineRequest {
         shows: shown,
         hidden: settings.display_style == VisualStyle::VisibleHidden,
@@ -171,22 +173,21 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         chord_mm,
     };
     let mut drawn = crate::drawing_view::lines(s, &set, &frame, &asked, CMD)?;
-    // A shaded part is drawn by its picture, so its own lines are left out; it still hides what
-    // lies behind it.
-    drawn.lines.retain(|l| !(if l.reference { settings.reference_style } else { settings.display_style }).is_shaded());
+    styles.leave_shaded_to_pictures(&mut drawn);
     if let Some(max) = request.max_error_mm {
         certify(&drawn, max, scale)?;
     }
+    let parts = crate::drawing_picture::view_parts(&set, styles);
     let scene = if request.scene {
-        let scene = solidcraft_geom::paper::Scene::new(paper, vec![crate::drawing_view::paper_group(&drawn, 0)]);
+        let mut group = crate::drawing_view::paper_group(&drawn, 0);
+        group.items.splice(0..0, crate::drawing_picture::picture_items(0, &parts, boundary));
+        let scene = solidcraft_geom::paper::Scene::new(paper, vec![group]);
         scene.validate().map_err(|e| bad(CMD, format!("{e}: raise chord_mm, or choose a smaller view")))?;
         Some(SceneResult(scene))
     } else {
         None
     };
-    let flags: Vec<bool> = set.bodies.iter().map(|b| b.reference).collect();
-    let pictures = crate::drawing_picture::pictures(settings.display_style, settings.reference_style, settings.reference_hides_model, &flags);
-    let picture = if pictures.is_empty() { None } else { Some(picture(boundary, request.sheet.dpi)?) };
+    let picture = if parts.is_empty() { None } else { Some(picture(boundary, request.sheet.dpi)?) };
 
     let named = match settings.view {
         ViewDirection::Named(view) => Some(snake_name(view)),
@@ -619,11 +620,11 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             .iter()
             .zip(&balloon_copies)
             .filter_map(|(old, new)| {
-                let original = d.balloon(*old)?;
+                let original = d.balloons.by_id(*old)?;
                 Some(Arc::new(Balloon { id: *new, view: copy_of(original.view)?, ..original.clone() }))
             })
             .collect();
-        d.add_balloons(copied);
+        d.balloons.add(copied);
         Ok(sheet)
     })?;
     let first = copies.first().copied().unwrap_or_default();

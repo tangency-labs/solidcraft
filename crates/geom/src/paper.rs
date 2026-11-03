@@ -82,6 +82,8 @@ pub const MAX_DASH_MM: f64 = 1000.0;
 pub const MAX_DASHES: f64 = 1e6;
 /// The longest side a sheet may have, in millimetres.
 pub const MAX_SIDE_MM: f64 = 5000.0;
+/// The most pixels an image on paper may have: 8,000 by 8,000, 256 MB once decoded.
+pub const MAX_IMAGE_PIXELS: u64 = 64_000_000;
 /// Groups, items, loops and curve pieces a scene may hold in all.
 pub const MAX_RECORDS: usize = 100_000;
 /// The largest coordinate and radius either way, in millimetres: twenty times the longest side.
@@ -142,6 +144,8 @@ pub enum ObjectKind {
     PartsList,
     /// The sheet table that lists the drawing's revisions.
     RevisionTable,
+    /// An image placed on the sheet, such as a logo or a photo.
+    SheetImage,
     /// A drawing view's lines.
     View,
 }
@@ -156,6 +160,7 @@ impl ObjectKind {
             ObjectKind::TitleBlock => "TITLE_BLOCK",
             ObjectKind::PartsList => "PARTS_LIST",
             ObjectKind::RevisionTable => "REVISION_TABLE",
+            ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
         }
     }

@@ -200,7 +200,7 @@ fn a_view_that_cant_be_drawn_leaves_out_only_itself() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let status = |s: &Session, id: u64| built(s, sheet).views.into_iter().find(|v| v.view == id).map(|v| v.status);
     for (style, why) in [
-        ("shaded", "not supported yet: shaded views need the drawing renderer (#5624)"),
+        ("shaded_visible", "not supported yet: shaded views with lines need the view's exact lines (W06)"),
         ("visible_hidden", "not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)"),
     ] {
         run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": style}}));
@@ -377,7 +377,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     // The first leaves 20 records; the second needs 32; the third takes the last 20.
     let views = [lines(left - 22), lines(30), lines(18)];
     let centre = Vec2::new(100.0, 100.0);
-    let (scene, states, _) = assemble(record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
+    let (scene, states, _) = assemble(record, &[], views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
     let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
     assert_eq!(statuses, ["drawn", "failed", "drawn"]);
     assert_eq!((scene.groups.len(), scene.groups.iter().map(Group::records).sum::<usize>()), (5, MAX_RECORDS));
@@ -620,7 +620,7 @@ fn a_views_box_is_what_it_draws() {
     for (items, min, max) in [(vec![], [70.0, 80.0], [130.0, 120.0]), (vec![fill], moved, moved_to), (vec![picture], moved, moved_to)] {
         let drawn =
             Drawn { group: Some(Group { object: 7, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None, boundary: Some(boundary) };
-        let (_, _, objects) = assemble(&record, [(7, centre, &drawn)].into_iter()).unwrap();
+        let (_, _, objects) = assemble(&record, &[], [(7, centre, &drawn)].into_iter()).unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -715,12 +715,12 @@ fn status_says_which_views_are_out_of_date() {
 #[test]
 fn status_says_why_a_view_has_no_lines() {
     let (mut s, sheet, [front, top]) = front_and_top();
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
     settled(&mut s, sheet);
     let (reply, words) = status_of(&mut s);
     assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "failed"), "{reply}");
     let failed = reply["views"].as_array().unwrap().iter().find(|v| v["status"] == "failed").unwrap();
-    assert!(failed["reason"].as_str().unwrap().contains("drawing renderer"), "{reply}");
+    assert!(failed["reason"].as_str().unwrap().contains("exact lines"), "{reply}");
     assert_eq!(failed["sheet"], json!(ids::encode(sheet)), "{reply}");
 
     run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));

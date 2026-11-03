@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Write};
 
 use serde_json::{Value, json};
+use solidcraft_doc::drawing::image::{ImageFile, SheetImage};
 use solidcraft_doc::drawing::{MAX_DRAWINGS, Source};
 use solidcraft_doc::format::DRAWING;
 use solidcraft_doc::ids::IdSource;
@@ -78,6 +79,36 @@ fn a_designs_drawings_round_trip_through_both_forms_byte_for_byte() {
     let read = read_design(&json).unwrap();
     assert_eq!(read.drawings, doc.drawings);
     assert_eq!(write_design(&read), json, "the plain form too");
+}
+
+/// An image on a sheet travels in its drawing's record through both forms, and an entry whose file
+/// isn't what its record says refuses the whole design.
+#[test]
+fn an_image_on_a_sheet_round_trips_and_a_lying_one_is_refused() {
+    let mut header = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    header.extend(640u32.to_be_bytes());
+    header.extend(480u32.to_be_bytes());
+    header.extend([8, 6, 0, 0, 0]);
+    let mut doc = plate();
+    let mut d = (*doc.drawings[0]).clone();
+    let mut ids = IdSource::seeded(5426);
+    let (file, placed) = (d.allocate_id(&mut ids).unwrap(), d.allocate_id(&mut ids).unwrap());
+    d.images.add([Arc::new(ImageFile::from_file(file, &header).unwrap())]);
+    d.sheet_images.add([Arc::new(SheetImage { id: placed, sheet: d.sheets[0].id, rect_mm: [10.0, 20.0, 60.0, 45.0], image: file })]);
+    doc.drawings[0] = Arc::new(d);
+    let bytes = write_design_container(&doc).unwrap();
+    let read = read_design(&bytes).unwrap();
+    assert_eq!(read.drawings, doc.drawings);
+    assert_eq!(write_design_container(&read).unwrap(), bytes, "save, open, save: the same bytes");
+    let json = write_design(&doc);
+    assert_eq!(read_design(&json).unwrap().drawings, doc.drawings, "the plain form too");
+
+    let mut inside = parts(&bytes);
+    let name = entry(doc.drawings[0].id);
+    let mut record: Value = serde_json::from_slice(&inside[&name]).unwrap();
+    record["images"][0]["pixels"] = json!([1, 1]);
+    inside.insert(name, record.to_string().into_bytes());
+    assert!(read_design(&container(&inside)).is_err());
 }
 
 /// What a container refuses in its drawings, each time the whole design: an entry under
