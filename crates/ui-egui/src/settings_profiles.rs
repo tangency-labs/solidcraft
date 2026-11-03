@@ -477,7 +477,8 @@ pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String>
     match id {
         "settings.profile.list" => Ok(json!({ "profiles": app.settings_profiles.names(), "active": app.settings_profiles.active })),
         "settings.profile.save" => {
-            let doc = capture(app, name);
+            // The checks a profile meets when it is read back, so none is saved only to be dropped.
+            let doc = sanitize(&capture(app, name))?;
             match app.settings_profiles.find(name) {
                 Some(i) => {
                     if let Some(old) = app.settings_profiles.list.get_mut(i) {

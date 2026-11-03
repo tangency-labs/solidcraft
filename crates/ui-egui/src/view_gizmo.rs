@@ -466,12 +466,13 @@ pub struct Form {
 }
 
 /// The panel opened by `view.navigator` from the toolbar or the navigator's menu, filled with
-/// the navigator as it is (its body picked when the open design has it).
+/// the navigator as it is (its body picked when the open design has that very body, not just one
+/// of the same name, so OK on a changed texture keeps the body).
 pub(crate) fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "view.navigator").then(|| {
         let mut body = SelInput::new("Body", BODIES, false);
         if let Some(shape) = &app.view_gizmo.shape
-            && app.session.world_state().is_ok_and(|st| st.body(&shape.name).is_some())
+            && Shape::of_body(&app.session, &shape.name).is_some_and(|own| own.to_json() == app.view_gizmo.stored())
         {
             body.items.push(Sel::Body { name: shape.name.clone() });
         }
@@ -804,6 +805,11 @@ mod tests {
         let kept = other.app.view_gizmo.shape.as_ref().expect("the body survives a restart");
         assert_eq!(kept.name, name);
         assert_eq!(kept.mesh.triangles.len(), h.app.view_gizmo.shape.as_ref().unwrap().mesh.triangles.len());
+        let preselected = |app: &SolveApp| start(app, "view.navigator").map(|(_, inputs)| picked(&inputs).map(str::to_owned));
+        assert_eq!(preselected(&h.app), Some(Some(name.clone())), "the panel picks the kept body in its own design");
+        other.app.run("solid.box", json!({"length": 30, "width": 30, "height": 10})).unwrap();
+        assert_eq!(other.app.session.world_state().unwrap().bodies[0].name, name);
+        assert_eq!(preselected(&other.app), Some(None), "another design's body of the same name is not the kept one");
         assert!(h.app.run("view.navigator", json!({"body": "No such body"})).is_err());
         assert!(h.app.run("view.navigator", json!({"body": 3})).is_err());
         h.app.run("solid.box", json!({"length": 60, "width": 10, "height": 10, "operation": "new"})).unwrap();

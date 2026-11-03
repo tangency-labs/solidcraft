@@ -6834,7 +6834,7 @@ fn gizmo_menu(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         && ui.input(|i| i.pointer.secondary_clicked())
         && app.dialog.is_none()
         && let Some(at) = ui.input(|i| i.pointer.interact_pos())
-        && outer.contains(at)
+        && ui.rect_contains_pointer(outer)
         && view_gizmo_at(app, at)
     {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ViewGizmo);
