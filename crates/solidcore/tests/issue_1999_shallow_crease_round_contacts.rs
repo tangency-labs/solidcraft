@@ -1,5 +1,5 @@
-//! Issue #1999: shallow crease fillets return success with invalid geometry.
-//! Current generic-blend regression, using the roof fixture from superseded PR #2003.
+//! Issue #1999: shallow crease rounds preserve contact, definition and volume.
+//! Regression using the roof fixture from superseded PR #2003; review follow-up to #2530.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -9,10 +9,13 @@
 
 use std::f64::consts::PI;
 
+use solidcore::blend::definition_check::{BlendFaceKind, BlendFaceLog};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
+use solidcore::mass::integrator::properties::brep_volume_default;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::sweep::api_brep::create_taper_extrude;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::edge;
@@ -71,9 +74,9 @@ fn crease_scaled(k: &Kernel, b: &Brep, turn: f64, scale: f64) -> EdgeId {
         .expect("the crease edge")
 }
 
-// Diagnostic matrix on unmodified current main; no post-fillet repair is installed.
+// Preserve default-path characterizations and reject invalid success in the new blend.
 #[test]
-fn current_main_shallow_crease_matrix() {
+fn shallow_crease_round_contact_profiles() {
     use solidcore::kernel::UpstreamFixes;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     let mut invalid = Vec::new();
@@ -175,6 +178,7 @@ fn new_blend_constructs_valid_shallow_crease_rounds() {
         ] {
             let mut k = Kernel {
                 fixes: UpstreamFixes::all(),
+                blend_face_log: Some(BlendFaceLog::default()),
                 ..Kernel::default()
             };
             k.fixes.geometric_g2_continuity = false;
@@ -206,6 +210,40 @@ fn new_blend_constructs_valid_shallow_crease_rounds() {
             assert!(is_manifold_solid(&b).unwrap());
             assert_eq!(b.face_list().len(), 8, "turn={turn} radius={radius}");
             assert_eq!(b.tolerance(), tol);
+
+            // Check the face the blend actually made, not just whichever surfaces
+            // happen to expose a definition (which could silently find none).
+            let made = k.blend_face_log.as_ref().unwrap().last();
+            assert_eq!(made.len(), 1, "turn={turn} radius={radius} scale={scale}");
+            assert_eq!(made[0].kind, BlendFaceKind::ExactRound);
+            let surface = b.face(made[0].face).unwrap().surface.as_ref().unwrap();
+            let definition = surface.procedural_blend().unwrap_or_else(|| {
+                panic!("bare round face: turn={turn} radius={radius} scale={scale}")
+            });
+            assert!(matches!(definition.net(), BlendNet::Exact(_)));
+            assert_eq!(definition.bound(), 0.0);
+            assert_eq!(definition.recertify(&k).unwrap(), 0.0);
+
+            // Interior angle theta = pi - turn. The two tangent triangles minus
+            // their circular sector remove r^2 * (cot(theta/2) - (pi-theta)/2)
+            // of section. Here that is r^2 * (tan(turn/2) - turn/2).
+            // The unrounded section is the 6x1 rectangle plus the roof triangle;
+            // extruding it by 2 and scaling all lengths gives the volume below.
+            let half_turn = 0.5 * turn * PI / 180.0;
+            let part_volume = (6.0 + 3.0 * rise(turn)) * 2.0 * scale.powi(3);
+            let removed_volume =
+                radius * radius * (half_turn.tan() - half_turn) * 2.0 * scale.powi(3);
+            let expected = part_volume - removed_volume;
+            let rounding = 1e-9 * part_volume;
+            assert!(
+                removed_volume > rounding,
+                "the gate must detect a missing round"
+            );
+            let volume = brep_volume_default(&k, &mut b, 1e-11).unwrap();
+            assert!(
+                (volume - expected).abs() <= rounding,
+                "turn={turn} radius={radius} scale={scale}: volume={volume} expected={expected} rounding={rounding}"
+            );
             for &edge_id in b.edge_list() {
                 let curve = edge::curve(&b, edge_id).unwrap().unwrap();
                 let interval = edge::interval(&b, edge_id).unwrap();
