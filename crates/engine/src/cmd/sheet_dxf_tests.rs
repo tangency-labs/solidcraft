@@ -511,6 +511,147 @@ fn a_bend_note_follows_the_bodys_own_rule_and_bends_down_too() {
     assert_eq!(notes(&mut s), ["B1 DOWN 122%%d R1"], "another active rule does not change this body's notes");
 }
 
+/// The LINEs of a layer as (start, end), each from its lower-left end.
+fn lines_on(es: &[Entity], layer: &str) -> Vec<(Vec2, Vec2)> {
+    let mut out: Vec<(Vec2, Vec2)> = es
+        .iter()
+        .filter(|e| e.0 == "LINE" && layer_of(e) == layer)
+        .map(|e| {
+            let (a, b) = (point(e, 10), point(e, 11));
+            if (a.x, a.y) <= (b.x, b.y) { (a, b) } else { (b, a) }
+        })
+        .collect();
+    out.sort_by(|p, q| (p.0.y, p.0.x).partial_cmp(&(q.0.y, q.0.x)).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
+fn near(a: Vec2, b: Vec2) -> bool {
+    a.dist(b) < 1e-6
+}
+
+/// #11488: with `bend_zones` each bend's zone (the developed bend, the bend allowance wide) has its
+/// two edges on layer BEND_ZONE, and a bend note gives the allowance and the deduction too.
+#[test]
+fn a_bend_zone_has_its_two_edges_and_its_allowance_in_the_note_when_asked_for() {
+    // A 100 × 60 plate of 2 mm sheet (K 0.5, R 1) with a 20 mm wall bent up 90° along y = 0, outside
+    // the plate.
+    // Bend allowance BA = angle · (R + K·T) = π/2 · (1 + 0.5 · 2) = π; the bend starts on the
+    // plate's edge, y = 0, and ends a BA further out, y = -π, its centre line half-way.
+    // Bend deduction BD = 2 · (R + T) · tan(angle / 2) - BA = 2 · 3 · 1 - π.
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"}));
+    let ba = PI / 2.0 * (1.0 + 0.5 * 2.0);
+    let dxf = export(&mut s, json!({"bend_zones": true, "bend_notes": true}));
+    let es = entities(&dxf);
+    let zone = lines_on(&es, "BEND_ZONE");
+    assert_eq!(zone.len(), 2, "{zone:?}");
+    assert!(near(zone[0].0, Vec2::new(0.0, -ba)) && near(zone[0].1, Vec2::new(100.0, -ba)), "{zone:?}");
+    assert!(near(zone[1].0, Vec2::new(0.0, 0.0)) && near(zone[1].1, Vec2::new(100.0, 0.0)), "{zone:?}");
+    // The centre line is still on BEND_UP, half-way between them.
+    let centre = lines_on(&es, "BEND_UP");
+    assert!(centre.len() == 1 && near(centre[0].0, Vec2::new(0.0, -ba / 2.0)) && near(centre[0].1, Vec2::new(100.0, -ba / 2.0)), "{centre:?}");
+    assert_eq!(layer_table(&dxf).get("BEND_ZONE"), Some(&(8, "Continuous".to_string())));
+    let bd = 2.0 * 3.0 * (PI / 4.0).tan() - ba;
+    assert!((bd - 2.858).abs() < 5e-4);
+    let notes: Vec<String> = es.iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect();
+    assert_eq!(notes, ["B1 UP 90%%d R1 BA3.142 BD2.858"]);
+    // The allowance is the bend table's.
+    let table = run(&mut s, "sheet.export_bend_table", json!({"format": "json"}));
+    let text: Value = serde_json::from_str(table["text"].as_str().unwrap_or_default()).unwrap_or_default();
+    assert!((text["bends"][0]["allowance"].as_f64().unwrap_or(f64::NAN) - ba).abs() < 1e-9, "{text}");
+
+    // A 58° bend: BA = 58° · 2 mm, BD = 2 · 3 · tan 29° - BA; the zone is that much wider.
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "58 deg", "flip": true}));
+    let ba = 58f64.to_radians() * 2.0;
+    let bd = 6.0 * 29f64.to_radians().tan() - ba;
+    let es = entities(&export(&mut s, json!({"bend_zones": true, "bend_notes": true})));
+    let zone = lines_on(&es, "BEND_ZONE");
+    assert!(zone.len() == 2 && (zone[1].0.y - zone[0].0.y - ba).abs() < 1e-6, "{zone:?}");
+    let notes: Vec<String> = es.iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect();
+    assert_eq!(notes, [format!("B1 DOWN 58%%d R1 BA{} BD{}", super::compact(ba), super::compact(bd))]);
+
+    // Without notes the zone lines come alone; on one layer they are on layer 0.
+    let es = entities(&export(&mut s, json!({"bend_zones": true})));
+    assert!(es.iter().all(|e| e.0 != "TEXT") && lines_on(&es, "BEND_ZONE").len() == 2);
+    let single = entities(&export(&mut s, json!({"bend_zones": true, "layers": "single"})));
+    assert_eq!(single.len(), es.len());
+    assert!(single.iter().all(|e| layer_of(e) == "0"));
+}
+
+/// The tray's four bends each have two zone edges, parallel to the centre line and half a bend
+/// allowance either side of it; a slot across a bend cuts its zone edges
+/// where it cuts its centre line.
+#[test]
+fn bend_zone_edges_follow_every_bend_and_what_cut_outs_leave_of_it() {
+    let mut s = tray_with(&[]);
+    let ba = PI / 2.0 * (1.0 + 0.5 * 2.0);
+    let es = entities(&export(&mut s, json!({"bend_zones": true})));
+    let zone = lines_on(&es, "BEND_ZONE");
+    let centres: Vec<(Vec2, Vec2)> = ["BEND_UP", "BEND_DOWN"].iter().flat_map(|l| lines_on(&es, l)).collect();
+    assert_eq!((centres.len(), zone.len()), (4, 8), "{zone:?}");
+    for (a, b) in &centres {
+        let d = (*b - *a).normalized().unwrap_or(Vec2::X);
+        let n = d.perp();
+        // Two zone edges parallel to it, at +BA/2 and -BA/2.
+        let side: Vec<f64> = zone
+            .iter()
+            .filter(|(p, q)| (*q - *p).normalized().is_some_and(|e| e.cross(d).abs() < 1e-9))
+            .map(|(p, _)| (*p - *a).dot(n))
+            .filter(|off| (off.abs() - ba / 2.0).abs() < 1e-6)
+            .collect();
+        assert_eq!(side.len(), 2, "bend from {a:?} to {b:?}: {zone:?}");
+        assert!(side.iter().any(|o| *o > 0.0) && side.iter().any(|o| *o < 0.0));
+    }
+
+    // A slot across the L bracket's bend (outside the plate, as above): centre line and both zone edges stop at x = 40 and go on at x = 60.
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"}));
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, -10], "p1": [60, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    run(&mut s, "sheet.refold", json!({}));
+    let es = entities(&export(&mut s, json!({"bend_zones": true, "bend_notes": true})));
+    let spans = |lines: &[(Vec2, Vec2)], y: f64| -> Vec<(f64, f64)> {
+        lines.iter().filter(|(a, b)| (a.y - y).abs() < 1e-6 && (b.y - y).abs() < 1e-6).map(|(a, b)| (a.x, b.x)).collect()
+    };
+    let zone = lines_on(&es, "BEND_ZONE");
+    let close = |got: Vec<(f64, f64)>| {
+        got.len() == 2
+            && (got[0].0).abs() < 1e-6
+            && (got[0].1 - 40.0).abs() < 1e-6
+            && (got[1].0 - 60.0).abs() < 1e-6
+            && (got[1].1 - 100.0).abs() < 1e-6
+    };
+    assert!(close(spans(&lines_on(&es, "BEND_UP"), -ba / 2.0)), "{:?}", lines_on(&es, "BEND_UP"));
+    assert!(close(spans(&zone, 0.0)) && close(spans(&zone, -ba)) && zone.len() == 4, "{zone:?}");
+    // A note for each piece, as before, each with the allowance.
+    let notes: Vec<String> = es.iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect();
+    assert_eq!(notes, ["B1 UP 90%%d R1 BA3.142 BD2.858"; 2]);
+}
+
+/// Without `bend_zones` (or with it false) the file is what it was: no BEND_ZONE layer and the
+/// notes without the allowance.
+#[test]
+fn without_bend_zones_the_dxf_is_unchanged() {
+    let mut s = tray_with(&marks());
+    for base in [json!({}), json!({"bend_notes": true}), json!({"bend_notes": true, "layers": "single"}), json!({"bend_lines": false})] {
+        let plain = export(&mut s, base.clone());
+        let mut off = base.clone();
+        off["bend_zones"] = json!(false);
+        assert_eq!(plain, export(&mut s, off), "{base}");
+        let mut null = base.clone();
+        null["bend_zones"] = Value::Null;
+        assert_eq!(plain, export(&mut s, null), "{base}");
+        assert!(!plain.contains("BEND_ZONE") && !plain.contains(" BA"), "{base}");
+    }
+    for bad in [json!({"bend_zones": "yes"}), json!({"bend_zones": 1})] {
+        assert!(s.execute("sheet.export_dxf", &bad).is_err(), "{bad}");
+    }
+}
+
 /// Two sheet bodies: a lid and, 200 mm away, a side wall with one bend.
 fn lid_and_wall() -> Session {
     let mut s = Session::default();
