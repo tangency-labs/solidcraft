@@ -6,5 +6,29 @@
   "de": {
     "prefs.hover_feature_outline": "Feature unter dem Zeiger umranden",
     "prefs.hover_feature_outline_help": "Ohne laufenden Befehl bekommen die Flächen des Features, das die Fläche unter dem Zeiger erzeugt hat, einen feinen Umriss in eigener Farbe. Wenn deaktiviert, wird wie bisher nur die Fläche unter dem Zeiger hervorgehoben."
+  },
+  "ar": {
+    "prefs.hover_feature_outline": "تحديد الميزة تحت المؤشر",
+    "prefs.hover_feature_outline_help": "دون أمر قيد التشغيل، تحصل وجوه الميزة التي أنشأت الوجه تحت المؤشر على حدّ رفيع بلونها الخاص. عند الإيقاف يُبرز الوجه تحت المؤشر وحده كما من قبل."
+  },
+  "he": {
+    "prefs.hover_feature_outline": "הדגשת קו המתאר של הפיצ'ר מתחת לסמן",
+    "prefs.hover_feature_outline_help": "כשאין פקודה פעילה, הפאות של הפיצ'ר שיצר את הפאה מתחת לסמן מקבלות קו מתאר דק בצבע משלהן. כשהאפשרות כבויה, רק הפאה מתחת לסמן מודגשת, כמו קודם."
+  },
+  "ja": {
+    "prefs.hover_feature_outline": "ポインター下のフィーチャーの輪郭を表示",
+    "prefs.hover_feature_outline_help": "コマンドを実行していないとき、ポインター下の面を作ったフィーチャーの面に専用の色で細い輪郭を付けます。オフのときは、これまでどおりポインター下の面だけが強調表示されます。"
+  },
+  "ko": {
+    "prefs.hover_feature_outline": "포인터 아래 피처의 윤곽 표시",
+    "prefs.hover_feature_outline_help": "실행 중인 명령이 없을 때, 포인터 아래 면을 만든 피처의 면들에 고유한 색의 얇은 윤곽을 표시합니다. 끄면 이전처럼 포인터 아래 면만 강조 표시됩니다."
+  },
+  "vi": {
+    "prefs.hover_feature_outline": "Viền tính năng dưới con trỏ",
+    "prefs.hover_feature_outline_help": "Khi không có lệnh nào đang chạy, các mặt của tính năng đã tạo ra mặt dưới con trỏ được viền mảnh bằng màu riêng. Khi tắt, chỉ mặt dưới con trỏ được làm nổi bật như trước."
+  },
+  "zh": {
+    "prefs.hover_feature_outline": "勾勒指针下的特征",
+    "prefs.hover_feature_outline_help": "未运行命令时，生成指针下方面的特征的各个面会以专用颜色显示细轮廓。关闭时，仍与以前一样只高亮指针下的面。"
   }
 }
