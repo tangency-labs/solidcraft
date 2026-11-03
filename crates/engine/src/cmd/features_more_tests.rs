@@ -2784,3 +2784,31 @@ fn align_by_a_frame_picked_on_another_copy_moves_the_part_in_its_own_coordinates
     assert_bounds(&mut s, "Peg", [4., 4., 10.], [6., 6., 12.]);
     assert_bounds(&mut s, "Peg (Board:2/Header:1)", [104., 4., 10.], [106., 6., 12.]);
 }
+
+/// A coil cut from a sketch follows that sketch when its points move, and the body it cuts when
+/// that changes upstream: its cached result is not taken back while either differs.
+#[test]
+fn a_sketch_coil_cut_follows_its_profile_and_target() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft", "name": "ShaftFeature"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Groove"}));
+    // A 1 x 1 mm square, 18..19 mm from the axis.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.coil", json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 18.5) < 1e-3, "{removed}");
+    // Widen the square inward to 17..19 mm: twice the area, centroid at 18 mm.
+    run(&mut s, "sketch.edit", json!({"sketch": "Groove"}));
+    run(&mut s, "sketch.move_point", json!({"point": "p1", "to": [17, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "p4", "to": [17, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 2.0 * 18.0) < 1e-3, "the groove kept the old profile: {removed}");
+    // A thinner shaft upstream (radius 18): the groove now cuts only 17..18 mm of it.
+    run(&mut s, "timeline.edit", json!({"feature": "ShaftFeature", "set": {"radius": "18"}}));
+    let removed = PI * 18.0 * 18.0 * 40.0 - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
+}
