@@ -1502,6 +1502,9 @@ pub struct UpstreamFixes {
     ///
     /// With it, since the fork's tangency-labs/smlib#104 (61547af to f1d81f4, merged at b5bb747): a vertex of three or more blends of one convexity on planes and straight edges that no Ball takes (rounds of unequal radii, of curvature sections, or a vertex the caller sets back with `FilletSession::set_set_back_fill`, the fork's `SetSetBackFill`) is the blend corner's Setback (`SmBlendCorner::ClassifySetBack`, [`crate::blend::blend_corner::setback`]): each blend ends at its setback along its edge (asked for, else the owner's rule, a default too long for its edge shrinking to its room less a quarter of its radius) and the hole is filled by the setback split (`SmBlendSetback::FillHole`). A G1 fill is a graph over the corner's axis whose heights are held convex by linear conditions on their Bernstein coefficients (a quadratic programme) and is taken only once certified convex; the rule's setbacks grow to the least scale that certifies (`SmBlendSetback::CertifiedScale`: the smallest certifying scale on the grid whose neighbour below fails; monotonicity checked, not proved), and an asked-for setback that does not fit, or is too short for a certified fill, is refused as `FilletErrorType::NoRoom` naming the setback that fits or builds (`FilletSession::fit_setback`, the fork's `GetFitSetBack`).
 
+    /// During insertion, a vertex contact must also fit the body's vertex/face incidence
+    /// tolerance. A blend curve's larger approximation allowance does not capture a
+    /// separate crease vertex and split the arc off that vertex (#1999, #2530).
     pub fillet_blend_corner: bool,
     /// The executive's circular rounds (`SetFilletParameters` with `SM_FSG_CIRCULAR`, and
     /// the corners' constant rounds, `SmFilletCorner::MakeConstantRadiusFillet`) take the

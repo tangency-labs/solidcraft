@@ -18,6 +18,9 @@
 //! callers. Handles and geometry use the part-1 model. Optional [`ClassGeometry`]
 //! callbacks resolve vertex points, topology tolerances and vertex/face gaps; opaque
 //! handles still defer.
+//! With `fillet_blend_corner`, fillet vertex contacts also satisfy the body's
+//! vertex/face incidence tolerance: the blend curve's approximation allowance must
+//! not capture a separate vertex outside that resolution (#1999).
 //!
 //! **In-place edits.** Upstream edits objects it reaches through const pointers: the
 //! edge branch of `sm_InsertSolutions` raises a vertex tolerance to the edge's
@@ -808,6 +811,23 @@ impl<O: ClassObject> CurveClassification<O> {
             let geometry = access.geometry();
             let vertex_zone = object_zone_tol_3d(k, geometry, Some(vertex))?;
             let tolerance = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // The curve may carry a larger approximation allowance than its body.
+            // Using that allowance alone captures a nearby corner and splits the
+            // blend arc there, even though the retained vertex cannot satisfy the
+            // resulting vertex/face incidence. Bound the contact before inserting
+            // it; neither the curve nor any topology tolerance is changed.
+            let contact_bound = if self.doing_fillets()
+                && k.fixes.fillet_blend_corner
+                && (wrapped.is_some() || self.curve_geometry(geometry)?.dim() == 3)
+            {
+                let (body, _) = super::p7::vertex_of(geometry, vertex, OP)?;
+                Some(crate::topology::vertex::corner::xsect_tol_3d_of_brep(
+                    k, body,
+                ))
+            } else {
+                None
+            };
+            let tolerance = contact_bound.map_or(tolerance, |bound| tolerance.min(bound));
             let point = geometry
                 .classification_vertex_point(vertex)
                 .ok_or_else(|| {
@@ -870,6 +890,11 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             // end GWC:CHANGED_SSS
             for solution in solutions.as_slice() {
+                // Match IsWithinXSectTol3dOfFaces' strict incidence bound, including
+                // when the legacy large-gap projection would admit this contact.
+                if contact_bound.is_some_and(|bound| solution.start.solution_value >= bound) {
+                    continue;
+                }
                 let geometry = access.geometry();
                 let curve = match &wrapped {
                     Some(c) => c,
@@ -1883,6 +1908,7 @@ mod tests {
         curve: Curve,
         point: Option<Point3>,
         gap_calls: core::cell::Cell<usize>,
+        body_vertex: Option<(Brep, crate::topology::VertexId)>,
     }
 
     impl ClassGeometry<VertexTestObject> for VertexGeometry {
@@ -1900,6 +1926,10 @@ mod tests {
         }
         fn classification_vertex_point(&self, _: VertexTestObject) -> Option<Point3> {
             self.point
+        }
+        fn topology_entity(&self, object: VertexTestObject) -> Option<(&Brep, EntityRef)> {
+            let (body, vertex) = self.body_vertex.as_ref()?;
+            (object == VertexTestObject::Vertex).then_some((body, EntityRef::Vertex(*vertex)))
         }
         fn topology_zone_tol_3d(&self, _: VertexTestObject) -> Option<f64> {
             Some(0.0)
@@ -1923,12 +1953,71 @@ mod tests {
     }
 
     #[test]
+    fn blend_vertex_contact_does_not_use_the_curve_allowance_as_body_resolution() {
+        for enabled in [false, true] {
+            for filleting in [false, true] {
+                for (body_tol, distance) in [
+                    (1e-5, 0.0),
+                    (1e-5, 1e-6),
+                    (1e-5, 2e-5),
+                    (1e-5, 3e-5),
+                    (1e-4, 3e-5),
+                ] {
+                    let mut k = Kernel::default();
+                    k.fixes.fillet_blend_corner = enabled;
+                    let point = Vec3::new(0.5, distance, 0.0);
+                    let mut body = Brep::new();
+                    body.set_tolerance(body_tol);
+                    let vertex = body.add_vertex(point).unwrap();
+                    let g = VertexGeometry {
+                        curve: geometry().0,
+                        point: Some(point),
+                        gap_calls: core::cell::Cell::new(0),
+                        body_vertex: Some((body, vertex)),
+                    };
+                    let surface = Surface::from(crate::surface::plane::Plane::from_normal(
+                        Vec3::ZERO,
+                        Vec3::new(0.0, 0.0, 1.0),
+                    ));
+                    let mut cc = vertex_classification(&k);
+                    cc.set_size(&k, 1).unwrap();
+                    cc.at_mut(0)
+                        .unwrap()
+                        .set_interval(&Extent1d::from_min_max(0.0, 1.0));
+                    cc.set_src_zone_tol_3d(4e-5);
+                    cc.set_fillet_data(None, filleting);
+                    cc.intersect_vertices(
+                        &k,
+                        &g,
+                        &[VertexTestObject::Vertex],
+                        &surface,
+                        false,
+                        true,
+                    )
+                    .unwrap();
+                    let contact = cc.intervals().iter().any(|i| {
+                        i.start.object() == Some(VertexTestObject::Vertex)
+                            || i.end.object() == Some(VertexTestObject::Vertex)
+                    });
+                    assert_eq!(
+                        contact,
+                        !(enabled && filleting && distance >= 2.0 * body_tol),
+                        "enabled={enabled} filleting={filleting} distance={distance}"
+                    );
+                    assert_eq!(cc.src_zone_tol_3d(), 4e-5);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn unresolved_vertex_point_is_invalid_input() {
         let k = Kernel::default();
         let g = VertexGeometry {
             curve: geometry().0,
             point: None,
             gap_calls: core::cell::Cell::new(0),
+            body_vertex: None,
         };
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
             Vec3::ZERO,
@@ -1960,6 +2049,7 @@ mod tests {
                 // produces no intersection after the adapter preconditions pass.
                 point: Some(Vec3::new(0., 10., 0.)),
                 gap_calls: core::cell::Cell::new(0),
+                body_vertex: None,
             };
             let mut cc = vertex_classification(&k);
             let mut surface = Surface::from(crate::surface::plane::Plane::from_normal(
@@ -1997,6 +2087,7 @@ mod tests {
             curve: geometry().0,
             point: None,
             gap_calls: core::cell::Cell::new(0),
+            body_vertex: None,
         };
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
             Vec3::ZERO,

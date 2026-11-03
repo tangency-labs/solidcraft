@@ -1,0 +1,13 @@
+#### WR-723. A blend curve's approximation tolerance captures a separate crease vertex
+
+- **Severity:** Wrong result
+- **Area:** Fillets and topology insertion
+- **Location:** `source/SMLib/src/SmCurveClass.cpp`, `SmCurveClassification::IntersectVertices`; Rust `intersect::curve_class::p5::intersect_vertices_in`.
+- **What happens:** The curve/vertex intersection tolerance admits an old crease vertex near the interior of a blend end arc. Topology insertion retains that vertex and splits the arc there although the vertex is outside the finished vertex/face tolerance. The fillet reports success and is manifold, but fails geometric validation. A broad curve approximation allowance is being used as the body's topology resolution.
+- **Trigger:** Issue #1999's roof block (6 wide, height 1 plus `3*tan(turn/2)`, extruded 2), rounded on its central crease. `(turn degrees, radius)` of `(2.5, 0.12)`, `(0.6, 2)`, `(1.5, 0.5)` produce vertex/face gaps about `2.85635e-5`, `2.74159e-5`, `4.28399e-5` against `2e-5`. The last two need the half-degree option. Generic-blend flags do not by themselves prevent this capture.
+- **How found:** Issue #1999, PR #2003's original fixtures, and the current-main Rust regression in PR #2530. The default path and half-degree-only path are retained as characterizations.
+- **Confirmed:** The unmodified pinned C++ default 2.5-degree case was independently reproduced in PR #2003. The new generic-blend runs here are Rust-only; no claim that all fork configurations have been rerun in C++.
+- **Construction change:** Under `fillet_blend_corner`, fillet vertex intersection also requires the body's strict vertex/face incidence bound (`vertex::corner::xsect_tol_3d_of_brep`). The existing curve/vertex bound remains an upper bound. Contacts outside the tighter bound are not inserted. This changes neither the source curve nor any entity tolerance, and does not move retained vertices after the operation. Non-fillet classifications and the default path keep their previous behavior.
+- **Prior work:** PR #2003 repaired vertices after construction and was closed as superseded. PR #2530 instead changes contact acceptance before the split is created. Successful multi-edge corner construction remains outside this change.
+
+Background: Park et al., *Boundary Representation Tolerance Impacts on Mesh Generation and Adaptation* (AIAA 2021), https://ntrs.nasa.gov/citations/20210016359, describes the consequences of geometric gaps and modeling tolerances. The acceptance bound here is derived from this kernel's face/vertex incidence contract, not a tolerance value taken from that paper.
