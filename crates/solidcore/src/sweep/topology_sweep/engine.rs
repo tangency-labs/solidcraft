@@ -43,6 +43,25 @@ use crate::topology::{
     edge, edgeuse::p1 as eu, face::p2 as face, loopuse, vertex, vertexuse, LoopuseStart,
 };
 
+/// Most repetitions one [`TopologySweep::do_sweep`] executes (not upstream).
+pub const MAX_SWEEP_REPETITIONS: u64 = 4096;
+
+/// [`SolidError::InvalidInput`] past [`MAX_SWEEP_REPETITIONS`], for `do_sweep` and for
+/// callers whose own work before it grows with the count.
+///
+/// # Errors
+///
+/// `InvalidInput` for more than [`MAX_SWEEP_REPETITIONS`] repetitions.
+pub fn check_sweep_repetitions(repetitions: u64) -> Result<()> {
+    if repetitions > MAX_SWEEP_REPETITIONS {
+        return Err(SolidError::invalid_input(
+            OP,
+            "sweep repetitions exceed 4096",
+        ));
+    }
+    Ok(())
+}
+
 /// `Kernel::fixes.sweep_statuses_pass_on` of `brep`'s kernel (fork c8f6a31, WR-662).
 fn pass_on(a: &impl SweepAccess, brep: crate::topology::BrepId) -> Result<bool> {
     Ok(a.kernel(brep)?.fixes.sweep_statuses_pass_on)
@@ -787,12 +806,7 @@ impl TopologySweep {
         targets: &mut SweepTargets,
     ) -> Result<()> {
         let original = required(original)?;
-        if self.repetitions > 4096 {
-            return Err(SolidError::invalid_input(
-                OP,
-                "sweep repetitions exceed 4096",
-            ));
-        }
+        check_sweep_repetitions(self.repetitions)?;
         let mut destination = match destination {
             Some(r) => r,
             None => (original, a.infinite_region(original)?),

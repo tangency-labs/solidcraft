@@ -68,6 +68,10 @@
 //!   (`1e300` control points split 15 to 30 levels deep and ran for minutes, fuzz
 //!   `curve.curve_p8` fuzz01456; upstream fixtures and the committed difftest cases
 //!   make at most 15,139 calls and split 32 levels deep).
+//!   A curve whose box reaches past [`crate::limits::MAX_COORDINATE_MAGNITUDE`]
+//!   (`1e150`, below `sqrt(f64::MAX)`) fails with `InvalidInput` before any split: its polar boxes overflow, so every check would
+//!   run to the call cap (a swung primitive scaled by `f64::MAX` merged with itself
+//!   ran past 600 s, upstream past 120 s; issue from the #2490 fuzz).
 //! - **Seam test.** `sm_IsPointSolutionAcrossClosedSeamBoundary` (unit
 //!   `curve.curve_p5`) is told whether the solution's first object is its `this`
 //!   curve: the split solutions name `[this, other]`, so it is when the coincidence
@@ -1606,8 +1610,10 @@ impl Curve {
     /// # Errors
     ///
     /// Those of the evaluations, box, closure, degeneracy and drop computations;
-    /// `InvalidInput` past [`MAX_COINCIDENCE_DEPTH`] nested splits or
-    /// [`MAX_COINCIDENCE_CALLS`] calls; those of the seam test of split solutions.
+    /// `InvalidInput` past [`MAX_COINCIDENCE_DEPTH`] nested splits,
+    /// [`MAX_COINCIDENCE_CALLS`] calls or a box coordinate past
+    /// [`crate::limits::MAX_COORDINATE_MAGNITUDE`]; those of the seam test of split
+    /// solutions.
     pub fn global_coincidence_checker<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1769,6 +1775,13 @@ impl Curve {
                     ignored(other.calculate_bounding_box(k, other_interval, req, true))?
                 {
                     if let (Some(a), Some(b)) = (this_box.normal, other_box.normal) {
+                        // Not upstream: see the module deviations (box coordinates past 1e150)
+                        if !is_measurable_box(&a) || !is_measurable_box(&b) {
+                            return Err(SolidError::invalid_input(
+                                OP_COINCIDENCE,
+                                "coincidence check of a curve with a coordinate beyond 1e150",
+                            ));
+                        }
                         if a.are_disjoint(&b, tol) {
                             return Ok(());
                         }
@@ -2452,6 +2465,15 @@ impl Curve {
         )?;
         Ok(Some(Self::from(new_curve)))
     }
+}
+
+/// Whether every corner coordinate of `b` is a number within
+/// [`crate::limits::MAX_COORDINATE_MAGNITUDE`].
+fn is_measurable_box(b: &Extent3d) -> bool {
+    let (min, max) = (b.min(), b.max());
+    [min.x, min.y, min.z, max.x, max.y, max.z]
+        .iter()
+        .all(|v| v.abs() <= crate::limits::MAX_COORDINATE_MAGNITUDE)
 }
 
 /// `interval` split at 37.5% and 62.5% (`sIvl1`, `sIvl2`, `sIvl3`).

@@ -11,7 +11,9 @@
 //!
 //! Deviations: typed services and owned curve slots replace pointers; null curve
 //! dereferences become errors. The existing sweep engine bounds repetitions to
-//! 4096. No additional recursion. Unavailable calls retain their full caller tails.
+//! 4096; the repeated linear sweep checks that bound before its end cap, which moves
+//! the profile once per repetition. No additional recursion. Unavailable calls retain
+//! their full caller tails.
 //! Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
 //! `Kernel::fixes.sheet_sweep_joins_profile_wires`): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
@@ -57,7 +59,9 @@ use crate::surface::surface::Surface;
 use crate::sweep::analytic_revolution::analytic_revolution;
 use crate::sweep::rotational_sweep_geometry::RotationalSweepGeometry;
 use crate::sweep::topology_sweep::{
-    engine::SweepTargets, geometry::SweepGeometry, SweepEntity, TopologySweep,
+    engine::{check_sweep_repetitions, SweepTargets},
+    geometry::SweepGeometry,
+    SweepEntity, TopologySweep,
 };
 use crate::sweep::trans_sweep_geometry::TranslationalSweepGeometry;
 use crate::topology::{BrepId, FaceId};
@@ -373,6 +377,11 @@ impl PrimitiveCreation {
                 repetitions: options.repetitions,
                 ..Default::default()
             };
+
+            // Not upstream: the end cap below moves the profile once per repetition, so
+            // the sweep's repetition cap is checked before it, not only in do_sweep
+            // (u64::MAX repetitions ran without end, #2490 fuzz)
+            check_sweep_repetitions(options.repetitions)?;
 
             // when asked and it's possible - build the end cap: the profile moved by
             // every step
