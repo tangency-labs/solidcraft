@@ -442,6 +442,17 @@ impl Tokens {
         if let Some(bevel) = self.borders.bevel {
             bevel.paint(ui.painter(), response.rect.shrink(1.0), self.control_radius, true, response.enabled());
         }
+        // egui also uses selection ink for the focus frame. It can read on a selection but
+        // disappear on the field. Inset the outline past the border and keep it in the row's clip.
+        let fill = self.input_fill();
+        if response.enabled() && response.has_focus() && contrast_ratio(composite(ui.visuals().selection.stroke.color, fill), fill) < 3.0 {
+            ui.painter().rect_stroke(
+                response.rect.shrink(2.0),
+                self.control_radius.saturating_sub(2),
+                Stroke::new(1.0, self.readable_ink(self.form_primary, fill)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
 
     pub fn button_bevel(&self, ui: &egui::Ui, response: &egui::Response, selected: bool) {
@@ -1284,7 +1295,7 @@ impl Tokens {
     /// Keep the requested ink when it reads on this surface, otherwise use a readable theme ink.
     pub(crate) fn readable_ink(&self, preferred: Color32, background: Color32) -> Color32 {
         for ink in [preferred, self.on_accent, self.text, self.tab_on_fill_dark] {
-            if contrast_ratio(ink, background) >= 4.5 {
+            if contrast_ratio(composite(ink, background), background) >= 4.5 {
                 return ink;
             }
         }

@@ -2251,6 +2251,36 @@ mod tests {
         for ink in [t.sketch_locked, t.sketch_construction, t.sketch_centerline, t.sketch_projected] {
             assert!(crate::theme::contrast_ratio(ink, t.viewport_top) >= 3.0, "sketch ink {ink:?}");
         }
+        assert!(crate::theme::contrast_ratio(t.sketch_projected, t.body) >= 3.0, "projected curves over a body");
+    }
+
+    #[test]
+    fn imported_selection_ink_uses_visible_contrast_and_keeps_readable_alpha() {
+        use crate::theme::{composite, contrast_ratio};
+        for (ink, background) in [("#000000", "#ffffff"), ("#ffffff", "#000000")] {
+            for alpha in ["20", "e0"] {
+                let translucent = format!("{ink}{alpha}");
+                let file = parse(
+                    &serde_json::json!({
+                        "format": "solidcraft-theme/1", "name": "Translucent ink", "base": "light",
+                        "colors": {
+                            "selected_bg": background, "selected_ink": translucent,
+                            "on_accent": translucent, "text": translucent, "tab_on_fill_dark": translucent
+                        }
+                    })
+                    .to_string(),
+                )
+                .unwrap();
+                let t = resolve(&file);
+                let selected = t.selection_ink();
+                assert!(contrast_ratio(composite(selected, t.selected_bg), t.selected_bg) >= 4.5, "{translucent} on {background}");
+                if alpha == "e0" {
+                    assert_eq!(selected, t.selected_ink, "readable imported alpha stays intact");
+                } else {
+                    assert_eq!(selected.a(), 255, "faint candidates need an opaque fallback");
+                }
+            }
+        }
     }
 
     /// `paper` is the theme's page (panels, viewport, bodies, hover); `ink` its text, and its selection.

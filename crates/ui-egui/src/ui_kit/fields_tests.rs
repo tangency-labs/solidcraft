@@ -5,6 +5,50 @@ use crate::scenario;
 use egui::Ui;
 
 #[test]
+fn focused_inputs_have_a_visible_outline_without_changing_selected_text_ink() {
+    use crate::theme::{composite, contrast_ratio};
+    for file in crate::theme_files::builtin() {
+        let t = crate::theme_files::resolve(file);
+        let _theme = crate::theme::scoped_tokens(t);
+        let ctx = crate::fonts::test_context();
+        let id = egui::Id::new("focused_input");
+        let mut value = "Selected text".to_owned();
+        let mut rect = egui::Rect::NOTHING;
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        let output = crate::test_support::frame(&ctx, egui::RawInput { focused: true, ..Default::default() }, |ui| {
+            ui.set_width(280.0);
+            scope(ui, |ui| {
+                assert!(
+                    contrast_ratio(composite(ui.visuals().selection.stroke.color, t.selected_bg), t.selected_bg) >= 4.5,
+                    "{}: selection ink",
+                    file.id
+                );
+                row(ui, "Value", |ui| {
+                    let response = cell_editor(ui, id, &mut value, "", false);
+                    assert!(response.has_focus(), "{}: input focus", file.id);
+                    rect = response.rect;
+                });
+            });
+        });
+        let mut visible_outline = false;
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Rect(outline) = shape
+                    && outline.stroke.width > 0.0
+                    && outline.rect.min.distance(rect.min) < 4.0
+                    && outline.rect.max.distance(rect.max) < 4.0
+                    && contrast_ratio(composite(outline.stroke.color, t.input_fill()), t.input_fill()) >= 3.0
+                {
+                    assert!(clipped.clip_rect.contains_rect(outline.visual_bounding_rect()), "{}: focus outline is clipped", file.id);
+                    visible_outline = true;
+                }
+            });
+        }
+        assert!(visible_outline, "{}: focused input needs a contrasting outline", file.id);
+    }
+}
+
+#[test]
 fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
     for case in ["expression", "plain", "cell", "invalid", "library", "placement", "password", "multiline", "area", "message", "search"] {
         let ctx = crate::fonts::test_context();
