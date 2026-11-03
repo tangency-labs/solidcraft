@@ -118,8 +118,9 @@ pub enum Mod {
     /// turn about the centre, and whether the originals stay behind. The command already
     /// carries the copy flag, so the Create Copy row needs no engine change.
     Move { x: String, y: String, angle: String, copy: bool },
-    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the middle
-    /// of their box. `x` and `y` move that middle, `factor` scales and `angle` turns about it.
+    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the picked
+    /// Center point or else the middle of their box. `x` and `y` move that point, `factor` scales
+    /// and `angle` turns about it.
     /// `frame` is the box (middle and size in the sketch, kept up to date from the picks by
     /// `sketch_transform_ui`) the window's size rows and the handles work on.
     Transform { x: String, y: String, factor: String, angle: String, frame: Option<([f64; 2], [f64; 2])> },
@@ -198,7 +199,10 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Mirror line", AXES, false)],
         Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)],
-        Mod::Transform { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true)],
+        // Center: the point Scale and Angle work about (#11718); empty, the middle of the picks' box.
+        Mod::Transform { .. } => {
+            vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)]
+        }
         // The direction is optional: `sketch.pattern.rectangular` documents sketch x as its
         // default, the way the engine reads it.
         Mod::PatternRect { .. } => vec![
@@ -920,7 +924,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let f = factor(app, text)?;
             let turn = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
             let (dx, dy) = (value(app, x, ValueKind::Length, "X")?, value(app, y, ValueKind::Length, "Y")?);
-            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": middle, "translate": [dx, dy]}))
+            let center = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel)).map_or_else(|| json!(middle), |id| json!(id));
+            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": center, "translate": [dx, dy]}))
         }
         Mod::Offset { distance, distance2, instances, mode, chain, flip } => {
             let curves = curve_ids(inputs, 0);
