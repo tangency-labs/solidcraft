@@ -298,8 +298,10 @@ fn sync_edge_vertices(b: &mut Brep, e: EdgeId) -> Result<()> {
 /// `pCurve->DropPoint(GetNaturalInterval(), point, NULL, tol, NULL, ...)` (default
 /// `SM_SO_MINIMIZE`), retried with `100 * tol` when no point is found; then the
 /// dropped parameter snaps to the natural interval end `at_max` selects when its
-/// curve point lies within the edge's zone tolerance of that end's.
-fn drop_limit(
+/// curve point lies within the edge's zone tolerance of that end's. Also the vertex
+/// drop of [`crate::curve::step_edge::edge_interval`] on a closed curve, where `at_max`
+/// picks the end of the seam the edge's sense needs.
+pub(crate) fn drop_limit(
     k: &Kernel,
     curve: &Curve,
     point: Point3,

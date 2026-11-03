@@ -31,6 +31,7 @@ pub mod line;
 pub mod offset_curve;
 pub mod parabola;
 pub mod projected_curve;
+pub mod step_edge;
 pub mod tangent_field;
 
 use crate::error::{Result, SolidError};
