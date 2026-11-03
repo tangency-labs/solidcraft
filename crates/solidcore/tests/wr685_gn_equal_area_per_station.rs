@@ -24,13 +24,14 @@
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
+use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::SurfParamType;
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::EdgeId;
@@ -511,5 +512,78 @@ fn flag_off_builds_no_gn_section() {
         let e = pick(&k, &b, [20.0, 30.0, 20.0]);
         let _ = fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, w);
         assert!(blend_nets(&b, 7).is_empty(), "w {w}");
+    }
+}
+
+/// smlib#109 (f9b133a, b8ec238): an equal area round solves each order and u once in its
+/// operation, and its certificate sums I(w) once per point and per interval off its cells.
+/// The counts over the blend are gated about 5% over today's (the fork's capi `rooted` and
+/// `summed`, counts, not times). Fork 5e8c9c1's gates, which also count its definition's
+/// evaluations: box edge 7 roots and 2 sums, boss root 13 and 680 (before smlib#109, 4720
+/// and 14215 roots, 10389 sums on the boss root). Before this port the same blends solved
+/// to the same bits (face nets and volume compared against #2274's head, 7ad58eb).
+#[test]
+fn equal_area_roots_and_sums_are_solved_once_each() {
+    fn box_edge(k: &mut Kernel) -> solidcore::Result<Brep> {
+        create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)
+    }
+    fn boss_root(k: &mut Kernel) -> solidcore::Result<Brep> {
+        let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0)?;
+        let boss = create_cylinder(k, Point3::new(30.0, 20.0, 10.0), 8.0, 10.0)?;
+        boolean_union(k, plate, boss)
+    }
+    struct Case {
+        name: &'static str,
+        build: fn(&mut Kernel) -> solidcore::Result<Brep>,
+        pick: [f64; 3],
+        r: f64,
+        most_roots: u64,
+        most_sums: u64,
+    }
+    let d = 4.0 * 2f64.sqrt();
+    let cases = [
+        Case {
+            name: "box edge",
+            build: box_edge,
+            pick: [20.0, 30.0, 20.0],
+            r: 3.0,
+            most_roots: 1,
+            most_sums: 1,
+        },
+        Case {
+            name: "boss root",
+            build: boss_root,
+            pick: [30.0 + d, 20.0 + d, 10.0],
+            r: 2.0,
+            most_roots: 10,
+            most_sums: 680,
+        },
+    ];
+    for Case {
+        name,
+        build,
+        pick: p,
+        r,
+        most_roots,
+        most_sums,
+    } in cases
+    {
+        let mut k = kernel(true);
+        let mut b = build(&mut k).unwrap();
+        let e = pick(&k, &b, p);
+        fillet_edges(&mut k, &mut b, &[e], r, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
+        let c = k.blend_counts.get();
+        assert!(
+            (1..=most_roots).contains(&c.area_roots),
+            "{name}: {} roots",
+            c.area_roots
+        );
+        assert!(
+            (1..=most_sums).contains(&c.area_sums),
+            "{name}: {} sums",
+            c.area_sums
+        );
+        // the memo is the operation's: the kernel keeps what it solved
+        assert!(!k.blend_w_memo.borrow().is_empty(), "{name}");
     }
 }

@@ -5,13 +5,17 @@
 //! Fork: `sm_Tay`, `sm_TayOf`, its `operator+ - * /`, `sm_Wide`, `sm_Acos`, `sm_SinCos`,
 //! `sm_TaySqrt`, `sm_TaySinCos`, `sm_PowN`, `sm_GnAreaIntegrand`, `sm_GnAreaSum`,
 //! `sm_GnWedgeCos`, `sm_GnHalfAngle`, `sm_GnTarget`, `sm_GnInvert` and `sm_GnAreaCells` in
-//! `source/SMLib/src/SmFilletSection.cpp` (tangency-labs/smlib@7102bc5); see [`super`] for
-//! the table.
+//! `source/SMLib/src/SmFilletSection.cpp` (tangency-labs/smlib@7102bc5; the cells' sums
+//! off the grid and at points kept once each, f9b133a, smlib#109); see [`super`] for the
+//! table.
 
 use core::ops::{Add, Div, Mul, Sub};
+use std::collections::BTreeMap;
 
 use super::interval::Ivl;
 use super::series::{GnScalar, VSer};
+use crate::kernel::Kernel;
+use crate::surface::procedural_blend::count_area_sum;
 
 /// `SM_GN_TAY`: the order the series are truncated at.
 pub const TAY: usize = 4;
@@ -394,7 +398,9 @@ pub fn gn_invert<S: Ring>(tg: &Tay<S>, d: &Tay<S>, w0: S) -> Tay<S> {
 /// `sm_GnAreaCells`: enclosures of I's Taylor coefficients in w over intervals of w, on a
 /// grid of cells over an edge's thumbweights, each computed once: cell k's series holds
 /// `I^(m)(w) / m!` for every w in it, and the hull of the cells an interval meets holds
-/// them over that interval. An interval off the grid is taken on its own.
+/// them over that interval. An interval off the grid is taken on its own, and I at a
+/// point of w (the root's guess) too: each once, kept by its ends' bits (the same w, the
+/// same sum; f9b133a, smlib#109).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GnAreaCells {
     /// `lOrder`: n.
@@ -403,6 +409,10 @@ pub struct GnAreaCells {
     pub ends: Vec<f64>,
     /// `sHave`, `sI`: the cells' series, once computed.
     pub series: Vec<Option<Tay<Ivl>>>,
+    /// `sOff`: the intervals off the grid, by their ends' bits.
+    pub off: BTreeMap<(u64, u64), Tay<Ivl>>,
+    /// `sAt`: I at points of w, by their bits.
+    pub at: BTreeMap<u64, Ivl>,
 }
 
 impl GnAreaCells {
@@ -415,16 +425,39 @@ impl GnAreaCells {
                 .push(lo + (hi - lo) * f64::from(k) / f64::from(cells));
         }
         self.series = vec![None; usize::from(cells)];
+        self.off.clear();
+        self.at.clear();
+    }
+
+    /// `At`: I at `w`, an enclosure.
+    pub fn at(&mut self, k: &Kernel, w: f64) -> Ivl {
+        let order = self.order;
+        *self.at.entry(w.to_bits()).or_insert_with(|| {
+            count_area_sum(k);
+            gn_area_sum::<Ivl>(order, Ivl::from(w))
+        })
+    }
+
+    /// `Over`'s interval off the grid, taken on its own once.
+    fn off_grid(&mut self, k: &Kernel, w: Ivl) -> Tay<Ivl> {
+        let order = self.order;
+        *self
+            .off
+            .entry((w.lo.to_bits(), w.hi.to_bits()))
+            .or_insert_with(|| {
+                count_area_sum(k);
+                gn_area_sum(order, Tay::of_terms(w, Ivl::from(1.0)))
+            })
     }
 
     /// `Over`: the series of I in w over the interval `w`.
-    pub fn over(&mut self, w: Ivl) -> Tay<Ivl> {
+    pub fn over(&mut self, k: &Kernel, w: Ivl) -> Tay<Ivl> {
         let cells = self.ends.len().saturating_sub(1);
         let (Some(&front), Some(&back)) = (self.ends.first(), self.ends.last()) else {
-            return gn_area_sum(self.order, Tay::of_terms(w, Ivl::from(1.0)));
+            return self.off_grid(k, w);
         };
         if cells < 1 || !(w.lo >= front && w.hi <= back) {
-            return gn_area_sum(self.order, Tay::of_terms(w, Ivl::from(1.0)));
+            return self.off_grid(k, w);
         }
         // std::upper_bound / std::lower_bound, less one, clamped to the cells
         let ub = self.ends.partition_point(|&e| e <= w.lo);
@@ -512,17 +545,46 @@ mod tests {
 
     #[test]
     fn cells_hold_the_series_over_their_cells() {
+        let k = Kernel::default();
         let mut cells = GnAreaCells::default();
         cells.init(2, -1.0, 0.5, 8);
         let w = Ivl::new(-0.3, -0.2);
-        let r = cells.over(w);
+        let r = cells.over(&k, w);
         let at = gn_area_sum(2, Tay::of_terms(-0.25_f64, 1.0));
         for (ri, ai) in r.c.iter().zip(&at.c) {
             assert!(ri.lo <= *ai && *ai <= ri.hi);
         }
         assert!(cells.series.iter().filter(|s| s.is_some()).count() >= 1);
         // off the grid: taken on its own
-        let off = cells.over(Ivl::new(0.6, 0.7));
+        let off = cells.over(&k, Ivl::new(0.6, 0.7));
         assert!(off.c[0].lo <= gn_area_sum(2, 0.65) && gn_area_sum(2, 0.65) <= off.c[0].hi);
+    }
+
+    /// f9b133a (smlib#109): an interval off the grid and a point of w are each summed once,
+    /// and a kept sum is the one a fresh sum gives, bit for bit; `Init` forgets them.
+    #[test]
+    fn sums_off_the_cells_are_kept_by_their_bits() {
+        let k = Kernel::default();
+        let mut cells = GnAreaCells::default();
+        cells.init(3, -1.0, 0.5, 8);
+        let off = Ivl::new(0.6, 0.7);
+        let fresh_off = gn_area_sum(3, Tay::of_terms(off, Ivl::from(1.0)));
+        let fresh_at = gn_area_sum::<Ivl>(3, Ivl::from(-0.25));
+        for _ in 0..3 {
+            assert_eq!(cells.over(&k, off), fresh_off);
+            assert_eq!(cells.at(&k, -0.25), fresh_at);
+        }
+        assert_eq!(k.blend_counts.get().area_sums, 2);
+        // inside the grid: the cells', not counted
+        let _ = cells.over(&k, Ivl::new(-0.3, -0.2));
+        assert_eq!(k.blend_counts.get().area_sums, 2);
+        // another point, and the next ulp of the same interval's end, are other sums
+        let _ = cells.at(&k, -0.24);
+        let _ = cells.over(&k, Ivl::new(0.6, f64::from_bits(0.7_f64.to_bits() + 1)));
+        assert_eq!(k.blend_counts.get().area_sums, 4);
+        cells.init(3, -1.0, 0.5, 8);
+        assert!(cells.off.is_empty() && cells.at.is_empty());
+        let _ = cells.at(&k, -0.25);
+        assert_eq!(k.blend_counts.get().area_sums, 5);
     }
 }

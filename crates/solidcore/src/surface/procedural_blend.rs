@@ -90,6 +90,14 @@ pub struct BlendCounts {
     pub newton_steps: u64,
     /// `lMostNewtonSteps`: the most one solve took.
     pub most_newton_steps: u64,
+    /// `lAreaSums`: the equal area thumbweight's area sums I(w) a G^n certificate summed
+    /// outside its cells (at a point of w, or over an interval of w off the cells' grid;
+    /// b64eb30, smlib#109).
+    pub area_sums: u64,
+    /// `lAreaRoots`: the equal area thumbweights solved for (each bisects
+    /// `I(w) = target(u)` on the kernel's first meeting of that order and u in an
+    /// operation; fbba0e2, smlib#109).
+    pub area_roots: u64,
 }
 
 /// `SmBlendNetScope`: while one lives, every procedural blend's `Evaluate`,
@@ -238,6 +246,20 @@ pub(crate) fn count_solve(k: &Kernel, newton_steps: u32) {
     if u64::from(newton_steps) > c.most_newton_steps {
         c.most_newton_steps = u64::from(newton_steps);
     }
+    k.blend_counts.set(c);
+}
+
+/// `CountAreaSum`: one area sum a certificate summed outside its cells.
+pub(crate) fn count_area_sum(k: &Kernel) {
+    let mut c = k.blend_counts.get();
+    c.area_sums = c.area_sums.wrapping_add(1);
+    k.blend_counts.set(c);
+}
+
+/// `CountAreaRoot`: one equal area thumbweight solved for.
+pub(crate) fn count_area_root(k: &Kernel) {
+    let mut c = k.blend_counts.get();
+    c.area_roots = c.area_roots.wrapping_add(1);
     k.blend_counts.set(c);
 }
 

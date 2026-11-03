@@ -629,7 +629,7 @@ pub fn evaluate_definition(
             w
         } else {
             let u = gn_half_angle(&gn_wedge_cos::<f64>(&at.f, &at.v, r0 * r1, ls));
-            let w0 = gn_equal_area_w(n, u.at(0))?;
+            let w0 = gn_equal_area_w(k, n, u.at(0))?;
             let d = gn_area_sum(n, Tay::of_terms(w0, 1.0));
             if d.at(1).partial_cmp(&0.0) != Some(Ordering::Less) {
                 // "the section's area does not fall with its thumbweight"

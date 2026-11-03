@@ -36,8 +36,11 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use crate::nurbs::knots::Side;
-use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
+use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
+use core::sync::atomic::{AtomicU32, Ordering};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const OP: &str = "blend::fillet_section::GnSectionFsg";
 const OP_BUILD: &str = "blend::fillet_section::GnSectionFsg::build";
@@ -236,10 +239,86 @@ fn smin(a: f64, b: f64) -> f64 {
     }
 }
 
-/// `sm_GnEqualAreaW`: the thumbweight at which the order-n section takes off what the
-/// ball's circle does, for half the angle u between the ball's radii
+/// `SM_GN_W_MEMO`: the most equal area thumbweights [`ThumbweightMemo`] keeps before it
+/// starts again. A guard on memory only: no case reaches it (one operation solved 9 at most
+/// here, on the boss root; the fork's largest gate, the twisted wedge with its definition's
+/// grading, 12150), and clearing it changes no result.
+const GN_W_MEMO: usize = 65536;
+
+/// `t_sWMemo` (b8ec238, smlib#109): the equal area thumbweights [`gn_equal_area_w`]
+/// solved, by order and u's bits (the same u, the same root). Emptied as the outermost
+/// [`OperationScope`] opens, and when it grows past [`GN_W_MEMO`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ThumbweightMemo {
+    roots: BTreeMap<(usize, u64), f64>,
+}
+
+impl ThumbweightMemo {
+    /// The memo's thumbweights.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.roots.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
+}
+
+/// `SmGnSectionFSG::OperationScope` (b8ec238, smlib#109): the scope of a blend operation,
+/// a fillet session's life. The kernel's memo of equal area thumbweights is emptied as
+/// the outermost scope opens, so no operation reads another's; nested scopes keep it. The
+/// depth is the kernel's shared counter (the fork's `thread_local` one), so a scope holds
+/// no borrow of the kernel.
+#[derive(Debug)]
+pub struct OperationScope {
+    depth: Arc<AtomicU32>,
+}
+
+impl OperationScope {
+    /// Opens a scope on `k`.
+    #[must_use]
+    pub fn new(k: &Kernel) -> Self {
+        let depth = Arc::clone(&k.blend_operation_scopes);
+        if depth.fetch_add(1, Ordering::Relaxed) == 0 {
+            *k.blend_w_memo.borrow_mut() = ThumbweightMemo::default();
+        }
+        Self { depth }
+    }
+}
+
+impl Drop for OperationScope {
+    fn drop(&mut self) {
+        self.depth.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// `sm_GnEqualAreaW` (b8ec238): [`gn_equal_area_w_solve`], each order and u solved once
+/// in an operation, kept in the kernel's [`ThumbweightMemo`]. A solve that fails is not
+/// kept. The solve is a pure function of exactly the key (the order and u), so a w kept for
+/// one round or definition is the w every other round or definition of the operation would
+/// solve for the same order and u: sharing the memo between them cannot change a result.
+pub(crate) fn gn_equal_area_w(k: &Kernel, order: usize, u: f64) -> Result<f64> {
+    let key = (order, u.to_bits());
+    if let Some(&w) = k.blend_w_memo.borrow().roots.get(&key) {
+        return Ok(w);
+    }
+    count_area_root(k);
+    let w = gn_equal_area_w_solve(order, u)?;
+    let mut memo = k.blend_w_memo.borrow_mut();
+    if memo.roots.len() >= GN_W_MEMO {
+        memo.roots.clear();
+    }
+    memo.roots.insert(key, w);
+    Ok(w)
+}
+
+/// `sm_GnEqualAreaWSolve`: the thumbweight at which the order-n section takes off what
+/// the ball's circle does, for half the angle u between the ball's radii
 /// ([`GnSectionFsg::equal_area_thumbweight`]): the root of `I(w) = target(u)`.
-pub(crate) fn gn_equal_area_w(order: usize, u: f64) -> Result<f64> {
+fn gn_equal_area_w_solve(order: usize, u: f64) -> Result<f64> {
     const OP_EA: &str = "blend::fillet_section::GnSectionFsg::equal_area_thumbweight";
     if !((2..=GN_MAX_ORDER).contains(&order) && u > 0.0 && u < 0.5 * PI) {
         return Err(SolidError::invalid_input(OP_EA, "order or wedge angle"));
@@ -275,9 +354,9 @@ pub(crate) fn gn_equal_area_w(order: usize, u: f64) -> Result<f64> {
 /// `sm_GnStationThumbweight`: a station's equal area thumbweight and its s-derivative: x
 /// from the station's feet and V to first order in s, w the root at its u,
 /// `dw/ds = target' / I'(w)`.
-fn gn_station_thumbweight(n: usize, rr: f64, st: &mut GnStation) -> Result<()> {
+fn gn_station_thumbweight(k: &Kernel, n: usize, rr: f64, st: &mut GnStation) -> Result<()> {
     let u = gn_half_angle(&gn_wedge_cos::<f64>(&st.f, &st.v, rr, 1));
-    let w = gn_equal_area_w(n, u.at(0))?;
+    let w = gn_equal_area_w(k, n, u.at(0))?;
     let d = gn_area_sum(n, Tay::of_terms(w, 1.0));
     let falls = d.at(1) < 0.0;
     if !falls {
@@ -351,6 +430,10 @@ impl GnSectionFsg {
     /// `SM_ERR_INVALID_INPUT` for an order past 2..=4, an angle outside (0, pi), or a
     /// target the bracket does not reach by w = -1000 (a wedge so open or so shut that the
     /// circle takes off next to nothing, or all but the chord's area).
+    ///
+    /// Deviation (b8ec238): the fork's goes through the thread's memo and counts its
+    /// solve; this takes no kernel, so it solves afresh and counts nothing (the same w:
+    /// the memo keeps what the solve gives). No blend operation calls it.
     pub fn equal_area_thumbweight(order: usize, alpha: f64) -> Result<f64> {
         if !(alpha > 0.0 && alpha < PI) {
             return Err(SolidError::invalid_input(
@@ -358,22 +441,22 @@ impl GnSectionFsg {
                 "wedge angle",
             ));
         }
-        gn_equal_area_w(order, 0.5 * (PI - alpha))
+        gn_equal_area_w_solve(order, 0.5 * (PI - alpha))
     }
 
     /// `ThumbweightAt`: the thumbweight at a station whose ball's radii to its contacts
     /// meet at the angle whose cosine is `cos_radii`: the one given, or the equal area one
-    /// of the wedge `alpha = pi - (that angle)`. Exact for two planes; elsewhere the
-    /// section of the station's own wedge (7102bc5).
+    /// of the wedge `alpha = pi - (that angle)`, kept in `k`'s memo. Exact for two planes;
+    /// elsewhere the section of the station's own wedge (7102bc5).
     ///
     /// # Errors
     ///
     /// Those of [`GnSectionFsg::equal_area_thumbweight`].
-    pub fn thumbweight_at(&self, cos_radii: f64) -> Result<f64> {
+    pub fn thumbweight_at(&self, k: &Kernel, cos_radii: f64) -> Result<f64> {
         if self.thumbweight != GN_THUMBWEIGHT_EQUAL_AREA {
             return Ok(self.thumbweight);
         }
-        gn_equal_area_w(self.order, 0.5 * acos_clamped(cos_radii))
+        gn_equal_area_w(k, self.order, 0.5 * acos_clamped(cos_radii))
     }
 
     /// `CreateSurface`: the blend surface between the solver's rails. The solver's faces
@@ -825,7 +908,7 @@ impl GnSectionFsg {
                 law_r.as_ref(),
             )?;
             if equal_area {
-                gn_station_thumbweight(n, r[0] * r[1], &mut before)?;
+                gn_station_thumbweight(k, n, r[0] * r[1], &mut before)?;
                 st.wdsl = before.wds;
             }
             st.xl = before.x;
@@ -1415,7 +1498,7 @@ impl GnSectionFsg {
             let mut w_lo = f64::INFINITY;
             let mut w_hi = f64::NEG_INFINITY;
             for st in &mut stations {
-                gn_station_thumbweight(n, rr, st)?;
+                gn_station_thumbweight(k, n, rr, st)?;
                 w_lo = smin(w_lo, st.w);
                 w_hi = smax(w_hi, st.w);
             }
@@ -1498,7 +1581,7 @@ impl GnSectionFsg {
                     law_r.as_ref(),
                 )?;
                 if equal_area {
-                    gn_station_thumbweight(n, rr, &mut st)?;
+                    gn_station_thumbweight(k, n, rr, &mut st)?;
                 }
                 next.push(st);
                 next_bounds.push(-1.0);
@@ -1584,8 +1667,10 @@ impl GnSectionFsg {
         .0?;
         // the thumbweight of the station's own wedge: the ball's radii to its contacts from V
         let v = Vec3::new(at.v.a[0].at(0, 0), at.v.a[1].at(0, 0), at.v.a[2].at(0, 0));
-        let w = self
-            .thumbweight_at((foot(&at, 0, 0, 0) - v).dot(foot(&at, 1, 0, 0) - v) / (r[0] * r[1]))?;
+        let w = self.thumbweight_at(
+            k,
+            (foot(&at, 0, 0, 0) - v).dot(foot(&at, 1, 0, 0) - v) / (r[0] * r[1]),
+        )?;
         let (i, o) = (rail, 1 - rail);
         let mut t_o = Vec3::new(0.0, 0.0, 0.0);
         for kk in 0..=n {
@@ -1712,16 +1797,20 @@ mod tests {
 
         // at a station: the radii at a right angle (cos 0) give the square corner's w; a
         // thumbweight given is kept
+        let k = Kernel::default();
         let g = GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT);
         assert_eq!(
-            g.thumbweight_at(0.0).unwrap().to_bits(),
+            g.thumbweight_at(&k, 0.0).unwrap().to_bits(),
             (-0.52521240458755813_f64).to_bits()
         );
         assert_eq!(g.thumbweight, GN_THUMBWEIGHT_EQUAL_AREA);
-        assert_eq!(GnSectionFsg::new(2, 0.3).thumbweight_at(0.7).unwrap(), 0.3);
+        assert_eq!(
+            GnSectionFsg::new(2, 0.3).thumbweight_at(&k, 0.7).unwrap(),
+            0.3
+        );
         // radii that coincide or oppose: no wedge
-        assert!(g.thumbweight_at(1.0).is_err());
-        assert!(g.thumbweight_at(-1.0).is_err());
+        assert!(g.thumbweight_at(&k, 1.0).is_err());
+        assert!(g.thumbweight_at(&k, -1.0).is_err());
     }
 
     /// The marker, passed by name, selects the equal area section: its thumbweight is
@@ -1729,15 +1818,16 @@ mod tests {
     /// before b9d6a72 (-2) gets an ordinary section of that fixed thumbweight instead.
     #[test]
     fn the_equal_area_marker_selects_the_equal_area_section() {
+        let k = Kernel::default();
         let marked = GnSectionFsg::new(2, GN_THUMBWEIGHT_EQUAL_AREA);
         let square = GnSectionFsg::equal_area_thumbweight(2, core::f64::consts::FRAC_PI_2).unwrap();
         let sixty = GnSectionFsg::equal_area_thumbweight(2, PI / 3.0).unwrap();
         // radii at a right angle (cos 0): the square corner's; at 120 degrees: the 60 degree wedge's
         assert_eq!(
-            marked.thumbweight_at(0.0).unwrap().to_bits(),
+            marked.thumbweight_at(&k, 0.0).unwrap().to_bits(),
             square.to_bits()
         );
-        assert!((marked.thumbweight_at(-0.5).unwrap() - sixty).abs() < 1e-12);
+        assert!((marked.thumbweight_at(&k, -0.5).unwrap() - sixty).abs() < 1e-12);
         assert!((square - sixty).abs() > 0.1);
         assert_eq!(
             GN_DEFAULT_THUMBWEIGHT.to_bits(),
@@ -1747,8 +1837,58 @@ mod tests {
         let stale_marker = -2.0;
         let stale = GnSectionFsg::new(2, stale_marker);
         assert!(GnSectionFsg::is_valid(2, stale_marker));
-        assert_eq!(stale.thumbweight_at(0.0).unwrap(), stale_marker);
-        assert_eq!(stale.thumbweight_at(-0.5).unwrap(), stale_marker);
+        assert_eq!(stale.thumbweight_at(&k, 0.0).unwrap(), stale_marker);
+        assert_eq!(stale.thumbweight_at(&k, -0.5).unwrap(), stale_marker);
+    }
+
+    /// b8ec238 (smlib#109): each order and u is solved once, and a kept thumbweight is
+    /// the solve's, bit for bit. A solve that fails is not kept.
+    #[test]
+    fn equal_area_thumbweights_are_solved_once_each() {
+        let k = Kernel::default();
+        let us = [0.3, core::f64::consts::FRAC_PI_4, 1.2];
+        for _ in 0..3 {
+            for n in 2..=GN_MAX_ORDER {
+                for u in us {
+                    let w = gn_equal_area_w(&k, n, u).unwrap();
+                    assert_eq!(w.to_bits(), gn_equal_area_w_solve(n, u).unwrap().to_bits());
+                }
+            }
+        }
+        assert_eq!(k.blend_counts.get().area_roots, 9);
+        assert_eq!(k.blend_w_memo.borrow().len(), 9);
+        // the next u up is another root
+        let next = f64::from_bits(0.3_f64.to_bits() + 1);
+        let _ = gn_equal_area_w(&k, 2, next).unwrap();
+        assert_eq!(k.blend_counts.get().area_roots, 10);
+        // no wedge: an error each time, solved each time
+        assert!(gn_equal_area_w(&k, 2, 0.0).is_err());
+        assert!(gn_equal_area_w(&k, 2, 0.0).is_err());
+        assert_eq!(k.blend_counts.get().area_roots, 12);
+        assert_eq!(k.blend_w_memo.borrow().len(), 10);
+    }
+
+    /// b8ec238: the outermost operation scope empties the memo as it opens; a nested one
+    /// keeps it, and so does the end of a scope.
+    #[test]
+    fn an_operation_scope_starts_the_memo_afresh() {
+        let k = Kernel::default();
+        let _ = gn_equal_area_w(&k, 2, 0.5).unwrap();
+        {
+            let _outer = OperationScope::new(&k);
+            assert!(k.blend_w_memo.borrow().is_empty());
+            let _ = gn_equal_area_w(&k, 2, 0.5).unwrap();
+            {
+                let _inner = OperationScope::new(&k);
+                assert_eq!(k.blend_w_memo.borrow().len(), 1);
+                let _ = gn_equal_area_w(&k, 2, 0.5).unwrap();
+            }
+            assert_eq!(k.blend_w_memo.borrow().len(), 1);
+        }
+        assert_eq!(k.blend_w_memo.borrow().len(), 1);
+        assert_eq!(k.blend_counts.get().area_roots, 2);
+        let _again = OperationScope::new(&k);
+        assert!(k.blend_w_memo.borrow().is_empty());
     }
 
     #[test]

@@ -61,8 +61,7 @@ use super::station::{
     knot, smax, solve4, span, GnStation, GnSystem, Nurbs, Partials,
 };
 use super::tay::{
-    gn_area_sum, gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar,
-    TAY,
+    gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar, TAY,
 };
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
@@ -1254,6 +1253,7 @@ fn vat(v: &VSer<Ivl>, q: usize, i: usize, k: usize) -> Ivl {
 /// `cm`: at its middle (to K - 1); `d`: s less the middle over the piece.
 #[allow(clippy::too_many_arguments)]
 pub fn gn_row_terms_over(
+    k: &Kernel,
     vary: &mut GnVarying,
     f: &[VSer<Ivl>; 2],
     centre: &VSer<Ivl>,
@@ -1297,7 +1297,7 @@ pub fn gn_row_terms_over(
     x_top = x_top * inv_rr;
     let u = gn_half_angle(&centred(&x_mid, x_top, K, d));
     let tg = gn_target(&u);
-    let phi = gn_area_sum::<Ivl>(n, Ivl::from(guess)) - tg.at(0);
+    let phi = vary.cells.at(k, guess) - tg.at(0);
     let mut w0 = IZ;
     let mut root = false;
     let mut rho = 1.0e-12 * (1.0 + guess.abs());
@@ -1308,7 +1308,7 @@ pub fn gn_row_terms_over(
         if !below_one {
             break;
         }
-        let d1 = vary.cells.over(w).at(1);
+        let d1 = vary.cells.over(k, w).at(1);
         if d1.hi < 0.0 {
             let nn = Ivl::from(guess) - phi / d1;
             if nn.lo > w.lo && nn.hi < w.hi {
@@ -1322,7 +1322,7 @@ pub fn gn_row_terms_over(
     if !root {
         return false;
     }
-    let over_w0 = vary.cells.over(w0);
+    let over_w0 = vary.cells.over(k, w0);
     let sw = gn_invert(&tg, &over_w0, w0);
     let form = gn_form_normalized(n, sw);
     // the jets c'_ik as series in s over the piece
@@ -1733,7 +1733,7 @@ pub fn gn_certify_span(
                             let d = Ivl::new(ea.s, eb.s) - Ivl::from(ps.mid);
                             let guess = (1.0 - t) * a.w + t * b.w;
                             gn_row_terms_over(
-                                v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, &bar, o, &mut rows,
+                                k, v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, &bar, o, &mut rows,
                             )
                         }
                         None => false,

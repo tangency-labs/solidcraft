@@ -77,6 +77,12 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
             std::sync::Weak::new(),
             crate::topology::topology::NotifyRecords::new(),
         ),
+        blend_w_memo: core::cell::RefCell::default(),
+        // (inside the caller's operation: a scope opened on the copy keeps its memo)
+        blend_operation_scopes: std::sync::Arc::new(core::sync::atomic::AtomicU32::new(
+            k.blend_operation_scopes
+                .load(core::sync::atomic::Ordering::Relaxed),
+        )),
         // (building cache trees does none of the counted work)
         work_counters: crate::kernel::WorkCounters::default(),
     }

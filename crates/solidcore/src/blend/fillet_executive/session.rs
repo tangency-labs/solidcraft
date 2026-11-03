@@ -72,6 +72,7 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_geom::p5::FilletEdgeContext;
+use crate::blend::fillet_section::section::OperationScope;
 use crate::blend::fillet_solver::curve_blend_sih::MakeCurveBlendSih;
 use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSurfaceGenerator, MakeSurfaceBlendSih,
@@ -1299,6 +1300,10 @@ fn replay_corner_error(
 pub struct FilletSession<'target> {
     executive: FilletExecutive<FilletObject>,
     objects: SessionObjects<'target>,
+    /// The fork's `SmFilletExecutive::m_sGnScope` (b8ec238, smlib#109): the blend
+    /// operation's scope, for the kernel's memo of equal area thumbweights. Opened first
+    /// and declared last, so it ends after the session's own teardown.
+    _gn_scope: OperationScope,
 }
 
 /// (not upstream) Copies `body`'s own attributes ([`Brep::add_attribute`]) into the
@@ -1428,6 +1433,7 @@ impl<'target> FilletSession<'target> {
         target: &'target mut Brep,
         second_base: Option<&'target mut Brep>,
     ) -> Result<Self> {
+        let gn_scope = OperationScope::new(k);
         let target_serial = crate::topology::brep::p3::notify_serial(&mut k.context, target)?;
         let mut second_base = match second_base {
             Some(body) => Some(SecondBase {
@@ -1499,6 +1505,7 @@ impl<'target> FilletSession<'target> {
                 set_back_vertices: Vec::new(),
                 set_back_fills: Vec::new(),
             },
+            _gn_scope: gn_scope,
         })
     }
 

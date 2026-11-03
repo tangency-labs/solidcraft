@@ -69,7 +69,7 @@ use crate::blend::fillet_executive::p3::{
     ContextMark, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
 };
 use crate::blend::fillet_geom::p1::{FilStatus, FilletEdgeType, FilletErrorType};
-use crate::blend::fillet_section::section::GnSectionFsg;
+use crate::blend::fillet_section::section::{GnSectionFsg, OperationScope};
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_standard_solver::p1::{
     BoundaryTrimmingType, FilletLaw, FilletLawKind, FilletSolverType, FilletSurfaceGeneratorType,
@@ -1519,7 +1519,9 @@ where
         }
     }
 
-    // Got the offset intersection. Create the fillet executive object.
+    // Got the offset intersection. Create the fillet executive object (and its scope for
+    // the memo of equal area thumbweights, its m_sGnScope: b8ec238, smlib#109).
+    let _gn_scope = OperationScope::new(k);
     let mut exec = FilletExecutive::new(None, access.new_executive_objects(k)?);
 
     // The fillet surface generator for the cross section (on the stack upstream):

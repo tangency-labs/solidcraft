@@ -40,9 +40,10 @@
 //! | [`station::GnStation`], [`station::leader_series`], [`station::gn_solve_station`], [`station::gn_solve_station_counted`] | `sm_GnStation`, `sm_LeaderSeries`, `sm_GnSolveStation` (its `pR` and `lSteps`, 014f66f) |
 //! | [`definition::T2`], [`definition::t2_pow`], [`definition::Tv`], [`definition::bern_taylor`], [`definition::StationMemo`], [`definition::evaluate_definition`] | `sm_T2`, `sm_T2Pow`, `sm_TV`, `sm_BernTaylor`, `sm_StationMemo`, `SmProceduralBlend::EvaluateDefinition` (014f66f, c6d9b9a, 0136260) |
 //! | [`section::GN_MAX_ORDER`], [`section::GN_DEFAULT_THUMBWEIGHT`], [`section::GN_THUMBWEIGHT_EQUAL_AREA`] | `SM_GN_MAX_ORDER`, `SM_GN_DEFAULT_THUMBWEIGHT`, `SM_GN_THUMBWEIGHT_EQUAL_AREA` (6148773 = 1947a45) |
-//! | [`section::GnSectionFsg::equal_area_thumbweight`], [`section::GnSectionFsg::thumbweight_at`], `gn_equal_area_w`, `gn_station_thumbweight` (private) | `EqualAreaThumbweight` (6148773 = 1947a45; b9d6a72, 7102bc5), `ThumbweightAt`, `sm_GnEqualAreaW`, `sm_GnStationThumbweight` (7102bc5) |
+//! | [`section::GnSectionFsg::equal_area_thumbweight`], [`section::GnSectionFsg::thumbweight_at`], `gn_equal_area_w`, `gn_equal_area_w_solve`, `gn_station_thumbweight` (private) | `EqualAreaThumbweight` (6148773 = 1947a45; b9d6a72, 7102bc5), `ThumbweightAt`, `sm_GnEqualAreaW` (memoized, b8ec238), `sm_GnEqualAreaWSolve` (b8ec238), `sm_GnStationThumbweight` (7102bc5) |
+//! | [`section::ThumbweightMemo`], [`section::OperationScope`] | `t_sWMemo` and `SM_GN_W_MEMO`, `SmGnSectionFSG::OperationScope` and `t_lOperationScopes` (b8ec238, smlib#109) |
 //! | [`tay::Tay`], [`tay::Ring`], [`tay::TayScalar`], [`tay::tay_sqrt`], [`tay::tay_sin_cos`], [`tay::pow_n`], [`tay::wide`], [`tay::acos_clamped`] | `sm_Tay`, `sm_TayOf`, its operators, the templates' `Z` and `S`, `sm_TaySqrt`, `sm_TaySinCos`, `sm_PowN`, `sm_Wide`, `sm_Acos`, `sm_SinCos` (7102bc5) |
-//! | [`tay::gn_area_integrand`], [`tay::gn_area_sum`], [`tay::gn_wedge_cos`], [`tay::gn_half_angle`], [`tay::gn_target`], [`tay::gn_invert`], [`tay::GnAreaCells`] | `sm_GnAreaIntegrand`, `sm_GnAreaSum` (in place of `sm_GnSectionAreaIntegral`), `sm_GnWedgeCos`, `sm_GnHalfAngle`, `sm_GnTarget`, `sm_GnInvert`, `sm_GnAreaCells` (7102bc5) |
+//! | [`tay::gn_area_integrand`], [`tay::gn_area_sum`], [`tay::gn_wedge_cos`], [`tay::gn_half_angle`], [`tay::gn_target`], [`tay::gn_invert`], [`tay::GnAreaCells`] | `sm_GnAreaIntegrand`, `sm_GnAreaSum` (in place of `sm_GnSectionAreaIntegral`), `sm_GnWedgeCos`, `sm_GnHalfAngle`, `sm_GnTarget`, `sm_GnInvert`, `sm_GnAreaCells` (7102bc5; `At`, `sOff`, `sAt` f9b133a) |
 //! | [`form::binom`], [`form::GnSectionFormT`], [`form::gn_form_t`], [`form::gn_form_normalized`] | `sm_Binom`, `sm_GnSectionFormT`, `sm_GnFormT`, `sm_GnFormNormalized` (7102bc5) |
 //! | [`certificate::GnVarying`], [`certificate::GnRowTerms`], [`certificate::centred`], [`certificate::gn_row_terms_over`], [`certificate::PieceSeries`], [`certificate::gn_fourth_over_series`] | `sm_GnVarying`, `sm_GnRowTerms`, `sm_Centred`, `sm_GnRowTermsOver`, `sm_GnFourthOver`'s `pF`, `pV`, `pFm`, `pVm`, `pdMid` (7102bc5) |
 //! | [`section::GnSectionFsg`], [`section::GnSectionFsg::new`], [`section::GnSectionFsg::is_valid`] | `SmGnSectionFSG`, its constructor, `IsValid` (and `GetOrder`, `GetThumbweight`, `GetCertifiedBound`, `GetCertifiedSpans` as fields) |
@@ -61,6 +62,13 @@
 //!   the solvers' copies of one generator need nothing shared. The
 //!   station's `dW` and `dWds` start NaN, as the fork's do.
 //! - **The area cells.** `sm_GnAreaCells`' `sHave` and `sI` are one `Option` per cell.
+//!   Its sums off the grid and at points count into the kernel's
+//!   [`crate::surface::procedural_blend::BlendCounts`], so `Over` and `At` take the kernel.
+//! - **The thumbweight memo (b8ec238).** The fork's `thread_local` memo and scope count
+//!   are the kernel's (`blend_w_memo`, `blend_operation_scopes`), so the solves that read
+//!   them take the kernel; the scope count is a shared atomic, so a fillet session holds
+//!   its scope while it takes `&mut Kernel`. The memo keeps what the solve gives, so every
+//!   result is the same with or without it.
 //! - **Bounds.** `sm_Trunc`'s orders are checked against the series' fixed size
 //!   (`SM_GN_MAXS`, `SM_GN_MAXE`) when a [`series::Trunc`] is made; the fork leaves them
 //!   to its callers. An empty Bernstein polynomial (which the fork never forms) multiplies
