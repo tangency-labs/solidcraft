@@ -5,7 +5,6 @@
 
 use egui::{Pos2, Sense, Stroke, Vec2 as Screen, vec2};
 use solidcore_record::{Plane, Vec2};
-use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -81,19 +80,11 @@ fn picked_box(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec<Vec<Vec
     let sk = &state.sketch(app.session.active_sketch?)?.sketch;
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut points: Vec<Vec2> = Vec::new();
-    for sel in &d.inputs.first()?.items {
-        match sel {
-            Sel::SketchCurve { id, .. } => {
-                if let Some(i) = sk.curve_index(id) {
-                    lines.push(sk.polyline(i));
-                }
-            }
-            Sel::SketchPoint { .. } => {
-                if let Some(p) = crate::sketch_modify_ui::point_id(&app.session, sel).and_then(|id| sk.resolve_point(id)).and_then(|i| sk.point(i)) {
-                    points.push(p);
-                }
-            }
-            _ => {}
+    for id in crate::sketch_modify_ui::entity_ids(&app.session, &d.inputs, 0) {
+        if let Some(i) = sk.curve_index(&id) {
+            lines.push(sk.polyline(i));
+        } else if let Some(p) = sk.resolve_point(&id).and_then(|i| sk.point(i)) {
+            points.push(p);
         }
     }
     let all: Vec<Vec2> = lines.iter().flatten().copied().chain(points).collect();
