@@ -174,6 +174,7 @@ form or exact. Draft it as a rig case here, export it with
 describes. `tests/kernel-cases/` takes no new cases: its `CASES` list only shrinks
 (`cargo xtask lists`). App-level cases (what a command does, the UI, product rules) stay in
 SolidCraft, as tests in their area's existing test file or UI scenarios.
+
 The naming corpus checks persistent names: every name a corpus design stores still finds a face or
 an edge, and two builds name its faces and edges alike
 (`cargo test --profile ci -p solidcraft-cli --test naming_corpus`).
