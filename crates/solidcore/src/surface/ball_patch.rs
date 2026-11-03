@@ -29,7 +29,8 @@
 //! Deviations: out-params are return values. `SmDatabaseIO::IsValidType` is a debug-build
 //! assertion only (not ported for any type). The fork's b439d73 notes that the shell's
 //! exact offset of a Ball patch is later put on a tangent-extended B-spline
-//! (`GetCreateExtendedSurface`), which no longer carries the sphere: so here too. No
+//! (`GetCreateExtendedSurface`), which no longer carries the sphere: so here too, unless
+//! `offset_extends_ball_patches_as_themselves` extends it as a ball patch (WR-728). No
 //! recursion: the reader reads its net as a plain B-spline record, inside the surface
 //! dispatcher's nesting count.
 

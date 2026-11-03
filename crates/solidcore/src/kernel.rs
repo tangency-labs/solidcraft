@@ -443,6 +443,8 @@ pub struct UpstreamFixes {
     pub offset_extended_edges_mated: bool,
     /// The extended offset (`SmOffsetExecutive::GetCreateExtendedSurface`) extends a cone or cylinder as itself, along its rulings and around its axis with `SM_CT_CINFINITY` (around by no more than half the turn it leaves open on each side), where upstream extends every surface by a tangent extension (`SM_CT_G1R`) that leaves a cylinder at once; a face that reaches a hair into that extension is later fitted back into a cylinder off its radius (WR-532; the fork's tangency-labs/smlib@b283ea2).
     pub offset_extends_cones_as_themselves: bool,
+    /// The extended offset (`SmOffsetExecutive::GetCreateExtendedSurface`) extends a ball patch (the blend corner's Ball, `fillet_blend_corner`) as itself, a ball patch on its sphere: its net carried on with `SM_CT_CINFINITY`, which stays on the sphere, around its pole by no more than a quarter of the turn its third side leaves open on each side and away from the pole by no more than half the arc left to the pole's antipode. Upstream extends every surface by a tangent extension (`SM_CT_G1R`), a plain B-spline off the sphere; a shell's face that reaches a hair into it (rounding in its trims) keeps that B-spline, so 7 of the 8 inner corners of a shelled rounded box lost their sphere (WR-728, #2484; the fork's b439d73 notes it).
+    pub offset_extends_ball_patches_as_themselves: bool,
     /// `SmOffsetSurface::SwapUV` negates the distance once for the extended surface and
     /// again for the base, so an owning offset that has a stored extension comes back
     /// with its distance unchanged and lies on the wrong side of its base; with this

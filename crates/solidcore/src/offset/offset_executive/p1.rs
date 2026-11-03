@@ -260,6 +260,106 @@ fn extend_cone_as_itself(
     Ok(both)
 }
 
+/// Not upstream (WR-728, #2484): ball patch `patch` (the face's surface `surface`)
+/// extended by `dist` as itself, a ball patch on the same sphere. The Ball's patch is the
+/// sphere's triangle with one corner, its pole, on a side of the patch collapsed to a point
+/// (a singularity, as the extension finds it); its iso-curves through the pole are great
+/// circles, and the third side is a great circle's arc. The patch is carried on with
+/// `SM_CT_CINFINITY`, the polynomial continuation of its homogeneous net, so the identity
+/// `|X - C W|^2 = R^2 W^2` that puts it on the sphere holds on the extension too, where a
+/// tangent extension (`SM_CT_G1R`) leaves the sphere at once. Around the pole (across
+/// its two sides through the pole) each side goes no farther than a quarter of the turn
+/// the third side's great circle leaves open, as a cone's turn is bounded
+/// ([`extend_cone_as_itself`]); away from the pole (across the third side) no farther
+/// than half the arc left from the third side's farthest point to the pole's antipode,
+/// where the great circles through the pole meet again. The pole's side is not extended.
+/// A patch with no singular side (not the Ball's triangle) is extended as its net is, a
+/// plain B-spline.
+///
+/// # Errors
+///
+/// Those of the singularity tests, evaluations and extensions, and
+/// [`SolidError::InvalidInput`] when the extended net has a weight that is not positive.
+fn extend_ball_patch_as_itself(
+    kernel: &Kernel,
+    surface: &Surface,
+    patch: &crate::surface::ball_patch::BallPatch,
+    dist: f64,
+) -> Result<Surface> {
+    use crate::math::Point2;
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let net = patch.net();
+    let dom = net.natural_uv_domain();
+    let (lo, hi) = (dom.min(), dom.max());
+    // the pole's side as the extension finds it (`CreateExtendedSurface`'s singularity
+    // test at the domain's corners): the pole, the third side's ends, the direction round
+    // the pole and the side across the third side
+    let at_lo = surface.is_singularity(kernel, lo, EFF_ZERO, false)?;
+    let at_hi = surface.is_singularity(kernel, hi, EFF_ZERO, false)?;
+    let (pole, ends, around, away) = if at_lo.singular && at_lo.direction == SurfParamType::U {
+        (
+            lo,
+            [Point2::new(lo.x, hi.y), hi],
+            SurfParamType::U,
+            SurfParamType::VMax,
+        )
+    } else if at_lo.singular {
+        (
+            lo,
+            [Point2::new(hi.x, lo.y), hi],
+            SurfParamType::V,
+            SurfParamType::UMax,
+        )
+    } else if at_hi.singular && at_hi.direction == SurfParamType::U {
+        (
+            hi,
+            [lo, Point2::new(hi.x, lo.y)],
+            SurfParamType::U,
+            SurfParamType::VMin,
+        )
+    } else if at_hi.singular {
+        (
+            hi,
+            [lo, Point2::new(lo.x, hi.y)],
+            SurfParamType::V,
+            SurfParamType::UMin,
+        )
+    } else {
+        return Ok(Surface::from(net.create_extended_surface(
+            kernel,
+            dist,
+            ContinuityType::G1R,
+        )?));
+    };
+    let centre = patch.centre();
+    let radius = patch.radius();
+    let [e0, e1] = ends;
+    let p = net.evaluate_point(pole)? - centre;
+    let a = net.evaluate_point(e0)? - centre;
+    let b = net.evaluate_point(e1)? - centre;
+    let angle = |x: Vec3, y: Vec3| x.cross(y).length().atan2(x.dot(y));
+    // the third side's farthest point from the pole: the foot of the pole's antipode on
+    // the great circle's plane, where it is on the arc, else an end
+    let m = a.cross(b);
+    let foot = m * m.dot(p) - p * m.dot(m);
+    let mut farthest = angle(p, a).max(angle(p, b));
+    if foot != Vec3::new(0.0, 0.0, 0.0)
+        && a.cross(foot).dot(m) >= 0.0
+        && foot.cross(b).dot(m) >= 0.0
+    {
+        farthest = farthest.max(angle(p, foot));
+    }
+    let around_dist = min2(dist, 0.25 * (2.0 * PI - angle(a, b)) * radius);
+    let away_dist = min2(dist, 0.5 * (PI - farthest) * radius);
+    let round =
+        net.create_extended_surface_dir(kernel, around, around_dist, ContinuityType::CInfinity)?;
+    let both =
+        round.create_extended_surface_dir(kernel, away, away_dist, ContinuityType::CInfinity)?;
+    Ok(Surface::from(
+        crate::surface::ball_patch::BallPatch::create(&both, centre, radius)?,
+    ))
+}
+
 /// Not upstream (WR-532; tangency-labs/smlib@3626d4b): makes the knot of B-spline
 /// `surface` at `at` in direction `dir` of multiplicity equal to the degree
 /// (`InsertOneKnot` of the missing count; a knot within `EFF_ZERO` of the interval's
@@ -757,6 +857,12 @@ impl OffsetExecutive {
                     // Not upstream (WR-532), opt-in `offset_extends_cones_as_themselves`
                     SurfaceKind::Cone(cone) if kernel.fixes.offset_extends_cones_as_themselves => {
                         extend_cone_as_itself(kernel, base, cone, dist)?
+                    }
+                    // Not upstream (WR-728), opt-in `offset_extends_ball_patches_as_themselves`
+                    SurfaceKind::BallPatch(patch)
+                        if kernel.fixes.offset_extends_ball_patches_as_themselves =>
+                    {
+                        extend_ball_patch_as_itself(kernel, base, patch, dist)?
                     }
                     _ => base.create_extended_surface(kernel, dist, ContinuityType::G1R)?,
                 };
