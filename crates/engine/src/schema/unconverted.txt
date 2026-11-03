@@ -58,7 +58,6 @@ document.inspect
 document.metadata
 document.metadata.remove
 document.metadata.set
-document.units
 engine.commands
 explode.create
 explode.delete
