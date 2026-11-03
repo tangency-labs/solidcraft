@@ -1278,6 +1278,7 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
+        old_auto_size: false,
     }
 }
 
