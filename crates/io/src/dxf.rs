@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 
-use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2};
+use solidcraft_doc::sketch::MAX_SPLINE_POINTS;
+use solidcraft_geom::bspline::{HPoint, bezier_point};
+use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2, Vec3};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 use crate::{IoError, Result};
@@ -279,7 +281,8 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                 if fx.len() >= 2 && fx.len() == fy.len() {
                     out.push(Geom2::Spline { pts: fx.iter().zip(&fy).map(|(x, y)| pt(*x, *y)).collect(), control: false, degree: 3 });
                 } else if cx.len() >= 2 && cx.len() == cy.len() {
-                    out.push(Geom2::Spline { pts: cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect(), control: true, degree });
+                    let ctrl: Vec<Vec2> = cx.iter().zip(&cy).map(|(x, y)| pt(*x, *y)).collect();
+                    control_spline(ctrl, degree, &e.all(40), &e.all(41), out)?;
                 }
             }
             "TEXT" | "MTEXT" => {
@@ -293,6 +296,114 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
         }
     }
     Ok(())
+}
+
+/// A SPLINE given by control points, with its knots (group 40) and weights (41), as sketch
+/// curves (solidcraft#10875). A sketch spline over control points is clamped with evenly spaced
+/// knots and holds at most [`MAX_SPLINE_POINTS`] points, so a SPLINE that is one stays one. Any
+/// other comes in as its Bézier pieces, which are exact: a straight piece as a line, a rational
+/// quadratic one as a conic, and a piece of another rational SPLINE as a spline through samples
+/// of it. Knots that are not a SPLINE's (the wrong count, decreasing) are taken as the even ones,
+/// and weights that are not (the wrong count, not positive) as all equal.
+fn control_spline(ctrl: Vec<Vec2>, degree: u8, knots: &[f64], weights: &[f64], out: &mut Vec<Geom2>) -> Result<()> {
+    let n = ctrl.len();
+    let p = usize::from(degree).clamp(1, n.saturating_sub(1).max(1));
+    // The sketch's knots for these points, as `solidcraft_sketch::spline_point` lays them out.
+    let spans = n.saturating_sub(p).max(1);
+    let even: Vec<f64> = (0..n + p + 1)
+        .map(|i| {
+            if i <= p {
+                0.0
+            } else if i >= n {
+                1.0
+            } else {
+                (i - p) as f64 / spans as f64
+            }
+        })
+        .collect();
+    let given =
+        knots.len() == n + p + 1 && knots.windows(2).all(|w| w.first() <= w.get(1)) && knots.get(p).zip(knots.get(n)).is_some_and(|(a, b)| a < b);
+    let (wmin, wmax) = weights.iter().fold((f64::INFINITY, 0.0f64), |(lo, hi), w| (lo.min(*w), hi.max(*w)));
+    let rational = weights.len() == n && wmin > 0.0 && wmax > wmin * (1.0 + 1e-12);
+    let even_knots = !given || {
+        let (lo, hi) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(1.0));
+        knots.iter().zip(&even).all(|(u, e)| ((u - lo) / (hi - lo) - e).abs() <= 1e-9)
+    };
+    if even_knots && !rational && n <= MAX_SPLINE_POINTS {
+        out.push(Geom2::Spline { pts: ctrl, control: true, degree });
+        return Ok(());
+    }
+    let u = if given { knots.to_vec() } else { even };
+    let h: Vec<HPoint> = ctrl
+        .iter()
+        .enumerate()
+        .map(|(i, c)| HPoint::weighted(Vec3::new(c.x, c.y, 0.0), if rational { weights.get(i).copied().unwrap_or(1.0) } else { 1.0 }))
+        .collect();
+    for k in p..n {
+        let (Some(&a), Some(&b)) = (u.get(k), u.get(k + 1)) else { continue };
+        if b <= a {
+            continue;
+        }
+        if out.len() > MAX_ENTITIES {
+            return Err(IoError::Invalid("the drawing is too complex".into()));
+        }
+        // Bézier point i of the span [a, b] is the blossom at a (p − i times) and b (i times).
+        let bez: Vec<HPoint> = (0..=p).map(|i| blossom(&h, &u, k, p, &|r| if r < p - i { a } else { b })).collect();
+        out.push(bezier_piece(&bez));
+    }
+    Ok(())
+}
+
+/// The blossom (polar form) of the B-spline of degree `p` with homogeneous control points `h` and
+/// knots `u`, on span `k`, at the arguments `arg(0)…arg(p − 1)`: de Boor's algorithm with one
+/// argument per level.
+fn blossom(h: &[HPoint], u: &[f64], k: usize, p: usize, arg: &dyn Fn(usize) -> f64) -> HPoint {
+    let mut d: Vec<HPoint> = (0..=p).map(|j| h.get((k + j).saturating_sub(p)).copied().unwrap_or(HPoint::ZERO)).collect();
+    for r in 1..=p {
+        let t = arg(r - 1);
+        for j in (r..=p).rev() {
+            let i = (k + j).saturating_sub(p);
+            let (lo, hi) = (u.get(i).copied().unwrap_or(0.0), u.get(i + p + 1 - r).copied().unwrap_or(1.0));
+            let s = if hi > lo { (t - lo) / (hi - lo) } else { 0.0 };
+            let prev = d.get(j - 1).copied();
+            if let (Some(prev), Some(cur)) = (prev, d.get_mut(j)) {
+                *cur = prev * (1.0 - s) + *cur * s;
+            }
+        }
+    }
+    d.get(p).copied().unwrap_or(HPoint::ZERO)
+}
+
+/// One Bézier piece of a SPLINE (homogeneous control points) as a sketch curve.
+fn bezier_piece(bez: &[HPoint]) -> Geom2 {
+    let flat = |q: HPoint| q.project().map_or(Vec2::ZERO, |v| Vec2::new(v.x, v.y));
+    let pts: Vec<Vec2> = bez.iter().map(|q| flat(*q)).collect();
+    let (first, last) = (pts.first().copied().unwrap_or_default(), pts.last().copied().unwrap_or_default());
+    let chord = last - first;
+    let len2 = chord.dot(chord);
+    // Every control point on the chord, in order along it: a straight piece.
+    let straight = len2 > 0.0
+        && pts.iter().all(|q| {
+            let along = (*q - first).dot(chord) / len2;
+            (*q - first).cross(chord).abs() <= 1e-9 * len2 && (-1e-9..=1.0 + 1e-9).contains(&along)
+        });
+    if straight {
+        return Geom2::Line(first, last);
+    }
+    let (wmin, wmax) = bez.iter().fold((f64::INFINITY, 0.0f64), |(lo, hi), q| (lo.min(q.w), hi.max(q.w)));
+    if wmax <= wmin * (1.0 + 1e-12) {
+        return Geom2::Spline { degree: pts.len().saturating_sub(1) as u8, pts, control: true };
+    }
+    if let ([a, apex, b], [w0, w1, w2]) = (&pts[..], &bez.iter().map(|q| q.w).collect::<Vec<_>>()[..]) {
+        // A rational quadratic in standard form (end weights 1) is a sketch conic.
+        let m = w1 / (w0 * w2).sqrt();
+        if m.is_finite() && m > 0.0 {
+            return Geom2::Conic { a: *a, apex: *apex, b: *b, rho: m / (1.0 + m) };
+        }
+    }
+    // Rational and of a higher degree: a spline through samples of the piece.
+    const SAMPLES: usize = 16;
+    Geom2::Spline { pts: (0..=SAMPLES).map(|s| flat(bezier_point(bez, s as f64 / SAMPLES as f64))).collect(), control: false, degree: 3 }
 }
 
 /// p ↦ m·p + t.
@@ -485,6 +596,16 @@ mod tests {
             "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n255\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
             "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n-5\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
             "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n1e400\n10\n0\n20\n0\n0\nENDSEC\n0\nEOF\n".into(),
+            // SPLINE knots too few, decreasing, all equal, not numbers; weights zero, negative
+            // or not numbers; one control point repeated (solidcraft#10875).
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n3\n40\n0\n40\n1\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n1\n40\n1\n40\n0\n40\n1\n40\n0\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n1\n40\n5\n40\n5\n40\n5\n40\n5\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n1\n40\nnan\n40\n0\n40\n1\n40\ninf\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n2\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n10\n0\n20\n0\n41\n0\n10\n1\n20\n1\n41\n-1\n10\n2\n20\n0\n41\nnan\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n2\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n10\n0\n20\n0\n41\n1e-300\n10\n1\n20\n1\n41\n1e11\n10\n2\n20\n0\n41\n1e-300\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n3\n40\n0\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n40\n1\n10\n1\n20\n1\n10\n1\n20\n1\n10\n1\n20\n1\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            format!("0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n9\n{}0\nENDSEC\n0\nEOF\n", "10\n1\n20\n2\n41\n3\n".repeat(20_000)),
             format!("0\nSECTION\n2\nBLOCKS\n{}0\nENDSEC\n0\nEOF\n", "0\nBLOCK\n2\nb\n0\nENDBLK\n".repeat(300)),
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\na\n1\nINSERT\n2\na\n0\nENDBLK\n0\nENDSEC\n0\nEOF\n".into(),
             format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", "0\nLINE\n10\n0\n20\n0\n11\n1\n21\n1\n".repeat(5000)),
@@ -573,6 +694,157 @@ mod tests {
             let back = read_dxf(&spline(given)).unwrap();
             assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree }] if *degree == read && pts.len() == 10), "{given:?}: {back:?}");
         }
+    }
+
+    /// A SPLINE entity with control points, degree, and optional knots (40) and weights (41).
+    fn spline_dxf(degree: usize, ctrl: &[(f64, f64)], knots: &[f64], weights: &[f64]) -> String {
+        let mut s = format!("0\nSECTION\n2\nENTITIES\n0\nSPLINE\n70\n8\n71\n{degree}\n72\n{}\n73\n{}\n", knots.len(), ctrl.len());
+        s.extend(knots.iter().map(|k| format!("40\n{k}\n")));
+        for (i, (x, y)) in ctrl.iter().enumerate() {
+            s.push_str(&format!("10\n{x}\n20\n{y}\n30\n0\n"));
+            if let Some(w) = weights.get(i) {
+                s.push_str(&format!("41\n{w}\n"));
+            }
+        }
+        s + "0\nENDSEC\n0\nEOF\n"
+    }
+
+    /// The curve of a B-spline at `t` (Cox–de Boor on the basis functions, NURBS Book eq. 2.5 and
+    /// 4.2), independent of the reader's own code; `left` takes the limit from below, for the end
+    /// of a span.
+    fn nurbs_point(p: usize, u: &[f64], ctrl: &[(f64, f64)], w: &[f64], t: f64, left: bool) -> Vec2 {
+        fn basis(i: usize, p: usize, u: &[f64], t: f64, left: bool) -> f64 {
+            if p == 0 {
+                let inside = if left { u[i] < t && t <= u[i + 1] } else { u[i] <= t && t < u[i + 1] };
+                return if inside { 1.0 } else { 0.0 };
+            }
+            let a = if u[i + p] > u[i] { (t - u[i]) / (u[i + p] - u[i]) * basis(i, p - 1, u, t, left) } else { 0.0 };
+            let b = if u[i + p + 1] > u[i + 1] { (u[i + p + 1] - t) / (u[i + p + 1] - u[i + 1]) * basis(i + 1, p - 1, u, t, left) } else { 0.0 };
+            a + b
+        }
+        let (mut x, mut y, mut sw) = (0.0, 0.0, 0.0);
+        for (i, (cx, cy)) in ctrl.iter().enumerate() {
+            let n = basis(i, p, u, t, left) * w.get(i).copied().unwrap_or(1.0);
+            (x, y, sw) = (x + n * cx, y + n * cy, sw + n);
+        }
+        Vec2::new(x / sw, y / sw)
+    }
+
+    /// A point of a curve the reader made, at `t` in 0..1 (Bézier pieces and lines only).
+    fn piece_point(g: &Geom2, t: f64) -> Vec2 {
+        match g {
+            Geom2::Line(a, b) => *a + (*b - *a) * t,
+            Geom2::Spline { pts, control: true, degree } if pts.len() == usize::from(*degree) + 1 => {
+                let mut d = pts.clone();
+                for r in 1..d.len() {
+                    for j in (r..d.len()).rev() {
+                        d[j] = d[j - 1] * (1.0 - t) + d[j] * t;
+                    }
+                }
+                d[d.len() - 1]
+            }
+            Geom2::Conic { a, apex, b, rho } => {
+                let w = rho / (1.0 - rho);
+                let (k0, k1, k2) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t) * w, t * t);
+                (*a * k0 + *apex * k1 + *b * k2) / (k0 + k1 + k2)
+            }
+            other => panic!("not a Bézier piece: {other:?}"),
+        }
+    }
+
+    /// solidcraft#10875: a SPLINE is read with its own knots. A polygon written as a cubic SPLINE
+    /// whose every piece is a straight Bézier (each interior knot four times, as a drawing
+    /// program writes one), longer than a sketch spline may be, came in as one 500-point spline
+    /// smoothed over the corners with the rest of the outline missing. It reads as its lines,
+    /// every one of them, and a SPLINE with uneven knots or weights reads as Bézier pieces on the
+    /// curve the file describes.
+    #[test]
+    fn a_spline_is_read_with_its_own_knots() {
+        // A 600-sided polygon, closed: 600 cubic pieces of 4 control points (2400 > 500).
+        let sides = 600;
+        let corner = |i: usize| {
+            let a = std::f64::consts::TAU * (i % sides) as f64 / sides as f64;
+            (40.0 * a.cos(), 40.0 * a.sin())
+        };
+        let ctrl: Vec<(f64, f64)> = (0..sides).flat_map(|i| [corner(i), corner(i), corner(i + 1), corner(i + 1)]).collect();
+        let mut knots = vec![0.0; 4];
+        for i in 1..sides {
+            knots.extend([i as f64 / sides as f64; 4]);
+        }
+        knots.extend([1.0; 4]);
+        let back = read_dxf(&spline_dxf(3, &ctrl, &knots, &[])).unwrap();
+        assert_eq!(back.len(), sides, "{:?}", back.first());
+        for (i, g) in back.iter().enumerate() {
+            let (a, b) = (Vec2::new(corner(i).0, corner(i).1), Vec2::new(corner(i + 1).0, corner(i + 1).1));
+            assert!(matches!(g, Geom2::Line(p, q) if p.dist(a) < 1e-9 && q.dist(b) < 1e-9), "side {i}: {g:?}");
+        }
+
+        // Uneven knots, unclamped (a periodic SPLINE's), and uneven weights: Bézier pieces, one
+        // per span, end to end on the curve.
+        let ctrl = [(0.0, 0.0), (10.0, 20.0), (25.0, -5.0), (40.0, 30.0), (55.0, 0.0), (70.0, 15.0)];
+        let cases: [(usize, Vec<f64>, Vec<f64>); 4] = [
+            (3, vec![0.0, 0.0, 0.0, 0.0, 0.1, 0.7, 1.0, 1.0, 1.0, 1.0], vec![]),
+            (3, vec![-0.3, -0.2, -0.1, 0.0, 0.25, 0.5, 1.0, 1.1, 1.2, 1.3], vec![]),
+            (2, vec![0.0, 0.0, 0.0, 0.2, 0.3, 0.9, 1.0, 1.0, 1.0], vec![]),
+            (3, vec![0.0, 0.0, 0.0, 0.0, 0.4, 0.6, 1.0, 1.0, 1.0, 1.0], vec![1.0, 2.0, 0.5, 1.0, 3.0, 1.0]),
+        ];
+        for (p, u, w) in cases {
+            let back = read_dxf(&spline_dxf(p, &ctrl, &u, &w)).unwrap();
+            let breaks: Vec<f64> = u[p..=ctrl.len()].to_vec();
+            assert_eq!(back.len(), breaks.len() - 1, "degree {p}, knots {u:?}: {back:?}");
+            for (g, span) in back.iter().zip(breaks.windows(2)) {
+                let samples = if let Geom2::Spline { pts, control: false, .. } = g { pts.clone() } else { vec![] };
+                for s in 0..=20 {
+                    let t = s as f64 / 20.0;
+                    let want = nurbs_point(p, &u, &ctrl, &w, span[0] + (span[1] - span[0]) * t, s == 20);
+                    // A rational cubic comes in as a spline through samples of it: check those.
+                    let got = if samples.is_empty() { piece_point(g, t) } else { samples[s * (samples.len() - 1) / 20] };
+                    if samples.is_empty() || (s * (samples.len() - 1)) % 20 == 0 {
+                        assert!(got.dist(want) < 1e-9, "degree {p}, knots {u:?}, weights {w:?}, t {t}: {got:?} vs {want:?}");
+                    }
+                }
+            }
+        }
+
+        // Circles as rational quadratic SPLINEs: a quarter (its weights in standard form or not,
+        // the same conic) and a whole one of four arcs: conics on the circle.
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let quarter = [(10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let whole = [(10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (-10.0, 10.0), (-10.0, 0.0), (-10.0, -10.0), (0.0, -10.0), (10.0, -10.0), (10.0, 0.0)];
+        let whole_knots = [0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+        let unit = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        for (ctrl, knots, w, arcs) in [
+            (&quarter[..], &unit[..], vec![1.0, h, 1.0], 1),
+            (&quarter[..], &unit[..], vec![1.0, 2.0 * h, 4.0], 1),
+            (&whole[..], &whole_knots[..], vec![1.0, h, 1.0, h, 1.0, h, 1.0, h, 1.0], 4),
+        ] {
+            let back = read_dxf(&spline_dxf(2, ctrl, knots, &w)).unwrap();
+            assert_eq!(back.len(), arcs, "{back:?}");
+            for g in &back {
+                assert!(matches!(g, Geom2::Conic { .. }), "{g:?}");
+                for s in 0..=10 {
+                    assert!((piece_point(g, f64::from(s) / 10.0).len() - 10.0).abs() < 1e-9, "{w:?}: {g:?}");
+                }
+            }
+        }
+
+        // Even knots, given or not, and no weights: still the one sketch spline it was.
+        let ctrl: Vec<(f64, f64)> = (0..8).map(|i| (f64::from(i), f64::from(i % 3))).collect();
+        for knots in [
+            vec![],
+            vec![0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0],
+            vec![2.0, 2.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 7.0, 7.0, 7.0],
+        ] {
+            let back = read_dxf(&spline_dxf(3, &ctrl, &knots, &[1.0; 8])).unwrap();
+            assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree: 3 }] if pts.len() == 8), "{knots:?}: {back:?}");
+        }
+
+        // More control points than a sketch spline holds, with no knots: pieces to the last one.
+        let ctrl: Vec<(f64, f64)> = (0..700).map(|i| (f64::from(i), f64::from(i % 5))).collect();
+        let back = read_dxf(&spline_dxf(3, &ctrl, &[], &[])).unwrap();
+        assert_eq!(back.len(), 700 - 3);
+        let end = |g: &Geom2| piece_point(g, 1.0);
+        assert!(back.last().is_some_and(|g| end(g).dist(Vec2::new(699.0, 4.0)) < 1e-9), "{:?}", back.last());
     }
 
     #[test]
