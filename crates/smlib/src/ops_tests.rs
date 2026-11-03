@@ -416,3 +416,29 @@ fn a_setback_corner_left_open_returns_its_hole() {
     let refused = b.blend_setback(Blend::Round, &edges[..2], &[5.0; 2], &[[60.0, 40.0, 20.0]], &[8.0], 0.1);
     assert!(matches!(refused, Err(Error::CornerRefused { corner: 0 })), "{refused:?}");
 }
+
+/// A body's box is measured once and stays its own: a copy, a move or an operation's result has
+/// the box of what it is, never one remembered from the body it came from (#11615).
+#[test]
+fn the_box_is_measured_once_and_stays_with_its_body() {
+    let a = cube(10.0);
+    assert!(a.bounds.get().is_none());
+    let (lo, hi) = a.bounds().unwrap();
+    assert_eq!((lo, hi), ([0.0; 3], [10.0; 3]));
+    assert_eq!(a.bounds.get(), Some(&(lo, hi)), "kept after the first measurement");
+    assert_eq!(a.bounds().unwrap(), (lo, hi));
+
+    let copy = a.try_clone().unwrap();
+    assert!(copy.bounds.get().is_none(), "a copy measures its own");
+    assert_eq!(copy.bounds().unwrap(), (lo, hi));
+
+    let along_x = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]];
+    let (moved_lo, moved_hi) = a.transformed(&along_x).unwrap().bounds().unwrap();
+    assert!((moved_lo[0] - 5.0).abs() < 1e-9 && (moved_hi[0] - 15.0).abs() < 1e-9, "{moved_lo:?} {moved_hi:?}");
+
+    let half = Brep::make_box([5.0, -1.0, -1.0], [10.0, 12.0, 12.0]).unwrap();
+    let cut = a.boolean(&half, crate::BooleanOp::Subtract).unwrap().unwrap();
+    let (_, cut_hi) = cut.bounds().unwrap();
+    assert!((cut_hi[0] - 5.0).abs() < 1e-9, "{cut_hi:?}");
+    assert_eq!(a.bounds().unwrap(), (lo, hi), "the operand keeps its box");
+}

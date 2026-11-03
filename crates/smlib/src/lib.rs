@@ -253,6 +253,9 @@ pub struct Brep {
     body: core::Body,
     /// The body's number in a trace ([`trace`]).
     id: u64,
+    /// The exact box once measured: the body never changes, and later steps of a feature ask
+    /// for it several times, each a walk of all the body's curves and surfaces.
+    bounds: std::sync::OnceLock<([f64; 3], [f64; 3])>,
 }
 
 impl std::fmt::Debug for Brep {
@@ -264,7 +267,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body, id: trace::next_id() }
+        Brep { body, id: trace::next_id(), bounds: std::sync::OnceLock::new() }
     }
 
     /// solidcore's body.

@@ -63,8 +63,13 @@ impl Brep {
 
     /// The exact axis-aligned box, least corner then greatest: the extrema of every vertex, edge
     /// and face on its exact curve or surface, not grown by tolerances or control hulls.
+    /// Measured once: a failure is not kept, so a later call tries again.
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        core::bounds(self.core())
+        if let Some(b) = self.bounds.get() {
+            return Ok(*b);
+        }
+        let b = core::bounds(self.core())?;
+        Ok(*self.bounds.get_or_init(|| b))
     }
 
     /// How far edge `edge` (its curve over its interval) lies from the surface of face `face`,
