@@ -1780,7 +1780,10 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     };
     let (la, lb) = if let Some(r) = str_(p, "point") {
         let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?;
-        let lines: Vec<usize> = (0..sk.curves.len()).filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i)).collect();
+        // An ellipse's construction axis is never a side: it would round a line into the axis.
+        let lines: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+            .collect();
         // A construction line ending there too (a diagonal that centres something) is not one of
         // the corner's sides: it keeps its end on the virtual sharp corner (#1026).
         let sides: Vec<usize> =
@@ -1792,6 +1795,9 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     } else {
         let a = str_(p, "a").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`a` must be a line"))?;
         let b = str_(p, "b").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`b` must be a line"))?;
+        if sk.is_ellipse_axis(a) || sk.is_ellipse_axis(b) {
+            return Err(bad(cmd, "an ellipse's axis is not a side of a corner"));
+        }
         (a, b)
     };
     let (a0, a1) = ends(la).ok_or_else(|| bad(cmd, "fillets and chamfers work on two lines"))?;
@@ -2087,7 +2093,9 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     };
     let (ca, cb, q) = if let Some(rf) = str_(p, "point") {
         let Some(q) = sk.resolve_point(rf) else { return Ok(None) };
-        let cs: Vec<usize> = (0..sk.curves.len()).filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i)).collect();
+        let cs: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+            .collect();
         match cs[..] {
             [a, b] => (a, b, q),
             _ => return Ok(None),
@@ -2097,6 +2105,9 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
             return Ok(None);
         };
         let (Some((a0, a1)), Some((b0, b1))) = (ends(a), ends(b)) else { return Ok(None) };
+        if sk.is_ellipse_axis(a) || sk.is_ellipse_axis(b) {
+            return Ok(None);
+        }
         let Some(q) = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1) else { return Ok(None) };
         (a, b, q)
     };
