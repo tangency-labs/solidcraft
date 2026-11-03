@@ -1,0 +1,41 @@
+# oracle/47-draft-curved-pocket: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Block: 11 faces, 24 edges
+Block face F2:side:l1
+Block face F2:side:l2
+Block face F2:side:l3
+Block face F2:side:l4
+Block face F2:start
+Block face F2:top
+Block face F4:bottom
+Block face F4:side:a1
+Block face F4:side:a2
+Block face F4:side:l1
+Block face F4:side:l2
+Block edge F2:side:l1|F2:side:l2
+Block edge F2:side:l1|F2:side:l4
+Block edge F2:side:l1|F2:start
+Block edge F2:side:l1|F2:top
+Block edge F2:side:l2|F2:side:l3
+Block edge F2:side:l2|F2:start
+Block edge F2:side:l2|F2:top
+Block edge F2:side:l3|F2:side:l4
+Block edge F2:side:l3|F2:start
+Block edge F2:side:l3|F2:top
+Block edge F2:side:l4|F2:start
+Block edge F2:side:l4|F2:top
+Block edge F2:top|F4:side:a1
+Block edge F2:top|F4:side:a2
+Block edge F2:top|F4:side:l1
+Block edge F2:top|F4:side:l2
+Block edge F4:bottom|F4:side:a1
+Block edge F4:bottom|F4:side:a2
+Block edge F4:bottom|F4:side:l1
+Block edge F4:bottom|F4:side:l2
+Block edge F4:side:a1|F4:side:l1
+Block edge F4:side:a1|F4:side:l2
+Block edge F4:side:a2|F4:side:l1
+Block edge F4:side:a2|F4:side:l2
+ref Draft1 (5) face 0 `F4:side:a1` -> Block face F4:side:a1
+ref Draft1 (5) face 1 `F4:side:l1` -> Block face F4:side:l1
+ref Draft1 (5) face 2 `F4:side:a2` -> Block face F4:side:a2
+ref Draft1 (5) face 3 `F4:side:l2` -> Block face F4:side:l2

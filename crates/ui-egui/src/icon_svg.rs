@@ -928,7 +928,8 @@ mod tests {
         }
         let construction: Vec<_> = specs.iter().filter(|c| c.panel == "CONSTRUCT").collect();
         let distinct: std::collections::HashSet<_> = construction.iter().map(|c| c.icon).collect();
-        assert_eq!(construction.len(), 19);
+        assert_eq!(construction.len(), 20);
+        assert_eq!(construction.iter().find(|c| c.id == "construct.plane.axis_point").unwrap().icon, "plane_axis_point");
         assert_eq!(distinct.len(), construction.len(), "construction methods need distinct visual identities");
     }
 

@@ -3,6 +3,7 @@ use super::{ImageMethod, RenderSelection, cpu, setups, studio};
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{CpuJob, GpuJob, RenderJob, RenderSetup, SkyEnvironment};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::job::{AreaLights, StudioLighting};
 use solidcraft_engine::schema::render_lights::{Geometry, Light, Visibility};
 
@@ -148,7 +149,7 @@ pub(crate) fn edited(app: &mut SolveApp, params: &Value, reply: &Value) {
 }
 
 fn product_centre(app: &SolveApp) -> [f64; 3] {
-    let bounds = solidcraft_engine::view::bounds(&app.session);
+    let bounds = solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
     let point = if bounds.is_empty() { app.cam.target } else { bounds.center() };
     [point.x, point.y, point.z]
 }
@@ -289,9 +290,9 @@ pub(super) fn preview(app: &SolveApp) -> Result<Vec<[f32; 16]>, String> {
                 emitted_axis, inner_half_angle_radians, outer_half_angle_radians, reference_distance_mm, minimum_distance_mm, ..
             } => (emitted_axis, inner_half_angle_radians.cos(), outer_half_angle_radians.cos(), reference_distance_mm.powi(2), minimum_distance_mm),
             Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } => {
-                let normal = solidcraft_engine::geom::Vec3::new(ux, uy, uz).cross(solidcraft_engine::geom::Vec3::new(vx, vy, vz));
+                let normal = solidcore_record::Vec3::new(ux, uy, uz).cross(solidcore_record::Vec3::new(vx, vy, vz));
                 let area = normal.len();
-                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcraft_engine::geom::Vec3::Z);
+                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
                 ([n.x, n.y, n.z], 0.0, 0.0, area, 0.001)
             }
             _ => ([0.0; 3], 0.0, 0.0, 1.0, 0.001),
@@ -773,13 +774,13 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                         let label =
                             app.tr(if aim == product_centre(app) { "render.light_product_centre" } else { "render.lighting_point" }).to_string();
                         ui_kit::dropdown_menu(ui, "render:light:aim", &label, |ui| {
-                            let bounds = solidcraft_engine::view::bounds(&app.session);
+                            let bounds = solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
                             let mut targets = vec![
                                 (app.tr("render.light_product_centre").to_string(), product_centre(app)),
                                 (app.tr("render.light_world_origin").to_string(), [0.0; 3]),
                             ];
                             if !bounds.is_empty() {
-                                for body in &app.session.world_state().bodies {
+                                for body in &crate::open_meshing::session_world(&app.session).bodies {
                                     let bounds = body.mesh_bounds();
                                     let c = bounds.center();
                                     targets.push((body.name.clone(), [c.x, c.y, c.z]));
@@ -925,7 +926,7 @@ fn length([x, y, z]: [f64; 3]) -> f64 {
     x.hypot(y).hypot(z)
 }
 fn subject_size(app: &SolveApp) -> f64 {
-    bounded(solidcraft_engine::view::bounds(&app.session).diagonal(), 1.0, 1e6)
+    bounded(solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY).diagonal(), 1.0, 1e6)
 }
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
     ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));

@@ -12,7 +12,8 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
@@ -366,6 +367,7 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
 }
 
 /// Modifier-only navigation never borrows pointer movement from another widget or gesture.
+/// Tool fields keep keyboard focus without blocking motion over the exposed viewport.
 pub(crate) fn modifier_motion(
     app: &mut SolveApp,
     ui: &egui::Ui,
@@ -376,7 +378,6 @@ pub(crate) fn modifier_motion(
 ) -> Option<(NavMode, egui::Vec2)> {
     let owns = inside
         && ui.input(|i| i.focused && !i.pointer.any_down() && !i.pointer.any_released() && !i.pointer.any_pressed())
-        && !ui.ctx().egui_wants_keyboard_input()
         && !egui::Popup::is_any_open(ui.ctx())
         && !crate::dim_view::editing()
         && app.viewport.context_menu.is_none()
@@ -503,7 +504,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
     {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
-        app.cam = cam;
+        app.cam = crate::view_angles::keep_locked(app, app.cam, cam);
     }
 }
 
@@ -815,7 +816,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 Some(NavMode::Zoom) => {
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), anchor);
+                    let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign).exp(), anchor);
                 }
                 _ => {}
             }
@@ -875,7 +877,7 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     }
     let sketch_turns = app.preferences.space_mouse_sketch_orbit;
     let sketch_view_is_initial = !sketch_turns
-        && solidcraft_engine::view::open_sketch_plane(&app.session).is_some_and(|plane| {
+        && solidcraft_engine::view::open_sketch_plane(&app.session).ok().flatten().is_some_and(|plane| {
             let normal = plane.normal();
             let mut initial = app.cam.looking_from(normal);
             if normal.z.abs() > 0.999 {
@@ -909,11 +911,15 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
         }
     });
     if let Some(queued) = app.viewport.device_motion.take() {
+        let before = app.cam;
         device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
+        app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
+        let before = app.cam;
         bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
+        app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
 }
 
@@ -945,7 +951,7 @@ pub(crate) fn bridge_camera(
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-oy * 0.008, -ox * 0.008, 0.0));
         } else {
-            cam.orbit(ox, oy);
+            orbit_on_screen(cam, ox, oy);
         }
         if let Some((p, coords)) = keep {
             cam.place(p, coords);
@@ -997,13 +1003,23 @@ pub(crate) fn device_camera(
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-rx, -ry, rz) * (2.0 * seconds));
         } else {
-            cam.orbit(ry * 250.0 * seconds, rx * 250.0 * seconds);
+            orbit_on_screen(cam, ry * 250.0 * seconds, rx * 250.0 * seconds);
             cam.roll_by(rz * 2.0 * seconds);
         }
         if let Some((p, coords)) = keep {
             cam.place(p, coords);
         }
     }
+}
+
+/// A 3D mouse's turn in the upright (turntable) orbit: `dx` and `dy` are screen deltas, as for
+/// [`Camera::orbit`], which turns about the unrolled view's axes. The device's Spin rolls the
+/// view, so its Tilt and Turn are taken back through that roll first: rolled upside down (#10083)
+/// or on its side, the cap still turns the view the way it is pushed on screen, not the way the
+/// world's axes lie. Unrolled, this is [`Camera::orbit`] exactly.
+fn orbit_on_screen(cam: &mut Camera, dx: f64, dy: f64) {
+    let (sin, cos) = cam.roll.sin_cos();
+    cam.orbit(dx * cos + dy * sin, dy * cos - dx * sin);
 }
 
 /// Six principal views, twelve edge diagonals and eight isometric corner directions.
@@ -1214,6 +1230,7 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_engine::geom::prelude::*;
     fn web_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move }
     }
@@ -1779,6 +1796,47 @@ mod tests {
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
         device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, None, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
+    }
+
+    /// The upright 3D mouse orbit follows the view, not the world (#10083): with the view rolled
+    /// upside down or on its side, Tilt and Turn move the model on screen as they do upright,
+    /// for the cap and for a device app over the bridge.
+    #[test]
+    fn the_3d_mouse_turns_a_rolled_or_upside_down_view_the_way_it_is_pushed() {
+        use super::*;
+        use std::f64::consts::{FRAC_PI_2, PI};
+        // Where the eye moves on screen (along the view's right and up) for one small turn.
+        let on_screen = |cam: Camera, turn: &dyn Fn(&mut Camera)| {
+            let mut after = cam;
+            turn(&mut after);
+            let (right, up, _) = cam.basis();
+            let moved = after.back() - cam.back();
+            let (x, y) = (moved.dot(right), moved.dot(up));
+            let length = x.hypot(y);
+            assert!(length > 1e-6, "{cam:?}: the view turns");
+            (x / length, y / length)
+        };
+        for (pitch, roll) in [(1.28, PI), (0.0, PI), (0.0, FRAC_PI_2), (0.0, -FRAC_PI_2), (0.3, 2.5)] {
+            let upright = Camera { yaw: -0.13, pitch, roll: 0.0, ..Default::default() };
+            let rolled = Camera { roll, ..upright };
+            for rotation in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.6, -0.8, 0.0]] {
+                let cap = |cam: &mut Camera| {
+                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, None, None);
+                };
+                let bridge = |cam: &mut Camera| {
+                    let orbit = [rotation[1] * 0.03, rotation[0] * 0.03];
+                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, None, None);
+                };
+                for turn in [&cap as &dyn Fn(&mut Camera), &bridge] {
+                    let (want, got) = (on_screen(upright, turn), on_screen(rolled, turn));
+                    let tolerance = if pitch == 0.0 || roll == PI { 1e-3 } else { 0.1 };
+                    assert!(
+                        (want.0 - got.0).hypot(want.1 - got.1) < tolerance,
+                        "pitch {pitch}, roll {roll}, {rotation:?}: {want:?} upright, {got:?} rolled"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -2476,6 +2534,7 @@ mod tests {
 mod view_key_tests {
     use crate::scenario::Harness;
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     fn turned(h: &mut Harness, key: serde_json::Value) -> (f64, f64) {
         let before = h.app.cam;

@@ -497,8 +497,8 @@ const JSON_STEPS: [JsonStep; HAND_WRITTEN as usize - 1] = [
 ];
 
 /// Stored face and edge names were worked out from geometry before format 14; they get the
-/// legacy mark (`?`, see `naming::LEGACY_MARK`) so they are found again as those builds found
-/// them, and an older design evaluates as it was saved. The step marks the fields that store
+/// legacy mark (`?`, see `naming::LEGACY_MARK`), which finds no face or edge: a feature holding
+/// one fails, asking for its reference to be picked again. The step marks the fields that store
 /// such a name, by their place in the schema:
 /// - each feature's `face_names`, and fillets' and chamfers' `edge_names` (other features' edge
 ///   names are sheet metal's own);
@@ -724,18 +724,19 @@ pub fn read(s: &str) -> Result<Document> {
     let mut grouped_features = std::collections::BTreeSet::new();
     let joint_ids: std::collections::BTreeSet<_> = d.assembly.joints.iter().map(|joint| joint.id).collect();
     let mut grouped_joints = std::collections::BTreeSet::new();
+    // A folder entry naming a feature or joint the design doesn't have, or one a folder already
+    // holds, is dropped, and the design opens: folders only group the timeline, so nothing else
+    // is lost. Editing a feature inside a folder used to leave such entries (#9373).
+    for group in &mut d.timeline_groups {
+        group.joints.retain(|joint| joint_ids.contains(joint) && grouped_joints.insert(*joint));
+        group.features.retain(|feature| feature_ids.contains(feature) && grouped_features.insert(*feature));
+    }
     for group in &d.timeline_groups {
         if group.name.trim().is_empty() || group.name.len() > 128 || !group_ids.insert(group.id) {
             return Err(DocError::Invalid("damaged design: invalid timeline folder".into()));
         }
         if group.parent.is_some_and(|parent| parent == group.id) {
             return Err(DocError::Invalid("damaged design: timeline folder cannot contain itself".into()));
-        }
-        if group.joints.iter().any(|joint| !joint_ids.contains(joint) || !grouped_joints.insert(*joint)) {
-            return Err(DocError::Invalid("damaged design: invalid joint in a timeline folder".into()));
-        }
-        if group.features.iter().any(|feature| !feature_ids.contains(feature) || !grouped_features.insert(*feature)) {
-            return Err(DocError::Invalid("damaged design: invalid feature in a timeline folder".into()));
         }
     }
     for group in &d.timeline_groups {
@@ -756,10 +757,14 @@ pub fn read(s: &str) -> Result<Document> {
     if let Some(id) = crate::non_contiguous_timeline_group(&d.features, &d.timeline_groups) {
         return Err(DocError::Invalid(format!("damaged design: timeline folder {id} is not contiguous")));
     }
-    for o in &d.occurrences {
-        if !rigid(&o.transform) {
-            return Err(DocError::Invalid(format!("damaged design: occurrence `{}` has an invalid placement", o.name)));
-        }
+    // Every occurrence whose placement is not a rigid motion within range, by name.
+    let unplaced: Vec<String> = d.occurrences.iter().filter(|o| !crate::is_placement(&o.transform)).map(|o| format!("`{}`", o.name)).collect();
+    if !unplaced.is_empty() {
+        return Err(DocError::Invalid(format!(
+            "damaged design: {} not placed by a rigid motion within 1e9 mm: {}",
+            if unplaced.len() == 1 { "an occurrence is" } else { "occurrences are" },
+            unplaced.join(", ")
+        )));
     }
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
@@ -774,6 +779,7 @@ pub fn read(s: &str) -> Result<Document> {
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
         }
         if let crate::FeatureKind::BodyTransfer { from, to, .. } = &feature.kind
             && [from, to].into_iter().any(|id| !component_ids.contains(id))
@@ -1225,26 +1231,6 @@ fn check_numbers(v: &Value, noun: &str, depth: usize) -> Result<()> {
     Ok(())
 }
 
-/// A placement: rotation (orthonormal, not mirrored) and a translation in range.
-fn rigid(m: &crate::Mat) -> bool {
-    let row = |i: usize| m.get(i).copied().unwrap_or_default();
-    let (x, y, z, t) = (row(0), row(1), row(2), row(3));
-    let dot = |a: [f64; 4], b: [f64; 4]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let unit = |a: [f64; 4]| (dot(a, a) - 1.0).abs() < 1e-6;
-    let det = x[0] * (y[1] * z[2] - y[2] * z[1]) - x[1] * (y[0] * z[2] - y[2] * z[0]) + x[2] * (y[0] * z[1] - y[1] * z[0]);
-    m.iter().flatten().all(|v| v.is_finite())
-        && unit(x)
-        && unit(y)
-        && unit(z)
-        && dot(x, y).abs() < 1e-6
-        && dot(y, z).abs() < 1e-6
-        && dot(x, z).abs() < 1e-6
-        && det > 0.0
-        && [x[3], y[3], z[3]].iter().all(|v| v.abs() < 1e-9)
-        && (t[3] - 1.0).abs() < 1e-9
-        && t[..3].iter().all(|v| v.abs() <= MAX_REAL)
-}
-
 /// Feature input names and component occurrences, which format 1 files may predate.
 fn normalise(d: &mut Document) -> Result<()> {
     d.normalise_component_color_indices()?;
@@ -1260,6 +1246,7 @@ fn normalise(d: &mut Document) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_geom::prelude::*;
 
     /// A pending change that records that its step ran, in `trace`.
     fn traced(name: &'static str) -> Part {
@@ -1690,7 +1677,7 @@ mod tests {
     #[test]
     fn version_twenty_three_designs_open_and_an_edge_flange_relief_is_saved_in_twenty_four() {
         let flange = |shape: Option<&str>, size: Option<&str>| crate::FeatureKind::SheetFlange {
-            edges: vec![crate::FlangeEdge::at(solidcraft_geom::Vec3::ZERO)],
+            edges: vec![crate::FlangeEdge::at(solidcore_record::Vec3::ZERO)],
             height: "10 mm".into(),
             angle: "90 deg".into(),
             radius: None,
@@ -1796,7 +1783,7 @@ mod tests {
 
     #[test]
     fn version_nine_wire_spaces_preserve_saved_points_and_explicit_markers() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         use solidcraft_sketch::{LinkKind, LinkSource, Sketch, WireSpace};
         let mut sketch = Sketch::new();
         sketch.add_drawn_wire(&[Vec3::new(12.0, 3.0, 4.0)]).unwrap();
@@ -1909,9 +1896,11 @@ mod tests {
                         start_offset: None,
                         through_all: false,
                         taper: Some("0 deg".into()),
-                        to: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0))),
+                        corner: Default::default(),
+                        to: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 10.0))),
                         to_offset: Some("offset + 1 mm".into()),
-                        from: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 5.0))),
+                        from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
+                        to_body_apart: false,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -1956,7 +1945,7 @@ mod tests {
 
     #[test]
     fn saved_offset_cannot_alias_and_overwrite_its_source_geometry() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{CurveKind, Sketch};
         let mut sketch = Sketch::new();
         let center = sketch.add_point(Vec2::ZERO, None).unwrap();
@@ -2095,7 +2084,7 @@ mod tests {
 
     #[test]
     fn periodic_file_validation_refuses_damaged_closed_geometry() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{CurveKind, Sketch};
         let mut sketch = Sketch::new();
         let mut pts = Vec::new();
@@ -2105,7 +2094,7 @@ mod tests {
         let first = pts[0];
         let neighbor = pts[1];
         let closing = pts[3];
-        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true }, None).unwrap();
+        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
         let mut document = Document::new("periodic file validation");
         document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         assert_eq!(read(&document.to_json()).unwrap(), document);
@@ -2245,7 +2234,7 @@ mod tests {
 
     #[test]
     fn version_seven_origin_sketch_keeps_geometry_dimension_ids_and_expressions() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{ConstraintKind, Sketch};
         let mut d = Document::new("legacy origin dimensions");
         d.set_param("reach", "25 mm", Some("mm"), None).unwrap();
@@ -2275,7 +2264,7 @@ mod tests {
 
     #[test]
     fn version_eight_persistent_angle_sweep_and_slot_dimensions_roundtrip() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{ConstraintKind, Sketch};
         let mut d = Document::new("persistent typed dimensions");
         let heading = d.new_model_param("45 deg", "deg");
@@ -2394,12 +2383,12 @@ mod tests {
         let (values, errors) = migrated.param_values();
         assert!(errors.is_empty());
         let p = migrated.resolve_plane(&values, plane, 0).unwrap();
-        assert_eq!(p.y, solidcraft_geom::Vec3::Z);
-        assert_eq!(p.normal(), -solidcraft_geom::Vec3::Y);
-        assert_eq!(p.origin, solidcraft_geom::Vec3::new(0.0, -7.0, 0.0));
+        assert_eq!(p.y, solidcore_record::Vec3::Z);
+        assert_eq!(p.normal(), -solidcore_record::Vec3::Y);
+        assert_eq!(p.origin, solidcore_record::Vec3::new(0.0, -7.0, 0.0));
         assert_eq!(read(&migrated.to_json()).unwrap(), migrated);
         let fresh = doc.resolve_plane(&values, &crate::PlaneRef::Origin { name: "XZ".into() }, 0).unwrap();
-        assert_eq!(fresh.normal(), solidcraft_geom::Vec3::Y);
+        assert_eq!(fresh.normal(), solidcore_record::Vec3::Y);
     }
 
     #[test]
@@ -2447,7 +2436,7 @@ mod tests {
         let mut sketch = Sketch::new();
         let mut previous = 0;
         while sketch.points.len() < MAX_POINTS {
-            let i = sketch.add_point(solidcraft_geom::Vec2::new(0.001 * sketch.points.len() as f64, 0.0), None).unwrap();
+            let i = sketch.add_point(solidcore_record::Vec2::new(0.001 * sketch.points.len() as f64, 0.0), None).unwrap();
             sketch.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: previous, q: i }, None).unwrap();
             previous = i;
         }
@@ -2559,7 +2548,7 @@ mod tests {
     #[test]
     fn integer_valued_coordinates_are_range_checked_and_large_ids_still_load() {
         let mut sketch = solidcraft_sketch::Sketch::new();
-        sketch.add_point(solidcraft_geom::Vec2::new(40.0, 0.0), None).unwrap();
+        sketch.add_point(solidcore_record::Vec2::new(40.0, 0.0), None).unwrap();
         let mut d = Document::new("range");
         d.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         let last = |v: &Value| v["features"][0]["sketch"]["points"].as_array().map_or(0, |a| a.len() - 1);
@@ -2616,7 +2605,7 @@ mod tests {
             "orientation": {"direction": [0.0, 1.0, 0.0]}, "twist": "90 deg", "scale": "0.5"});
         let k: FeatureKind = serde_json::from_value(new.clone()).unwrap();
         let FeatureKind::SurfaceSweep { orientation, .. } = &k else { panic!("{k:?}") };
-        assert_eq!(*orientation, SweepOrientation::Direction(crate::Dir(solidcraft_geom::Vec3::Y)));
+        assert_eq!(*orientation, SweepOrientation::Direction(crate::Dir(solidcore_record::Vec3::Y)));
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);

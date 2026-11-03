@@ -4,7 +4,7 @@ use super::{HdrDecodeTask, HdrSource, HdrTaskPoll};
 use crate::job::{CancelToken, ErrorCode, JobError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use std::{
     f64::consts::{PI, TAU},
     sync::Arc,

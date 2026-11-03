@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+use super::MODEL_LIST_CAP;
 use super::acp::ModelInfo;
 use super::agents::Protocol;
 use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
@@ -22,6 +23,8 @@ use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
+/// Longest name kept for a listed model.
+const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
 /// Pictures of the view kept in the conversation. The whole history goes with every request
@@ -643,6 +646,10 @@ pub struct ApiConfig {
     pub http: HttpFn,
     /// How long one model request may take, in seconds (the endpoint's setting).
     pub request_timeout_s: u64,
+    /// The reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies. A set value wins over the `none` retry (#3817): that
+    /// retry only runs when no effort was chosen.
+    pub reasoning_effort: String,
 }
 
 enum Cmd {
@@ -650,6 +657,7 @@ enum Cmd {
     NewChat,
     SetModel(String),
     SetRequestTimeout(u64),
+    SetReasoningEffort(String),
 }
 
 pub struct ApiBackend {
@@ -724,6 +732,11 @@ impl ChatBackend for ApiBackend {
             let _ = c.send(Cmd::SetRequestTimeout(secs));
         }
     }
+    fn set_reasoning_effort(&mut self, effort: &str) {
+        if let Some(c) = &self.cmds {
+            let _ = c.send(Cmd::SetReasoningEffort(effort.to_string()));
+        }
+    }
     fn new_session(&mut self) {
         // A running turn is cancelled; the worker resets the history once it has ended.
         self.cancel.store(true, Ordering::Relaxed);
@@ -785,21 +798,36 @@ impl Worker {
         }
         self.emit(Event::ToolsAvailable(!self.tools.is_empty()));
         self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
-        // The endpoint's models for the picker; an endpoint that does not list them shows none.
-        if let Ok(list) = self.model_list() {
-            let mut available = list;
-            if !self.cfg.model.is_empty() && !available.iter().any(|m| m.id == self.cfg.model) {
-                available.insert(0, ModelInfo { id: self.cfg.model.clone(), name: self.cfg.model.clone(), description: String::new() });
+        // The endpoint's models for the picker. An endpoint that does not list them still shows the
+        // configured model, and says why there are no others.
+        let configured = ModelInfo { id: self.cfg.model.clone(), name: self.cfg.model.clone(), description: String::new() };
+        let available = match self.model_list() {
+            Ok(mut list) => {
+                self.emit(Event::ModelsNote(None));
+                if !self.cfg.model.is_empty() && !list.iter().any(|m| m.id == self.cfg.model) {
+                    list.insert(0, configured);
+                }
+                list
             }
-            if !available.is_empty() {
-                self.emit(Event::Models { current: self.cfg.model.clone(), available });
+            Err(e) => {
+                self.emit(Event::ModelsNote(Some(e)));
+                if self.cfg.model.is_empty() { Vec::new() } else { vec![configured] }
             }
+        };
+        if !available.is_empty() {
+            self.emit(Event::Models { current: self.cfg.model.clone(), available });
         }
         for cmd in cmds {
             match cmd {
                 Cmd::Prompt(parts) => self.turn(parts),
                 Cmd::SetModel(m) => self.cfg.model = m,
                 Cmd::SetRequestTimeout(secs) => self.cfg.request_timeout_s = secs,
+                Cmd::SetReasoningEffort(effort) => {
+                    self.cfg.reasoning_effort = super::agents::reasoning_effort(&effort);
+                    // A new choice starts the refusal dance again: an earlier `none` answer was
+                    // the endpoint's, not the user's, and must not silently override the choice.
+                    self.no_reasoning.set(false);
+                }
                 Cmd::NewChat => {
                     self.history.clear();
                     // A new conversation gets a fresh Go session ID for routing and caching.
@@ -980,6 +1008,12 @@ impl Worker {
         self.history.len() != before
     }
 
+    /// The reasoning effort the user chose for this endpoint, or `None` to send nothing and let
+    /// the provider apply its own default.
+    fn reasoning_effort(&self) -> Option<&str> {
+        (!self.cfg.reasoning_effort.trim().is_empty()).then(|| self.cfg.reasoning_effort.trim())
+    }
+
     fn request(&self) -> Result<Reply, String> {
         // OpenCode Go serves one protocol per model family behind a single base URL.
         if self.cfg.protocol == Protocol::OpenAi && is_opencode_go(&self.cfg.base_url) {
@@ -989,11 +1023,13 @@ impl Worker {
         let (status, v) = self.post(&body)?;
         // Some OpenAI models refuse function tools on this endpoint unless the reasoning effort is
         // "none" (HTTP 400 naming `reasoning_effort`): ask again once with it, and keep it for the
-        // next requests. Anthropic has no such parameter.
+        // next requests. Anthropic has no such parameter. A reasoning effort the user chose wins:
+        // the refusal is shown instead of being replaced silently (#10241).
         let refused = self.cfg.protocol == Protocol::OpenAi
             && status == 400
             && !self.tools.is_empty()
             && !self.no_reasoning.get()
+            && self.reasoning_effort().is_none()
             && http_error(status, &v).contains("reasoning_effort");
         if refused {
             self.no_reasoning.set(true);
@@ -1021,15 +1057,19 @@ impl Worker {
         let mut first_err: Option<String> = None;
         for protocol in order {
             let mut body = self.go_body(protocol);
-            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() {
+            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() && self.reasoning_effort().is_none() {
                 body["reasoning_effort"] = json!("none");
             }
             let (status, v) = self.go_post(protocol, &body)?;
             if protocol == GoProtocol::Chat {
                 // As on plain OpenAI endpoints: ask again once with reasoning effort
-                // "none" when the refusal names it.
-                let refused =
-                    status == 400 && !self.tools.is_empty() && !self.no_reasoning.get() && http_error(status, &v).contains("reasoning_effort");
+                // "none" when the refusal names it — unless the user chose an effort, whose
+                // refusal is shown instead (#10241).
+                let refused = status == 400
+                    && !self.tools.is_empty()
+                    && !self.no_reasoning.get()
+                    && self.reasoning_effort().is_none()
+                    && http_error(status, &v).contains("reasoning_effort");
                 if refused {
                     self.no_reasoning.set(true);
                     body["reasoning_effort"] = json!("none");
@@ -1143,9 +1183,14 @@ impl Worker {
                 messages.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
                 messages.extend(self.history.iter().cloned());
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
+                if let Some(effort) = self.reasoning_effort() {
+                    // The user's choice goes out on every request, ahead of any `none` the
+                    // endpoint once asked for (#10241).
+                    body["reasoning_effort"] = json!(effort);
+                }
                 if !self.tools.is_empty() {
                     body["tools"] = Value::Array(self.tools.clone());
-                    if self.no_reasoning.get() {
+                    if self.no_reasoning.get() && self.reasoning_effort().is_none() {
                         body["reasoning_effort"] = json!("none");
                     }
                 }
@@ -1595,7 +1640,7 @@ fn anthropic_headers(base_url: &str, key: Option<&str>) -> Result<Vec<(String, S
 }
 
 /// The endpoint's models for the picker. The Messages API has no models endpoint at every
-/// compatible provider (Qwen's has none), so a failure here simply leaves the picker empty.
+/// compatible provider (Qwen's has none), so a failure here leaves only the configured model.
 pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Vec<ModelInfo>, String> {
     let req = HttpRequest { method: "GET", url: endpoint(base_url, "models"), headers: anthropic_headers(base_url, key)?, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
@@ -1603,19 +1648,10 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(v.get("data")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .take(500)
-                .filter_map(|m| {
-                    let id = m.get("id").and_then(Value::as_str)?.to_string();
-                    let name = m.get("display_name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| id.clone());
-                    Some(ModelInfo { id, name, description: String::new() })
-                })
-                .collect()
-        })
-        .unwrap_or_default())
+    Ok(listed_models(&v, "display_name")?
+        .into_iter()
+        .map(|(id, name)| ModelInfo { name: name.unwrap_or_else(|| id.clone()), id, description: String::new() })
+        .collect())
 }
 
 /// Test an Anthropic-compatible endpoint: send the smallest message there is, so the check covers
@@ -1688,18 +1724,35 @@ fn tool_title(name: &str, args: &Value) -> String {
     }
 }
 
-/// `GET {base_url}/models`: the model ids, in the order the endpoint lists them.
-fn model_ids(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<String>, String> {
+/// The ids of a `/models` body and the names the endpoint gives them (when not just the id), in
+/// its order. The body is the endpoint's to write: an id that could not be sent back is left out,
+/// and a name is cut. A body without a `data` array is no model list (a web page where the
+/// endpoint should be, say): an error, so the picker says so and asks again later.
+fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
+    let Some(entries) = body.get("data").and_then(Value::as_array) else {
+        return Err(crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string());
+    };
+    Ok(entries
+        .iter()
+        .filter_map(|m| {
+            let id = m.get("id").and_then(Value::as_str).filter(|id| super::model_id_valid(id))?;
+            let name = m.get(name_key).and_then(Value::as_str).filter(|name| *name != id).map(|name| name.chars().take(MODEL_NAME_CAP).collect());
+            Some((id.to_string(), name))
+        })
+        .take(MODEL_LIST_CAP)
+        .collect())
+}
+
+/// `GET {base_url}/models`: the models, in the order the endpoint lists them. The picker shows the
+/// ids, so an endpoint's own name for a model is its description.
+fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<ModelInfo>, String> {
     let req = HttpRequest { method: "GET", url: format!("{base_url}/models"), headers, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
     let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(v.get("data")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().take(500).filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect())
-        .unwrap_or_default())
+    Ok(listed_models(&v, "name")?.into_iter().map(|(id, name)| ModelInfo { name: id.clone(), id, description: name.unwrap_or_default() }).collect())
 }
 
 /// The endpoint's models for the picker.
@@ -1711,7 +1764,7 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Ve
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
-    Ok(model_ids(http, base_url, headers)?.into_iter().map(|id| ModelInfo { name: id.clone(), id, description: String::new() }).collect())
+    model_entries(http, base_url, headers)
 }
 
 /// Ask an endpoint for its models (Test connection): how many, and whether `model` is one.
@@ -1723,10 +1776,9 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
-    let ids = model_ids(http, base_url, headers)?;
-    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let found = model.is_empty() || ids.contains(&model);
-    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &ids.len().to_string()), ("model", model)]))
+    let models = model_entries(http, base_url, headers)?;
+    let found = model.is_empty() || models.iter().any(|m| m.id == model);
+    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &models.len().to_string()), ("model", model)]))
 }
 
 #[cfg(test)]
@@ -1861,6 +1913,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1911,6 +1964,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1964,6 +2018,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2010,6 +2065,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2022,6 +2078,7 @@ mod tests {
         let Some(Event::Models { current, available }) = events.iter().find(|e| matches!(e, Event::Models { .. })) else { panic!("{events:?}") };
         assert_eq!(current, "local");
         assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local", "big", "small"]);
+        assert!(events.iter().any(|e| matches!(e, Event::ModelsNote(None))), "{events:?}");
         b.set_model("big");
         b.prompt(&[PromptPart::Text("hi".into())]);
         wait_for_seen(&seen);
@@ -2093,6 +2150,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         }
     }
 
@@ -2166,6 +2224,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2484,6 +2543,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2521,6 +2581,87 @@ mod tests {
         assert!(tools[0].pointer("/parameters/additionalProperties").is_none(), "{tools:?}");
     }
 
+    /// An endpoint that refuses the listing still shows the configured model, and says why first.
+    #[test]
+    fn a_refused_listing_keeps_the_configured_model_and_says_why() {
+        let http: HttpFn = Arc::new(|r: &HttpRequest| {
+            assert_eq!(r.method, "GET");
+            Ok((401, json!({"error": {"message": "No auth credentials"}}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "local".into(),
+            key: None,
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::Models { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let listing: Vec<&Event> = events.iter().filter(|e| matches!(e, Event::Models { .. } | Event::ModelsNote(_))).collect();
+        let [Event::ModelsNote(Some(note)), Event::Models { current, available }] = listing[..] else { panic!("{events:?}") };
+        assert!(note.contains("No auth credentials"), "{note}");
+        assert_eq!(current, "local");
+        assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local"]);
+        b.shutdown(true);
+    }
+
+    /// OpenRouter's shape: the name is the description, whatever else an entry holds is ignored, an
+    /// id that could not be sent back is left out, and the list stays within its caps.
+    #[test]
+    fn a_listing_keeps_the_names_and_stays_within_its_caps() {
+        let mut data = vec![
+            json!({"id": "openai/gpt-x", "name": "OpenAI: GPT X", "description": "Long text", "supported_parameters": ["tools"]}),
+            json!({"id": "same", "name": "same", "display_name": "Same One"}),
+            json!({"id": "long", "name": "n".repeat(MODEL_NAME_CAP + 10), "display_name": "d".repeat(MODEL_NAME_CAP + 10)}),
+            json!({"id": "x".repeat(super::super::MODEL_ID_CAP + 1)}),
+            json!({"id": "bell\u{7}"}),
+            json!({"id": ""}),
+            json!({"id": 7}),
+            json!({"name": "no id"}),
+        ];
+        data.extend((0..MODEL_LIST_CAP + 500).map(|i| json!({"id": format!("m{i}")})));
+        let body = json!({"data": data}).to_string().into_bytes();
+        let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
+        let list = model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        assert_eq!(list.len(), MODEL_LIST_CAP);
+        let [first, same, long, next] = &list[..4] else { panic!("{}", list.len()) };
+        assert_eq!((first.id.as_str(), first.name.as_str(), first.description.as_str()), ("openai/gpt-x", "openai/gpt-x", "OpenAI: GPT X"));
+        assert_eq!((same.id.as_str(), same.description.as_str()), ("same", ""));
+        assert_eq!(long.description.chars().count(), MODEL_NAME_CAP);
+        assert_eq!(next.id, "m0");
+        let list = anthropic_model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        assert_eq!(list.len(), MODEL_LIST_CAP);
+        let [first, same, long] = &list[..3] else { panic!("{}", list.len()) };
+        assert_eq!(first.name, "openai/gpt-x");
+        assert_eq!(same.name, "Same One");
+        assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
+        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x").unwrap().contains(&MODEL_LIST_CAP.to_string()));
+    }
+
+    /// A 200 that is no model list (a web page where the endpoint should be) is an error, so the
+    /// picker says why and asks again later; a list with nothing in it is a list.
+    #[test]
+    fn an_answer_that_is_no_model_list_is_an_error() {
+        let expected = crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string();
+        let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
+        assert_eq!(model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "").unwrap_err(), expected);
+        let object: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"object": "list"}).to_string().into_bytes())));
+        assert_eq!(model_list(&object, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        let empty: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"data": []}).to_string().into_bytes())));
+        assert!(model_list(&empty, "http://localhost:18789/v1", None).unwrap().is_empty());
+    }
+
     #[test]
     fn tool_arguments_are_an_object_or_an_error() {
         assert_eq!(tool_arguments(None), Ok(json!({})));
@@ -2556,6 +2697,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2585,6 +2727,7 @@ mod tests {
             key: Some("k".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(cfg, ctx).is_err());
@@ -2593,6 +2736,11 @@ mod tests {
     /// A worker with one function tool whose endpoint answers each POST with the next scripted
     /// (status, body); the requests it received are returned too.
     fn scripted_worker(answers: Vec<(u16, Value)>) -> (Worker, Arc<std::sync::Mutex<Vec<Value>>>) {
+        scripted_worker_effort(answers, "")
+    }
+
+    /// [`scripted_worker`] with the endpoint's reasoning effort set (empty: send nothing).
+    fn scripted_worker_effort(answers: Vec<(u16, Value)>, effort: &str) -> (Worker, Arc<std::sync::Mutex<Vec<Value>>>) {
         let answers = std::sync::Mutex::new(answers.into_iter().rev().collect::<Vec<_>>());
         let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
         let log = seen.clone();
@@ -2609,6 +2757,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: effort.to_string(),
         };
         let (events, _rx) = channel();
         let w = Worker {
@@ -2658,6 +2807,37 @@ mod tests {
         let (w, seen) = scripted_worker(vec![(400, json!({"error": {"message": "context length exceeded"}}))]);
         assert!(w.request().unwrap_err().contains("context length"));
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// A reasoning effort the user chose goes out as `reasoning_effort` on every request; empty
+    /// sends nothing, so existing agents are untouched (#10241).
+    #[test]
+    fn a_chosen_reasoning_effort_goes_out_on_every_request() {
+        let ok = json!({"choices": [{"message": {"role": "assistant", "content": "Done."}}]});
+        let (w, seen) = scripted_worker_effort(vec![(200, ok.clone()), (200, ok.clone())], "high");
+        assert_eq!(w.request().unwrap().assistant, ok["choices"][0]["message"]);
+        assert_eq!(w.request().unwrap().assistant, ok["choices"][0]["message"]);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0]["reasoning_effort"], "high");
+        assert_eq!(sent[1]["reasoning_effort"], "high");
+        drop(sent);
+        // Empty effort: nothing is sent at all.
+        let (w, seen) = scripted_worker(vec![(200, ok)]);
+        assert!(w.request().is_ok());
+        assert!(seen.lock().unwrap()[0].get("reasoning_effort").is_none());
+    }
+
+    /// A chosen effort wins over the #3817 `none` retry: the endpoint's refusal of the effort is
+    /// shown to the user after exactly one request, never silently replaced by `none` (#10241).
+    #[test]
+    fn a_chosen_reasoning_effort_wins_over_the_none_retry() {
+        let (w, seen) = scripted_worker_effort(vec![refusal()], "max");
+        let e = w.request().unwrap_err();
+        assert!(e.starts_with("HTTP 400") && e.contains("reasoning_effort"), "{e}");
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 1, "the refusal is shown, not replayed with none");
+        assert_eq!(sent[0]["reasoning_effort"], "max");
     }
 
     #[test]
@@ -2742,6 +2922,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2791,6 +2972,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2841,6 +3023,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();

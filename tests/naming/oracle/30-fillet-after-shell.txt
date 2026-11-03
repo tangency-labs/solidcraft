@@ -1,0 +1,103 @@
+# oracle/30-fillet-after-shell: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Box: 27 faces, 64 edges
+Box face F2:side:l1
+Box face F2:side:l2
+Box face F2:side:l3
+Box face F2:side:l4
+Box face F2:start
+Box face F2:top
+Box face F3:inner:F2:side:l1
+Box face F3:inner:F2:side:l2
+Box face F3:inner:F2:side:l3
+Box face F3:inner:F2:side:l4
+Box face F3:inner:F2:start
+Box face F4:blend:F2:side:l1|F2:side:l2
+Box face F4:blend:F2:side:l1|F2:side:l4
+Box face F4:blend:F2:side:l2|F2:side:l3
+Box face F4:blend:F2:side:l3|F2:side:l4
+Box face F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box face F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box face F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box face F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box face F6:blend:F3:inner:F2:side:l1|F3:inner:F2:start
+Box face F6:blend:F3:inner:F2:side:l2|F3:inner:F2:start
+Box face F6:blend:F3:inner:F2:side:l3|F3:inner:F2:start
+Box face F6:blend:F3:inner:F2:side:l4|F3:inner:F2:start
+Box face F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box face F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box face F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box face F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F2:side:l1|F2:start
+Box edge F2:side:l1|F2:top
+Box edge F2:side:l1|F4:blend:F2:side:l1|F2:side:l2
+Box edge F2:side:l1|F4:blend:F2:side:l1|F2:side:l4
+Box edge F2:side:l2|F2:start
+Box edge F2:side:l2|F2:top
+Box edge F2:side:l2|F4:blend:F2:side:l1|F2:side:l2
+Box edge F2:side:l2|F4:blend:F2:side:l2|F2:side:l3
+Box edge F2:side:l3|F2:start
+Box edge F2:side:l3|F2:top
+Box edge F2:side:l3|F4:blend:F2:side:l2|F2:side:l3
+Box edge F2:side:l3|F4:blend:F2:side:l3|F2:side:l4
+Box edge F2:side:l4|F2:start
+Box edge F2:side:l4|F2:top
+Box edge F2:side:l4|F4:blend:F2:side:l1|F2:side:l4
+Box edge F2:side:l4|F4:blend:F2:side:l3|F2:side:l4
+Box edge F2:start|F4:blend:F2:side:l1|F2:side:l2
+Box edge F2:start|F4:blend:F2:side:l1|F2:side:l4
+Box edge F2:start|F4:blend:F2:side:l2|F2:side:l3
+Box edge F2:start|F4:blend:F2:side:l3|F2:side:l4
+Box edge F2:top|F3:inner:F2:side:l1
+Box edge F2:top|F3:inner:F2:side:l2
+Box edge F2:top|F3:inner:F2:side:l3
+Box edge F2:top|F3:inner:F2:side:l4
+Box edge F2:top|F4:blend:F2:side:l1|F2:side:l2
+Box edge F2:top|F4:blend:F2:side:l1|F2:side:l4
+Box edge F2:top|F4:blend:F2:side:l2|F2:side:l3
+Box edge F2:top|F4:blend:F2:side:l3|F2:side:l4
+Box edge F2:top|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F2:top|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F2:top|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F2:top|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l1|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F3:inner:F2:side:l1|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l1|F6:blend:F3:inner:F2:side:l1|F3:inner:F2:start
+Box edge F3:inner:F2:side:l2|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F3:inner:F2:side:l2|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F3:inner:F2:side:l2|F6:blend:F3:inner:F2:side:l2|F3:inner:F2:start
+Box edge F3:inner:F2:side:l3|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F3:inner:F2:side:l3|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l3|F6:blend:F3:inner:F2:side:l3|F3:inner:F2:start
+Box edge F3:inner:F2:side:l4|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l4|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l4|F6:blend:F3:inner:F2:side:l4|F3:inner:F2:start
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:side:l1|F3:inner:F2:start
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:side:l2|F3:inner:F2:start
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:side:l3|F3:inner:F2:start
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:side:l4|F3:inner:F2:start
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F6:blend:F3:inner:F2:side:l1|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F6:blend:F3:inner:F2:side:l1|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F6:blend:F3:inner:F2:side:l2|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F6:blend:F3:inner:F2:side:l2|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F6:blend:F3:inner:F2:side:l3|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F6:blend:F3:inner:F2:side:l3|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F6:blend:F3:inner:F2:side:l4|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F6:blend:F3:inner:F2:side:l4|F3:inner:F2:start|F6:blend:F3:inner:F2:start|F5:blend:F3:inner:F2:side:l3|F3:inner:F2:side:l4
+ref Shell1 (3) face 0 `F2:top` -> Box face F2:top
+ref OuterFillet (4) edge 0 `F2:side:l3|F2:side:l4` -> Box edge F2:side:l3|F2:side:l4
+ref OuterFillet (4) edge 1 `F2:side:l2|F2:side:l3` -> Box edge F2:side:l2|F2:side:l3
+ref OuterFillet (4) edge 2 `F2:side:l1|F2:side:l2` -> Box edge F2:side:l1|F2:side:l2
+ref OuterFillet (4) edge 3 `F2:side:l1|F2:side:l4` -> Box edge F2:side:l1|F2:side:l4
+ref InnerFillet (5) edge 0 `F3:inner:F2:side:l2|F3:inner:F2:side:l3` -> Box edge F3:inner:F2:side:l2|F3:inner:F2:side:l3
+ref InnerFillet (5) edge 1 `F3:inner:F2:side:l3|F3:inner:F2:side:l4` -> Box edge F3:inner:F2:side:l3|F3:inner:F2:side:l4
+ref InnerFillet (5) edge 2 `F3:inner:F2:side:l1|F3:inner:F2:side:l2` -> Box edge F3:inner:F2:side:l1|F3:inner:F2:side:l2
+ref InnerFillet (5) edge 3 `F3:inner:F2:side:l1|F3:inner:F2:side:l4` -> Box edge F3:inner:F2:side:l1|F3:inner:F2:side:l4
+ref FloorFillet (6) edge 0 `F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4` -> Box edge F3:inner:F2:start|F5:blend:F3:inner:F2:side:l1|F3:inner:F2:side:l4

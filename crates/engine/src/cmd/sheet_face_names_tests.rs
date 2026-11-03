@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -59,9 +60,10 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     let mut s = Session::default();
     let (width, fb, sd) = tray(&mut s, 320.0);
     let all = faces(&mut s);
-    // Every face but the hole's wall (two halves) has a sheet name, and no two faces share one.
+    // Every face but the hole's wall (r 3.3, however many faces the kernel makes it of) has a
+    // sheet name, and no two faces share one.
     let unnamed: Vec<_> = all.iter().filter(|f| f.0.is_none()).collect();
-    assert!(unnamed.len() == 2 && unnamed.iter().all(|f| f.2.is_some_and(|r| (r - 3.3).abs() < 1e-6)), "only the hole's wall: {unnamed:?}");
+    assert!(!unnamed.is_empty() && unnamed.iter().all(|f| f.2.is_some_and(|r| (r - 3.3).abs() < 1e-6)), "only the hole's wall: {unnamed:?}");
     let mut names: Vec<&str> = all.iter().filter_map(|f| f.0.as_deref()).collect();
     names.sort_unstable();
     let n = names.len();
@@ -84,7 +86,9 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     let radius = |name: &str| named(&all, name).first().and_then(|f| f.2);
     assert_eq!(radius(&format!("sheet:Body1:F{fb}.0:bend.inner")).map(|r| (r * 1e6).round() / 1e6), Some(1.0));
     assert_eq!(radius(&format!("sheet:Body1:F{fb}.0:bend.outer")).map(|r| (r * 1e6).round() / 1e6), Some(2.0));
-    // 80 mm wider: the same names, each on the same face where it now is.
+    // 80 mm wider: the same names, each on the same face where it now is. A name's point is
+    // somewhere on its face: the right flange's top is the plane x = w − 1, the back flange's
+    // far rim the strip z = 30, 199 <= y <= 200 (the flange 1 thick, its outside at y = 200).
     let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
     assert!((right.x - 319.0).abs() < 1e-3, "{right:?}");
     run(&mut s, "parameters.change", json!({"name": width, "expression": "400"}));
@@ -95,7 +99,7 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
     assert!((right.x - 399.0).abs() < 1e-3, "{right:?}");
     let far = point(&s, &format!("sheet:Body1:F{fb}.1:rim.far"));
-    assert!((far.y - 199.5).abs() < 1e-3 && (far.z - 30.0).abs() < 1e-3, "{far:?}");
+    assert!((199.0 - 1e-3..=200.0 + 1e-3).contains(&far.y) && (0.0..=400.0).contains(&far.x) && (far.z - 30.0).abs() < 1e-3, "{far:?}");
 }
 
 #[test]
@@ -111,4 +115,24 @@ fn a_flanges_sheet_names_hold_when_another_flange_goes() {
     let gone = format!("sheet:Body1:F{fb}.0:top");
     assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), None, &gone).is_err());
     assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), Some("Body2"), &right).is_err());
+}
+
+/// A fold at 45° across a strip, with a bend zone wide for the strip: about a third of the bend's
+/// faces lies beyond the ends of its start line, along the bend, and they still take its names.
+#[test]
+fn a_bend_askew_across_a_sheet_keeps_its_names() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R10", "thickness": "1 mm", "bend_radius": "10 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strip"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [200, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Strip"}));
+    run(&mut s, "sheet.fold", json!({"points": [[90, -5, 1], [115, 20, 1]], "fixed": [10, 10, 1]}));
+    let fold = s.doc.features.last().map_or(0, |f| f.id);
+    let all = faces(&mut s);
+    for (side, radius) in [("inner", 10.0), ("outer", 11.0)] {
+        let name = format!("sheet:Body1:F{fold}.0:bend.{side}");
+        let f = named(&all, &name);
+        assert!(f.len() == 1 && f[0].2.is_some_and(|r| (r - radius).abs() < 1e-6), "{name}: {all:?}");
+    }
 }

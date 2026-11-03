@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use solidcraft_doc::{BodyName, FacePick, FeatureKind, Position};
-use solidcraft_kernel::Continuity;
+use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
 use super::features::add_feature;
@@ -33,17 +33,19 @@ fn match_surface(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&target).is_none() {
         return Err(bad(cmd, format!("no body `{target}`")));
     }
-    let faces: Vec<solidcraft_geom::Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let faces: Vec<solidcore_record::Vec3> =
+        p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if faces.len() > 64 {
         return Err(bad(cmd, "too many points on the face to rebuild"));
     }
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, "`edges` must list 1 to 10000 points on the target's edge chain"));
     }
     let order = match p.get("order") {
         None => Continuity::G2,
-        Some(v) => v.as_str().and_then(Continuity::parse).filter(|o| *o != Continuity::G0).ok_or_else(|| bad(cmd, "`order` must be g1, g2 or g3"))?,
+        Some(v) => crate::params::continuity(cmd, Some(v), "`order`", Construction::Match)?,
     };
     add_feature(
         s,
@@ -63,7 +65,7 @@ mod tests {
     use super::*;
     use crate::Session;
     use serde_json::json;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     fn run(s: &mut Session, c: &str, p: Value) -> Value {
         s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"))
@@ -73,7 +75,7 @@ mod tests {
     /// at either end. The seam is where `solid.extrude` starts the circle, so it is read off the
     /// body rather than assumed.
     fn picks(s: &Session) -> Vec<Vec3> {
-        let boss = s.world_state().body("Boss").unwrap().body.clone();
+        let boss = s.world_state().unwrap().body("Boss").unwrap().body.clone();
         let e = boss
             .edges(boss.size() * 1e-2)
             .unwrap()
@@ -109,7 +111,7 @@ mod tests {
     /// is from the picked seam line, the angle between the two surfaces' normals across it, and
     /// the continuity it holds.
     fn seam(s: &Session) -> (f64, f64, Continuity) {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let made = st.body("Skirt").unwrap().body.clone();
         let target = st.body("Boss").unwrap().body.clone();
         solidcraft_kernel::seam_continuity(&made, &target, &picks(s)).unwrap()
@@ -127,7 +129,7 @@ mod tests {
         assert!((gap - 1.0).abs() < 0.05, "the skirt starts a millimetre off the seam: {gap}");
         let chain = picks(&s);
         run(&mut s, "surface.match", json!({"body": "Skirt", "target": "Boss", "edges": chain, "order": "g2"}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert!(st.body("Skirt").is_some(), "the matched body keeps its name");
         assert!(st.body("Boss").is_some(), "the body it was matched to stays too");
         assert!(st.body("Skirt").unwrap().body.is_surface(), "a match stays a surface");

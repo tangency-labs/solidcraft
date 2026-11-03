@@ -97,7 +97,7 @@ fn occurrence(s: &Session, body: &str) -> Option<u64> {
     s.doc.body_frames(&s.model.state()).into_iter().find(|f| f.0 == body).map(|(_, _, path, _)| path.last().copied().unwrap_or(0))
 }
 
-fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcraft_engine::geom::Vec3)> {
+fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcore_record::Vec3)> {
     match inputs.get(i)?.items.first()? {
         Sel::Face { body, point, .. } | Sel::Edge { body, point, .. } => Some((body.as_str(), *point)),
         _ => None,
@@ -107,7 +107,7 @@ fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcraft_engine::geom:
 /// The radius of the round face picked in input `i`.
 fn picked_radius(s: &Session, inputs: &[SelInput], i: usize) -> Option<f64> {
     let (body, point) = pick(inputs, i)?;
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     solidcraft_engine::kernel::cylinder_face_at(&st.body(body)?.body, point).map(|c| c.radius)
 }
 

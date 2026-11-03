@@ -52,6 +52,17 @@ impl Deferred {
     }
 }
 
+#[cfg(test)]
+impl Deferred {
+    /// A command that never finishes computing, with the sender that keeps it so, for the tests
+    /// of what waits for one (the real worker would finish in a moment).
+    pub(crate) fn never_done(id: &str, params: Value, revision: u64) -> (Self, std::sync::mpsc::Sender<Option<solidcraft_engine::Evaluated>>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let job = Deferred { done: rx, evaluated: None, started: crate::now_ms(), command: (id.to_string(), params), revision, kept: None };
+        (job, tx)
+    }
+}
+
 /// How a command asked to run off the window thread goes.
 enum Start {
     /// It computes off the window thread.
@@ -122,12 +133,28 @@ fn replaced_by_a_later_one(id: &str) -> bool {
 }
 
 impl SolveApp {
+    /// A direct exit or editor switch supersedes any queued sketch exit. A late worker must
+    /// never finish a different sketch that was opened while it computed.
+    pub(crate) fn take_sketch_exit(&mut self) -> Option<String> {
+        let is_exit = |id: &str| matches!(id, "sketch.finish" | "sketch.cancel");
+        let pending = self.deferred.as_ref().filter(|job| is_exit(&job.command.0)).map(|job| job.command.0.clone());
+        if pending.is_some() {
+            self.deferred = None;
+        }
+        let queued = self.deferred_queue.iter().find(|(id, _)| is_exit(id)).map(|(id, _)| id.clone());
+        self.deferred_queue.retain(|(id, _)| !is_exit(id));
+        pending.or(queued)
+    }
+
     /// Run a command that may recompute much of the history, off the window thread when it takes
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).
     pub fn run_heavy(&mut self, id: &str, params: Value) -> Result<Value, String> {
         if id == "timeline.play" {
             return self.run(id, params);
+        }
+        if matches!(id, "edit.undo" | "edit.redo" | "timeline.roll_to") {
+            self.close_editor_for_history()?;
         }
         // A manual history action takes over from playback. Playback takes its state out
         // while submitting its own next step, then puts it back to wait for that step.
@@ -174,6 +201,25 @@ impl SolveApp {
             self.pending_feature_edit.as_ref().map(|edit| edit.started),
         ];
         started.into_iter().flatten().reduce(f64::min)
+    }
+
+    /// Whether the "Computing" toast can stop what it waits for (#8266): a history command or a
+    /// delete's check computing off the window thread. A feature edit applying has its own
+    /// dialog, with its own Cancel.
+    pub fn can_cancel_computing(&self) -> bool {
+        self.deferred.is_some() || self.delete_check.is_some()
+    }
+
+    /// Stop waiting for the history command, and the delete check, computing off the window thread
+    /// (#8266), and drop the commands waiting behind them. The design is as it was before they
+    /// started: a command only runs for real once its evaluation is in. The worker threads run
+    /// to the end of what they evaluate and their results are dropped (the same as Cancel while a
+    /// feature is applying).
+    pub fn cancel_computing(&mut self) {
+        self.deferred = None;
+        self.deferred_queue.clear();
+        self.delete_check = None;
+        self.start_after_roll = None;
     }
 
     /// Run a delete's check `commands` and carry on with `then` once their replies are in: off

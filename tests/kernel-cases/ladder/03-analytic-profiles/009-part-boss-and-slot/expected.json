@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the running part: a revolved boss r8 h10 joined on the top, a slot 15x8 cut through the base",
+ "source": "analytic",
+ "method": "back-wall part (57000) + pi 8^2 10 - 20 (15*8 + pi 4^2); faces 8 + boss side and top + slot's 2 planes and 2 half cylinders",
+ "body_count": 1,
+ "volume_mm3": 55605.309649149,
+ "faces": 14
+}

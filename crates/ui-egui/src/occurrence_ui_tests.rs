@@ -6,6 +6,8 @@ use solidcraft_engine::Sel;
 #[test]
 fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
     let transferred = h.app.run("component.from_bodies", json!({"bodies":["Block"]})).unwrap();
     let owner = transferred["components"][0]["component"].as_u64().unwrap();
@@ -22,7 +24,7 @@ fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     assert_eq!(cache.root.folders[0].as_ref().unwrap().entries().map(|entry| entry.key.as_str()).collect::<Vec<_>>(), ["Block"]);
     let occurrence = h.app.session.doc.occurrence_of(owner).unwrap().id;
     assert!(cache.occurrences.get([occurrence].as_slice()).unwrap().folders[0].as_ref().unwrap().entries().next().is_none());
-    let bounds = h.app.session.world_state().body("Block").unwrap().mesh().bounds();
+    let bounds = h.app.session.world_state().unwrap().body("Block").unwrap().mesh().bounds();
     assert!((bounds.min.x - 30.0).abs() < 1e-9);
     assert!((bounds.max.x - 35.0).abs() < 1e-9);
 }
@@ -30,8 +32,42 @@ fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
 fn fixture() -> (Harness, u64, u64, u64) {
     let (mut h, component, first) = crate::test_support::component_box();
     let second = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.frames(3);
     (h, component, first, second)
+}
+
+#[test]
+fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
+    for label in ["Show All", "Unisolate"] {
+        let (mut h, _, first, second) = fixture();
+        h.app.session.selection.clear();
+        let menu_item =
+            |h: &Harness, label: &str| context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.label == label).unwrap();
+        assert!(!menu_item(&h, label).enabled, "nothing is hidden yet");
+        let isolate =
+            context_menu::items(&h.app, &Target::Occurrence { path: vec![first] }).into_iter().find(|item| item.label == "Isolate").unwrap();
+        context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+        assert!(h.app.session.visibility.hidden_bodies.is_empty());
+        assert_eq!(h.app.session.visibility.hidden_occurrences, vec![vec![second]]);
+        let other_body = h.app.session.occurrence_bodies(&[second], false).unwrap()[0].clone();
+        assert!(!h.app.session.body_visible(&other_body));
+
+        let restore = menu_item(&h, label);
+        assert!(restore.enabled, "{label} must restore a hidden component instance");
+        let undo = h.app.session.undo.len();
+        context_menu::run_item(&mut h.app, &restore, egui::Pos2::ZERO);
+        assert!(h.app.session.visibility.hidden_occurrences.is_empty());
+        assert!(h.app.session.body_visible(&other_body));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "restoring visibility is one undo step");
+        assert!(!menu_item(&h, label).enabled, "all component instances are visible again");
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_occurrences, vec![vec![second]]);
+        assert!(!h.app.session.body_visible(&other_body));
+        assert!(menu_item(&h, label).enabled);
+    }
 }
 
 #[test]
@@ -197,20 +233,19 @@ fn occurrence_move_dialog_keeps_other_pending_moves_and_reuses_initial_baseline(
     let movement = items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
     let mut m = h.app.tree.occurrence_move.clone().unwrap();
-    m.pivot =
-        Some(solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcraft_engine::geom::Vec3::ZERO));
+    m.pivot = Some(solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcore_record::Vec3::ZERO));
     m.translate = [10.0, 0.0, 0.0];
     crate::browser::apply_occurrence_move(&mut h.app, &m);
     let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcraft_engine::geom::Vec3::ZERO).x - 65.0).abs() < 1e-8);
+    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 65.0).abs() < 1e-8);
     m.translate = [3.0, 0.0, 0.0];
     crate::browser::apply_occurrence_move(&mut h.app, &m);
     let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcraft_engine::geom::Vec3::ZERO).x - 58.0).abs() < 1e-8);
+    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 58.0).abs() < 1e-8);
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
     crate::browser::revert_occurrence_dialog(&mut h.app, &m);
     let restored = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&restored.world, solidcraft_engine::geom::Vec3::ZERO).x - 55.0).abs() < 1e-8);
+    assert!((solidcraft_engine::doc::apply_point(&restored.world, solidcore_record::Vec3::ZERO).x - 55.0).abs() < 1e-8);
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
     h.app.run("component.revert_position", json!({"occurrences":[second]})).unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
@@ -233,7 +268,7 @@ fn occurrence_delete_targets_second_copy_even_if_first_was_selected() {
     crate::delete::confirm(&mut h.app, true);
     assert!(h.app.session.doc.occurrences.iter().any(|o| o.id == first));
     assert!(!h.app.session.doc.occurrences.iter().any(|o| o.id == second));
-    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
 }
 
 #[test]
@@ -251,7 +286,7 @@ fn occurrence_new_component_keeps_inactive_second_parent_authoring_context() {
     h.app.run("solid.box", json!({"corner":[51,1,1],"length":2,"width":2,"height":2})).unwrap();
     let feature = h.app.session.model.state().bodies.last().unwrap().feature;
     let mut centers: Vec<f64> =
-        h.app.session.world_state().bodies.iter().filter(|b| b.feature == feature).map(|b| b.mesh().bounds().center().x).collect();
+        h.app.session.world_state().unwrap().bodies.iter().filter(|b| b.feature == feature).map(|b| b.mesh().bounds().center().x).collect();
     centers.sort_by(f64::total_cmp);
     assert_eq!(centers.len(), 2);
     assert!((centers[0] - 2.0).abs() < 1e-8 && (centers[1] - 52.0).abs() < 1e-8, "{centers:?}");
@@ -273,6 +308,8 @@ fn occurrence_body_appearance_editor_inherits_definition_precision() {
 #[test]
 fn occurrence_nested_shared_child_has_distinct_rows_and_scope() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
     let parent_component = parent["component"].as_u64().unwrap();
     let parent_occurrence = parent["occurrence"].as_u64().unwrap();
@@ -330,6 +367,8 @@ fn occurrence_distance_editor_reads_inches_and_keeps_four_digits_in_model_space(
 #[test]
 fn a_body_dropped_on_a_bodies_folder_moves_into_that_component() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
     h.app.run("solid.box", json!({"corner":[20,0,0],"length":5,"width":5,"height":5,"body_name":"Lid"})).unwrap();
@@ -427,6 +466,8 @@ fn bodies_folders_fold_by_the_preference_but_never_the_designs_or_a_hidden_one()
 fn a_folded_body_sits_one_level_under_its_nested_placement() {
     use crate::prefs::BodiesFolders;
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
     let child = h.app.run("component.create", json!({"name":"Child"})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Pin"})).unwrap();
@@ -504,6 +545,8 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
 #[test]
 fn dragging_an_occurrence_row_onto_another_moves_it_into_that_component() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     // Component A with a body, at the design root.
     let a = h.app.run("component.create", json!({"name":"A"})).unwrap();
     let (_a_comp, a_occ) = (a["component"].as_u64().unwrap(), a["occurrence"].as_u64().unwrap());
@@ -560,4 +603,31 @@ fn dragging_an_occurrence_row_onto_the_top_of_a_sibling_reorders_them() {
     assert_eq!(*saved, [c, a, b].map(|id| solidcraft_engine::doc::BrowserEntry::item(&id.to_string())));
     assert!(row(c).y < row(a).y && row(a).y < row(b).y, "the rows follow the saved order");
     assert!(h.app.session.doc.occurrences.iter().all(|o| o.parent == 0), "none moved into another");
+}
+
+/// #10218: the design's Sketches folder offers Move Sketches to the Part They're On for its
+/// sketches; the one drawn on the part's face goes to the part, the one on XY stays, and the
+/// status bar says so.
+#[test]
+fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
+    let (mut h, component, occurrence) = crate::test_support::component_box();
+    h.app.session.auto_project = false;
+    let world = h.app.session.world_state().unwrap();
+    let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
+    let face = world.body(&body).unwrap().body.faces(0.01).unwrap().into_iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap();
+    let pick = json!({"face":[face.centroid.x,face.centroid.y,face.centroid.z],"body":body,"index":face.index,"path":[occurrence]});
+    let on_face = h.app.run("sketch.create", json!({"name":"OnFace","plane":pick})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    let on_xy = h.app.run("sketch.create", json!({"name":"OnXY","plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    let target = Target::Folder { component: 0, folder: "sketches".into(), scope: "c0".into() };
+    let items = context_menu::items(&h.app, &target);
+    let item = items.iter().find(|i| i.id == "component.move_sketches.to_parts").expect("on the Sketches folder's menu");
+    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face.to_string(), on_xy.to_string()]));
+    context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.doc.feature(on_face).unwrap().component, component);
+    assert_eq!(h.app.session.doc.feature(on_xy).unwrap().component, 0);
+    let (status, _, error) = h.app.status.clone().unwrap();
+    assert!(!error && status.contains("Moved 1") && status.contains("1 stayed") && status.contains("not on a part's face"), "{status}");
+    assert!(context_menu::items(&h.app, &Target::Sketch { id: on_xy }).iter().any(|i| i.id == "component.move_sketches.to_parts"));
 }

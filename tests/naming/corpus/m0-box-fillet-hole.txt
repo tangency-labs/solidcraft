@@ -1,0 +1,32 @@
+# corpus/m0-box-fillet-hole: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 9 faces, 21 edges
+Body1 face F2:side:l5
+Body1 face F2:side:l6
+Body1 face F2:side:l7
+Body1 face F2:side:l8
+Body1 face F2:start
+Body1 face F2:top
+Body1 face F3:blend:F2:side:l5|F2:side:l8
+Body1 face F5:side:c1#1
+Body1 face F5:side:c1#2
+Body1 edge F2:side:l5|F2:side:l6
+Body1 edge F2:side:l5|F2:start
+Body1 edge F2:side:l5|F2:top
+Body1 edge F2:side:l5|F3:blend:F2:side:l5|F2:side:l8
+Body1 edge F2:side:l6|F2:side:l7
+Body1 edge F2:side:l6|F2:start
+Body1 edge F2:side:l6|F2:top
+Body1 edge F2:side:l7|F2:side:l8
+Body1 edge F2:side:l7|F2:start
+Body1 edge F2:side:l7|F2:top
+Body1 edge F2:side:l8|F2:start
+Body1 edge F2:side:l8|F2:top
+Body1 edge F2:side:l8|F3:blend:F2:side:l5|F2:side:l8
+Body1 edge F2:start|F3:blend:F2:side:l5|F2:side:l8
+Body1 edge F2:start|F5:side:c1#1
+Body1 edge F2:start|F5:side:c1#2
+Body1 edge F2:top|F3:blend:F2:side:l5|F2:side:l8
+Body1 edge F2:top|F5:side:c1#1
+Body1 edge F2:top|F5:side:c1#2
+Body1 edge F5:side:c1#1|F5:side:c1#2~1 [geometric]
+Body1 edge F5:side:c1#1|F5:side:c1#2~2 [geometric]

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "an axis square to a cylinder's side through a point on the cylinder's axis",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: every radial line passes through (60,0,5), so no one normal: refused",
+ "outcome": "refused",
+ "refusal": "the point is on the face's axis"
+}

@@ -1,0 +1,7 @@
+{"commands": [
+  {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 40, "width": 30, "height": 20, "body_name": "RoundedBox"}},
+  {"command": "solid.fillet", "params": {"body": "RoundedBox", "radius": 2, "edges": [[20, 0, 0], [20, 30, 0], [20, 0, 20], [20, 30, 20], [0, 15, 0], [40, 15, 0], [0, 15, 20], [40, 15, 20], [0, 0, 10], [40, 0, 10], [0, 30, 10], [40, 30, 10]]}},
+  {"command": "solid.cylinder", "params": {"radius": 15, "height": 20, "base": [100, 0, 0], "body_name": "Drilled"}},
+  {"command": "solid.cylinder", "params": {"radius": 3, "height": 20, "base": [100, 0, 0], "body_name": "Bore"}},
+  {"command": "solid.combine", "params": {"target": "Drilled", "tools": ["Bore"], "operation": "cut"}}
+]}

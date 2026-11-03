@@ -1,0 +1,89 @@
+# oracle/28-blind-pocket-fillets: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Block: 23 faces, 52 edges
+Block face F2:side:l1
+Block face F2:side:l2
+Block face F2:side:l3
+Block face F2:side:l4
+Block face F2:start
+Block face F2:top
+Block face F4:bottom
+Block face F4:side:l1
+Block face F4:side:l2
+Block face F4:side:l3
+Block face F4:side:l4
+Block face F5:blend:F4:side:l1|F4:side:l2
+Block face F5:blend:F4:side:l1|F4:side:l4
+Block face F5:blend:F4:side:l2|F4:side:l3
+Block face F5:blend:F4:side:l3|F4:side:l4
+Block face F6:blend:F4:bottom|F4:side:l1
+Block face F6:blend:F4:bottom|F4:side:l2
+Block face F6:blend:F4:bottom|F4:side:l3
+Block face F6:blend:F4:bottom|F4:side:l4
+Block face F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l2
+Block face F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l4
+Block face F6:blend:F4:bottom|F5:blend:F4:side:l2|F4:side:l3
+Block face F6:blend:F4:bottom|F5:blend:F4:side:l3|F4:side:l4
+Block edge F2:side:l1|F2:side:l2
+Block edge F2:side:l1|F2:side:l4
+Block edge F2:side:l1|F2:start
+Block edge F2:side:l1|F2:top
+Block edge F2:side:l2|F2:side:l3
+Block edge F2:side:l2|F2:start
+Block edge F2:side:l2|F2:top
+Block edge F2:side:l3|F2:side:l4
+Block edge F2:side:l3|F2:start
+Block edge F2:side:l3|F2:top
+Block edge F2:side:l4|F2:start
+Block edge F2:side:l4|F2:top
+Block edge F2:top|F4:side:l1
+Block edge F2:top|F4:side:l2
+Block edge F2:top|F4:side:l3
+Block edge F2:top|F4:side:l4
+Block edge F2:top|F5:blend:F4:side:l1|F4:side:l2
+Block edge F2:top|F5:blend:F4:side:l1|F4:side:l4
+Block edge F2:top|F5:blend:F4:side:l2|F4:side:l3
+Block edge F2:top|F5:blend:F4:side:l3|F4:side:l4
+Block edge F4:bottom|F6:blend:F4:bottom|F4:side:l1
+Block edge F4:bottom|F6:blend:F4:bottom|F4:side:l2
+Block edge F4:bottom|F6:blend:F4:bottom|F4:side:l3
+Block edge F4:bottom|F6:blend:F4:bottom|F4:side:l4
+Block edge F4:bottom|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l2
+Block edge F4:bottom|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l4
+Block edge F4:bottom|F6:blend:F4:bottom|F5:blend:F4:side:l2|F4:side:l3
+Block edge F4:bottom|F6:blend:F4:bottom|F5:blend:F4:side:l3|F4:side:l4
+Block edge F4:side:l1|F5:blend:F4:side:l1|F4:side:l2
+Block edge F4:side:l1|F5:blend:F4:side:l1|F4:side:l4
+Block edge F4:side:l1|F6:blend:F4:bottom|F4:side:l1
+Block edge F4:side:l2|F5:blend:F4:side:l1|F4:side:l2
+Block edge F4:side:l2|F5:blend:F4:side:l2|F4:side:l3
+Block edge F4:side:l2|F6:blend:F4:bottom|F4:side:l2
+Block edge F4:side:l3|F5:blend:F4:side:l2|F4:side:l3
+Block edge F4:side:l3|F5:blend:F4:side:l3|F4:side:l4
+Block edge F4:side:l3|F6:blend:F4:bottom|F4:side:l3
+Block edge F4:side:l4|F5:blend:F4:side:l1|F4:side:l4
+Block edge F4:side:l4|F5:blend:F4:side:l3|F4:side:l4
+Block edge F4:side:l4|F6:blend:F4:bottom|F4:side:l4
+Block edge F5:blend:F4:side:l1|F4:side:l2|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l2
+Block edge F5:blend:F4:side:l1|F4:side:l4|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l4
+Block edge F5:blend:F4:side:l2|F4:side:l3|F6:blend:F4:bottom|F5:blend:F4:side:l2|F4:side:l3
+Block edge F5:blend:F4:side:l3|F4:side:l4|F6:blend:F4:bottom|F5:blend:F4:side:l3|F4:side:l4
+Block edge F6:blend:F4:bottom|F4:side:l1|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l2
+Block edge F6:blend:F4:bottom|F4:side:l1|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l4
+Block edge F6:blend:F4:bottom|F4:side:l2|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l2
+Block edge F6:blend:F4:bottom|F4:side:l2|F6:blend:F4:bottom|F5:blend:F4:side:l2|F4:side:l3
+Block edge F6:blend:F4:bottom|F4:side:l3|F6:blend:F4:bottom|F5:blend:F4:side:l2|F4:side:l3
+Block edge F6:blend:F4:bottom|F4:side:l3|F6:blend:F4:bottom|F5:blend:F4:side:l3|F4:side:l4
+Block edge F6:blend:F4:bottom|F4:side:l4|F6:blend:F4:bottom|F5:blend:F4:side:l1|F4:side:l4
+Block edge F6:blend:F4:bottom|F4:side:l4|F6:blend:F4:bottom|F5:blend:F4:side:l3|F4:side:l4
+ref CornerFillet (5) edge 0 `F4:side:l1|F4:side:l2` -> Block edge F4:side:l1|F4:side:l2
+ref CornerFillet (5) edge 1 `F4:side:l1|F4:side:l4` -> Block edge F4:side:l1|F4:side:l4
+ref CornerFillet (5) edge 2 `F4:side:l2|F4:side:l3` -> Block edge F4:side:l2|F4:side:l3
+ref CornerFillet (5) edge 3 `F4:side:l3|F4:side:l4` -> Block edge F4:side:l3|F4:side:l4
+ref FloorFillet (6) edge 0 `F4:bottom|F5:blend:F4:side:l3|F4:side:l4` -> Block edge F4:bottom|F5:blend:F4:side:l3|F4:side:l4
+ref FloorFillet (6) edge 1 `F4:bottom|F4:side:l4` -> Block edge F4:bottom|F4:side:l4
+ref FloorFillet (6) edge 2 `F4:bottom|F5:blend:F4:side:l1|F4:side:l4` -> Block edge F4:bottom|F5:blend:F4:side:l1|F4:side:l4
+ref FloorFillet (6) edge 3 `F4:bottom|F4:side:l1` -> Block edge F4:bottom|F4:side:l1
+ref FloorFillet (6) edge 4 `F4:bottom|F5:blend:F4:side:l1|F4:side:l2` -> Block edge F4:bottom|F5:blend:F4:side:l1|F4:side:l2
+ref FloorFillet (6) edge 5 `F4:bottom|F4:side:l2` -> Block edge F4:bottom|F4:side:l2
+ref FloorFillet (6) edge 6 `F4:bottom|F5:blend:F4:side:l2|F4:side:l3` -> Block edge F4:bottom|F5:blend:F4:side:l2|F4:side:l3
+ref FloorFillet (6) edge 7 `F4:bottom|F4:side:l3` -> Block edge F4:bottom|F4:side:l3

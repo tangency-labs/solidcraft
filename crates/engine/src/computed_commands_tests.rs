@@ -16,15 +16,15 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
     let checkpoint = session.checkpoint();
     let history = session.undo.len();
     let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
-    prepared.warm_meshes(|| true);
-    let world = prepared.computed.world_state();
+    prepared.warm_meshes(|| true).unwrap();
+    let world = prepared.computed.world_state().unwrap();
     let before = session.evaluations;
     session.accept_commands(prepared).unwrap();
     assert_eq!(session.evaluations, before);
     assert_eq!(session.path.as_deref(), Some("working.solidcraft"));
     assert!(Arc::ptr_eq(&saved, &session.saved));
     assert_eq!(session.undo.len(), history + 1);
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     session.restore_checkpoint(checkpoint).unwrap();
     assert_eq!(session.undo.len(), history);
     assert_eq!(session.doc.features.len(), 1);
@@ -65,14 +65,14 @@ fn revision_context_selection_and_replaced_document_reject_old_work() {
 fn editor_marker_restoration_reuses_the_pinned_model_with_an_empty_cache() {
     let mut session = Session::default();
     session.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
-    let world = session.world_state();
+    let world = session.world_state().unwrap();
     let original = session.scratch();
     session.execute("timeline.roll_to", &json!({"position":0})).unwrap();
     let source = session.scratch();
     *session.model.cache.lock().unwrap() = Default::default();
     let prepared = session.scratch().compute_editor_commands(&[], &source, original).unwrap();
     assert_eq!(prepared.computed.evaluations, 0, "restoring the marker must never evaluate the old suffix");
-    assert!(Arc::ptr_eq(&world, &prepared.computed.world_state()));
+    assert!(Arc::ptr_eq(&world, &prepared.computed.world_state().unwrap()));
     session.accept_commands(prepared).unwrap();
     assert_eq!(session.doc.marker, None);
 }
@@ -146,6 +146,35 @@ fn editor_visibility_changes_allow_apply_and_preserve_separate_undo_steps() {
         session.execute("edit.redo", &json!({})).unwrap();
         assert_eq!(session.visibility, hidden);
         assert_editor_volume(&mut session, 12024.0);
+    }
+}
+
+/// A section, an analysis or the selection changed while an editor is open changes only what is
+/// shown: OK still applies the edit and Cancel puts the design back (#10687).
+#[test]
+fn editor_display_changes_allow_apply_and_cancel() {
+    let cases: [&[(&str, serde_json::Value)]; 5] = [
+        &[("inspect.section", json!({"plane":"XZ","offset":1}))],
+        &[("inspect.section", json!({"plane":"XZ","offset":1})), ("inspect.section", json!({"clear":true}))],
+        &[("inspect.zebra", json!({"stripes":14.5}))],
+        &[("select.set", json!({"items":[{"type":"body","name":"Other"}]}))],
+        &[("select.clear", json!({}))],
+    ];
+    for display in cases {
+        let (mut session, source, original, commands) = extrusion_editor();
+        for (id, params) in display {
+            session.execute(id, params).unwrap();
+        }
+        let prepared =
+            session.scratch().compute_editor_commands(&commands, &source, original).unwrap_or_else(|e| panic!("OK after {display:?}: {e}"));
+        session.accept_commands(prepared).unwrap();
+        assert_editor_volume(&mut session, 12024.0);
+        let (mut session, source, original, _) = extrusion_editor();
+        for (id, params) in display {
+            session.execute(id, params).unwrap();
+        }
+        session.restore_editor(&source, original).unwrap_or_else(|e| panic!("Cancel after {display:?}: {e}"));
+        assert_editor_volume(&mut session, 6024.0);
     }
 }
 

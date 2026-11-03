@@ -3,6 +3,7 @@
 
 use egui::pos2;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::context_menu::{self, Target};
 use crate::scenario::Harness;

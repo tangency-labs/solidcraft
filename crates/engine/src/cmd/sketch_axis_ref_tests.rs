@@ -3,7 +3,8 @@
 //! reported in `created`, and left out of profiles. A real curve with that id wins.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{CurveKind, LinkSource, Sketch};
 
 use crate::Session;

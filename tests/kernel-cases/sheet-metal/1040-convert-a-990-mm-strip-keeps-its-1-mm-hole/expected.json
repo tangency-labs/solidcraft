@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1040"
+ ],
+ "what": "a 990 x 100 x 1 strip with holes of 10, 4, 2 and 1 mm: the 1 mm hole fell out of the outline when the mesh sagged by almost the thickness",
+ "source": "analytic",
+ "method": "V = 990*100*1 - (pi/4)(10^2 + 4^2 + 2^2 + 1^2)*1 = 99000 - 30.25*pi",
+ "body_count": 1,
+ "volume_mm3": 98904.9668222289
+}

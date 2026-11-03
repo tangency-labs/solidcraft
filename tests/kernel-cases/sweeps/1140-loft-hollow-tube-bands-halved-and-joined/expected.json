@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1140"
+ ],
+ "what": "two hollow lofted tube bands (outer r 30, bore r 18 on R100, 5 sections each, 45 degrees each), each cut in half through its axis plane z = 0 and the halves joined into one body (\"no result\" after ten minutes of fallbacks)",
+ "source": "analytic",
+ "method": "the two bands meet on a shared section plane and together are the 90 degree wall: pi (30^2 - 18^2) * 100 * (pi/2), cut in half by the plane through the axis (the arc lies in z = 0, so the halves are equal): V = 1/2 * pi * 576 * 100 * pi/2 = 142122.3.",
+ "body_count": 1,
+ "volume_mm3": 142122.30337568675
+}

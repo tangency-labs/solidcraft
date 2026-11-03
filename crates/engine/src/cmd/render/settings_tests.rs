@@ -1,5 +1,6 @@
 use super::*;
 use solidcraft_doc::render_settings::RenderJob;
+use solidcraft_geom::prelude::*;
 
 fn save(s: &mut Session, patch: Value) {
     s.execute("render.settings.set", &json!({"name":"Studio", "set":patch})).unwrap();
@@ -181,7 +182,7 @@ fn light_fixture(s: &mut Session, method: &str) {
 #[test]
 fn render_lights_small_area_pose_and_resize_preserve_aspect_and_emitting_side() {
     use crate::schema::render_lights::Geometry;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     save(
         &mut s,
@@ -666,7 +667,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     assert!(s.render_job_host().is_none());
     let original = s.doc.clone();
     let model = s.model.state();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let undo = s.undo.len();
     s.evaluations = 0;
     let setup: RenderSetup = serde_json::from_value(json!({
@@ -712,7 +713,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     );
     assert_eq!(s.doc.render.setups["Studio"].exposure_ev, 2.5);
     assert!(Arc::ptr_eq(&model, &s.model.state()));
-    assert!(Arc::ptr_eq(&world, &s.world_state()));
+    assert!(Arc::ptr_eq(&world, &s.world_state().unwrap()));
     assert_eq!(s.evaluations, 0);
 }
 
@@ -746,7 +747,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
     s.execute("occurrence.move", &json!({"occurrence":component["occurrence"],"translate":[30,0,0]})).unwrap();
     s.mark_saved();
     let model = s.model.state();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert!(!Arc::ptr_eq(&model, &world), "exercise the prepared occurrence cache");
     let mesh = model.bodies[0].mesh();
     let undo = s.undo.len();
@@ -779,7 +780,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
     assert_eq!(s.doc.render.setups["Studio"].width, 1024);
     assert!(Arc::ptr_eq(&model, &s.model.state()));
     assert!(Arc::ptr_eq(&mesh, &s.model.state().bodies[0].mesh()));
-    assert!(Arc::ptr_eq(&world, &s.world_state()));
+    assert!(Arc::ptr_eq(&world, &s.world_state().unwrap()));
     assert_eq!(s.evaluations, 0);
     // A geometry change and its history still require normal evaluation.
     s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();

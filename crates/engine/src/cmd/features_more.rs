@@ -1,11 +1,12 @@
 //! Rib, Web, Emboss, Replace Face, Align and Remove.
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
@@ -189,7 +190,7 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
     let face = if let Some(value) = p.get("face") {
         let local = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a finite point [x,y,z]"))?;
         let at = solidcraft_doc::apply_point(&s.active_component_frame(), local);
-        let state = s.world_state();
+        let state = s.world_state()?;
         let mut candidates = Vec::new();
         // The nearest face off the point: (distance, body), for the error when none holds it.
         let mut nearest: Option<(f64, &str)> = None;
@@ -328,7 +329,7 @@ fn infer_emboss_selection(
     let regions = solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?;
     let sketch_owner = s.doc.feature(sketch).map(|f| f.component).ok_or_else(|| bad(cmd, "profile sketch no longer exists"))?;
     let d = s.doc.eval(&s.doc.with_design_unit(depth, Kind::Length), Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
-    let world = s.world_state();
+    let world = s.world_state()?;
     let placed = s.placed_document();
     let mut chosen = None;
     let mut faces = 0usize;
@@ -349,7 +350,7 @@ fn infer_emboss_selection(
         let body_frame = face.body_frame(&placed, raw).map_err(|e| bad(cmd, e.to_string()))?;
         let inverse = solidcraft_doc::mat_inverse(&body_frame).ok_or_else(|| bad(cmd, "invalid cylinder body frame"))?;
         let displayed = world.sketch(sketch).ok_or_else(|| bad(cmd, "the profile sketch is not displayed"))?;
-        let plane = solidcraft_geom::Plane::new(
+        let plane = solidcore_record::Plane::new(
             solidcraft_doc::apply_point(&inverse, displayed.plane.origin),
             solidcraft_doc::apply_vector(&inverse, displayed.plane.x),
             solidcraft_doc::apply_vector(&inverse, displayed.plane.y),
@@ -389,7 +390,7 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let target = match p.get("target_face").and_then(vec3) {
         Some(tp) => {
             let n = super::face::face_normal(s, tp).ok_or_else(|| bad(cmd, "the target face must be planar"))?;
-            let plane = solidcraft_geom::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
+            let plane = solidcore_record::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
             solidcraft_doc::PlaneRef::Custom { plane }
         }
         None => plane_param(s, p.get("target"), cmd)?,
@@ -463,7 +464,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(o) = p.get(pk).filter(|v| v.is_object()) {
             let at = o.get("at").and_then(vec3).ok_or_else(|| bad(cmd, format!("`{pk}.at` must be [x, y, z]")))?;
             let kind = o.get("snap").and_then(Value::as_str).unwrap_or("vertex");
-            return snap_point(s, kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
+            return snap_point(&*s.world_state()?, kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
         }
         p.get(pk)
             .and_then(vec3)
@@ -533,9 +534,8 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
 mod tests;
 
 /// A snap point near `at` on the model: the nearest vertex, edge midpoint, planar face's centre
-/// or circular edge's centre (the end of a cylindrical face).
-pub(crate) fn snap_point(s: &Session, kind: &str, at: Vec3) -> Option<Vec3> {
-    let st = s.world_state();
+/// or circular edge's centre (the end of a cylindrical face) of the placed model `st`.
+pub(crate) fn snap_point(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> Option<Vec3> {
     let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
     match kind {
         "vertex" => near(

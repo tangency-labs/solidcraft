@@ -1,0 +1,45 @@
+# typical/multi-body-join-cut: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Block: 13 faces, 30 edges
+Block face F1:+x
+Block face F1:+y
+Block face F1:+z
+Block face F1:-x
+Block face F1:-y
+Block face F1:-z
+Block face F2:side#1
+Block face F2:side#2
+Block face F2:top
+Block face F4:+x
+Block face F4:+y
+Block face F4:-y
+Block face F4:-z
+Block edge F1:+x|F1:+y
+Block edge F1:+x|F1:+z
+Block edge F1:+x|F1:-y
+Block edge F1:+x|F1:-z
+Block edge F1:+y|F1:+z
+Block edge F1:+y|F1:-x
+Block edge F1:+y|F1:-z
+Block edge F1:+z|F1:-x~1 [geometric]
+Block edge F1:+z|F1:-x~2 [geometric]
+Block edge F1:+z|F1:-y
+Block edge F1:+z|F2:side#1
+Block edge F1:+z|F2:side#2
+Block edge F1:+z|F4:+x
+Block edge F1:+z|F4:+y
+Block edge F1:+z|F4:-y
+Block edge F1:-x|F1:-y
+Block edge F1:-x|F1:-z
+Block edge F1:-x|F4:+y
+Block edge F1:-x|F4:-y
+Block edge F1:-x|F4:-z
+Block edge F1:-y|F1:-z
+Block edge F2:side#1|F2:side#2~1 [geometric]
+Block edge F2:side#1|F2:side#2~2 [geometric]
+Block edge F2:side#1|F2:top
+Block edge F2:side#2|F2:top
+Block edge F4:+x|F4:+y
+Block edge F4:+x|F4:-y
+Block edge F4:+x|F4:-z
+Block edge F4:+y|F4:-z
+Block edge F4:-y|F4:-z

@@ -1,13 +1,128 @@
 use serde_json::{Value, json};
 
-use super::{AngleReadoutParams, TabStep, TabStepParams};
+use super::{AngleReadoutParams, CameraReply, NormalToParams, StandardViewParams, TabStep, TabStepParams};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
+use crate::schema::types::CameraParam;
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AngleReadoutParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<StandardViewParams>(), &["camera"]);
+    assert_keys(input_schema_for::<NormalToParams>(), &["camera"]);
+}
+
+const STANDARD_VIEWS: [&str; 7] = ["view.front", "view.back", "view.left", "view.right", "view.top", "view.bottom", "view.isometric"];
+
+/// A camera the view commands take, with `change` merged into it.
+fn camera(change: Value) -> Value {
+    let mut c = json!({"target": [1, 2, 3], "yaw": 0.3, "pitch": 0.4, "roll": 0, "distance": 150, "fov": 0, "up": "z"});
+    if let (Some(c), Some(change)) = (c.as_object_mut(), change.as_object()) {
+        c.extend(change.clone());
+    }
+    c
+}
+
+/// #10898: the camera type takes what the view commands' own reader takes, and its schema says
+/// the same.
+#[test]
+fn the_camera_type_matches_the_view_commands_reader() {
+    let schema = input_schema_for::<CameraParam>();
+    let schema = schema.as_value();
+    let without = |key: &str| {
+        let mut c = camera(json!({}));
+        c.as_object_mut().map(|o| o.remove(key));
+        c
+    };
+    for v in [
+        camera(json!({})),
+        camera(json!({"up": "y", "fov": 0.8})),
+        camera(json!({"pitch": -1.5, "yaw": 12.0, "roll": -3.0})),
+        camera(json!({"target": [0.5, -2, 1e6]})),
+        without("roll"),
+        without("up"),
+        camera(json!({"distance": 0})),
+        camera(json!({"distance": -5})),
+        camera(json!({"fov": std::f64::consts::PI})),
+        camera(json!({"fov": -0.1})),
+        camera(json!({"up": "x"})),
+        camera(json!({"up": "Z"})),
+        camera(json!({"target": [1, 2]})),
+        camera(json!({"target": {"x": 1, "y": 2, "z": 3}})),
+        camera(json!({"yaw": "0.3"})),
+        without("target"),
+        without("distance"),
+        without("fov"),
+        json!(null),
+        json!(5),
+        json!("front"),
+        json!([1, 2, 3]),
+    ] {
+        let read = crate::cmd::camera_form(&v).is_some();
+        assert_eq!(serde_json::from_value::<CameraParam>(v.clone()).is_ok(), read, "{v}");
+        assert_eq!(conforms(schema, schema, &v), read, "{v}");
+    }
+}
+
+#[test]
+fn standard_views_keep_todays_errors() {
+    let mut cases = Vec::new();
+    for id in STANDARD_VIEWS {
+        for c in [json!(5), json!(null), json!("top"), camera(json!({"distance": 0})), camera(json!({"fov": 4})), camera(json!({"up": "x"}))] {
+            cases.push((id, json!({ "camera": c })));
+        }
+    }
+    assert_strict_keeps_todays_errors(&cases);
+}
+
+/// A box with its top face selected, for Normal To.
+fn top_face_selected(check: ParamCheck) -> Session {
+    let mut s = Session { param_check: check, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("select.set", &json!({"items": [{"type": "face", "body": "Body1", "index": 1, "point": [20, 15, 20]}]}))
+        .unwrap_or_else(|e| panic!("{e}"));
+    s
+}
+
+/// #10898: every standard view and Normal To reply with the camera their output schema
+/// describes, with or without a camera given, and refuse in strict what they refuse anyway.
+#[test]
+fn camera_commands_reply_with_the_camera_schema() {
+    let schema = output_schema_for::<CameraReply>();
+    let schema = schema.as_value();
+    let check = |id: &str, r: &Value, warned: bool| {
+        assert!(conforms(schema, schema, r), "{id}: {r} doesn't match {schema}");
+        assert_eq!(r.get("param_warnings").is_some(), warned, "{id}: {r}");
+        assert!(crate::cmd::camera_form(&r["camera"]).is_some(), "{id}: the reply's camera is one the commands take: {r}");
+    };
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for id in STANDARD_VIEWS {
+        for p in [json!({}), json!({"camera": camera(json!({}))}), json!({"camera": camera(json!({"up": "y", "fov": 0.6}))})] {
+            let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+            check(id, &r, false);
+            if let Some(up) = p["camera"].get("up") {
+                assert_eq!(&r["camera"]["up"], up, "{id} keeps the up axis");
+            }
+        }
+        let r = s.execute(id, &json!({"camera": camera(json!({})), "zoom": 2})).unwrap_or_else(|e| panic!("{id}: {e}"));
+        check(id, &r, true);
+    }
+    let mut s = top_face_selected(ParamCheck::Warn);
+    for p in [json!({}), json!({"camera": camera(json!({}))})] {
+        let r = s.execute("view.normal_to", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        check("view.normal_to", &r, false);
+    }
+    let r = s.execute("view.normal_to", &json!({"zoom": 2})).unwrap_or_else(|e| panic!("{e}"));
+    check("view.normal_to", &r, true);
+    // Strict refuses what the handler refuses, with its message: a camera of the wrong form,
+    // and (the handler's own check) one whose angles are out of Normal To's bounds.
+    for c in [json!(5), json!(null), camera(json!({"distance": 0})), camera(json!({"yaw": 2e6})), camera(json!({"pitch": 2.0}))] {
+        let p = json!({ "camera": c });
+        let off = top_face_selected(ParamCheck::Off).execute("view.normal_to", &p).err().map(|e| e.to_string());
+        assert!(off.as_deref().is_some_and(|e| e.contains("invalid camera")), "{p}: {off:?}");
+        assert_eq!(top_face_selected(ParamCheck::Strict).execute("view.normal_to", &p).err().map(|e| e.to_string()), off, "{p}");
+    }
 }
 
 #[test]

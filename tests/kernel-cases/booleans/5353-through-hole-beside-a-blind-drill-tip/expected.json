@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5353"
+ ],
+ "what": "a second plain O9 through hole in a 14 mm base plate, nowhere near a blind drilled O4.2 hole in the tower above: truck refused it, pointing at the blind hole's 118 deg tip ('could not be computed reliably')",
+ "source": "analytic",
+ "method": "base 90x60x14 + tower 50x24x40 = 75600 + 48000; the blind hole (axis y from the tower's -y face, 15.2 to the shoulder + the point cone r/tan59 high): pi 2.1^2 15.2 + pi 2.1^2 (2.1/tan59)/3; two simple O9 holes 14 deep through the plate (the default type is simple, flat-bottomed): 2 pi 4.5^2 14",
+ "body_count": 1,
+ "volume_mm3": 121602.3025
+}
