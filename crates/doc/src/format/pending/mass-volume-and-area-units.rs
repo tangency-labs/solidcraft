@@ -1,5 +1,5 @@
 //! Expressions know mass, volume and area units (#4811): `g`, `kg`, `lb`, `ml`, `mm³`, `cm³`, `m³`,
-//! `mm²`, `cm²` and `m²`, and a parameter can be a mass, a volume or an area. A unit's name can't
+//! `in³`, `ft³`, `mm²`, `cm²`, `m²`, `in²` and `ft²`, and a parameter can be a mass, a volume or an area. A unit's name can't
 //! be a parameter's, so this step lists the parameters, text parameters and feature inputs of an
 //! older design called one of these words, and the design renames each as it opens (`g` to
 //! `g_param`): every expression and text that uses it follows as the older build read it (`2 g`
@@ -9,7 +9,7 @@
 use serde_json::Value;
 
 /// The words this change made units (not `expr::UNITS`, which grows).
-const WORDS: [&str; 10] = ["g", "kg", "lb", "ml", "mm³", "cm³", "m³", "mm²", "cm²", "m²"];
+const WORDS: [&str; 14] = ["g", "kg", "lb", "ml", "mm³", "cm³", "m³", "in³", "ft³", "mm²", "cm²", "m²", "in²", "ft²"];
 
 pub fn step(v: &mut Value) -> crate::Result<()> {
     super::list_unit_word_params(v, &WORDS)
@@ -24,10 +24,15 @@ mod tests {
         let mut v = json!({
             "params": [{"name": "g"}, {"name": "width"}, {"name": "kg"}, {"name": "g"}],
             "text_params": [{"name": "ml", "text": "A"}, {"name": "tag", "text": "B"}],
-            "features": [{"type": "box", "param_names": ["d1", "lb"]}, {"param_names": ["mm³", "m²"]}, {"type": "sketch"}]
+            "features": [{"type": "box", "param_names": ["d1", "lb"]}, {"param_names": ["mm³", "m²", "ft³"]}, {"type": "sketch"}]
         });
         super::step(&mut v).unwrap();
-        assert_eq!(v["unit_word_params"], json!(["g", "kg", "lb", "ml", "mm³", "m²"]));
+        assert_eq!(v["unit_word_params"], json!(["g", "kg", "lb", "ml", "mm³", "ft³", "m²"]));
+        // Every new unit word, written out here so a word left out of the step is seen.
+        let every = ["g", "kg", "lb", "ml", "mm³", "cm³", "m³", "in³", "ft³", "mm²", "cm²", "m²", "in²", "ft²"];
+        let mut all = json!({"params": every.iter().map(|name| json!({"name": name})).collect::<Vec<_>>()});
+        super::step(&mut all).unwrap();
+        assert_eq!(all["unit_word_params"], json!(every));
         // Other words, other changes' units and ASCII powers aren't listed, and nothing changes.
         let mut free = json!({
             "params": [{"name": "l"}, {"name": "L"}, {"name": "t"}, {"name": "m3"}, {"name": "cm2"}, {"name": "oz"}, {"name": "mm"}],
