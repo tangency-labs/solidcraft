@@ -7,7 +7,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use serde_json::{Value, json};
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::ProfileSel;
-use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, Wire, WireSpace, intersections, intersections_within};
+use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, TwoCircles, Wire, WireSpace, intersections, intersections_within};
 
 use super::sketch::{add_c, coincident_points, edit, ids_of, line_or_axis_ref, solve_current};
 use super::sketch_store;
@@ -61,12 +61,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source releases its dependent straight offsets' linked extents (offset_released: curve ids), retaining their driving normal-distance dimensions and parallel relations", created_doc!())),
+        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source releases its dependent straight offsets' linked extents, and trimming a piece off a line or arc offset releases that offset's association (offset_released: curve ids); both retain the driving distance as parallel and point-line distance dimensions for lines, and a nested circle distance round the shared centre for arcs", created_doc!())),
     CommandSpec::new("sketch.trim.path", "Trim Along Path", trim_path)
         .icon("trim")
         .enabled(in_sketch)
         .params(concat!(
-            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; projected geometry, infinite lines, offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
+            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; projected geometry, infinite lines, free-form and topology-aware offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
             created_doc!()
         )),
     CommandSpec::new("sketch.extend", "Extend", extend)
@@ -458,7 +458,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
-        let released = release_source_line_offsets(sk, doc, ci, cmd)?;
+        let released = release_offsets_for_trim(sk, doc, ci, at, cmd)?;
         let (mut out, _) = remove_piece(sk, ci, at, cmd)?;
         if !released.is_empty() {
             out["offset_released"] = json!(released);
@@ -469,9 +469,34 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"result": out, "sketch": info}))
 }
 
+/// The offsets a trim of curve `ci` at `at` releases first (their output curve ids): those of
+/// a source line ([`release_source_line_offsets`]) and the one whose output is being cut
+/// ([`release_trimmed_offset_output`]).
+fn release_offsets_for_trim(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, at: Vec2, cmd: &str) -> Result<Vec<String>> {
+    let mut released = release_source_line_offsets(sk, doc, ci, cmd)?;
+    released.extend(release_trimmed_offset_output(sk, doc, ci, at, cmd)?);
+    released.sort();
+    released.dedup();
+    Ok(released)
+}
+
+/// Whether an associative offset can be released into ordinary constraints that keep its
+/// driving distance: one plain (not topology-aware) chain of line or arc pieces, each the same
+/// kind as its source, an arc round its source's own centre. With `lines_only`, lines alone.
+fn releasable_offset(sk: &Sketch, offset: &solidcraft_sketch::OffsetChain, lines_only: bool) -> bool {
+    let kind = |id: &str| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).map(|c| &c.kind);
+    offset.topology.is_none()
+        && offset.sources.len() == offset.outputs.len()
+        && offset.sources.iter().zip(&offset.outputs).all(|((source, _), output)| match (kind(source.as_str()), kind(output.as_str())) {
+            (Some(CurveKind::Line { .. }), Some(CurveKind::Line { .. })) => true,
+            (Some(CurveKind::Arc { c: a, .. }), Some(CurveKind::Arc { c: b, .. })) => !lines_only && a == b,
+            _ => false,
+        })
+}
+
 /// A source line's endpoints may change independently of its parallel offsets. Materialize
 /// the affected line chains before Trim, retaining their original driving distance parameters
-/// as point-line dimensions. Directly trimming an associated output remains a separate command policy.
+/// as point-line dimensions.
 fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
     if curve.infinite || sk.is_linked_curve(ci) || !matches!(curve.kind, CurveKind::Line { .. }) {
@@ -482,27 +507,53 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
         .offsets
         .iter()
         .enumerate()
-        .filter_map(|(i, offset)| {
-            (offset.topology.is_none()
-                && offset.sources.iter().any(|(source, _)| source == &id)
-                && offset.sources.len() == offset.outputs.len()
-                && offset.sources.iter().zip(&offset.outputs).all(|((source, _), output)| {
-                    [source, output]
-                        .iter()
-                        .all(|id| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. })))
-                }))
-            .then_some(i)
-        })
+        .filter_map(|(i, offset)| (offset.sources.iter().any(|(source, _)| source == &id) && releasable_offset(sk, offset, true)).then_some(i))
         .collect();
+    release_offsets(sk, doc, affected, cmd)
+}
+
+/// An offset's own output is recomputed from its source curves on every solve, so a cut piece
+/// would be pulled straight back. Trimming a piece off it first releases its whole association,
+/// as trimming a source line does: each piece keeps the driving distance from its source (see
+/// [`release_offsets`]), and only the trimmed ends become the user's to place. Topology-aware and
+/// free-form offsets, and a trim that removes the whole output, are left as they were.
+fn release_trimmed_offset_output(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, at: Vec2, cmd: &str) -> Result<Vec<String>> {
+    let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
+    if curve.infinite || sk.is_linked_curve(ci) || curve.kind.is_freeform() {
+        return Ok(Vec::new());
+    }
+    let id = curve.id.clone();
+    let Some(index) = sk.offsets.iter().position(|offset| offset.outputs.iter().any(|output| output == &id)) else { return Ok(Vec::new()) };
+    if !sk.offsets.get(index).is_some_and(|offset| releasable_offset(sk, offset, false)) {
+        return Ok(Vec::new());
+    }
+    // Nothing crosses it: the trim deletes the whole curve, which releases the rest of its chain.
+    let Some(sh) = sk.shape(ci) else { return Ok(Vec::new()) };
+    if bracket(sk, ci, sh.param(sh.project(at))).0.is_empty() {
+        return Ok(Vec::new());
+    }
+    release_offsets(sk, doc, vec![index], cmd)
+}
+
+/// Replace the offset associations at `affected` (indices into `sk.offsets`) by ordinary
+/// constraints driven by the same distance parameter: a parallel and a point-line distance for
+/// each line, a nested circle distance for each arc (which keeps its source's centre). Returns the
+/// released output curve ids.
+fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected: Vec<usize>, cmd: &str) -> Result<Vec<String>> {
     if affected.is_empty() {
         return Ok(Vec::new());
     }
+    affected.sort_unstable();
+    affected.dedup();
     let report = solve_current(sk, doc)?;
     if !report.keeps_orientation() {
         return Err(bad(cmd, report.failure(|_| "cannot trim a source with conflicting offset dimensions".into())));
     }
     let mut released = Vec::new();
     for index in affected.into_iter().rev() {
+        if index >= sk.offsets.len() {
+            return Err(bad(cmd, "missing offset association"));
+        }
         let record = sk.offsets.remove(index);
         let dimension = sk
             .constraints
@@ -519,7 +570,7 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
         };
         sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
         for output in &record.outputs {
-            let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
+            let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset curve"))?;
             let points = sk.curves.get(target).map(|c| c.kind.point_ids()).unwrap_or_default();
             for i in points {
                 if i != 0
@@ -532,15 +583,22 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
         }
         for (index, ((source, _), output)) in record.sources.iter().zip(&record.outputs).enumerate() {
             let source = sk.curve_index(source).ok_or_else(|| bad(cmd, "missing offset source"))?;
-            let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
-            if !sk.constraints.iter().any(|c| {
-                matches!(c.kind,
-                ConstraintKind::Parallel { a, b } if (a == source && b == target) || (a == target && b == source))
-            }) {
-                add_c(sk, ConstraintKind::Parallel { a: source, b: target })?;
-            }
-            let p = sk.curves.get(target).and_then(|c| c.kind.ends()).map(|ends| ends.0).ok_or_else(|| bad(cmd, "missing offset line endpoint"))?;
-            let kind = ConstraintKind::PointLineDistance { p, l: source, value };
+            let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset curve"))?;
+            let kind = match sk.curves.get(target).map(|c| c.kind.clone()) {
+                Some(CurveKind::Line { a: p, .. }) => {
+                    if !sk.constraints.iter().any(|c| {
+                        matches!(c.kind,
+                        ConstraintKind::Parallel { a, b } if (a == source && b == target) || (a == target && b == source))
+                    }) {
+                        add_c(sk, ConstraintKind::Parallel { a: source, b: target })?;
+                    }
+                    ConstraintKind::PointLineDistance { p, l: source, value }
+                }
+                // The arc keeps its source's centre, so the gap between the two circles is the
+                // difference of their radii: the offset distance.
+                Some(CurveKind::Arc { .. }) => ConstraintKind::CircleCircleDistance { a: source, b: target, value, circles: TwoCircles::Nested },
+                _ => return Err(bad(cmd, "not supported yet: releasing this offset curve")),
+            };
             let id = sk.add_constraint(kind.clone(), dimension.param.clone())?;
             if let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id) {
                 let mut kept = dimension.clone();
@@ -740,7 +798,7 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
             after = (si, t);
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
-            let cut = release_source_line_offsets(sk, doc, ci, cmd).and_then(|released| {
+            let cut = release_offsets_for_trim(sk, doc, ci, q, cmd).and_then(|released| {
                 let (mut out, gone) = remove_piece(sk, ci, q, cmd)?;
                 if !released.is_empty() {
                     out["offset_released"] = json!(released);

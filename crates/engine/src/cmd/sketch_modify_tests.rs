@@ -3567,26 +3567,23 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
     assert!(near(piece[0], [0.0, 0.0]) && near(piece[piece.len() - 1], [8.0, 0.0]), "{piece:?}");
 }
 
-/// An offset's ends follow its source curves, so trimming a piece off it or extending it is
-/// refused (the trim used to report success and leave the curve whole). Trimming away a whole
-/// offset curve still works, and once the association is broken the trim cuts it.
+/// An offset's ends follow its source curves, so extending it or breaking it is refused (a trim
+/// used to report success and leave the curve whole). Once the association is broken both work.
 #[test]
-fn trim_extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken() {
+fn extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
     let out = ids(&run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}))["curves"]);
     assert_eq!(out, ["l5", "l6", "l7", "l8"]);
     run(&mut s, "sketch.line", json!({"points": [[20, -10], [20, 10]]}));
     let before = serde_json::to_value(sketch(&s)).unwrap();
-    let e = s.execute("sketch.trim", &json!({"curve": "l5", "at": [30, -2]})).unwrap_err().to_string();
-    assert!(e.contains("offset") && e.contains("break the offset association"), "{e}");
     let e = s.execute("sketch.extend", &json!({"curve": "l5", "at": [42, -2]})).unwrap_err().to_string();
     assert!(e.contains("offset"), "{e}");
     for params in [json!({"curve": "l5", "at": [30, -2]}), json!({"curve": "l5", "points": [[20, -2]]})] {
         let e = s.execute("sketch.break", &params).unwrap_err().to_string();
         assert!(e.contains("offset") && e.contains("break the offset association"), "{params}: {e}");
     }
-    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused trim changes nothing");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused edit changes nothing");
 
     run(&mut s, "sketch.offset.break", json!({"curve": "l5"}));
     run(&mut s, "sketch.trim", json!({"curve": "l5", "at": [30, -2]}));
@@ -3596,6 +3593,88 @@ fn trim_extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken(
         matches!(sh, solidcraft_sketch::Shape::Line { a, b } if a.dist(Vec2::new(-2.0, -2.0)) < 1e-9 && b.dist(Vec2::new(20.0, -2.0)) < 1e-9),
         "{sh:?}"
     );
+}
+
+/// Trimming a piece off an offset's own line cuts it where the trim says, instead of being
+/// refused: the association is released first, and its distance parameter still drives every
+/// line of the chain through a parallel and a point-line distance. One undo restores it all.
+#[test]
+fn trimming_an_offset_line_releases_its_chain_and_keeps_the_distance_driving() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let offset = run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}));
+    assert_eq!(ids(&offset["curves"]), ["l5", "l6", "l7", "l8"]);
+    let param = offset["param"].as_str().unwrap().to_string();
+    let cutter = ids(&run(&mut s, "sketch.line", json!({"points": [[20, -10], [20, 10]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "l2", "l3", "l4", cutter]}));
+    let before = s.doc.to_json();
+
+    let r = run(&mut s, "sketch.trim", json!({"curve": "l5", "at": [30, -2]}));
+    assert_eq!(r["result"]["trimmed"], "l5", "{r}");
+    assert_eq!(r["result"]["offset_released"], json!(["l5", "l6", "l7", "l8"]), "{r}");
+    assert_eq!(r["sketch"]["solved"], true, "{r}");
+    let line = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        let solidcraft_sketch::Shape::Line { a, b } = sk.shape(sk.curve_index(id).unwrap()).unwrap() else { panic!("{id} is a line") };
+        (a, b)
+    };
+    let (a, b) = line(&s, "l5");
+    assert!(a.dist(Vec2::new(-2.0, -2.0)) < 1e-6 && b.dist(Vec2::new(20.0, -2.0)) < 1e-6, "{a:?} {b:?}");
+    let sk = sketch(&s);
+    assert!(sk.offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));
+    assert!(s.doc.param(&param).is_some(), "the distance parameter remains");
+
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "3 mm"}));
+    let (a, b) = line(&s, "l5");
+    assert!(a.dist(Vec2::new(-3.0, -3.0)) < 1e-6 && b.dist(Vec2::new(20.0, -3.0)) < 1e-6, "the trimmed line follows the distance: {a:?} {b:?}");
+    let (a, b) = line(&s, "l7");
+    assert!((a.y - 33.0).abs() < 1e-6 && (b.y - 33.0).abs() < 1e-6, "the rest of the chain follows the distance: {a:?} {b:?}");
+
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before, "undo restores the association");
+}
+
+/// Trimming an offset arc back to a curve that crosses it (an offset of a slot's side arc
+/// trimmed to the circle at its end) cuts it there. The arc keeps its source's centre, and the
+/// offset distance still drives the difference of their radii.
+#[test]
+fn trimming_an_offset_arc_keeps_its_centre_and_driving_distance() {
+    let mut s = new_sketch();
+    let source =
+        ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [20, 0], "end": [0, 20], "connect": false}))["curves"])[0]
+            .clone();
+    let offset = run(&mut s, "sketch.offset", json!({"curves": [source], "distance": "2 mm", "side": [5, 5]}));
+    let arc = ids(&offset["curves"])[0].clone();
+    let param = offset["param"].as_str().unwrap().to_string();
+    let cutter = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 5], [30, 30]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [source.clone(), cutter]}));
+
+    let at = Vec2::new(18.0 * 20f64.to_radians().cos(), 18.0 * 20f64.to_radians().sin());
+    let r = run(&mut s, "sketch.trim", json!({"curve": arc, "at": [at.x, at.y]}));
+    assert_eq!(r["result"]["trimmed"], json!(arc), "{r}");
+    assert_eq!(r["result"]["offset_released"], json!([arc]), "{r}");
+    let id = s.active_sketch.unwrap();
+    let check = |sk: &solidcraft_sketch::Sketch, radius: f64| {
+        let CurveKind::Arc { c, a, b } = sk.curves[sk.curve_index(&arc).unwrap()].kind else { panic!("{arc} is an arc") };
+        let CurveKind::Arc { c: centre, .. } = sk.curves[sk.curve_index(&source).unwrap()].kind else { panic!("source arc") };
+        assert_eq!(c, centre, "the trimmed arc keeps its source's centre");
+        for p in [a, b] {
+            assert!((sk.points[p].pos.dist(sk.points[c].pos) - radius).abs() < 1e-6, "radius {radius}: {:?}", sk.points[p].pos);
+        }
+        assert!(
+            [a, b].iter().any(|p| (sk.points[*p].pos.x - sk.points[*p].pos.y).abs() < 1e-6),
+            "the cut end stays on the crossing line: {:?} {:?}",
+            sk.points[a].pos,
+            sk.points[b].pos
+        );
+        assert!(sk.offsets.is_empty() && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })));
+    };
+    check(&sketch(&s), 18.0);
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "3 mm"}));
+    check(&sketch(&s), 17.0);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened.world_state().unwrap().sketch(id).unwrap().sketch, 17.0);
 }
 
 /// #2874: an offset's corners follow its source curves, so filleting them is refused before

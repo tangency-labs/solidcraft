@@ -117,7 +117,17 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             // Along the line through the centres, between the edge points that face each other:
             // for nested circles, where the inner one comes nearest the outer one.
             let ((ca, ra), (cb, rb)) = ((sk.center(a)?, sk.radius(a)?), (sk.center(b)?, sk.radius(b)?));
-            let u = unit(cb - ca, Vec2::X);
+            // Concentric circles have no line through their centres. Where one of them is an
+            // arc (a trimmed offset keeps its source's centre), measure across the middle of
+            // the arc, so the dimension sits on the curves it drives.
+            let middle = |c: usize| match (sk.curves.get(c).map(|x| &x.kind), sk.segs(c).first()) {
+                (Some(CurveKind::Arc { .. }), Some(solidcore_record::Seg2::Arc { start, sweep, .. })) => {
+                    let t = *start + *sweep / 2.0;
+                    Some(Vec2::new(t.cos(), t.sin()))
+                }
+                _ => None,
+            };
+            let u = unit(cb - ca, middle(b).or_else(|| middle(a)).unwrap_or(Vec2::X));
             let (p0, p1) = match circles {
                 TwoCircles::Nested if ra >= rb => (cb + u * rb, ca + u * ra),
                 TwoCircles::Nested => (ca - u * ra, cb - u * rb),

@@ -501,4 +501,7 @@ parameter to resize the offset without moving its source curves. The selected si
 and association survive save/reopen and undo/redo. Symmetric offsets share one driving distance;
 Two Sides has an independent distance for each side. Disconnected selected curves or chains are
 all offset. Breaking an association retains its current geometry and removes that association's
-driver. Older offsets retain their saved fixed distances.
+driver. Older offsets retain their saved fixed distances. Trimming a piece off an offset line or
+arc releases that offset's association and keeps its distance driving: each line stays parallel
+to its source at that distance, and each arc keeps its source's centre and the difference of
+their radii. The trimmed ends then stay where the trim cut them.
