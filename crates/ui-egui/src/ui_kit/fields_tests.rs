@@ -551,7 +551,7 @@ fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
                                     .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
                                     .collect::<Vec<_>>();
                                 let mut choice = selected.get();
-                                let mut choices = |ui: &mut Ui| {
+                                let choices = |ui: &mut Ui| {
                                     for (index, option) in options.iter().enumerate() {
                                         let response = ui.selectable_label(selected.get() == index, *option);
                                         scenario::publish_target(&format!("dialog:Visual style:{option}"), response.rect);
@@ -563,13 +563,13 @@ fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
                                 let response = match kind {
                                     "plain" => dropdown(ui, "styles", &mut choice, &options),
                                     "icons" => dropdown_icons(ui, "styles", &mut choice, &icons),
-                                    "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], &mut choices),
+                                    "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], choices),
                                     _ => dropdown_menu_with_close_behavior(
                                         ui,
                                         "styles",
                                         options[selected.get()],
                                         egui::PopupCloseBehavior::CloseOnClickOutside,
-                                        &mut choices,
+                                        choices,
                                     ),
                                 };
                                 trigger.set(Some(response.id));

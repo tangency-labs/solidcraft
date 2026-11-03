@@ -762,6 +762,7 @@ mod tests {
                 ("Display quality", "Curved surfaces", "prefs:display_quality:normal"),
                 ("MSAA", "Anti-aliasing", "prefs:msaa:4"),
                 ("Ambient occlusion", "Ambient occlusion", "prefs:ambient_occlusion"),
+                ("Profile operations", "Profile operations", "prefs:profile_operations"),
                 ("Quick measurement in the view's corner", "Quick measurement", "prefs:quick_measure"),
                 ("Show viewport analysis status", "Analysis", "prefs:viewport_analysis_status"),
                 ("Show viewport section status", "Section", "prefs:viewport_section_status"),
@@ -778,11 +779,13 @@ mod tests {
                 set_cursor(&h.ctx, index);
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                h.frames(3);
+                // Enter restores the full page; let its normal scroll animation settle.
+                h.frames(20);
                 assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
                 assert!(h.app.prefs_window.filter.is_empty());
                 let page = crate::scenario::rect_of("dialog:page_body").unwrap();
-                assert!(page.contains_rect(crate::scenario::rect_of(handle).unwrap()), "{query} reveals the real control");
+                let target = crate::scenario::rect_of(handle).unwrap();
+                assert!(page.contains_rect(target), "{query} reveals the real control: page={page:?}, target={target:?}");
             }
         }
     }

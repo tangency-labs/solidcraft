@@ -1997,7 +1997,7 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
                 let rect = scenario::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
                 let icon = crate::navigation_bar::visual_style_icon(option as u8);
                 let painted = scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
-                let owner = if option == sample.borrow().selected { scenario::rect_of("dialog:Visual style").unwrap() } else { rect };
+                let owner = if option == sample.borrow().selected { scenario::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
                 assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
             }
             let option = scenario::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
@@ -2006,7 +2006,7 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
             super::test_support::frame(&ctx, vec![], &mut draw);
             assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
             let icon = crate::navigation_bar::visual_style_icon(index as u8);
-            let trigger = scenario::rect_of("dialog:Visual style").unwrap();
+            let trigger = scenario::rect_of("dialog:widget:Visual style").unwrap();
             assert!(trigger.contains_rect(scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
             assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
         }

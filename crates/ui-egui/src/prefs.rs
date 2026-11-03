@@ -6082,11 +6082,11 @@ mod tests {
             ("Origin plane names", PAGE_DESIGN),
             ("Status bar", PAGE_LAYOUT),
             ("Color vision", PAGE_APPEARANCE),
-            ("Quick measurement in the view's corner", PAGE_GRAPHICS),
-            ("Show viewport analysis status", PAGE_GRAPHICS),
-            ("Show viewport section status", PAGE_GRAPHICS),
-            ("Live viewport details", PAGE_GRAPHICS),
-            ("Fold viewport status items", PAGE_GRAPHICS),
+            ("Quick measurement", PAGE_GRAPHICS),
+            ("Analysis", PAGE_GRAPHICS),
+            ("Section", PAGE_GRAPHICS),
+            ("Live details", PAGE_GRAPHICS),
+            ("Fold items", PAGE_GRAPHICS),
             ("Allow network locations in designs", PAGE_GENERAL),
             ("Print face highlight", PAGE_GENERAL),
         ];
@@ -9998,7 +9998,7 @@ mod graphics_preset_tests {
             for (query, handle) in [
                 ("Tint new surface in a preview", "prefs:preview_tint_new_faces"),
                 ("Show removed material in red", "prefs:cut_preview_tint"),
-                ("Profile operations", "dialog:Profile operations"),
+                ("Profile operations", "prefs:profile_operations"),
             ] {
                 click_graphics(&mut h, query, handle);
             }

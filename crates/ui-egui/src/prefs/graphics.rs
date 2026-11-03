@@ -1,5 +1,6 @@
 //! Graphics preferences compose shared controls and canonical figures, preserving transactions.
 use super::*;
+use ui_kit::PreferenceFigure;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -43,8 +44,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "quality", app.tr("prefs.curved_surfaces"), |ui| {
             use solidcraft_engine::doc::display_quality::DisplayQuality;
             let current = DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
-            let figures: [fn(&egui::Painter, egui::Rect); 4] =
-                [ui_kit::paint_tess_coarse, ui_kit::paint_tess_normal, ui_kit::paint_tess_fine, ui_kit::paint_tess_ultra];
+            let figures: [fn(&egui::Painter, egui::Rect); 4] = [
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Quality(8)),
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Quality(16)),
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Quality(32)),
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Quality(64)),
+            ];
             let notes = ["prefs.quality_fastest", "prefs.quality_default", "prefs.quality_smoother", "prefs.quality_slowest"];
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
@@ -81,7 +86,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.restart"), true);
                 ui_kit::help_icon(ui, app.tr("settings.msaa_applies_on_restart"));
             });
-            let figures: [fn(&egui::Painter, egui::Rect); 4] = [ui_kit::paint_aa_off, ui_kit::paint_aa_2x, ui_kit::paint_aa_4x, ui_kit::paint_aa_8x];
+            let figures: [fn(&egui::Painter, egui::Rect); 4] = [
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Antialiasing(1)),
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Antialiasing(2)),
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Antialiasing(4)),
+                |p, r| paint_graphics_figure(p, r, PreferenceFigure::Antialiasing(8)),
+            ];
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 for (m, figure) in MSAA.into_iter().zip(figures) {
@@ -154,7 +164,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ("grid", "navbar.grid", app.ui.show_grid, ui_kit::paint_view_grid),
                 ("ground_shadow", "ui.ground_shadow", app.ui.ground_shadow, ui_kit::paint_view_shadow),
                 ("perspective", "navbar.perspective", app.ui.perspective, ui_kit::paint_view_perspective),
-                ("ambient_occlusion", "ui.ambient_occlusion", app.preferences.ambient_occlusion, ui_kit::paint_ao_on),
+                ("ambient_occlusion", "ui.ambient_occlusion", app.preferences.ambient_occlusion, |p, r| {
+                    paint_graphics_figure(p, r, PreferenceFigure::ContactShading(true));
+                }),
             ];
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
@@ -276,7 +288,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 crate::scenario::publish_target("prefs:frame_rate_details", response.rect);
             });
-            setting::profile_operations(app, ui).on_hover_text(app.tr("prefs.profile_operations_note"));
+            let profile = setting::profile_operations(app, ui).on_hover_text(app.tr("prefs.profile_operations_note"));
+            crate::scenario::publish_target("prefs:profile_operations", profile.rect);
             ui.horizontal_wrapped(|ui| {
                 ui_kit::settings_inline_note(ui, app.tr("prefs.graphics_page.status_chips"));
                 for (id, label, help) in [
@@ -355,6 +368,26 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
     });
+}
+
+/// Graphics uses the refined canonical pictures while retaining the shared legacy figure API.
+fn paint_graphics_figure(p: &egui::Painter, rect: egui::Rect, figure: PreferenceFigure) {
+    let paint: fn(&egui::Painter, egui::Rect) = match figure {
+        PreferenceFigure::Quality(8) => ui_kit::paint_tess_coarse,
+        PreferenceFigure::Quality(16) => ui_kit::paint_tess_normal,
+        PreferenceFigure::Quality(32) => ui_kit::paint_tess_fine,
+        PreferenceFigure::Quality(64) => ui_kit::paint_tess_ultra,
+        PreferenceFigure::Antialiasing(1) => ui_kit::paint_aa_off,
+        PreferenceFigure::Antialiasing(2) => ui_kit::paint_aa_2x,
+        PreferenceFigure::Antialiasing(4) => ui_kit::paint_aa_4x,
+        PreferenceFigure::Antialiasing(8) => ui_kit::paint_aa_8x,
+        PreferenceFigure::ContactShading(true) => ui_kit::paint_ao_on,
+        _ => {
+            ui_kit::paint_preference_figure(p, rect, figure, true);
+            return;
+        }
+    };
+    paint(p, rect);
 }
 
 /// One stroked glyph of a preset card on the design's 24 x 24 grid: a bolt, a gem or three sliders.
