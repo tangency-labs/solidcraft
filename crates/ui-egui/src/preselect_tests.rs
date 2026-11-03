@@ -2012,7 +2012,7 @@ fn align_takes_sketch_frames_and_joint_origins() {
     assert!(p.get("from_face").is_none() && p["angle"] == json!("45"), "{p}");
     // A sketch point is a frame too, and the command runs.
     d.inputs[2].items.clear();
-    let at = solidcraft_engine::geom::Vec2::new(70.0, 5.0);
+    let at = solidcore_record::Vec2::new(70.0, 5.0);
     let point = d.candidate(&app.session, &crate::viewport::Hit::SketchPoint { sketch, id: "p".into(), at }).unwrap();
     d.pick(&app.session, point);
     assert_eq!(apply_commands(&app, &d).unwrap().remove(0).1["to_frame"], json!({"sketch": sketch, "point": "p"}));
