@@ -91,6 +91,11 @@ inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
+layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
+layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)
+layout.save                       application panel layout; no geometry (engine/UI/MCP tests)
+layout.workspace.select           application panel layout; no geometry (engine/UI/MCP tests)
 library.apply                     material and appearance libraries
 library.export                    material and appearance libraries
 library.inspect                   material and appearance libraries
@@ -107,6 +112,21 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
+panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.collapse                    application panel layout; no geometry (engine/UI/MCP tests)
+panel.dismiss                     application panel layout; no geometry (engine/UI/MCP tests)
+panel.float                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.focus                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.list                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.move                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.native_close                application panel layout; no geometry (engine/UI/MCP tests)
+panel.open                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.peek                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.popout                      application panel layout; no geometry (engine/UI/MCP tests)
+panel.reset_pair                  application panel layout; no geometry (engine/UI/MCP tests)
+panel.resize                      application panel layout; no geometry (engine/UI/MCP tests)
+panel.resize_pair                 application panel layout; no geometry (engine/UI/MCP tests)
 parameters.comment                parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.complete               parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.delete                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
