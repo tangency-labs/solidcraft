@@ -8,6 +8,8 @@ const fn icon_primary(rgb: [u8; 3]) -> Color32 {
 impl Tokens {
     pub const fn light() -> Tokens {
         Tokens {
+            command_hint_media_width: 480.0,
+            command_hint_media_height: 300.0,
             nav_hover: Color32::from_rgb(233, 237, 242),
             nav_press: Color32::from_rgb(220, 226, 234),
             nav_dim: Color32::from_rgb(136, 149, 167),
@@ -173,6 +175,10 @@ impl Tokens {
             axis_z: Color32::from_rgb(60, 100, 230),
             construction_plane: Color32::from_rgba_unmultiplied_const(249, 184, 134, 70),
             construction_geom: icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[0]),
+            command_hint_axis: Color32::from_rgb(255, 190, 40),
+            command_hint_curve: Color32::from_rgb(0, 95, 190),
+            command_hint_plane: Color32::from_rgba_unmultiplied_const(255, 159, 52, 165),
+            command_hint_plane_edge: Color32::from_rgb(174, 71, 8),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
             manipulator: Color32::from_rgb(40, 110, 220),
@@ -340,6 +346,10 @@ impl Tokens {
         t.accent = Color32::from_rgb(58, 136, 238);
         t.accent_soft = Color32::from_rgb(42, 70, 110);
         t.sketch_accent = icon_primary(crate::icon_svg::SKETCH_PRIMARY[1]);
+        t.command_hint_axis = Color32::from_rgb(255, 223, 77);
+        t.command_hint_curve = Color32::from_rgb(100, 190, 255);
+        t.command_hint_plane = Color32::from_rgba_unmultiplied_const(255, 177, 72, 170);
+        t.command_hint_plane_edge = Color32::from_rgb(255, 202, 109);
         t.surface_accent = Color32::from_rgb(149, 104, 45);
         t.mesh_accent = Color32::from_rgb(133, 113, 0);
         t.form_accent = Color32::from_rgb(123, 99, 166);

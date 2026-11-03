@@ -1,0 +1,1670 @@
+{
+  "samples": [
+    {
+      "command": "solid.box",
+      "slug": "box",
+      "group": "CREATE",
+      "setup": [],
+      "operation": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 28,
+            "height": 22,
+            "center": [
+              0,
+              0,
+              11
+            ]
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          11
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 24640,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -14,
+            0
+          ],
+          "max": [
+            20,
+            14,
+            22
+          ]
+        }
+      },
+      "explanation": "40 \u00d7 28 \u00d7 22 block; six planar faces."
+    },
+    {
+      "command": "solid.cylinder",
+      "slug": "cylinder",
+      "group": "CREATE",
+      "setup": [],
+      "operation": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 16,
+            "height": 30,
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "operation": "new"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          15
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 24127.43157956961,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -16,
+            -16,
+            0
+          ],
+          "max": [
+            16,
+            16,
+            30
+          ]
+        }
+      },
+      "explanation": "Radius 16, height 30; V = \u03c0r\u00b2h."
+    },
+    {
+      "command": "solid.sphere",
+      "slug": "sphere",
+      "group": "CREATE",
+      "setup": [],
+      "operation": [
+        {
+          "command": "solid.sphere",
+          "params": {
+            "radius": 20,
+            "center": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 33510.32163829113,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -20,
+            -20
+          ],
+          "max": [
+            20,
+            20,
+            20
+          ]
+        }
+      },
+      "explanation": "Radius 20 sphere; V = 4\u03c0r\u00b3/3."
+    },
+    {
+      "command": "solid.torus",
+      "slug": "torus",
+      "group": "CREATE",
+      "setup": [],
+      "operation": [
+        {
+          "command": "solid.torus",
+          "params": {
+            "major": 18,
+            "minor": 6,
+            "center": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 12791.007303811808,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -24,
+            -24,
+            -6
+          ],
+          "max": [
+            24,
+            24,
+            6
+          ]
+        }
+      },
+      "explanation": "Major radius 18, tube radius 6; V = 2\u03c0\u00b2Rr\u00b2."
+    },
+    {
+      "command": "solid.cone",
+      "slug": "cone",
+      "group": "CREATE",
+      "setup": [],
+      "operation": [
+        {
+          "command": "solid.cone",
+          "params": {
+            "radius": 20,
+            "top_radius": 0,
+            "height": 32,
+            "base": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          16
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 13404.128655316452,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -20,
+            0
+          ],
+          "max": [
+            20,
+            20,
+            32
+          ]
+        }
+      },
+      "explanation": "Radius-20, height-32 cone with an apex; V = \u03c0r\u00b2h/3."
+    },
+    {
+      "command": "solid.revolve",
+      "slug": "revolve",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XZ",
+            "name": "TurnedProfile"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                8,
+                0
+              ],
+              [
+                20,
+                0
+              ],
+              [
+                20,
+                -5
+              ],
+              [
+                12,
+                -5
+              ],
+              [
+                12,
+                -24
+              ],
+              [
+                8,
+                -24
+              ]
+            ],
+            "closed": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.revolve",
+          "params": {
+            "sketch": "TurnedProfile",
+            "axis": "Z",
+            "angle": "360 deg",
+            "operation": "new"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 115
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 10053.096491487338,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -20,
+            0
+          ],
+          "max": [
+            20,
+            20,
+            24
+          ]
+        }
+      },
+      "explanation": "Stepped annular section revolves into a hollow flanged sleeve. V = \u03c0((20\u00b2\u22128\u00b2)5 + (12\u00b2\u22128\u00b2)19)."
+    },
+    {
+      "command": "solid.pipe",
+      "slug": "pipe",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Path"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -20,
+                -15
+              ],
+              [
+                0,
+                -15
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.arc.center_point",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "start": "l1.end",
+            "end": [
+              15,
+              0
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              "a1.end",
+              [
+                15,
+                20
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.pipe",
+          "params": {
+            "path_sketch": "Path",
+            "path": [
+              "l1",
+              "a1",
+              "l2"
+            ],
+            "diameter": 8,
+            "wall": 2,
+            "body_name": "Tube"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 115
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 2396.228869821143,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -19,
+            -4
+          ],
+          "max": [
+            19,
+            20,
+            4
+          ]
+        }
+      },
+      "explanation": "Hollow tube follows a tangent line\u2013quarter-circle\u2013line path. Annular area 12\u03c0 times path length 40+15\u03c0/2."
+    },
+    {
+      "command": "solid.sweep",
+      "slug": "sweep",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Path"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -20,
+                -15
+              ],
+              [
+                0,
+                -15
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.arc.center_point",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "start": "l1.end",
+            "end": [
+              15,
+              0
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              "a1.end",
+              [
+                15,
+                20
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": {
+              "origin": [
+                -20,
+                -15,
+                0
+              ],
+              "x_dir": [
+                0,
+                1,
+                0
+              ],
+              "y_dir": [
+                0,
+                0,
+                1
+              ]
+            },
+            "name": "Section"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -2,
+              -3
+            ],
+            "p1": [
+              2,
+              3
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.sweep",
+          "params": {
+            "sketch": "Section",
+            "path_sketch": "Path",
+            "path": [
+              "l1",
+              "a1",
+              "l2"
+            ],
+            "operation": "new"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 115
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 1525.4866776461627,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -17,
+            -3
+          ],
+          "max": [
+            17,
+            20,
+            3
+          ]
+        }
+      },
+      "explanation": "A 4 \u00d7 6 rectangular section follows the tangent curved path; V = 24(40+15\u03c0/2)."
+    },
+    {
+      "command": "solid.loft",
+      "slug": "loft",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Lower"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -18,
+              -14
+            ],
+            "p1": [
+              18,
+              14
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Upper",
+            "offset": 32
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -9,
+              -7
+            ],
+            "p1": [
+              9,
+              7
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.loft",
+          "params": {
+            "sections": [
+              {
+                "sketch": "Lower"
+              },
+              {
+                "sketch": "Upper"
+              }
+            ],
+            "operation": "new"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          16
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 115
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 18816,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -18,
+            -14,
+            0
+          ],
+          "max": [
+            18,
+            14,
+            32
+          ]
+        }
+      },
+      "explanation": "Similar 36 \u00d7 28 and 18 \u00d7 14 rectangles form a 32-high pyramidal frustum; V = 32(1008+504+252)/3."
+    },
+    {
+      "command": "solid.bounding_solid",
+      "slug": "bounding_solid",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 12,
+            "height": 30,
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "operation": "new",
+            "body_name": "Part"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.bounding_solid",
+          "params": {
+            "bodies": [
+              "Part"
+            ],
+            "margin": 3,
+            "body_name": "Stock"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          15
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 115
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 45971.68026350791,
+        "body_count": 2,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "stock_bbox": {
+          "min": [
+            -15,
+            -15,
+            -3
+          ],
+          "max": [
+            15,
+            15,
+            33
+          ]
+        },
+        "stock_volume_mm3": 32400
+      },
+      "explanation": "Bounding stock is 30 \u00d7 30 \u00d7 36 around a radius-12, height-30 cylinder, with margin 3 on all sides."
+    },
+    {
+      "command": "solid.boundary_fill",
+      "slug": "boundary_fill",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 30,
+            "width": 24,
+            "height": 20,
+            "corner": [
+              -24,
+              -16,
+              0
+            ],
+            "body_name": "A"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 30,
+            "width": 24,
+            "height": 20,
+            "corner": [
+              -6,
+              -8,
+              0
+            ],
+            "body_name": "B"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.boundary_fill",
+          "params": {
+            "tools": [
+              "A",
+              "B"
+            ],
+            "cells": [
+              [
+                0,
+                0,
+                10
+              ]
+            ],
+            "remove_tools": true
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 120
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 3840,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -6,
+            -8,
+            0
+          ],
+          "max": [
+            6,
+            8,
+            20
+          ]
+        }
+      },
+      "explanation": "Select the overlapping cell of two offset blocks: 12 \u00d7 16 \u00d7 20. Tools are consumed."
+    },
+    {
+      "command": "solid.coil",
+      "slug": "coil",
+      "group": "CREATE",
+      "setup": [],
+      "operation": [
+        {
+          "command": "solid.coil",
+          "params": {
+            "diameter": 32,
+            "revolutions": 3,
+            "height": 30,
+            "section_size": 4,
+            "section": "circular"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          15
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 120
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 3789.9280900183135,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -18,
+            -18,
+            -2
+          ],
+          "max": [
+            18,
+            18,
+            32
+          ]
+        }
+      },
+      "explanation": "Three-turn circular coil, mean radius 16, wire radius 2. Native section remains in the radial plane; V = \u03c0r\u00b2\u00b72\u03c0R\u00b7turns."
+    },
+    {
+      "command": "solid.thread",
+      "slug": "thread",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 8,
+            "height": 28,
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.thread",
+          "params": {
+            "face": [
+              8,
+              0,
+              14
+            ],
+            "designation": "M16x2",
+            "length": 24,
+            "modeled": true
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 95
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "body_count": 1,
+        "volume_less_than_mm3": 5629.734035232909,
+        "closed": true,
+        "relative_volume_tolerance": 0.005,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -8,
+            -8,
+            0
+          ],
+          "max": [
+            8,
+            8,
+            28
+          ]
+        },
+        "volume_mm3": 4935.642385518232,
+        "material_removed_mm3": 694.0916497146776,
+        "relative_removal_tolerance": 0.03
+      },
+      "explanation": "Actual modeled M16 \u00d7 2 external thread over 24 mm. ISO groove removal = 12 \u222b[8\u22125\u221a3/8,8] 2\u03c0r(1/2+2(r\u2212root)tan(\u03c0/6))dr = 694.092 mm\u00b3; allow 3% for groove end faceting."
+    },
+    {
+      "command": "solid.rib",
+      "slug": "rib",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 20,
+            "height": 5,
+            "corner": [
+              -20,
+              -10,
+              0
+            ]
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 5,
+            "width": 20,
+            "height": 40,
+            "corner": [
+              -20,
+              -10,
+              0
+            ],
+            "operation": "join"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": {
+              "origin": [
+                -20,
+                0,
+                0
+              ],
+              "x_dir": [
+                1,
+                0,
+                0
+              ],
+              "y_dir": [
+                0,
+                0,
+                1
+              ]
+            },
+            "name": "Brace"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                5,
+                25
+              ],
+              [
+                25,
+                5
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.rib",
+          "params": {
+            "sketch": "Brace",
+            "curves": [
+              "l1"
+            ],
+            "thickness": 4
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          20
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 8300,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -10,
+            0
+          ],
+          "max": [
+            20,
+            10,
+            40
+          ]
+        }
+      },
+      "explanation": "A 4-thick triangular brace fills the corner. Base L bracket volume 7500 plus triangle area 200 \u00d7 thickness 4."
+    },
+    {
+      "command": "solid.web",
+      "slug": "web",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 32,
+            "height": 4,
+            "corner": [
+              -20,
+              -16,
+              0
+            ]
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "offset": 24,
+            "name": "WebLines"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -15,
+                -10
+              ],
+              [
+                15,
+                -10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -15,
+                10
+              ],
+              [
+                15,
+                10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -10,
+                -12
+              ],
+              [
+                -10,
+                12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                10,
+                -12
+              ],
+              [
+                10,
+                12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.web",
+          "params": {
+            "sketch": "WebLines",
+            "curves": [
+              "l1",
+              "l2",
+              "l3",
+              "l4"
+            ],
+            "thickness": 2,
+            "direction": "normal"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 9120,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -16,
+            0
+          ],
+          "max": [
+            20,
+            16,
+            24
+          ]
+        }
+      },
+      "explanation": "Four intersecting walls descend 20 from the sketch to the plate. Added volume = (2\u00d730\u00d72 + 2\u00d724\u00d72 \u2212 4\u00d72\u00d72)20 = 4000."
+    },
+    {
+      "command": "solid.emboss",
+      "slug": "emboss",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 8,
+            "corner": [
+              -20,
+              -15,
+              0
+            ]
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Badge",
+            "offset": 8
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -8,
+                -7
+              ],
+              [
+                3,
+                -7
+              ],
+              [
+                3,
+                -2
+              ],
+              [
+                9,
+                -2
+              ],
+              [
+                9,
+                7
+              ],
+              [
+                -8,
+                7
+              ]
+            ],
+            "closed": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.emboss",
+          "params": {
+            "sketch": "Badge",
+            "depth": 3
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 10224,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            11
+          ]
+        }
+      },
+      "explanation": "Original stepped badge raised 3 above the block; profile area 208, added volume 624."
+    },
+    {
+      "command": "plastic.boss",
+      "slug": "plastic-boss",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 32,
+            "height": 4,
+            "corner": [
+              -20,
+              -16,
+              0
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "plastic.boss",
+          "params": {
+            "position": [
+              0,
+              0,
+              4
+            ],
+            "diameter": 12,
+            "height": 18,
+            "hole_diameter": 5
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          11
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 6802.322865997334,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -16,
+            0
+          ],
+          "max": [
+            20,
+            16,
+            22
+          ]
+        }
+      },
+      "explanation": "Hollow screw boss on a plate, outer radius 6, bore radius 2.5, height 18. Added volume \u03c0(36\u22126.25)18."
+    },
+    {
+      "command": "plastic.lip",
+      "slug": "plastic-lip",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 44,
+            "width": 34,
+            "height": 18,
+            "corner": [
+              -22,
+              -17,
+              0
+            ]
+          }
+        },
+        {
+          "command": "solid.shell",
+          "params": {
+            "faces": [
+              [
+                0,
+                0,
+                18
+              ]
+            ],
+            "thickness": 2
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "plastic.lip",
+          "params": {
+            "face": [
+              -21,
+              0,
+              18
+            ],
+            "width": 1,
+            "height": 3
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 120
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 8160,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -22,
+            -17,
+            0
+          ],
+          "max": [
+            22,
+            17,
+            21
+          ]
+        }
+      },
+      "explanation": "A 1-wide raised registration lip follows the inner rim of the open enclosure. Added band volume (42\u00d732\u221240\u00d730)3."
+    },
+    {
+      "command": "plastic.snap_fit",
+      "slug": "plastic-snap_fit",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 32,
+            "height": 4,
+            "corner": [
+              -20,
+              -16,
+              0
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "plastic.snap_fit",
+          "params": {
+            "position": [
+              0,
+              0,
+              4
+            ],
+            "hook": [
+              1,
+              0,
+              0
+            ],
+            "length": 20,
+            "thickness": 2,
+            "width": 9,
+            "catch_depth": 3,
+            "catch_length": 5
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 5547.5,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -16,
+            0
+          ],
+          "max": [
+            20,
+            16,
+            24
+          ]
+        }
+      },
+      "explanation": "Upright cantilever latch and triangular catch. Added volume 2\u00d720\u00d79 + \u00bd\u00d73\u00d75\u00d79."
+    },
+    {
+      "command": "plastic.rest",
+      "slug": "plastic-rest",
+      "group": "CREATE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 32,
+            "height": 4,
+            "corner": [
+              -20,
+              -16,
+              0
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "plastic.rest",
+          "params": {
+            "position": [
+              0,
+              0,
+              4
+            ],
+            "width": 12,
+            "length": 24,
+            "along": [
+              1,
+              0,
+              0
+            ],
+            "height": 8,
+            "thickness": 2
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "volume_mm3": 6144,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "bbox_tolerance_mm": 0.02,
+        "bbox": {
+          "min": [
+            -20,
+            -16,
+            0
+          ],
+          "max": [
+            20,
+            16,
+            12
+          ]
+        }
+      },
+      "explanation": "Hollow rectangular support pad. Added volume (24\u00d712\u221220\u00d78)8; the plate closes its bottom."
+    }
+  ]
+}

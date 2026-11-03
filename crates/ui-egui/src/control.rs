@@ -25,6 +25,7 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
+//! - `ui.hint_capture {emphasize_axes?: bool, emphasize_planes?: bool, emphasize_sketches?: bool}`: temporary native command-hint capture styling;
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
 //!   the open menu and its items. `ui.menuPick {item}` runs an item by id or label;
@@ -920,6 +921,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             ok(json!(app.cam))
         }
         "ui.camera" => wrap(camera(app, p)),
+        "ui.hint_capture" => wrap(hint_capture(app, p)),
         "ui.palette" => {
             if p.get("open").and_then(Value::as_bool) == Some(false) {
                 app.ui.palette_open = false;
@@ -1400,6 +1402,37 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         other => err(format!("unknown method `{other}`")),
     }
+}
+
+fn hint_capture(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let fields = match p {
+        Value::Null => None,
+        Value::Object(fields) => Some(fields),
+        _ => return Err("params must be an object".into()),
+    };
+    if let Some(name) =
+        fields.and_then(|fields| fields.keys().find(|name| !matches!(name.as_str(), "emphasize_axes" | "emphasize_planes" | "emphasize_sketches")))
+    {
+        return Err(format!("unknown hint capture field `{name}`"));
+    }
+    let read = |name: &str| {
+        fields.and_then(|fields| fields.get(name)).map(|value| value.as_bool().ok_or_else(|| format!("`{name}` must be a boolean"))).transpose()
+    };
+    let axes = read("emphasize_axes")?;
+    let planes = read("emphasize_planes")?;
+    let sketches = read("emphasize_sketches")?;
+    if let Some(emphasize) = axes {
+        app.viewport.hint_capture_emphasize_axes = emphasize;
+    }
+    if let Some(emphasize) = planes {
+        app.viewport.hint_capture_emphasize_planes = emphasize;
+    }
+    if let Some(emphasize) = sketches {
+        app.viewport.hint_capture_emphasize_sketches = emphasize;
+    }
+    Ok(
+        json!({"emphasize_axes": app.viewport.hint_capture_emphasize_axes, "emphasize_planes": app.viewport.hint_capture_emphasize_planes, "emphasize_sketches": app.viewport.hint_capture_emphasize_sketches}),
+    )
 }
 
 /// `ui.camera`: the viewport's orbit camera (`target`, `yaw`, `pitch`, `roll` in radians,
@@ -2636,6 +2669,61 @@ mod tests {
         }
         assert!(!proj.join("b.step").exists());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn hint_capture_reads_sets_and_rejects_invalid_fields_without_mutation() {
+        let mut h = crate::scenario::Harness::new();
+        let revision = h.app.session.revision;
+        assert_eq!(
+            h.call("ui.hint_capture", Value::Null)["result"],
+            json!({"emphasize_axes": false, "emphasize_planes": false, "emphasize_sketches": false})
+        );
+        assert_eq!(
+            h.call("ui.hint_capture", json!({"emphasize_axes": true, "emphasize_planes": false, "emphasize_sketches": false}))["result"],
+            json!({"emphasize_axes": true, "emphasize_planes": false, "emphasize_sketches": false})
+        );
+        for bad in [
+            json!(true),
+            json!([]),
+            json!({"emphasize_axes": null}),
+            json!({"emphasize_axes": "true"}),
+            json!({"emphasize_axes": 1}),
+            json!({"emphasize_axes": false, "unknown": true}),
+            json!({"emphasize_planes": null}),
+            json!({"emphasize_sketches": null}),
+            json!({"emphasize_axes": false, "emphasize_sketches": 1}),
+            json!({"emphasize_planes": 1}),
+            json!({"emphasize_planes": "true"}),
+            json!({"emphasize_axes": false, "emphasize_planes": []}),
+        ] {
+            let response = h.call("ui.hint_capture", bad);
+            assert_eq!(response["ok"], false, "{response}");
+            assert!(h.app.viewport.hint_capture_emphasize_axes);
+            assert!(!h.app.viewport.hint_capture_emphasize_planes);
+            assert!(!h.app.viewport.hint_capture_emphasize_sketches);
+        }
+        assert_eq!(
+            h.call("ui.hint_capture", json!({}))["result"],
+            json!({"emphasize_axes": true, "emphasize_planes": false, "emphasize_sketches": false})
+        );
+        assert_eq!(
+            h.call("ui.hint_capture", json!({"emphasize_axes": false, "emphasize_planes": false, "emphasize_sketches": false}))["result"],
+            json!({"emphasize_axes": false, "emphasize_planes": false, "emphasize_sketches": false})
+        );
+        let original = h.call("ui.hint_capture", json!({}))["result"].clone();
+        assert_eq!(
+            h.call("ui.hint_capture", json!({"emphasize_planes": true, "emphasize_sketches": false}))["result"],
+            json!({"emphasize_axes": false, "emphasize_planes": true, "emphasize_sketches": false})
+        );
+        assert_eq!(
+            h.call("ui.hint_capture", json!({"emphasize_axes": true, "emphasize_planes": false, "emphasize_sketches": false}))["result"],
+            json!({"emphasize_axes": true, "emphasize_planes": false, "emphasize_sketches": false})
+        );
+        h.call("ui.hint_capture", json!({"emphasize_sketches": true}));
+        assert!(h.app.viewport.hint_capture_emphasize_sketches);
+        assert_eq!(h.call("ui.hint_capture", original.clone())["result"], original);
+        assert_eq!(h.app.session.revision, revision);
     }
 
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view

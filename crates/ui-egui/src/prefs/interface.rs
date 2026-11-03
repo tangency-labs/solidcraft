@@ -195,6 +195,14 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 ui.ctx().request_repaint();
             }
         });
+        ui_kit::settings_section(ui, "command_hints", app.tr("prefs.illustrated_command_hints"), |ui| {
+            let check = setting::illustrated_command_hints(app, ui).on_hover_text(app.tr("prefs.illustrated_command_hints_note"));
+            crate::scenario::publish_target("prefs:illustrated_command_hints", check.rect);
+            ui_kit::text(ui, app.tr("prefs.illustrated_command_hints_note"), ui_kit::Text::Hint("illustrated_command_hints"));
+            let check = setting::animate_command_hints(app, ui).on_hover_text(app.tr("prefs.animate_command_hints_note"));
+            crate::scenario::publish_target("prefs:animate_command_hints", check.rect);
+            ui_kit::text(ui, app.tr("prefs.animate_command_hints_note"), ui_kit::Text::Hint("animate_command_hints"));
+        });
     });
 }
 

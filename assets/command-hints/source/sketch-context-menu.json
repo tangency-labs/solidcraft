@@ -1,0 +1,3660 @@
+{
+  "samples": [
+    {
+      "command": "sketch.ellipse",
+      "slug": "sketch-ellipse",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.ellipse",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "major": [
+              26,
+              0
+            ],
+            "minor_radius": 13
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "An ellipse with distinct major and minor radii, 26 and 13."
+    },
+    {
+      "command": "sketch.conic",
+      "slug": "sketch-conic",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.conic",
+          "params": {
+            "start": [
+              -24,
+              -12
+            ],
+            "end": [
+              24,
+              -12
+            ],
+            "apex": [
+              0,
+              32
+            ],
+            "rho": 0.65
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A native conic curve between two endpoints, controlled by an apex and rho."
+    },
+    {
+      "command": "sketch.polygon.inscribed",
+      "slug": "sketch-polygon-inscribed",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.polygon.inscribed",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "radius": 22,
+            "sides": 6
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A regular hexagon has its vertices on a radius-22 circle."
+    },
+    {
+      "command": "sketch.polygon.circumscribed",
+      "slug": "sketch-polygon-circumscribed",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.polygon.circumscribed",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "radius": 18,
+            "sides": 6
+          }
+        },
+        {
+          "command": "sketch.delete",
+          "params": {
+            "entities": [
+              "c2"
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1,
+        "sketch_curves": 7
+      },
+      "explanation": "The hexagon is tangent to one radius-18 incircle. The redundant native outer construction circle is omitted from this illustration."
+    },
+    {
+      "command": "sketch.polygon.edge",
+      "slug": "sketch-polygon-edge",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.polygon.edge",
+          "params": {
+            "p0": [
+              -12,
+              -18
+            ],
+            "p1": [
+              12,
+              -18
+            ],
+            "sides": 5
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A regular pentagon grows from its chosen bottom edge."
+    },
+    {
+      "command": "sketch.text",
+      "slug": "sketch-text",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.text",
+          "params": {
+            "text": "ABC",
+            "at": [
+              -23,
+              -8
+            ],
+            "height": 18
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The letters are genuine editable sketch geometry, not a label pasted onto a screenshot."
+    },
+    {
+      "command": "sketch.fillet",
+      "slug": "sketch-fillet",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                16
+              ],
+              [
+                -22,
+                -14
+              ],
+              [
+                24,
+                -14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.fillet",
+          "params": {
+            "a": "l1",
+            "b": "l2",
+            "radius": 9
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Compare the original sharp corner with the native modified corner."
+    },
+    {
+      "command": "sketch.chamfer.equal_distance",
+      "slug": "sketch-chamfer-equal_distance",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                16
+              ],
+              [
+                -22,
+                -14
+              ],
+              [
+                24,
+                -14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.chamfer.equal_distance",
+          "params": {
+            "a": "l1",
+            "b": "l2",
+            "distance": 11
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Compare the original sharp corner with the native modified corner."
+    },
+    {
+      "command": "sketch.chamfer.distance_angle",
+      "slug": "sketch-chamfer-distance_angle",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                16
+              ],
+              [
+                -22,
+                -14
+              ],
+              [
+                24,
+                -14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.chamfer.distance_angle",
+          "params": {
+            "a": "l1",
+            "b": "l2",
+            "distance": 13,
+            "angle": 30
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Compare the original sharp corner with the native modified corner."
+    },
+    {
+      "command": "sketch.chamfer.two_distance",
+      "slug": "sketch-chamfer-two_distance",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                16
+              ],
+              [
+                -22,
+                -14
+              ],
+              [
+                24,
+                -14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.chamfer.two_distance",
+          "params": {
+            "a": "l1",
+            "b": "l2",
+            "distance": 13,
+            "distance2": 7
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Compare the original sharp corner with the native modified corner."
+    },
+    {
+      "command": "sketch.offset",
+      "slug": "sketch-offset",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -17,
+              -11
+            ],
+            "p1": [
+              17,
+              11
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.offset",
+          "params": {
+            "curves": [
+              "l1",
+              "l2",
+              "l3",
+              "l4"
+            ],
+            "distance": 6,
+            "side": [
+              25,
+              0
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The associated outer outline stays six millimeters from the original rectangle."
+    },
+    {
+      "command": "sketch.trim",
+      "slug": "sketch-trim",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -25,
+                0
+              ],
+              [
+                25,
+                0
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -10,
+                -18
+              ],
+              [
+                -10,
+                18
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                12,
+                -18
+              ],
+              [
+                12,
+                18
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.trim",
+          "params": {
+            "curve": "l1",
+            "at": [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Only the central part between the two crossing lines is removed."
+    },
+    {
+      "command": "sketch.extend",
+      "slug": "sketch-extend",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -10
+              ],
+              [
+                2,
+                -10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                19,
+                -20
+              ],
+              [
+                19,
+                20
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.extend",
+          "params": {
+            "curve": "l1",
+            "at": [
+              2,
+              -10
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A short line extends to the next reference line."
+    },
+    {
+      "command": "sketch.scale",
+      "slug": "sketch-scale",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -10,
+              -7
+            ],
+            "p1": [
+              10,
+              7
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.scale",
+          "params": {
+            "entities": [
+              "l1",
+              "l2",
+              "l3",
+              "l4"
+            ],
+            "base": [
+              0,
+              0
+            ],
+            "factor": 1.8
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Scaling changes size uniformly around the fixed center."
+    },
+    {
+      "command": "sketch.transform",
+      "slug": "sketch-transform",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -18,
+                -8
+              ],
+              [
+                10,
+                -8
+              ],
+              [
+                10,
+                8
+              ],
+              [
+                -18,
+                8
+              ]
+            ],
+            "infer": false,
+            "closed": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.transform",
+          "params": {
+            "entities": [
+              "l1",
+              "l2",
+              "l3",
+              "l4"
+            ],
+            "angle": 35,
+            "translate": [
+              7,
+              2
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The same rectangle turns and moves in the sketch plane."
+    },
+    {
+      "command": "sketch.move",
+      "slug": "sketch-move",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              -15,
+              0
+            ],
+            "radius": 8
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.move",
+          "params": {
+            "entities": [
+              "c1"
+            ],
+            "translate": [
+              30,
+              0
+            ],
+            "copy": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Move/Copy retains the original circle and places a second circle to its right."
+    },
+    {
+      "command": "sketch.blend_curve",
+      "slug": "sketch-blend_curve",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -27,
+                -14
+              ],
+              [
+                -10,
+                -14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                12,
+                12
+              ],
+              [
+                27,
+                12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.blend_curve",
+          "params": {
+            "a": "l1.end",
+            "b": "l2.start",
+            "continuity": "g1"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A native tangent spline bridges the two open line ends."
+    },
+    {
+      "command": "sketch.mirror",
+      "slug": "sketch-mirror",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -14
+              ],
+              [
+                -9,
+                -14
+              ],
+              [
+                -9,
+                14
+              ],
+              [
+                -20,
+                9
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.mirror",
+          "params": {
+            "entities": [
+              "l1",
+              "l2",
+              "l3"
+            ],
+            "line": "y"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The original asymmetric outline is copied across the sketch y axis."
+    },
+    {
+      "command": "sketch.pattern.circular",
+      "slug": "sketch-pattern-circular",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              17,
+              0
+            ],
+            "radius": 4
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.pattern.circular",
+          "params": {
+            "entities": [
+              "c1"
+            ],
+            "center": [
+              0,
+              0
+            ],
+            "count": 6
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Six equally spaced circles form a circular pattern, including its seed."
+    },
+    {
+      "command": "sketch.pattern.rectangular",
+      "slug": "sketch-pattern-rectangular",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              -18,
+              -9
+            ],
+            "radius": 4
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.pattern.rectangular",
+          "params": {
+            "entities": [
+              "c1"
+            ],
+            "count": 3,
+            "spacing": 18,
+            "count2": 2,
+            "spacing2": 18
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Three columns and two rows repeat the seed circle."
+    },
+    {
+      "command": "sketch.constraint.horizontal_vertical",
+      "slug": "sketch-constraint-horizontal_vertical",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -8
+              ],
+              [
+                24,
+                8
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.horizontal_vertical",
+          "params": {
+            "line": "l1",
+            "mode": "horizontal"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The tilted line becomes horizontal."
+    },
+    {
+      "command": "sketch.constraint.coincident",
+      "slug": "sketch-constraint-coincident",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -13
+              ],
+              [
+                -3,
+                0
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                6,
+                5
+              ],
+              [
+                24,
+                16
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.coincident",
+          "params": {
+            "a": "l1.end",
+            "b": "l2.start"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The two free endpoints meet; the gap closes."
+    },
+    {
+      "command": "sketch.constraint.parallel",
+      "slug": "sketch-constraint-parallel",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -12
+              ],
+              [
+                22,
+                -12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -20,
+                10
+              ],
+              [
+                18,
+                18
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.parallel",
+          "params": {
+            "a": "l1",
+            "b": "l2"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The second line turns until both lines share a direction."
+    },
+    {
+      "command": "sketch.constraint.perpendicular",
+      "slug": "sketch-constraint-perpendicular",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -12
+              ],
+              [
+                22,
+                -12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                0,
+                -12
+              ],
+              [
+                9,
+                20
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.perpendicular",
+          "params": {
+            "a": "l1",
+            "b": "l2"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The two lines meet at a right angle."
+    },
+    {
+      "command": "sketch.constraint.equal",
+      "slug": "sketch-constraint-equal",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              -16,
+              0
+            ],
+            "radius": 6
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              15,
+              0
+            ],
+            "radius": 12
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.equal",
+          "params": {
+            "a": "c1",
+            "b": "c2"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The two circles become equal in radius."
+    },
+    {
+      "command": "sketch.constraint.concentric",
+      "slug": "sketch-constraint-concentric",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              -6,
+              -4
+            ],
+            "radius": 18
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              8,
+              6
+            ],
+            "radius": 9
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.concentric",
+          "params": {
+            "a": "c1",
+            "b": "c2"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The circles retain different radii and share one center."
+    },
+    {
+      "command": "sketch.constraint.collinear",
+      "slug": "sketch-constraint-collinear",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -26,
+                -10
+              ],
+              [
+                -6,
+                -10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                6,
+                5
+              ],
+              [
+                26,
+                14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.collinear",
+          "params": {
+            "a": "l1",
+            "b": "l2"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The separate lines lie on the same infinite straight line."
+    },
+    {
+      "command": "sketch.constraint.midpoint",
+      "slug": "sketch-constraint-midpoint",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -10
+              ],
+              [
+                24,
+                -10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -5,
+                5
+              ],
+              [
+                5,
+                19
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.midpoint",
+          "params": {
+            "a": "l1",
+            "b": "l2"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The second line moves so the two line midpoints meet."
+    },
+    {
+      "command": "sketch.constraint.symmetry",
+      "slug": "sketch-constraint-symmetry",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              -18,
+              -6
+            ],
+            "radius": 6
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              10,
+              10
+            ],
+            "radius": 9
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.symmetry",
+          "params": {
+            "a": "c1",
+            "b": "c2",
+            "line": "y"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The two circles become mirror images across the sketch y axis."
+    },
+    {
+      "command": "sketch.constraint.tangent",
+      "slug": "sketch-constraint-tangent",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -27,
+                -12
+              ],
+              [
+                27,
+                -12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              0,
+              5
+            ],
+            "radius": 10
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.constraint.tangent",
+          "params": {
+            "a": "l1",
+            "b": "c1"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The circle moves into tangent contact with the straight line."
+    },
+    {
+      "command": "sketch.construction",
+      "slug": "sketch-construction",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -22,
+              -14
+            ],
+            "p1": [
+              22,
+              14
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                -14
+              ],
+              [
+                22,
+                14
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.construction",
+          "params": {
+            "curves": [
+              "l5"
+            ],
+            "value": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The diagonal changes to a dashed construction reference; the profile boundary remains solid."
+    },
+    {
+      "command": "sketch.centerline",
+      "slug": "sketch-centerline",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -25,
+                0
+              ],
+              [
+                25,
+                0
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.edit",
+          "params": {
+            "sketch": "Example"
+          }
+        },
+        {
+          "command": "sketch.centerline",
+          "params": {
+            "curves": [
+              "l1"
+            ],
+            "value": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ],
+        "hint_capture": {
+          "emphasize_sketches": true
+        }
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The line becomes a native centerline, drawn in its centerline dash pattern."
+    },
+    {
+      "command": "sketch.break",
+      "slug": "sketch-break",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Break Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_profile": false,
+            "show_constraints": false,
+            "show_dimensions": false,
+            "show_points": true
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                73,
+                100
+              ],
+              [
+                127,
+                100
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                92,
+                87
+              ],
+              [
+                92,
+                113
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                108,
+                87
+              ],
+              [
+                108,
+                113
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.break",
+          "params": {
+            "curve": "l1",
+            "at": [
+              100,
+              100
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 98
+      },
+      "crop_scale": 0.5,
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "select": [
+          {
+            "type": "external_sketch_curve",
+            "id": "l1",
+            "sketch": 1
+          }
+        ]
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "select": [
+          {
+            "type": "external_sketch_curve",
+            "id": "l1",
+            "sketch": 1
+          }
+        ]
+      },
+      "expected": {
+        "before": {
+          "body_count": 0,
+          "sketch_count": 1,
+          "sketch_curves": 3
+        },
+        "after": {
+          "body_count": 0,
+          "sketch_count": 1,
+          "sketch_curves": 5
+        }
+      },
+      "explanation": "Break splits the horizontal curve at its construction-line crossings. Only the first resulting segment is selected afterward; no material is removed."
+    },
+    {
+      "command": "sketch.dimension",
+      "slug": "sketch-dimension",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Dimension Example"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_profile": false,
+            "show_constraints": false,
+            "show_dimensions": true,
+            "show_points": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                80,
+                95
+              ],
+              [
+                100,
+                95
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.constraint.fix",
+          "params": {
+            "entities": [
+              "l1.start"
+            ]
+          }
+        },
+        {
+          "command": "sketch.constraint.horizontal_vertical",
+          "params": {
+            "line": "l1"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.dimension",
+          "params": {
+            "entities": [
+              "l1"
+            ],
+            "value": "40 mm",
+            "text_at": [
+              100,
+              110
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          100,
+          104,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 98
+      },
+      "crop_scale": 0.5,
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "select": [
+          {
+            "type": "external_sketch_curve",
+            "id": "l1",
+            "sketch": 1
+          }
+        ]
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "select": [
+          {
+            "type": "external_sketch_curve",
+            "id": "l1",
+            "sketch": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1,
+        "sketch_curves": 1
+      },
+      "explanation": "A native length dimension drives the horizontal segment from20 to40 mm while its fixed left endpoint stays in place. The dimension label and arrows are rendered by SolidCraft."
+    }
+  ]
+}

@@ -1173,7 +1173,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = crate::theme::Tokens::view();
-    let stroke = Stroke::new(1.5, tk.sketch_accent);
+    let stroke = crate::viewport::sketch_preview_stroke(app, tk.sketch_accent);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
@@ -1181,14 +1181,16 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
-        let readout = painter.text(
-            crate::tool_cursor::readout_at(painter, proj.rect, sp),
-            egui::Align2::LEFT_TOP,
-            format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-            tk.text_dim,
-        );
-        crate::scenario::publish_rect("viewport:readout", readout);
+        if !app.viewport.hint_capture_emphasize_sketches {
+            let readout = painter.text(
+                crate::tool_cursor::readout_at(painter, proj.rect, sp),
+                egui::Align2::LEFT_TOP,
+                format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
+                egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+                tk.text_dim,
+            );
+            crate::scenario::publish_rect("viewport:readout", readout);
+        }
     }
     if matches!(t.kind, Kind::HorizontalVertical | Kind::Dimension) {
         for target in &t.point_picks {
