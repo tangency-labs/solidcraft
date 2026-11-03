@@ -3,11 +3,26 @@
   "purpose": "Reviewable source-edit-to-Drawing acceptance contract; not an executable SolidCraft application document",
   "coordinates": "Model: millimetres in XY; labels: paper millimetres in an A3 1:2 view.",
   "status": "DRAFT_CONTRACT_ONLY",
+  "ui_workflow_policy": {
+    "model_commands_during_open_drawing": "rejected",
+    "drawing_and_model_same_design_file": true,
+    "required_sequence": [
+        "close_drawing_workspace",
+        "switch_to_model_workspace",
+        "apply_source_edit_or_undo_redo",
+        "reopen_drawing_workspace",
+        "verify_views_dimensions_references_and_positions"
+      ],
+    "runtime_status": "NOT_RUN",
+    "source": "https://github.com/tangency-labs/solidcraft/pull/8288#issuecomment-6599897742",
+    "live_coediting": "future_only_not_current_acceptance"
+  },
   "source_of_truth": "tests/oracle/W23a-workshop-acceptance.md",
   "source_data": {
     "fixture": "84-plate-two-bores",
     "source_session": "design",
     "drawing_session": "drawing",
+    "session_semantics_note": "These names denote model vs drawing command intent; UI edits switch workspaces in the same design file, never concurrent model commands in an open Drawing workspace.",
     "baseline": {
       "plate_mm": [
         100,
@@ -161,6 +176,19 @@
         "W20a"
       ],
       "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": false,
+        "note": "Reopen the same drawing after the diameter edit and verify the updated Ø12 dimension, unchanged Bore2 and authored labels.",
+        "runtime_status": "NOT_RUN"
+      },
       "early_dimension_inspect": {
         "runtime_status": "NOT_RUN",
         "goal": "Bore1 Ø10 -> Ø12 keeps the same authored dimension ID and inspect reads Ø12",
@@ -263,6 +291,19 @@
         "W20a"
       ],
       "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": false,
+        "note": "Reopen after deleting Bore1 and verify the lost reference/last_good instead of attaching to Bore2.",
+        "runtime_status": "NOT_RUN"
+      },
       "early_dimension_inspect": {
         "runtime_status": "NOT_RUN",
         "goal": "Deleting Bore1 makes the original diameter dimension lost, never retargeted to Bore2",
@@ -381,6 +422,19 @@
         "W20a"
       ],
       "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": true,
+        "note": "Undo and redo occur in the Model workspace; reopen and inspect the Drawing workspace after every model transition.",
+        "runtime_status": "NOT_RUN"
+      },
       "early_dimension_inspect": {
         "runtime_status": "NOT_RUN",
         "goal": "Undo and redo model resize/deletion while preserving authored drawing JSON, positioned labels and both geometric dimension references",
@@ -491,6 +545,19 @@
         "K4"
       ],
       "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": false,
+        "note": "The unchanged baseline is a pure save/reopen; for resized/deleted states close the Drawing workspace before each model edit and reopen for verification.",
+        "runtime_status": "NOT_RUN"
+      },
       "early_dimension_inspect": {
         "runtime_status": "NOT_RUN",
         "goal": "Real save/reopen of unchanged, resized and deleted plate states in a fresh session",

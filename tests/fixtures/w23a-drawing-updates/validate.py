@@ -34,6 +34,31 @@ def main():
     require([c["id"] for c in items] == [f"W23A-E2E-{i:02}" for i in range(1, 5)], "case identities changed")
     require(all(c["runtime_status"] == "NOT_RUN" for c in items), "E2E cases are not runnable yet")
 
+    # CamWight, 3 Nov 2026: the Drawing workspace refuses model edits.
+    # This validates the recipe only; it does not execute UI acceptance.
+    required_ui_sequence = [
+        "close_drawing_workspace",
+        "switch_to_model_workspace",
+        "apply_source_edit_or_undo_redo",
+        "reopen_drawing_workspace",
+        "verify_views_dimensions_references_and_positions",
+    ]
+    policy = data["ui_workflow_policy"]
+    require(policy["model_commands_during_open_drawing"] == "rejected"
+            and policy["drawing_and_model_same_design_file"] is True
+            and policy["required_sequence"] == required_ui_sequence
+            and policy["runtime_status"] == "NOT_RUN"
+            and policy["live_coediting"] == "future_only_not_current_acceptance",
+            "UI test contract must close Drawing before model edits")
+    for item in items:
+        ui = item["ui_workflow"]
+        require(ui["required_sequence"] == required_ui_sequence
+                and ui["model_command_while_drawing_open"] is False
+                and ui["runtime_status"] == "NOT_RUN",
+                "unsupported model edit in an open drawing")
+    require(items[2]["ui_workflow"]["check_after_each_undo_redo"] is True,
+            "E2E-03 must reopen and verify Drawing after undo/redo")
+
     source = data["source_data"]
     baseline = source["baseline"]
     require(baseline["source_oracle"] == case("84-plate-two-bores"), "baseline links wrong oracle")

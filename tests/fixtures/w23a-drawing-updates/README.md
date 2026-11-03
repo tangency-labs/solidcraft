@@ -21,6 +21,28 @@ Only the Engine/dimension-inspection portions are runnable today. **All four com
 
 Reapplied on official `drawings` with #9254 and #10713 already merged; neither one's production code is carried by this PR. CamWight's shared W23-1 plate (#9821) remains unmerged and is included **temporarily, byte-identically** so the tests run. Once #9821 merges, the matching fixture disappears from this PR's diff. No separate model implementation is claimed.
 
+## Supported UI workspace sequence (CamWight, 3 Nov 2026)
+
+The Drawing workspace **rejects model-edit commands while a drawing is open**.
+For every full UI acceptance recipe, the supported user flow is:
+
+1. Close/leave the Drawing workspace (the drawing remains in the design file).
+2. Switch to the Model workspace; perform the specified model edit, deletion, undo or redo.
+3. Return to/reopen the Drawing workspace for the **same design**.
+4. Inspect the refreshed views, the actual dimension values and their reference
+   statuses, and confirm authored text positions remain unchanged.
+5. For E2E-03, return to the Model workspace for each subsequent undo/redo
+   transition and check the drawing again after reopening it. For E2E-04,
+   check unchanged baseline saves/reopens without inventing a model edit.
+
+**Do not test editing the 3D model while the Drawing workspace is open.**
+That would require later live co-editing support and is not part of the current
+first-release user flow. Native engine session-level tests are a separate
+contract: they do not demonstrate a rendered UI refresh. The four complete UI
+scenarios remain **NOT RUN**.
+
+CamWight confirmed this workflow in [the PR #8288 review](https://github.com/tangency-labs/solidcraft/pull/8288#issuecomment-6599897742).
+
 ## Intended user-facing behaviour
 
 On a 100 × 80 × 20 mm workshop plate, `Bore1` at (20,20) and `Bore2`
@@ -100,9 +122,10 @@ CamWight will link the relevant API slices on #4892 as they land.
 ## Isolation and invariants
 
 1. **Start each recipe from oracle 84**, not from the previous recipe's
-   modified design. The saved drawing is paired with that design; source
-   model commands are issued in the **design's** session, drawing label
-   edits in the **drawing's** session.
+   modified design. Drawings are stored in the same design file as their model.
+   Keep source model actions in the **Model workspace** and Drawing edits in
+   the **Drawing workspace**; switch workspaces rather than trying to edit
+   the model while the drawing is open.
 2. **No closest-object fallback:** after deleting `Bore1`, even a new
    geometrically identical bore must not acquire its reference. The
    `Bore2` feature keeps the *original* identity, name and XY location.
@@ -112,10 +135,13 @@ CamWight will link the relevant API slices on #4892 as they land.
    `drawing.dimension.inspect` reads the current model immediately, not through
    the deferred view publication. Automatic update must not add an authored
    undo step.
-4. Check both drawing-open and drawing-closed paths once supported. No
-   old computation may publish after an edit, undo or close. Those
-   publication-order cases are already being prepared separately under
-   #5430; **do not duplicate** that contribution here.
+4. Use only the supported **close drawing → edit model → reopen drawing**
+   flow for UI acceptance. After every model change, undo or redo, confirm
+   that the reopened drawing shows the correct current views, dimensions,
+   status and preserved authored placements. Live co-editing while the
+   Drawing workspace is open is **not currently supported** and is outside
+   these recipes. The separate publication-order cases under #5430 must
+   not be duplicated here.
 5. Save/reopen tests must preserve *actual captured* authored dimension IDs
    and manually chosen label coordinates, not only numeric output.
 
