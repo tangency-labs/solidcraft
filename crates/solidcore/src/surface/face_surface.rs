@@ -151,7 +151,7 @@ pub fn face_surface(
 }
 
 /// A plane label's surface ([`from_parameters`]), its record pcurves its trims scaled by its
-/// axes' lengths: the axes `du`, `dv`, or `u_point - origin`, `v_point - origin` for a plane
+/// axes' scales ([`axis_scale`](crate::surface::from_parameters::axis_scale)): the axes `du`, `dv`, or `u_point - origin`, `v_point - origin` for a plane
 /// through three points.
 fn plane(
     k: &Kernel,
@@ -163,8 +163,11 @@ fn plane(
 ) -> Result<FaceSurface> {
     let (surface, uv_domain) = from_parameters(k, label, domain)?;
     let o = through.unwrap_or([0.0; 3]);
-    let length =
-        |a: [f64; 3]| (Point3::new(a[0], a[1], a[2]) - Point3::new(o[0], o[1], o[2])).length();
+    let length = |a: [f64; 3]| {
+        crate::surface::from_parameters::axis_scale(
+            Point3::new(a[0], a[1], a[2]) - Point3::new(o[0], o[1], o[2]),
+        )
+    };
     Ok(FaceSurface {
         surface,
         uv_domain,

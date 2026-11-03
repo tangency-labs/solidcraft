@@ -256,7 +256,7 @@ fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3, Vec3)> {
 }
 
 /// The plane `origin + u du + v dv` over `u x v`: unit axes along `du`, `dv`, unit scales,
-/// the box scaled by their lengths; and its implicit surface.
+/// the box scaled by their lengths ([`axis_scale`]); and its implicit surface.
 fn plane(
     origin: Point3,
     du: Vec3,
@@ -275,10 +275,25 @@ fn plane(
             "the plane's axes are not square: the kernel's plane cannot hold a skew parametrisation",
         ));
     }
+    let (a, b) = (axis_scale(du), axis_scale(dv));
     let dom = Extent2d::from_bounds(u[0] * a, v[0] * b, u[1] * a, v[1] * b);
     let p = Plane::new(origin, du, dv, Vec2::new(1.0, 1.0), &dom);
     let normal = p.position().x_axis().cross(p.position().y_axis());
     Ok((Surface::from(p), Implicit::Plane { origin, normal }))
+}
+
+/// How far a plane's parameter runs along its unit axis for a unit of the record's along
+/// `axis`: the axis's length, except that an axis unit to the rounding the kernel's placement
+/// keeps it as it is (`SetCanonical`) is the placement's axis itself, so the scale is 1 and
+/// the record's parameters are the kernel's exactly.
+#[must_use]
+pub fn axis_scale(axis: Vec3) -> f64 {
+    let kept = Axis2Placement::new(Point3::new(0.0, 0.0, 0.0), axis, Vec3::new(0.0, 0.0, 0.0));
+    if kept.x_axis() == axis {
+        1.0
+    } else {
+        axis.length()
+    }
 }
 
 /// A spline from its knots and homogeneous rows `(w x, w y, w z, w)` (`w = 1` for a

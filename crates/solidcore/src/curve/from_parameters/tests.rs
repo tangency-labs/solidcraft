@@ -255,7 +255,7 @@ fn a_line_goes_back_by_its_two_end_points() {
 }
 
 /// A circle goes to the record as its label on its own frame with its NURBS as its form, proved
-/// on each other (bound 0), and comes back through conic_on_form to the same record. A circle
+/// on each other (bound 0), and comes back through `conic_on_form` to the same record. A circle
 /// whose NURBS runs against its angle reverses the frame's y; a NURBS moved off its circle is
 /// refused.
 #[test]
@@ -331,7 +331,7 @@ fn a_circle_goes_back_as_its_label_on_its_form() {
 }
 
 /// A trim's record keeps its knots where the edge's record interval is its kernel one, maps
-/// them onto [0, 1] for a line's, and scales its points by a plane's scales; uv_trim takes it
+/// them onto [0, 1] for a line's, and scales its points by a plane's scales; `uv_trim` takes it
 /// back to the same trim.
 #[test]
 fn a_trim_goes_back_onto_its_edges_record_interval() {
