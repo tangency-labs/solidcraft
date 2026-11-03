@@ -8,8 +8,8 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
-use solidcraft_geom::{Vec2, Vec3};
 
 use super::check::{keyed, whole};
 use crate::params;

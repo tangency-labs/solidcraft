@@ -1,7 +1,9 @@
 // Home and Fit frame what is shown now, and a middle-button double-click goes Home.
 use crate::scenario::Harness;
 use serde_json::json;
-use solidcraft_engine::geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the

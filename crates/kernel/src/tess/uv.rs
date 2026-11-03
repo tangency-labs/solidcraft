@@ -2,6 +2,7 @@
 //! the plan stores are the ones the evaluators use), and the tolerance-driven divisions of a
 //! face's parameter box.
 
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::tess::EvalSurface;
 pub(crate) use solidcraft_geom::tess::uv::{Domain, degenerate_within, domain, unwrap};
 
@@ -126,7 +127,7 @@ fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_geom::tess::EvalCurve;
 
     fn cylinder() -> EvalSurface {

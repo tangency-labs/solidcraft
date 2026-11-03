@@ -5,9 +5,10 @@
 //! the facet angle, then Ruppert refinement for shape. Constraint edges are never split, so the
 //! boundary stays exactly the shared edge nodes.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::size::Turn;
 use spade::handles::FixedVertexHandle;

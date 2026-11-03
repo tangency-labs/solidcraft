@@ -1,5 +1,6 @@
 use crate::Session;
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {

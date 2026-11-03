@@ -3,11 +3,12 @@
 //! when the part changes (also after the design is saved and reopened), and a bad reference is
 //! refused with an error. A cylinder takes the same references for its base (#6380).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
 use crate::{EngineError, Session};
 

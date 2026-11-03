@@ -14,13 +14,14 @@
 //! `sketch.toggle_driven`, `parameters.change`.
 
 use crate::ui_kit::{Container, Surface};
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use egui::{FontId, Pos2, Rect, Shape, Stroke, vec2};
 use serde_json::json;
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
 use solidcraft_engine::sketch::{
     ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame, dim_layout_reaching, dim_reach,
 };
@@ -1409,7 +1410,7 @@ mod tests {
         h.app.run("sketch.dimension", json!({"entities":["l2"],"text_at":[10,20]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 90.;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 10., 0.);
+        h.app.cam.target = solidcore_record::Vec3::new(10., 10., 0.);
         h.settle();
         let rects = crate::dim_view::text_rects();
         assert_eq!(rects.len(), 2, "{rects:?}");
@@ -1430,7 +1431,7 @@ mod tests {
         let param = h.app.run("sketch.dimension", json!({"entities":["l1"],"text_at":[10,25]})).unwrap()["param"].as_str().unwrap().to_string();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 120.;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 12., 0.);
+        h.app.cam.target = solidcore_record::Vec3::new(10., 12., 0.);
         h.settle();
         h.app.run("parameters.change", json!({"name":param,"expression":"30"})).unwrap();
         h.settle();

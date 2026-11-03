@@ -35,12 +35,13 @@
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
 //!   which is the body's; from a library without them, SMLib's intersection tolerance (or the
 //!   floor where larger) for the body, every edge and every vertex.
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep as b;
+use solidcore_record::Vec3;
+use solidcore_record::brep as b;
 
 use crate::flat::{self, *};
 use crate::history::{Order, Piece};
@@ -375,7 +376,7 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
 /// `form`, the NURBS the edge runs on over `range`: what [`b::Edge::curve_interval`] reads (an
 /// ellipse's radii scale its axes, not the way its angle turns).
 fn along(f: b::Frame, form: &b::Curve, range: [f64; 2]) -> Res<b::Frame> {
-    let eval = b::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
+    let eval = solidcraft_geom::brep::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
     let [t0, t1] = range;
     let (p, q) = (eval.point(t0), eval.point(t0 + 1e-3 * (t1 - t0)));
     let (Some(p), Some(q)) = (p, q) else { return Err(invalid("circle NURBS form")) };
@@ -743,7 +744,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
         // A face with a NURBS form is parameterised on it: its range and trims are that NURBS's.
         let params = nurbs.as_ref().unwrap_or(&surface);
-        let natural = params.natural();
+        let natural = solidcraft_geom::brep::label::surface_natural(params);
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
         // SMLib's own trims are taken where the arrays carry them: B-spline faces, NURBS forms, and
         // planes (mapped onto the plane's own (u, v) by the export).
@@ -1265,7 +1266,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         })
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
-    brep.validate_built().map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
+    solidcraft_geom::brep::check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };
@@ -1518,7 +1519,7 @@ fn pcurves<'a>(
         let mut loop_uses = Vec::with_capacity(l.len());
         for (&(e, forward), given) in l.iter().zip(g) {
             let geometry = edge(e).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(b::pcurve::EdgeUse {
+            loop_uses.push(solidcraft_geom::brep::pcurve::EdgeUse {
                 edge: e,
                 curve: geometry.curve,
                 interval: geometry.interval,
@@ -1529,7 +1530,8 @@ fn pcurves<'a>(
         }
         uses.push(loop_uses);
     }
-    let mut curves = b::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
+    let mut curves =
+        solidcraft_geom::brep::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
     into_domain(surface, domain, &mut curves);
     Ok(curves)
 }
@@ -1587,7 +1589,7 @@ fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
 
 /// Moves each loop's pcurves by whole periods so the loop's middle is nearest the domain's.
 fn into_domain(surface: &b::Surface, domain: [[f64; 2]; 2], curves: &mut [Vec<b::Curve2>]) {
-    for (d, natural) in surface.natural().into_iter().enumerate() {
+    for (d, natural) in solidcraft_geom::brep::label::surface_natural(surface).into_iter().enumerate() {
         if natural != b::Natural::Periodic {
             continue;
         }

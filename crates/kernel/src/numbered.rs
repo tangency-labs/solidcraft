@@ -4,9 +4,10 @@
 //! numbers are defined here: the segments of the caller's regions in order, each region its outer
 //! loop and then its holes ([`profile_loops`]).
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::{Loop2, Region2, Seg2};
+use solidcore_record::{Loop2, Region2, Seg2};
 
 /// The loops of `regions` in profile order: each region's outer loop, then its holes.
 pub(crate) fn profile_loops(regions: &[Region2]) -> impl Iterator<Item = &Loop2> {

@@ -2,7 +2,8 @@
 //! arc slots.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
@@ -1153,7 +1154,8 @@ pub(super) fn solve_new_only(sk: &mut Sketch, first_new: usize) {
 #[cfg(test)]
 mod blend_tests {
     use serde_json::{Value, json};
-    use solidcraft_geom::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
     use solidcraft_sketch::CurveKind;
 
     use crate::Session;
@@ -1185,7 +1187,7 @@ mod blend_tests {
     }
 
     /// The derivatives 1…`order` of exact piece `seg` at its end (`at_end`), from the piece's own
-    /// geometry: what a blend must match, computed here independently of `Seg2::derivatives`.
+    /// geometry: what a blend must match, computed here independently of `Seg2Geom::derivatives`.
     fn piece_derivatives(seg: &Seg2, at_end: bool, order: usize) -> Vec<Vec2> {
         let t = if at_end { 1.0 } else { 0.0 };
         let p = seg.point_at(t);

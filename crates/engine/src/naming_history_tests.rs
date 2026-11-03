@@ -4,7 +4,7 @@
 //! names again by sampling geometry could do.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 

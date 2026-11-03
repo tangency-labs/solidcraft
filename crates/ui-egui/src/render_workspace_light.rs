@@ -3,6 +3,7 @@ use super::{ImageMethod, RenderSelection, cpu, setups, studio};
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{CpuJob, GpuJob, RenderJob, RenderSetup, SkyEnvironment};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::job::{AreaLights, StudioLighting};
 use solidcraft_engine::schema::render_lights::{Geometry, Light, Visibility};
 
@@ -289,9 +290,9 @@ pub(super) fn preview(app: &SolveApp) -> Result<Vec<[f32; 16]>, String> {
                 emitted_axis, inner_half_angle_radians, outer_half_angle_radians, reference_distance_mm, minimum_distance_mm, ..
             } => (emitted_axis, inner_half_angle_radians.cos(), outer_half_angle_radians.cos(), reference_distance_mm.powi(2), minimum_distance_mm),
             Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } => {
-                let normal = solidcraft_engine::geom::Vec3::new(ux, uy, uz).cross(solidcraft_engine::geom::Vec3::new(vx, vy, vz));
+                let normal = solidcore_record::Vec3::new(ux, uy, uz).cross(solidcore_record::Vec3::new(vx, vy, vz));
                 let area = normal.len();
-                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcraft_engine::geom::Vec3::Z);
+                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
                 ([n.x, n.y, n.z], 0.0, 0.0, area, 0.001)
             }
             _ => ([0.0; 3], 0.0, 0.0, 1.0, 0.001),

@@ -5,7 +5,7 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::build::{box_solid, extrude, extrude_tapered};
 use crate::{Body, BoolOp, ChamferSide, boolean, chamfer, chamfer_sides};

@@ -2,10 +2,11 @@
 //! distances with the closest and farthest listed too, diameters and radii, slot sizes. Every
 //! expected value is worked out by hand from the part's dimensions.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 

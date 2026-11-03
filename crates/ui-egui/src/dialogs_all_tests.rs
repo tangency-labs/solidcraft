@@ -14,11 +14,11 @@ fn measure_input_fits_external_sketch_geometry() {
     assert!(fits(accept, &point));
     assert_eq!(d.items(), vec![curve.clone(), point.clone()]);
     assert_eq!(
-        d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO }),
+        d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcore_record::Vec3::ZERO }),
         Some(curve.clone())
     );
     assert_eq!(
-        d.candidate(&h.app.session, &Hit::SketchPoint { sketch: 17, id: "p1".into(), at: solidcraft_engine::geom::Vec2::new(0.0, 0.0) }),
+        d.candidate(&h.app.session, &Hit::SketchPoint { sketch: 17, id: "p1".into(), at: solidcore_record::Vec2::new(0.0, 0.0) }),
         Some(point.clone())
     );
     d.take_box(&h.app.session, vec![curve.clone(), point.clone()], false);
@@ -1145,7 +1145,7 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         let state = h.app.session.world_state().unwrap();
         let ss = state.sketch(sketch).unwrap();
         assert_eq!(ss.profiles.len(), 3, "the lens, the crescent past the face and the rest of the face");
-        let index = ss.profiles.iter().position(|p| p.region.contains(solidcraft_engine::geom::Vec2::new(x, 0.0))).unwrap();
+        let index = ss.profiles.iter().position(|p| p.region.contains(solidcore_record::Vec2::new(x, 0.0))).unwrap();
         let area = ss.profiles[index].area;
         let mut d = Dialog::for_command(&h.app, "solid.extrude").unwrap();
         if let Kind::Extrude { distance, .. } = &mut d.kind {

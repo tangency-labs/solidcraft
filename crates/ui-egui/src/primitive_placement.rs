@@ -10,9 +10,9 @@
 //! feature's stored point goes back unchanged.
 
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
 
 use crate::i18n::tr;
 use crate::selection::{EDGES, FACES, ORIGIN, SelInput, VERTICES};

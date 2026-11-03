@@ -1,11 +1,12 @@
 //! Rib, Web, Emboss, Replace Face, Align and Remove.
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
@@ -349,7 +350,7 @@ fn infer_emboss_selection(
         let body_frame = face.body_frame(&placed, raw).map_err(|e| bad(cmd, e.to_string()))?;
         let inverse = solidcraft_doc::mat_inverse(&body_frame).ok_or_else(|| bad(cmd, "invalid cylinder body frame"))?;
         let displayed = world.sketch(sketch).ok_or_else(|| bad(cmd, "the profile sketch is not displayed"))?;
-        let plane = solidcraft_geom::Plane::new(
+        let plane = solidcore_record::Plane::new(
             solidcraft_doc::apply_point(&inverse, displayed.plane.origin),
             solidcraft_doc::apply_vector(&inverse, displayed.plane.x),
             solidcraft_doc::apply_vector(&inverse, displayed.plane.y),
@@ -389,7 +390,7 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let target = match p.get("target_face").and_then(vec3) {
         Some(tp) => {
             let n = super::face::face_normal(s, tp).ok_or_else(|| bad(cmd, "the target face must be planar"))?;
-            let plane = solidcraft_geom::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
+            let plane = solidcore_record::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
             solidcraft_doc::PlaneRef::Custom { plane }
         }
         None => plane_param(s, p.get("target"), cmd)?,

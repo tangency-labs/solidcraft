@@ -1,4 +1,4 @@
-//! Schema 4 records (`solidcraft_geom::brep::Brep`) into SMLib: the record is laid out as the C
+//! Schema 4 records (`solidcore_record::brep::Brep`) into SMLib: the record is laid out as the C
 //! API's flat arrays (`capi/include/smlib.h`, "Flat B-rep arrays"), which solidcore builds into
 //! its B-rep ([`crate::core::from_arrays`]).
 //!
@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 
 use crate::flat;
 
@@ -83,7 +83,7 @@ fn z_axis(f: &b::Frame) -> [f64; 3] {
 /// The record as flat arrays. `trusted`: the record comes from a modeller that keeps SMLib's
 /// rules (SMLib then skips its healer); otherwise SMLib heals it on import.
 pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
-    brep.validate_built().map_err(|e| Unsupported::Invalid(e.0))?;
+    solidcraft_geom::brep::check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
     let brep = analytic::analytic(brep)?;
     laid_out(brep.as_ref(), trusted, true, &HashSet::new())
 }
@@ -93,7 +93,7 @@ pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
 /// bilinear patch, to compare what SMLib makes of splines with what it makes of its own analytic
 /// surfaces. A revolution is still refused (SMLib has no such surface).
 pub fn arrays_keeping_splines(brep: &b::Brep, trusted: bool) -> R<Arrays> {
-    brep.validate_built().map_err(|e| Unsupported::Invalid(e.0))?;
+    solidcraft_geom::brep::check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
     laid_out(brep, trusted, false, &HashSet::new())
 }
 

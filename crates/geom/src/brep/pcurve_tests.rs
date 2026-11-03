@@ -1,6 +1,6 @@
 use super::*;
-use crate::brep::Frame;
 use crate::brep::eval::{CurveEval, SurfaceEval};
+use solidcore_record::brep::Frame;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 fn frame(origin: [f64; 3], x_axis: [f64; 3], y_axis: [f64; 3]) -> Frame {
@@ -24,7 +24,7 @@ fn lift_error(surface: &Surface, curve: &Curve, interval: [f64; 2], pc: &Curve2)
     };
     let mut ts: Vec<f64> = (0..=64).map(|k| if k == 64 { t1 } else { t0 + (t1 - t0) * k as f64 / 64. }).collect();
     ts.extend(knots.windows(2).filter(|k| k[0] < k[1]).map(|k| 0.5 * (k[0] + k[1])));
-    ts.iter().map(|&t| s.point(pc.eval(t).unwrap()).unwrap().dist(c.point(t).unwrap())).fold(0., f64::max)
+    ts.iter().map(|&t| s.point(eval(pc, t).unwrap()).unwrap().dist(c.point(t).unwrap())).fold(0., f64::max)
 }
 fn segment_points(pc: &Curve2) -> [[f64; 2]; 2] {
     match pc {
@@ -211,7 +211,7 @@ fn walk(l: &[EdgeUse<'_>], pcs: &[Curve2]) -> (Vec<([f64; 2], [f64; 2])>, f64) {
     for (u, pc) in l.iter().zip(pcs) {
         let [a, b] = u.interval;
         let ts: Vec<f64> = (0..=16).map(|k| if u.forward { a + (b - a) * k as f64 / 16. } else { b - (b - a) * k as f64 / 16. }).collect();
-        let pts: Vec<[f64; 2]> = ts.iter().map(|t| pc.eval(*t).unwrap()).collect();
+        let pts: Vec<[f64; 2]> = ts.iter().map(|t| eval(pc, *t).unwrap()).collect();
         ends.push((pts[0], pts[16]));
         ring.extend_from_slice(&pts[..16]);
     }
@@ -267,12 +267,12 @@ fn meridians_run_straight_into_the_poles() {
         for pc in pcs {
             assert!(lift_error(&sphere, &meridian, half, pc) <= tol);
             for k in 0..=16 {
-                let q = pc.eval(-FRAC_PI_2 + PI * k as f64 / 16.).unwrap();
-                let u = pcs[0].eval(0.).unwrap()[0];
+                let q = eval(pc, -FRAC_PI_2 + PI * k as f64 / 16.).unwrap();
+                let u = eval(&pcs[0], 0.).unwrap()[0];
                 assert!((q[0] - u).abs() < 1e-9 || ((q[0] - u).abs() - TAU).abs() < 1e-9, "straight: {q:?}");
             }
         }
-        let (a, b) = (pcs[0].eval(0.).unwrap(), pcs[1].eval(0.).unwrap());
+        let (a, b) = (eval(&pcs[0], 0.).unwrap(), eval(&pcs[1], 0.).unwrap());
         assert!(((a[0] - b[0]).abs() - TAU).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-12, "{a:?} {b:?}");
         let (_, area) = walk(&l, pcs);
         assert!(area > 0., "counter-clockwise: {area}");
@@ -295,7 +295,7 @@ fn meridians_at_a_pole_span_the_face_box() {
                 EdgeUse { edge: 1, curve: &last, interval: half, forward: flip, tolerance: 0.0, given: None },
             ];
             let pcs = &pcurves_within(&sphere, std::slice::from_ref(&l), 1e-7, Some([box_u, [-FRAC_PI_2, FRAC_PI_2]])).unwrap()[0];
-            let (a, b) = (pcs[0].eval(0.).unwrap()[0], pcs[1].eval(0.).unwrap()[0]);
+            let (a, b) = (eval(&pcs[0], 0.).unwrap()[0], eval(&pcs[1], 0.).unwrap()[0]);
             assert!(((a - b).abs() - span).abs() < 1e-9, "box {box_u:?}, flip {flip}: u {a} and {b}");
         }
     }
@@ -348,7 +348,7 @@ fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
                             assert!(lift_error(on, seam, iv, pc) <= tol, "{what}");
                         }
                         let mid = 0.5 * (iv[0] + iv[1]);
-                        let (a, b) = (pcs[0].eval(mid).unwrap(), pcs[1].eval(mid).unwrap());
+                        let (a, b) = (eval(&pcs[0], mid).unwrap(), eval(&pcs[1], mid).unwrap());
                         assert!(((a[0] - b[0]).abs() - period).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-12, "a period apart: {a:?} {b:?} {what}");
                         let (ends, area) = walk(&l, pcs);
                         for k in 0..2 {
@@ -405,7 +405,7 @@ fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2],
     }
     let iv = l[seam[0]].interval;
     let mid = 0.5 * (iv[0] + iv[1]);
-    let (a, b) = (pcs[seam[0]].eval(mid).unwrap(), pcs[seam[1]].eval(mid).unwrap());
+    let (a, b) = (eval(&pcs[seam[0]], mid).unwrap(), eval(&pcs[seam[1]], mid).unwrap());
     let dom = SurfaceEval::new(surface).unwrap().domain();
     let period = dom.period[0].unwrap();
     assert!(((a[0] - b[0]).abs() - period).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9, "{what}: seam uses a period apart: {a:?} {b:?}");
@@ -426,7 +426,7 @@ fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2],
         let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) = pc;
         for k in 0..=32 {
             let t = knots[0] + (knots[knots.len() - 1] - knots[0]) * k as f64 / 32.;
-            let q = pc.eval(t).unwrap();
+            let q = eval(pc, t).unwrap();
             assert!((u.0 - 1e-9..=u.1 + 1e-9).contains(&q[0]), "{what}: base period: {q:?}");
         }
     }

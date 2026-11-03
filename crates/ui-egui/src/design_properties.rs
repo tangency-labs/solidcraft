@@ -9,13 +9,14 @@
 //! about; both are `ui_kit::Window` cards. While the card is open, [`overlay`] marks the centre
 //! of mass in the view with the principal axes standing out of it.
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
 
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
 use solidcraft_engine::doc::progress::Progress;
-use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -465,6 +466,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     use crate::scenario::Harness;
 
@@ -566,7 +568,7 @@ mod tests {
     /// its centre of mass with three principal axes a third of the box's diagonal long.
     #[test]
     fn the_measure_panels_properties_button_opens_the_window_with_the_moment_of_inertia() {
-        use solidcraft_engine::geom::Vec3;
+        use solidcore_record::Vec3;
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"})).unwrap();
         h.step(&json!({"start": "component.properties"})).unwrap();

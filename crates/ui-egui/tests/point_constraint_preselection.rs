@@ -1,5 +1,7 @@
 use serde_json::json;
-use solidcraft_engine::{Sel, geom::Vec2, sketch::ConstraintKind};
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> Harness {

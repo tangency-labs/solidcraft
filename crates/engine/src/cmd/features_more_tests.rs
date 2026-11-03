@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -193,7 +194,7 @@ fn turned_part(base: bool) -> (Session, solidcraft_doc::Mat) {
 }
 
 /// A sketch on the face at world point `at`, with `draw` given the point's place in the sketch.
-fn sketch_on_face(s: &mut Session, at: solidcraft_geom::Vec3, draw: impl FnOnce(&mut Session, solidcraft_geom::Vec2, solidcraft_geom::Plane)) {
+fn sketch_on_face(s: &mut Session, at: solidcore_record::Vec3, draw: impl FnOnce(&mut Session, solidcore_record::Vec2, solidcore_record::Plane)) {
     run(s, "sketch.create", json!({"plane": {"face": [at.x, at.y, at.z]}, "project_edges": false}));
     let plane = s
         .doc
@@ -223,7 +224,7 @@ fn a_sketch_on_a_turned_sub_components_face_cuts_and_joins_it_from_the_top_level
     let hole = std::f64::consts::PI * 4.0 * 3.0;
     for base in [false, true] {
         let (mut s, placed) = turned_part(base);
-        let top = solidcraft_doc::apply_point(&placed, solidcraft_geom::Vec3::new(5.0, 5.0, 10.0));
+        let top = solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(5.0, 5.0, 10.0));
         sketch_on_face(&mut s, top, |s, c, _| {
             run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
         });
@@ -239,7 +240,7 @@ fn a_sketch_on_a_turned_sub_components_face_cuts_and_joins_it_from_the_top_level
                 assert!((body_volume(&t, "Stock") - want).abs() < 1e-3 * hole, "{case}: {}", body_volume(&t, "Stock"));
                 // In the part's own frame: through the middle of its top, not beside it.
                 let stock = t.model.state().body("Stock").unwrap().mesh();
-                let at = |x: f64, y: f64, z: f64| stock.contains(solidcraft_geom::Vec3::new(x, y, z));
+                let at = |x: f64, y: f64, z: f64| stock.contains(solidcore_record::Vec3::new(x, y, z));
                 if expected == "cut" {
                     assert!(!at(5.0, 5.0, 8.0) && at(5.0, 5.0, 6.0) && at(1.0, 1.0, 9.0), "{case}");
                 } else {
@@ -261,7 +262,7 @@ fn a_revolve_from_a_turned_sub_components_face_joins_and_cuts_it_from_the_top_le
     let half = std::f64::consts::PI * 3.0;
     for (operation, want) in [("join", 1000.0 + half), ("cut", 1000.0 - half)] {
         let (mut s, placed) = turned_part(true);
-        let top = solidcraft_doc::apply_point(&placed, solidcraft_geom::Vec3::new(5.0, 5.0, 10.0));
+        let top = solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(5.0, 5.0, 10.0));
         let mut axis = json!(null);
         sketch_on_face(&mut s, top, |s, c, plane| {
             run(s, "sketch.rectangle.two_point", json!({"p0": [c.x - 3.0, c.y], "p1": [c.x + 3.0, c.y + 1.0]}));
@@ -281,8 +282,8 @@ fn a_revolve_from_a_turned_sub_components_face_joins_and_cuts_it_from_the_top_le
 #[test]
 fn a_loft_from_a_turned_sub_components_face_joins_it_from_the_top_level() {
     let (mut s, placed) = turned_part(true);
-    let top = solidcraft_doc::apply_point(&placed, solidcraft_geom::Vec3::new(5.0, 5.0, 10.0));
-    let mut centre = solidcraft_geom::Vec2::new(0.0, 0.0);
+    let top = solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(5.0, 5.0, 10.0));
+    let mut centre = solidcore_record::Vec2::new(0.0, 0.0);
     sketch_on_face(&mut s, top, |s, c, _| {
         run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
         centre = c;
@@ -307,7 +308,7 @@ fn a_loft_from_a_turned_sub_components_face_joins_it_from_the_top_level() {
 fn a_cut_from_the_top_level_shows_in_every_placement_and_a_later_placement_is_refused() {
     let (mut s, placed) = turned_part(true);
     let second = run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [0, 40, 0]}))["occurrence"].as_u64().unwrap();
-    let top = solidcraft_doc::apply_point(&placed, solidcraft_geom::Vec3::new(5.0, 5.0, 10.0));
+    let top = solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(5.0, 5.0, 10.0));
     let mut first = s.scratch();
     sketch_on_face(&mut first, top, |s, c, _| {
         run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
@@ -321,7 +322,7 @@ fn a_cut_from_the_top_level_shows_in_every_placement_and_a_later_placement_is_re
     assert!(placements.iter().all(|v| (v - want).abs() < 1e-2), "{placements:?}");
 
     let (_, moved) = s.doc.path_placement(&[second]).unwrap();
-    let top = solidcraft_doc::apply_point(&moved, solidcraft_geom::Vec3::new(5.0, 5.0, 10.0));
+    let top = solidcraft_doc::apply_point(&moved, solidcore_record::Vec3::new(5.0, 5.0, 10.0));
     sketch_on_face(&mut s, top, |s, c, _| {
         run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
     });
@@ -339,7 +340,7 @@ fn a_cut_from_the_top_level_shows_in_every_placement_and_a_later_placement_is_re
 #[test]
 fn a_sketch_on_a_top_level_body_beside_a_turned_part_cuts_only_that_body() {
     let (mut s, _) = turned_part(true);
-    sketch_on_face(&mut s, solidcraft_geom::Vec3::new(-30.0, -30.0, 5.0), |s, c, _| {
+    sketch_on_face(&mut s, solidcore_record::Vec3::new(-30.0, -30.0, 5.0), |s, c, _| {
         run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
     });
     assert_eq!(crate::auto_operation(&s, &json!({"distance": -2})).unwrap(), Some("cut"));
@@ -534,7 +535,7 @@ fn exact_cylinder_volume(s: &Session) -> f64 {
 
 #[test]
 fn cylinder_emboss_persists_selection_and_replays_radial_depth() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = cylinder_badge();
     let before = exact_cylinder_volume(&s);
     run(
@@ -632,7 +633,7 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
             .bodies
             .iter()
             .find(|b| {
-                b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(
+                b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcore_record::Vec3::new(
                     40.5 + pick_offset,
                     0.,
                     7.5,
@@ -666,7 +667,7 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
                     .body
                     .mesh(&solidcraft_kernel::MeshTolerance::chord(0.001))
                     .unwrap()
-                    .contains(solidcraft_geom::Vec3::new(x, 0., 7.5)))
+                    .contains(solidcore_record::Vec3::new(x, 0., 7.5)))
             );
         }
         let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
@@ -823,7 +824,7 @@ fn check_body_offset(auto: bool) {
             .body
             .mesh(&solidcraft_kernel::MeshTolerance::chord(0.001))
             .unwrap()
-            .contains(solidcraft_geom::Vec3::new(0., 10.5, 7.5))
+            .contains(solidcore_record::Vec3::new(0., 10.5, 7.5))
     );
 }
 
@@ -1036,7 +1037,7 @@ fn loft_cut_through_a_shelled_basin_in_either_order() {
 
 #[test]
 fn cylinder_auto_inference_saves_a_profile_anchor_and_replays_both_depth_signs() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for mode in ["emboss", "deboss"] {
         let mut s = cylinder_badge();
         let before = exact_cylinder_volume(&s);
@@ -1108,7 +1109,7 @@ fn cylinder_auto_inference_ignores_remote_finite_tangent_walls_in_each_body_orde
 
 #[test]
 fn cylinder_auto_inference_retains_selected_holes_and_nested_islands() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for mode in ["emboss", "deboss"] {
         let mut s = cylinder_badge();
         run(&mut s, "sketch.edit", json!({"sketch":"Badge"}));
@@ -1396,7 +1397,7 @@ fn cutting_a_text_removes_each_letter_whether_its_letters_stand_apart_or_touch()
 /// corners rounded and reflex ones trimmed where the offsets cross, a region's area is
 /// A + P e + C e² while the offset meets nothing, C being half each loop's turning (π for an
 /// outer loop, −π for a hole) less tan(t/2) − t/2 at each reflex corner of turn t.
-fn steiner(regions: &[&solidcraft_geom::Region2]) -> (f64, f64, f64) {
+fn steiner(regions: &[&solidcore_record::Region2]) -> (f64, f64, f64) {
     let (mut a, mut p, mut c) = (0.0, 0.0, 0.0);
     for r in regions {
         a += r.area();
@@ -1419,7 +1420,7 @@ fn steiner(regions: &[&solidcraft_geom::Region2]) -> (f64, f64, f64) {
 }
 
 /// The text's letters (its profiles less their counters, a counter being a profile too).
-fn letters(s: &Session) -> Vec<solidcraft_geom::Region2> {
+fn letters(s: &Session) -> Vec<solidcore_record::Region2> {
     let state = s.world_state().unwrap();
     let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
     let sorted = |ids: &[String]| {
@@ -1492,7 +1493,7 @@ fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
                         for i in 0..8 {
                             let q = seg.point_at(f64::from(i) / 8.0);
                             assert!(
-                                mesh.contains(solidcraft_geom::Vec3::new(q.x, q.y, h / 2.0)),
+                                mesh.contains(solidcore_record::Vec3::new(q.x, q.y, h / 2.0)),
                                 "{what}: ({}, {}) outside the letter half-way up",
                                 q.x,
                                 q.y

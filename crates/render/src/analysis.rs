@@ -1,6 +1,6 @@
 //! Surface analysis as a view draws it: the shading mode and the colours it uses.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// Surface analysis colours, straight sRGB 0..1 as the shader takes them.
 #[derive(Clone, Copy, Debug, PartialEq)]

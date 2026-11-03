@@ -4,10 +4,11 @@
 //! every trim it needs (`SmEdgeuse::GetOrCreateUVTrimCurve`, when the body is exported). They are
 //! SMLib's, relayed as it holds them on the record's parameters; nothing here fits a curve.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashSet;
 
+use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 use solidcraft_geom::brep::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
-use solidcraft_geom::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 
 /// [`Trims`] by SMLib.
 #[derive(Clone, Copy, Debug, Default)]

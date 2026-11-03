@@ -7,7 +7,7 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::*;
 

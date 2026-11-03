@@ -4,11 +4,12 @@
 //! `sketch.edit_text` live; the whole gesture is one undo step and Esc cancels it (the drag
 //! shares [`crate::viewport::Viewport::text_drag`] with moving a text, so it ends and cancels
 //! the same way). A drag from anywhere else inside the frame moves the text ([`grab_inside`]).
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::{Align2, CursorIcon, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, vec2};
 use serde_json::json;
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, LinkKind, LinkSource};
 
 use crate::SolveApp;

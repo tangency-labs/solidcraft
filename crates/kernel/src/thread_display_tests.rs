@@ -1,7 +1,9 @@
 //! Issue 1289: the display mesh of a modelled screw thread (helical B-spline flanks).
 
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::tess::TessPlan;
-use solidcraft_geom::{Mesh, Vec3};
 
 use std::f64::consts::{PI, TAU};
 
@@ -14,7 +16,7 @@ use crate::{Body, DISPLAY_ANGLE};
 /// trim along helices. The section reaches a tenth of a pitch into the core along its flanks, so
 /// the join cuts it at the core rather than meeting it face to face.
 fn ridge_thread(major: f64, pitch: f64, turns: f64) -> Body {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let h = pitch * 3f64.sqrt() / 2.0;
     let (rc, rm) = (major / 2.0 - 5.0 * h / 8.0, major / 2.0);
     let (foot, crest) = ((pitch - pitch / 4.0) / 2.0, pitch / 16.0);

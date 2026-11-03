@@ -1,5 +1,6 @@
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 /// `ui.at {"plane": …}` gives a point that a click picks that plane at, even where another
 /// origin plane hides the middle of its square (seen from the front right and a little lower

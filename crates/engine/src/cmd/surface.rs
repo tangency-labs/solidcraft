@@ -8,6 +8,7 @@ use solidcraft_doc::{
 };
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
@@ -91,7 +92,8 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
     let crown = crown_param(p, cmd)?;
     let continuity = patch_continuity(p, cmd)?;
     let points: Vec<Position> = patch_points(p, cmd)?.into_iter().map(Position).collect();
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     let mut v = if !edges.is_empty() {
         if edges.len() > 10_000 {
             return Err(bad(cmd, "too many edges"));
@@ -177,7 +179,7 @@ fn patch_continuity(p: &Value, cmd: &str) -> Result<PatchContinuity> {
 }
 
 /// The points a patch passes through (at most 64, each a finite point).
-fn patch_points(p: &Value, cmd: &str) -> Result<Vec<solidcraft_geom::Vec3>> {
+fn patch_points(p: &Value, cmd: &str) -> Result<Vec<solidcore_record::Vec3>> {
     let Some(v) = p.get("points") else { return Ok(Vec::new()) };
     let list = v
         .as_array()
@@ -202,7 +204,7 @@ fn crown_param(p: &Value, cmd: &str) -> Result<f64> {
 fn blend_side(p: &Value, cmd: &str, key: &str) -> Result<BlendSide> {
     let side = p.get(key).ok_or_else(|| bad(cmd, format!("`{key}` must be {{body, edges}}")))?;
     let body = str_(side, "body").ok_or_else(|| bad(cmd, format!("`{key}.body` must name a body")))?;
-    let edges: Vec<solidcraft_geom::Vec3> =
+    let edges: Vec<solidcore_record::Vec3> =
         side.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, format!("`{key}.edges` must list 1 to 10000 points on the edges of a chain")));
@@ -261,12 +263,13 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A body by name, and points on some of its faces (none: all of them).
-fn body_faces(s: &Session, p: &Value, cmd: &str) -> Result<(String, Vec<solidcraft_geom::Vec3>)> {
+fn body_faces(s: &Session, p: &Value, cmd: &str) -> Result<(String, Vec<solidcore_record::Vec3>)> {
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let faces: Vec<solidcraft_geom::Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let faces: Vec<solidcore_record::Vec3> =
+        p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if faces.len() > 10_000 {
         return Err(bad(cmd, "too many faces"));
     }
@@ -298,7 +301,7 @@ fn untrim(s: &mut Session, p: &Value) -> Result<Value> {
             if points.len() > 10_000 {
                 return Err(bad(cmd, "too many holes"));
             }
-            let points: Option<Vec<solidcraft_geom::Vec3>> = points.iter().map(vec3).collect();
+            let points: Option<Vec<solidcore_record::Vec3>> = points.iter().map(vec3).collect();
             Some(points.ok_or_else(|| bad(cmd, "`holes` must list points [x, y, z] on the inner loops"))?)
         }
         Some(_) => return Err(bad(cmd, "`holes` must be \"all\" or a list of points [x, y, z] on the inner loops")),
@@ -382,7 +385,7 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
         // A section is a chain of sketch curves, or an edge chain of a body whose face the end of
         // the loft repeats.
         if let Some(body) = str_(sec, "body") {
-            let edges: Vec<solidcraft_geom::Vec3> =
+            let edges: Vec<solidcore_record::Vec3> =
                 sec.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
             if edges.is_empty() || edges.len() > 10_000 {
                 return Err(bad(cmd, "`sections.edges` must list 1 to 10000 points on the edges of a chain"));
@@ -433,7 +436,8 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.offset";
-    let faces: Vec<solidcraft_geom::Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let faces: Vec<solidcore_record::Vec3> =
+        p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if faces.is_empty() || faces.len() > 10_000 {
         return Err(bad(cmd, "`faces` must list points on the faces to offset"));
     }
@@ -459,7 +463,8 @@ fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, "`edges` must list points on a chain of the body's edges"));
     }
@@ -573,7 +578,8 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, "`edges` must list points on the edges to extend"));
     }
@@ -614,7 +620,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Points to keep: one `[x, y, z]`, or a list of them (at most 10 000).
-fn keep_points(v: Option<&Value>, cmd: &str, key: &str) -> Result<Vec<solidcraft_geom::Vec3>> {
+fn keep_points(v: Option<&Value>, cmd: &str, key: &str) -> Result<Vec<solidcore_record::Vec3>> {
     let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
     if let Some(p) = vec3(v) {
         return Ok(vec![p]);
@@ -1196,7 +1202,7 @@ mod tests {
         plate_with_three_holes(&mut s);
         let top = [5.0, 5.0, 2.0];
         let name =
-            solidcraft_doc::naming::face_name_at_body(s.model.state().body("Plate").unwrap(), solidcraft_geom::Vec3::new(5.0, 5.0, 2.0)).unwrap();
+            solidcraft_doc::naming::face_name_at_body(s.model.state().body("Plate").unwrap(), solidcore_record::Vec3::new(5.0, 5.0, 2.0)).unwrap();
         run(&mut s, "surface.untrim", json!({"face": {"body": "Plate", "point": top}, "body_name": "Top"}));
         let st = s.world_state().unwrap();
         let made = &st.body("Top").unwrap().body;
@@ -1973,7 +1979,7 @@ mod tests {
         run(&mut s, "surface.patch", json!({"edges": rim, "body": "Saddle", "body_name": "Shell"}));
         let st = s.world_state().unwrap();
         assert!(st.body("Shell").unwrap().body.is_surface(), "a patch on a rim is a sheet");
-        let before: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
+        let before: Vec<solidcore_record::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert!(!before.is_empty());
         let area_before = area(&s, "Shell");
         // The fairing reports both energies. The fit is not the fairest surface on its own rim, so
@@ -1986,7 +1992,7 @@ mod tests {
         // The edges do not move: every boundary point of the faired body is where it was, bit for
         // bit, and the sheet is still the one face.
         let st = s.world_state().unwrap();
-        let after: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
+        let after: Vec<solidcore_record::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert_eq!(after, before, "fairing must not move the face's edges");
         assert_eq!(st.body("Shell").unwrap().body.face_count(), 1);
         // Undo takes the fairing back, redo puts it back, and a cold reopen rebuilds the same.

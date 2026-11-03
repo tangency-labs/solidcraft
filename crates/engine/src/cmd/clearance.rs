@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_geom::mesh_distance::box_gap;
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::{BodyDistance, DistanceShape};
 
@@ -58,7 +59,7 @@ pub(crate) struct PairCache(HashMap<(u64, u64, [u64; 3]), PairResult>);
 #[derive(Clone, Default)]
 struct PairResult {
     /// Shared volume, area, box and centre.
-    overlap: Option<(f64, f64, Aabb3, solidcraft_geom::Vec3)>,
+    overlap: Option<(f64, f64, Aabb3, solidcore_record::Vec3)>,
     distance: Option<BodyDistance>,
     unchecked: Option<String>,
 }
@@ -190,7 +191,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
                     p.into_iter().for_each(|v| bx.add(v));
                 }
                 let chord = b.display_tol();
-                let g = solidcraft_geom::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
+                let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
                 if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } }
             }
             _ => Aabb3::EMPTY,
@@ -198,7 +199,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
 
     // Pairs whose boxes, grown by half the clearance each, meet.
-    let half = solidcraft_geom::Vec3::new(1.0, 1.0, 1.0) * (gap / 2.0);
+    let half = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * (gap / 2.0);
     let grown: Vec<Aabb3> = boxes.iter().map(|b| if b.is_empty() { *b } else { Aabb3 { min: b.min - half, max: b.max + half } }).collect();
     let (close, truncated) = super::joints::overlapping_pairs(&grown, MAX_PAIRS);
     let has_mesh = |i: usize| meshes.get(i).is_some_and(Option::is_some);
@@ -406,14 +407,14 @@ fn shared_region(a: &DistanceShape, b: &DistanceShape) -> Aabb3 {
         return Aabb3::EMPTY;
     }
     let grow = 1.0 + 0.05 * min.dist(max);
-    let g = solidcraft_geom::Vec3::new(grow, grow, grow);
+    let g = solidcore_record::Vec3::new(grow, grow, grow);
     Aabb3 { min: min - g, max: max + g }
 }
 
 /// [`solidcraft_kernel::measure`] of `body` moved by `-at` and back: far from the origin, the
 /// centre of a thin part loses its precision (its moments are large numbers that nearly cancel).
-fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcraft_geom::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
-    let moved = solidcraft_kernel::transform(body, -at, solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::Z, 0.0)?;
+fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
+    let moved = solidcraft_kernel::transform(body, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)?;
     let mut m = solidcraft_kernel::measure(&moved)?;
     m.centroid += at;
     m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };

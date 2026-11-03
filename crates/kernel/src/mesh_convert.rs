@@ -1,9 +1,10 @@
 //! Conservative reconstruction of constant-section mechanical mesh parts.
 //! Geometry is inferred from closed, manifold input, never from a display mesh.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::{Body, KernelError, Result};
 
@@ -260,7 +261,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         }
         let p = plane.to_local(*p);
         if !boundary_segments.iter().any(|&(a, b)| {
-            solidcraft_geom::Seg2::Line { a, b }.point_at(solidcraft_geom::Seg2::Line { a, b }.closest_param(p)).dist(p) <= epsilon * 3.
+            solidcore_record::Seg2::Line { a, b }.point_at(solidcore_record::Seg2::Line { a, b }.closest_param(p)).dist(p) <= epsilon * 3.
         }) {
             return Ok(None);
         }
@@ -411,7 +412,7 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
         }
         let remove = (0..n).find(|&i| {
             let (Some(a), Some(b), Some(c)) = (points.get((i + n - 1) % n), points.get(i), points.get((i + 1) % n)) else { return false };
-            let edge = solidcraft_geom::Seg2::Line { a: *a, b: *c };
+            let edge = solidcore_record::Seg2::Line { a: *a, b: *c };
             edge.point_at(edge.closest_param(*b)).dist(*b) <= linear_tolerance
         });
         let Some(index) = remove else { break };
@@ -483,7 +484,7 @@ mod tests {
 
     /// The loop is the exact circle: one full turn of an arc round `center` at `radius`.
     fn assert_exact_circle(fitted: &Loop2, center: Vec2, radius: f64) {
-        let [solidcraft_geom::Seg2::Arc { center: c, radius: r, sweep, .. }] = fitted.segs.as_slice() else { panic!("not one arc: {fitted:?}") };
+        let [solidcore_record::Seg2::Arc { center: c, radius: r, sweep, .. }] = fitted.segs.as_slice() else { panic!("not one arc: {fitted:?}") };
         assert!(c.dist(center) < 1e-9 && (r - radius).abs() < 1e-9, "centre {c:?}, radius {r}");
         assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9, "sweep {sweep}");
     }

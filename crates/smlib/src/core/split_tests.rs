@@ -77,7 +77,7 @@ fn rel(a: f64, b: f64) -> f64 {
 
 fn valid(name: &str, b: &Body) {
     let (rec, _) = native(&to_arrays(b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-    rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+    solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
 }
 
 fn judge(name: &str, who: &str, got: Got) -> Got {

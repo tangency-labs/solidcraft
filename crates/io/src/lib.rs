@@ -54,8 +54,10 @@ pub use threemf::{
 };
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
-use solidcraft_geom::{MassProperties, Mesh, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{MassProperties, Mesh};
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";
@@ -955,8 +957,8 @@ pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Vec3;
     use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
-    use solidcraft_geom::Vec3;
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");

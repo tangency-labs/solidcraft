@@ -125,7 +125,7 @@ struct Measured {
     solids: usize,
 }
 
-fn kinds(rec: &solidcraft_geom::brep::Brep) -> BTreeMap<String, usize> {
+fn kinds(rec: &solidcore_record::brep::Brep) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for f in &rec.faces {
         let v = serde_json::to_value(&f.surface).unwrap();
@@ -181,7 +181,7 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
         let solids = solid_count(body).unwrap_or_else(|e| panic!("{name}: solid count: {e}"));
         assert_eq!(solids, c.solids, "{name}: solids");
         let (rec, _) = native(&to_arrays(body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Some(Measured { volume: v, counts: n, kinds: kinds(&rec), solids })
     })
 }
@@ -361,7 +361,7 @@ fn a_ring_and_a_lip_with_walls_nearly_together() {
 /// Face and edge tags (`Brep::tagged`) through booleans: each operand tagged, the result's history
 /// ([`Raw`]) read back.
 mod history {
-    use solidcraft_geom::brep::history::Change;
+    use solidcore_record::brep::history::Change;
 
     use crate::history::Raw;
     use crate::{BooleanOp, Brep};

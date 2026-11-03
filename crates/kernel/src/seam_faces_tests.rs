@@ -1,7 +1,7 @@
 //! Round faces read from STEP: a whole turn bounded by one wire that runs along its seam twice.
 //! A boolean whose intersection loop lies wholly inside such a face is exact.
 use crate::*;
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use std::f64::consts::PI;
 
 const R: f64 = 4.5;

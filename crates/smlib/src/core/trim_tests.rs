@@ -126,7 +126,7 @@ fn solidcore_case(name: &str) -> Got {
     let (c, _) = case(name);
     let got = untrim_face(&c.input.core(), c.point, TOL, c.holes, c.outer, c.in_place).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { area: area(&b, 1e-8).unwrap(), counts: counts(&b).unwrap() }
     });
     judge(name, "solidcore", got)
@@ -266,7 +266,7 @@ fn extend_solidcore(name: &str) -> Got {
     let (sheet, point, distance, how, _) = extend_case(name);
     let got = extend_sheet(&sheet.core(), point, TOL, distance, how).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { area: area(&b, 1e-8).unwrap(), counts: counts(&b).unwrap() }
     });
     extend_judge(name, "solidcore", got)

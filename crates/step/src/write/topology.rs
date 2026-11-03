@@ -22,9 +22,10 @@
 //! the side its first use needs (its same_sense, and its loops run counter-clockwise about that
 //! side's normal); a later use of the other side refers to it through an ORIENTED_FACE.
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
-use solidcraft_geom::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
+use solidcore_record::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
 
 use super::{GeomWriter, boolean, list, r, s};
 use crate::geom::{
@@ -422,7 +423,7 @@ pub fn outer_loop(b: &Brep, face: &Face) -> Option<usize> {
                 let [t0, t1] = edge_of(b, u.edge).ok()?.interval;
                 for k in 0..AREA_SAMPLES {
                     let f = k as f64 / AREA_SAMPLES as f64;
-                    ring.push(u.pcurve.eval(if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })?);
+                    ring.push(solidcraft_geom::brep::pcurve::eval(&u.pcurve, if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })?);
                 }
             }
             (signed_area(&ring) > 0.0).then_some(li)
@@ -618,8 +619,8 @@ fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) 
     let (p, su, sv) = eval.derivs(0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1]))?;
     let normal = su.cross(sv);
     let away = |f: &Frame| {
-        let o = solidcraft_geom::Vec3::new(f.origin[0], f.origin[1], f.origin[2]);
-        let z = solidcraft_geom::Vec3::new(f.x_axis[0], f.x_axis[1], f.x_axis[2]).cross(solidcraft_geom::Vec3::new(
+        let o = solidcore_record::Vec3::new(f.origin[0], f.origin[1], f.origin[2]);
+        let z = solidcore_record::Vec3::new(f.x_axis[0], f.x_axis[1], f.x_axis[2]).cross(solidcore_record::Vec3::new(
             f.y_axis[0],
             f.y_axis[1],
             f.y_axis[2],

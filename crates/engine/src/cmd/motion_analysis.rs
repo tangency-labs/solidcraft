@@ -3,13 +3,15 @@
 //! joint values and a point's path with their velocities and accelerations; `motion.interference`
 //! answers the pairs of parts that pass through each other along the way.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints;
 use solidcraft_doc::motion::MotionStudy;
 use solidcraft_doc::{Document, Mat, apply_point, mat_mul};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};

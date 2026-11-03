@@ -2,7 +2,8 @@
 //! world land in the component's own frame (user bug #4).
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
