@@ -44,6 +44,8 @@ pub struct FrameRate {
     samples: VecDeque<Sample>,
     /// The model scene's key at the last frame, to mark the frames that rebuilt it.
     scene_key: u64,
+    /// The top of the readout (and its details) drawn this frame, for what stacks above it.
+    pub(crate) top: Option<f32>,
 }
 
 impl FrameRate {
@@ -143,7 +145,7 @@ const MARGIN: f32 = 12.0;
 
 /// `readout` moved left until none of the `panes` covering the view overlaps it, `MARGIN` clear
 /// of the leftmost of them; it stops at the view's left edge.
-fn beside_panes(mut readout: Rect, view: Rect, panes: &[Rect]) -> Rect {
+pub(crate) fn beside_panes(mut readout: Rect, view: Rect, panes: &[Rect]) -> Rect {
     for _ in 0..panes.len().min(32) {
         let Some(pane) = panes.iter().find(|p| p.is_finite() && p.is_positive() && p.intersects(readout)) else { break };
         let left = (pane.left() - MARGIN - readout.width()).max(view.left() + MARGIN);
@@ -162,6 +164,7 @@ fn beside_panes(mut readout: Rect, view: Rect, panes: &[Rect]) -> Rect {
 /// the view drew. Once the frames stop, one more frame a little over [`IDLE_AFTER`] later shows the
 /// view idle.
 pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, rect: Rect) {
+    app.frame_rate.top = None;
     if !app.preferences.show_frame_rate {
         app.frame_rate = FrameRate::default();
         return;
@@ -199,21 +202,24 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     painter.rect(r, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_target("viewport:frame_rate", r);
     painter.galley(r.center() - galley.size() / 2.0, galley, t.text);
-    if app.preferences.frame_rate_details {
-        details(app, painter, rect, r, drawn, &font);
+    app.frame_rate.top = Some(r.top());
+    if app.preferences.frame_rate_details
+        && let Some(panel) = details(app, painter, rect, r, drawn, &font)
+    {
+        app.frame_rate.top = Some(panel.top());
     }
 }
 
 /// The details above the readout `below`, flush with its right edge: the frame-time graph with the
 /// triangles over it, the histogram and what the GPU drew.
-fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, drawn: crate::gpu::DrawStats, font: &FontId) {
+fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, drawn: crate::gpu::DrawStats, font: &FontId) -> Option<Rect> {
     let t = Tokens::get();
     let (pad, row, label_h, graph_h, hist_h) = (8.0, 16.0, 12.0, 56.0, 40.0);
     let lines = 7.0 + 0.8; // seven rows and the adapter's name
     let w = 300.0_f32.min(below.right() - view.left() - MARGIN);
     let h = pad * 2.0 + row + label_h + graph_h + 6.0 + hist_h + row + lines * row;
     if w < 160.0 || h > view.height() - below.height() - 30.0 {
-        return;
+        return None;
     }
     let panel = Rect::from_min_size(pos2(below.right() - w, below.top() - 6.0 - h), vec2(w, h));
     painter.rect(panel, t.radius_sm, t.dialog_bg, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
@@ -314,6 +320,7 @@ fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, dra
     let adapter: String =
         if adapter.chars().count() > room { adapter.chars().take(room.saturating_sub(1)).chain(['…']).collect() } else { adapter.to_string() };
     text(pos2(inner.right(), y - 2.0), Align2::RIGHT_TOP, &adapter, &small, t.text_dim);
+    Some(panel)
 }
 
 #[cfg(test)]
