@@ -25,16 +25,18 @@
 //!   the fork after 661f79c; without it, as 52bfef0.
 //! - **Ownership.** The new curves are owned values moved into the B-rep (upstream's
 //!   pointers, cleared once the B-rep has them). Each B-rep edit notifies through the
-//!   kernel's callbacks (`with_kernel_callbacks`). The fork sets a new curve's owner
-//!   after `SetCurve`; the port sets it before.
+//!   kernel's callbacks (`with_kernel_callbacks`). As the fork, a new curve's owner is set
+//!   after `SetCurve`, which records the edit's identity of the edge: a B-rep its caller
+//!   names ([`NamingScheme::Caller`](crate::topology::NamingScheme::Caller)) owns the
+//!   edge's geometry by it from then on.
 //! - **Null pointers.** Where the fork dereferences `NULL` (a rail without primary edge
 //!   use), the port returns [`SolidError::InvalidInput`].
 //! - No recursion.
 
-use super::{bspline_part, glue_edges, ner, null, set_vertex_point, sm_err, OP};
+use super::{bspline_part, glue_edges, ner, null, own_edge_curve, set_vertex_point, sm_err, OP};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::SolverOperation;
@@ -823,22 +825,16 @@ impl RingFilletRemoval {
 }
 
 /// `pEdge->SetCurve(pCurve, TRUE)` (deleting the old curve and the edge uses' UV trim
-/// curves; status ignored), then `pCurve->SetOwner(pEdge)` (the owner set first here,
-/// to the edge's [`Brep::owner_identity`]).
+/// curves; status ignored), then `pCurve->SetOwner(pEdge)`: owned under the edge's
+/// [`Brep::owner_identity`] as `SetCurve` left it, what the check compares.
 fn install_curve(k: &mut Kernel, b: &mut Brep, e: EdgeId, curve: Option<Curve>) -> Result<()> {
     with_kernel_callbacks(k, b, |_k, b, env| {
-        let mut curve = curve;
-        if let Some(c) = curve.as_mut() {
-            // the identity the B-rep names the edge's geometry owner by (what the check
-            // compares), not the edit's notification identity
-            let owner = b.owner_identity(EntityRef::Edge(e));
-            let _ = c.set_owner(Some(owner), Some(brep_p2::brep_ref(b)));
-        }
         let options = SetCurveOptions {
             delete_old_curve: true,
             ..SetCurveOptions::default()
         };
-        ignore_status(edge::set_curve(b, e, curve, options, env, [None, None]))
+        ignore_status(edge::set_curve(b, e, curve, options, env, [None, None]))?;
+        own_edge_curve(b, e)
     })
 }
 

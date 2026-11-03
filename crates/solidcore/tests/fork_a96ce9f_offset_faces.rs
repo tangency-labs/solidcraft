@@ -8,7 +8,10 @@
 //!   24000 + pi R^2 10 + 2 pi (R + d) A for R = 11, 9, 7, with A = r^2 (1 - pi/4) and
 //!   d = r^3 (5/6 - pi/4) / A (Pappus), nine faces;
 //! - a 60 x 40 x 20 block, its top front edge rounded r 2, the top up and down by 1:
-//!   2400 (20 +- 1) - 60 A, seven faces.
+//!   2400 (20 +- 1) - 60 A, seven faces;
+//! - tangency-labs/solidcraft#3468's boxes: a 40 x 30 x 20 box with one edge rounded r 3,
+//!   the face beside the round (the wall beside a vertical round, the top beside a top
+//!   round) out by 2, seven faces, on the box as built and on a copy its caller names.
 //!
 //! Pinned SMLib's face move (`FaceuseOffset` and `SmBrep::LocalOperation`, unchanged)
 //! keeps the round where it was and builds a step on it.
@@ -24,14 +27,17 @@ use std::f64::consts::PI;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p3;
 use solidcore::topology::face::p2 as face2;
-use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
+use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, NamingScheme};
 use solidcore::Kernel;
 
 /// The volume at the integration tolerance 1e-9.
@@ -189,6 +195,95 @@ fn the_top_front_round_follows_the_top() {
         let v = volume(&k, &mut b);
         assert!(near(v, want, 1e-9), "up {up}: volume {v}, expected {want}");
         assert_eq!(b.face_list().len(), 7, "up {up}");
+    }
+}
+
+/// `SmApiBrepCopy` of `b` whose caller names the copy's objects in key domain `domain`
+/// (`NamingScheme::Caller`, as SolidCraft's bodies and the difftest's SolidCraft cases are).
+fn caller_named_copy(k: &mut Kernel, b: &Brep, domain: u64) -> Brep {
+    let key = |entity, domain: u64| {
+        let r = p3::topology_ref(0, entity);
+        ObjectRef {
+            type_code: r.type_code,
+            key: ObjectKey(domain + r.type_code as u64 * 1_000_000 + (r.key.0 & 0xffff_ffff)),
+        }
+    };
+    let target_key = |entity| key(entity, domain);
+    let mut state = ArenaNotifyState::new(&Brep::new());
+    let mut env = state.env(None);
+    env.key_of = &target_key;
+    let copy = p3::api_brep_copy(k, &mut env, Some(b), &|entity| key(entity, 0)).unwrap();
+    assert_eq!(copy.naming(), NamingScheme::Caller);
+    copy
+}
+
+/// tangency-labs/solidcraft#3468's boxes (the `3468-offset-face-next-to-fillet` cases): a
+/// 40 x 30 x 20 box with the edge whose vertices satisfy `on_edge` rounded r 3, and the plane
+/// face whose vertices satisfy `on_face` moved out by 2, on the box as built or on a copy its
+/// caller names (`caller_named`). Its volume and face count.
+fn box_face_beside_round(
+    on_edge: impl Fn(Point3) -> bool,
+    on_face: impl Fn(Point3) -> bool,
+    caller_named: bool,
+) -> (f64, usize) {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    if caller_named {
+        b = caller_named_copy(&mut k, &b, 100_000_000);
+    }
+    let e = edge_where(&b, on_edge);
+    fillet_edges(&mut k, &mut b, &[e], 3.0, 1, 1, 1.0).unwrap();
+    let face = *b
+        .face_list()
+        .iter()
+        .find(|&&f| is_plane(&b, f) && face_points(&b, f).into_iter().all(&on_face))
+        .unwrap();
+    let mut ex = OffsetFacesExecutive::new();
+    let r = ex.offset_faces(&mut k, &mut b, &[face], 2.0);
+    assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert_eq!(ex.followed_blends(), 1);
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    (volume(&k, &mut b), b.face_list().len())
+}
+
+/// The box's round follows the face beside it, keeping r 3: the box grows by 2 across the
+/// face, less the corner region 3^2 (1 - pi/4) along the round. The fork (tangency-labs/smlib
+/// 7178777, `smlib_offset_faces`) takes the round off exactly and builds both, seven faces,
+/// within 2e-9 and 7e-10 of these volumes. A body its caller names takes the round off as
+/// one named by the kernel: the new sharp edge's curve is owned under the identity its edge
+/// has once the curve is installed, which `ValidateGeometry` compares.
+#[test]
+fn a_box_round_follows_the_face_beside_it() {
+    let corner = 9.0 * (1.0 - PI / 4.0);
+    for caller_named in [false, true] {
+        let side = box_face_beside_round(
+            |p| (p.x - 40.0).abs() < 1e-6 && p.y.abs() < 1e-6,
+            |p| (p.x - 40.0).abs() < 1e-6,
+            caller_named,
+        );
+        let top = box_face_beside_round(
+            |p| p.y.abs() < 1e-6 && (p.z - 20.0).abs() < 1e-6,
+            |p| (p.z - 20.0).abs() < 1e-6,
+            caller_named,
+        );
+        for ((v, faces), want, what) in [
+            (
+                side,
+                42.0 * 30.0 * 20.0 - corner * 20.0,
+                "the wall beside a vertical round",
+            ),
+            (
+                top,
+                40.0 * 30.0 * 22.0 - corner * 40.0,
+                "the top beside a top round",
+            ),
+        ] {
+            assert!(
+                near(v, want, 1e-9),
+                "{what}, caller named {caller_named}: volume {v}, expected {want}"
+            );
+            assert_eq!(faces, 7, "{what}, caller named {caller_named}");
+        }
     }
 }
 

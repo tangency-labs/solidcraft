@@ -7,7 +7,7 @@
 //! boss again, 24000 + 1000 pi = 27141.592653590, eight faces, check clean. The fork's
 //! probe gave the same. With `glue_vertices_joins_every_region` (WR-607, 661f79c) too,
 //! the shells are joined by the glue instead of `JoinShellsAtVertex`, with the same
-//! result.
+//! result. A copy its caller names (`NamingScheme::Caller`) gives the same, check clean.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -22,13 +22,17 @@ use offset_fixture::volume;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_removal::delete_fillet_face;
 use solidcore::boolean::api_brep::boolean_union;
+use solidcore::geom::attribute::ObjectKey;
+use solidcore::geom::object::ObjectRef;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p3;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face2;
-use solidcore::topology::{edge, vertex, Brep, FaceId};
+use solidcore::topology::{edge, vertex, Brep, FaceId, NamingScheme};
 use solidcore::Kernel;
 
 /// 24000 + 1000 pi: the 60 x 40 x 10 plate and the boss r 10, 10 high.
@@ -50,6 +54,25 @@ fn boss_with_foot_round(k: &mut Kernel) -> Brep {
         .unwrap();
     fillet_edges(k, &mut b, &[foot], 2.0, 1, 1, 1.0).unwrap();
     b
+}
+
+/// `SmApiBrepCopy` of `b` whose caller names the copy's objects in key domain `domain`
+/// (`NamingScheme::Caller`, as SolidCraft's bodies are).
+fn caller_named_copy(k: &mut Kernel, b: &Brep, domain: u64) -> Brep {
+    let key = |entity, domain: u64| {
+        let r = p3::topology_ref(0, entity);
+        ObjectRef {
+            type_code: r.type_code,
+            key: ObjectKey(domain + r.type_code as u64 * 1_000_000 + (r.key.0 & 0xffff_ffff)),
+        }
+    };
+    let target_key = |entity| key(entity, domain);
+    let mut state = ArenaNotifyState::new(&Brep::new());
+    let mut env = state.env(None);
+    env.key_of = &target_key;
+    let copy = p3::api_brep_copy(k, &mut env, Some(b), &|entity| key(entity, 0)).unwrap();
+    assert_eq!(copy.naming(), NamingScheme::Caller);
+    copy
 }
 
 /// The round: the face that is neither a plane nor on the boss's wall's cylinder
@@ -137,5 +160,19 @@ fn ring_fillet_is_removed_to_the_sharp_edge() {
 fn ring_fillet_is_removed_with_every_region_glue() {
     let (mut k, mut b, r, _) = remove_round(true, true);
     r.unwrap();
+    assert_plate_and_boss(&mut k, &mut b);
+}
+
+/// On a copy its caller names, the sharp edge's and the side edges' new curves are owned
+/// under the identity each edge has once its curve is installed, which the check compares.
+#[test]
+fn ring_fillet_is_removed_on_a_body_its_caller_names() {
+    let mut k = Kernel::default();
+    k.fixes.fillet_removal_takes_ring_fillets = true;
+    let rounded = boss_with_foot_round(&mut k);
+    let mut b = caller_named_copy(&mut k, &rounded, 100_000_000);
+    let f = round(&b);
+    b.set_editing_enabled(true);
+    delete_fillet_face(&mut k, &mut b, f, None).unwrap();
     assert_plate_and_boss(&mut k, &mut b);
 }
