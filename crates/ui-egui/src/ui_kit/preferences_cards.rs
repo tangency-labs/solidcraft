@@ -403,6 +403,7 @@ pub(super) fn carousel_window(count: usize, offset: usize, available: f32, item_
 }
 
 /// A row of items with a previous and a next arrow; an arrow is dimmed and inert at its end.
+/// An arrow moves by the items that fit (#11434); the last page ends on the last item.
 /// `item` paints the item at an index into a column `item_width` wide and `item_height` high.
 pub(crate) fn carousel(
     ui: &mut Ui,
@@ -424,7 +425,7 @@ pub(crate) fn carousel(
         ui.spacing_mut().item_spacing.x = gap;
         let can_back = first > 0;
         if carousel_arrow(ui, vec2(arrow, height), -1.0, can_back, crate::i18n::tr("prefs.carousel_previous")).clicked() {
-            next_offset = first.saturating_sub(1);
+            next_offset = first.saturating_sub(visible);
         }
         for index in first..first + visible {
             ui.allocate_ui_with_layout(vec2(dimension(item_width), height), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -434,7 +435,7 @@ pub(crate) fn carousel(
         }
         let can_forward = first + visible < count;
         if carousel_arrow(ui, vec2(arrow, height), 1.0, can_forward, crate::i18n::tr("prefs.carousel_next")).clicked() {
-            next_offset = (first + 1).min(count.saturating_sub(visible));
+            next_offset = (first + visible).min(count.saturating_sub(visible));
         }
     });
     ui.data_mut(|d| d.insert_temp(key, next_offset));

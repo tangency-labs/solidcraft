@@ -151,8 +151,66 @@ fn shared_picture_choices_return_clicks_and_respect_both_disabled_states() {
     }
 }
 
+/// #11434: an arrow moves by the cards that fit, not by one, and the last page ends on the last card.
 #[test]
-fn theme_carousel_moves_one_card_and_disables_its_ends_without_selecting() {
+fn carousel_arrows_move_a_page_of_the_cards_that_fit_at_each_width() {
+    let count = 11;
+    for width in [280.0_f32, 480.0, 700.0] {
+        let ctx = crate::fonts::test_context();
+        let shown = || -> Vec<usize> { (0..count).filter(|i| scenario::rect_of(&format!("page:item:{i}")).is_some()).collect() };
+        let draw = |events: Vec<egui::Event>| {
+            scenario::clear_handles();
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width + 40.0, 400.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(width);
+                    scope(ui, |ui| {
+                        carousel(ui, ("page_carousel", width as u32), count, 88.0, 96.0, |ui, i| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(88.0, 90.0), egui::Sense::hover());
+                            scenario::publish_rect(&format!("page:item:{i}"), r);
+                        });
+                    });
+                },
+            );
+        };
+        let click = |label: &str| {
+            let at = scenario::handle_at(&format!("prefs:carousel:{}", crate::i18n::tr(label))).unwrap();
+            draw(pointer(at, true));
+            draw(pointer(at, false));
+            draw(vec![]);
+        };
+        draw(vec![]);
+        draw(vec![]);
+        let page = shown().len();
+        assert!(page > 1 && page < count, "width {width}: {page} cards fit");
+        assert_eq!(shown(), (0..page).collect::<Vec<_>>());
+        click("prefs.carousel_previous");
+        assert_eq!(shown(), (0..page).collect::<Vec<_>>(), "width {width}: previous is inert at the start");
+        click("prefs.carousel_next");
+        let second = page.min(count - page);
+        assert_eq!(shown(), (second..second + page).collect::<Vec<_>>(), "width {width}: next shows the cards that were hidden");
+        for _ in 0..count {
+            click("prefs.carousel_next");
+        }
+        let last: Vec<usize> = (count - page..count).collect();
+        assert_eq!(shown(), last, "width {width}: the last page ends on the last card");
+        click("prefs.carousel_previous");
+        let back = (count - page).saturating_sub(page);
+        assert_eq!(shown(), (back..back + page).collect::<Vec<_>>(), "width {width}: previous shows the cards before");
+        for _ in 0..count {
+            click("prefs.carousel_previous");
+        }
+        assert_eq!(shown(), (0..page).collect::<Vec<_>>(), "width {width}: previous stops at the first card");
+    }
+}
+
+#[test]
+fn theme_carousel_moves_and_disables_its_ends_without_selecting() {
     let ctx = crate::fonts::test_context();
     let sample = ThemeSample::from_tokens(&Tokens::light());
     let draw = |ui: &mut Ui| {
@@ -194,7 +252,7 @@ fn theme_carousel_moves_one_card_and_disables_its_ends_without_selecting() {
     assert_eq!(scenario::rect_of("test:theme:0").unwrap().left(), start, "previous is inert at the start");
     click(&next);
     assert!(scenario::rect_of("test:theme:0").is_none());
-    assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "move exactly one item");
+    assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "the last page ends on the last card");
     assert!(scenario::rect_of("test:theme:2").is_some());
     click(&next);
     assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "next is inert at the end");
