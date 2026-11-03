@@ -1296,9 +1296,8 @@ impl Sketch {
     /// centre bisects through the major end, and any other with an end held on the ellipse,
     /// first in curve order, counts, construction or not (a diameter drawn that way before the
     /// minor axis is taken for it). Deleting the midpoint or point-on-curve constraint makes
-    /// it an ellipse without axes. Each call scans curves times constraints, and `chain` and a
-    /// line drag ask it for every ellipse: microseconds at everyday sizes, though a sketch near
-    /// the curve and constraint limits would want an index from centre points to their lines.
+    /// it an ellipse without axes. Each call scans the constraints once (and again per line the
+    /// centre bisects), and `chain`, a line drag and a move ask it for every ellipse.
     pub fn ellipse_axes(&self, e: usize) -> Option<EllipseAxes> {
         let Some(CurveKind::Ellipse { m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
         let (Some((major, m2)), Some((minor, n1, n2))) = self.ellipse_axis_lines(e)? else { return None };
@@ -1316,15 +1315,25 @@ impl Sketch {
             Some(CurveKind::Line { a, b }) => Some((*a, *b)),
             _ => None,
         };
-        let held =
-            |l: usize| self.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::Midpoint { p, l: on } if p == *c && on == l));
+        // The lines the centre bisects, in curve order: one pass over the constraints, so a
+        // large sketch does not pay curves times constraints per ellipse.
+        let mut held: Vec<usize> = self
+            .constraints
+            .iter()
+            .filter_map(|k| match k.kind {
+                ConstraintKind::Midpoint { p, l } if !k.driven && p == *c => Some(l),
+                _ => None,
+            })
+            .collect();
+        held.sort_unstable();
+        held.dedup();
         let on =
             |q: usize| self.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::PointOnCurve { p, c: on } if p == q && on == e));
-        let major = (0..self.curves.len()).find_map(|l| match line(l) {
-            Some((a, b)) if held(l) && (a == *m || b == *m) => Some((l, if a == *m { b } else { a })),
+        let major = held.iter().find_map(|&l| match line(l) {
+            Some((a, b)) if a == *m || b == *m => Some((l, if a == *m { b } else { a })),
             _ => None,
         });
-        let minor = (0..self.curves.len()).filter(|l| major.is_none_or(|(major, _)| *l != major) && held(*l)).find_map(|l| {
+        let minor = held.iter().copied().filter(|l| major.is_none_or(|(major, _)| *l != major)).find_map(|l| {
             let (a, b) = line(l)?;
             if on(a) {
                 Some((l, a, b))
