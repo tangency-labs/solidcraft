@@ -589,13 +589,20 @@ impl Walk for AxisDef {
 }
 
 /// A feature's own reference to the model (a revolve's or circular pattern's axis on an edge or
-/// round face): walked like a construction axis's.
+/// round face, an extrude's or rectangular pattern's To Object): walked like a construction
+/// axis's, so a construction axis or point it names follows a rename and keeps it from deletion.
 impl Walk for GeoRef {
     fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
         plane_exprs(vec![self], f)
     }
     fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
         plane_exprs_mut(vec![self], f)
+    }
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        self.walk_feature_refs(f, 0);
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.walk_feature_refs_mut(f, 0);
     }
     fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
         f(Geo::Construct(self))

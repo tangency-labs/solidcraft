@@ -231,6 +231,37 @@ fn construction_names_follow_renames_in_every_definition() {
 }
 
 #[test]
+fn a_to_object_reference_follows_a_rename_of_the_construction_it_names() {
+    use crate::walk::{Ref, Walk};
+    use serde_json::json;
+
+    // An extrude's and a rectangular pattern's To Object (#8527, #8523) can be a construction
+    // axis or point: a rename rewrites it, and deleting it finds the feature as a dependent.
+    let axis = json!({"type": "axis", "name": "Old"});
+    let point = json!({"type": "construct_point", "name": "Old"});
+    let kinds = [
+        json!({"type": "extrude", "sketch": 1, "profiles": {"type": "all"},
+            "extent": {"distance": "10", "to": [0, 0, 10], "to_ref": axis, "from": [0, 0, 0], "from_ref": point}}),
+        json!({"type": "pattern", "features": [], "bodies": ["B"], "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "10",
+            "dir2": [0, 1, 0], "count2": "2", "spacing2": "10", "to1": [40, 0, 0], "to1_ref": axis, "to2": [0, 40, 0], "to2_ref": point}}),
+    ];
+    let names = BTreeMap::from([("Old".into(), "New".into())]);
+    for definition in kinds {
+        let mut kind: FeatureKind = serde_json::from_value(definition.clone()).unwrap_or_else(|e| panic!("{definition}: {e}"));
+        let mut seen = Vec::new();
+        kind.walk_refs(&mut |r| {
+            if let Ref::FeatureName(name) = r {
+                seen.push(name.to_string());
+            }
+        });
+        assert_eq!(seen, vec!["Old"; 2], "{definition}");
+        kind.remap_refs(&BTreeMap::new(), &names);
+        let expected: serde_json::Value = serde_json::from_str(&definition.to_string().replace("\"Old\"", "\"New\"")).unwrap();
+        assert_eq!(serde_json::to_value(kind).unwrap(), serde_json::to_value(serde_json::from_value::<FeatureKind>(expected).unwrap()).unwrap());
+    }
+}
+
+#[test]
 fn construction_reference_walk_keeps_its_depth_limit_across_geometry() {
     use crate::construct::GeoRef;
     use crate::walk::{Ref, Walk};

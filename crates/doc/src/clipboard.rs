@@ -226,6 +226,11 @@ impl crate::Feature {
                     checked_geo(geo, 0)?;
                 }
             }
+            K::Pattern { pattern: crate::PatternKind::Rectangular { to1_ref, to2_ref, .. }, .. } => {
+                for geo in to1_ref.iter().chain(to2_ref.iter()) {
+                    checked_geo(geo, 0)?;
+                }
+            }
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -309,6 +314,12 @@ impl crate::Feature {
             }
             K::Extrude { extent, .. } => {
                 for geo in extent.to_ref.iter_mut().chain(&mut extent.from_ref) {
+                    remap_geo(geo, ids, bodies, 0)?;
+                }
+            }
+            // A To Object direction's reference follows the copy's own sketches and bodies (#8523).
+            K::Pattern { pattern: crate::PatternKind::Rectangular { to1_ref, to2_ref, .. }, .. } => {
+                for geo in to1_ref.iter_mut().chain(to2_ref.iter_mut()) {
                     remap_geo(geo, ids, bodies, 0)?;
                 }
             }
@@ -403,6 +414,27 @@ mod clone_tests {
             feature.remap_clone(&BTreeMap::new(), &names, &BTreeMap::new(), &BTreeMap::new()).unwrap();
             assert_eq!(serde_json::to_string(&feature).unwrap(), before.replace("\"Old\"", "\"New\""));
         }
+    }
+
+    #[test]
+    fn a_copied_rectangular_patterns_to_object_follows_the_copy() {
+        use serde_json::json;
+
+        // To Object as a sketch point and as an edge (#8523): the copy's own sketch and body.
+        let mut feature: crate::Feature = serde_json::from_value(json!({
+            "id": 3, "name": "Pattern", "type": "pattern", "features": [], "bodies": ["Body1"],
+            "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "3", "spacing1": "10", "dir2": [0, 1, 0], "count2": "2", "spacing2": "10",
+                "to1": [40, 0, 0], "to1_ref": {"type": "sketch_point", "sketch": 1, "point": "p1"},
+                "to2": [0, 40, 0], "to2_ref": {"type": "edge", "at": [0, 40, 0], "name": "F1:+y|F1:side:l1"}},
+        }))
+        .unwrap();
+        let ids = BTreeMap::from([(1, 2)]);
+        feature.remap_clone(&ids, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let crate::FeatureKind::Pattern { pattern: crate::PatternKind::Rectangular { to1_ref, to2_ref, .. }, .. } = &feature.kind else {
+            panic!("not a rectangular pattern")
+        };
+        assert_eq!(to1_ref.as_deref(), Some(&crate::construct::GeoRef::SketchPoint { sketch: 2, point: "p1".into() }));
+        assert!(matches!(to2_ref.as_deref(), Some(crate::construct::GeoRef::Edge { name: Some(n), .. }) if n == "F2:+y|F2:side:l1"), "{to2_ref:?}");
     }
 
     #[test]
