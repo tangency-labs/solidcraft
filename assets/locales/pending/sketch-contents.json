@@ -73,5 +73,50 @@
     "sketch.contents.links": "링크",
     "sketch.contents.text": "텍스트",
     "sketch.contents.other": "기타"
+  },
+  "ar": {
+    "sketch.contents.points": "نقاط",
+    "sketch.contents.lines": "خطوط",
+    "sketch.contents.arcs": "أقواس",
+    "sketch.contents.circles": "دوائر",
+    "sketch.contents.splines": "منحنيات",
+    "sketch.contents.conics": "قطوع مخروطية",
+    "sketch.contents.constraints": "قيود",
+    "sketch.contents.dimensions": "أبعاد",
+    "sketch.contents.patterns": "أنماط",
+    "sketch.contents.offsets": "إزاحات",
+    "sketch.contents.links": "روابط",
+    "sketch.contents.text": "نص",
+    "sketch.contents.other": "أخرى"
+  },
+  "he": {
+    "sketch.contents.points": "נקודות",
+    "sketch.contents.lines": "קווים",
+    "sketch.contents.arcs": "קשתות",
+    "sketch.contents.circles": "עיגולים",
+    "sketch.contents.splines": "ספליינים",
+    "sketch.contents.conics": "חתכי חרוט",
+    "sketch.contents.constraints": "אילוצים",
+    "sketch.contents.dimensions": "מידות",
+    "sketch.contents.patterns": "תבניות",
+    "sketch.contents.offsets": "היסטים",
+    "sketch.contents.links": "קישורים",
+    "sketch.contents.text": "טקסט",
+    "sketch.contents.other": "אחר"
+  },
+  "vi": {
+    "sketch.contents.points": "Điểm",
+    "sketch.contents.lines": "Đường thẳng",
+    "sketch.contents.arcs": "Cung",
+    "sketch.contents.circles": "Đường tròn",
+    "sketch.contents.splines": "Đường cong spline",
+    "sketch.contents.conics": "Đường conic",
+    "sketch.contents.constraints": "Ràng buộc",
+    "sketch.contents.dimensions": "Kích thước",
+    "sketch.contents.patterns": "Mẫu",
+    "sketch.contents.offsets": "Độ lệch",
+    "sketch.contents.links": "Liên kết",
+    "sketch.contents.text": "Văn bản",
+    "sketch.contents.other": "Khác"
   }
 }

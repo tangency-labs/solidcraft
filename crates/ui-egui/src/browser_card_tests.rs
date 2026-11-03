@@ -2283,6 +2283,16 @@ fn a_consumed_sketch_still_expands_to_its_contents() {
     assert!(handle_at(&format!("browser:sketch-contents-group:{scope}:lines")).is_some(), "the consumed sketch folds its contents open");
     let lines = crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:lines:"));
     assert_eq!(lines.len(), 4, "the rectangle's four lines are listed: {lines:?}");
+    // Stage 3: its rows are external picks, and the viewport lights them through the external
+    // path even though the sketch's own display is consumed (no eye is toggled to show it).
+    let visibility = h.app.session.visibility.clone();
+    h.step(&json!({"click":{"handle":lines[0].0.clone()}})).unwrap();
+    let id = lines[0].0.rsplit(':').next().unwrap_or_default().to_string();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id }]);
+    assert_eq!(h.app.session.visibility, visibility, "a consumed sketch's eye is left alone");
+    assert!(!crate::browser::sketch_visible(&h.app, sketch));
+    let highlight = crate::viewport::build_highlight(&h.app).merged();
+    assert!(!highlight.overlay.is_empty() || !highlight.lines.is_empty(), "the consumed sketch's curve is lit in the view");
 }
 
 /// Large groups are capped: the browser draws a group's first rows and a Show all row instead of
@@ -2340,4 +2350,172 @@ fn expanding_contents_keeps_pattern_rows_in_their_group() {
     h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:patterns")}})).unwrap();
     h.settle();
     assert!(handle_at(&handle).is_some(), "the Patterns group lists the pattern row");
+}
+
+/// Stage 3: a contents row of the sketch being edited selects its own entity, so the viewport
+/// lights it and the view's own picks light the row back.
+#[test]
+fn contents_rows_select_the_active_sketchs_entities() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Editable"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["l1"]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let point = h.app.run("sketch.point", json!({"point":[5,5],"id":"p1"})).unwrap()["point"].as_str().unwrap().to_owned();
+    let dimension =
+        h.app.run("sketch.dimension", json!({"entities":[line],"value":20})).unwrap()["created"]["dimensions"][0].as_str().unwrap().to_owned();
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.settle();
+
+    let row = |slug: &str, id: &str| format!("browser:sketch-contents-row:s:{sketch}:{slug}:{id}");
+    h.step(&json!({"click":{"handle":row("lines", &line)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: line.clone(), sketch: None }]);
+    h.step(&json!({"click":{"handle":row("points", &point)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchPoint { id: point }]);
+
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:dimensions")}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":row("dimensions", &dimension)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchConstraint { id: dimension }]);
+}
+
+/// Stage 3: a row of a sketch that is not being edited is an external pick, which the viewport
+/// lights through the same path a viewport pick uses; its constraint row stands for the geometry
+/// it ties together, and its eye is untouched.
+#[test]
+fn contents_rows_of_a_finished_sketch_select_external_geometry() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Source"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["l1"]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let point = h.app.run("sketch.point", json!({"point":[5,5],"id":"p1"})).unwrap()["point"].as_str().unwrap().to_owned();
+    let constraint = h.app.run("sketch.constraint.horizontal_vertical", json!({"line":line,"mode":"horizontal"})).unwrap()["constraint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap();
+    h.settle();
+    let visibility = h.app.session.visibility.clone();
+
+    h.step(&json!({"click":{"handle":"fold:Source"}})).unwrap();
+    h.settle();
+    let row = |slug: &str, id: &str| format!("browser:sketch-contents-row:s:{sketch}:{slug}:{id}");
+    h.step(&json!({"click":{"handle":row("lines", &line)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id: line.clone() }]);
+    let at = handle_at(&row("lines", &line)).expect("the line row is drawn");
+    right_click(&mut h, at);
+    let Target::SketchContents { rows, editable, .. } = &h.app.menu.target else { panic!("no contents menu: {:?}", h.app.menu.target) };
+    assert!(!editable, "a finished sketch's row menu is read-only");
+    assert!(rows.contains(&line), "the right-clicked row is in the menu: {rows:?}");
+    let menu = crate::context_menu::items(&h.app, &h.app.menu.target);
+    assert!(!menu.iter().any(|item| item.id == "ui.delete" && item.enabled), "a finished sketch's rows cannot be deleted");
+    crate::context_menu::close(&mut h.app);
+    h.frames(2);
+    h.step(&json!({"click":{"handle":row("points", &point)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchPoint { sketch, id: point }]);
+
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:constraints")}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":row("constraints", &constraint)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id: line }], "an inactive constraint lights the curve it holds");
+    assert_eq!(h.app.session.visibility, visibility, "selecting a row never shows or hides its sketch");
+}
+
+/// Stage 3: Ctrl toggles contents rows in and out of the selection, and Shift takes the range
+/// between the last clicked row and this one, in the tree's own order.
+#[test]
+fn contents_rows_take_ctrl_and_shift_over_their_range() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Rows"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let mut lines = Vec::new();
+    for (i, id) in ["l1", "l2", "l3"].into_iter().enumerate() {
+        let x = i as f64 * 10.0;
+        lines.push(h.app.run("sketch.line", json!({"points":[[x,0],[x,5]],"ids":[id]})).unwrap()["curves"][0].as_str().unwrap().to_owned());
+    }
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.settle();
+    let row = |id: &str| format!("browser:sketch-contents-row:s:{sketch}:lines:{id}");
+
+    h.step(&json!({"click":{"handle":row(&lines[0])}})).unwrap();
+    h.step(&json!({"click":{"handle":row(&lines[1])},"ctrl":true})).unwrap();
+    assert_eq!(
+        h.app.session.selection,
+        vec![Sel::SketchCurve { id: lines[0].clone(), sketch: None }, Sel::SketchCurve { id: lines[1].clone(), sketch: None }],
+        "Ctrl adds a row"
+    );
+    h.step(&json!({"click":{"handle":row(&lines[1])},"ctrl":true})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: lines[0].clone(), sketch: None }], "Ctrl takes a picked row out");
+
+    h.step(&json!({"click":{"handle":row(&lines[0])}})).unwrap();
+    h.step(&json!({"click":{"handle":row(&lines[2])},"shift":true})).unwrap();
+    assert_eq!(
+        h.app.session.selection,
+        vec![
+            Sel::SketchCurve { id: lines[0].clone(), sketch: None },
+            Sel::SketchCurve { id: lines[1].clone(), sketch: None },
+            Sel::SketchCurve { id: lines[2].clone(), sketch: None },
+        ],
+        "Shift takes every contents row between the anchor and the click"
+    );
+}
+
+/// Stage 4b: right-clicking a contents row selects it and opens its sketch's entity menu; a row
+/// already in a multi-selection keeps the whole selection.
+#[test]
+fn right_clicking_contents_rows_opens_their_menu() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Menu"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let mut lines = Vec::new();
+    for (i, id) in ["l1", "l2"].into_iter().enumerate() {
+        let x = i as f64 * 10.0;
+        lines.push(h.app.run("sketch.line", json!({"points":[[x,0],[x,5]],"ids":[id]})).unwrap()["curves"][0].as_str().unwrap().to_owned());
+    }
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.settle();
+    let row = |id: &str| format!("browser:sketch-contents-row:s:{sketch}:lines:{id}");
+
+    let at = handle_at(&row(&lines[0])).expect("the first line row is drawn");
+    right_click(&mut h, at);
+    assert_eq!(
+        h.app.menu.target,
+        Target::SketchContents { sketch, rows: vec![lines[0].clone()], editable: true },
+        "the right-click selects the row and names it in its menu"
+    );
+    let menu = crate::context_menu::items(&h.app, &h.app.menu.target);
+    assert!(menu.iter().any(|item| item.id == "ui.delete" && item.enabled), "an active row can be deleted");
+
+    // A second row joins the selection with Ctrl, and the menu of either row speaks for both.
+    crate::context_menu::close(&mut h.app);
+    h.frames(2);
+    h.step(&json!({"click":{"handle":row(&lines[1])},"ctrl":true})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 2, "both rows are selected: {:?}", h.app.session.selection);
+    let at = handle_at(&row(&lines[1])).expect("the second line row is drawn");
+    right_click(&mut h, at);
+    let Target::SketchContents { rows, editable, .. } = &h.app.menu.target else { panic!("no contents menu: {:?}", h.app.menu.target) };
+    assert!(*editable);
+    assert_eq!(rows, &vec![lines[0].clone(), lines[1].clone()], "the whole multi-selection goes to the menu");
+}
+
+/// A right-click as the browser and the view receive it: the pointer moves over the row, then the
+/// secondary button goes down and up. A one-frame click can let the viewport's menu land over the
+/// browser's, so the frames are kept apart as a hand's are.
+fn right_click(h: &mut Harness, at: egui::Pos2) {
+    let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    h.frame_with(vec![press(true)]);
+    h.frame_with(vec![press(false)]);
+    h.frames(3);
 }
