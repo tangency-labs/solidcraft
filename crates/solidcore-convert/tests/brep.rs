@@ -248,7 +248,6 @@ fn records_the_conversion_cannot_carry_are_refused() {
 /// Each primitive goes to the record with its analytic kinds, validates, and comes back to the
 /// same body: the same counts and volume, valid, and the same record again.
 #[test]
-#[ignore = "WIP: to_record is the next commit"]
 fn every_primitive_goes_round_unchanged() {
     let o = Vec3::new(1.0, 2.0, 3.0);
     let makers: [(&str, fn(&mut Kernel, Vec3) -> Brep, &[&str]); 5] = [
@@ -464,4 +463,156 @@ fn an_untrusted_record_is_healed_into_the_same_body() {
     assert!(is_manifold_solid(&b).unwrap());
     assert!((volume(&k, &mut b) - 8.0).abs() < 1e-9);
     valid(&mut k, &mut b);
+}
+
+/// A body goes to the record, validates, comes back to the kernel as the same body (counts,
+/// volume, valid) and gives the same record again. Returns the record and the body back.
+fn round_trip(k: &mut Kernel, name: &str, b: &mut Brep) -> (Record, Brep) {
+    let v0 = volume(k, b);
+    let (r, order) = to_record(k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
+    r.validate_built().unwrap_or_else(|e| panic!("{name}: {e}"));
+    order_is_total(&order, &r, b);
+    let (mut back, back_order) = to_kernel(k, &r, true).unwrap_or_else(|e| panic!("{name}: {e}"));
+    order_is_total(&back_order, &r, &back);
+    let v1 = volume(k, &mut back);
+    assert!((v1 - v0).abs() <= 1e-9 * v0.abs(), "{name}: {v0} -> {v1}");
+    valid(k, &mut back);
+    let (again, _) = to_record(k, &mut back).unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert_eq!(again, r, "{name}: the record changed on a round trip");
+    (r, back)
+}
+
+fn boxed(k: &mut Kernel, o: [f64; 3], s: f64) -> Brep {
+    primitives::create_box(k, Vec3::new(o[0], o[1], o[2]), s, s, s).unwrap()
+}
+
+/// A box with a cubic void: the void is a bounded region of its own, its shell listed by the
+/// material round it as an inner shell, and the enclosing shell goes first again however the
+/// kernel's list is turned.
+#[test]
+fn a_void_goes_round_as_its_own_region_and_shell() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::topology::brep::enclosing::put_enclosing_shells_first;
+    let mut k = kernel();
+    let outer = boxed(&mut k, [0.0; 3], 10.0);
+    let inner = boxed(&mut k, [3.0; 3], 4.0);
+    let mut b = boolean_difference(&mut k, outer, inner).unwrap();
+    assert!((volume(&k, &mut b) - 936.0).abs() < 1e-9);
+    let (r, mut back) = round_trip(&mut k, "void", &mut b);
+    assert_eq!(r.regions.len(), 3);
+    assert_eq!(r.shells.len(), 2);
+    let material: Vec<_> = r.regions.iter().filter(|g| g.shells.len() == 2).collect();
+    assert_eq!(material.len(), 1, "{:?}", r.regions);
+    assert!(!material[0].void);
+    let void = r.regions.iter().find(|g| g.void).expect("a void region");
+    assert_eq!(void.shells, vec![material[0].shells[1]]);
+    // The kernel's list turned round: the enclosing shell is put first again.
+    let region = b_region_with_two_shells(&back);
+    let before = back.region(region).unwrap().shells.clone();
+    back.region_mut(region).unwrap().shells = before.iter().rev().copied().collect();
+    put_enclosing_shells_first(&mut k, &mut back).unwrap();
+    assert_eq!(back.region(region).unwrap().shells, before);
+}
+
+fn b_region_with_two_shells(b: &Brep) -> solidcore::topology::RegionId {
+    solidcore::topology::brep::p1::regions(b, None)
+        .unwrap()
+        .into_iter()
+        .find(|&g| Some(g) != b.infinite_region() && b.region(g).unwrap().shells.len() == 2)
+        .unwrap()
+}
+
+/// Two boxes apart are two bounded regions and two shells; two boxes touching along an edge
+/// are split there, each solid with its own copy of the shared edge and vertices, every copy
+/// naming the one kernel edge.
+#[test]
+fn lumps_and_solids_touching_along_an_edge_go_round() {
+    use solidcore::boolean::api_brep::boolean_union;
+    let mut k = kernel();
+    let a = boxed(&mut k, [0.0; 3], 1.0);
+    let c = boxed(&mut k, [3.0, 0.0, 0.0], 1.0);
+    let mut apart = boolean_union(&mut k, a, c).unwrap();
+    let (r, _) = round_trip(&mut k, "apart", &mut apart);
+    assert_eq!((r.regions.len(), r.shells.len(), r.faces.len()), (3, 2, 12));
+
+    let a = boxed(&mut k, [0.0; 3], 1.0);
+    let c = boxed(&mut k, [1.0, 1.0, 0.0], 1.0);
+    let mut touching = boolean_union(&mut k, a, c).unwrap();
+    let kernel_edges = touching.edge_list().len();
+    let (r, order) = to_record(&mut k, &mut touching).unwrap();
+    r.validate_built().unwrap();
+    assert_eq!(r.shells.len(), 2);
+    assert_eq!(
+        r.edges.len(),
+        kernel_edges + 1,
+        "the shared edge is copied once"
+    );
+    let mut named = order.edges.clone();
+    named.sort_unstable_by_key(|e| e.index());
+    named.dedup();
+    assert_eq!(named.len(), kernel_edges, "every kernel edge is named");
+    round_trip(&mut k, "touching", &mut touching);
+}
+
+/// An analytic body's record: its curved faces are labels on their NURBS forms, its circles
+/// labels on theirs, its lines their two end points over [0, 1]; each pcurve on its edge's
+/// interval.
+#[test]
+fn analytic_records_carry_labels_on_their_forms() {
+    let mut k = kernel();
+    let mut b = primitives::create_cylinder(&mut k, Vec3::new(0.0, 0.0, 0.0), 2.0, 5.0).unwrap();
+    let (r, _) = round_trip(&mut k, "cylinder", &mut b);
+    for f in &r.faces {
+        match f.surface {
+            Surface::Cylinder { radius, .. } => {
+                assert_eq!(radius, 2.0);
+                assert!(f.nurbs.is_some());
+            }
+            Surface::Plane { .. } => assert!(f.nurbs.is_none()),
+            ref other => panic!("a {other:?} face"),
+        }
+    }
+    for e in &r.edges {
+        match &e.curve {
+            Curve::Line { start, end } => {
+                assert_eq!(e.interval, [0.0, 1.0]);
+                assert_eq!((start[2], end[2]), (0.0, 5.0));
+                assert!(e.nurbs.is_none());
+            }
+            Curve::Circle { radius, .. } => {
+                assert_eq!(*radius, 2.0);
+                assert!(e.nurbs.is_some());
+            }
+            other => panic!("a {other:?} edge"),
+        }
+    }
+}
+
+/// Uses that go to the kernel bare (without their record pcurves) come back with the kernel's
+/// own trims: on the square sheet, the very lines its record had.
+#[test]
+fn bare_uses_come_back_with_the_kernels_trims() {
+    use solidcore_convert::brep::to_kernel_with_bare_uses;
+    let mut k = kernel();
+    let r = square(3.0);
+    let mut placeholder = r.clone();
+    let Loop::Edges { edges } = &mut placeholder.faces[0].loops[0] else {
+        unreachable!()
+    };
+    for u in edges.iter_mut() {
+        u.pcurve = Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0; 2]; 2],
+        };
+    }
+    let bare: Vec<(u32, u32, u32)> = (0..4).map(|p| (0, 0, p)).collect();
+    let (mut b, _) = to_kernel_with_bare_uses(&mut k, &placeholder, true, &bare).unwrap();
+    let (back, _) = to_record(&mut k, &mut b).unwrap();
+    assert_eq!(back.faces[0].loops, r.faces[0].loops);
+    let mut unsorted = bare.clone();
+    unsorted.reverse();
+    assert!(matches!(
+        to_kernel_with_bare_uses(&mut k, &placeholder, true, &unsorted),
+        Err(Unsupported::Invalid(_))
+    ));
 }

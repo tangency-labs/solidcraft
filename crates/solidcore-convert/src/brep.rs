@@ -112,10 +112,31 @@ fn undefined(t: &mut TopologyData) {
 /// kernel's limit; [`Unsupported::NotYet`] for wire and vertex shells, wire edges and traced
 /// intersection curves; [`Unsupported::Kernel`] for a step the kernel refuses.
 pub fn to_kernel(k: &mut Kernel, record: &r::Brep, trusted: bool) -> R<(Brep, Order)> {
+    to_kernel_with_bare_uses(k, record, trusted, &[])
+}
+
+/// [`to_kernel`], the uses `bare` names (each `(face, loop, position)`, sorted) going without
+/// their record pcurves, which they need not have: the kernel makes their trims as it makes every
+/// trim it needs ([`to_record`] asks for them). For a face whose uses have no pcurve of their own
+/// (an approximated edge on a cone, a file's spline edge on a spline surface): the face goes to
+/// the kernel alone, its bare uses' pcurves placeholders, and comes back with the kernel's.
+///
+/// # Errors
+///
+/// As [`to_kernel`]; [`Unsupported::Invalid`] for `bare` not sorted.
+pub fn to_kernel_with_bare_uses(
+    k: &mut Kernel,
+    record: &r::Brep,
+    trusted: bool,
+    bare: &[(u32, u32, u32)],
+) -> R<(Brep, Order)> {
     record
         .validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
-    let mut data = data(k, record)?;
+    if !bare.is_sorted() {
+        return Err(Unsupported::Invalid("bare uses not sorted"));
+    }
+    let mut data = data(k, record, bare)?;
     data.set_healer_version(if trusted {
         HEALER_VERSION
     } else {
@@ -164,7 +185,7 @@ pub fn to_kernel(k: &mut Kernel, record: &r::Brep, trusted: bool) -> R<(Brep, Or
 
 /// The record as the kernel's B-rep data: edgeuses face by face, loop by loop, in loop order;
 /// edges and vertices in the record's order.
-fn data(k: &Kernel, rec: &r::Brep) -> R<BrepData> {
+fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     let zone = zone_tolerance(rec.tolerance);
     let mut d = BrepData::new(UNSURE, DataSourceType::Usd);
     d.zone_tol_3d = zone;
@@ -352,7 +373,7 @@ fn data(k: &Kernel, rec: &r::Brep) -> R<BrepData> {
             object: made.surface,
         });
         d.faces.push(fd);
-        for l in &f.loops {
+        for (li, l) in f.loops.iter().enumerate() {
             let mut ld = LoopData::default();
             undefined(&mut ld.topology);
             match l {
@@ -366,7 +387,7 @@ fn data(k: &Kernel, rec: &r::Brep) -> R<BrepData> {
                     ld.loop_type = 0;
                     ld.num_eu = int(edges.len())?;
                     ld.start_eu = eu;
-                    for u in edges {
+                    for (p, u) in edges.iter().enumerate() {
                         let here = i64::try_from(eu).map_err(|_| Unsupported::Invalid("count"))?;
                         let slot =
                             usize::try_from(eu).map_err(|_| Unsupported::Invalid("count"))?;
@@ -402,7 +423,8 @@ fn data(k: &Kernel, rec: &r::Brep) -> R<BrepData> {
                             ud.mate_next_eu = here;
                         }
                         ud.uv_curve = NO_OBJECT;
-                        if made.trims {
+                        let place = (idx(fi)?, idx(li)?, idx(p)?);
+                        if made.trims && bare.binary_search(&place).is_err() {
                             let interval = intervals
                                 .get(u.edge as usize)
                                 .ok_or(Unsupported::Invalid("edge"))?;
@@ -529,13 +551,5 @@ pub fn recognised(
     })
 }
 
-/// The kernel's body as the record, in canonical order, and where each record face, edge and
-/// vertex is in the kernel.
-///
-/// # Errors
-///
-/// [`Unsupported::NotYet`]: the kernel-to-record half of the direct conversion is the next
-/// commit of this change.
-pub fn to_record(_k: &mut Kernel, _b: &mut Brep) -> R<(r::Brep, Order)> {
-    Err(Unsupported::NotYet("the kernel body as a record"))
-}
+mod record;
+pub use record::to_record;

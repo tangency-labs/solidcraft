@@ -16,5 +16,9 @@ categories = ["data-structures", "science"]
 solidcore = { path = "../solidcore" }
 solidcore-record = { path = "../solidcore-record" }
 
+[dev-dependencies]
+flate2 = "1.1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
 [lints]
 workspace = true

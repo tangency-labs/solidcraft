@@ -343,6 +343,8 @@ dependencies = [
 name = "solidcore-convert"
 version = "0.1.0"
 dependencies = [
+ "flate2",
+ "serde_json",
  "solidcore",
  "solidcore-record",
 ]
