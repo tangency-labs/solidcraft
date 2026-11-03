@@ -99,7 +99,7 @@ fn prune_params(doc: &mut Document) {
             used.extend(f.param_names.iter().cloned());
             used.extend(f.kind.expressions().into_iter().flat_map(references));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                used.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| references(e)));
             }
         }

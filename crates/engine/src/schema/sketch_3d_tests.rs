@@ -1,0 +1,85 @@
+use serde_json::json;
+
+use super::{AlongAxisParams, AlongAxisResult, OnPlaneParams, OnPlaneResult};
+use crate::Session;
+use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
+use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+
+#[test]
+fn schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<AlongAxisParams>(), &["axis", "line", "lines", "sketch"]);
+    assert_keys(input_schema_for::<OnPlaneParams>(), &["plane", "point", "points", "sketch"]);
+}
+
+#[test]
+fn strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("sketch.constraint.along_axis", json!({"line": "w1"})),
+        ("sketch.constraint.along_axis", json!({"line": "w1", "axis": "w"})),
+        ("sketch.constraint.along_axis", json!({"line": 5, "axis": "x"})),
+        ("sketch.constraint.along_axis", json!({"axis": "x"})),
+        ("sketch.constraint.on_plane", json!({"point": "q1"})),
+        ("sketch.constraint.on_plane", json!({"point": "q1", "plane": "xw"})),
+        ("sketch.constraint.on_plane", json!({"plane": "xy"})),
+    ]);
+}
+
+#[test]
+fn along_axis_reply_matches_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [10, 1, 2]]}));
+    let line = l["curves"][0].as_str().unwrap_or_else(|| panic!("{l}")).to_string();
+    let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": line, "axis": "x"}));
+    let schema = output_schema_for::<AlongAxisResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r}");
+}
+
+#[test]
+fn on_plane_reply_matches_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let q = run(&mut s, "sketch.point3d", json!({"point": [1, 2, 3]}));
+    let point = q["point"].as_str().unwrap_or_else(|| panic!("{q}")).to_string();
+    let r = run(&mut s, "sketch.constraint.on_plane", json!({"point": point, "plane": "xy"}));
+    let schema = output_schema_for::<OnPlaneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r}");
+}
+
+#[test]
+fn strict_takes_plane_and_axis_names_in_any_case() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [10, 1, 2]]}))["curves"][0].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": l, "axis": "X"}));
+    for (i, name) in ["XY", "xZ", "Zy"].into_iter().enumerate() {
+        let q = run(&mut s, "sketch.point3d", json!({"point": [1 + i, 2, 3]}))["point"].as_str().unwrap_or_default().to_string();
+        run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": name}));
+    }
+}
+
+#[test]
+fn plane_and_axis_names_publish_the_cases_they_take() {
+    use crate::schema::sketch_3d::{AxisName, PlaneName};
+    // The published pattern is any case, as the reader is.
+    let pattern = |v: serde_json::Value| v["pattern"].as_str().unwrap_or_default().to_string();
+    let plane = pattern(serde_json::to_value(schemars::schema_for!(PlaneName)).unwrap_or_default());
+    let axis = pattern(serde_json::to_value(schemars::schema_for!(AxisName)).unwrap_or_default());
+    assert!(plane.contains("[XxYy]") && plane.contains("[XxZz]"), "{plane}");
+    assert_eq!(axis, "^[XxYyZz]$");
+    for name in ["xy", "XY", "yX", "zx", "Zy"] {
+        assert!(serde_json::from_value::<PlaneName>(json!(name)).is_ok(), "{name}");
+    }
+    for name in ["xw", "x", "xyz"] {
+        assert!(serde_json::from_value::<PlaneName>(json!(name)).is_err(), "{name}");
+    }
+    for name in ["x", "Y", "z"] {
+        assert!(serde_json::from_value::<AxisName>(json!(name)).is_ok(), "{name}");
+    }
+}

@@ -198,10 +198,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let doc = s.doc_mut();
         if let FeatureKind::Sketch { sketch, .. } = &mut kind {
             // Each dimension of the copy gets its own parameter, with the same expression.
-            for c in &mut sketch.constraints {
-                if let Some(pn) = c.param.clone() {
+            for param in sketch.dimension_params_mut() {
+                if let Some(pn) = param.clone() {
                     let (e, u) = doc.param(&pn).map(|x| (x.expr.clone(), x.unit.clone())).unwrap_or_else(|| (pn.clone(), "mm".into()));
-                    c.param = Some(doc.new_model_param(&e, &u));
+                    *param = Some(doc.new_model_param(&e, &u));
                 }
             }
         }

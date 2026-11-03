@@ -1,0 +1,9 @@
+{
+  "en": {"cmd.sketch_constraint_on_plane": "On Plane"},
+  "ar": {"cmd.sketch_constraint_on_plane": "على مستوى"},
+  "de": {"cmd.sketch_constraint_on_plane": "Auf Ebene"},
+  "he": {"cmd.sketch_constraint_on_plane": "על מישור"},
+  "ja": {"cmd.sketch_constraint_on_plane": "平面上"},
+  "vi": {"cmd.sketch_constraint_on_plane": "Trên mặt phẳng"},
+  "zh": {"cmd.sketch_constraint_on_plane": "在平面上"}
+}

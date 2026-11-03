@@ -1,0 +1,28 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#10613"
+ ],
+ "what": "a pipe of diameter 8 along a 3D sketch line drawn from (0,0,0) to (100,3,4) and then held parallel to X by Along Axis",
+ "source": "analytic",
+ "method": "Along Axis asks only that the ends agree in y and z; the 3D solve moves the points as little as it can, so each end moves half the gap: the line runs (0,1.5,2) to (100,1.5,2), 100 long. The pipe is a cylinder r = 4, L = 100: V = pi r^2 L, faces = side + 2 caps, centre (50,1.5,2), box (0,-2.5,-2) to (100,5.5,6).",
+ "body_count": 1,
+ "volume_mm3": 5026.548245743669,
+ "faces": 3,
+ "center_of_mass": [
+  50.0,
+  1.5,
+  2.0
+ ],
+ "bbox": {
+  "min": [
+   0.0,
+   -2.5,
+   -2.0
+  ],
+  "max": [
+   100.0,
+   5.5,
+   6.0
+  ]
+ }
+}
