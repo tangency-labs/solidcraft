@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 use solidcraft_doc::{Document, Feature, FeatureKind, Mat, PlaneRef};
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, vec3};
 use crate::schema::timeline_clipboard::{PasteResult, Pasted};
