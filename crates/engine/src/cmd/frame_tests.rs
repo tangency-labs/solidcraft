@@ -1088,6 +1088,9 @@ fn bar45() -> Value {
     json!({"kind": "bar", "width": 45, "height": 45})
 }
 
+/// The section area of [`bar45`]: a member's volume is this × its length.
+const BAR45: f64 = 45.0 * 45.0;
+
 /// The member bodies a `frame.member` run made (not every body of the model), in line order.
 fn made(r: &Value) -> Vec<String> {
     r["created_bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect()
