@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "measure.line_to_centre": "من الخط إلى المركز"
+  },
+  "de": {
+    "measure.line_to_centre": "Linie zum Mittelpunkt"
+  },
+  "en": {
+    "measure.line_to_centre": "Line to centre"
+  },
+  "he": {
+    "measure.line_to_centre": "מהקו למרכז"
+  },
+  "ja": {
+    "measure.line_to_centre": "線から中心まで"
+  },
+  "ko": {
+    "measure.line_to_centre": "선에서 중심까지"
+  },
+  "vi": {
+    "measure.line_to_centre": "Từ đường đến tâm"
+  },
+  "zh": {
+    "measure.line_to_centre": "线到圆心"
+  }
+}
