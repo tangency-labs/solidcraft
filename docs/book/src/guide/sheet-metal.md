@@ -320,6 +320,7 @@ index) and, for the bends, a linetype that the file defines.
 | `TEXT` | 2 yellow | continuous | the letters that text cut through the sheet, with their counters; only with `"text": "cut"`, the default |
 | `ETCH` | 6 magenta | continuous | letters as single contours, to be marked and not cut: `"text": "etch"`, and always text machined to a depth |
 | `BEND_UP`, `BEND_DOWN` | 1 red, 5 blue | `DASHED` | the bend centre lines, by direction |
+| `BEND_ZONE` | 8 grey | continuous | the two edges of each bend zone, only with `"bend_zones": true` |
 | `BEND_NOTES` | 8 grey | continuous | the note beside each bend line, only with `"bend_notes": true` |
 | `POCKET_…` | 3 green | continuous | pockets, a layer for each depth (see below) |
 | `PERFORATION` | 3 green | continuous | the holes of a perforation field |
@@ -349,6 +350,20 @@ high (`"note_height"` changes that), centred half a height beside the middle of 
 parallel to it and readable from below or from the right. A bend that cut-outs split has a note
 for each piece. Notes are off by default, because a program that cuts or marks every layer would
 mark them.
+
+A bend zone is the strip of the flat that the bend takes: it starts where the flat side ends and
+is the bend allowance wide, BA = angle · (R + K · T) in radians, with the centre line half-way
+across. `"bend_zones": true` draws the zone's two edges on `BEND_ZONE`, so a shop can see where
+each bend starts and ends. It also adds the allowance and the deduction to each bend note:
+`B1 UP 90° R1 BA3.142 BD2.858` for a 90° bend of radius 1 in 2 mm sheet with a K-factor of 0.5.
+The deduction is BD = 2 · (R + T) · tan(angle / 2) − BA: the flat is the outside lengths of the
+flanges less it. A bend of 180° has no deduction, so its note gives only the allowance. The
+values are the bend table's `allowance_mm`, and a zone edge stops where a cut-out cuts it, as
+the centre line does. The option is off by default, and without it the file is as before.
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","bend_notes":true,"bend_zones":true}}
+```
 
 For a program that cuts every line it is given, `"bend_lines": false` leaves the bend lines out
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer

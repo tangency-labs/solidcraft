@@ -134,9 +134,11 @@ pub static COMMANDS: &[CommandSpec] = &[
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90%%d R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
+             bend_zones?: bool (default false: each bend zone's two edges, where the bend starts and where it ends, on layer BEND_ZONE, \
+              and each bend note gives the bend allowance and deduction too, `B1 UP 90%%d R1 BA3.142 BD2.858`), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
-             → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
+             → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_ZONE, BEND_NOTES, \
              POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
         ),
     CommandSpec::new("sheet.export_bend_table", "Export Bend Table", export_bend_table).icon("bendtable")
@@ -851,6 +853,9 @@ pub struct DxfOptions {
     pub bend_notes: Option<f64>,
     /// Leave the bend lines out (BEND_UP, BEND_DOWN), for a cutter that would cut them (#4314).
     pub no_bend_lines: bool,
+    /// Each bend zone's two edges on layer BEND_ZONE, and the bend allowance and deduction in
+    /// the bend notes (#11488).
+    pub bend_zones: bool,
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
 }
@@ -867,7 +872,7 @@ fn dxf_layer(name: &str) -> solidcraft_io::DxfLayer {
         "ETCH" => DxfLayer::new(name, 6),
         "BEND_UP" => DxfLayer::new(name, 1).dashed(),
         "BEND_DOWN" => DxfLayer::new(name, 5).dashed(),
-        "BEND_NOTES" => DxfLayer::new(name, 8),
+        "BEND_NOTES" | "BEND_ZONE" => DxfLayer::new(name, 8),
         _ => DxfLayer::new(name, 3),
     }
 }
@@ -879,10 +884,19 @@ fn compact(v: f64) -> String {
     if t.is_empty() || t == "-0" { "0".into() } else { t.into() }
 }
 
+/// A bend's deduction (mm) in a sheet `t` thick: twice its outside setback, (R + T)·tan(angle / 2),
+/// less its allowance, so that the flat is the outside lengths of its flanges less it. None for a
+/// bend of 180° or more, which has no setback.
+fn bend_deduction(b: &solidcraft_doc::sheet::BendInfo, t: f64) -> Option<f64> {
+    let half = b.angle_deg.to_radians() / 2.0;
+    (half.is_finite() && half < std::f64::consts::FRAC_PI_2 - 1e-9).then(|| 2.0 * (b.radius + t) * half.tan() - b.allowance)
+}
+
 /// The note beside a bend line, `B1 UP 90%%d R2.5` (number, direction, angle as `display` reads
-/// it, inner radius): as high as `height`, centred half a height beside the middle of the line,
+/// it, inner radius), with ` BA3.142 BD2.858` (allowance, and deduction in a sheet `t` thick) when
+/// `t` is given: as high as `height`, centred half a height beside the middle of the line,
 /// parallel to it and readable from below or from the right. (`%%d` is AutoCAD's degree sign.)
-fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay) -> solidcraft_io::DxfShape {
+fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay, t: Option<f64>) -> solidcraft_io::DxfShape {
     let along = (b.end - b.start).normalized().unwrap_or(Vec2::X);
     let mut angle = along.angle().to_degrees();
     if angle > 90.0 + 1e-9 {
@@ -891,17 +905,19 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
         angle += 180.0;
     }
     let beside = Vec2::from_angle(angle.to_radians()).perp();
-    solidcraft_io::DxfShape::Text {
-        at: (b.start + b.end) * 0.5 + beside * (height * 0.5),
-        height,
-        angle_deg: angle,
-        text: format!("B{} {} {}%%d R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
+    let mut text = format!("B{} {} {}%%d R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius));
+    if let Some(t) = t {
+        text.push_str(&format!(" BA{}", compact(b.allowance)));
+        if let Some(bd) = bend_deduction(b, t) {
+            text.push_str(&format!(" BD{}", compact(bd)));
+        }
     }
+    solidcraft_io::DxfShape::Text { at: (b.start + b.end) * 0.5 + beside * (height * 0.5), height, angle_deg: angle, text }
 }
 
 /// A DXF (AutoCAD 2000, mm) of the flat pattern on layers by role: OUTLINE (the outer contour of
 /// each piece), CUT (what is cut out inside it, and the loose pieces of a cut), TEXT or ETCH
-/// (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked for), one layer
+/// (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_ZONE and BEND_NOTES (when asked for), one layer
 /// per pocket depth and PERFORATION. Inner contours are written before the outline, so a program
 /// that follows the file's order cuts inside-out. Free-form curves as `o.curves` says.
 pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
@@ -999,7 +1015,12 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
             entities.push(DxfEntity { layer: if b.up { "BEND_UP" } else { "BEND_DOWN" }.into(), shape: DxfShape::Line(b.start, b.end) });
         }
         if let Some(height) = o.bend_notes {
-            entities.push(DxfEntity { layer: "BEND_NOTES".into(), shape: bend_note(&b, height, sh.angle_display) });
+            entities.push(DxfEntity { layer: "BEND_NOTES".into(), shape: bend_note(&b, height, sh.angle_display, o.bend_zones.then_some(sh.t)) });
+        }
+    }
+    if o.bend_zones {
+        for (_, a, b) in sh.bend_zone_edges() {
+            entities.push(DxfEntity { layer: "BEND_ZONE".into(), shape: DxfShape::Line(a, b) });
         }
     }
     for (c, r) in perforation {
@@ -1050,6 +1071,11 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(false)) => true,
         Some(_) => return Err(bad(cmd, "`bend_lines` must be true or false")),
     };
+    let bend_zones = match p.get("bend_zones").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(bad(cmd, "`bend_zones` must be true or false")),
+    };
     let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
         None => false,
         Some(v) => match v.as_str().map(str::to_ascii_lowercase).as_deref() {
@@ -1058,7 +1084,7 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
             _ => return Err(bad(cmd, "`layers` must be roles or single")),
         },
     };
-    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
+    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, bend_zones, one_layer })
 }
 
 /// The files of an export of every sheet body: `path` with `-<body>` before its extension
