@@ -43,7 +43,9 @@ pub struct Drag {
 }
 
 /// Begin a drag on the part under `p` when joints place it and leave it free to move (it is
-/// neither grounded nor fixed to what is). True when one began.
+/// neither grounded nor fixed to what is). True when the press is the joint drag's: one began, or
+/// one would have but moves shown and not captured hold it back. Then the status says so and no
+/// other tool (a Press Pull on the part's face) takes the press instead.
 pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     // The face under the pointer, past the part's own edges and vertices (not past sketches or
     // construction geometry in front of it).
@@ -57,12 +59,6 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
         return false;
     };
     let s = &app.session;
-    // Moves shown but not captured (a free move, an exploded view) are display only: the frames
-    // would solve from the design's placements, not the ones shown, and after the release the
-    // move shown would cover where the reach put the part. Capture or revert them first.
-    if !s.pending_moves.is_empty() {
-        return false;
-    }
     let Some(occurrence) = crate::dialogs_assembly::occurrence_of_body(s, &body).filter(|o| *o != 0) else { return false };
     if !s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence)) {
         return false;
@@ -70,6 +66,20 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let sol = joints::solve(&s.doc, &s.model.state());
     if !sol.world.contains_key(&occurrence) || sol.dof.get(&occurrence).is_none_or(|d| *d == 0) {
         return false;
+    }
+    // Moves shown but not captured (a free move, an exploded view) are display only: the frames
+    // would solve from the design's placements, not the ones shown, and after the release the
+    // move shown would cover where the reach put the part. Capture or revert them first; the
+    // press stays the joint drag's, so it says so rather than starting another tool on the part.
+    if !s.pending_moves.is_empty() {
+        let n = s.pending_moves.len();
+        let moved = if n == 1 {
+            crate::i18n::tr("browser.capture_one").to_string()
+        } else {
+            crate::i18n::format("browser.capture_many", &[("count", &n.to_string())])
+        };
+        app.set_status(format!("{moved} {}", crate::i18n::tr("browser.capture_note")), false);
+        return true;
     }
     let Some(local) = mat_inverse(&joints::occurrence_world(&s.doc, occurrence)).map(|inv| apply_point(&inv, at)) else { return false };
     let normal = proj.ray(p).1;
@@ -402,18 +412,29 @@ mod tests {
     /// #6325: while the view shows a move not captured yet (`occurrence.move` with `capture: false`,
     /// an exploded view), a press on a jointed part starts no joint drag: its frames would solve
     /// from where the design has the parts, not where the view shows them, and after the release
-    /// the uncaptured move would show the part again over where the reach put it.
+    /// the uncaptured move would show the part again over where the reach put it. The press is
+    /// still the joint drag's: it starts no Press Pull on the arm's face, and the status says why
+    /// nothing moves and what to do.
     #[test]
     fn a_move_not_captured_starts_no_joint_drag() {
         let (mut h, end, a, b) = hinged_arm();
+        // With direct interaction on, a press on a planar face that moves upward is a Press Pull.
+        h.app.preferences.direct_interaction = true;
         let doc = &h.app.session.doc;
         let arm = doc.find_component("Arm").and_then(|c| doc.occurrence_of(c)).map(|o| o.id).expect("the arm placed");
         run(&mut h, "occurrence.move", json!({"occurrence": arm, "translate": [0, 0, 20], "capture": false}));
         assert!(!h.app.session.pending_moves.is_empty(), "the move is shown, not captured");
         h.frames(2);
         let (doc, undo, pending) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.pending_moves.clone());
+        // Straight up on screen from the arm's top face: a pull, were the press not the joint drag's.
+        let up = a - egui::vec2(0.0, 60.0);
+        press_and_move(&mut h, a, up);
+        assert!(!crate::drag_extrude::started(&h.app) && h.app.dialog.is_none(), "the press started a Press Pull on the arm");
+        release(&mut h, up);
         press_and_move(&mut h, a, b);
         let started = h.app.viewport.joint_drag.is_some();
+        let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert!(status.contains(crate::i18n::tr("browser.capture_note")), "the status says to capture or revert first: {status:?}");
         release(&mut h, b);
         let turned = arm_at(&h, end);
         assert!(!started, "a drag began over the uncaptured move; the design's arm ended at {turned:?}, shown at y {}", shown_arm_reach(&h));
