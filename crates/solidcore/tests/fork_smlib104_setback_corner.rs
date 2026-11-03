@@ -44,6 +44,7 @@ fn box_corner_faces() -> Vec<Face> {
                 n[f] = -1.0;
                 Vec3::new(n[0], n[1], n[2])
             },
+            ..Face::default()
         })
         .collect()
 }

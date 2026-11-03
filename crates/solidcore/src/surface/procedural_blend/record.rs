@@ -614,13 +614,46 @@ pub struct EndCornerRecord {
     pub net: SupportRecord,
 }
 
-/// A face's plane at a Setback, its normal out of the material.
+/// A face at a Setback: its plane, its normal out of the material; or, beside a curved face
+/// (#2343), the natural quadric it is (`quadric`), `point` then its axis point (a cone's
+/// apex) or centre and `normal` its unit normal out of the material at the corner.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PlaneRecord {
-    /// A point of the plane.
+    /// A point of the plane; a quadric's axis point or centre.
     pub point: [f64; 3],
-    /// Its unit normal.
+    /// Its unit normal (a quadric's at the corner).
     pub normal: [f64; 3],
+    /// The quadric, where the face is no plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quadric: Option<QuadricRecord>,
+}
+
+/// What a curved face at a Setback is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuadricKindRecord {
+    /// A circular cylinder.
+    Cylinder,
+    /// A circular cone.
+    Cone,
+    /// A sphere.
+    Sphere,
+}
+
+/// A curved face at a Setback as its fill reads it (#2343): a cylinder or cone about the axis
+/// through its record's point, of `radius` there and `radius + slope h` at `h` along the
+/// axis, or a sphere about the point of `radius`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct QuadricRecord {
+    /// What it is.
+    pub kind: QuadricKindRecord,
+    /// A cylinder's or cone's unit axis.
+    pub axis: [f64; 3],
+    /// Its radius at the point (a cone's at its apex, 0).
+    pub radius: f64,
+    /// A cone's change of radius along its axis (a cylinder's and sphere's 0).
+    pub slope: f64,
+    /// `+1` where the material is inside it, `-1` outside.
+    pub side: f64,
 }
 
 /// A round at a Setback as its fill reads it.
@@ -817,6 +850,25 @@ impl CornerRecord {
                 for f in &r.faces {
                     if !points_finite(&[f.point, f.normal]) {
                         return Err(refuse("faces", "a face's plane is finite"));
+                    }
+                    if let Some(q) = &f.quadric {
+                        let radius_ok = match q.kind {
+                            QuadricKindRecord::Cone => q.radius >= 0.0 && q.slope > 0.0,
+                            QuadricKindRecord::Cylinder | QuadricKindRecord::Sphere => {
+                                q.radius > 0.0 && q.slope == 0.0
+                            }
+                        };
+                        let valid = points_finite(&[q.axis])
+                            && q.radius.is_finite()
+                            && q.slope.is_finite()
+                            && radius_ok
+                            && (q.side == 1.0 || q.side == -1.0);
+                        if !valid {
+                            return Err(refuse(
+                                "faces",
+                                "a curved face is a cylinder or sphere of positive radius or a cone opening along its axis, with a side of +1 or -1",
+                            ));
+                        }
                     }
                 }
                 if !(r.order == 1 || r.order == 2) {

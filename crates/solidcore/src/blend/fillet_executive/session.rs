@@ -577,6 +577,66 @@ impl crate::blend::blend_corner::ball::BallSolvers for SweptSessionSolvers<'_> {
     }
 }
 
+/// The live objects a Setback's fill reaches: the solvers as [`SweptSessionSolvers`] reads
+/// them, and (to grow its setbacks beside curved faces, solidcore#2343) the concrete solvers'
+/// `CalcSetBackVert` of its setback vertices.
+struct SetbackSessionSolvers<'s> {
+    solvers: &'s mut [Option<SolverObject>],
+    executive: &'s FilletExecutive<FilletObject>,
+    corner: FilletCornerId,
+}
+
+impl SetbackSessionSolvers<'_> {
+    fn lookup(&self) -> SweptSessionSolvers<'_> {
+        SweptSessionSolvers {
+            solvers: &*self.solvers,
+            executive: Some(self.executive),
+        }
+    }
+}
+
+impl crate::blend::blend_corner::ball::BallSolvers for SetbackSessionSolvers<'_> {
+    fn solver_of_edgeuse(&self, eu: EdgeuseId) -> Result<Option<FilletSolverId>> {
+        crate::blend::blend_corner::ball::BallSolvers::solver_of_edgeuse(&self.lookup(), eu)
+    }
+    fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver> {
+        self.solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .map(SolverObject::base)
+            .ok_or_else(|| invalid("setback solver is not live"))
+    }
+    fn solver_type(&self, id: FilletSolverId) -> Result<FilletSolverType> {
+        crate::blend::blend_corner::ball::BallSolvers::solver_type(&self.lookup(), id)
+    }
+    fn offset_radii_can_change(&self, id: FilletSolverId) -> Result<bool> {
+        crate::blend::blend_corner::ball::BallSolvers::offset_radii_can_change(&self.lookup(), id)
+    }
+}
+
+impl crate::blend::blend_corner::setback::SetbackSolvers for SetbackSessionSolvers<'_> {
+    fn calc_set_back_vert(
+        &mut self,
+        k: &Kernel,
+        target: &Brep,
+        pseudo: &mut FilletBrep,
+        corner: &FilletCorner,
+        fv: VertexId,
+    ) -> Result<()> {
+        let live = live_vertex_solvers(pseudo, self.solvers, fv)?;
+        pseudo.calc_set_back_vert_with_live_solvers(
+            k,
+            fv,
+            CornerLookup {
+                this: Some((Some(self.corner), corner)),
+                ..CornerLookup::default()
+            },
+            live,
+            target,
+        )
+    }
+}
+
 /// The fork's Setback noting why it refused at its vertex (`SetBackNotBuilt`, its
 /// `NoteError(m_cpVertex, SM_FIL_FAILURE, ..)`), and the setback that builds
 /// (`NoteFitSetBack`) where it names one.
@@ -2812,6 +2872,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             solvers,
             corners,
             extended_surfaces,
+            set_back_fills,
             ..
         } = self;
         let corner = corners
@@ -2871,12 +2932,18 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_setback)
         {
             let refused = {
-                let lookup = SweptSessionSolvers {
-                    solvers: solvers.as_slice(),
-                    executive: Some(&*executive),
+                let mut live = SetbackSessionSolvers {
+                    solvers: solvers.as_mut_slice(),
+                    executive: &*executive,
+                    corner: id,
                 };
                 crate::blend::blend_corner::setback::build_setback_fill(
-                    k, target, pseudo, corner, &lookup,
+                    k,
+                    target,
+                    pseudo,
+                    corner,
+                    &mut live,
+                    set_back_fills,
                 )?
             };
             if let Err(refusal) = refused {

@@ -39,13 +39,13 @@ const NC: usize = 3;
 
 /// A 2D point or vector (`SmPoint2d`, `SmVector2d`).
 #[derive(Debug, Clone, Copy, Default)]
-struct P2 {
-    x: f64,
-    y: f64,
+pub(super) struct P2 {
+    pub x: f64,
+    pub y: f64,
 }
 
 /// `sm_SbFillFrom`: the fill's surfaces from its nets.
-fn fill_from(
+pub(super) fn fill_from(
     nets: &[Net],
     round: &[usize],
     face: &[usize],
@@ -796,7 +796,7 @@ pub(super) fn graph_g1(
                 *el_mut(&mut cmm, lm * ln + f)? = if f == free { 1.0 } else { 0.0 };
             }
             bvm.push(-1.0);
-            return match dual_qp_rows(&gmm, &gvm, &cmm, &bvm, ln, lm + 1, 1.0e-13)? {
+            return match dual_qp_rows(&gmm, &gvm, &cmm, &bvm, ln, lm + 1, 1.0e-13, false)? {
                 QpOutcome::Solved(tm) => {
                     pr.margin_value = el(&tm, free)?;
                     Ok(Fill::default())
@@ -810,7 +810,7 @@ pub(super) fn graph_g1(
                 QpOutcome::Infeasible { .. } => Err(sm_err().into()),
             };
         }
-        let outcome = dual_qp_rows(&gm, &gv, &cm, &bv, free, bv.len(), 1.0e-13)?;
+        let outcome = dual_qp_rows(&gm, &gv, &cm, &bv, free, bv.len(), 1.0e-13, false)?;
         if let Some(pr) = probe.as_deref_mut().filter(|p| !p.fill) {
             pr.feasible = matches!(outcome, QpOutcome::Solved(_));
             return Ok(Fill::default());

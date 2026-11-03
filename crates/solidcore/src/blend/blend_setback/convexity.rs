@@ -19,9 +19,9 @@ use crate::error::Result;
 use crate::math::{Vec3, PI};
 
 /// `SM_SB_GRAPH_LEVELS`: the sector conditions' halvings.
-const GRAPH_LEVELS: usize = 1;
+pub(super) const GRAPH_LEVELS: usize = 1;
 /// `SM_SB_GRAPH_DIRECTIONS`: their directions over a half turn.
-const GRAPH_DIRECTIONS: usize = 16;
+pub(super) const GRAPH_DIRECTIONS: usize = 16;
 
 /// A patch's curvature determinants as affine functions of the unknowns, and its side.
 pub(super) struct PatchCurvatures {

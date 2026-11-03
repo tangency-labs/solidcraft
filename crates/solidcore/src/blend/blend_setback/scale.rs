@@ -264,7 +264,26 @@ pub fn certified_scale(
     }
     // The smallest certifying scale on the grid whose neighbour below fails;
     // monotonicity checked, not proved. Both ends of the final bracket were tested.
-    let (mut lo, mut hi) = (1000, 2000);
+    let hi = bisect_thousandths(1000, 2000, &mut certified)?;
+    Ok(CertifiedScale {
+        scale: f64::from(hi) / 1000.0,
+        solves,
+        attempts,
+        reason: None,
+    })
+}
+
+/// The bisection of [`certified_scale`]'s search on the grid of thousandths, shared by the
+/// curved Setback's growth (`grow_curved`, solidcore#2343): from `lo`, an index known to
+/// fail, and `hi`, one known to certify, the integer bracket is halved (`certified` asked at
+/// each midpoint) until its ends are adjacent. Returns `hi`: the smallest certifying index on
+/// the grid whose neighbour below fails; monotonicity checked, not proved. From 1000 and
+/// 2000 it asks at most 10 times.
+pub(crate) fn bisect_thousandths<E>(
+    mut lo: i32,
+    mut hi: i32,
+    mut certified: impl FnMut(i32) -> core::result::Result<bool, E>,
+) -> core::result::Result<i32, E> {
     while hi - lo > 1 {
         let mid = (lo + hi) / 2;
         if certified(mid)? {
@@ -273,12 +292,7 @@ pub fn certified_scale(
             lo = mid;
         }
     }
-    Ok(CertifiedScale {
-        scale: f64::from(hi) / 1000.0,
-        solves,
-        attempts,
-        reason: None,
-    })
+    Ok(hi)
 }
 
 #[cfg(test)]
@@ -296,6 +310,7 @@ mod tests {
             .map(|i| Face {
                 point: Point3::default(),
                 normal: unit(i) * if concave { 1.0 } else { -1.0 },
+                ..Face::default()
             })
             .collect();
         let edges = (0..3)

@@ -33,13 +33,26 @@
 //! | `corner_planes` (private)    | `sm_SbCornerPlanes`                                   |
 //! | `edge_blended` (private)     | `sm_SbEdgeBlended`                                    |
 //! | `set_backs` (private)        | `sm_SbSetBacks`                                       |
+//! | [`SetbackSolvers`]           | the corner's `SmFilletVertex::CalcSetBackVert` calls (37c9e1d) |
+//! | `quadric_face` (private)     | `sm_SbQuadricFace` (37c9e1d)                          |
+//! | `corner_quadrics` (private)  | `sm_SbCornerPlanes`'s `pbCurved` (37c9e1d)            |
+//! | `along_edge` (private)       | `sm_SbAlongEdge` (37c9e1d)                            |
+//! | `curved_least` (private)     | `sm_SbCurvedLeast` (37c9e1d)                          |
+//! | `gather_ends` (private)      | `BuildSetBackFill`'s `gather`                         |
+//! | `grow_curved` (private)      | `BuildSetBackFill`'s growth beside curved faces (37c9e1d) |
 //!
 //! Deviations: the Setback's own members are kept in [`SetbackCorner`] on the corner
 //! ([`FilletCorner::setback`]) from its creation (`SetFillOrder`) until its patches are
 //! faces. The fork's corner notes its refusal on the executive itself; here it is returned
 //! ([`SetbackRefusal`]) and the session notes it. The executive's set-back fills
 //! (`m_vSetBackFills`) are the session's, passed in. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion.
+//! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion. Beside curved faces
+//! (solidcore#2343, built in solidcore from the fork's work in progress at 37c9e1d, no fork
+//! commit; with `Kernel::fixes.fillet_setback_beside_curved_faces` too): the curved faces
+//! are found apart from `corner_planes` (`corner_quadrics`); the
+//! fork's `SBSCALE` environment override of the rule is not taken; the executive's
+//! `CalcSetBackVert` is reached through [`SetbackSolvers`]; a failing call within a growth
+//! trial is that call's error, where the fork's trial counts it as not certified.
 //!
 //! [`FilletCorner::setback`]: crate::blend::fillet_corner::p3::FilletCorner::setback
 
@@ -49,11 +62,13 @@ use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::BlendCornerEvent;
 use crate::blend::blend_setback::{
-    certified_scale, containment, distances, fill_hole, Edge, Face, Fill, Round,
+    bisect_thousandths, certified_scale, containment, distances, fill_hole_counted,
+    fill_hole_probe, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
 };
 use crate::blend::fillet_corner::p1::{face_by_two_edgeuses, test_g1_continuity};
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_corner::topology::new_corner_vertex;
+use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletErrorType,
     FilletGeomId, FilletVertexType,
@@ -64,6 +79,7 @@ use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::point_class::PointClassType;
@@ -96,6 +112,11 @@ pub struct SetbackCorner {
     /// `m_bSetBackOverflows`: the rule's setbacks do not fit, the blends overflow (refused
     /// if the corner is built).
     pub overflows: bool,
+    /// `m_vSetBackRoom` (the fork's 37c9e1d): each blended edge's room, its length less the
+    /// far end's claim (what a setback grown beside a curved face is held within). Beside a
+    /// curved face the length is the edge's arc length, as the setbacks are measured along
+    /// it; between planes (straight edges) the distance between its ends.
+    pub room: Vec<f64>,
     /// `m_pFill`: the fill, from the edge geometry until the patches take it.
     pub fill: Option<Fill>,
     /// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition, which
@@ -112,6 +133,7 @@ impl Default for SetbackCorner {
             fill_order: 1,
             convex: true,
             overflows: false,
+            room: Vec::new(),
             fill: None,
             definition: None,
         }
@@ -283,10 +305,7 @@ fn corner_planes(
             normal = -normal;
         }
         faces.push(face);
-        planes.push(Face {
-            point: vpoint,
-            normal,
-        });
+        planes.push(Face::plane(vpoint, normal));
     }
     let mut edges = Vec::with_capacity(n);
     for (i, &eu) in all_eus.iter().enumerate() {
@@ -304,6 +323,347 @@ fn corner_planes(
         planes,
         edges,
     }))
+}
+
+/// `sm_SbQuadricFace` (the fork's 37c9e1d): a curved corner face as the fill sees it, its
+/// natural quadric ([`BlendQuadric::from_surface`] at the middle of the face's uv domain);
+/// `None` where it is no plane or natural quadric. Its side is settled by the caller
+/// ([`corner_quadrics`]); its normal is left zero.
+fn quadric_face(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    vpoint: Point3,
+    tol: f64,
+) -> Result<Option<Face>> {
+    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let surface = face2::surface(b, face)?.ok_or_else(nul)?;
+    let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
+    let zero = Vec3::new(0.0, 0.0, 0.0);
+    let found = match q.kind {
+        QuadricKind::Plane => Face::plane(vpoint, zero),
+        QuadricKind::Cylinder => Face {
+            point: q.point,
+            normal: zero,
+            kind: FaceKind::Cylinder,
+            axis: q.dir,
+            radius: q.radius,
+            ..Face::default()
+        },
+        // the apex, the axis into the nappe
+        QuadricKind::Cone => Face {
+            point: q.point,
+            normal: zero,
+            kind: FaceKind::Cone,
+            axis: q.dir,
+            radius: 0.0,
+            slope: q.angle.tan(),
+            ..Face::default()
+        },
+        QuadricKind::Sphere => Face {
+            point: q.point,
+            normal: zero,
+            kind: FaceKind::Sphere,
+            radius: q.radius,
+            ..Face::default()
+        },
+        _ => return Ok(None),
+    };
+    Ok(Some(found))
+}
+
+/// `sm_SbCornerPlanes` with `pbCurved` (the fork's 37c9e1d): [`corner_planes`]'s, where a
+/// face may also be a natural quadric ([`quadric_face`]): its normal out of the material at
+/// the vertex, its side the material's (`+1` inside it, where that normal points away from
+/// its axis or centre). `None` where a face is neither, a side is undecided, or no face is
+/// curved (the corner is [`corner_planes`]'s then).
+fn corner_quadrics(
+    k: &Kernel,
+    b: &Brep,
+    vtx: VertexId,
+    all_eus: &[EdgeuseId],
+    solvers: &dyn BallSolvers,
+    tol: f64,
+    convex: bool,
+) -> Result<Option<CornerPlanes>> {
+    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let n = all_eus.len();
+    let mut away = Vec::with_capacity(n);
+    for &eu in all_eus {
+        let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
+        away.push(away_from(k, b, e, vtx)?);
+    }
+    let vpoint = vertex::point(b, vtx)?;
+    let mut faces = Vec::with_capacity(n);
+    let mut planes = Vec::with_capacity(n);
+    let mut curved = false;
+    for i in 0..n {
+        let prev = all_eus.get((i + n - 1) % n).copied();
+        let this = all_eus.get(i).copied();
+        let Some(face) = face_by_two_edgeuses(b, prev, this, None)? else {
+            return Ok(None);
+        };
+        let Some(surface) = face2::surface(b, face)? else {
+            return Ok(None);
+        };
+        let planar = surface.is_planar(k, tol)?;
+        let mut quadric = None;
+        let mut normal = if planar.is_planar {
+            match planar.normal.unitize() {
+                Ok(normal) => normal,
+                Err(_) => return Ok(None),
+            }
+        } else {
+            // a natural quadric: its normal at the vertex (its side settled below)
+            let Some(found) = quadric_face(k, b, face, vpoint, tol)? else {
+                return Ok(None);
+            };
+            let probe = Face { side: 1.0, ..found };
+            let Ok(normal) = probe.distance(vpoint).1.unitize() else {
+                return Ok(None);
+            };
+            quadric = Some(found);
+            normal
+        };
+        // the other edges lie on the material's side of a convex corner's face, off it at
+        // a concave one's
+        let mut others = Vec3::new(0.0, 0.0, 0.0);
+        for (j, &aj) in away.iter().enumerate() {
+            if j != i && j != (i + n - 1) % n {
+                others += aj;
+            }
+        }
+        let side = normal.dot(others);
+        if side.abs() <= EFF_ZERO {
+            return Ok(None);
+        }
+        let flip = (side > 0.0) == convex;
+        if flip {
+            normal = -normal;
+        }
+        faces.push(face);
+        planes.push(match quadric {
+            // the material inside the quadric (+1) where the normal out of it points away
+            // from its axis
+            Some(found) => {
+                curved = true;
+                Face {
+                    normal,
+                    side: if flip { -1.0 } else { 1.0 },
+                    ..found
+                }
+            }
+            None => Face::plane(vpoint, normal),
+        });
+    }
+    if !curved {
+        return Ok(None);
+    }
+    let mut edges = Vec::with_capacity(n);
+    for (i, &eu) in all_eus.iter().enumerate() {
+        let id = solver_of_edgeuse_or_mate(b, eu, solvers)?.ok_or_else(nul)?;
+        let fs = solvers.solver(id)?;
+        let s0 = fs.surface(0)?.ok_or_else(nul)?;
+        edges.push(Edge {
+            away: away.get(i).copied().ok_or_else(nul)?,
+            radius: s0.surface.offset_distance().abs(),
+            faces: [i, (i + 1) % n],
+        });
+    }
+    Ok(Some(CornerPlanes {
+        faces,
+        planes,
+        edges,
+    }))
+}
+
+/// The corner's faces as the fill sees them: [`corner_planes`]'s where every face is a
+/// plane, else, with `fillet_setback_beside_curved_faces`, [`corner_quadrics`]'s (`true` with
+/// them: the corner is beside a curved face).
+#[allow(clippy::too_many_arguments)]
+fn corner_faces(
+    k: &Kernel,
+    b: &Brep,
+    vtx: VertexId,
+    all_eus: &[EdgeuseId],
+    solvers: &dyn BallSolvers,
+    tol: f64,
+    convex: bool,
+) -> Result<Option<(CornerPlanes, bool)>> {
+    if let Some(planes) = corner_planes(k, b, vtx, all_eus, solvers, tol, convex)? {
+        return Ok(Some((planes, false)));
+    }
+    // beside a curved face only with its own flag: without it such a corner is the corner it
+    // was before (#2343)
+    if !k.fixes.fillet_setback_beside_curved_faces {
+        return Ok(None);
+    }
+    Ok(corner_quadrics(k, b, vtx, all_eus, solvers, tol, convex)?.map(|q| (q, true)))
+}
+
+/// `sm_SbAlongEdge` (the fork's 37c9e1d): how far along `e` from `vertex` the plane square
+/// to it holds `c` (Newton on the edge's parameter from the vertex, clamped to its interval,
+/// at most 60 steps, to `1e-3` of `tol`), as the edge's arc length from the vertex.
+fn along_edge(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    vertex: VertexId,
+    c: Point3,
+    tol: f64,
+) -> Result<Option<f64>> {
+    let nul = || SolidError::null_pointer(OP_TOPOLOGY);
+    // the curve as its edge's (its length's cache at the edge's tolerance, as the fork's
+    // pEdge->GetCurve() reads it through its owner)
+    let curve = edge::evaluation_curve(b, e)?.ok_or_else(nul)?;
+    let ivl = edge::interval(b, e)?;
+    let from_start = edge::start_vertex(b, e)? == Some(vertex);
+    let t0 = if from_start { ivl.min() } else { ivl.max() };
+    let mut t = t0;
+    for _ in 0..60 {
+        let d = curve.evaluate(k, t, 2, true, true)?;
+        let (Some(&d0), Some(&d1), Some(&d2)) = (d.first(), d.get(1), d.get(2)) else {
+            return Err(nul());
+        };
+        let w = c - d0;
+        let f = w.dot(d1);
+        let df = -d1.dot(d1) + w.dot(d2);
+        if df.is_nan() || df.abs() <= 0.0 {
+            return Ok(None);
+        }
+        let step = f / df;
+        t -= step;
+        t = smax(ivl.min(), smin(ivl.max(), t));
+        if step.abs() * d1.length() <= 1.0e-3 * tol {
+            break;
+        }
+    }
+    if (t - t0).abs() == 0.0 {
+        return Ok(Some(0.0));
+    }
+    Ok(Some(curve.length(
+        k,
+        &Extent1d::from_min_max(smin(t, t0), smax(t, t0)),
+        1.0e-3 * tol,
+    )?))
+}
+
+/// The determinant of a 3 by 3 matrix, by its first row (the fork's own expansion).
+fn det3(m: &[[f64; 3]; 3]) -> f64 {
+    let [[a, b, c], [d, e, f], [g, h, i]] = *m;
+    a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+}
+
+/// `sm_SbCurvedLeast` (the fork's 37c9e1d): the least setbacks at a corner beside curved
+/// faces. On each face i, where the rails of the two rounds beside it cross: the point P of
+/// the face whose ball centres `P - s r n(P)` (s `+1` at a convex corner, `-1` at a concave
+/// one) lie at r from each round's other face (Newton on the faces' closed-form distances,
+/// their Jacobian by central differences, at most 60 steps, to `1e-13` of the corner's size:
+/// its radii, and its distance from the origin, which the distances' rounding grows with);
+/// as far along each round's edge as the plane square to it through that ball's centre
+/// ([`along_edge`]). Each edge the farther of its two faces'. `None` where a crossing is not
+/// found (no convergence, a singular Jacobian, an edge with no Newton step).
+#[allow(clippy::too_many_arguments)]
+fn curved_least(
+    k: &Kernel,
+    b: &Brep,
+    vtx: VertexId,
+    all_eus: &[EdgeuseId],
+    faces: &[Face],
+    radii: &[f64],
+    convex: bool,
+    tol: f64,
+) -> Result<Option<Vec<f64>>> {
+    let nul = || SolidError::null_pointer(OP_TOPOLOGY);
+    let n = all_eus.len();
+    let mut least = vec![0.0; n];
+    let s = if convex { 1.0 } else { -1.0 };
+    let vpoint = vertex::point(b, vtx)?;
+    for i in 0..n {
+        // the rounds beside face i: edge a (faces a, i), edge b (faces i, i + 1)
+        let (ea, eb) = ((i + n - 1) % n, i);
+        let fi = faces.get(i).ok_or_else(nul)?;
+        let fa = faces.get(ea).ok_or_else(nul)?;
+        let fb = faces.get((i + 1) % n).ok_or_else(nul)?;
+        let ra = radii.get(ea).copied().ok_or_else(nul)?;
+        let rb = radii.get(eb).copied().ok_or_else(nul)?;
+        let residual = |p: Point3| -> ([f64; 3], Point3, Point3) {
+            let (d, normal) = fi.distance(p);
+            let ca = p - normal * (s * ra);
+            let cb = p - normal * (s * rb);
+            (
+                [d, fa.distance(ca).0 + s * ra, fb.distance(cb).0 + s * rb],
+                ca,
+                cb,
+            )
+        };
+        let mut p = vpoint;
+        let scale = smax(1.0, smax(ra, rb));
+        // the residuals are distances computed from world coordinates: their rounding grows
+        // with the corner's distance from the origin, not with its radii alone
+        let mut size = smax(scale, vpoint.length());
+        for f in [fi, fa, fb] {
+            size = smax(size, f.point.length());
+        }
+        let mut done = None;
+        for _ in 0..60 {
+            let (f, ca, cb) = residual(p);
+            if f[0].abs() + f[1].abs() + f[2].abs() <= 1.0e-13 * size {
+                done = Some((ca, cb));
+                break;
+            }
+            // the Jacobian by central differences of the closed-form distances
+            let mut jac = [[0.0; 3]; 3];
+            let h = 1.0e-6 * scale;
+            for kk in 0..3 {
+                let mut dv = Vec3::new(0.0, 0.0, 0.0);
+                match kk {
+                    0 => dv.x = h,
+                    1 => dv.y = h,
+                    _ => dv.z = h,
+                }
+                let (fp, _, _) = residual(p + dv);
+                let (fm, _, _) = residual(p - dv);
+                for (row, (&a, &bm)) in jac.iter_mut().zip(fp.iter().zip(&fm)) {
+                    if let Some(slot) = row.get_mut(kk) {
+                        *slot = (a - bm) / (2.0 * h);
+                    }
+                }
+            }
+            let det = det3(&jac);
+            if det.is_nan() || det.abs() <= EFF_ZERO {
+                return Ok(None);
+            }
+            let mut x = [0.0; 3];
+            for (kk, xk) in x.iter_mut().enumerate() {
+                let mut m = jac;
+                for (row, &fr) in m.iter_mut().zip(&f) {
+                    if let Some(slot) = row.get_mut(kk) {
+                        *slot = fr;
+                    }
+                }
+                *xk = det3(&m) / det;
+            }
+            let [x0, x1, x2] = x;
+            p -= Vec3::new(x0, x1, x2);
+        }
+        let Some((ca, cb)) = done else {
+            return Ok(None);
+        };
+        let edge_a = eu1::edge(b, *all_eus.get(ea).ok_or_else(nul)?)?.ok_or_else(nul)?;
+        let edge_b = eu1::edge(b, *all_eus.get(eb).ok_or_else(nul)?)?.ok_or_else(nul)?;
+        let (Some(da), Some(db)) = (
+            along_edge(k, b, edge_a, vtx, ca, tol)?,
+            along_edge(k, b, edge_b, vtx, cb, tol)?,
+        ) else {
+            return Ok(None);
+        };
+        let la = least.get_mut(ea).ok_or_else(nul)?;
+        *la = smax(*la, da);
+        let lb = least.get_mut(eb).ok_or_else(nul)?;
+        *lb = smax(*lb, db);
+    }
+    Ok(Some(least))
 }
 
 /// `sm_SbEdgeBlended`: whether `e` is blended by the executive (any of its edge uses has a
@@ -344,7 +704,7 @@ struct SetBacks {
 }
 
 /// `sm_SbSetBacks`: the corner's setbacks (owner, 2026-11-01). Each edge's room: its
-/// length, less the far end's claim: an asked-for setback with its ease there, or, where the
+/// length (beside a curved face its arc length, as its setbacks are), less the far end's claim: an asked-for setback with its ease there, or, where the
 /// far end is itself a vertex whose three or more edges are all blended (a corner that may
 /// set back too), half the edge. Asked for: the asked setback on every edge, refused (`fits`
 /// false) unless it and its ease lie below every room, `largest` then the largest that fits
@@ -352,9 +712,12 @@ struct SetBacks {
 /// the rule's ([`distances`]), each shrunk to its room less a quarter of its radius where
 /// longer, as long as that is at or above its minimum (`fits` false where not: the rounds
 /// beside an edge cross past its room, an overflow). `Err(reason)` where [`distances`]
-/// refuses.
+/// refuses. Beside a curved face (`curved`; the fork's 37c9e1d): the least setbacks where
+/// the rails cross on the faces as they are ([`curved_least`], refused where they cannot be
+/// found), and the rule's `max(1.5 r, least + 0.25 r)` from them ([`distances`]'s rule).
 #[allow(clippy::too_many_arguments)]
 fn set_backs(
+    k: &Kernel,
     b: &Brep,
     vtx: VertexId,
     all_eus: &[EdgeuseId],
@@ -363,15 +726,30 @@ fn set_backs(
     planes: &[Face],
     edges: &[Edge],
     tol: f64,
+    curved: bool,
+    convex: bool,
 ) -> Result<core::result::Result<SetBacks, Option<&'static str>>> {
     let nul = || SolidError::null_pointer(OP_TOPOLOGY);
     let n = all_eus.len();
-    let rule = match distances(planes, edges) {
-        Ok(rule) => rule,
-        Err(refusal) => return Ok(Err(refusal.reason)),
+    let (mut setbacks, least) = if curved {
+        let radii: Vec<f64> = edges.iter().map(|e| e.radius).collect();
+        let Some(least) = curved_least(k, b, vtx, all_eus, planes, &radii, convex, tol)? else {
+            return Ok(Err(Some(
+                "Fillet Error: where the rails of the rounds at a setback corner cross on its curved faces cannot be found",
+            )));
+        };
+        let setbacks = least
+            .iter()
+            .zip(&radii)
+            .map(|(&l, &r)| smax(1.5 * r, l + 0.25 * r))
+            .collect();
+        (setbacks, least)
+    } else {
+        match distances(planes, edges) {
+            Ok(rule) => (rule.setbacks, rule.least),
+            Err(refusal) => return Ok(Err(refusal.reason)),
+        }
     };
-    let mut setbacks = rule.setbacks;
-    let least = rule.least;
     let asked = set_back_fill_of(fills, vtx);
     let mut room = vec![0.0; n];
     let mut fits = true;
@@ -379,9 +757,16 @@ fn set_backs(
     let mut largest = BIG_DOUBLE;
     for (i, &eu) in all_eus.iter().enumerate() {
         let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
-        let start = edge::start_vertex(b, e)?.ok_or_else(nul)?;
-        let end = edge::end_vertex(b, e)?.ok_or_else(nul)?;
-        let length = vertex::point(b, start)?.distance(vertex::point(b, end)?);
+        let length = if curved {
+            // beside a curved face the edges may be arcs: the setbacks are lengths along
+            // them (along_edge, CalcSetBackVert), and so is the room they are held within
+            let curve = edge::evaluation_curve(b, e)?.ok_or_else(nul)?;
+            curve.length(k, &edge::interval(b, e)?, 1.0e-3 * tol)?
+        } else {
+            let start = edge::start_vertex(b, e)?.ok_or_else(nul)?;
+            let end = edge::end_vertex(b, e)?.ok_or_else(nul)?;
+            vertex::point(b, start)?.distance(vertex::point(b, end)?)
+        };
         let far = edge::other_vertex(b, e, Some(vtx))?.filter(|&f| f != vtx);
         let mut claim = 0.0;
         if let Some(ff) = far.and_then(|f| set_back_fill_of(fills, f)) {
@@ -435,7 +820,9 @@ fn set_backs(
 
 /// `SmBlendCorner::ClassifySetBack` (the fork's 61547af): whether the corner of a filleted
 /// vertex where every edge is blended (`solver_eus`, `all_eus`, three or more) is a Setback:
-/// every face there a plane, every edge a straight line, no two edges tangent, all of one
+/// every face there a plane, every edge a straight line (or, solidcore#2343 from the fork's
+/// 37c9e1d, a face a natural quadric, any edges, every blend a constant circular round, the
+/// fill G1), no two edges tangent, all of one
 /// convexity, each blend a constant round of one radius (`SM_FSG_CIRCULAR`) or the
 /// curvature-continuous section (`SM_FSG_BLEND_CURVE`), and either set back on request
 /// (`fills`, `GetSetBackFill`), or G2 (curvature-continuous sections), or rounds of unequal
@@ -510,15 +897,17 @@ pub fn classify_setback(
         max_r = smax(max_r, r0);
     }
 
-    // the edges: straight, of one convexity, no two tangent at the vertex
+    // the edges: of one convexity, no two tangent at the vertex; straight between planes
+    // (beside a curved face, any edge)
     let mut concave0 = false;
+    let mut straight = true;
     for (i, &eu) in all_eus.iter().enumerate() {
         let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
         let Some(curve) = edge::curve(b, e)? else {
             return none;
         };
         if curve.is_line(k, 10, tol)?.is_none() {
-            return none;
+            straight = false;
         }
         let concave = is_concave_edge(k, b, e)?;
         if i == 0 {
@@ -534,8 +923,15 @@ pub fn classify_setback(
         }
     }
 
-    // the faces: planes
-    if corner_planes(k, b, vtx, all_eus, solvers, tol, !concave0)?.is_none() {
+    // the faces: planes, or natural quadrics (solidcore#2343, the fork's 37c9e1d)
+    let Some((_, curved)) = corner_faces(k, b, vtx, all_eus, solvers, tol, !concave0)? else {
+        return none;
+    };
+    if !curved && !straight {
+        return none;
+    }
+    // beside a curved face only the G1 fill of constant circular rounds (smlib#85)
+    if curved && (kind != FilletSurfaceGeneratorType::Circular || !one_kind) {
         return none;
     }
 
@@ -556,6 +952,9 @@ pub fn classify_setback(
     } else {
         1
     };
+    if curved && order != 1 {
+        return Ok((BlendCornerEvent::None, order));
+    }
     Ok((BlendCornerEvent::Setback, order))
 }
 
@@ -631,7 +1030,8 @@ pub fn make_setback_topology(
     let first = eu1::edge(target, *all.first().ok_or_else(nul)?)?.ok_or_else(nul)?;
     let concave = is_concave_edge(k, target, first)?;
     sb.convex = !concave;
-    let Some(planes) = corner_planes(k, target, vtx, &all, solvers, tol, sb.convex)? else {
+    let Some((planes, curved)) = corner_faces(k, target, vtx, &all, solvers, tol, sb.convex)?
+    else {
         return Err(err()); // ClassifySetBack found them
     };
 
@@ -640,6 +1040,7 @@ pub fn make_setback_topology(
     // corner, made meanwhile with each setback at half its room (only so that its vertices
     // can be placed), refuses in BuildSetBackFill if it is ever built.
     let found = set_backs(
+        k,
         target,
         vtx,
         &all,
@@ -648,6 +1049,8 @@ pub fn make_setback_topology(
         &planes.planes,
         &planes.edges,
         tol,
+        curved,
+        sb.convex,
     )?;
     let SetBacks {
         setbacks: mut sbs,
@@ -691,12 +1094,14 @@ pub fn make_setback_topology(
         corner.ease_dist = a.ease;
     }
     sb.overflows = !fits;
+    sb.room.clone_from(&room);
     // a G1 fill is taken only certified convex: the least scale of the setbacks at which it
     // is (CertifiedScale). The rule's grow to it, each held at its room less the rule's
     // quarter radius (the others growing on); refused, naming them, where none within the
     // rooms certifies. One asked for that is too short is refused, naming the setback that
-    // builds (or that none does, where that one does not fit with its ease).
-    if sb.fill_order == 1 && !sb.overflows {
+    // builds (or that none does, where that one does not fit with its ease). Beside a curved
+    // face they grow with the real rounds instead (build_setback_fill).
+    if sb.fill_order == 1 && !sb.overflows && !curved {
         let mut most = vec![0.0; n];
         for (i, m) in most.iter_mut().enumerate() {
             *m = if asked.is_some() {
@@ -852,52 +1257,62 @@ pub fn make_setback_topology(
     Ok(Ok(()))
 }
 
-/// `SmBlendCorner::BuildSetBackFill` (the fork's 61547af, 1506e2f): the Setback's fill
-/// ([`fill_hole`]), from the blends' surfaces at their end sections, and from it the base
-/// points and the spring curves' halves. `Ok(Err(refusal))` where the fill is refused (its
-/// reason noted), where it stands past a face ([`containment`], certified) farther than the
-/// corner's tolerance, or where the rule's setbacks overflowed.
-///
-/// # Errors
-///
-/// `SM_ERR` where the corner's topology is not the Setback's, a setback vertex is not
-/// processed or the fill does not match it; [`SolidError::null_pointer`] where the fork
-/// dereferences missing geometry (`NER`); those of the queries.
-#[allow(clippy::too_many_lines)] // the fork's one function
-pub fn build_setback_fill(
+/// What the Setback's fill reads of the executive's solvers ([`BallSolvers`]) and, to grow
+/// its setbacks beside curved faces (solidcore#2343), the executive's placing of its setback
+/// vertices again.
+pub trait SetbackSolvers: BallSolvers {
+    /// `SmFilletVertex::CalcSetBackVert` of `corner`'s setback vertex `fv`, at the setbacks
+    /// `corner` holds ([`SetbackCorner::setbacks`]); its mate gets the matching point.
+    ///
+    /// # Errors
+    /// Those of the executive's `CalcSetBackVert`.
+    fn calc_set_back_vert(
+        &mut self,
+        k: &Kernel,
+        target: &Brep,
+        pseudo: &mut FilletBrep,
+        corner: &FilletCorner,
+        fv: VertexId,
+    ) -> Result<()>;
+}
+
+/// Each blend's surface at its end section, and its rails' direction on it, the rail
+/// parameter of its setback vertex and on which side the corner lies.
+type Ends = (Vec<Surface>, Vec<(SurfParamType, f64, bool)>);
+
+/// The blends at their end sections as `gather` (the fork's lambda in `BuildSetBackFill`)
+/// finds them: each one's surface, and its rails' direction, the rail parameter of its
+/// setback vertex and on which side the corner lies.
+enum Gathered {
+    /// The blends' ends.
+    Ends(Vec<Surface>, Vec<(SurfParamType, f64, bool)>),
+    /// Refused, with its reason (`pGatherWhy`).
+    Refused(&'static str),
+    /// A setback vertex not on its rail (`DropPoint` found none): the fork's `SM_ERR`, a
+    /// trial not placed while the setbacks grow.
+    Unplaced,
+}
+
+/// The fork's `gather` in `BuildSetBackFill`: each blend at its end section (its surface,
+/// its rails' direction on it, the rail parameter of its setback vertex, and on which side
+/// the corner lies).
+#[allow(clippy::too_many_arguments)]
+fn gather_ends(
     k: &Kernel,
     target: &Brep,
-    pseudo: &mut FilletBrep,
-    corner: &mut FilletCorner,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
     solvers: &dyn BallSolvers,
-) -> Result<core::result::Result<(), SetbackRefusal>> {
+    faces: &[FaceId],
+    vpoint: Point3,
+    tol: f64,
+) -> Result<Gathered> {
     let nul = || SolidError::null_pointer(OP_FILL);
     let err = || SolidError::sm_err(OP_FILL);
-    let all = corner.all_eus.clone().ok_or_else(nul)?;
-    let sb = corner.setback.as_ref().ok_or_else(err)?;
-    if sb.overflows {
-        return Ok(Err(SetbackRefusal::no_room(
-            "Fillet Error: the rounds beside an edge at a setback corner cross past the room on that edge: the blends are larger than their faces allow",
-            None,
-        )));
-    }
-    let n = all.len();
-    if corner.vertices.len() != 3 * n || corner.edges.len() != 3 * n {
-        return Err(err());
-    }
-    let vtx = corner.vertex.ok_or_else(nul)?;
-    let tol = corner.approx_tol_3d;
-    let (convex, order) = (sb.convex, sb.fill_order);
-    let Some(planes) = corner_planes(k, target, vtx, &all, solvers, tol, convex)? else {
-        return Err(err());
-    };
-    let vpoint = vertex::point(target, vtx)?;
-
-    // each blend at its end section: its surface, its rails' direction on it, the rail
-    // parameter of its setback vertex, and on which side the corner lies
+    let n = faces.len();
     let mut surfaces: Vec<Surface> = Vec::with_capacity(n);
     let mut sides: Vec<(SurfParamType, f64, bool)> = Vec::with_capacity(n);
-    for i in 0..n {
+    for (i, &face) in faces.iter().enumerate() {
         let s = *corner.vertices.get(3 * i + 2).ok_or_else(nul)?;
         if !pseudo.fillet_vertex(s)?.is_processed() {
             return Err(err());
@@ -915,7 +1330,6 @@ pub fn build_setback_fill(
             Some(s) if crate::topology::brep::p3::with_nurb(k, s)?.is_some() => s.clone(),
             _ => return Err(nul()),
         };
-        let face = *planes.faces.get(i).ok_or_else(nul)?;
         let rail_index = fs.find_index_of_rail_on_face(target, Some(face))?;
         if rail_index > 1 {
             return Err(err());
@@ -933,7 +1347,7 @@ pub fn build_setback_fill(
             SolverOperation::Minimize,
         )?;
         if !dropped.success {
-            return Err(err());
+            return Ok(Gathered::Unplaced);
         }
         let end = dropped.parameter;
         let on_rail = rail_curve.evaluate_point(k, end)?;
@@ -976,36 +1390,324 @@ pub fn build_setback_fill(
             }
         }
         if along == SurfParamType::Unknown {
-            return Ok(Err(SetbackRefusal::not_built(
+            return Ok(Gathered::Refused(
                 "Fillet Error: a setback corner needs each blend's surface to run along its rails",
-            )));
+            ));
         }
         surfaces.push(surface);
         sides.push((along, end, hi.distance(vpoint) < lo.distance(vpoint)));
     }
-    let rounds: Vec<Round<'_>> = surfaces
+    Ok(Gathered::Ends(surfaces, sides))
+}
+
+/// The fill's rounds from the blends' ends.
+fn rounds_of<'s>(surfaces: &'s [Surface], sides: &[(SurfParamType, f64, bool)]) -> Vec<Round<'s>> {
+    surfaces
         .iter()
-        .zip(&sides)
+        .zip(sides)
         .map(|(surface, &(along, end, corner_above))| Round {
             surface,
             along,
             end,
             corner_above,
         })
-        .collect();
+        .collect()
+}
 
-    let fill = match fill_hole(k, &planes.planes, &rounds, order, tol) {
+/// What the growth of a Setback's setbacks beside curved faces works on.
+struct Growth<'a> {
+    k: &'a Kernel,
+    target: &'a Brep,
+    planes: &'a CornerPlanes,
+    vpoint: Point3,
+    tol: f64,
+    /// The setbacks it grows from (the rule's, or the one asked for).
+    base: Vec<f64>,
+    /// The most each may grow to: its room less the rule's quarter radius (unbounded where
+    /// asked for).
+    most: Vec<f64>,
+}
+
+impl Growth<'_> {
+    /// The fork's `place`: the setbacks at `scale` times the base (each held at its most),
+    /// the setback vertices placed there (`CalcSetBackVert`), and the blends' ends gathered
+    /// there; `None` where a vertex is not placed or the ends are not gathered.
+    fn place<S: SetbackSolvers>(
+        &self,
+        pseudo: &mut FilletBrep,
+        corner: &mut FilletCorner,
+        solvers: &mut S,
+        scale: f64,
+    ) -> Result<Option<Ends>> {
+        let nul = || SolidError::null_pointer(OP_FILL);
+        let sb = corner.setback.as_mut().ok_or_else(nul)?;
+        let mut dist: f64 = 0.0;
+        for ((s, &base), &most) in sb.setbacks.iter_mut().zip(&self.base).zip(&self.most) {
+            *s = smin(scale * base, most);
+            dist = smax(dist, *s);
+        }
+        corner.set_back_dist = dist;
+        for i in 0..self.base.len() {
+            let s = *corner.vertices.get(3 * i + 2).ok_or_else(nul)?;
+            solvers.calc_set_back_vert(self.k, self.target, pseudo, corner, s)?;
+            if !pseudo.fillet_vertex(s)?.is_processed() {
+                return Ok(None);
+            }
+        }
+        match gather_ends(
+            self.k,
+            self.target,
+            pseudo,
+            corner,
+            &*solvers,
+            &self.planes.faces,
+            self.vpoint,
+            self.tol,
+        )? {
+            Gathered::Ends(surfaces, sides) => Ok(Some((surfaces, sides))),
+            Gathered::Refused(_) | Gathered::Unplaced => Ok(None),
+        }
+    }
+
+    /// The fork's `trial`: the fill at `scale` times the base (`FillHoleProbe`, from the
+    /// least degree up); `None` where its vertices are not placed or it is refused. A failing
+    /// call within it is that call's error.
+    fn trial<S: SetbackSolvers>(
+        &self,
+        pseudo: &mut FilletBrep,
+        corner: &mut FilletCorner,
+        solvers: &mut S,
+        scale: f64,
+    ) -> Result<Option<Fill>> {
+        let Some((surfaces, sides)) = self.place(pseudo, corner, solvers, scale)? else {
+            return Ok(None);
+        };
+        let rounds = rounds_of(&surfaces, &sides);
+        // certified by more than its rounding, so that the setback the growth names builds
+        // when asked for (#2243)
+        let mut probe = Probe {
+            fill: true,
+            rounding_margin: true,
+            ..Probe::default()
+        };
+        match fill_hole_probe(
+            self.k,
+            &self.planes.planes,
+            &rounds,
+            self.tol,
+            &mut probe,
+            &mut FillStats::default(),
+        ) {
+            Ok(fill) => Ok(Some(fill)),
+            Err(refusal) if refusal.reason.is_some() => Ok(None),
+            Err(refusal) => Err(refusal.error),
+        }
+    }
+}
+
+/// The fork's growth in `BuildSetBackFill` (37c9e1d; #85 C, the owner's section 28): beside
+/// a curved face, the rule's setbacks, or the one asked for, grow to the least scale at which
+/// the fill is certified, with the real rounds: each trial moves the setback vertices
+/// ([`SetbackSolvers::calc_set_back_vert`] at the scaled setbacks, each held at its room less
+/// a quarter radius) and fills the hole from the least degree up. Twice them first, then the
+/// planar search's bisection on the grid of thousandths (`certified_scale`, the fork's
+/// 20b1c01, where 37c9e1d bisected to `1e-2`): the smallest certifying scale whose neighbour
+/// below fails, in at most 11 trials. A trial is certified only by more than its certificate's
+/// rounding bound (`Probe::rounding_margin`, #2243), so that the corner built afresh there,
+/// as the caller builds it or a caller asking that setback would, is certified too. None up
+/// to twice them: refused, naming none. One asked for that certifies only grown: refused,
+/// naming the setback that builds (or none, where that one does not fit with its ease).
+/// Returns the blends' ends where the setbacks found put them.
+fn grow_curved<S: SetbackSolvers>(
+    growth: &Growth<'_>,
+    pseudo: &mut FilletBrep,
+    corner: &mut FilletCorner,
+    solvers: &mut S,
+    asked: Option<SetBackFill>,
+) -> Result<core::result::Result<Ends, SetbackRefusal>> {
+    let err = || SolidError::sm_err(OP_FILL);
+    if growth.trial(pseudo, corner, solvers, 2.0)?.is_none() {
+        let why = if let Some(a) = asked {
+            format!(
+                "Fillet Error: no setback up to twice {} keeps the setback corner's fill no more concave than its faces",
+                fmt_g(a.setback)
+            )
+        } else {
+            "Fillet Error: no setbacks up to twice the rule's within the corner's edges keep its fill no more concave than its faces".to_owned()
+        };
+        return Ok(Err(SetbackRefusal::no_room(why, Some(0.0))));
+    }
+    // The planar search's (`certified_scale`, #2382, the fork's 20b1c01): the smallest
+    // certifying scale on the grid of thousandths whose neighbour below fails, by bisection
+    // from 1 (the fill at the setbacks themselves, refused) and 2.
+    let hi = bisect_thousandths(1000, 2000, |i| {
+        let at = growth.trial(pseudo, corner, solvers, f64::from(i) / 1000.0)?;
+        Ok::<bool, SolidError>(at.is_some())
+    })?;
+    let hi = f64::from(hi) / 1000.0;
+    let Some(ends) = growth.place(pseudo, corner, solvers, hi)? else {
+        return Err(err());
+    };
+    if let Some(a) = asked {
+        let room = &corner.setback.as_ref().ok_or_else(err)?.room;
+        let fits_room = room.iter().all(|&r| hi * a.setback + a.ease < r);
+        let builds = if fits_room { hi * a.setback } else { 0.0 };
+        let why = if fits_room {
+            format!(
+                "Fillet Error: a setback of {} is too short for the setback corner's fill to stay no more concave than its faces: a setback of {} builds it",
+                fmt_g(a.setback),
+                fmt_g(builds)
+            )
+        } else {
+            format!(
+                "Fillet Error: a setback of {} is too short for the setback corner's fill to stay no more concave than its faces, and the {} that would be does not fit on its edges",
+                fmt_g(a.setback),
+                fmt_g(hi * a.setback)
+            )
+        };
+        return Ok(Err(SetbackRefusal::no_room(why, Some(builds))));
+    }
+    Ok(Ok(ends))
+}
+
+/// `SmBlendCorner::BuildSetBackFill` (the fork's 61547af, 1506e2f): the Setback's fill
+/// ([`fill_hole`](crate::blend::blend_setback::fill_hole)), from the blends' surfaces at their end sections, and from it the base
+/// points and the spring curves' halves. `Ok(Err(refusal))` where the fill is refused (its
+/// reason noted), where it stands past a face ([`containment`], certified) farther than the
+/// corner's tolerance, or where the rule's setbacks overflowed. Beside a curved face
+/// (solidcore#2343, the fork's 37c9e1d) a fill refused as uncertified grows its setbacks
+/// with the real rounds (`grow_curved`, placing the setback vertices again through
+/// `solvers`), and one not certified on the material's side of its curved faces is refused.
+/// `fills`: the executive's set-back fills (`GetSetBackFill`).
+///
+/// # Errors
+///
+/// `SM_ERR` where the corner's topology is not the Setback's, a setback vertex is not
+/// processed or the fill does not match it; [`SolidError::null_pointer`] where the fork
+/// dereferences missing geometry (`NER`); those of the queries.
+#[allow(clippy::too_many_lines)] // the fork's one function
+pub fn build_setback_fill<S: SetbackSolvers>(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &mut FilletBrep,
+    corner: &mut FilletCorner,
+    solvers: &mut S,
+    fills: &[SetBackFill],
+) -> Result<core::result::Result<(), SetbackRefusal>> {
+    let nul = || SolidError::null_pointer(OP_FILL);
+    let err = || SolidError::sm_err(OP_FILL);
+    let all = corner.all_eus.clone().ok_or_else(nul)?;
+    let sb = corner.setback.as_ref().ok_or_else(err)?;
+    if sb.overflows {
+        return Ok(Err(SetbackRefusal::no_room(
+            "Fillet Error: the rounds beside an edge at a setback corner cross past the room on that edge: the blends are larger than their faces allow",
+            None,
+        )));
+    }
+    let n = all.len();
+    if corner.vertices.len() != 3 * n || corner.edges.len() != 3 * n {
+        return Err(err());
+    }
+    let vtx = corner.vertex.ok_or_else(nul)?;
+    let tol = corner.approx_tol_3d;
+    let (convex, order) = (sb.convex, sb.fill_order);
+    let Some((planes, curved)) = corner_faces(k, target, vtx, &all, &*solvers, tol, convex)? else {
+        return Err(err());
+    };
+    let vpoint = vertex::point(target, vtx)?;
+
+    // each blend at its end section
+    let (mut surfaces, mut sides) = match gather_ends(
+        k,
+        target,
+        pseudo,
+        corner,
+        &*solvers,
+        &planes.faces,
+        vpoint,
+        tol,
+    )? {
+        Gathered::Ends(surfaces, sides) => (surfaces, sides),
+        Gathered::Refused(why) => return Ok(Err(SetbackRefusal::not_built(why))),
+        Gathered::Unplaced => return Err(err()),
+    };
+    let mut stats = FillStats::default();
+    let first = fill_hole_counted(
+        k,
+        &planes.planes,
+        &rounds_of(&surfaces, &sides),
+        order,
+        tol,
+        &mut stats,
+    );
+    let fill = match first {
         Ok(fill) => fill,
-        Err(refusal) => {
+        Err(refusal) if !curved || !stats.uncertified => {
             return Ok(Err(SetbackRefusal::not_built(refusal.reason.unwrap_or(
                 "Fillet Error: the setback corner's hole cannot be filled",
             ))))
         }
+        Err(_) => {
+            let asked = set_back_fill_of(fills, vtx);
+            let sb = corner.setback.as_ref().ok_or_else(err)?;
+            if sb.room.len() != n || sb.setbacks.len() != n {
+                return Err(err());
+            }
+            let base = sb.setbacks.clone();
+            let mut most = Vec::with_capacity(n);
+            for ((&b, &r), e) in base.iter().zip(&sb.room).zip(&planes.edges) {
+                most.push(if asked.is_some() {
+                    BIG_DOUBLE
+                } else {
+                    smax(b, r - 0.25 * e.radius)
+                });
+            }
+            let growth = Growth {
+                k,
+                target,
+                planes: &planes,
+                vpoint,
+                tol,
+                base,
+                most,
+            };
+            match grow_curved(&growth, pseudo, corner, solvers, asked)? {
+                // the fill where the grown setbacks put the blends' ends, made as a corner
+                // asked for those setbacks would make it
+                Ok((grown_surfaces, grown_sides)) => {
+                    surfaces = grown_surfaces;
+                    sides = grown_sides;
+                    match fill_hole_counted(
+                        k,
+                        &planes.planes,
+                        &rounds_of(&surfaces, &sides),
+                        order,
+                        tol,
+                        &mut stats,
+                    ) {
+                        Ok(fill) => fill,
+                        Err(refusal) => {
+                            return Ok(Err(SetbackRefusal::not_built(refusal.reason.unwrap_or(
+                                "Fillet Error: the setback corner's hole cannot be filled",
+                            ))))
+                        }
+                    }
+                }
+                Err(refusal) => return Ok(Err(refusal)),
+            }
+        }
     };
+    let rounds = rounds_of(&surfaces, &sides);
+
     if fill.patches.len() != 2 * n || fill.face.len() != n {
         return Err(err());
     }
     let worst = containment(&fill, &planes.planes, convex)?;
+    if worst == f64::INFINITY {
+        return Ok(Err(SetbackRefusal::not_built(
+            "Fillet Error: the setback corner's fill is not certified to stay on the material's side of its curved faces",
+        )));
+    }
     if worst > tol {
         return Ok(Err(SetbackRefusal::not_built(format!(
             "Fillet Error: the setback corner's fill stands {} past a face it meets",
@@ -1110,7 +1812,8 @@ pub fn build_setback_fill(
 /// ([`SetbackFill`]: the faces' planes, the rounds at their end sections, the rule's order
 /// and tolerance, the corner's convexity and its containment), certified at once: the rule
 /// run again from the definition makes this fill, number for number, with its
-/// certificates ([`SetbackFill::refill`]).
+/// certificates ([`SetbackFill::refill`]). Beside a curved face (#2343) its faces are the
+/// quadrics they are, and after a growth its rounds are where the grown setbacks put them.
 ///
 /// # Errors
 ///

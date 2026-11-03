@@ -60,6 +60,7 @@ fn box_corner_faces() -> Vec<Face> {
         .map(|f| Face {
             point: Point3::new(0.0, 0.0, 0.0),
             normal: -unit(f),
+            ..Face::default()
         })
         .collect()
 }

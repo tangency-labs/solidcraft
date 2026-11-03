@@ -10,7 +10,7 @@
 //!
 //! The cases: a box edge rounded r 5 (an exact cylinder, ending in two Ends), its Gⁿ round
 //! (continuity 2), its chamfer; three equal rounds at a box corner (the Ball) and three
-//! unequal ones (the Setback); a boss's base rounded r 1 with its Turns Mitred and Swept; a
+//! unequal ones (the Setback), and beside a cylinder (the curved Setback, #2343); a boss's base rounded r 1 with its Turns Mitred and Swept; a
 //! cut ball's rim (two Joins); #2256's tangent peg (the Mixed corner); and the offset of
 //! #2388's chamfered box (the offsets of a chamfer and two rounds).
 #![allow(
@@ -35,7 +35,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
-use solidcore::primitive::api_primitives::{create_box, create_sphere};
+use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::topology::NotifyRecords;
@@ -227,6 +227,26 @@ fn cases() -> Vec<Case> {
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     round(&mut k, &mut b, &CORNER, &[1.0, 1.5, 2.0], false);
     out.push(checked("box corner, rounds r 1, 1.5, 2", &b, &made(&k)));
+
+    // #2343: unequal rounds at a vertex beside a cylinder, the curved Setback (the D prism:
+    // a cylinder R 10, 10 high, cut at x = 4; its top corner at (4, sqrt 84, 10))
+    let mut k = kernel();
+    let cylinder = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0).unwrap();
+    let cut = create_box(&mut k, Point3::new(4.0, -20.0, -1.0), 20.0, 40.0, 12.0).unwrap();
+    let mut b = boolean_difference(&mut k, cylinder, cut).unwrap();
+    let h = 84.0_f64.sqrt();
+    round(
+        &mut k,
+        &mut b,
+        &[[4.0, 0.0, 10.0], [4.0, h, 5.0], [-10.0, 0.0, 10.0]],
+        &[2.0, 2.5, 3.0],
+        false,
+    );
+    out.push(checked(
+        "D prism corner beside its cylinder, rounds r 2, 2.5, 3",
+        &b,
+        &made(&k),
+    ));
 
     for swept in [false, true] {
         let mut k = kernel();

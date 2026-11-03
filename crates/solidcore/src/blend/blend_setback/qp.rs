@@ -30,20 +30,21 @@ fn at(m: &[f64], i: usize) -> Result<f64> {
     el(m, i)
 }
 
-/// `sm_SbDualQP`: the strictly convex quadratic programme `min 1/2 y' G y + g' y` subject to
-/// `C y >= b`, by the dual active-set method (from the unconstrained minimum, adding the
-/// most violated constraint each step and dropping those whose multipliers would turn
-/// negative): `G` `n x n`, `C` `m x n`, row-major.
-#[allow(clippy::too_many_lines, clippy::many_single_char_names)] // the fork's one function
-pub(super) fn dual_qp(
-    gm: &[f64],
-    g: &[f64],
-    cm: &[f64],
-    b: &[f64],
-    n: usize,
-    m: usize,
-    tol: f64,
-) -> Result<QpOutcome> {
+/// The dual method's state (`sm_SbDualQP`'s locals): `J` (`J' G J = I`, turned as
+/// constraints join), the solution, the active rows and their multipliers, and `R`. Kept
+/// between calls, it continues the method on more rows ([`dual_qp_rows`] beside a curved
+/// face, #2343).
+pub(super) struct DualState {
+    jm: Vec<f64>,
+    y: Vec<f64>,
+    active: Vec<usize>,
+    u: Vec<f64>,
+    rm: Vec<f64>,
+}
+
+/// `sm_SbDualQP`'s start: `G = L L'`, `J = L^-T` and the unconstrained minimum; `None` where
+/// `G` is not positive definite.
+fn dual_start(gm: &[f64], g: &[f64], n: usize) -> Result<Option<DualState>> {
     // G = L L', J = L^-T (J' G J = I), J[r n + c] its column c
     let mut l = vec![0.0; n * n];
     for j in 0..n {
@@ -52,7 +53,7 @@ pub(super) fn dual_qp(
             s -= at(&l, j * n + k)? * at(&l, j * n + k)?;
         }
         if !(s > 0.0) {
-            return Ok(QpOutcome::NotDefinite);
+            return Ok(None);
         }
         *el_mut(&mut l, j * n + j)? = sqrt(s);
         for i in j + 1..n {
@@ -88,9 +89,34 @@ pub(super) fn dual_qp(
             }
         }
     }
-    let mut active: Vec<usize> = Vec::new();
-    let mut u: Vec<f64> = Vec::new();
-    let mut rm = vec![0.0; n * n];
+    Ok(Some(DualState {
+        jm,
+        y,
+        active: Vec::new(),
+        u: Vec::new(),
+        rm: vec![0.0; n * n],
+    }))
+}
+
+/// `sm_SbDualQP`'s steps from `st`, over the rows `C y >= b` (`C` `m x n`, row-major); `rounding`
+/// takes a row as violated only past its own rounding bound ([`violation`]).
+#[allow(clippy::too_many_lines, clippy::many_single_char_names)] // the fork's one function
+fn dual_run(
+    st: &mut DualState,
+    cm: &[f64],
+    b: &[f64],
+    n: usize,
+    m: usize,
+    tol: f64,
+    rounding: bool,
+) -> Result<QpOutcome> {
+    let DualState {
+        jm,
+        y,
+        active,
+        u,
+        rm,
+    } = st;
     let mut d = vec![0.0; n];
     let mut z = vec![0.0; n];
     let mut r = vec![0.0; n];
@@ -116,14 +142,18 @@ pub(super) fn dual_qp(
         let mut p = m;
         let mut worst = -tol;
         for i in 0..m {
-            let s = slack(&y, i)?;
+            let s = if rounding {
+                violation(cm, b, y, i, n)?
+            } else {
+                slack(y, i)?
+            };
             if s < worst {
                 worst = s;
                 p = i;
             }
         }
         if p == m {
-            return Ok(QpOutcome::Solved(y));
+            return Ok(QpOutcome::Solved(y.clone()));
         }
         let mut up = 0.0;
         loop {
@@ -131,7 +161,7 @@ pub(super) fn dual_qp(
             for (c, dc) in d.iter_mut().enumerate() {
                 let mut s = 0.0;
                 for k in 0..n {
-                    s += at(&jm, k * n + c)? * at(cm, p * n + k)?;
+                    s += at(jm, k * n + c)? * at(cm, p * n + k)?;
                 }
                 *dc = s;
             }
@@ -140,7 +170,7 @@ pub(super) fn dual_qp(
             for (k, zk) in z.iter_mut().enumerate() {
                 let mut s = 0.0;
                 for c in q..n {
-                    s += at(&jm, k * n + c)? * at(&d, c)?;
+                    s += at(jm, k * n + c)? * at(&d, c)?;
                 }
                 *zk = s;
                 dz = smax(dz, s.abs());
@@ -148,14 +178,14 @@ pub(super) fn dual_qp(
             for i in (0..q).rev() {
                 let mut s = at(&d, i)?;
                 for j in i + 1..q {
-                    s -= at(&rm, i * n + j)? * at(&r, j)?;
+                    s -= at(rm, i * n + j)? * at(&r, j)?;
                 }
-                *el_mut(&mut r, i)? = s / at(&rm, i * n + i)?;
+                *el_mut(&mut r, i)? = s / at(rm, i * n + i)?;
             }
             let mut t1 = f64::INFINITY;
             let mut drop = q;
             for k in 0..q {
-                let (rk, uk) = (at(&r, k)?, at(&u, k)?);
+                let (rk, uk) = (at(&r, k)?, at(u, k)?);
                 if rk > 0.0 && uk / rk < t1 {
                     t1 = uk / rk;
                     drop = k;
@@ -166,7 +196,7 @@ pub(super) fn dual_qp(
                 zn += zk * at(cm, p * n + k)?;
             }
             let t2 = if dz > 1.0e-14 && zn > 0.0 {
-                -slack(&y, p)? / zn
+                -slack(y, p)? / zn
             } else {
                 f64::INFINITY
             };
@@ -213,9 +243,9 @@ pub(super) fn dual_qp(
                     *el_mut(&mut d, j - 1)? = dj1;
                     *el_mut(&mut d, j)? = dj;
                     for k in 0..n {
-                        let (a, bb) = (at(&jm, k * n + j - 1)?, at(&jm, k * n + j)?);
-                        *el_mut(&mut jm, k * n + j - 1)? = cs * a + sn * bb;
-                        *el_mut(&mut jm, k * n + j)? = -sn * a + cs * bb;
+                        let (a, bb) = (at(jm, k * n + j - 1)?, at(jm, k * n + j)?);
+                        *el_mut(jm, k * n + j - 1)? = cs * a + sn * bb;
+                        *el_mut(jm, k * n + j)? = -sn * a + cs * bb;
                     }
                     j -= 1;
                 }
@@ -223,7 +253,7 @@ pub(super) fn dual_qp(
                     return Ok(QpOutcome::Infeasible { proven: false });
                 }
                 for i in 0..=q {
-                    *el_mut(&mut rm, i * n + q)? = at(&d, i)?;
+                    *el_mut(rm, i * n + q)? = at(&d, i)?;
                 }
                 active.push(p);
                 u.push(up);
@@ -238,24 +268,24 @@ pub(super) fn dual_qp(
             u.remove(drop);
             for i in 0..q {
                 for j in drop..q.saturating_sub(1) {
-                    *el_mut(&mut rm, i * n + j)? = at(&rm, i * n + j + 1)?;
+                    *el_mut(rm, i * n + j)? = at(rm, i * n + j + 1)?;
                 }
-                *el_mut(&mut rm, i * n + q - 1)? = 0.0;
+                *el_mut(rm, i * n + q - 1)? = 0.0;
             }
             for j in drop..q.saturating_sub(1) {
-                let (mut a, mut bb) = (at(&rm, j * n + j)?, at(&rm, (j + 1) * n + j)?);
+                let (mut a, mut bb) = (at(rm, j * n + j)?, at(rm, (j + 1) * n + j)?);
                 let (cs, sn) = givens(&mut a, &mut bb);
-                *el_mut(&mut rm, j * n + j)? = a;
-                *el_mut(&mut rm, (j + 1) * n + j)? = 0.0;
+                *el_mut(rm, j * n + j)? = a;
+                *el_mut(rm, (j + 1) * n + j)? = 0.0;
                 for k in j + 1..q.saturating_sub(1) {
-                    let (x1, x2) = (at(&rm, j * n + k)?, at(&rm, (j + 1) * n + k)?);
-                    *el_mut(&mut rm, j * n + k)? = cs * x1 + sn * x2;
-                    *el_mut(&mut rm, (j + 1) * n + k)? = -sn * x1 + cs * x2;
+                    let (x1, x2) = (at(rm, j * n + k)?, at(rm, (j + 1) * n + k)?);
+                    *el_mut(rm, j * n + k)? = cs * x1 + sn * x2;
+                    *el_mut(rm, (j + 1) * n + k)? = -sn * x1 + cs * x2;
                 }
                 for k in 0..n {
-                    let (x1, x2) = (at(&jm, k * n + j)?, at(&jm, k * n + j + 1)?);
-                    *el_mut(&mut jm, k * n + j)? = cs * x1 + sn * x2;
-                    *el_mut(&mut jm, k * n + j + 1)? = -sn * x1 + cs * x2;
+                    let (x1, x2) = (at(jm, k * n + j)?, at(jm, k * n + j + 1)?);
+                    *el_mut(jm, k * n + j)? = cs * x1 + sn * x2;
+                    *el_mut(jm, k * n + j + 1)? = -sn * x1 + cs * x2;
                 }
             }
         }
@@ -263,11 +293,52 @@ pub(super) fn dual_qp(
     Ok(QpOutcome::Infeasible { proven: false })
 }
 
+/// `sm_SbDualQP`: the strictly convex quadratic programme `min 1/2 y' G y + g' y` subject to
+/// `C y >= b`, by the dual active-set method (from the unconstrained minimum, adding the
+/// most violated constraint each step and dropping those whose multipliers would turn
+/// negative): `G` `n x n`, `C` `m x n`, row-major.
+pub(super) fn dual_qp(
+    gm: &[f64],
+    g: &[f64],
+    cm: &[f64],
+    b: &[f64],
+    n: usize,
+    m: usize,
+    tol: f64,
+    rounding: bool,
+) -> Result<QpOutcome> {
+    let Some(mut st) = dual_start(gm, g, n)? else {
+        return Ok(QpOutcome::NotDefinite);
+    };
+    dual_run(&mut st, cm, b, n, m, tol, rounding)
+}
+
+/// Row `i`'s slack `C_i y - b_i` past its own rounding bound: the slack plus
+/// `(n + 1) eps (sum_k |C_ik y_k| + |b_i|)`, the bound of its dot product's rounding. Negative
+/// only where the row is violated by more than its rounding can account for.
+fn violation(cm: &[f64], b: &[f64], y: &[f64], i: usize, n: usize) -> Result<f64> {
+    let bi = at(b, i)?;
+    let mut s = -bi;
+    let mut size = bi.abs();
+    for (k, &yk) in y.iter().enumerate() {
+        let t = at(cm, i * n + k)? * yk;
+        s += t;
+        size += t.abs();
+    }
+    Ok(s + (n + 1) as f64 * f64::EPSILON * size)
+}
+
 /// `sm_SbDualQPRows`: [`dual_qp`] over many rows, few of which bind: solved on a working set
 /// of rows, those violated at its solution added (the most violated first, up to a block at
 /// a time) until none is. Its answer is the full programme's: a solution meets every row; a
 /// set of rows with no solution is one the full set has none of either (`proven` as
 /// [`dual_qp`]'s).
+///
+/// `native` (the curved fill's, #2343; not the fork): a row counts as violated only past its
+/// own rounding bound ([`violation`]), and each round continues the dual method from the
+/// last round's state on the rows added ([`DualState`]) instead of solving the working set
+/// afresh. The method adds rows to a dual-feasible state as it goes, so the state solving
+/// one set starts the next; the programme being strictly convex, its solution is the same.
 pub(super) fn dual_qp_rows(
     gm: &[f64],
     g: &[f64],
@@ -276,27 +347,35 @@ pub(super) fn dual_qp_rows(
     n: usize,
     m: usize,
     tol: f64,
+    native: bool,
 ) -> Result<QpOutcome> {
     const BLOCK: usize = 2000;
     let mut taken = vec![false; m];
     let mut set: Vec<usize> = Vec::new();
     // y at the unconstrained minimum: the empty set's solution
-    let mut y = match dual_qp(gm, g, &[], &[], n, 0, tol)? {
-        QpOutcome::Solved(y) => y,
+    let Some(mut state) = dual_start(gm, g, n)? else {
         // SER: the empty programme's status (SM_ERR_INVALID_INPUT; with no rows it is
         // never infeasible)
-        other => return Ok(other),
+        return Ok(QpOutcome::NotDefinite);
     };
+    let mut y = state.y.clone();
+    let mut sc: Vec<f64> = Vec::new();
+    let mut sb: Vec<f64> = Vec::new();
     for _ in 0..200 {
         let mut violated: Vec<(f64, usize)> = Vec::new();
         for (i, &inside) in taken.iter().enumerate() {
             if inside {
                 continue;
             }
-            let mut s = -at(b, i)?;
-            for (k, &yk) in y.iter().enumerate() {
-                s += at(cm, i * n + k)? * yk;
-            }
+            let s = if native {
+                violation(cm, b, &y, i, n)?
+            } else {
+                let mut s = -at(b, i)?;
+                for (k, &yk) in y.iter().enumerate() {
+                    s += at(cm, i * n + k)? * yk;
+                }
+                s
+            };
             if s < -tol {
                 violated.push((s, i));
             }
@@ -310,16 +389,17 @@ pub(super) fn dual_qp_rows(
         for &(_, i) in violated.iter().take(take) {
             *el_mut(&mut taken, i)? = true;
             set.push(i);
-        }
-        let mut sc = vec![0.0; set.len() * n];
-        let mut sb = vec![0.0; set.len()];
-        for (t, &row) in set.iter().enumerate() {
             for k in 0..n {
-                *el_mut(&mut sc, t * n + k)? = at(cm, row * n + k)?;
+                sc.push(at(cm, i * n + k)?);
             }
-            *el_mut(&mut sb, t)? = at(b, row)?;
+            sb.push(at(b, i)?);
         }
-        match dual_qp(gm, g, &sc, &sb, n, set.len(), tol)? {
+        let outcome = if native {
+            dual_run(&mut state, &sc, &sb, n, set.len(), tol, true)?
+        } else {
+            dual_qp(gm, g, &sc, &sb, n, set.len(), tol, false)?
+        };
+        match outcome {
             QpOutcome::Solved(next) => y = next,
             other => return Ok(other),
         }

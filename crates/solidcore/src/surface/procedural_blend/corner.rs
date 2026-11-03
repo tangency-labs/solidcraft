@@ -134,12 +134,13 @@ pub struct SetbackRound {
     pub(crate) corner_above: bool,
 }
 
-/// A Setback's fill by its definition: the faces' planes, the rounds at their end sections,
+/// A Setback's fill by its definition: the faces (planes, or beside a curved face the
+/// quadrics they are, #2343), the rounds at their end sections,
 /// the fill's order, the tolerance it matched them to, the corner's convexity, and the
 /// certificate it was built with (the most it stands past a face).
 #[derive(Debug, Clone)]
 pub struct SetbackFill {
-    /// The faces' planes, normals out of the material.
+    /// The faces, normals out of the material: planes, or the quadrics they are.
     pub(crate) faces: Vec<Face>,
     /// The rounds, in the corner's order.
     pub(crate) rounds: Vec<SetbackRound>,
@@ -240,11 +241,12 @@ fn same_form(a: &BSplineSurface, b: &BSplineSurface) -> bool {
 /// A certified distance between two NURBS forms that are one parametrization up to the
 /// symmetries of the parameter square (`u`, `v` swapped, either reversed: the edits a face's
 /// net takes, `SwapUV` and the reversals, which keep the set): over the orientations of `b`
-/// with `a`'s degrees, knot vectors and weights (bit for bit), the least of the largest
-/// distance between their control points. The difference of the two is then a convex
-/// combination of the control points' differences (the weights positive), so no point of
-/// one is farther from the other's at the same parameters. `None` where no orientation
-/// matches but for the control points (another parametrization, a piece).
+/// with `a`'s degrees and knot vectors, the least of [`control_distance`]'s bounds: with the
+/// same weights (bit for bit) the largest distance between their control points, the
+/// difference of the two a convex combination of the control points' differences (the
+/// weights positive), so no point of one is farther from the other's at the same
+/// parameters. `None` where no orientation matches but for the control points and weights
+/// (another parametrization, a piece).
 fn net_distance(a: &BSplineSurface, b: &BSplineSurface) -> Option<f64> {
     let (a, b) = (a.gw_nurb()?, b.gw_nurb()?);
     let grid = |s: &crate::nurbs::srf_basic::Surface| -> Vec<Vec<crate::nurbs::math::CPoint>> {
@@ -300,7 +302,13 @@ fn net_distance(a: &BSplineSurface, b: &BSplineSurface) -> Option<f64> {
 }
 
 /// The largest distance between two control nets of one shape and the same weights (bit
-/// for bit, positive); `None` otherwise.
+/// for bit, positive). Where their positive weights differ (a curved Setback's fill made
+/// again after a move, its weights computed afresh, #2343), within a ratio `rho < 1`
+/// (`|w_a / w_b - 1| <= rho`), the largest distance between their Euclidean points plus
+/// `2 rho / (1 - rho)` times the radius R of b's points about their centroid: with the
+/// patches' convex weights `l = B w / sum B w`, `S_a - S_b = sum l_a (P_a - P_b) +
+/// sum (l_a - l_b) (P_b - c)`, and `l_a = l_b (1 + d) / (1 + dbar)` (`|d|, |dbar| <= rho`)
+/// gives `sum |l_a - l_b| <= 2 rho / (1 - rho)`. `None` otherwise.
 fn control_distance(
     a: &[Vec<crate::nurbs::math::CPoint>],
     b: &[Vec<crate::nurbs::math::CPoint>],
@@ -309,24 +317,54 @@ fn control_distance(
     if a.len() != b.len() {
         return None;
     }
+    let weight = |w: f64| if w == NOW { 1.0 } else { w };
     let mut worst = 0.0_f64;
+    let mut same = true;
     for (ra, rb) in a.iter().zip(b) {
         if ra.len() != rb.len() {
             return None;
         }
         for (pa, pb) in ra.iter().zip(rb) {
+            let (wa, wb) = (weight(pa.w), weight(pb.w));
+            if wa.is_nan() || wa <= 0.0 || wb.is_nan() || wb <= 0.0 {
+                return None;
+            }
             if pa.w.to_bits() != pb.w.to_bits() {
-                return None;
+                same = false;
+                continue;
             }
-            let w = if pa.w == NOW { 1.0 } else { pa.w };
-            if w.is_nan() || w <= 0.0 {
-                return None;
-            }
-            let d = Vec3::new(pa.x - pb.x, pa.y - pb.y, pa.z - pb.z).length() / w;
+            let d = Vec3::new(pa.x - pb.x, pa.y - pb.y, pa.z - pb.z).length() / wa;
             worst = worst.max(d);
         }
     }
-    Some(worst)
+    if same {
+        return Some(worst);
+    }
+    let euclid = |p: &crate::nurbs::math::CPoint| {
+        let w = weight(p.w);
+        Vec3::new(p.x / w, p.y / w, p.z / w)
+    };
+    let (mut far, mut rho, mut count) = (0.0_f64, 0.0_f64, 0.0_f64);
+    let mut centre = Vec3::ZERO;
+    for (ra, rb) in a.iter().zip(b) {
+        for (pa, pb) in ra.iter().zip(rb) {
+            far = far.max((euclid(pa) - euclid(pb)).length());
+            rho = rho.max((weight(pa.w) / weight(pb.w) - 1.0).abs());
+            centre += euclid(pb);
+            count += 1.0;
+        }
+    }
+    if rho.is_nan() || rho >= 1.0 || count == 0.0 {
+        return None;
+    }
+    centre *= 1.0 / count;
+    let mut radius = 0.0_f64;
+    for rb in b {
+        for pb in rb {
+            radius = radius.max((euclid(pb) - centre).length());
+        }
+    }
+    Some(far + 2.0 * rho / (1.0 - rho) * radius)
 }
 
 /// `|a x b| <= sin`, `a` and `b` unit: the two directions are parallel to within `sin`.
@@ -869,6 +907,12 @@ impl CornerDefinition {
                 for f in &mut fill.faces {
                     f.point = point(f.point);
                     f.normal = rotate_n_move.transform_vector(f.normal).unitize()?;
+                    // a quadric's axis turns with it and its radius scales; a cone's slope,
+                    // a ratio, and the side the material is on are kept (#2343)
+                    if f.is_curved() {
+                        f.axis = rotate_n_move.transform_vector(f.axis).unitize()?;
+                        f.radius *= factor;
+                    }
                 }
                 for r in &mut fill.rounds {
                     r.surface

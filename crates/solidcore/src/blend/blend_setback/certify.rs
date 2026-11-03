@@ -279,7 +279,10 @@ fn rows_of(net: &Net, e: Vec3) -> Result<Rows> {
 }
 
 /// The 3 x 3 minor of rows `rows` without column `c`.
-fn minor_without<'a>(rows: [&'a [Tensor; 4]; 3], c: usize) -> Result<[[&'a Tensor; 3]; 3]> {
+pub(super) fn minor_without<'a>(
+    rows: [&'a [Tensor; 4]; 3],
+    c: usize,
+) -> Result<[[&'a Tensor; 3]; 3]> {
     let mut m: [[Option<&Tensor>; 3]; 3] = [[None; 3]; 3];
     for (r, row) in rows.iter().enumerate() {
         let mut cc = 0;

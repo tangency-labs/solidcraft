@@ -18,12 +18,13 @@ use super::record::{
     BezierCurveRecord, BlendDefinitionRecord, ChamferRecord, ChamferSizeRecord, ClassInputsRecord,
     CornerRecord, EndCornerRecord, ExactClassRecord, ExactNetKindRecord, ExactNetRecord,
     ExactRoundRecord, LeaderMapRecord, MixedCornerRecord, MixedSideRecord, NurbsCurveRecord,
-    NurbsSurfaceRecord, ParameterMapRecord, PlaneRecord, ProceduralBlendRecord, RadiusRecord,
-    SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord, SupportRecord, SweptCornerRecord,
+    NurbsSurfaceRecord, ParameterMapRecord, PlaneRecord, ProceduralBlendRecord, QuadricKindRecord,
+    QuadricRecord, RadiusRecord, SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord,
+    SupportRecord, SweptCornerRecord,
 };
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
 use crate::blend::blend_corner::mixed::algebra::{Crv, Side};
-use crate::blend::blend_setback::{Face, Round};
+use crate::blend::blend_setback::{Face, FaceKind, Round};
 use crate::blend::fillet_exact::{classify_supports, BlendSpine, ClassInputs};
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_section::station::as_b_spline;
@@ -667,6 +668,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
                     .map(|f| PlaneRecord {
                         point: xyz(f.point),
                         normal: xyz(f.normal),
+                        quadric: quadric_record(f),
                     })
                     .collect(),
                 rounds: fill
@@ -787,14 +789,7 @@ pub fn corner_from_record(k: &Kernel, rec: &CornerRecord) -> Result<Surface> {
                     corner_above: round.corner_above,
                 })
                 .collect();
-            let faces: Vec<Face> = r
-                .faces
-                .iter()
-                .map(|f| Face {
-                    point: p(f.point),
-                    normal: p(f.normal),
-                })
-                .collect();
+            let faces: Vec<Face> = r.faces.iter().map(setback_face_of).collect();
             let fill = SetbackFill::create(
                 k,
                 &faces,
@@ -862,6 +857,44 @@ pub fn corner_rebuild(k: &Kernel, rec: &CornerRecord) -> Result<Surface> {
 }
 
 /// A piecewise Bezier curve's record.
+/// A Setback face's quadric as a record (#2343); `None` for a plane.
+fn quadric_record(f: &Face) -> Option<QuadricRecord> {
+    let kind = match f.kind {
+        FaceKind::Plane => return None,
+        FaceKind::Cylinder => QuadricKindRecord::Cylinder,
+        FaceKind::Cone => QuadricKindRecord::Cone,
+        FaceKind::Sphere => QuadricKindRecord::Sphere,
+    };
+    Some(QuadricRecord {
+        kind,
+        axis: [f.axis.x, f.axis.y, f.axis.z],
+        radius: f.radius,
+        slope: f.slope,
+        side: f.side,
+    })
+}
+
+/// A Setback face from its record: its plane, or the quadric it is (#2343).
+fn setback_face_of(f: &PlaneRecord) -> Face {
+    let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
+    let plane = Face::plane(p(f.point), p(f.normal));
+    match &f.quadric {
+        None => plane,
+        Some(q) => Face {
+            kind: match q.kind {
+                QuadricKindRecord::Cylinder => FaceKind::Cylinder,
+                QuadricKindRecord::Cone => FaceKind::Cone,
+                QuadricKindRecord::Sphere => FaceKind::Sphere,
+            },
+            axis: p(q.axis),
+            radius: q.radius,
+            slope: q.slope,
+            side: q.side,
+            ..plane
+        },
+    }
+}
+
 fn bezier_record(c: &Crv) -> BezierCurveRecord {
     BezierCurveRecord {
         brk: c.brk.clone(),
