@@ -1639,6 +1639,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     for (sketch, _) in f.kind.profile_sels() {
         if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
             reads.sketch(doc, sketch);
+            // A later transfer can preserve this profile's historical frame. Changes to that
+            // boundary (including suppression and rollback) must invalidate the constructor.
+            if let Some(relative) = crate::body_transfer::profile_frame(doc, f, sketch) {
+                "transferred profile".hash(&mut h);
+                sketch.hash(&mut h);
+                hash_placement(&relative, &mut h);
+            }
         }
     }
     let path = match &f.kind {
@@ -4874,10 +4881,10 @@ fn feature_tools_with_constructor(
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
     match &f.kind {
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets, thin } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
             let regions = match thin {
                 Some(thin) => thin_regions(vals, &ss, thin)?,
@@ -5099,10 +5106,10 @@ fn feature_tools_with_constructor(
             Ok(tools)
         }
         FeatureKind::Revolve { sketch, profiles, axis, angle, angle2, symmetric, convention, to, .. } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) =
@@ -5507,16 +5514,27 @@ fn sketch_in_feature_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64)
     profile_in_frame(doc, sketch, consumer)
 }
 
+fn constructor_profile_in_frame(doc: &Document, sketch: &SolvedSketch, feature: &Feature) -> Result<SolvedSketch> {
+    match crate::body_transfer::profile_frame(doc, feature, sketch.feature) {
+        Some(relative) => profile_with_transform(sketch, &relative),
+        None => sketch_in_feature_frame(doc, sketch, feature.component),
+    }
+}
+
 fn profile_in_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64) -> Result<SolvedSketch> {
     let owner = doc.feature(sketch.feature).map(|feature| feature.component).unwrap_or(0);
     let inverse =
         crate::mat_inverse(&doc.component_transform(consumer)).ok_or_else(|| DocError::Invalid("profile consumer frame is invalid".into()))?;
     let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    profile_with_transform(sketch, &relative)
+}
+
+fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<SolvedSketch> {
     let mut mapped = sketch.clone();
     mapped.plane = Plane::new(
-        crate::apply_point(&relative, sketch.plane.origin),
-        crate::apply_vector(&relative, sketch.plane.x),
-        crate::apply_vector(&relative, sketch.plane.y),
+        crate::apply_point(relative, sketch.plane.origin),
+        crate::apply_vector(relative, sketch.plane.x),
+        crate::apply_vector(relative, sketch.plane.y),
     )
     .ok_or_else(|| DocError::Invalid("profile sketch frame is invalid".into()))?;
     Ok(mapped)
