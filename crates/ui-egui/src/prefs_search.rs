@@ -865,14 +865,15 @@ mod tests {
                 ("Font", "Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
             ] {
                 h.app.prefs_window.filter = query.into();
-                h.frames(5);
+                // Allow the real search scroll animation to settle before checking its target.
+                h.frames(20);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
                 assert_eq!(matching.len(), 1, "width={width}: {query} needs exactly one real navigation hit");
                 assert_eq!(matching[0].page, crate::prefs::PAGE_APPEARANCE);
                 let at = h.widget(label).unwrap();
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)));
+                assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "width={width}: {query} hit must be inside the settled page body");
                 if let Some((role, name, target)) = native {
                     let tree = h.output.accesskit_update.as_ref().unwrap();
                     let controls: Vec<_> =
