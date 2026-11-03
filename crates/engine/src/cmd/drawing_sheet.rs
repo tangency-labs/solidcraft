@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::drawing::template;
 use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
@@ -39,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "after?: a sheet (id or name; default the last); name?; size?: {standard: a3} or {custom: {sides_mm: [w, h]}}; \
-             orientation?: landscape|portrait; title_block?: a definition or null; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
+             orientation?: landscape|portrait; title_block?: a definition, \"built-in\" or null; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
              component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
@@ -50,7 +51,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name; name?, size?, orientation?, title_block?: a definition or null (a new block keeps the overrides of the text cells it still has), dpi?; \
+            "sheet: id or name; name?, size?, orientation?, title_block?: a definition, \"built-in\" (its general tolerances a part's or, for a design with components, an assembly's) or null \
+             (a new block keeps the overrides of the text cells it still has), dpi?; \
              documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
              its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper or title block `outside`: the sheet's views whose \
              boundary leaves its drawing space or lies over its title block (none is moved), and after a new title block `lost`: the cells whose typed text \
@@ -116,9 +118,9 @@ fn sheet_at(cmd: &str, d: &Drawing, p: &Value, key: &str) -> Result<usize> {
     d.sheet_index(named).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// The settings `p` gives a sheet, over the ones it has. Answers the cells whose typed text a new
-/// title block drops ([`Sheet::set_title_block`]).
-fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
+/// The settings `p` gives a sheet, over the ones it has; `assembly` says whose tolerances the built-in
+/// block takes. Answers the cells whose typed text a new title block drops ([`Sheet::set_title_block`]).
+fn apply(cmd: &str, sheet: &mut Sheet, p: &Value, assembly: bool) -> Result<Vec<String>> {
     if let Some(name) = p.get("name") {
         sheet.name = name.as_str().ok_or_else(|| bad(cmd, "`name` must be text"))?.to_string();
     }
@@ -133,6 +135,7 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
     let lost = match p.get("title_block") {
         None => Vec::new(),
         Some(Value::Null) => sheet.set_title_block(None),
+        Some(Value::String(name)) if name == "built-in" => sheet.set_title_block(Some(template::built_in_block(assembly))),
         Some(block) => {
             let block = serde_json::from_value::<TitleBlock>(block.clone()).map_err(|e| bad(cmd, format!("`title_block`: {e}")))?;
             sheet.set_title_block(Some(block))
@@ -181,6 +184,7 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.add";
+    let assembly = template::for_assembly(&s.doc);
     let record = s.drawing(cmd)?.clone();
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
     s.edit_drawing(cmd, |d| {
@@ -189,7 +193,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         let free = (d.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| d.sheets.iter().all(|s| s.name != *name)).unwrap_or_default();
         let mut sheet =
             Sheet { id, name: free, documents: None, excluded: Excluded::default(), title_block_overrides: BTreeMap::new(), ..(**model).clone() };
-        apply(cmd, &mut sheet, p)?;
+        apply(cmd, &mut sheet, p, assembly)?;
         d.sheets.insert(after + 1, Arc::new(sheet));
         Ok(())
     })?;
@@ -198,11 +202,12 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
+    let assembly = template::for_assembly(&s.doc);
     let (id, room, lost) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
         let was = (sheet.sheet, sheet.title_block.clone());
-        let lost = apply(cmd, sheet, p)?;
+        let lost = apply(cmd, sheet, p, assembly)?;
         Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was, lost))
     })?;
     // Only a change of paper or block changes the room views have; each view measured once.

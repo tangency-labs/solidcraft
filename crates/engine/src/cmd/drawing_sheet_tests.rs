@@ -322,13 +322,14 @@ fn a_title_blocks_cells_read_the_model() {
     run(&mut s, "component.metadata.set", properties);
     run(&mut s, "drawing.create", json!({}));
     let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source, "component": component}}));
+    let documents = json!({"source": source, "component": component});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": documents, "title_block": "built-in"}));
     let shown = |s: &mut Session, names: &[&str]| {
         let cells = cells(s);
         names.iter().map(|name| cells[*name].0.clone()).collect::<Vec<_>>()
     };
     let read = ["title", "identification_number", "material", "finish", "mass", "sheet", "general_tolerances", "legal_owner"];
-    // A design with components is drawn from the assembly template, with its tolerances.
+    // In a design with components the built-in block has the assembly tolerances.
     let tolerances = solidcraft_doc::drawing::template::ASSEMBLY_TOLERANCES;
     let expected = ["Block", "-", "Steel", "Zinc plated", "0.40 kg", "1/1", tolerances, "-"];
     assert_eq!(shown(&mut s, &read), expected);

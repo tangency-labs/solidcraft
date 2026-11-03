@@ -42,10 +42,11 @@ fn orientation<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
     }
 }
 
-/// A title block's definition, as `TitleBlock` reads it, or `null` for none.
+/// A title block's definition, as `TitleBlock` reads it, `"built-in"` for the built-in block, or
+/// `null` for none.
 fn title_block<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
     let v = Value::deserialize(d)?;
-    if !v.is_null() {
+    if !v.is_null() && v.as_str() != Some("built-in") {
         serde_json::from_value::<solidcraft_geom::title_block::TitleBlock>(v.clone())
             .map_err(|e| serde::de::Error::custom(whole(format!("`title_block`: {e}"))))?;
     }
@@ -154,7 +155,8 @@ pub struct SheetSettings {
     #[schemars(with = "String")]
     pub orientation: Option<String>,
     /// Its title block: a definition (`size_mm`, `outline_line_mm`, `cell_line_mm`, `cells`) that
-    /// sits on the drawing border's lower-right corner and must fit inside it, or `null` for none.
+    /// sits on the drawing border's lower-right corner and must fit inside it, `"built-in"` for the
+    /// built-in block, or `null` for none.
     #[serde(default, deserialize_with = "title_block", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Value")]
     pub title_block: Option<Value>,

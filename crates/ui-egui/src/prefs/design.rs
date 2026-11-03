@@ -49,18 +49,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             let titles: Vec<String> = template::BUILT_INS.iter().filter_map(|name| template::title(name)).collect();
             let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
-            for (label, id, chosen) in [
-                ("ui.template_for_part_drawings", "pref_part_drawing_template", &mut app.preferences.part_drawing_template),
-                ("ui.template_for_assembly_drawings", "pref_assembly_drawing_template", &mut app.preferences.assembly_drawing_template),
-            ] {
-                ui_kit::row(ui, crate::i18n::tr(label), |ui| {
-                    let mut selected = template::BUILT_INS.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
-                    ui_kit::dropdown(ui, id, &mut selected, &titles);
-                    if let Some(name) = template::BUILT_INS.get(selected) {
-                        *chosen = (*name).to_string();
-                    }
-                });
-            }
+            let chosen = &mut app.preferences.drawing_template;
+            ui_kit::row(ui, crate::i18n::tr("ui.template_for_new_drawings"), |ui| {
+                let mut selected = template::BUILT_INS.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
+                ui_kit::dropdown(ui, "pref_drawing_template", &mut selected, &titles);
+                if let Some(name) = template::BUILT_INS.get(selected) {
+                    *chosen = (*name).to_string();
+                }
+            });
         });
     });
     ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
