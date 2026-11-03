@@ -8,7 +8,8 @@
 //! - **component:** `name`, `part_number`, `description`, `revision` (its part properties),
 //!   `material`, `mass`, and `properties.<name>` (its free-text properties, such as a finish);
 //! - **drawing:** `name`, `number` (its `part_number` property: the drawing's identification
-//!   number), `organization`, `author`, `project`, and `properties.<key>` (any of its properties);
+//!   number; without one, the name of the component the sheet documents), `organization`, `author`,
+//!   `project`, and `properties.<key>` (any of its properties);
 //! - **sheet:** `name`, `number`, `count`: sheets left out of the count are neither counted nor
 //!   numbered, and such a sheet shows neither;
 //! - **revision:** the newest revision row's fields ([`Field`]);
@@ -101,7 +102,7 @@ impl Values<'_> {
         match source {
             Source::Drawing => match key {
                 "name" => Some(d.name.clone()),
-                "number" => d.properties.part_number().map(str::to_string),
+                "number" => d.properties.part_number().or(self.component.map(|c| c.name)).map(str::to_string),
                 "organization" | "author" | "project" => d.properties.text(key).map(str::to_string),
                 _ => property(&d.properties),
             },

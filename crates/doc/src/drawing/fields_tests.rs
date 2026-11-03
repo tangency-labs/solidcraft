@@ -52,6 +52,15 @@ fn the_drawings_fields() {
     Arc::make_mut(&mut d.properties).remove("organization");
     assert_eq!(shown(&d, 0, None, parts), "Bracket drawing / DRW-0042 / -");
     assert_eq!(shown(&d, 0, None, vec![field(Source::Drawing, "properties.acme.finish")]), "-");
+    // Without a number of its own, the drawing is numbered by the component its sheet documents,
+    // by name; without either, "-".
+    let metadata = Metadata::default();
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let number = || vec![field(Source::Drawing, "number")];
+    assert_eq!(shown(&d, 0, Some(bracket), number()), "DRW-0042", "its own number first");
+    Arc::make_mut(&mut d.properties).set(Owner::Design, "part_number", json!("")).unwrap();
+    assert_eq!(shown(&d, 0, Some(bracket), number()), "Bracket");
+    assert_eq!(shown(&d, 0, None, number()), "-");
 }
 
 /// Sheets are numbered among the counted ones: the second of three is "2/3". A sheet left out of

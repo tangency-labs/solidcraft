@@ -329,9 +329,10 @@ fn a_title_blocks_cells_read_the_model() {
         names.iter().map(|name| cells[*name].0.clone()).collect::<Vec<_>>()
     };
     let read = ["title", "identification_number", "material", "finish", "mass", "sheet", "general_tolerances", "legal_owner"];
-    // In a design with components the built-in block has the assembly tolerances.
+    // In a design with components the built-in block has the assembly tolerances; with no number of
+    // its own, the drawing is numbered by the component's name.
     let tolerances = solidcraft_doc::drawing::template::ASSEMBLY_TOLERANCES;
-    let expected = ["Block", "-", "Steel", "Zinc plated", "0.40 kg", "1/1", tolerances, "-"];
+    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", tolerances, "-"];
     assert_eq!(shown(&mut s, &read), expected);
     on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
     on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
