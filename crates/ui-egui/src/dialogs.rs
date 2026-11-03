@@ -3316,7 +3316,7 @@ fn sync_reach(app: &SolveApp, d: &mut Dialog) {
         Some(Sel::Face { point, .. } | Sel::Vertex { point, .. }) if plain => {
             d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first)).map(|plane| {
                 let under = *point - plane.normal() * plane.height(*point);
-                solidcraft_engine::doc::object_height(&app.session.world_state(), &plane, under, *point)
+                solidcraft_engine::doc::object_height(&crate::open_meshing::session_world(&app.session), &plane, under, *point)
             })
         }
         _ => None,
