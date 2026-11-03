@@ -74,7 +74,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     })
-                    .on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
+                    .backing_on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
                     crate::scenario::publish_target("prefs:suppress_sketch_snap", response.rect);
                 });
             });
@@ -232,7 +232,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         width,
                     )
-                    .on_hover_text(app.tr("prefs.sketch_exit_view_note"));
+                    .backing_on_hover_text(app.tr("prefs.sketch_exit_view_note"));
                     crate::scenario::publish_target(&format!("prefs:sketch_exit_view:{key}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:list:{}", choice.label_id()), response.rect);
                     if app.preferences.sketch_exit_view == choice {
@@ -307,7 +307,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     width,
                 )
-                .on_hover_text(crate::i18n::tr(help));
+                .backing_on_hover_text(crate::i18n::tr(help));
                 targets(key, &response);
                 if response.clicked() {
                     *value = !*value;
@@ -451,7 +451,7 @@ fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &
             if show_help && response.rect.is_positive() {
                 ui_kit::help_icon(ui, help);
             }
-            response.on_hover_text(help)
+            response.backing_on_hover_text(help)
         } else {
             response
         }

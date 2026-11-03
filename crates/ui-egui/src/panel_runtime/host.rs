@@ -1,3 +1,4 @@
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::panels::*;
 
 /// Content receives this value separately from state/model/command services. All
@@ -267,7 +268,7 @@ impl PanelHost for EguiPanelHost<'_> {
                                 let ink = if presentation.attention { tokens.form_primary } else { tokens.form_ink };
                                 let mut response = ui.label(egui::RichText::new(&presentation.title).color(ink));
                                 if let Some(status) = &presentation.status {
-                                    response = response.on_hover_text(status);
+                                    response = response.backing_on_hover_text(status);
                                 }
                                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &presentation.title));
                             }
@@ -285,7 +286,7 @@ impl PanelHost for EguiPanelHost<'_> {
                                                 .inner;
                                             let clicked = response.clicked();
                                             if let Some(reason) = &action.disabled_reason {
-                                                response.on_disabled_hover_text(reason);
+                                                response.backing_on_disabled_hover_text(reason);
                                             }
                                             if clicked
                                                 && failure.is_none()

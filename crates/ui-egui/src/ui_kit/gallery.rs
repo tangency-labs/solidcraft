@@ -778,7 +778,7 @@ const ELEMENTS: &[Element] = &[
                 let width = 96.0;
                 let (rect, response) = ui.allocate_exact_size(vec2(width, width * size[1] / size[0]), egui::Sense::hover());
                 paint(ui.painter(), rect);
-                response.on_hover_text(*name);
+                response.backing_on_hover_text(*name);
             }
         });
     }),
@@ -837,7 +837,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("assistant_entry", |ui, _| {
         let t = Tokens::get();
-        egui::Frame::NONE.fill(t.app_bar).show(ui, |ui| {
+        crate::ui_kit::Container::show_backing(ui, egui::Frame::NONE.fill(t.app_bar), |ui| {
             ui.horizontal(|ui| {
                 for state in [
                     AssistantEntryState::Quiet,
@@ -2399,7 +2399,8 @@ fn history_example(ui: &mut Ui, names: bool) {
     let width = crate::timeline_left::strip_width(&app);
     let rect = ui.allocate_space(vec2(width, 650.0)).1;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(5.0)), |ui| {
-        ui.painter().add(Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left).paint(rect));
+        let frame = Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left);
+        Container::paint_frame(ui.painter(), frame, rect);
         crate::timeline_left::left_timeline(&mut app, ui);
     });
 }

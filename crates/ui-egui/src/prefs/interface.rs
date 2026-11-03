@@ -115,7 +115,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                                     ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
                                 )
                             })
-                            .on_hover_text(app.tr("prefs.scale_note"));
+                            .backing_on_hover_text(app.tr("prefs.scale_note"));
                             crate::scenario::publish_target("prefs:scale", response.rect);
                         });
                     });
@@ -160,7 +160,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.ui_font.clear();
                     }
                 });
-                ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.on_hover_text(app.tr("prefs.font_fallback"));
+                ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.backing_on_hover_text(app.tr("prefs.font_fallback"));
             }
         });
         ui_kit::settings_section(ui, "colour_vision", app.tr("ui.colour_vision"), |ui| {
@@ -422,7 +422,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let options = [app.tr("prefs.dialogs_edge"), app.tr("prefs.dialogs_left_column")];
                     let segments =
                         ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() }));
-                    segments.response.on_hover_text(app.tr("prefs.dialogs_note"));
+                    segments.response.backing_on_hover_text(app.tr("prefs.dialogs_note"));
                     if segments.inner {
                         app.preferences.dialog_place = if selected == 1 { DialogPlace::LeftColumn } else { DialogPlace::Edge };
                     }
@@ -560,7 +560,7 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
                 ui.spacing_mut().item_spacing.x = t.space_6;
                 let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
                 let response = ui_kit::settings_control_width(ui, check_width, |ui| {
-                    ui_kit::checkbox(ui, label, value).on_hover_text(help).on_disabled_hover_text(help)
+                    ui_kit::checkbox(ui, label, value).backing_on_hover_text(help).backing_on_disabled_hover_text(help)
                 });
                 crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                 ui_kit::help_icon(ui, help);

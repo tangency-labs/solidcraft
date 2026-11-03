@@ -92,7 +92,7 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         let response = ui_kit::dropdown_menu(ui, "pref_nav", nav_preset(&app.preferences.nav).translated_label(), |ui| {
                             for preset in NAV_PRESETS {
                                 if ui_kit::list_picker(ui, preset.id, preset.translated_label(), app.preferences.nav == preset.id)
-                                    .on_hover_text(preset.translated_help())
+                                    .backing_on_hover_text(preset.translated_help())
                                     .clicked()
                                 {
                                     choose_nav_preset(&mut app.preferences, preset);
@@ -101,16 +101,16 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         });
                         crate::scenario::publish_target("dialog:Pan, zoom, orbit", response.rect);
                         crate::scenario::publish_target("prefs:nav", response.rect);
-                        response.on_hover_text(nav_preset(&app.preferences.nav).translated_help());
+                        response.backing_on_hover_text(nav_preset(&app.preferences.nav).translated_help());
                     });
                 });
             });
         });
         if nav_preset(&app.preferences.nav).bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit) {
-            let response = setting::right_drag_orbits(app, ui).on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
+            let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
             crate::scenario::publish_target("prefs:right_drag_orbits", response.rect);
         }
-        setting::radial_context_menu(app, ui).on_hover_text(crate::i18n::tr("prefs.navigation.radial_help"));
+        setting::radial_context_menu(app, ui).backing_on_hover_text(crate::i18n::tr("prefs.navigation.radial_help"));
         let label = app.tr("Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);
         ui_kit::settings_form(ui, width, |ui| {
@@ -125,7 +125,7 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     });
                     crate::scenario::publish_target("prefs:middle_double_click", response.rect);
-                    response.on_hover_text(crate::i18n::tr_label("Double-clicking the middle button in the view: Home (the home view, framing what is shown), Fit (frame what is shown, keeping the orientation) or nothing"));
+                    response.backing_on_hover_text(crate::i18n::tr_label("Double-clicking the middle button in the view: Home (the home view, framing what is shown), Fit (frame what is shown, keeping the orientation) or nothing"));
                 });
             });
         });
@@ -197,7 +197,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             });
         });
         ui.add_enabled_ui(app.preferences.free_orbit, |ui| {
-            let response = setting::free_orbit_upright(app, ui).on_hover_text(crate::i18n::tr("nav.free_orbit_upright.help"));
+            let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(crate::i18n::tr("nav.free_orbit_upright.help"));
             crate::scenario::publish_target("prefs:free_orbit_upright", response.rect);
         });
     });
@@ -227,12 +227,14 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 setting::smooth_wheel_zoom(app, ui);
                 let touchpad = app.preferences.nav == TOUCHPAD_NAV;
                 ui.add_enabled_ui(!touchpad, |ui| {
-                    let response = ui_kit::checkbox(ui, crate::i18n::tr("ui.two_finger_scroll_pans"), &mut app.preferences.trackpad_pan)
-                        .on_hover_text(if touchpad { crate::i18n::tr("nav.touchpad.scroll") } else { crate::i18n::tr("ui.trackpad_pan_tip") });
+                    let response =
+                        ui_kit::checkbox(ui, crate::i18n::tr("ui.two_finger_scroll_pans"), &mut app.preferences.trackpad_pan).backing_on_hover_text(
+                            if touchpad { crate::i18n::tr("nav.touchpad.scroll") } else { crate::i18n::tr("ui.trackpad_pan_tip") },
+                        );
                     crate::scenario::publish_target("prefs:trackpad_pan", response.rect);
                 });
                 setting::orbit_reverse(app, ui);
-                let response = setting::zoom_stop_at_model(app, ui).on_hover_text(crate::i18n::tr("prefs.zoom_stop_at_model_tip"));
+                let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(crate::i18n::tr("prefs.zoom_stop_at_model_tip"));
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });
         });
@@ -260,7 +262,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             }
                         }
                     })
-                    .on_hover_text(crate::i18n::tr("prefs.trackpad_zoom_modifier.help"));
+                    .backing_on_hover_text(crate::i18n::tr("prefs.trackpad_zoom_modifier.help"));
                     crate::scenario::publish_target("prefs:trackpad_zoom_modifier", response.rect);
                 });
             });
@@ -302,17 +304,17 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
                 );
                 crate::scenario::publish_rect("prefs:home_fit_size", response.rect);
-                response.on_hover_text(note);
+                response.backing_on_hover_text(note);
             });
         });
         let (label, note) = (app.tr("prefs.navigator_fit").to_owned(), app.tr("prefs.navigator_fit_note").to_owned());
-        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_fit).on_hover_text(note);
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_fit).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:navigator_fit", response.rect);
         let (label, note) = (app.tr("prefs.invert_navigator_arrows").to_owned(), app.tr("prefs.invert_navigator_arrows_note").to_owned());
-        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_navigator_arrows).on_hover_text(note);
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_navigator_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_navigator_arrows", response.rect);
         let (label, note) = (app.tr("prefs.invert_curved_roll_arrows").to_owned(), app.tr("prefs.invert_curved_roll_arrows_note").to_owned());
-        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_curved_roll_arrows).on_hover_text(note);
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_curved_roll_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_curved_roll_arrows", response.rect);
     });
 }

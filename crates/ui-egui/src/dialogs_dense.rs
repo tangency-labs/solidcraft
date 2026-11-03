@@ -218,7 +218,7 @@ fn fillet_corner_rows(
             let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", &factor)]);
             ui_kit::checked_row(ui, "ui.fillet_setback", &mut text, &hint, warning.as_deref())
         });
-        row.response.on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", &factor)]));
+        row.response.backing_on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", &factor)]));
         let (accepted, field) = row.inner;
         enter |= accepted;
         if text != shown {
@@ -237,7 +237,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
     let t = Tokens::get();
     let before = extra.get("fit").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_fit", |ui| extra_choice(ui, extra, "fi_fit", "fit", &FILLET_FITS)));
-    row.response.on_hover_text(tr("ui.fillet_fit_tip"));
+    row.response.backing_on_hover_text(tr("ui.fillet_fit_tip"));
     let fit = row.inner;
     if extra.get("fit") != before.as_ref() {
         settle_fillet_options(extra, "fit", setback);
@@ -322,14 +322,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             };
             tr(key).to_owned()
         };
-        ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).on_hover_text(&prompt);
+        ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).backing_on_hover_text(&prompt);
         if matches!(&d.kind, Kind::SketchModify(k) if k.previews()) {
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
             let step = crate::i18n::format(
                 "dialog.selection_step",
                 &[("step", &(d.active + 1).to_string()), ("total", &d.inputs.len().to_string()), ("input", label)],
             );
-            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).on_hover_text(tr("dialog.selection_guidance"));
+            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
     let manage_hint = match &d.kind {
@@ -540,7 +540,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     }
                     response
                 })
-                .on_hover_text(tr("ui.fillet_type_choices_tip"));
+                .backing_on_hover_text(tr("ui.fillet_type_choices_tip"));
                 if rtype == 0 {
                     enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, radius, setback);
                     fillet_fit_rows(app, ui, &mut d.extra, setback);
@@ -558,7 +558,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::section(ui, "fillet_options", "Options", true, |ui| {
                 ui.scope(|ui| ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2))
                     .response
-                    .on_hover_text(tr("ui.fillet_options_tip"));
+                    .backing_on_hover_text(tr("ui.fillet_options_tip"));
             });
             // The radii along the edge, for the two types that take them.
             if !*chamfer && matches!(rtype, 2 | 4) {
@@ -579,12 +579,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             form_row(ui, "Mid Radius", |ui| {
                                 ui.horizontal(|ui| {
                                     ui_kit::fraction_field(ui, position)
-                                        .on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
+                                        .backing_on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
                                     let width = (ui.available_width() - t.space_24 - t.space_4).max(0.0);
                                     ui.allocate_ui_with_layout(vec2(width, t.space_24), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                         enter |= field(ui, r);
                                     });
-                                    if ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Remove this point")).clicked() {
+                                    if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("Remove this point")).clicked() {
                                         remove = Some(k);
                                     }
                                 });
@@ -1006,7 +1006,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         ui.label(format!("{:.2}, {:.2}, {:.2}", p.x, p.y, p.z));
                         // A cylinder's place is its Face pick, cleared there.
                         if *cmd != "solid.cylinder"
-                            && ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Place at the origin instead")).clicked()
+                            && ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("Place at the origin instead")).clicked()
                         {
                             *at = None;
                         }

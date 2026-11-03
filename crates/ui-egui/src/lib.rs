@@ -455,6 +455,8 @@ pub struct Services {
     /// frame, so it only reads a value kept up to date elsewhere. None, or `None` from it: the
     /// window toolkit's theme.
     pub desktop_dark: Option<Box<dyn Fn() -> Option<bool>>>,
+    /// Lazy background observation; `needed` arms polling, the return is cached only.
+    pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
@@ -513,6 +515,7 @@ pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
     pub blur: blur::State,
+    pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
@@ -790,6 +793,7 @@ impl SolveApp {
             panel_runtime: None,
             viewport_status: Default::default(),
             blur: Default::default(),
+            blur_session: Default::default(),
             viewport_status_fixture: Default::default(),
             session,
             ui: UiState::default(),
@@ -2960,6 +2964,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        prefs::prepare_blur(self, ui.ctx());
         let blur_source = !self.home.open && !render_workspace::result_active(self);
         let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);

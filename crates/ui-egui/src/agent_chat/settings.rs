@@ -7,6 +7,7 @@ use super::agents::{self, AgentConfig, Kind, Mode, Protocol};
 use super::backend::TestError;
 use super::*;
 use crate::ui_kit;
+use crate::ui_kit::BackingTooltipExt as _;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AddKind {
@@ -405,7 +406,7 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
 /// An endpoint's request timeout field: seconds, 30 s to an hour.
 fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
     let r = ui_kit::number_field(ui, secs, agents::MIN_REQUEST_TIMEOUT_S..=agents::MAX_REQUEST_TIMEOUT_S, 5.0, "")
-        .on_hover_text(tr("ui.ai_request_timeout_hint"));
+        .backing_on_hover_text(tr("ui.ai_request_timeout_hint"));
     r.widget_info(|| {
         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), *secs as f64);
         info.label = Some(tr("prefs.assistant_seconds_aria").to_owned());
@@ -419,7 +420,7 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
 fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
     let response = ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
-        .on_hover_text(tr("ui.ai_reasoning_effort_hint"));
+        .backing_on_hover_text(tr("ui.ai_reasoning_effort_hint"));
     crate::scenario::publish_target(handle, response.rect);
     response.changed()
 }
@@ -446,14 +447,14 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, tr("prefs.assistant"), tr("ai.prefs.intro"));
         ui_kit::settings_section(ui, "assistant_availability", tr("ai.prefs.availability"), |ui| {
             ui.horizontal(|ui| {
-                let response =
-                    ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features).on_hover_text(tr("ui.ai_show_features_note"));
+                let response = ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features)
+                    .backing_on_hover_text(tr("ui.ai_show_features_note"));
                 crate::scenario::publish_handle("prefs:ai_features", response.rect.center());
                 ui_kit::help_icon(ui, tr("ui.ai_show_features_note"));
             });
             ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
                 let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
-                    .on_hover_text(tr("ui.ai_toolbar_button_note"));
+                    .backing_on_hover_text(tr("ui.ai_toolbar_button_note"));
                 crate::scenario::publish_handle("prefs:ai_toolbar_button", response.rect.center());
             });
             if cfg!(target_arch = "wasm32") {
@@ -487,7 +488,7 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("ai.prefs.open_at_start", "ai.prefs.open_at_start_note", "agent_chat_open_at_start", &mut app.preferences.agent_chat_open_at_start),
         ] {
             ui.horizontal(|ui| {
-                let response = ui_kit::checkbox(ui, tr(label), value).on_hover_text(tr(help));
+                let response = ui_kit::checkbox(ui, tr(label), value).backing_on_hover_text(tr(help));
                 crate::scenario::publish_handle(&format!("prefs:{handle}"), response.rect.center());
                 ui_kit::help_icon(ui, tr(help));
             });
@@ -540,7 +541,8 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             .collect();
         ui_kit::section_count(ui, "always_allowed", tr("ui.ai_always_allowed"), false, Some(remembered.len()), |ui| {
             if remembered.is_empty() {
-                ui_kit::text(ui, tr("ai.prefs.no_saved_approvals"), ui_kit::Text::Hint("none")).on_hover_text(tr("ui.ai_always_allowed_none"));
+                ui_kit::text(ui, tr("ai.prefs.no_saved_approvals"), ui_kit::Text::Hint("none"))
+                    .backing_on_hover_text(tr("ui.ai_always_allowed_none"));
             }
             let names: std::collections::HashMap<_, _> = agents::entries(app).into_iter().map(|entry| (entry.id, entry.name)).collect();
             for (agent, tools) in remembered {
@@ -605,7 +607,7 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if limit != 0 {
                     let response =
-                        ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).on_hover_text(tr("ai.prefs.turn_limit_hint"));
+                        ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).backing_on_hover_text(tr("ai.prefs.turn_limit_hint"));
                     response.widget_info(|| {
                         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(p.agent_chat_turn_limit));
                         info.label = Some(tr("prefs.assistant_limit").to_owned());
@@ -625,7 +627,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui,
             |ui| {
                 let response = ui_kit::checkbox(ui, tr("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
-                    .on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
+                    .backing_on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
                 crate::scenario::publish_target("prefs:agent_pointer_show", response.rect);
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
                     let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + crate::theme::Tokens::get().space_4;
@@ -653,7 +655,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     ui.horizontal(|ui| {
                         let response = ui_kit::checkbox(ui, tr("ai.prefs.follow_camera"), &mut app.ui.agent_cursor.follow_camera)
-                            .on_hover_text(tr("prefs.assistant_follow_help"));
+                            .backing_on_hover_text(tr("prefs.assistant_follow_help"));
                         crate::scenario::publish_target("prefs:agent_pointer_follow", response.rect);
                         ui_kit::help_icon(ui, tr("prefs.assistant_follow_help"));
                     });
@@ -719,13 +721,13 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         Kind::Api => "ui.ai_test_api_tip",
                                         Kind::Anthropic => "ui.ai_test_anthropic_tip",
                                     };
-                                    if test_button.on_hover_text(tr(tip)).clicked() {
+                                    if test_button.backing_on_hover_text(tr(tip)).clicked() {
                                         test = Some(entry.clone());
                                     }
                                     if !entry.found {
                                         let edit_button = ui_kit::button(ui, tr("ui.ai_edit"), ui_kit::Button::Small);
                                         crate::scenario::publish_handle(&format!("prefs:ai_edit:{}", entry.id), edit_button.rect.center());
-                                        if edit_button.on_hover_text(tr("ui.ai_edit_tip")).clicked() {
+                                        if edit_button.backing_on_hover_text(tr("ui.ai_edit_tip")).clicked() {
                                             edit = Some(entry.id.clone());
                                         }
                                     }
@@ -748,7 +750,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     }
                                 },
                             );
-                            ui_kit::settings_short_note(ui, &detail).on_hover_text(&entry.id);
+                            ui_kit::settings_short_note(ui, &detail).backing_on_hover_text(&entry.id);
                             // Wide enough for an endpoint's "Request timeout" or "Reasoning effort" too,
                             // so all rows line up.
                             let label_w = [tr("ui.ai_permissions"), tr("ui.ai_request_timeout"), tr("ui.ai_reasoning_effort")]
@@ -819,7 +821,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
                                 ui_kit::text(ui, tr("ai.prefs.override_all_warning"), ui_kit::Text::Report("agent_permissions_warning", true))
-                                    .on_hover_text(tr("ui.ai_mode_all_warning"));
+                                    .backing_on_hover_text(tr("ui.ai_mode_all_warning"));
                             }
                             test_line(ui, &app.agent_chat.settings.tests.get(&entry.id));
                         });

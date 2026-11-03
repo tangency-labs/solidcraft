@@ -91,7 +91,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ),
             ] {
                 ui.horizontal_wrapped(|ui| {
-                    let response = setting(app, ui).on_hover_text(app.tr(help));
+                    let response = setting(app, ui).backing_on_hover_text(app.tr(help));
                     crate::scenario::publish_target(&format!("prefs:{target}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
                     if !crate::prefs_search::suppress_chrome(ui) {
@@ -139,7 +139,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                let response = setting::offer_stand_up(app, ui).on_hover_text(app.tr("prefs.stand_up_note"));
+                let response = setting::offer_stand_up(app, ui).backing_on_hover_text(app.tr("prefs.stand_up_note"));
                 crate::scenario::publish_target("prefs:offer_stand_up", response.rect);
                 if !crate::prefs_search::suppress_chrome(ui) {
                     ui_kit::help_icon(ui, app.tr("prefs.stand_up_note"));
@@ -176,7 +176,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:update_changed_links", response.rect);
             crate::scenario::publish_target("dialog:Update changed linked designs when a tab comes back", response.rect);
             ui.horizontal_wrapped(|ui| {
-                let response = setting::double_click_components(app, ui).on_hover_text(app.tr("prefs.design_tools.double_click_help"));
+                let response = setting::double_click_components(app, ui).backing_on_hover_text(app.tr("prefs.design_tools.double_click_help"));
                 crate::scenario::publish_target("prefs:double_click_components", response.rect);
                 crate::scenario::publish_target("dialog:Double-click a component to activate it, or to edit a linked one in place", response.rect);
                 if !crate::prefs_search::suppress_chrome(ui) {
