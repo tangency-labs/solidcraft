@@ -1,8 +1,8 @@
 use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
-use solidcraft_geom::Aabb2;
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::Aabb2;
 
 use crate::{
     Anchor, Bend, Corner, CornerRelief, Datum, DevelopError, Development, EdgeFrom, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rigid3, Rip, Sheet,

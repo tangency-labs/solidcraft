@@ -10,9 +10,9 @@
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
+use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{Bent, Development, Fold};
 use solidcraft_geom::LINEAR_TOL;
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
 use crate::sheet::FlatWork;

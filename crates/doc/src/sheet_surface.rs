@@ -4,10 +4,10 @@
 //! `SOLIDCRAFT_SURFACE_REPORT` to a file makes every sheet body that is built append one line to it,
 //! naming the thread (a test's name under `cargo test`) and how far the two flats differ.
 
-use solidcraft_geom::prelude::*;
-use solidcraft_develop::{Anchor, Bend, Datum, Development, Joint, JointKind, Panel, Relief, Rigid2, Sheet, Tail, ZoneEnds, crossings, develop};
-use solidcraft_geom::{Aabb2, Ring};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_develop::{Anchor, Bend, Datum, Development, Joint, JointKind, Panel, Relief, Rigid2, Sheet, Tail, ZoneEnds, crossings, develop};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb2, Ring};
 use solidcraft_kernel::BoolOp;
 
 use crate::sheet::{FlatWork, SheetBody, SheetFlange, material_boolean, material_union};

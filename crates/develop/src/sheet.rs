@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use solidcraft_geom::bspline::NurbsSurface;
 use solidcore_record::{Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::bspline::NurbsSurface;
 
 /// A sheet metal part's surfaces: the panels and the joints between them. The material lies on
 /// the side of the sheet that a chart's `u × v` points to, `thickness` deep.

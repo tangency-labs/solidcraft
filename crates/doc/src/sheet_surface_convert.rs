@@ -33,13 +33,13 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use solidcore_record::brep::Loop as Bounds;
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{
     Anchor, Bend, Corner, CornerRelief, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rigid3, Rip, Sheet, Surface, Tail,
     ZoneEnds, curve_through, develop, fold,
 };
-use solidcore_record::brep::Loop as Bounds;
 use solidcraft_geom::brep::query::Query;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
 use crate::sheet::FlatWork;

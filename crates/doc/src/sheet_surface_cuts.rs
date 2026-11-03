@@ -24,9 +24,9 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
+use solidcore_record::{Plane, Region2, Vec2};
 use solidcraft_develop::{Cut, Development, Fold, Rigid2, Rigid3, Surface, develop};
 use solidcraft_geom::brep::query::Query;
-use solidcore_record::{Plane, Region2, Vec2};
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
 use crate::sheet::FlatWork;

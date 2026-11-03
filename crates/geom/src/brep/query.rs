@@ -247,8 +247,9 @@ impl<'a> Query<'a> {
                 let mut ring = Vec::new();
                 for oe in edges {
                     let Some([t0, t1]) = oe.pcurve.interval() else { continue };
-                    let mut pts: Vec<[f64; 2]> =
-                        (0..PCURVE_POINTS).filter_map(|k| super::pcurve::eval(&oe.pcurve, t0 + (t1 - t0) * k as f64 / PCURVE_POINTS as f64)).collect();
+                    let mut pts: Vec<[f64; 2]> = (0..PCURVE_POINTS)
+                        .filter_map(|k| super::pcurve::eval(&oe.pcurve, t0 + (t1 - t0) * k as f64 / PCURVE_POINTS as f64))
+                        .collect();
                     pts.extend(super::pcurve::eval(&oe.pcurve, t1));
                     if !oe.forward {
                         pts.reverse();

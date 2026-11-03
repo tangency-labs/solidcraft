@@ -1,7 +1,7 @@
 //! Rigid motions of the plane, applied exactly to every kind of profile segment, and of space.
 
-use solidcraft_geom::prelude::*;
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 /// How far from a unit vector, or from square to another, a frame's axis may be.
 const FRAME_TOL: f64 = 1e-9;

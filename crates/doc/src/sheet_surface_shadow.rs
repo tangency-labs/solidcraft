@@ -26,11 +26,11 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
 
+use solidcore_record::brep::{Loop as Bounds, Shell, Surface as Record};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{Bent, Fold, Rigid2, Rigid3, Surface, curve_through};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::query::Query;
-use solidcore_record::brep::{Loop as Bounds, Shell, Surface as Record};
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
 /// A wall leaning less than this (the cosine of its normal's angle to the fibers) is edge-on to

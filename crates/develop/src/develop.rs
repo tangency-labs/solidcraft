@@ -4,8 +4,8 @@ use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
-use solidcraft_geom::Aabb2;
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::Aabb2;
 
 use crate::chart::Flatten;
 use crate::fold::Wrap;

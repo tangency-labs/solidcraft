@@ -11,8 +11,8 @@
 use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
-use solidcraft_develop::{Development, EdgeFrom};
 use solidcore_record::{Region2, Seg2};
+use solidcraft_develop::{Development, EdgeFrom};
 use solidcraft_kernel::PLANAR_FIT_TOL;
 
 /// Within this (mm), an edge lies on a line or circle.

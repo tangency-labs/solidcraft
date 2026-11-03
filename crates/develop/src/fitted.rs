@@ -14,10 +14,10 @@
 //! least stretch over its space, by damped Gauss-Newton on the metric with a band Cholesky
 //! solve. What stretch is left is the flat's cost, which is reported and never forced.
 
-use solidcraft_geom::prelude::*;
-use solidcraft_geom::bspline::{NurbsSurface, bernstein};
-use solidcraft_geom::spline_space::{Cond, Interpolant, Space, embed};
 use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcraft_geom::bspline::{NurbsSurface, bernstein};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::spline_space::{Cond, Interpolant, Space, embed};
 
 /// The stretch a fitted flat may leave, as a strain: refinement stops below it.
 pub(crate) const STRETCH_TOL: f64 = 1e-7;

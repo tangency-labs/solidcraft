@@ -7,9 +7,9 @@
 //!
 //! Not built yet: flanges on part of an edge, and flanges on a curved edge or a roll's edge.
 
-use solidcraft_geom::prelude::*;
-use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rip, Surface, Tail, ZoneEnds, develop};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rip, Surface, Tail, ZoneEnds, develop};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
 
 use crate::sheet::HeightFrom;
