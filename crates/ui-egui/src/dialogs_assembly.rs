@@ -123,9 +123,21 @@ pub enum Asm {
         of: Vec<Sel>,
         /// Pairs closer than this (mm, as typed) are listed too.
         clearance: String,
+        /// Compute's check under way (its reply lands here).
+        check: Option<Check>,
     },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
     Trace(Box<TraceForm>),
+}
+
+/// Interference's check off the window thread: where it leaves its reply (the check's and the
+/// shared volumes' meshes), the design and the picks it checked, and when it started.
+#[derive(Clone, Debug)]
+pub struct Check {
+    reply: std::sync::Arc<std::sync::Mutex<Option<(Value, Vec<Mesh>)>>>,
+    design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    of: Vec<Sel>,
+    started: f64,
 }
 
 /// The snap under the cursor, remembered for the selection it was found for.
@@ -285,7 +297,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
         "inspect.interference" => (
-            Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into() },
+            Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into(), check: None },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
         ),
         _ => return None,
@@ -954,10 +966,41 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
         }
         Asm::Coupling(f) => enter |= crate::dialogs_coupling::rows(app, ui, f, inputs),
         Asm::Cam(f) => enter |= crate::dialogs_coupling::cam::rows(app, ui, f, inputs),
-        Asm::Interference { result, overlaps, of, clearance } => {
+        Asm::Interference { result, overlaps, of, clearance, check } => {
             let picked: Vec<Sel> = inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+            if let Some(c) = check.take() {
+                match c.reply.lock().map(|mut r| r.take()).map_err(|_| ()) {
+                    Ok(None) => {
+                        *check = Some(c);
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                    }
+                    // Done: shown unless the design changed meanwhile (a script, the control
+                    // channel, undo). A poisoned lock (its thread panicked) leaves nothing.
+                    Ok(Some((r, o))) => {
+                        if c.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc)) {
+                            (*result, *overlaps, *of) = (Some(r), o, c.of);
+                        }
+                        ui.ctx().request_repaint();
+                    }
+                    Err(()) => {}
+                }
+            }
             enter |= expr_row(ui, "Clearance", clearance);
+            let started = check.as_ref().map(|c| c.started);
             form_row(ui, "", |ui| {
+                if let Some(started) = started {
+                    let t = Tokens::get();
+                    ui.horizontal(|ui| {
+                        let seconds = ((crate::now_ms() - started) / 1000.0).floor().max(0.0);
+                        ui.add(egui::Spinner::new().size(t.font_small));
+                        ui.label(RichText::new(crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
+                        if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                            // Its thread finishes the check; the reply is left unread.
+                            *check = None;
+                        }
+                    });
+                    return;
+                }
                 let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
@@ -966,13 +1009,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 )
                 .clicked()
                 {
-                    let (r, o) = interference(app, &picked, clearance);
-                    *result = Some(r);
-                    *overlaps = o;
-                    *of = picked;
+                    (*result, *overlaps) = (None, Vec::new());
+                    *check = Some(interference(app, &picked, clearance));
+                    ui.ctx().request_repaint();
                 }
             });
-            if let Some(r) = result.as_ref() {
+            if check.is_none()
+                && let Some(r) = result.as_ref()
+            {
                 interference_rows(app, ui, r);
             }
         }
@@ -1172,30 +1216,62 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
     }
 }
 
-/// Run the check (overlaps, pairs closer than the clearance, each body's nearest neighbour) and
-/// find the overlapping volumes (world placement) to show in red.
-fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, Vec<Mesh>) {
+/// Start Compute's check (overlaps, pairs closer than the clearance, each body's nearest
+/// neighbour) and find the overlapping volumes (world placement) to show in red. Off the window
+/// thread, on a kernel thread, when the app runs commands there: a slow pair froze the window
+/// until the app was closed (#11483). Else at once.
+fn interference(app: &SolveApp, picked: &[Sel], clearance: &str) -> Check {
+    let check =
+        Check { reply: Default::default(), design: std::sync::Arc::downgrade(&app.session.doc), of: picked.to_vec(), started: crate::now_ms() };
     let names: Vec<String> = picked.body_names();
     let (scale, _) = crate::prefs::unit_scale(&app.session.doc.units);
-    let clearance = match crate::prefs::parse_length_mm(clearance, scale) {
-        Some(v) if v >= 0.0 => v,
-        _ => return (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
+    let reply = match crate::prefs::parse_length_mm(clearance, scale) {
+        Some(v) if v >= 0.0 => {
+            let mut p = json!({ "clearance": v, "nearest": 1 });
+            if !names.is_empty() {
+                p["bodies"] = json!(names);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if app.apply_off_thread.is_some() {
+                let (ahead, world, out, params) =
+                    (app.session.ahead(), crate::open_meshing::session_world(&app.session), check.reply.clone(), p.clone());
+                let spawned = solidcraft_engine::kernel::kernel_thread("interference").spawn(move || {
+                    let r = check_now(ahead, &world, params);
+                    if let Ok(mut slot) = out.lock() {
+                        *slot = Some(r);
+                    }
+                });
+                if spawned.is_ok() {
+                    return check;
+                }
+            }
+            check_now(app.session.ahead(), &crate::open_meshing::session_world(&app.session), p)
+        }
+        _ => (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
     };
-    let mut p = json!({ "clearance": clearance, "nearest": 1 });
-    if !names.is_empty() {
-        p["bodies"] = json!(names);
+    if let Ok(mut slot) = check.reply.lock() {
+        *slot = Some(reply);
     }
-    let r = match app.run("inspect.clearance", p) {
-        Ok(v) => v,
-        Err(e) => return (json!({ "error": e }), Vec::new()),
-    };
-    let meshes = overlap_meshes(&crate::open_meshing::session_world(&app.session), &r);
-    (r, meshes)
+    check
+}
+
+/// `inspect.clearance` with `p` on a copy of the session, and the volume each pair it finds
+/// overlapping shares ([`overlap_meshes`]).
+fn check_now(ahead: solidcraft_engine::Ahead, world: &solidcraft_engine::doc::ModelState, p: Value) -> (Value, Vec<Mesh>) {
+    // One reply for the one command.
+    match ahead.replies(&[("inspect.clearance".to_string(), p)]).pop() {
+        Some(Ok(r)) => {
+            let meshes = overlap_meshes(world, &r);
+            (r, meshes)
+        }
+        Some(Err(e)) => (json!({ "error": e.to_string() }), Vec::new()),
+        None => (json!({}), Vec::new()),
+    }
 }
 
 /// The volume each pair in an `inspect.clearance` reply's `overlaps` shares, meshed in world
-/// placement. Each pair runs on a kernel worker with the kernel's stack: on the window thread
-/// (1 MiB on Windows) the kernel's recursion ran out of stack and the app closed (#11483).
+/// placement. Each pair runs on a kernel worker with the kernel's stack, whatever thread asks
+/// (the window thread's is 1 MiB on Windows).
 fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mesh> {
     use solidcraft_engine::kernel;
     let pairs: Vec<_> =
