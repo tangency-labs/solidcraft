@@ -97,7 +97,8 @@ plain!(
     Brep,
     solidcore::geom::vector3d::Point3,
     crate::history::Raw,
-    crate::MassProperties
+    crate::MassProperties,
+    Vec<crate::trace::Pick>
 );
 
 impl<T> Answer for Option<T> {}

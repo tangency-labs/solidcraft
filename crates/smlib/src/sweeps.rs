@@ -6,6 +6,9 @@
 //! With `cap`, the profile's loops close the ends and the result must be a closed manifold solid
 //! ([`Error::NotSolid`] otherwise); without, it is the swept sheet.
 
+use serde_json::json;
+
+use crate::trace;
 use crate::{Brep, Result, core};
 
 /// A 3D curve of a profile, path or section.
@@ -105,7 +108,9 @@ impl Brep {
     /// A sheet of planar faces bounded by `loops`: closed loops of curves in one plane, in any
     /// order, nested as outer loops, their holes and islands in the holes.
     pub fn planar_faces(loops: &[Curve]) -> Result<Brep> {
-        core::sweep::planar_faces(loops).map(Brep::made_core)
+        let r = core::sweep::planar_faces(loops).map(Brep::made_core);
+        trace::made("planar_faces", &[], &r, || json!({"loops": trace::curves(loops)}));
+        r
     }
 
     /// The planar `profile` extruded `distance` along the unit `direction` (square to its plane).
@@ -116,20 +121,43 @@ impl Brep {
     /// [`DraftCorner::Curvature`], a curve of a profile with a sharp corner is neither a line nor
     /// an arc).
     pub fn extrude(profile: &[Curve], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Brep> {
-        core::sweep::extrude(profile, direction, distance, draft, corner, cap).map(Brep::made_core)
+        let r = core::sweep::extrude(profile, direction, distance, draft, corner, cap).map(Brep::made_core);
+        trace::made("extrude", &[], &r, || {
+            let corner = match corner {
+                DraftCorner::Curvature => "curvature",
+                DraftCorner::Tangent => "tangent",
+                DraftCorner::Round => "round",
+            };
+            json!({"profile": trace::curves(profile), "direction": direction, "distance": distance, "draft": draft, "corner": corner, "cap": cap})
+        });
+        r
     }
 
     /// The planar `profile` turned `angle` radians (0 < angle <= 2 pi) right-handed about the
     /// axis through `origin` along `direction`, in the profile's plane (touching it at most).
     pub fn revolve(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
-        core::sweep::revolve(profile, origin, direction, angle, cap).map(Brep::made_core)
+        let r = core::sweep::revolve(profile, origin, direction, angle, cap).map(Brep::made_core);
+        trace::made(
+            "revolve",
+            &[],
+            &r,
+            || json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "angle": angle, "cap": cap}),
+        );
+        r
     }
 
     /// `profile` swept along `path` (end-to-end curves), carried with the path's start: the
     /// profile keeps its place relative to it. The walls are B-spline approximations, one per
     /// stretch of profile between tangent breaks.
     pub fn sweep(profile: &[Curve], path: &[Curve], frame: SweepFrame, cap: bool) -> Result<Brep> {
-        core::sweep::sweep_placed(profile, path, frame, cap).map(|(b, _)| Brep::made_core(b))
+        let r = core::sweep::sweep_placed(profile, path, frame, cap).map(|(b, _)| Brep::made_core(b));
+        trace::made(
+            "sweep",
+            &[],
+            &r,
+            || json!({"profile": trace::curves(profile), "path": trace::curves(path), "frame": frame_word(frame), "cap": cap}),
+        );
+        r
     }
 
     /// [`Brep::sweep`], with where the sweep placed the profile: the rigid motions carrying the
@@ -138,7 +166,15 @@ impl Brep {
     /// out from point to point along the path); a sweep that carries on from where this one left
     /// the profile starts from the last.
     pub fn sweep_placed(profile: &[Curve], path: &[Curve], frame: SweepFrame, cap: bool) -> Result<(Brep, [Affine; 3])> {
-        core::sweep::sweep_placed(profile, path, frame, cap).map(|(b, m)| (Brep::made_core(b), m))
+        let r = core::sweep::sweep_placed(profile, path, frame, cap).map(|(b, m)| (Brep::made_core(b), m));
+        trace::call(
+            "sweep",
+            &[],
+            &r,
+            |(b, _)| vec![b.id],
+            || json!({"profile": trace::curves(profile), "path": trace::curves(path), "frame": frame_word(frame), "cap": cap}),
+        );
+        r
     }
 
     /// The `curves` projected along `direction` (pointing from them toward the face) onto the
@@ -173,27 +209,52 @@ impl Brep {
     /// A loft (skin) through `sections` (at least two closed loops), `degree` (1 ruled, 2 or 3)
     /// across them.
     pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Brep> {
-        core::sweep::loft(sections, degree, cap).map(Brep::made_core)
+        let r = core::sweep::loft(sections, degree, cap).map(Brep::made_core);
+        trace::made(
+            "loft",
+            &[],
+            &r,
+            || json!({"sections": sections.iter().map(|s| trace::curves(s)).collect::<Vec<_>>(), "degree": degree, "cap": cap}),
+        );
+        r
     }
 
     /// The planar `profile` placed by each of `stations` in turn (2…[`MAX_STATIONS`], each
     /// section exactly the profile's image), its walls skinned through the sections, cubic
     /// across them: one wall per profile curve. `ends` says how the ends close.
     pub fn sweep_stations(profile: &[Curve], stations: &[Affine], ends: Ends) -> Result<Brep> {
-        core::sweep::sweep_stations(profile, stations, ends).map(Brep::made_core)
+        let r = core::sweep::sweep_stations(profile, stations, ends).map(Brep::made_core);
+        trace::made("sweep_stations", &[], &r, || {
+            let ends = match ends {
+                Ends::Open => "open",
+                Ends::Capped => "capped",
+                Ends::Joined => "joined",
+            };
+            json!({"profile": trace::curves(profile), "stations": stations.iter().map(trace::affine).collect::<Vec<_>>(), "ends": ends})
+        });
+        r
     }
 
     /// A loft from the planar `section` (one closed loop of lines, in order) to the point `apex`
     /// off its plane: a pyramid, its base the section and a triangle on each line.
     pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Brep> {
-        core::sweep::loft_to_point(section, apex).map(Brep::made_core)
+        let r = core::sweep::loft_to_point(section, apex).map(Brep::made_core);
+        trace::made("loft_to_point", &[], &r, || json!({"section": trace::curves(section), "apex": apex}));
+        r
     }
 
     /// `profile` carried by a screw motion about the axis through `origin` along `direction`:
     /// `turns` right-handed turns about it, rising `pitch` (signed) per turn, capped at both ends,
     /// its walls within about `tolerance` of the true screw surfaces.
     pub fn screw_sweep(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], pitch: f64, turns: f64, tolerance: f64) -> Result<Brep> {
-        core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance).map(Brep::made_core)
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance).map(Brep::made_core);
+        trace::made(
+            "screw_sweep",
+            &[],
+            &r,
+            || json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "pitch": pitch, "turns": turns, "tolerance": tolerance}),
+        );
+        r
     }
 
     /// [`screw_sweep`](Self::screw_sweep) with the profile moved off the axis as it turns: at turn
@@ -211,7 +272,20 @@ impl Brep {
         law: &[(f64, f64)],
         tolerance: f64,
     ) -> Result<Brep> {
-        core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance).map(Brep::made_core)
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance).map(Brep::made_core);
+        trace::made("screw_sweep", &[], &r, || {
+            json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "pitch": pitch, "turns": turns,
+                "law": law, "tolerance": tolerance})
+        });
+        r
+    }
+}
+
+/// A sweep frame's name in a trace.
+fn frame_word(f: SweepFrame) -> &'static str {
+    match f {
+        SweepFrame::Follow => "follow",
+        SweepFrame::Translate => "translate",
     }
 }
 

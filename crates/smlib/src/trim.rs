@@ -1,6 +1,9 @@
 //! Untrim and extend of a sheet's faces. Each returns a new body and leaves its input unchanged;
 //! faces and holes are chosen by points, as [`crate::ops`] chooses them.
 
+use serde_json::json;
+
+use crate::trace;
 use crate::{Brep, Result, core};
 
 /// How [`Brep::extend_sheet`] continues a surface past its side.
@@ -33,7 +36,14 @@ impl Brep {
             Holes::All => None,
             Holes::At(at) => Some(at),
         };
-        core::trim::untrim_face(self.core(), point, tolerance, holes, outer, in_place).map(Brep::made_core)
+        let r = core::trim::untrim_face(self.core(), point, tolerance, holes, outer, in_place).map(Brep::made_core);
+        trace::made(
+            "untrim_face",
+            &[self],
+            &r,
+            || json!({"face": trace::picks(self, trace::PickKind::Face, &[point], tolerance), "holes": holes, "outer": outer, "in_place": in_place}),
+        );
+        r
     }
 
     /// The one-face sheet `self`, whose face is its surface's whole parameter box, continued
@@ -41,7 +51,16 @@ impl Brep {
     /// `how` says: SMLib's extended surface over the grown box, the face and its sides carrying
     /// the tags of those they continue. A sheet of another shape is [`crate::Error::Unsupported`].
     pub fn extend_sheet(&self, point: [f64; 3], tolerance: f64, distance: f64, how: Continuation) -> Result<Brep> {
-        core::trim::extend_sheet(self.core(), point, tolerance, distance, how).map(Brep::made_core)
+        let r = core::trim::extend_sheet(self.core(), point, tolerance, distance, how).map(Brep::made_core);
+        trace::made("extend_sheet", &[self], &r, || {
+            let how = match how {
+                Continuation::Natural => "natural",
+                Continuation::Tangent => "tangent",
+                Continuation::Curvature => "curvature",
+            };
+            json!({"edge": trace::picks(self, trace::PickKind::Edge, &[point], tolerance), "distance": distance, "how": how})
+        });
+        r
     }
 
     /// A point inside each face, in SMLib's face order: on the face's surface, inside its trims
