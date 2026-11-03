@@ -483,6 +483,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
 - `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
+- `value_box_beside_handle` (bool, default false: the value box stays beside its handle instead of going just outside the model).
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
 - `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and shows MODEL, #9360)

@@ -41,6 +41,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_handle("prefs:step_values", step.rect.center());
         let tip = app.tr("prefs.value_boxes_in_view_tip").to_string();
         setting::value_boxes_in_view(app, ui).on_hover_text(tip);
+        setting::value_box_beside_handle(app, ui);
     });
     // When SMLib's full check runs while features are computed (`diagnostics.validation`).
     ui_kit::settings_section(ui, "validation", app.tr("prefs.validation"), |ui| {
