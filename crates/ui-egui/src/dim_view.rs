@@ -773,8 +773,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         Some((e.param.clone(), draft.clone()))
     });
     let placing = !editing();
+    // While a value is typed the whole sketch, its other dimensions included, is drawn as the
+    // value would leave it (#11584); placing one only measures, so nothing moves.
+    let typed = preview_world(app);
     let draft = editor_draft.or_else(|| placing.then(|| placement_preview(app)).flatten());
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         // Only a finished sketch's dimension edited from the model view stays open, at its text.
@@ -816,11 +819,15 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
-    let mut constraints = sk.constraints.iter().map(|c| (ss, c, false)).collect::<Vec<_>>();
-    if let (Some(source), Some((param, _))) = (draft_sketch, draft.as_ref()) {
-        // A driven draft is keyed by its constraint id (it has no parameter).
-        let ours = |c: &&solidcraft_engine::sketch::Constraint| c.param.as_deref() == Some(param.as_str()) || (c.driven && c.id == *param);
-        constraints.extend(source.sketch.constraints.iter().filter(ours).map(|c| (source, c, true)));
+    // A driven draft is keyed by its constraint id (it has no parameter).
+    let ours = |c: &solidcraft_engine::sketch::Constraint| {
+        draft.as_ref().is_some_and(|(param, _)| c.param.as_deref() == Some(param.as_str()) || (c.driven && c.id == *param))
+    };
+    // Drawn from the typed value's solve, the sketch already holds the draft: it is told apart
+    // by its parameter, as below.
+    let mut constraints = sk.constraints.iter().filter(|c| typed.is_none() || !ours(c)).map(|c| (ss, c, false)).collect::<Vec<_>>();
+    if let Some(source) = draft_sketch {
+        constraints.extend(source.sketch.constraints.iter().filter(|c| ours(c)).map(|c| (source, c, true)));
     }
     // Text boxes already drawn this frame, in draw order: a later dimension that would land
     // on one of them steps clear of it (#44).
@@ -1140,6 +1147,13 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     live.typed |= r.changed() || completed;
                 }
                 e.owned |= r.changed() || completed;
+                // Solved now, so the next frame draws the sketch at the new value from its start.
+                if (r.changed() || completed)
+                    && let Some(draft) = e.draft.as_mut()
+                {
+                    let expr = e.expr.clone();
+                    reevaluate(app, draft, &expr);
+                }
                 if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                 }
@@ -1219,9 +1233,25 @@ fn clear_picks(app: &mut SolveApp) {
     }
 }
 
+/// While a new dimension's value is typed: the design solved with that value (the last value
+/// that solved), so the open sketch is drawn as Enter would leave it. None otherwise.
+pub fn preview_world(app: &SolveApp) -> Option<Arc<solidcraft_engine::doc::ModelState>> {
+    EDIT.with(|e| e.try_borrow().ok()?.as_ref()?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.preview.clone()))
+}
+
 /// Is the inline editor open (it has the keyboard)?
 pub fn editing() -> bool {
     EDIT.with(|e| e.borrow().is_some())
+}
+
+/// The open draft's typed text and the text its preview was solved for (tests).
+#[cfg(test)]
+pub fn solved_for() -> Option<(String, String)> {
+    EDIT.with(|edit| {
+        let edit = edit.borrow();
+        let e = edit.as_ref()?;
+        Some((e.expr.clone(), e.draft.as_ref()?.checked_expr.clone()))
+    })
 }
 
 /// The open draft: its expression, the dimension it adds and the sketch it previews (tests).
