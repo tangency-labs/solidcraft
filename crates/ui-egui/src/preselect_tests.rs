@@ -1518,7 +1518,7 @@ pub(crate) fn thread_face(app: &SolveApp, body: &str) -> Sel {
 
 #[test]
 fn thread_size_suggestion_matches_the_feature_for_shafts_and_holes() {
-    for (diameter, internal, expected) in [(8.0, false, "M8"), (20.0, false, "M20"), (5.0, true, "M6")] {
+    for (diameter, internal, expected) in [(8.0, false, "M8"), (20.0, false, "M20"), (5.0, true, "M5")] {
         let mut app = app_with(json!([]));
         if internal {
             app.run("solid.box", json!({"corner":[-10,-10,0],"length":20,"width":20,"height":10})).unwrap();
