@@ -1965,17 +1965,37 @@ impl FilletLaw {
     /// when `reverse`); none for the other laws (the base's default). The fillet's centre
     /// curve and rails turn at such a parameter.
     ///
+    /// The slope is the law curve's `x'` alone, as the fork's: the radius is the law
+    /// curve's x at the curve parameter the edge map gives (`Evaluate`), its `y` not read,
+    /// so a jump in `x'` is a corner of the radius the fillet is built with, and nothing
+    /// else is.
+    ///
+    /// Deviation from the fork: an edge interval or edge map that is not finite or has no
+    /// length is refused, where the fork returns no corners.
+    ///
     /// # Errors
     ///
-    /// Those of the law curve's `GetKnots` and `Evaluate`.
+    /// [`SolidError::InvalidInput`] for an edge interval or edge map that is not finite or
+    /// has no length; those of the law curve's `GetKnots` and `Evaluate`.
     pub fn corner_parameters(&self, curve_interval: &Extent1d, reverse: bool) -> Result<Vec<f64>> {
+        for (ivl, what) in [
+            (
+                curve_interval,
+                "a law's corners need a finite edge interval with length",
+            ),
+            (
+                &self.edge_map,
+                "a law's corners need a finite edge map with length",
+            ),
+        ] {
+            if !(ivl.min().is_finite() && ivl.max().is_finite() && ivl.length() > 0.0) {
+                return Err(SolidError::invalid_input(OP_CORNERS, what));
+            }
+        }
         let FilletLawKind::BSpline { law_curve, .. } = &self.kind else {
             return Ok(Vec::new());
         };
         let map_length = self.edge_map.length();
-        if curve_interval.length() <= 0.0 || map_length <= 0.0 {
-            return Ok(Vec::new());
-        }
         let (knots, _) = law_curve.knots(None)?;
         let ivl = law_curve.natural_interval();
         let mut corners = Vec::new();
