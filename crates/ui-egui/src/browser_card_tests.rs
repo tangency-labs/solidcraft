@@ -2316,6 +2316,8 @@ fn a_large_sketch_caps_its_groups_until_show_all() {
     let scope = format!("s:{sketch}");
     let shown = |slug: &str| crate::scenario::count_of(&format!("browser:sketch-contents-shown:{scope}:{slug}"));
     assert_eq!(shown("lines"), Some(200.0), "the lines group is capped");
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.settle();
     assert_eq!(shown("points"), Some(200.0), "the points group is capped");
 
     h.app.tree.expanded.insert(format!("s:{sketch}/contents/lines/all"));
@@ -2372,6 +2374,8 @@ fn contents_rows_select_the_active_sketchs_entities() {
     let row = |slug: &str, id: &str| format!("browser:sketch-contents-row:s:{sketch}:{slug}:{id}");
     h.step(&json!({"click":{"handle":row("lines", &line)}})).unwrap();
     assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: line.clone(), sketch: None }]);
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.settle();
     h.step(&json!({"click":{"handle":row("points", &point)}})).unwrap();
     assert_eq!(h.app.session.selection, vec![Sel::SketchPoint { id: point }]);
 
@@ -2416,6 +2420,8 @@ fn contents_rows_of_a_finished_sketch_select_external_geometry() {
     assert!(!menu.iter().any(|item| item.id == "ui.delete" && item.enabled), "a finished sketch's rows cannot be deleted");
     crate::context_menu::close(&mut h.app);
     h.frames(2);
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.settle();
     h.step(&json!({"click":{"handle":row("points", &point)}})).unwrap();
     assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchPoint { sketch, id: point }]);
 

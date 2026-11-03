@@ -3189,7 +3189,15 @@ fn sketch_contents_rows(
         let r = draw_row(
             ui,
             ui.id().with(("sketch_contents_group", scope, slug)),
-            &Row { depth, fold: Some(open), icon: group_icon(kind), label: group_title(kind), dim, count: &count, ..Default::default() },
+            &Row {
+                depth,
+                fold: Some(open),
+                icon: group_icon(kind),
+                label: crate::i18n::tr(group_title(kind)),
+                dim,
+                count: &count,
+                ..Default::default()
+            },
         );
         if let Some(rect) = r.rect {
             crate::scenario::publish_handle(&format!("browser:sketch-contents-group:{scope}:{slug}"), rect.center());
@@ -3408,7 +3416,7 @@ fn group_title(kind: GroupKind) -> &'static str {
 
 /// Geometry groups start open; the constraint, dimension and derived groups start closed.
 fn group_default_open(kind: GroupKind) -> bool {
-    matches!(kind, GroupKind::Points | GroupKind::Lines | GroupKind::Arcs | GroupKind::Circles | GroupKind::Splines | GroupKind::Conics)
+    matches!(kind, GroupKind::Lines | GroupKind::Arcs | GroupKind::Circles | GroupKind::Splines | GroupKind::Conics)
 }
 
 /// The icon of a group row: an existing command icon, as the tree uses elsewhere.
