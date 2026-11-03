@@ -1,5 +1,14 @@
 # Control protocol
 
+The [universal panel foundation](panel-foundation.md) supplies typed Rust layout
+actions, schemas, committed inspection and a live runtime action sink for future
+command routing. These interfaces are internal and are **not registered control
+methods or engine commands**. The foundation does not add a panel preference or
+change the current control protocol; production registration belongs to #11304.
+The Rust `Replace` action applies complete saved layouts and workspace changes
+atomically on the live service. Snapshot omission hides content without cancellation;
+explicit Close/Destroy retain their lifecycle semantics. This is not a new control method.
+
 For UI-kit review, `ui.status_fixture {"preset":"mode"}` shows bounded status
 specimens in the real viewport. Presets are `off`, `mode`, `result`, `attention`,
 `row`, `kinds`, `many` and `key`; the reply carries the preset and item count. This
