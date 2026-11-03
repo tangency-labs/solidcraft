@@ -16,6 +16,24 @@ including the three weighted families. A chosen static font retains its own
 weight; SolidCraft does not simulate bold by drawing text twice. Clearing the
 preference restores Plex. Monospace fields keep Plex Mono.
 
+A chosen font file named `Family-Weight.ttf` (or `.otf`), such as
+`IosevkaAile-Extralight.ttf`, brings its heavier sibling files from the same
+folder into the weighted families, nearest weight first:
+
+| Family | Uses |
+|---|---|
+| medium | Medium, else SemiBold, else Bold |
+| semibold | SemiBold, else Bold, else Medium |
+| bold | Bold, else SemiBold, ExtraBold, Heavy/Black, else Medium |
+
+Weight suffixes match case-insensitively, with the usual spellings
+(`Semibold`, `DemiBold`, `Extrabold`, `Ultralight`, …). A sibling lighter than
+the chosen file is never used. Where the chosen file is itself the nearest
+weight, or none of the listed weights is there, the family keeps the chosen
+face: with Extralight and Medium beside each other, bold text uses Medium.
+Italic files and other families in the folder are ignored. A font family name,
+and the web app, keep one face for every weight.
+
 Egui's symbol and emoji fallbacks remain available. Desktop also appends the
 available Japanese/Chinese, Hangul and Thai system fonts to every family, ordered
 for the selected language. The web app installs Plex at startup and adds its
