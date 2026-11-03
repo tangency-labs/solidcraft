@@ -279,7 +279,7 @@ fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
     let root = schema.as_value();
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-    let body = s.world_state().bodies[0].name.clone();
+    let body = s.world_state().unwrap().bodies[0].name.clone();
     let before = (s.revision, s.doc.to_json(), s.undo.len());
     for (params, echo) in [
         (json!({}), json!({})),

@@ -15,7 +15,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::{Mesh, Vec3Geom};
 
 use crate::SolveApp;
 use crate::context_menu::{Item, act};
@@ -95,7 +96,7 @@ impl Shape {
 
     /// The snapshot of a body of the session's design, in the colours the viewport draws it.
     pub fn of_body(session: &solidcraft_engine::Session, name: &str) -> Option<Shape> {
-        let st = session.world_state();
+        let st = session.world_state().ok()?;
         let b = st.body(name)?;
         let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
         let colour = session.doc.body_color(b).map(|c| c.map(to8));
@@ -374,7 +375,7 @@ fn set_body(app: &mut SolveApp, name: Option<&str>) -> Result<(), String> {
 
 /// The snapshot of body `name`, or why it can't be the navigator (a message id).
 fn snapshot_of(session: &solidcraft_engine::Session, name: &str) -> Result<Shape, &'static str> {
-    let st = session.world_state();
+    let st = session.world_state().map_err(|_| "view_gizmo.no_such_body")?;
     let body = st.body(name).ok_or("view_gizmo.no_such_body")?;
     if let Some(reason) = refusal(&body.mesh()) {
         return Err(reason);
@@ -467,7 +468,7 @@ pub(crate) fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "view.navigator").then(|| {
         let mut body = SelInput::new("Body", BODIES, false);
         if let Some(shape) = &app.view_gizmo.shape
-            && app.session.world_state().body(&shape.name).is_some()
+            && app.session.world_state().is_ok_and(|st| st.body(&shape.name).is_some())
         {
             body.items.push(Sel::Body { name: shape.name.clone() });
         }
@@ -565,7 +566,7 @@ mod tests {
     fn box_mesh() -> Arc<Mesh> {
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 10})).unwrap();
-        s.world_state().bodies[0].mesh()
+        s.world_state().unwrap().bodies[0].mesh()
     }
 
     #[test]
@@ -588,7 +589,7 @@ mod tests {
         // A box 25 times larger snapshots to the same shape.
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 1000, "width": 500, "height": 250})).unwrap();
-        let big = Shape::of("Big", &s.world_state().bodies[0].mesh(), None, &BTreeMap::new()).unwrap();
+        let big = Shape::of("Big", &s.world_state().unwrap().bodies[0].mesh(), None, &BTreeMap::new()).unwrap();
         let bb = big.mesh.bounds();
         assert!((bb.max - bb.min).dist(b.max - b.min) < 1e-3);
     }
@@ -648,7 +649,7 @@ mod tests {
         let mut s = solidcraft_engine::Session::default();
         let mesh = |s: &mut solidcraft_engine::Session, params: Value| {
             s.execute("solid.box", &params).unwrap();
-            s.world_state().bodies.last().unwrap().mesh()
+            s.world_state().unwrap().bodies.last().unwrap().mesh()
         };
         // A 4:2:1 block is fine; a 6:1:1 stick and a 6:6:1 sheet are not.
         assert_eq!(refusal(&mesh(&mut s, json!({"length": 40, "width": 20, "height": 10}))), None);
@@ -671,7 +672,7 @@ mod tests {
         // A sphere close to the triangle limit: as many points as a smooth body has.
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.sphere", &json!({"radius": 10})).unwrap();
-        let mesh = s.world_state().bodies[0].mesh();
+        let mesh = s.world_state().unwrap().bodies[0].mesh();
         let mut big = (*mesh).clone();
         while big.triangles.len() < MAX_TRIANGLES {
             let offset = u32::try_from(big.positions.len()).unwrap();
@@ -731,7 +732,7 @@ mod tests {
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
         h.call("ui.prefs", json!({"navigator_style": "cube"}));
         h.frames(2);
-        let body = h.app.session.world_state().bodies[0].name.clone();
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let open = |h: &mut crate::scenario::Harness| {
             let before = h.app.preferences.navigator_style;
             let c = crate::scenario::rect_of("axis_view:outer").unwrap().center();
@@ -786,7 +787,7 @@ mod tests {
     fn the_body_is_kept_with_the_preferences_and_unreadable_ones_are_dropped() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
-        let name = h.app.session.world_state().bodies[0].name.clone();
+        let name = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let reply = h.app.run("view.navigator", json!({"body": name})).unwrap();
         assert_eq!(reply["body"], json!(name), "{reply}");
         assert!(h.app.dialog.is_none(), "a programmatic call never opens the panel");
@@ -798,7 +799,7 @@ mod tests {
         assert!(h.app.run("view.navigator", json!({"body": "No such body"})).is_err());
         assert!(h.app.run("view.navigator", json!({"body": 3})).is_err());
         h.app.run("solid.box", json!({"length": 60, "width": 10, "height": 10, "operation": "new"})).unwrap();
-        let stick = h.app.session.world_state().bodies.last().unwrap().name.clone();
+        let stick = h.app.session.world_state().unwrap().bodies.last().unwrap().name.clone();
         assert!(h.app.run("view.navigator", json!({"body": stick})).is_err(), "a stick is refused");
         assert_eq!(h.app.view_gizmo.shape.as_ref().map(|s| s.name.clone()), Some(name), "a refused body changes nothing");
         assert_eq!(h.app.run("view.navigator", json!({"body": null})).unwrap()["body"], Value::Null);

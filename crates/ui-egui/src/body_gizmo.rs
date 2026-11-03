@@ -441,7 +441,7 @@ mod tests {
     }
 
     fn body_name(h: &crate::scenario::Harness) -> String {
-        h.app.session.world_state().bodies[0].name.clone()
+        h.app.session.world_state().unwrap().bodies[0].name.clone()
     }
 
     fn custom(h: &mut crate::scenario::Harness) {

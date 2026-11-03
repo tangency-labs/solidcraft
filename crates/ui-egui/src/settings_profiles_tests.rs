@@ -1007,7 +1007,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
 fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     // Not the defaults, so the profile has something to carry.
     run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));

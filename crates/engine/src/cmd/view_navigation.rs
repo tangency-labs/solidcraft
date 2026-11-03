@@ -334,7 +334,7 @@ fn navigator(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.navigator";
     let request: NavigatorParams = serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
     if let Some(Some(name)) = &request.body
-        && s.world_state().body(name).is_none()
+        && s.world_state()?.body(name).is_none()
     {
         return Err(bad(cmd, format!("no body named `{name}`")));
     }
