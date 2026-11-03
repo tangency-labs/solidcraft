@@ -2787,8 +2787,12 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // pointer over anything (a line's middle lies on the line), further out unless an edge or a
     // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
     let edge_near = beste.v.iter().map(|x| x.0).fold(curve_near, f32::min);
-    let woken: Vec<Hit> =
-        crate::snap_wake::hits(app, proj, pos).into_iter().filter(|(dd, _)| *dd < crate::snap_wake::ON || *dd < edge_near).map(|x| x.1).collect();
+    // Like a vertex, a woken point behind the nearest face or cut away by the section is not picked.
+    let woken: Vec<Hit> = crate::snap_wake::hits(app, proj, pos)
+        .into_iter()
+        .filter(|(dd, h)| (*dd < crate::snap_wake::ON || *dd < edge_near) && matches!(h, Hit::Vertex { point, .. } if visible(*point, slack)))
+        .map(|x| x.1)
+        .collect();
     hits.splice(0..0, woken);
     hits.extend(bestv.hits());
     hits.extend(beste.hits());

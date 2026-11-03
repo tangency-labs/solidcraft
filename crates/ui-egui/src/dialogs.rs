@@ -2793,12 +2793,14 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         Sel::Vertex { point, .. } => {
             let state = crate::open_meshing::session_world(s);
             match s.active_sketch.and_then(|id| state.sketch(id)) {
-                Some(sk) => {
+                // A point on the sketch's plane: where it is in the sketch.
+                Some(sk) if (sk.plane.to_world(sk.plane.to_local(*point)) - *point).len() < 1e-6 => {
                     let p = sk.plane.to_local(*point);
                     format!("({:.2}, {:.2}) mm", p.x, p.y)
                 }
-                // A snap point (a centre, a middle) picked outside a sketch: where it is.
-                None => crate::snap_wake::label(*point),
+                // A snap point (a centre, a middle) off the sketch's plane or outside a sketch:
+                // where it is in the model.
+                _ => crate::snap_wake::label(*point),
             }
         }
         _ => format!("{item:?}"),

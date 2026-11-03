@@ -798,6 +798,23 @@ fn another_edge_wakes_its_own_points_and_the_rest_sleep() {
     assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{from:?}");
 }
 
+/// A woken point hidden behind a face is not picked, like a vertex there: the click takes the
+/// face in front of it.
+#[test]
+fn a_woken_point_behind_a_face_is_not_picked() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    let hidden = Vec3::new(20.0, 20.0, 0.0);
+    h.app.viewport.woken.points.push(solidcraft_engine::snap::SnapPoint {
+        at: hidden,
+        kind: solidcraft_engine::snap::SnapKind::Middle,
+        body: String::new(),
+    });
+    h.step(&json!({ "click": { "world": [20, 20, 0] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(!matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(hidden) < 1e-6), "{from:?}");
+}
+
 /// Crossing a face on the way from a rim to its centre keeps the centre awake: only another
 /// edge or curve puts a rim's points to sleep.
 #[test]
