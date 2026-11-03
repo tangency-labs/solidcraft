@@ -4,7 +4,9 @@
 //! the fix set, its expected values and the rig's result). This writes what that leaves out:
 //! an entry for each case whose process left none (a hang or a crash, so no trace), each ladder
 //! case's golden, and `DIR/manifest.json`, the counts per area and every case that is not
-//! expressible as kernel input, with its reasons.
+//! expressible as kernel input, with its reasons. An entry's operand records go to
+//! `<case>.bodies.json.gz` beside it (gzip, no timestamp, so a re-export of the same records is
+//! the same bytes); the entry keeps what each body is and names that file.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -41,6 +43,29 @@ fn write_json(path: &Path, v: &Value, pretty: bool) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Moves the records out of `entry`'s `bodies` into the gzip file `to`, `{"b<n>": record}`, and
+/// names it in `records`. An entry without records (written before) is left as it is.
+fn split_records(entry: &mut Value, to: &Path) -> Result<(), String> {
+    use std::io::Write as _;
+    let Some(bodies) = entry["bodies"].as_object_mut() else { return Ok(()) };
+    let mut records = serde_json::Map::new();
+    for (name, b) in bodies.iter_mut() {
+        if let Some(r) = b.as_object_mut().and_then(|o| o.remove("record")) {
+            records.insert(name.clone(), r);
+        }
+    }
+    if records.is_empty() {
+        return Ok(());
+    }
+    let text = serde_json::to_vec(&Value::Object(records)).map_err(|e| e.to_string())?;
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    gz.write_all(&text).map_err(|e| e.to_string())?;
+    let bytes = gz.finish().map_err(|e| e.to_string())?;
+    std::fs::write(to, bytes).map_err(|e| format!("{}: {e}", to.display()))?;
+    entry["records"] = json!(to.file_name().map(|n| n.to_string_lossy().to_string()));
+    Ok(())
 }
 
 /// What `git args` prints in this checkout.
@@ -95,7 +120,8 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
         if let Some(e) = r.get("export_error") {
             entry["export_error"] = e.clone();
         }
-        write_json(&file, &entry, false)?;
+        split_records(&mut entry, &dir.join(area).join(format!("{id}.bodies.json.gz")))?;
+        write_json(&file, &entry, true)?;
     }
 
     // Every entry in the corpus, this run's or an earlier one's.

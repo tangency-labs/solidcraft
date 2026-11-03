@@ -5754,6 +5754,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.40.0-rc.1"
 dependencies = [
+ "flate2",
  "proc-macro2",
  "quick-xml",
  "serde",
