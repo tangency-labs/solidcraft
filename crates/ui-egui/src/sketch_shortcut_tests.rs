@@ -571,6 +571,55 @@ fn a_line_snap_whose_source_curve_is_undone_ends_without_an_error() {
     }
 }
 
+/// A sketch on a body's face projects its edges, and a line drawn from the midpoint of one of
+/// them to the midpoint of the opposite one is drawn, as construction (L, X) too (#11596). The
+/// first midpoint is a snap until the line is drawn, as on the sketch's own lines (#11181).
+#[test]
+fn a_line_runs_between_midpoints_of_a_faces_projected_edges() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    // The +X face of a 58.5 x 40 x 24 box, looked at straight on: 40 wide, 24 high in the sketch.
+    for (construction, (start, end), (from, to)) in [
+        (false, ([58.5, 20.0, 0.0], [58.5, 20.0, 24.0]), ([20.0, 0.0], [20.0, 24.0])),
+        (true, ([58.5, 20.0, 0.0], [58.5, 20.0, 24.0]), ([20.0, 0.0], [20.0, 24.0])),
+        (true, ([58.5, 0.0, 12.0], [58.5, 40.0, 12.0]), ([0.0, 12.0], [40.0, 12.0])),
+    ] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner":[0,0,0],"length":58.5,"width":40,"height":24})).unwrap();
+        h.call("ui.camera", json!({"yaw":-std::f64::consts::FRAC_PI_2,"pitch":0,"target":[58.5,20,12],"distance":71}));
+        h.settle();
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click":{"world":[58.5, 22.0, 9.0]}})).unwrap();
+        h.settle();
+        let projected = lines(&h);
+        assert_eq!(projected.len(), 4, "the face's edges are projected: {:?}", h.app.status);
+        // The line type is kept per sketch id on this thread; start each design in Normal.
+        crate::sketch_palette::set_mode(&mut h.app, 0);
+        press(&mut h, "L");
+        if construction {
+            press(&mut h, "X");
+        }
+        for at in [start, end] {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), 5, "construction={construction}: {:?}", h.app.status);
+        assert_line(drawn[4], from, to);
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.model.state();
+        let sketch = &state.sketch(sid).unwrap().sketch;
+        let line = sketch.curves.last().unwrap();
+        assert_eq!(line.construction, construction);
+        let held: Vec<usize> =
+            sketch.constraints.iter().filter_map(|c| if let ConstraintKind::Midpoint { l, .. } = c.kind { Some(l) } else { None }).collect();
+        assert!(matches!(held[..], [a, b] if a != b && a < 4 && b < 4), "each end is held at the middle of its projected edge: {held:?}");
+        drop(state);
+        assert_eq!(h.app.run("sketch.solve", json!({})).unwrap()["dof"], 0, "both ends sit on projected geometry");
+        h.step(&json!({"expect":{"errors":0}})).unwrap();
+    }
+}
+
 /// The Undo button runs `edit.undo` and leaves the tool on: the chain goes back to the end of the
 /// last segment still there, and the next click draws from it (#10016).
 #[test]
