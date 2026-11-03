@@ -192,9 +192,10 @@ impl Shape {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let shape = Shape { name, id, mesh: Arc::new(mesh), colour, face_colours };
-        // Keep only what saves again: a face number or bounds the packer refuses would be drawn
-        // now and dropped at the next save.
-        shape.to_json().is_object().then_some(shape)
+        // A stored body meets the limits a picked one does (a hand-edited file or an imported
+        // profile could hold a stick), and is kept only if it saves again: a face number or
+        // bounds the packer refuses would be drawn now and dropped at the next save.
+        (refusal(&shape.mesh).is_none() && shape.to_json().is_object()).then_some(shape)
     }
 
     /// The direction to look from to see the face of triangle `tri` straight on: a planar
@@ -652,6 +653,8 @@ mod tests {
         let mut damaged = good.clone();
         damaged["t"] = json!(words(&[0, 1, 2, 0, 1, 9999]));
         assert!(Shape::from_json(&damaged).is_none(), "one triangle past the points refuses the whole snapshot");
+        let flat = json!({"name": "x", "v": words(&[0, 0, 0, 30000, 0, 0, 0, 30000, 0]), "t": words(&[0, 1, 2]), "f": words(&[0])});
+        assert!(Shape::from_json(&flat).is_none(), "a stored sheet is refused as a picked one is");
         let mut over = good;
         over["t"] = json!(words(&vec![0; 3 * MAX_TRIANGLES + 3]));
         assert!(Shape::from_json(&over).is_none(), "more triangles than the limit are refused");
