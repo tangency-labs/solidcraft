@@ -1348,7 +1348,18 @@ impl Sketch {
 
     /// Whether line `l` is one of an ellipse's axes (see [`Sketch::ellipse_axis_lines`]).
     pub fn is_ellipse_axis(&self, l: usize) -> bool {
+        // An axis is bisected by its ellipse's centre: only the ellipses centred on a point that
+        // bisects `l` are asked.
+        let centres: Vec<usize> = self
+            .constraints
+            .iter()
+            .filter_map(|k| match k.kind {
+                ConstraintKind::Midpoint { p, l: m } if !k.driven && m == l => Some(p),
+                _ => None,
+            })
+            .collect();
         (0..self.curves.len())
+            .filter(|&e| matches!(self.curves.get(e).map(|x| &x.kind), Some(CurveKind::Ellipse { c, .. }) if centres.contains(c)))
             .filter_map(|e| self.ellipse_axis_lines(e))
             .any(|(major, minor)| major.is_some_and(|(line, _)| line == l) || minor.is_some_and(|(line, ..)| line == l))
     }
