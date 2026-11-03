@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use solidcraft_doc::drawing::view::ResolvedView;
+use solidcraft_doc::drawing::view::{ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
@@ -60,6 +60,15 @@ impl Status {
             Status::Drawn => "drawn",
             Status::Placeholder(_) => "placeholder",
             Status::Failed(_) => "failed",
+        }
+    }
+
+    /// Why it has no lines: a placeholder's or a failed view's reason.
+    pub fn reason(&self) -> Option<String> {
+        match self {
+            Status::Drawn => None,
+            Status::Placeholder(why) => Some(why.to_string()),
+            Status::Failed(why) => Some(why.clone()),
         }
     }
 }
@@ -352,6 +361,54 @@ impl Cache {
     fn fresh(&self, id: u64, state: &Arc<ModelState>, view: &ResolvedView) -> bool {
         self.views.get(&id).is_some_and(|e| Arc::ptr_eq(&e.state, state) && e.view == *view)
     }
+
+    /// What sheet `record`, holding the views `on` ([`views_on`]), is assembled from now.
+    fn inputs(&self, record: &Sheet, on: &[(u64, ResolvedView, Vec2)]) -> Inputs {
+        let serial = |id: &u64| self.views.get(id).map_or(0, |e| e.serial);
+        Inputs { sheet: record.clone(), views: on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect() }
+    }
+
+    /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
+    /// has it, holding the same views, none drawn again since. So a view in it is on that sheet.
+    fn assembled(&self, d: &Drawing) -> Option<&[ViewState]> {
+        let last = self.last.as_ref()?;
+        let on = views_on(d, last.sheet).ok()?;
+        (self.inputs(sheet_of(d, last.sheet).ok()?, &on) == last.inputs).then_some(last.answer.views.as_slice())
+    }
+}
+
+/// Where one view of a drawing stands with the provider ([`standing`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewStanding {
+    pub view: u64,
+    pub sheet: u64,
+    /// `current`, `out_of_date` (not drawn yet, or drawn from another model or with other settings
+    /// than it has now), `placeholder` or `failed`.
+    pub status: &'static str,
+    /// Why, for a placeholder or a failed view.
+    pub reason: Option<String>,
+}
+
+/// Each view of `d`, the drawing open, in id order, as the provider last drew it, whichever sheet it
+/// is on. It reads the cache: nothing is drawn. A view that drew but didn't fit its sheet's scene is
+/// as the last assembly left it, while that is still its sheet's scene ([`Cache::assembled`]).
+pub fn standing(s: &Session, d: &Drawing) -> Vec<ViewStanding> {
+    let state = s.world_state();
+    let cache = &s.drawing_scenes;
+    let assembled = cache.assembled(d).unwrap_or_default();
+    let in_assembly = |id: u64| assembled.binary_search_by_key(&id, |v| v.view).ok().and_then(|at| assembled.get(at));
+    let one = |view: &Arc<View>| {
+        let fresh = d.resolve_view(view.id).is_ok_and(|resolved| cache.fresh(view.id, &state, &resolved));
+        let (status, reason) = match cache.views.get(&view.id).filter(|_| fresh) {
+            Some(entry) => {
+                let status = in_assembly(view.id).map_or(&entry.drawn.status, |v| &v.status);
+                (if *status == Status::Drawn { "current" } else { status.name() }, status.reason())
+            }
+            None => ("out_of_date", None),
+        };
+        ViewStanding { view: view.id, sheet: view.sheet, status, reason }
+    };
+    d.views.iter().map(one).collect()
 }
 
 /// Sheet `sheet` of the drawing open, as the provider last drew it: at once, as nothing is drawn
@@ -374,8 +431,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     cache.drawing = Some(d.id);
     cache.sheet = Some(sheet);
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
-    let serial = |id: &u64| cache.views.get(id).map_or(0, |e| e.serial);
-    let inputs = Inputs { sheet: record.clone(), views: on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect() };
+    let inputs = cache.inputs(record, &on);
     let (scene, views, objects, generation) = match cache.last.take() {
         Some(last) if last.inputs == inputs => (last.answer.scene, last.answer.views, last.answer.objects, last.answer.generation),
         _ => {
