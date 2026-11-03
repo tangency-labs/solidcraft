@@ -460,6 +460,8 @@ pub struct Split<'a> {
 
 /// A row of a group in the » menu.
 pub struct MoreRow<'a> {
+    /// Draw a large icon beside the full command name.
+    pub large: bool,
     pub id: &'a str,
     /// Its label (the menu row translates it) and kit icon.
     pub label: &'a str,
@@ -916,11 +918,12 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                             return;
                         }
                         for r in &group.more {
-                            let response = if r.checked.is_some() {
+                            let response = if r.large || r.checked.is_some() {
                                 let mut item = crate::MenuItem::new(r.id, r.label, r.icon);
                                 item.shortcut = r.shortcut;
                                 item.enabled = r.enabled;
                                 item.checked = r.checked;
+                                item.large = r.large;
                                 item.show(ui)
                             } else {
                                 crate::command_menu_button(ui, r.id, r.label, r.icon, r.shortcut, r.enabled)
@@ -1210,6 +1213,8 @@ pub struct MenuEntry<'a> {
 /// How a group's menus look and where they publish their parts.
 #[derive(Clone, Copy, Debug)]
 pub struct MenuStyle<'a> {
+    /// Use large icons beside full command names in list rows.
+    pub large: bool,
     /// The pin's hover text when the command is not pinned, and when it is, translated.
     pub pin_tip: &'a str,
     pub unpin_tip: &'a str,
@@ -1330,7 +1335,7 @@ pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
 /// response (for the app's drags and tips).
 pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Option<f32>, style: &MenuStyle) -> (Option<MenuAction>, egui::Response) {
     let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, if style.large { t.space_16 * 2.0 + t.space_8 } else { ROW_H }), Sense::hover());
     // Every row drags onto the ribbon (to pin it there); enabled rows also start their command.
     let sense = if entry.enabled { Sense::click_and_drag() } else { Sense::drag() };
     let resp = ui.interact(rect, style.focus_id(entry.id), sense);
@@ -1360,7 +1365,11 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     row.checked = entry.checked;
     row.highlighted = hot || revealed.is_some();
     row.shortcut = entry.shortcut;
-    row.paint(ui, rect, &resp, 26.0);
+    if style.large {
+        row.paint_large(ui, rect, &resp, 26.0);
+    } else {
+        row.paint(ui, rect, &resp, 26.0);
+    }
     if let Some(strength) = revealed {
         paint_reveal(ui.painter(), rect, &style.accent, strength, false);
         solidcraft_ui_registry::publish_rect(style.reveal, rect);
