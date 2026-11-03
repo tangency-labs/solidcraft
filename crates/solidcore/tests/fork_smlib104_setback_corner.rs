@@ -2,6 +2,11 @@
 //! as a graph over the corner's axis, certified convex (`SmBlendSetback::FillHole`), and the
 //! least scale of the setbacks that certifies (`SmBlendSetback::CertifiedScale`), on the box
 //! corner of the fork's capi `setback_g1_fill_keeps_the_body_convex` cases.
+//! #2344(a) uses 20b1c01's thousandth search. Changed flag-on volumes below are
+//! native executive comparisons, extended to thirteen cases. Scales and
+//! QP/attempt counts are compared to native in `blend_setback::scale::tests`.
+//! Merged-head coordinate/snapshot failures are recorded in the two
+//! `plan/findings/blend.fillet_corner--2344-main-refresh-*` findings.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -365,10 +370,21 @@ fn counts(b: &Brep) -> (usize, usize, usize) {
     )
 }
 
-/// The fork blend driver's printout (`blend dx dy dz n x y z r ... [cx cy cz sb ease]`);
-/// `FLAGOFF` set runs it without `fillet_blend_corner`.
-fn dump_blend(dims: [f64; 3], at: &[[f64; 3]], radii: &[f64], ask: Option<&SetbackAsk>) -> String {
+/// Kernel settings for diagnostic dumps; `FLAGOFF` disables `fillet_blend_corner`.
+fn dump_kernel(exact_classes: bool) -> Kernel {
     let mut k = all_fixes(std::env::var("FLAGOFF").is_err());
+    k.fixes.fillet_exact_round_classes = exact_classes;
+    k
+}
+
+fn dump_blend(
+    dims: [f64; 3],
+    at: &[[f64; 3]],
+    radii: &[f64],
+    ask: Option<&SetbackAsk>,
+    exact_classes: bool,
+) -> String {
+    let mut k = dump_kernel(exact_classes);
     let r = blend_box(&mut k, dims, at, radii, ask);
     dump_blended(k, r)
 }
@@ -396,9 +412,28 @@ fn dump_blended(mut k: Kernel, mut r: Blended) -> String {
 #[test]
 #[ignore = "prints the blends for a local comparison with the fork driver"]
 fn dump_blends() {
+    // Match #2491's fork-parity profile; the exact-spine redesign is not in this fork.
+    dump_blend_matrix(false);
+}
+
+/// Isolate the class-dependent cylinder construction for the same thirteen inputs.
+/// This enables the solidcore-native exact spine, outside #2491's fork-parity profile.
+#[test]
+#[ignore = "diagnostic only: exact-spine construction is outside the fork-parity profile"]
+fn diagnose_class_dependent_executive() {
+    dump_blend_matrix(true);
+}
+
+fn dump_blend_matrix(exact_classes: bool) {
     print!(
         "{}",
-        dump_blend([40.0, 30.0, 20.0], &UNEQUAL_AT, &[2.0, 3.0, 4.0], None)
+        dump_blend(
+            [40.0, 30.0, 20.0],
+            &UNEQUAL_AT,
+            &[2.0, 3.0, 4.0],
+            None,
+            exact_classes
+        )
     );
     for (sb, ease) in [(8.0, 0.0), (20.0, 0.0), (0.0, 0.0), (5.0, 0.0), (8.0, 2.0)] {
         println!("== setback {sb} ease {ease}");
@@ -408,32 +443,56 @@ fn dump_blends() {
                 [60.0, 40.0, 20.0],
                 &ASKED_AT,
                 &[5.0; 3],
-                Some(&asked(sb, ease))
+                Some(&asked(sb, ease)),
+                exact_classes
             )
         );
     }
-    for sb in [4.25, 4.5, 4.6, 4.7515] {
+    for sb in [4.25, 4.5, 4.6, 4.7175] {
         println!("== short {sb}");
         print!(
             "{}",
-            dump_blend([20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&short(sb)))
+            dump_blend(
+                [20.0; 3],
+                &SHORT_AT,
+                &[2.0, 3.0, 4.0],
+                Some(&short(sb)),
+                exact_classes
+            )
         );
     }
     println!("== shrink");
     print!(
         "{}",
-        dump_blend([20.0, 20.0, 5.5], &SHRINK_AT, &[2.0, 3.0, 4.0], None)
+        dump_blend(
+            [20.0, 20.0, 5.5],
+            &SHRINK_AT,
+            &[2.0, 3.0, 4.0],
+            None,
+            exact_classes
+        )
     );
     println!("== concave");
-    let mut k = all_fixes(std::env::var("FLAGOFF").is_err());
+    let mut k = dump_kernel(exact_classes);
     let b = notched(&mut k, 10.0);
     let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);
     print!("{}", dump_blended(k, r));
+    println!("== unequal dependency box");
+    print!(
+        "{}",
+        dump_blend(
+            [20.0; 3],
+            &[[10.0, 0.0, 20.0], [20.0, 10.0, 20.0], [20.0, 0.0, 10.0]],
+            &[2.0, 2.0, 3.0],
+            None,
+            exact_classes
+        )
+    );
 }
 
 // ---- regression cases: the fork's capi setback cases, run through the executive ----
 //
-// Each value is the fork's own (tangency-labs/smlib b5bb747, built locally and run through
+// Each value is the fork's own (b5bb747 initially, 20b1c01 after #2344(a), run through
 // `SmFilletExecutive` as these build the body): its status and comment, `GetFitSetBack`,
 // face, edge and vertex counts, `SmApiBrepComputeVolume` at 1e-12 (printed to 15
 // digits) and every vertex, which the port matched bit for bit. The values without the
@@ -470,7 +529,7 @@ fn short(setback: f64) -> SetbackAsk {
 }
 
 /// A built blend: sound (no check lines), its counts and its volume to the fork's printed
-/// 15 digits; returns the body.
+/// 15 digits; the thousandth-search cases are compared by the native executive gate.
 fn built(k: &mut Kernel, r: Blended, counts_want: (usize, usize, usize), volume_want: f64) -> Brep {
     assert_eq!(r.code, 0, "{}", r.comment);
     let mut b = r.body.expect("a body");
@@ -506,7 +565,10 @@ fn three_unequal_rounds_are_the_certified_setback_fill() {
         &[2.0, 3.0, 4.0],
         None,
     );
-    built(&mut k, r, (15, 36, 23), 23841.6143900444);
+    // Local native executive: 23841.674295048841; also agrees with the handoff to 1e-9.
+    let mut b = built(&mut k, r, (15, 36, 23), 23841.67429504884);
+    let v = volume(&k, &mut b);
+    assert!((v - 23841.674296328).abs() <= 1e-9 * v.abs().max(23841.674296328));
     let mut k = all_fixes(false);
     let r = blend_box(
         &mut k,
@@ -615,7 +677,7 @@ fn asked_setback_that_does_not_fit_is_refused() {
 
 /// Rounds r 2, 3, 4 at a corner set back 4.25 on request: past the rails' crossings but too
 /// short for a certified convex fill, so refused as no room, `GetFitSetBack` naming the
-/// setback that builds (the least certifying scale, to 1e-2); at that setback it builds.
+/// setback that builds (the certifying thousandth whose predecessor fails); at that setback it builds.
 #[test]
 fn asked_setback_too_short_names_what_builds() {
     let mut k = all_fixes(true);
@@ -628,8 +690,8 @@ fn asked_setback_too_short_names_what_builds() {
     );
     assert!(r.body.is_none());
     assert_eq!(r.code, 8);
-    assert_eq!(r.fit.to_bits(), 4.7515f64.to_bits(), "{}", r.fit);
-    assert_eq!(r.comment, "Fillet Error: a setback of 4.25 is too short for the setback corner's fill to stay convex: a setback of 4.7515 builds it");
+    assert_eq!(r.fit.to_bits(), 4.7175f64.to_bits(), "{}", r.fit);
+    assert_eq!(r.comment, "Fillet Error: a setback of 4.25 is too short for the setback corner's fill to stay convex: a setback of 4.7175 builds it");
     let r = blend_box(
         &mut k,
         [20.0; 3],
@@ -637,7 +699,8 @@ fn asked_setback_too_short_names_what_builds() {
         &[2.0, 3.0, 4.0],
         Some(&short(r.fit)),
     );
-    built(&mut k, r, (15, 36, 23), 7878.54334757591);
+    // Native executive at the new fit: 7879.3005740352419.
+    built(&mut k, r, (15, 36, 23), 7879.300574035242);
     // without the flag the asked setback builds the pinned corner, and no fit is named
     let mut k = all_fixes(false);
     let r = blend_box(
@@ -664,7 +727,8 @@ fn default_setback_shrinks_to_fit() {
         &[2.0, 3.0, 4.0],
         None,
     );
-    let b = built(&mut k, r, (15, 36, 23), 2128.88386364731);
+    // Native executive with the upright held at its room: 2128.9749176154519.
+    let b = built(&mut k, r, (15, 36, 23), 2128.9749176154523);
     // the upright round's end section at 4.5, r 4 from its edge on each face
     assert!(has_vertex(&b, [4.0, 0.0, 4.5]) && has_vertex(&b, [0.0, 4.0, 4.5]));
     let mut k = all_fixes(false);
@@ -685,7 +749,8 @@ fn concave_corner_is_the_setback_fill() {
     let mut k = all_fixes(true);
     let b = notched(&mut k, 10.0);
     let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);
-    built(&mut k, r, (18, 45, 29), 7015.2379122164);
+    // Native executive at the new scale: 7015.230424090797.
+    built(&mut k, r, (18, 45, 29), 7015.230424090796);
     let mut k = all_fixes(false);
     let b = notched(&mut k, 10.0);
     let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);

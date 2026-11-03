@@ -5,9 +5,10 @@
 //! set back by the rule and filled G1: 15 faces. Without the flag it is the pinned
 //! `SmFilletConvexNxNCorner`: 10 faces.
 //!
-//! Both volumes are those of the fork b5bb747 built here, run through
-//! `SmApiFilletEdgesPerEdge` (circular, G1, thumbweight 1) and `SmApiBrepComputeVolume`
-//! at 1e-8. That gives 7928.142563966 with 15 faces, the Setback. With the flag off the
+//! The original fork b5bb747, run through `SmApiFilletEdgesPerEdge` (circular,
+//! G1, thumbweight 1), gave 7928.142563966 with 15 faces. The thousandth-grid
+//! search (20b1c01, #2344a) gives 7927.724282512234, independently checked by
+//! `harness/cpp/tests/blend_setback_executive.cpp`. With the flag off the
 //! value is this port's pinned corner, 7928.743041465 with 10 faces; the pinned C++ path
 //! is gated by difftest. SolidCraft's engine case
 //! `a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there` pins the old value,
@@ -108,7 +109,9 @@ fn unequal_rounds_at_a_box_corner_are_the_setback() {
     let (made, v, faces) = rounded(true);
     assert_eq!(made.1, Some(BlendCornerEvent::Setback));
     assert_eq!(faces, 15);
-    assert_close(v, 7928.142563966);
+    // Native SMLib 20b1c01 thousandth-grid search, independently built by
+    // blend_setback_executive.cpp (20 20 20 2 2 3 -1 3).
+    assert_close(v, 7927.724282512234);
 }
 
 #[test]

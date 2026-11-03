@@ -1,6 +1,13 @@
 //! The least scale of a corner's setbacks at which its G1 fill is certified convex (the
 //! fork's `SmBlendSetback::CertifiedScale`, `sm_SbModelRounds`; tangency-labs/smlib
-//! 250cb3f, f1d81f4; smlib#104).
+//! 250cb3f, f1d81f4; smlib#104; 20b1c01, smlib#106(a)).
+//!
+//! Upstream: `source/SMLib/src/SmBlendSetback.cpp`, `source/SMLib/inc/SmBlendSetback.h`.
+//!
+//! | Rust | Upstream |
+//! |------|----------|
+//! | [`certified_scale`] | `SmBlendSetback::CertifiedScale` |
+//! | `model_rounds` (private) | `sm_SbModelRounds` |
 //!
 //! The corner's rounds are made from its geometry: edge i's round, of radius r between its
 //! faces f and g (normals n out of the material), has its ball's centre C at
@@ -29,11 +36,13 @@ use crate::surface::surface::Surface;
 /// What [`certified_scale`] finds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CertifiedScale {
-    /// `rdScale`: the least scale that certifies (to `1e-2`, on a grid of `1e-3`), 1 where
+    /// `rdScale`: the locally least certifying scale on a grid of `1e-3`, 1 where
     /// the setbacks themselves do; 0 where none up to 2 does.
     pub scale: f64,
     /// `*plSolves`: the quadratic programmes solved.
     pub solves: usize,
+    /// `*plAttempts`: fills built by the search, at most 12.
+    pub attempts: usize,
     /// `*ppReason`: why none certifies, with a scale of 0.
     pub reason: Option<&'static str>,
 }
@@ -193,32 +202,18 @@ impl Model<'_> {
     }
 }
 
-/// `margin`: the least uniform violation of the fill's sector conditions at scale k.
-fn margin(
-    model: &mut impl FnMut(f64, Option<&mut Probe>) -> core::result::Result<bool, Refusal>,
-    k: f64,
-) -> core::result::Result<f64, Refusal> {
-    let mut probe = Probe {
-        margin: true,
-        ..Probe::default()
-    };
-    model(k, Some(&mut probe))?;
-    Ok(probe.margin_value)
-}
-
-/// `SmBlendSetback::CertifiedScale`: the least scale k of the setbacks `setbacks` (one per
-/// edge, the edges and faces as for [`super::distances`], every face a plane through the
-/// corner's vertex, every edge a straight line there), each held at its most (`most`), at
-/// which the G1 fill of the corner's constant circular rounds (each round's end section
-/// square to its edge at its setback) is certified convex ([`super::fill_hole`]), to `1e-2`:
-/// 1 where the setbacks themselves are; else the certifying end of a bracket `1e-2` wide,
-/// found from the margin by which the fill's conditions fail (at 1, 1.02, their secant's
-/// root, then the parabola's), up to 2; 0, with its reason, where none up to 2 is.
+/// `SmBlendSetback::CertifiedScale`: the smallest certifying scale on the grid whose neighbour below fails; monotonicity checked, not proved.
+///
+/// The grid is thousandths in `[1, 2]`. Each setback is multiplied by the scale before
+/// being held at its `most`. The search returns 1 if the original fill certifies, 0 with
+/// its reason if the fill at 2 does not, otherwise bisects integer grid indices. At most
+/// 12 fills are built. Certification is of the QP's least-energy solution at fixed
+/// subdivision depth; neither that verdict nor the room-limited feasible sets are proved
+/// monotone. The result is certified at its own scale and its immediate predecessor fails.
 ///
 /// # Errors
 /// [`Refusal`] with `SM_ERR_INVALID_INPUT` and its reason where the corner is not one of
 /// planes and straight edges, or `most` is not one per edge; a failing fill's refusal.
-#[allow(clippy::too_many_lines)] // the fork's one function
 pub fn certified_scale(
     kernel: &Kernel,
     faces: &[Face],
@@ -244,111 +239,184 @@ pub fn certified_scale(
         most,
         size,
     };
-    let mut model = |k: f64, probe: Option<&mut Probe>| ctx.run(k, probe, &mut solves);
-    // The search, from the margin m(k) by which the fill's sector conditions fail at degree 9
-    // (m <= 0: met, and the conditions only grow easier with k): m at 1 and 1.02, then at
-    // their secant's root, then the root of the parabola through the three; the certifying
-    // end checked a half percent above it, the failing end the bracket's 1e-2 below.
-    let m1 = margin(&mut model, 1.0)?;
-    if m1 <= 0.0 && model(1.0, None)? {
+    let mut attempts = 0;
+    let mut certified = |i: i32| {
+        attempts += 1;
+        ctx.run(f64::from(i) / 1000.0, None, &mut solves)
+    };
+    if certified(1000)? {
         return Ok(CertifiedScale {
             scale: 1.0,
             solves,
+            attempts,
             reason: None,
         });
     }
-    let mut sk = vec![1.0];
-    let mut sm = vec![m1];
-    let mut lo = 1.0; // the largest scale known to fail
-    let mut predict = 0.0;
-    for step in 0..3 {
-        let mut k;
-        if step == 0 {
-            k = 1.02;
-        } else if step == 1 {
-            let slope = (el(&sm, 1)? - el(&sm, 0)?) / (el(&sk, 1)? - el(&sk, 0)?);
-            k = if slope < 0.0 {
-                el(&sk, 1)? - el(&sm, 1)? / slope
-            } else {
-                2.0
-            };
+    if !certified(2000)? {
+        return Ok(CertifiedScale {
+            scale: 0.0,
+            solves,
+            attempts,
+            reason: Some(
+                "SmBlendSetback: no G1 fill is certified convex at the corner's setbacks up to twice them",
+            ),
+        });
+    }
+    // The smallest certifying scale on the grid whose neighbour below fails;
+    // monotonicity checked, not proved. Both ends of the final bracket were tested.
+    let (mut lo, mut hi) = (1000, 2000);
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if certified(mid)? {
+            hi = mid;
         } else {
-            // the parabola through the three points, its root past the last
-            let (k0, k1, k2) = (el(&sk, 0)?, el(&sk, 1)?, el(&sk, 2)?);
-            let (m0, mm1, m2) = (el(&sm, 0)?, el(&sm, 1)?, el(&sm, 2)?);
-            let d01 = (mm1 - m0) / (k1 - k0);
-            let d12 = (m2 - mm1) / (k2 - k1);
-            let a = (d12 - d01) / (k2 - k0);
-            let b = d12 - a * (k1 + k2);
-            let c = m2 - k2 * (a * k2 + b);
-            let mut root = 0.0;
-            if a.abs() > 1.0e-12 {
-                let disc = b * b - 4.0 * a * c;
-                if disc >= 0.0 {
-                    let r1 = (-b - sqrt(disc)) / (2.0 * a);
-                    let r2 = (-b + sqrt(disc)) / (2.0 * a);
-                    // the root nearest past the last scale that fails
-                    let (ra, rb) = (smin(r1, r2), smax(r1, r2));
-                    root = if ra > lo { ra } else { rb };
-                }
-            }
-            if !(root > lo) {
-                root = if d12 < 0.0 { k2 - m2 / d12 } else { 2.0 };
-            }
-            predict = root;
-            break;
-        }
-        k = smin(smax(k, lo * 1.001), 2.0);
-        let m = margin(&mut model, k)?;
-        sk.push(k);
-        sm.push(m);
-        if m > 0.0 {
-            lo = smax(lo, k);
-        }
-        if step == 1 {
-            predict = k;
+            lo = mid;
         }
     }
-    // the certifying end: a half percent past the prediction (and past the last failing
-    // scale), stepping up by 1e-2 while it does not certify, up to 2
-    let mut hi = smax(predict * 1.005, lo * 1.01);
-    loop {
-        if hi > 2.0 {
-            hi = 2.0;
-        }
-        if model(hi, None)? {
-            break;
-        }
-        lo = hi;
-        if hi >= 2.0 {
-            return Ok(CertifiedScale {
-                scale: 0.0,
-                solves,
-                reason: Some(
-                    "SmBlendSetback: no G1 fill is certified convex at the corner's setbacks up to twice them",
-                ),
-            });
-        }
-        hi *= 1.01;
-    }
-    // the failing end within 1e-2 below it
-    while hi > lo * 1.01 {
-        let k = hi / 1.01;
-        let m = margin(&mut model, k)?;
-        if m > 0.0 {
-            break;
-        }
-        if !model(k, None)? {
-            break;
-        }
-        hi = k;
-    }
-    // on a grid of 1e-3, up (certifying still: the conditions only grow easier with k), so
-    // that one corner described two ways (its faces and edges in another order) gets one
-    // scale
     Ok(CertifiedScale {
-        scale: (hi * 1000.0).ceil() / 1000.0,
+        scale: f64::from(hi) / 1000.0,
         solves,
+        attempts,
         reason: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Vec3;
+
+    fn corner(radii: [f64; 3], frame: usize, concave: bool) -> (Vec<Face>, Vec<Edge>) {
+        let unit = |i: usize| {
+            let mut xyz = [0.0; 3];
+            xyz[(i + frame) % 3] = 1.0;
+            Vec3::new(xyz[0], xyz[1], xyz[2])
+        };
+        let faces = (0..3)
+            .map(|i| Face {
+                point: Point3::default(),
+                normal: unit(i) * if concave { 1.0 } else { -1.0 },
+            })
+            .collect();
+        let edges = (0..3)
+            .map(|i| Edge {
+                away: unit(i),
+                radius: radii[i],
+                faces: [(i + 1) % 3, (i + 2) % 3],
+            })
+            .collect();
+        (faces, edges)
+    }
+
+    #[test]
+    fn thousandth_scales_and_attempt_budget() {
+        let kernel = Kernel::default();
+        for (radii, setbacks, most, want, want_solves) in [
+            ([2.0, 3.0, 4.0], [4.5, 4.75, 6.0], None, 1.056, 35),
+            ([1.0, 1.5, 2.0], [2.25, 2.375, 3.0], None, 1.056, 35),
+            (
+                [2.0, 3.0, 4.0],
+                [4.5, 4.75, 4.5],
+                Some([20.0, 20.0, 4.5]),
+                1.046,
+                39,
+            ),
+            ([2.0, 3.0, 4.0], [4.25; 3], None, 1.110, 34),
+            ([5.0; 3], [8.0; 3], None, 1.0, 2),
+            // Every edge held at its original setback: no scale can certify.
+            (
+                [2.0, 3.0, 4.0],
+                [4.5, 4.75, 6.0],
+                Some([4.5, 4.75, 6.0]),
+                0.0,
+                10,
+            ),
+        ] {
+            let (faces, edges) = corner(radii, 0, false);
+            let result = certified_scale(
+                &kernel,
+                &faces,
+                &edges,
+                &setbacks,
+                most.as_ref().map(<[_; 3]>::as_slice),
+            )
+            .unwrap();
+            println!(
+                "scale {} attempts {} solves {}",
+                result.scale, result.attempts, result.solves
+            );
+            assert_eq!(result.scale, want);
+            assert!(result.attempts <= 12);
+            assert_eq!(result.solves, want_solves, "SMLib 20b1c01 QP count");
+            assert_eq!(
+                result.attempts,
+                if want == 1.0 {
+                    1
+                } else if want == 0.0 {
+                    2
+                } else {
+                    12
+                }
+            );
+            assert_eq!(result.reason.is_some(), want == 0.0);
+        }
+    }
+
+    /// Separate expensive run mode, as requested by the handoff. Seventeen descriptions
+    /// cover axis permutations, concavity, scale changes and room-limited growth.
+    /// The smallest certifying scale on the grid whose neighbour below fails;
+    /// monotonicity checked, not proved.
+    #[test]
+    #[ignore = "explicit setback monotonicity gate: many full QP fills"]
+    fn setback_monotone_grid() {
+        let kernel = Kernel::default();
+        let mut corners = 0;
+        for frame in 0..3 {
+            for (radii, setbacks, most, want, concave) in [
+                ([2.0, 3.0, 4.0], [4.5, 4.75, 6.0], None, 1056, false),
+                ([1.0, 1.5, 2.0], [2.25, 2.375, 3.0], None, 1056, true),
+                (
+                    [2.0, 3.0, 4.0],
+                    [4.5, 4.75, 4.5],
+                    Some([20.0, 20.0, 4.5]),
+                    1046,
+                    false,
+                ),
+                ([2.0, 3.0, 4.0], [4.25; 3], None, 1110, false),
+                ([5.0; 3], [8.0; 3], None, 1000, false),
+                ([3.0; 3], [4.5; 3], None, 1000, false),
+            ] {
+                // Two equal-radius permutations suffice, keeping seventeen corners.
+                if frame == 2 && radii == [3.0; 3] {
+                    continue;
+                }
+                let (faces, edges) = corner(radii, frame, concave);
+                let most = most.as_ref().map(<[_; 3]>::as_slice);
+                let result = certified_scale(&kernel, &faces, &edges, &setbacks, most).unwrap();
+                assert_eq!(result.scale, f64::from(want) / 1000.0);
+                let model = Model {
+                    kernel: &kernel,
+                    faces: &faces,
+                    edges: &edges,
+                    setbacks: &setbacks,
+                    most,
+                    size: setbacks.iter().copied().fold(0.0, f64::max),
+                };
+                let mut grid = vec![1000, want + 20, want + 100, 1500, 2000];
+                grid.extend((want - 3..=want + 3).filter(|i| *i >= 1000));
+                grid.sort_unstable();
+                grid.dedup();
+                for i in grid {
+                    let mut solves = 0;
+                    assert_eq!(
+                        model.run(f64::from(i) / 1000.0, None, &mut solves).unwrap(),
+                        i >= want,
+                        "corner {corners} grid {i}"
+                    );
+                }
+                corners += 1;
+            }
+        }
+        assert_eq!(corners, 17);
+    }
 }
