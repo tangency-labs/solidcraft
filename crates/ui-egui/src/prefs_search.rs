@@ -488,7 +488,11 @@ pub(crate) fn reveal(ui: &mut Ui) {
     }
     if draw_section {
         let response = ui.label(RichText::new(section.to_uppercase()).size(t.font_small).color(t.text_dim));
-        remember(ui, &section, response.rect);
+        // A setting with the section's name owns its search stop and reveal target.
+        let setting_owns_label = with(ui, |state| state.key.rsplit('\n').next() == Some(section.as_str())).unwrap_or(false);
+        if !setting_owns_label {
+            remember(ui, &section, response.rect);
+        }
     }
 }
 
@@ -617,6 +621,20 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "single surface analysis" => &["use a single surface analysis"],
         "only while the view is still" => &["only when the view is still"],
         "supersampling" => &["supersampling (ssaa)"],
+        "free" => &["free orbit"],
+        "turn about the world's up axis" => &["turn around the vertical axis"],
+        "reverse horizontal pan" => &["reverse horizontal pan direction"],
+        "reverse vertical pan" => &["reverse vertical pan direction"],
+        "reverse trackpad orbit" => &["reverse trackpad orbit direction"],
+        "two-finger zoom while holding" => &["zoom with two-finger scroll while holding"],
+        "show it in the 3d view" => &["show the 3d mouse in the 3d view"],
+        "picture position" => &["position"],
+        "turn the view while a sketch is edited" => &["turn sketches with the 3d mouse"],
+        "model" => &["traced"],
+        "view center" | "view centre" => &["classic"],
+        "axes" | "axes (signed)" => &["axes", "signed axes", "axes (signed)"],
+        "cube" | "cube (compact)" => &["cube", "cube (compact)"],
+        "under cursor" => &["under the cursor"],
         _ => &[],
     }
 }
@@ -1132,7 +1150,7 @@ mod tests {
         h.frames(1);
         assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::new("prefs_search"))), "Cmd+F focuses search");
         h.step(&serde_json::json!({"text": "zo"})).expect("type");
-        h.frames(3);
+        h.frames(20);
         assert!(h.widget("Reverse zoom direction").is_some(), "typed letters search from the open page");
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
         let first = crate::scenario::handle_at("prefs:search:current");
@@ -1189,13 +1207,53 @@ mod tests {
     /// The selected match is scrolled to when the arrows move it, not on every frame, so the
     /// wheel can scroll the results away from it.
     #[test]
+    fn navigation_and_mouse3d_search_hits_reveal_the_actual_cards_and_controls() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
+            for (query, page, target) in [
+                ("Orbit around", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:View center"),
+                ("Under the cursor", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Under the cursor"),
+                ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
+                ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Cube", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Cube"),
+                ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
+                ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
+                ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
+                ("Overall speed", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_speed"),
+                ("Traced", crate::prefs::PAGE_MOUSE3D, "prefs:3d_mouse_orbit_traced"),
+                ("Position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
+            ] {
+                h.call("ui.prefs", serde_json::json!({"open":"General"}));
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == page && (query != "Cube" || hit.label == "Cube")).collect();
+                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
+                set_cursor(&h.ctx, matching[0].0);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(20);
+                assert_eq!(h.app.prefs_window.section, page);
+                assert!(h.app.prefs_window.filter.is_empty());
+                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+                assert!(body.contains_rect(crate::scenario::rect_of(target).unwrap()), "{query} reveals its live control");
+            }
+        }
+    }
+
+    #[test]
     fn preferences_search_results_scroll_freely() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
         h.frames(2);
         h.app.prefs_window.filter = "view".into();
-        h.frames(3);
+        h.frames(20);
         let first = crate::scenario::handle_at("prefs:search:current").expect("first match");
         let wheel = egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
@@ -1227,11 +1285,11 @@ mod tests {
         h.frames(2);
         assert!(h.widget("Units of new designs").is_none(), "another page stays put until a search");
         h.app.prefs_window.filter = "units".into();
-        h.frames(3);
+        h.frames(20);
         assert!(h.widget("Units of new designs").is_some(), "a row is found from its label");
         assert!(h.widget("Reverse zoom direction").is_none());
         h.app.prefs_window.filter = "zoom".into();
-        h.frames(3);
+        h.frames(20);
         assert!(h.widget("Reverse zoom direction").is_some());
         assert!(h.widget("Units of new designs").is_none());
         assert!(h.widget("Grid").is_none(), "a checkbox on another page stays hidden");
@@ -1243,14 +1301,14 @@ mod tests {
         assert!(gap < 520.0, "search results leave a {gap:.0}px gap under the field");
         assert!(h.widget("Translation X").is_none(), "unmatched pages do not stack on the result");
         h.app.prefs_window.filter = "extrude".into();
-        h.frames(3);
+        h.frames(20);
         assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_some(), "shortcut matches collapse to one row");
         assert!(crate::scenario::rect_of("dialog:cell:Extrude").is_none(), "the shortcut list stays closed");
         h.step(&serde_json::json!({"click": {"handle": "prefs:search:clear"}})).expect("clear");
         h.frames(2);
         assert!(h.app.prefs_window.filter.is_empty(), "the search X clears the field");
         h.app.prefs_window.filter = "fusion".into();
-        h.frames(3);
+        h.frames(20);
         assert!(h.widget("Mouse mapping").is_some(), "the dropdown's current value counts");
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(2);

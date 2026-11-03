@@ -432,6 +432,8 @@ fn settings_section_count_spaced<R>(
         if !gained {
             return Some(missed);
         }
+        // Keep search headings outside wrapped rows in this section.
+        crate::prefs_search::reveal(ui);
         let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-section", key), false);
         let result = add(&mut child);
         crate::prefs_search::place_search_child(ui, &child);
@@ -564,6 +566,7 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
 
 #[derive(Clone, Copy)]
 pub(crate) enum PreferenceFigure {
+    #[cfg(test)]
     Pivot(usize),
     Quality(usize),
     Antialiasing(u32),
@@ -732,6 +735,7 @@ pub(crate) fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: Pre
             }
         }
         PreferenceFigure::UpAxis(y_up) => super::preferences_figures::paint_orientation(&p, rect, y_up),
+        #[cfg(test)]
         PreferenceFigure::Pivot(pivot) => super::preferences_figures::paint_orbit(&p, rect, pivot),
         PreferenceFigure::ContactShading(on) => super::preferences_figures::paint_contact_shading(&p, rect, on),
     }

@@ -68,6 +68,7 @@ fn radial_shadow(p: &Painter, centre: Pos2, radius: Vec2, ink: Color32) {
 
 /// Orbit cards share a deliberately positioned model; only the pivot and its explanatory
 /// cue move. The arc's arrowhead is tangent to the projected ground-plane ellipse.
+#[cfg(test)]
 pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
     let t = Tokens::get();
     let c = Canvas { rect };
