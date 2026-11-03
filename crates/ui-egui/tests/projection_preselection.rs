@@ -60,6 +60,30 @@ fn a_line_of_another_sketch_picked_in_the_project_dialog_projects() {
 }
 
 #[test]
+fn a_contents_row_of_a_hidden_sketch_projects_into_the_active_sketch() {
+    let (mut h, source) = setup();
+    let active = h.app.session.active_sketch.expect("a sketch is open");
+    // The source sketch's own display is hidden: projection reads its stored/solved geometry,
+    // not what is shown, so a hidden source still feeds the sketch being edited.
+    h.call("ui.set", json!({"shownSketches": []}));
+    let target = solidcraft_ui_egui::context_menu::Target::SketchContents { sketch: source, rows: vec!["l1".into()], editable: false };
+    let menu = solidcraft_ui_egui::context_menu::items(&h.app, &target);
+    let project = menu.into_iter().find(|item| item.id == "sketch.project").expect("a contents row of another sketch offers Project");
+    assert!(project.enabled);
+    assert_eq!(project.params.as_ref().unwrap()["refs"], json!([{"sketch": source, "curve": "l1"}]));
+    solidcraft_ui_egui::context_menu::run_item(&mut h.app, &project, egui::Pos2::ZERO);
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    assert_eq!(h.app.session.active_sketch, Some(active), "Project leaves the sketch being edited open");
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(active).unwrap().sketch;
+    assert!(
+        sk.links.iter().any(|link| matches!(&link.source, solidcraft_engine::sketch::LinkSource::SketchCurve { sketch, .. } if *sketch == source)),
+        "the hidden sketch's curve is projected: {:?}",
+        sk.links
+    );
+}
+
+#[test]
 fn clicked_external_curve_and_point_project_with_source_identity_and_one_undo() {
     let (mut h, source) = setup();
     h.step(&json!({"click":{"world":[20,10,10]}})).unwrap();
