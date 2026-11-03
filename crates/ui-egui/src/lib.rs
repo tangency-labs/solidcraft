@@ -1081,6 +1081,7 @@ impl SolveApp {
             timeline::request_playback(self, action)?;
             return Ok(reply);
         }
+        let params = if id == "drawing.create" { prefs::new_drawing_params(self, params) } else { params };
         let t0 = now_ms();
         let revision = self.session.revision;
         if matches!(id, "render.lights.solo" | "render.lights.mute") {
@@ -1350,10 +1351,6 @@ impl SolveApp {
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
-                }
-                if id == "drawing.create" {
-                    // A new drawing is third angle. Projection of new drawings still applies.
-                    prefs::apply_new_drawing(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover") {
                     documents::reset_chat(self);

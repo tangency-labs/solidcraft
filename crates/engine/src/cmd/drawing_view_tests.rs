@@ -499,7 +499,11 @@ fn a_base_view_fits_what_its_percent_shows() {
     for (percent, scale) in [(0.0, near), (100.0, far)] {
         let (made, id) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "reference_shown_percent": percent}));
         assert_eq!((&made["scale"]["text"], made["scale"]["fitted"].as_bool()), (&scale, Some(true)), "{made}");
-        assert!(made.get("outside").is_none(), "{made}");
+        // In the drawing space; it may still lie over the title block, and is listed if it does.
+        let space = s.drawing("test").unwrap().sheets[0].drawing_space().unwrap().inflated(1e-9);
+        let corner =
+            |at: &str| solidcraft_geom::Vec2::new(made["boundary_mm"][at][0].as_f64().unwrap(), made["boundary_mm"][at][1].as_f64().unwrap());
+        assert!(space.contains(corner("min")) && space.contains(corner("max")), "{made}");
         assert_eq!(saved(&s, id).reference_shown_percent, percent);
     }
 }

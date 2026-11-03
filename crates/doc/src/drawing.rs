@@ -9,10 +9,11 @@
 //! - **Sources** are the designs it draws. For now a drawing draws the design it is in: at most one
 //!   source, an id and nothing else. What the design was when the drawing last saw it is not saved
 //!   here.
-//! - **Sheets**: the paper, a copy of its drawing border, the resolution its pictures are rendered
-//!   at, the component it documents, and whether it is left out of the sheet count or of printing.
-//!   The border is a copy of the profile it was made with, never a name, so a later built-in never
-//!   changes a saved drawing.
+//! - **Sheets**: the paper, a copy of its drawing border and of its title block with the text typed
+//!   over its cells' values, the resolution its pictures are rendered at, the component it
+//!   documents, and whether it is left out of the sheet count or of printing. The border and the
+//!   block are copies of what they were made with, never names, so a later built-in never changes a
+//!   saved drawing.
 //! - **Units** follow each view's design or are one length unit for the whole drawing. The
 //!   **language** is the content's, a BCP 47 tag chosen when the drawing is made, whatever the
 //!   interface's is. **Properties** follow [`Metadata`]'s rules.
@@ -46,7 +47,7 @@
 //! ([`Drawing::check_image_files`]); [`Drawing::from_value`] the same from the format check on.
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,7 @@ use serde_json::Value;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
 use solidcraft_geom::revision::RevisionRecord;
+use solidcraft_geom::title_block::TitleBlock;
 use solidcraft_geom::{Aabb2, Vec2};
 
 use crate::format::DRAWING;
@@ -63,7 +65,9 @@ use crate::{DocError, Metadata, Result, expr};
 pub mod balloon;
 pub mod by_id;
 pub mod dimension;
+pub mod fields;
 pub mod image;
+pub mod template;
 pub mod view;
 
 use balloon::Balloon;
@@ -173,6 +177,14 @@ pub struct Sheet {
     pub sheet: drawing_sheet::Sheet,
     /// A copy of the drawing border's profile (`None`: no drawing border).
     pub border: Option<DrawingBorderProfile>,
+    /// A copy of its title block's definition (`None`: no title block), on the drawing border's
+    /// lower-right corner, so only a sheet with a border has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_block: Option<TitleBlock>,
+    /// Text shown in place of a title block cell's value, by the cell's name: the value is still
+    /// worked out, so it can be shown beside it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_block_overrides: BTreeMap<String, String>,
     /// The resolution its pictures (its shaded views) are rendered at, in dots per inch.
     #[serde(default = "default_dpi")]
     pub dpi: f64,
@@ -212,6 +224,25 @@ impl Sheet {
             Some(border) => Ok(border.layout(&self.sheet).map_err(from_sheet)?.drawing_border),
             None => Ok(Aabb2 { min: Vec2::ZERO, max: self.sheet.size_mm().map_err(from_sheet)? }),
         }
+    }
+
+    /// Where its title block sits, in paper millimetres (none without one), once its drawing border
+    /// and the block on it lay out on the paper: the rule a sheet is held to, as drawing them uses it.
+    pub fn title_block_outline(&self) -> Result<Option<Aabb2>> {
+        let border = self.border.as_ref().map(|border| border.layout(&self.sheet)).transpose().map_err(from_sheet)?;
+        let Some(block) = &self.title_block else { return Ok(None) };
+        let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
+        Ok(Some(block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?.outline))
+    }
+
+    /// Gives the sheet `block` (`None`: no title block). Text typed over a cell stays while `block`
+    /// has a text cell of that name; answers the cells whose typed text is dropped.
+    pub fn set_title_block(&mut self, block: Option<TitleBlock>) -> Vec<String> {
+        let kept = |name: &String| fields::overridable(block.as_ref(), name);
+        let lost = self.title_block_overrides.keys().filter(|name| !kept(name)).cloned().collect();
+        self.title_block_overrides.retain(|name, _| kept(name));
+        self.title_block = block;
+        lost
     }
 }
 
@@ -253,8 +284,17 @@ impl Drawing {
     ) -> Result<Drawing> {
         let id = id_source.next(taken)?;
         let sheet_id = id_source.next(&BTreeSet::from([id]))?;
-        let first =
-            Sheet { id: sheet_id, name: sheet.into(), sheet: paper, border, dpi: DEFAULT_DPI, documents: None, excluded: Excluded::default() };
+        let first = Sheet {
+            id: sheet_id,
+            name: sheet.into(),
+            sheet: paper,
+            border,
+            title_block: None,
+            title_block_overrides: BTreeMap::new(),
+            dpi: DEFAULT_DPI,
+            documents: None,
+            excluded: Excluded::default(),
+        };
         let drawing = Drawing {
             format: DRAWING.format_string(DRAWING.current()),
             format_pending: DRAWING.pending_names(),
@@ -429,11 +469,17 @@ impl Drawing {
     fn check_sheet(&self, sheet: &Sheet) -> Result<()> {
         check_name(&sheet.name, "its")?;
         sheet.sheet.size_mm().map_err(from_sheet)?;
-        // The border must lay out on the sheet: the one rule, as drawing it uses it. A few small
-        // lists per sheet, so every edit's check stays cheap.
-        if let Some(border) = &sheet.border {
-            border.layout(&sheet.sheet).map_err(from_sheet)?;
+        sheet.title_block_outline()?;
+        if let Some(block) = &sheet.title_block {
+            fields::check_block(block)?;
         }
+        // Each override names a text cell of its block, and its text is a cell's.
+        for name in sheet.title_block_overrides.keys() {
+            let named = || format!("its title block has no text cell `{name}` to override");
+            require(fields::overridable(sheet.title_block.as_ref(), name), named)?;
+        }
+        let texts = sheet.title_block_overrides.values().map(String::as_str);
+        solidcraft_geom::cell::check_text(texts).map_err(|e| DocError::Invalid(e.to_string()))?;
         require((MIN_DPI..=MAX_DPI).contains(&sheet.dpi), || format!("its pictures are {MIN_DPI} to {MAX_DPI} dpi"))?;
         match sheet.documents {
             Some(SheetComponent { source, .. }) => {

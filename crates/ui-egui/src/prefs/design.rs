@@ -47,6 +47,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.default_projection = *projection;
                 }
             });
+            let titles: Vec<String> = template::BUILT_INS.iter().filter_map(|name| template::title(name)).collect();
+            let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+            let chosen = &mut app.preferences.drawing_template;
+            ui_kit::row(ui, crate::i18n::tr("ui.template_for_new_drawings"), |ui| {
+                let mut selected = template::BUILT_INS.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
+                ui_kit::dropdown(ui, "pref_drawing_template", &mut selected, &titles);
+                if let Some(name) = template::BUILT_INS.get(selected) {
+                    *chosen = (*name).to_string();
+                }
+            });
         });
     });
     ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {

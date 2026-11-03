@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.drawing_template_list": "List Drawing Templates",
+    "ui.template_for_new_drawings": "Template for new drawings"
+  },
+  "ar": {
+    "cmd.drawing_template_list": "سرد قوالب اللوحات",
+    "ui.template_for_new_drawings": "قالب اللوحات الجديدة"
+  },
+  "de": {
+    "cmd.drawing_template_list": "Zeichnungsvorlagen auflisten",
+    "ui.template_for_new_drawings": "Vorlage für neue Zeichnungen"
+  },
+  "he": {
+    "cmd.drawing_template_list": "רשימת תבניות שרטוט",
+    "ui.template_for_new_drawings": "תבנית לשרטוטים חדשים"
+  },
+  "ja": {
+    "cmd.drawing_template_list": "図面テンプレートを一覧表示",
+    "ui.template_for_new_drawings": "新しい図面のテンプレート"
+  },
+  "ko": {
+    "cmd.drawing_template_list": "도면 템플릿 목록",
+    "ui.template_for_new_drawings": "새 도면의 템플릿"
+  },
+  "vi": {
+    "cmd.drawing_template_list": "Liệt kê mẫu bản vẽ",
+    "ui.template_for_new_drawings": "Mẫu cho bản vẽ mới"
+  },
+  "zh": {
+    "cmd.drawing_template_list": "列出绘图模板",
+    "ui.template_for_new_drawings": "新绘图的模板"
+  }
+}

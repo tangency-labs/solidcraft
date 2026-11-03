@@ -162,7 +162,7 @@ fn overrides_show_their_text_and_keep_the_value() {
     let pin = &layout.rows[1].cells[2];
     assert_eq!((texts(pin), pin.replaced.as_deref()), (vec![], Some("2")), "a blank cell, still tracked");
     let frame = &layout.rows[2].cells[2];
-    assert_eq!((texts(frame), frame.replaced.as_deref()), (vec![MISSING], None), "a field the row doesn't have");
+    assert_eq!((texts(frame), frame.replaced.as_deref()), (vec![], None), "a field the row doesn't have shows nothing");
     assert_eq!(layout.rows.len(), 3, "an override of a row that has gone is kept and shows nowhere");
     // The fitted part number column is as wide as the override: "Part number" is still wider.
     assert!((layout.rows[0].cells[1].rect.size().x - WIDTHS[1]).abs() < 1e-9);

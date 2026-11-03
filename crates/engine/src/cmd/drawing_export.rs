@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default; png and dxf are not supported yet); path?: .svg file (else the reply holds the SVG text) → {sheet, format, bytes, path | svg, report: {widths_snapped, pieces_merged}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's visible lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
+    .params("sheet: id or name; format?: svg (default; png and dxf are not supported yet); path?: .svg file (else the reply holds the SVG text) → {sheet, format, bytes, path | svg, report: {widths_snapped, pieces_merged}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's visible lines, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let request: ExportParams = crate::schema::read(CMD, p)?;
