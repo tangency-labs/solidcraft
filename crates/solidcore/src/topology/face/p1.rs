@@ -149,7 +149,7 @@
 //! - **Not upstream: [`shrink_geometry_with`]** (tangency-labs/solidcore#472) passes
 //!   [`TrimOptions`] to the surface trim; [`shrink_geometry`] uses the defaults
 //!   (upstream). See `nurbs::b_spline_surface_n_lib::p2`'s Deviations.
-//! - **Not upstream (WR-728, opt-in `Kernel::fixes.face_swap_uv_transposes_trims`):**
+//! - **Not upstream (WR-729, opt-in `Kernel::fixes.face_swap_uv_transposes_trims`):**
 //!   [`swap_uv`] swaps its UV trims' control point coordinates exactly
 //!   ([`BSplineCurve::create_transposed_curve`]) instead of mirroring them through
 //!   upstream's rounded `u = v` mirror matrix.
@@ -1491,7 +1491,7 @@ fn swap_uv_notifying(
     // Mirror the UV trims and swap the surface (the steps that can fail) before changing
     // the face, so that a failure leaves the face unchanged.
 
-    // (WR-728, opt-in: the mirror about u = v is the swap of each control point's u and
+    // (WR-729, opt-in: the mirror about u = v is the swap of each control point's u and
     // v, made exactly; the rounded mirror matrix moves every coordinate by an ulp and a
     // trim's end on a domain bound past it)
     let transpose = k.fixes.face_swap_uv_transposes_trims;

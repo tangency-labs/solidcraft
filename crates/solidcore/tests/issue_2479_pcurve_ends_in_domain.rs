@@ -2,7 +2,7 @@
 //! parameter domain. `SmFace::SwapUV` mirrored each UV trim about `u = v` through a
 //! rounded matrix, so every face `StitchAndOrient` (or any other reversal) swaps had trims
 //! an ulp past its domain's bounds: a unit box's three swapped faces end at
-//! `v = -2.2e-16`. With `Kernel::fixes.face_swap_uv_transposes_trims` (WR-728) the trims
+//! `v = -2.2e-16`. With `Kernel::fixes.face_swap_uv_transposes_trims` (WR-729) the trims
 //! are transposed exactly. The scan ([`support::pcurve_domain_scan`]) walks every face's
 //! loops; the cases are the operations whose out-of-domain ends were all made there.
 #![allow(

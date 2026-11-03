@@ -1,4 +1,4 @@
-#### WR-728. `SmFace::SwapUV` mirrors the UV trims through a rounded matrix, so a swapped face's pcurves end an ulp past its domain
+#### WR-729. `SmFace::SwapUV` mirrors the UV trims through a rounded matrix, so a swapped face's pcurves end an ulp past its domain
 - **Severity:** Wrong result (accuracy: pcurve ends outside the face's parameter domain)
 - **Area:** Topology (face reversal)
 - **Location:** `source/SMLib/src/SmFace.cpp:13983`, `SmFace::SwapUV` (the mirror at `:13990-13993`, used at `:14032`). Rust: `crates/solidcore/src/topology/face/p1.rs`, `swap_uv_notifying` (the mirror placement and the `create_mirror_curve` arms).

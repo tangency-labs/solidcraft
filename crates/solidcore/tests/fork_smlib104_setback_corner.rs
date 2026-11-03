@@ -215,7 +215,7 @@ use solidcore::{Brep, Kernel};
 /// `face_swap_uv_transposes_trims`, with or without `fillet_blend_corner`. The pins are the
 /// fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does not
 /// have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves the
-/// volumes by about 1e-10, and so does `face_swap_uv_transposes_trims` (#2479, WR-728: the
+/// volumes by about 1e-10, and so does `face_swap_uv_transposes_trims` (#2479, WR-729: the
 /// exact transpose of a swapped face's trims), which moves the concave corner's volume
 /// without `fillet_blend_corner` by 6e-12.
 fn all_fixes(blend: bool) -> Kernel {

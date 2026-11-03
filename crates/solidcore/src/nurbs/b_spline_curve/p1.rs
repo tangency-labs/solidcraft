@@ -28,7 +28,7 @@
 //! | [`BSplineCurve::create_degenerate_curve`]    | `CreateDegenerateCurve`                           |
 //! | [`BSplineCurve::create_line_segment`]        | `CreateLineSegment`                               |
 //! | [`BSplineCurve::create_mirror_curve`]        | `CreateMirrorCurve`                               |
-//! | [`BSplineCurve::create_transposed_curve`]    | (not upstream, WR-728)                            |
+//! | [`BSplineCurve::create_transposed_curve`]    | (not upstream, WR-729)                            |
 //! | [`BSplineCurve::create_plane_projection`]    | `CreatePlaneProjection`                           |
 //! | [`BSplineCurve::edit_parameterization`]      | `EditParameterization`                            |
 //! | [`BSplineCurve::edit_end_point`]             | `EditEndPoint`                                    |
@@ -1314,7 +1314,7 @@ impl BSplineCurve {
 
     /// A copy with its coordinates `x` and `y` swapped exactly: the mirror about the
     /// plane `x = y` that [`BSplineCurve::create_mirror_curve`] makes with a rounded
-    /// matrix (not upstream, WR-728). The copy keeps this curve's dimension; a 2D NURB
+    /// matrix (not upstream, WR-729). The copy keeps this curve's dimension; a 2D NURB
     /// is made 3D, as the mirror makes it.
     ///
     /// # Errors
