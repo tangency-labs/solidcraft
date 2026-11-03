@@ -370,7 +370,7 @@ fn rounds_ending_in_a_sphere_of_any_size_never_panic() {
 #[test]
 fn a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why() {
     let rounded = fillet(&part(), &[tf()], 2.0).unwrap();
-    let middle = Vec3::new(41.17486688363082, -20.413218067968561, 9.415188112149071);
+    let middle = Vec3::new(41.17486688363082, -20.41321806796856, 9.415188112149071);
     let why = match fillet(&rounded, &[middle], 2.0) {
         Err(KernelError::TooLarge(why)) => why,
         other => panic!("{:?}", other.map(|b| b.face_count())),
