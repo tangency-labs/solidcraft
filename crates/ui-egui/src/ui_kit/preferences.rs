@@ -392,7 +392,23 @@ pub(crate) fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl
 }
 
 /// A settings disclosure with a real item count, using the shared section badge.
-pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, mut add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, false, add)
+}
+
+/// A list section directly following its search toolbar uses the compact page rhythm.
+pub(crate) fn settings_list_section<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, true, add)
+}
+
+fn settings_section_count_spaced<R>(
+    ui: &mut Ui,
+    key: &str,
+    title: &str,
+    count: Option<&str>,
+    compact: bool,
+    mut add: impl FnMut(&mut Ui) -> R,
+) -> Option<R> {
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::begin_section(ui, title);
         if !ui.is_visible() {
@@ -424,7 +440,7 @@ pub(crate) fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, cou
     let page = super::settings_page_active(ui);
     if page {
         // The page's 10 pt item gap plus the shared disclosure's 2 pt inset complete 38 pt.
-        ui.add_space(t.space_24 + t.space_14 - t.space_10 - t.space_2);
+        ui.add_space(if compact { 0.0 } else { t.space_24 + t.space_14 - t.space_10 - t.space_2 });
     } else {
         ui.add_space(t.space_8);
     }
