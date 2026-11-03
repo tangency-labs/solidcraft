@@ -563,8 +563,6 @@ pub(crate) fn matches_text(query: &str, texts: &[&str]) -> bool {
 /// Words that find a setting even though they are not written on it.
 fn keywords(text: &str) -> &'static [&'static str] {
     match fold(text).as_str() {
-        "theme" => &["dark", "light", "appearance"],
-        "anti-aliasing" | "antialiasing" => &["antialiasing", "msaa"],
         "design" => &["design defaults"],
         "step values with arrows and wheel" => &["step values with the arrow keys and the wheel"],
         "show values beside their handles" => &["show values beside their handles in the view"],
@@ -580,6 +578,8 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "far-axis step" => &["far-axis rotation step (°)", "fine rotation"],
         "axis distances in measure" => &["show x/y/z distances"],
         "tool at the cursor" => &["show tool at cursor"],
+        "theme" => &["dark", "light", "appearance"],
+        "anti-aliasing" | "antialiasing" => &["antialiasing", "msaa"],
         _ => &[],
     }
 }
