@@ -6135,7 +6135,7 @@ fn pattern_reach(
         return Err(DocError::Invalid("not a pattern".into()));
     };
     let tst = state_in_frame(doc, st, component);
-    let centre = seed_centre(doc, &tst, features, bodies)
+    let centre = seed_centre(doc, vals, &tst, features, bodies)
         .ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
     let plane = Plane::from_normal(centre, d).ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
     // A plane at an angle: where the line from the middle along `d` meets it.
@@ -6146,40 +6146,25 @@ fn pattern_reach(
     Ok(reach)
 }
 
-/// The middle of the box around what a pattern copies (#8523): its bodies, or the faces its
-/// features made (for a pattern or mirror among them, its own sources' faces and their copies).
-fn seed_centre(doc: &Document, st: &ModelState, features: &[FeatureId], bodies: &[crate::BodyName]) -> Option<Vec3> {
+/// The middle of what a pattern copies (#8523), which a To Object direction measures from: the
+/// exact boxes of its bodies and of its features' tools, a cut's tool only where it meets the
+/// bodies (a Through All hole is centred on the part, not along its long tool).
+fn seed_centre(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, features: &[FeatureId], bodies: &[crate::BodyName]) -> Option<Vec3> {
     let mut b = solidcraft_geom::Aabb3::EMPTY;
     for n in bodies {
-        if let Some(mb) = st.body(n) {
-            b = b.union(&mb.mesh_bounds());
+        if let Some(bx) = st.body(n).and_then(|mb| more::exact_box(&mb.body)) {
+            b = b.union(&bx);
         }
     }
-    let mut ids: Vec<u64> = Vec::new();
-    let mut todo: Vec<FeatureId> = features.to_vec();
-    while let Some(id) = todo.pop() {
-        if ids.contains(&id.0) || ids.len() > MAX_INSTANCES {
-            continue;
-        }
-        ids.push(id.0);
-        if let Some(FeatureKind::Pattern { features, .. } | FeatureKind::Mirror { features, .. }) = doc.feature(id.0).map(|x| &x.kind) {
-            todo.extend(features.iter().copied());
-        }
-    }
-    if !ids.is_empty() {
-        for mb in &st.bodies {
-            let names = crate::naming::face_names(mb);
-            let made: Vec<bool> = names.iter().map(|n| crate::persistent_name::made_by(n).is_some_and(|id| ids.contains(&id))).collect();
-            if !made.contains(&true) {
-                continue;
-            }
-            let m = mb.mesh();
-            for (t, fi) in m.triangles.iter().zip(&m.tri_face) {
-                if made.get(*fi as usize).copied().unwrap_or(false)
-                    && let Some(pts) = m.tri(t)
-                {
-                    pts.into_iter().for_each(|p| b.add(p));
-                }
+    let part = st.bodies.iter().filter_map(|mb| more::exact_box(&mb.body)).fold(solidcraft_geom::Aabb3::EMPTY, |a, bx| a.union(&bx));
+    for id in features {
+        let Some(f) = doc.feature(id.0) else { continue };
+        let Ok(tools) = feature_tools_with_constructor(doc, vals, f, st, &mut None, &mut None, &mut None) else { continue };
+        let cut = feature_op(f).0 == Operation::Cut && !part.is_empty();
+        for bx in tools.iter().filter_map(|t| more::exact_box(&t.body)) {
+            let bx = if cut { bx.intersection(&part) } else { bx };
+            if !bx.is_empty() {
+                b = b.union(&bx);
             }
         }
     }

@@ -386,9 +386,11 @@ fn pattern_on_path_spacing_extent_and_flip() {
 /// Whether `body` has a hole through (x, y): no material there, material 2 mm beside it.
 fn hole_at(s: &Session, x: f64, y: f64) -> bool {
     use solidcraft_geom::Vec3;
-    let st = s.world_state();
+    use solidcraft_kernel::PointClass;
+    let st = s.world_state().unwrap();
     let body = &st.bodies[0].body;
-    !body.contains(Vec3::new(x, y, 2.5)) && body.contains(Vec3::new(x, y + 2.0, 2.5))
+    let inside = |p: Vec3| matches!(body.classify_point(p), Ok(PointClass::Inside));
+    !inside(Vec3::new(x, y, 2.5)) && inside(Vec3::new(x, y + 2.0, 2.5))
 }
 
 /// Extent (#8523): a direction's value runs from the first copy to the last, whatever the
