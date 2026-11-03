@@ -4948,6 +4948,13 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         } else {
             None
         };
+        // a chamfer's chord and sizes, for the linear generator's definition (#2486)
+        let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist {
+            self.ops.constant_distance().ok()
+        } else {
+            None
+        };
+        let chamfer = self.ops.solver().chamfer;
         let solver = self.ops.solver_mut();
         let approx_tol_3d = solver.approx_tol_3d;
         let this_ang_tol_rad = solver.this_ang_tol_rad();
@@ -4961,6 +4968,8 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         // (a constant round between NURBS faces is its definition, the fork's cc08236)
         let ball = crate::blend::fillet_standard_solver::p2::CircleBall {
             radii,
+            chord,
+            chamfer,
             ang_tol_rad: this_ang_tol_rad,
             law,
         };

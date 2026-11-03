@@ -14,7 +14,12 @@
 //! body's volume within 1e-7 (the volume integrator's tolerance). The volume
 //! integrates the definition's points, not the net's (the fork at this commit has no net
 //! scope in the tessellator yet).
-#![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)] // test helpers
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)] // test helpers
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
@@ -262,4 +267,618 @@ fn a_pipe_root_round_is_its_definition() {
     let e = pick(&k, &b, [30.0, 28.0, 10.0]);
     fillet_edges(&mut k, &mut b, &[e], 2.0, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
     check("pipe", &k, &mut b, &FORK, 60.0);
+}
+
+/// The chamfered box with its two G^n rounds by definition (`a_gn_round_is_its_definition`).
+fn chamfered_box(k: &mut Kernel) -> Brep {
+    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let c = pick(k, &b, [20.0, 30.0, 20.0]);
+    fillet_edges(k, &mut b, &[c], 5.0, 0, 2, 0.0).unwrap();
+    let both = [
+        pick(k, &b, [20.0, 25.0, 20.0]),
+        pick(k, &b, [20.0, 0.0, 0.0]),
+    ];
+    fillet_edges(k, &mut b, &both, 2.0, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
+    b
+}
+
+/// #2388: a body whose G^n rounds are rebuilt from their records (the reopened body) is
+/// certified again face by face; one whose round's net was moved off its definition is
+/// refused, naming that face.
+#[test]
+fn a_reopened_body_s_rounds_are_certified_again_and_a_bad_one_is_named() {
+    use solidcore::surface::procedural_blend::convert::{from_record, rebuild, to_record};
+    use solidcore::surface::procedural_blend::recertify_faces;
+    let mut k = kernel(true);
+    let mut b = chamfered_box(&mut k);
+    let mut rounds = Vec::new();
+    for &f in b.face_list() {
+        if let Some(SurfaceKind::ProceduralBlend(pb)) =
+            b.face(f).unwrap().surface.as_ref().map(Surface::kind)
+        {
+            rounds.push((f, to_record(&k, pb).unwrap()));
+        }
+    }
+    assert_eq!(rounds.len(), 2);
+    for (f, rec) in &rounds {
+        let back = rebuild(&k, rec).unwrap();
+        assert!(back.recertify(&k).unwrap() <= rec.definition.bound);
+        b.face_mut(*f).unwrap().surface = Some(Surface::from(back));
+    }
+    recertify_faces(&k, &b).unwrap();
+    // the second round's net moved by three bounds at one control point
+    let (f, rec) = &rounds[1];
+    let mut bad = rec.clone();
+    let i = bad.net.points.len() / 2;
+    let w = bad.net.weights.as_ref().map_or(1.0, |w| w[i]);
+    bad.net.points[i][0] += 3.0 * bad.definition.bound * w;
+    assert!(rebuild(&k, &bad).is_err());
+    b.face_mut(*f).unwrap().surface = Some(Surface::from(from_record(&k, &bad).unwrap()));
+    let e = recertify_faces(&k, &b).unwrap_err();
+    assert_eq!(e.entity(), Some(solidcore::EntityRef::Face(*f)), "{e}");
+    // a support labelled a kind its NURBS form is not: refused on rebuild, naming the face
+    let (f, rec) = &rounds[0];
+    let mut bad = rec.clone();
+    let solidcore::surface::procedural_blend::record::SupportRecord::Nurbs { kind, .. } =
+        &mut bad.definition.supports[0]
+    else {
+        panic!("the box's round's support is not a NURBS support");
+    };
+    assert_eq!(
+        *kind,
+        solidcore::surface::procedural_blend::record::SupportKindRecord::Plane
+    );
+    *kind = solidcore::surface::procedural_blend::record::SupportKindRecord::Torus;
+    let e =
+        solidcore::surface::procedural_blend::convert::rebuild_for_face(&k, *f, &bad).unwrap_err();
+    assert_eq!(e.entity(), Some(solidcore::EntityRef::Face(*f)), "{e}");
+}
+
+// ---- #2388, contract 5: S as the operand downstream ------------------------------------
+
+#[path = "support/offset_fixture.rs"]
+mod offset_fixture;
+
+use solidcore::math::{Point2, Vec3};
+use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use solidcore::topology::FaceId;
+
+/// The body's rounds by definition: each face and its surface.
+fn rounds_of(b: &Brep) -> Vec<(FaceId, Surface)> {
+    b.face_list()
+        .iter()
+        .filter_map(|&f| {
+            let s = b.face(f).unwrap().surface.clone()?;
+            matches!(s.kind(), SurfaceKind::ProceduralBlend(_)).then_some((f, s))
+        })
+        .collect()
+}
+
+/// The body reopened: each round rebuilt from its record (re-certified), as a design read
+/// back from SolidCraft's record is. Returns the rebuilt rounds.
+fn reopen(k: &Kernel, b: &mut Brep) -> Vec<(FaceId, Surface)> {
+    use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
+    let mut out = Vec::new();
+    for (f, s) in rounds_of(b) {
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            unreachable!()
+        };
+        let back = Surface::from(rebuild(k, &to_record(k, pb).unwrap()).unwrap());
+        b.face_mut(f).unwrap().surface = Some(back.clone());
+        out.push((f, back));
+    }
+    out
+}
+
+/// The distance from `p` to S itself: Gauss-Newton on S's own partials (the
+/// definition's, outside a net scope), from the foot on the net (a start only), kept in
+/// the surface's domain.
+fn to_s(k: &Kernel, s: &Surface, p: Point3) -> f64 {
+    foot_on_s(k, s, p).0
+}
+
+/// [`to_s`] and whether the foot is past the round's ends (held at an end of u, the
+/// round's length, where `p` is beyond S rather than on or off it).
+fn foot_on_s(k: &Kernel, s: &Surface, p: Point3) -> (f64, bool) {
+    let dom = s.natural_uv_domain_with_nurb(k).unwrap();
+    let net = match s.kind() {
+        SurfaceKind::ProceduralBlend(pb) => Surface::from(pb.net().clone()),
+        _ => s.clone(),
+    };
+    let mut uv =
+        surface_closest_point(k, &net, p).map_or_else(|_| dom.evaluate(0.5, 0.5), |c| c.uvs[0]);
+    for _ in 0..12 {
+        let d = s.evaluate(k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+        let (e, su, sv) = (d[0][0] - p, d[1][0], d[0][1]);
+        let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
+        let (r, q) = (-su.dot(e), -sv.dot(e));
+        let det = a * c - b * b;
+        if det.abs() < 1e-300 {
+            break;
+        }
+        uv = dom.clamp_point(Point2::new(
+            uv.x + (c * r - b * q) / det,
+            uv.y + (a * q - b * r) / det,
+        ));
+    }
+    let at_end = uv.x <= dom.min().x || uv.x >= dom.max().x;
+    ((s.evaluate_point(k, uv).unwrap() - p).length(), at_end)
+}
+
+/// The edges bounding face `f`.
+fn edges_of(b: &Brep, f: FaceId) -> Vec<EdgeId> {
+    let mut out = Vec::new();
+    for &l in &b.face(f).unwrap().loops {
+        out.extend(b.loop_(l).unwrap().edges.iter().map(|le| le.edge));
+    }
+    out
+}
+
+/// Nine points along edge `e`'s curve.
+fn edge_points(k: &Kernel, b: &Brep, e: EdgeId) -> Vec<Point3> {
+    let edge = b.edge(e).unwrap();
+    let c = edge.curve.as_ref().unwrap();
+    (0..=8)
+        .map(|i| {
+            let t = edge.interval.min() + edge.interval.length() * f64::from(i) / 8.0;
+            c.evaluate_point(k, t).unwrap()
+        })
+        .collect()
+}
+
+/// Every edge of a face of `b` that is a piece of one of `rounds` (its middle on that
+/// round's S) lies on that S within the edge's own tolerance: `(edges checked, the largest
+/// distance in units of tolerance)`.
+fn edges_on_s(k: &Kernel, b: &Brep, rounds: &[(FaceId, Surface)]) -> (usize, f64) {
+    let (mut n, mut worst) = (0, 0.0_f64);
+    for (f, s) in rounds_of(b) {
+        let d = s.natural_uv_domain_with_nurb(k).unwrap();
+        let mid = s.evaluate_point(k, d.evaluate(0.5, 0.5)).unwrap();
+        let Some((_, round)) = rounds.iter().find(|(_, r)| to_s(k, r, mid) < 1e-9) else {
+            continue;
+        };
+        for e in edges_of(b, f) {
+            let tol = b.edge(e).unwrap().tolerance;
+            for p in edge_points(k, b, e) {
+                worst = worst.max(to_s(k, round, p) / tol);
+            }
+            n += 1;
+        }
+    }
+    (n, worst)
+}
+
+use solidcore::query::api_queries::surface_closest_point;
+
+/// #2388, contract 5: a boolean cutting a reopened round. A cylinder through the bottom
+/// round is taken out of the body as reopened and of the body as built: the same volume
+/// and the same count of edges on rounds, every such edge on S within its own tolerance.
+#[test]
+fn a_boolean_cuts_a_reopened_round_on_its_definition() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::primitive::api_primitives::create_cylinder;
+    let mut k = kernel(true);
+    let built = chamfered_box(&mut k);
+    let mut open = built.clone();
+    let rounds = reopen(&k, &mut open);
+    let mut results = Vec::new();
+    for body in [built, open] {
+        let tool = create_cylinder(&mut k, Point3::new(20.0, 1.0, -5.0), 1.5, 10.0).unwrap();
+        let mut cut = boolean_difference(&mut k, body, tool).unwrap();
+        let v = volume_of(&k, &mut cut);
+        results.push((cut, v));
+    }
+    let (n0, _) = edges_on_s(&k, &results[0].0, &rounds);
+    let (n1, worst) = edges_on_s(&k, &results[1].0, &rounds);
+    assert!(
+        n1 > 0 && n1 == n0,
+        "edges on rounds: {n1} reopened, {n0} built"
+    );
+    assert!(worst <= 1.0, "an edge {worst} of its tolerance off S");
+    assert!(
+        (results[0].1 - results[1].1).abs() <= 1e-12 * results[0].1,
+        "volumes {} and {}",
+        results[0].1,
+        results[1].1
+    );
+}
+
+/// The reopened body offset 0.5 outward, with its rounds: each round's offset face and
+/// the round it is the offset of.
+fn offset_rounds(k: &mut Kernel) -> (Brep, Vec<(FaceId, Surface)>) {
+    let mut b = chamfered_box(k);
+    let rounds = reopen(k, &mut b);
+    let offset = offset_fixture::offset_full(k, &mut b, 0.5).unwrap();
+    let mut out = Vec::new();
+    for &f in offset.face_list() {
+        let face = offset.face(f).unwrap();
+        let s = face.surface.as_ref().unwrap();
+        let mid = s
+            .evaluate_point(k, face.uv_domain.evaluate(0.5, 0.5))
+            .unwrap();
+        // the offset of a round: its middle 0.5 off that round's S
+        if let Some((_, round)) = rounds
+            .iter()
+            .find(|(_, r)| (to_s(k, r, mid) - 0.5).abs() < 1e-3)
+        {
+            out.push((f, round.clone()));
+        }
+    }
+    (offset, out)
+}
+
+/// #2388, contract 5: the reopened body offset 0.5 outward: each round's offset face
+/// stands 0.5 off its S along its edges (where they lie over the round, not over its
+/// extension past the round's ends) and at its internal point, within each edge's and
+/// the face's own tolerance. (A shell of this body, open at the top or the bottom, fails
+/// as built too, with or without the definitions: a merge's `make_faceuse` or a point
+/// classification refuses it, so the offset is the operand here.) The rounds' bound is
+/// about 1e-12 here, so this does not tell S from its net: see the next test.
+#[test]
+fn an_offset_of_a_reopened_round_stands_off_its_definition() {
+    use solidcore::query::api_queries::face_internal_point;
+    let mut k = kernel(true);
+    let (mut offset, walls) = offset_rounds(&mut k);
+    assert_eq!(walls.len(), 2, "the rounds' offsets");
+    let mut worst = 0.0_f64;
+    for (f, round) in &walls {
+        for e in edges_of(&offset, *f) {
+            let tol = offset.edge(e).unwrap().tolerance;
+            for p in edge_points(&k, &offset, e) {
+                // (the offset is extended past the round's ends, over the corners)
+                let (d, beyond) = foot_on_s(&k, round, p);
+                if !beyond {
+                    worst = worst.max((d - 0.5).abs() / tol);
+                }
+            }
+        }
+        let tol = offset.face(*f).unwrap().tolerance;
+        let p = face_internal_point(&k, &mut offset, *f).unwrap();
+        worst = worst.max((to_s(&k, round, p) - 0.5).abs() / tol);
+    }
+    assert!(
+        worst <= 1.0,
+        "an offset {worst} of its tolerance off 0.5 from S"
+    );
+}
+
+/// #2388, contract 5, known failing: the offset of a round is not built on S. Its offset
+/// face's surface is an offset surface of the round's net B (`TurnToNURBS` slices a blend
+/// to its net, fork 0136260), so the offset stands 0.5 off B, within the bound ε of S,
+/// not off S. This test fails once the offset's base is the round by its definition.
+#[test]
+fn known_failing_the_offset_of_a_round_is_the_offset_of_its_net() {
+    let mut k = kernel(true);
+    let (offset, walls) = offset_rounds(&mut k);
+    assert_eq!(walls.len(), 2, "the rounds' offsets");
+    for (f, _) in &walls {
+        let s = offset.face(*f).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::OffsetSurface(o) = s.kind() else {
+            panic!("not an offset surface: {}", s.type_code());
+        };
+        assert!(
+            matches!(o.base_surface().kind(), SurfaceKind::BSpline(_)),
+            "the offset's base is now {} (fixed? update this test)",
+            o.base_surface().type_code()
+        );
+    }
+}
+
+/// #2388, contract 5, #2451: the plane x = 20 sections each reopened round's face (the
+/// face's own section, `SmBrep::CreatePlanarSectionCurves`' per-face step, with no
+/// tolerance given). Each section curve lies within the face's tolerance of the round at
+/// 65 points along it, and off S and B alike (the net is S to rounding there). With
+/// `planar_section_face_tolerance` (WR-723) the section is traced to the face's
+/// tolerance; upstream's march runs to its default 1/1000 of the surface's size and left
+/// the round by up to 32 times the face's tolerance (5.2e-3 at 1.6e-4).
+#[test]
+fn a_plane_section_of_a_round_is_within_its_tolerance() {
+    use solidcore::topology::brep::planar_section::face_planar_section_curves;
+    let mut k = kernel(true);
+    k.fixes.planar_section_face_tolerance = true;
+    let mut b = chamfered_box(&mut k);
+    let rounds = reopen(&k, &mut b);
+    let (mut on, mut worst, mut s_vs_b) = (0, 0.0_f64, 0.0_f64);
+    for (f, s) in &rounds {
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            unreachable!()
+        };
+        let net = Surface::from(pb.net().clone());
+        let (tol, dom) = {
+            let face = b.face(*f).unwrap();
+            (face.tolerance, face.uv_domain)
+        };
+        let section = face_planar_section_curves(
+            &k,
+            &mut b,
+            *f,
+            s,
+            &dom,
+            Point3::new(20.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            None,
+            None,
+        )
+        .unwrap();
+        for c in &section.curves_3d {
+            let ivl = c.natural_interval();
+            for i in 0..=64 {
+                let p = c
+                    .evaluate_point(&k, ivl.min() + ivl.length() * f64::from(i) / 64.0)
+                    .unwrap();
+                let (ds, db) = (to_s(&k, s, p), to_s(&k, &net, p));
+                on += 1;
+                worst = worst.max(ds / tol);
+                s_vs_b = s_vs_b.max((ds - db).abs());
+            }
+        }
+    }
+    assert!(on > 0, "no section of a round");
+    assert!(
+        s_vs_b < 1e-10,
+        "the section is off S and B differently: {s_vs_b:e}"
+    );
+    assert!(
+        worst <= 1.0,
+        "the section leaves the round by {worst} times the face's tolerance"
+    );
+}
+
+/// #2388, contract 5: distance and measure. A point 1 off the middle of each reopened
+/// round along S's normal is 1 from the round (the closest point query's foot on S), and
+/// the reopened body's volume is the built one's.
+#[test]
+fn distance_and_volume_of_a_reopened_round_are_its_definition_s() {
+    let mut k = kernel(true);
+    let built = chamfered_box(&mut k);
+    let mut open = built.clone();
+    let rounds = reopen(&k, &mut open);
+    for (f, s) in &rounds {
+        let tol = open.face(*f).unwrap().tolerance;
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let uv = d.evaluate(0.5, 0.5);
+        let e = s.evaluate(&k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+        let n = e[1][0].cross(e[0][1]);
+        let p = e[0][0] + n * (1.0 / n.length());
+        let c = surface_closest_point(&k, s, p).unwrap();
+        let foot = s.evaluate_point(&k, c.uvs[0]).unwrap();
+        assert!(
+            (foot - c.closest.point).length() <= tol,
+            "the foot is not S's"
+        );
+        assert!(
+            (c.closest.distance - 1.0).abs() <= tol,
+            "distance {}",
+            c.closest.distance
+        );
+    }
+    let mut built = built;
+    let (v0, v1) = (volume_of(&k, &mut built), volume_of(&k, &mut open));
+    assert!((v0 - v1).abs() <= 1e-12 * v0, "volumes {v0} and {v1}");
+}
+
+/// A plate with a pipe lying on it tilted 4 degrees down along x (its axis from
+/// (0, 20, 16)), its far root edge (a curve: the plate's plane cuts the tilted cylinder
+/// in an ellipse) rounded r 2 at the equal area default. The round's section turns along
+/// it, so its certified net is a measurable distance off its definition.
+fn tilted_pipe(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::primitive::api_primitives::create_cylinder;
+    let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+    let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
+    let phi = 4.0_f64.to_radians();
+    let place = Axis2Placement::new(
+        Point3::new(0.0, 20.0, 16.0),
+        Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    solidcore::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
+    let mut b = boolean_union(k, plate, pipe).unwrap();
+    // the root edge nearest (30, 29.2, 10)
+    let q = Point3::new(30.0, 29.2, 10.0);
+    let mut best = (1.0_f64, None);
+    for &e in b.edge_list() {
+        if let Ok(c) = edge_closest_point(k, &b, e, q) {
+            if c.closest.distance <= best.0 {
+                best = (c.closest.distance, Some(e));
+            }
+        }
+    }
+    let e = best.1.expect("the root edge");
+    fillet_edges(k, &mut b, &[e], 2.0, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
+    b
+}
+
+/// The largest distance between S and its net B over a 41 x 9 grid of the round.
+fn s_to_net(k: &Kernel, s: &Surface) -> f64 {
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut gap = 0.0_f64;
+    for i in 0..=40 {
+        for j in 0..=8 {
+            let uv = d.evaluate(f64::from(i) / 40.0, f64::from(j) / 8.0);
+            let (p, q) = (
+                s.evaluate_point(k, uv).unwrap(),
+                pb.net().evaluate_point(uv).unwrap(),
+            );
+            gap = gap.max((p - q).length());
+        }
+    }
+    gap
+}
+
+/// #2388, contract 5, discriminating: the tilted pipe's round, reopened, whose certified
+/// net B stands measurably off S (at least 1e3 times the coordinates' rounding, 60 mm x
+/// 2.2e-16). A cylinder cut through it leaves edges on S within their own tolerance and
+/// measurably off B; a point 1 off S's middle is 1 from the round by the closest point
+/// query and not 1 from B; the reopened body's volume is the built one's (the volume
+/// integrates S; at its accuracy, 1e-7 of the volume, B's distance does not show).
+#[test]
+fn a_reopened_round_measurably_off_its_net_is_the_operand_on_s() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::primitive::api_primitives::create_cylinder;
+    let rounding = 1e3 * 60.0 * f64::EPSILON;
+    let mut k = kernel(true);
+    let built = tilted_pipe(&mut k);
+    let mut open = built.clone();
+    let rounds = reopen(&k, &mut open);
+    assert_eq!(rounds.len(), 1, "the root round");
+    let (f, s) = &rounds[0];
+    let tol = open.face(*f).unwrap().tolerance;
+    let gap = s_to_net(&k, s);
+    assert!(gap > rounding && gap < tol, "S and B {gap:e} apart");
+    let net = match s.kind() {
+        SurfaceKind::ProceduralBlend(pb) => Surface::from(pb.net().clone()),
+        _ => unreachable!(),
+    };
+
+    // distance: 1 off S's middle along its normal
+    let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+    let mut off_b = 0.0_f64;
+    for (a, c) in [(0.3, 0.5), (0.5, 0.5), (0.7, 0.4)] {
+        let e = s
+            .evaluate(&k, d.evaluate(a, c), 1, 1, EvaluateFlags::default())
+            .unwrap();
+        let n = e[1][0].cross(e[0][1]);
+        let p = e[0][0] + n * (1.0 / n.length());
+        let c = surface_closest_point(&k, s, p).unwrap();
+        assert!(
+            (c.closest.distance - 1.0).abs() <= tol,
+            "{}",
+            c.closest.distance
+        );
+        assert!((s.evaluate_point(&k, c.uvs[0]).unwrap() - c.closest.point).length() <= tol);
+        off_b = off_b.max((to_s(&k, &net, p) - 1.0).abs());
+    }
+
+    // boolean: a cylinder through the round
+    let tool = create_cylinder(&mut k, Point3::new(30.0, 30.5, 0.0), 1.5, 30.0).unwrap();
+    let cut = boolean_difference(&mut k, open.clone(), tool).unwrap();
+    let (n, worst) = edges_on_s(&k, &cut, &rounds);
+    assert!(n > 0, "no edge on the round");
+    assert!(worst <= 1.0, "an edge {worst} of its tolerance off S");
+    let mut edge_off_b = 0.0_f64;
+    for (cf, cs) in rounds_of(&cut) {
+        let dm = cs.natural_uv_domain_with_nurb(&k).unwrap();
+        let mid = cs.evaluate_point(&k, dm.evaluate(0.5, 0.5)).unwrap();
+        if to_s(&k, s, mid) > 1e-9 {
+            continue;
+        }
+        for e in edges_of(&cut, cf) {
+            for p in edge_points(&k, &cut, e) {
+                edge_off_b = edge_off_b.max(to_s(&k, &net, p));
+            }
+        }
+    }
+    assert!(
+        off_b > rounding && edge_off_b > rounding,
+        "B is not measurably off: distance {off_b:e}, edges {edge_off_b:e}"
+    );
+
+    // volume
+    let mut built = built;
+    let (v0, v1) = (volume_of(&k, &mut built), volume_of(&k, &mut open));
+    assert!((v0 - v1).abs() <= 1e-12 * v0, "volumes {v0} and {v1}");
+}
+
+/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`, with the round
+/// as its definition or as a plain B-spline.
+fn solidcraft_kernel(definition: bool) -> Kernel {
+    let mut fixes = UpstreamFixes::default();
+    for &name in UpstreamFixes::NAMES {
+        if name != "geometric_g2_continuity" {
+            *fixes.flag_mut(name).unwrap() = true;
+        }
+    }
+    fixes.fillet_round_as_definition = definition;
+    let mut k = Kernel::new(&KernelOptions::default());
+    k.fixes = fixes;
+    k
+}
+
+/// #2388, contract 5 (#2452): a second round whose support is a round. The edge where the
+/// bottom round meets the end face x = 0 is rounded r 0.5. Both its ends run on
+/// tangentially into the sharp edges x = 0, z = 0 and x = 0, y = 0, which are not picked,
+/// so the round ends at its sections through the end vertices (WR-674, trimmed at its
+/// creases, WR-706); without those fixes the pinned corner refuses each end
+/// (`SmFilletNx1Corner`, "Corner Edge Computation Failure"), which `DoFilleting` returns as
+/// its generic status. The round rolls between the plane x = 0 and a surface swept along
+/// x, so the ball's centre is at x = 0.5 and its rail on the bottom round is the round's
+/// section at x = 0.5, from (0.5, 0, 2) to (0.5, 2, 0): it lies on S within its edge's
+/// tolerance, on the body reopened (S the definition) and as built with the rounds as
+/// plain B-splines (S the B-spline), and the round adds its face and its two end faces.
+#[test]
+#[ignore = "slow (about 20 min unoptimized, 70 s optimized): the round's trace solves the reopened round's definition at about 67 000 stations"]
+fn a_round_on_a_reopened_round_lies_on_it() {
+    for definition in [true, false] {
+        let mut k = solidcraft_kernel(definition);
+        let mut b = chamfered_box(&mut k);
+        let rounds: Vec<(FaceId, Surface)> = if definition {
+            reopen(&k, &mut b)
+        } else {
+            // the faces whose surface is the G^n section's B-spline (degree 7 in v)
+            b.face_list()
+                .iter()
+                .filter_map(|&f| {
+                    let s = b.face(f).unwrap().surface.clone()?;
+                    let SurfaceKind::BSpline(bs) = s.kind() else {
+                        return None;
+                    };
+                    (bs.degree(solidcore::nurbs::b_spline_surface::SurfParamType::V) == 7)
+                        .then_some((f, s))
+                })
+                .collect()
+        };
+        assert_eq!(rounds.len(), 2, "definition {definition}: the rounds");
+        // the bottom round (along x near y = z = 0) and its edge in the plane x = 0
+        let (f, s) = rounds
+            .iter()
+            .find(|(_, s)| {
+                let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+                s.evaluate_point(&k, d.evaluate(0.5, 0.5)).unwrap().z < 5.0
+            })
+            .unwrap()
+            .clone();
+        let end = edges_of(&b, f)
+            .into_iter()
+            .find(|&e| edge_points(&k, &b, e).iter().all(|p| p.x.abs() < 1e-6))
+            .unwrap();
+        let faces = b.face_list().len();
+        fillet_edges(&mut k, &mut b, &[end], 0.5, 1, 1, 0.0)
+            .unwrap_or_else(|e| panic!("definition {definition}: {e}"));
+        assert_eq!(
+            b.face_list().len(),
+            faces + 3,
+            "definition {definition}: the round and its two end faces"
+        );
+        // the rail: the edge at x = 0.5 from (0.5, 0, 2) to (0.5, 2, 0)
+        let rail: Vec<_> = b
+            .edge_list()
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let p = edge_points(&k, &b, e);
+                p.iter().all(|p| (p.x - 0.5).abs() < 1e-9)
+                    && p.iter().any(|p| p.y > 1e-3 && p.z > 1e-3)
+            })
+            .collect();
+        assert_eq!(rail.len(), 1, "definition {definition}: the rail on S");
+        let tol = b.edge(rail[0]).unwrap().tolerance;
+        let p = edge_points(&k, &b, rail[0]);
+        let ends = [p[0], p[8]];
+        for q in [Point3::new(0.5, 0.0, 2.0), Point3::new(0.5, 2.0, 0.0)] {
+            assert!(
+                ends.iter().any(|e| (*e - q).length() <= tol),
+                "definition {definition}: the rail does not end at {q:?}: {ends:?}"
+            );
+        }
+        let worst = p.iter().map(|&q| to_s(&k, &s, q)).fold(0.0_f64, f64::max);
+        assert!(
+            worst <= tol,
+            "definition {definition}: the rail {worst:e} off S, its tolerance {tol:e}"
+        );
+    }
 }

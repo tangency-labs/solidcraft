@@ -492,6 +492,21 @@ impl FilletSurfaceGenerator {
                 return Ok(s);
             }
         }
+        // (a chamfer between NURBS faces is its definition, the chord: #2486)
+        if let (Self::Linear, Some(ball), Some(center)) = (&*self, ball, center_line.as_deref()) {
+            if let Some(s) = LinearCrossSectionFsg.definition_surface(
+                k,
+                approx_tol_3d,
+                solver_type,
+                center,
+                [&mut *rail1, &mut *rail2],
+                surfaces,
+                [&mut *uv1, &mut *uv2],
+                ball,
+            )? {
+                return Ok(s);
+            }
+        }
         let uv = [uv1, uv2];
         let [s1, s2] = surfaces;
         let [uv1, uv2] = uv;
@@ -658,6 +673,10 @@ pub struct FilletSolver {
     pub fillet_geoms: Vec<FilletGeomId>,
     /// `m_eStatus`.
     pub status: FilStatus,
+    /// The chamfer's sizes this solver was made for
+    /// ([`crate::blend::fillet_executive::session::FilletSession::prepare_chamfers`]),
+    /// which its surface by its definition keeps (solidcore's, #2486).
+    pub chamfer: Option<crate::surface::procedural_blend::chamfer::ChamferDefinition>,
     /// `m_vG1Knots`.
     pub g1_knots: Vec<f64>,
     /// Offset surfaces [`FilletSolver::set_surface`] displaced: upstream does not
@@ -709,6 +728,7 @@ impl FilletSolver {
             status: FilStatus::Unprocessed,
             g1_knots: Vec::new(),
             detached: Vec::new(),
+            chamfer: None,
         }
     }
 

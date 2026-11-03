@@ -231,6 +231,24 @@ impl Plane {
         }
     }
 
+    /// The plane of a placement, scales and domain as stored, on the NURB `form` (not
+    /// made from them): a plane read back from data it was written to, its form checked
+    /// against it by the caller ([`crate::surface::implicit::AnalyticSupport::build`]).
+    #[must_use]
+    pub(crate) fn from_stored(
+        position: Axis2Placement,
+        uv_scale: Vec2,
+        uv_domain: Extent2d,
+        form: BSplineSurface,
+    ) -> Self {
+        Self {
+            base: form,
+            position,
+            anal_uv_domain: uv_domain,
+            uv_scale,
+        }
+    }
+
     /// The infinite plane through `origin` with normal `normal` (`SmPlane(Origin,
     /// PlaneNormal, cpContext)`): unit scales, the domain
     /// `[-SM_INFINITE_PARAMETER, SM_INFINITE_PARAMETER]^2` and the axes of

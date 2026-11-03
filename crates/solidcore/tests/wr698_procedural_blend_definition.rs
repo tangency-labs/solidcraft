@@ -14,7 +14,7 @@
 //! 3bc54a4's (all 3564 values again bit for bit), the others are unchanged. The circle's points are also checked against the
 //! closed form.
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQUAL_AREA};
 use solidcore::geom::vector3d::{Point3, Vec3};
@@ -116,6 +116,7 @@ fn blend(k: &Kernel, bumpy: bool, order: u32, thumbweight: f64, law: bool) -> Pr
         leader: &leader,
         seeds: [&seed, &seed],
         bound: 1e-3,
+        chamfer: None,
     };
     ProceduralBlend::create(k, &net, &input, |n, w| {
         GnSectionFsg::is_valid(n as usize, w)
@@ -531,4 +532,475 @@ fn a_blend_cast_to_a_b_spline_is_its_net() {
             "joined point",
         );
     }
+}
+
+// ---- #2388: the definition as plain data ----------------------------------------------
+
+use solidcore::surface::plane::Plane;
+use solidcore::surface::procedural_blend::convert::{from_record, rebuild, to_record};
+use solidcore::surface::procedural_blend::record::{
+    ProceduralBlendRecord, RadiusRecord, SupportKindRecord, SupportRecord,
+};
+
+/// The record through JSON (as SolidCraft's record would store it), back to the kernel
+/// and to a record again: `(json, record back, json back)`.
+fn round_trip(k: &Kernel, pb: &ProceduralBlend) -> (String, ProceduralBlend, String) {
+    let rec = to_record(k, pb).unwrap();
+    let json = serde_json::to_string(&rec).unwrap();
+    let read: ProceduralBlendRecord = serde_json::from_str(&json).unwrap();
+    let back = from_record(k, &read).unwrap();
+    let again = serde_json::to_string(&to_record(k, &back).unwrap()).unwrap();
+    (json, back, again)
+}
+
+/// The partials of S at a grid of (u, v), as bits.
+fn s_bits(k: &Kernel, pb: &ProceduralBlend) -> Vec<Result<[u64; 3], String>> {
+    let s = Surface::from(pb.clone());
+    let mut out = Vec::new();
+    for u in [0.0, 0.13, 0.37, 0.8, 1.0] {
+        for v in [0.0, 0.25, 0.6, 1.0] {
+            let d = s.evaluate(
+                k,
+                Point2::new(u, v),
+                1,
+                1,
+                solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags::default(),
+            );
+            match d {
+                Ok(d) => {
+                    for row in &d {
+                        for p in row {
+                            out.push(Ok([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]));
+                        }
+                    }
+                }
+                Err(e) => out.push(Err(e.to_string())),
+            }
+        }
+    }
+    out
+}
+
+/// A round on the round between y = 0 and z = 0 (`blend(false, 1, ..)`, the quarter
+/// cylinder about (x, 2, 2) of radius 2): a ball of radius 0.5 inside it against the plane
+/// x = 5, its centre on the circle of radius 1.5 about (4.5, 2, 2).
+fn round_on_a_round(k: &Kernel) -> ProceduralBlend {
+    let inner = Surface::from(blend(k, false, 1, 0.0, false));
+    let wall = Surface::from(bilinear([
+        Point3::new(5.0, 0.0, 0.0),
+        Point3::new(5.0, L, 0.0),
+        Point3::new(5.0, 0.0, L),
+        Point3::new(5.0, L, L),
+    ]));
+    let c = Point3::new(4.5, R, R);
+    let w = 0.5_f64.sqrt();
+    let leader = BSplineCurve::create_canonical(&solidcore::nurbs::b_spline_curve::CanonicalData {
+        dim: 3,
+        degree: 2,
+        control_points: &[
+            c + Vec3::new(0.0, -1.5, 0.0),
+            c + Vec3::new(0.0, -1.5, -1.5),
+            c + Vec3::new(0.0, 0.0, -1.5),
+        ],
+        form: solidcore::nurbs::b_spline_curve::BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[3, 3],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: Some(&[1.0, w, 1.0]),
+        trim: None,
+    })
+    .unwrap();
+    // the feet: on the inner round at s = 0.45 across t, on the wall at (y, z) / L
+    let seed_inner = line(Point3::new(0.45, 0.0, 0.0), Point3::new(0.45, 1.0, 0.0));
+    let seed_wall = line(Point3::new(0.05, 0.2, 0.0), Point3::new(0.2, 0.05, 0.0));
+    // the ball is inside the inner round: on the side of its normal towards the axis
+    let solidcore::surface::surface::SurfaceKind::ProceduralBlend(ip) = inner.kind() else {
+        unreachable!()
+    };
+    let d = ip.evaluate_definition(k, 0.45, 0.5, 1, 1).unwrap();
+    let n = d[1][0].cross(d[0][1]);
+    let side_inner = if (c - d[0][0]).dot(n) > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let input = BlendDefinitionInput {
+        supports: [&inner, &wall],
+        sides: [side_inner, 1.0],
+        offsets: [0.5, 0.5],
+        law: None,
+        order: 1,
+        thumbweight: 0.0,
+        leader: &leader,
+        seeds: [&seed_inner, &seed_wall],
+        bound: 1e-3,
+        chamfer: None,
+    };
+    let net = bilinear([
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+    ]);
+    ProceduralBlend::create(k, &net, &input, |n, w| {
+        GnSectionFsg::is_valid(n as usize, w)
+    })
+    .unwrap()
+}
+
+/// #2388: a constant round, a G^n round, a variable round and a round on a round go to
+/// data and back with their records equal bit for bit (the JSON text, every number
+/// written exactly), and the blend read back evaluates S as the original does, bit for
+/// bit, not its net.
+#[test]
+fn a_definition_goes_to_data_and_back_bit_for_bit() {
+    let k = kernel();
+    let cases = [
+        ("round", blend(&k, false, 1, 0.0, false)),
+        (
+            "G2 equal area",
+            blend(&k, true, 2, GN_THUMBWEIGHT_EQUAL_AREA, false),
+        ),
+        ("variable", blend(&k, true, 1, 0.0, true)),
+        ("round on a round", round_on_a_round(&k)),
+    ];
+    for (name, pb) in &cases {
+        let (json, back, again) = round_trip(&k, pb);
+        assert_eq!(json, again, "{name}: the record changed through the kernel");
+        assert_eq!(back.depth(), pb.depth(), "{name}");
+        let (want, got) = (s_bits(&k, pb), s_bits(&k, &back));
+        assert_eq!(want, got, "{name}: S read back is not S");
+        // S solved, not the net: at the middle the net (the unit square z = 0) is far
+        let uv = Point2::new(0.37, 0.6);
+        let p = Surface::from(back.clone()).evaluate_point(&k, uv).unwrap();
+        let q = back.net().evaluate_point(uv).unwrap();
+        assert!(p.distance(q) > 0.1, "{name}: evaluates its net");
+    }
+    // the nested record keeps its inner definition by value
+    let rec = to_record(&k, &cases[3].1).unwrap();
+    assert_eq!(rec.depth(), 2);
+    assert!(matches!(
+        rec.definition.supports[0],
+        SupportRecord::Blend(_)
+    ));
+    assert!(matches!(
+        rec.definition.supports[1],
+        SupportRecord::Nurbs { .. }
+    ));
+    assert!(matches!(
+        to_record(&k, &cases[2].1).unwrap().definition.radius,
+        RadiusRecord::Law(_)
+    ));
+}
+
+/// #2388: a corrupted record is refused, before anything is evaluated: counts that do not
+/// agree, numbers out of range, knots that decrease, a weight that is not positive, a
+/// singular map, and supports nested past three definitions.
+#[test]
+fn a_corrupted_definition_is_refused() {
+    type Corrupt = fn(&mut ProceduralBlendRecord);
+    let k = kernel();
+    let good = to_record(&k, &blend(&k, true, 1, 0.0, true)).unwrap();
+    assert!(from_record(&k, &good).is_ok());
+    let corruptions: [(&str, Corrupt); 13] = [
+        ("a knot dropped", |r| {
+            r.definition.leader.knots.pop();
+        }),
+        ("a point dropped", |r| {
+            r.net.points.pop();
+        }),
+        ("knots that decrease", |r| {
+            r.definition.seeds[0].knots.reverse();
+        }),
+        ("a weight below 0", |r| {
+            r.net.weights = Some(vec![-1.0; r.net.points.len()]);
+        }),
+        ("a weight per point missing", |r| {
+            r.net.weights = Some(vec![1.0]);
+        }),
+        ("a side of 0.5", |r| r.definition.sides[0] = 0.5),
+        ("an order of 7", |r| r.definition.order = 7),
+        ("a bound below 0", |r| r.definition.bound = -1.0),
+        ("a bound not finite", |r| r.definition.bound = f64::INFINITY),
+        ("a singular map", |r| r.definition.map.b[1] = 0.0),
+        ("a degree of 0", |r| r.definition.leader.degree = 0),
+        ("a support labelled a sphere it is not", |r| {
+            let SupportRecord::Nurbs { kind, .. } = &mut r.definition.supports[0] else {
+                unreachable!()
+            };
+            *kind = SupportKindRecord::Sphere;
+        }),
+        ("four definitions deep", |r| {
+            let mut inner = r.clone();
+            for _ in 0..3 {
+                let mut outer = r.clone();
+                outer.definition.supports[0] = SupportRecord::Blend(Box::new(inner));
+                inner = outer;
+            }
+            *r = inner;
+        }),
+    ];
+    for (what, corrupt) in corruptions {
+        let mut bad = good.clone();
+        corrupt(&mut bad);
+        assert!(from_record(&k, &bad).is_err(), "{what} was taken");
+    }
+    // labelled the plane it is (y = 0), the support is rebuilt as a plane derived from it
+    let mut planar = good.clone();
+    let SupportRecord::Nurbs { kind, .. } = &mut planar.definition.supports[0] else {
+        unreachable!()
+    };
+    *kind = SupportKindRecord::Plane;
+    let back = from_record(&k, &planar).unwrap();
+    assert_eq!(back.support(0).unwrap().type_code(), Plane::TYPE);
+}
+
+/// #2388: a support labelled a plane is rebuilt as the plane its form parametrises. A form
+/// of higher degree (a plane form from another writer, or a hostile record) is a plane
+/// only where its own (u, v) is the plane's affine one: the plane y = 0 as a degree-2 by
+/// degree-1 form with its middle control row half way along is taken, and the rebuilt
+/// plane evaluates as the form; with that row moved within the plane (still planar, not
+/// affine in u) it is refused.
+#[test]
+fn a_plane_label_needs_the_plane_s_parametrisation() {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use solidcore::surface::procedural_blend::record::NurbsSurfaceRecord;
+    use solidcore::surface::surface::SurfaceKind;
+    let k = kernel();
+    let good = to_record(&k, &blend(&k, true, 1, 0.0, true)).unwrap();
+    let plane = |middle: f64| {
+        let mut r = good.clone();
+        let mut points = Vec::new();
+        for x in [0.0, middle, L] {
+            for z in [0.0, L] {
+                points.push([x, 0.0, z]);
+            }
+        }
+        r.definition.supports[0] = SupportRecord::Nurbs {
+            kind: SupportKindRecord::Plane,
+            form: NurbsSurfaceRecord {
+                u_degree: 2,
+                v_degree: 1,
+                u_count: 3,
+                v_count: 2,
+                u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                v_knots: vec![0.0, 0.0, 1.0, 1.0],
+                points,
+                weights: None,
+            },
+        };
+        r
+    };
+    let back = from_record(&k, &plane(0.5 * L)).unwrap();
+    let support = back.support(0).unwrap();
+    assert_eq!(support.type_code(), Plane::TYPE);
+    let SurfaceKind::Plane(p) = support.kind() else {
+        unreachable!()
+    };
+    let uv = Point2::new(0.3, 0.7);
+    let analytic = Surface::from(p.clone())
+        .evaluate(&k, uv, 0, 0, EvaluateFlags::default())
+        .unwrap()[0][0];
+    assert!(
+        (analytic - Point3::new(0.3 * L, 0.0, 0.7 * L)).length() <= 1e-12,
+        "{analytic:?}"
+    );
+    assert!(
+        from_record(&k, &plane(0.2 * L)).is_err(),
+        "a plane form not affine in u was taken"
+    );
+}
+
+/// #2388: a net off its definition is refused when the record is rebuilt. These nets are
+/// the unit square z = 0, nowhere near their definitions' rounds; the bump's G^n round's
+/// supports are NURBS, so it is the certificate that refuses it.
+#[test]
+fn a_net_off_its_definition_is_refused_on_rebuild() {
+    let k = kernel();
+    for pb in [
+        blend(&k, false, 1, 0.0, false),
+        blend(&k, true, 2, GN_THUMBWEIGHT_EQUAL_AREA, false),
+        blend(&k, true, 1, 0.0, true),
+    ] {
+        let rec = to_record(&k, &pb).unwrap();
+        assert!(from_record(&k, &rec).is_ok());
+        assert!(rebuild(&k, &rec).is_err());
+    }
+}
+
+/// S's partials at a row of points at one s, as bits.
+fn row_bits(k: &Kernel, pb: &ProceduralBlend, s: f64) -> Vec<u64> {
+    let mut out = Vec::new();
+    for t in [0.0, 0.3, 0.6, 1.0] {
+        for row in pb.evaluate_definition(k, s, t, 2, 2).unwrap() {
+            for p in row {
+                out.extend([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+            }
+        }
+    }
+    out
+}
+
+/// #2388, contract 4: evaluating S is a pure function of its definition. Two threads,
+/// each with its own kernel, evaluating blends that share a definition give what one
+/// kernel gives, bit for bit, also where a thread's kernel has made and evaluated
+/// definitions of its own at the same s (its station memo holds their stations).
+#[test]
+fn evaluating_on_two_threads_equals_one_bit_for_bit() {
+    let k = kernel();
+    let shared = [
+        blend(&k, true, 2, GN_THUMBWEIGHT_EQUAL_AREA, false),
+        blend(&k, true, 1, 0.0, true),
+    ];
+    let ss = [0.0, 0.37, 0.5, 1.0];
+    let serial: Vec<Vec<u64>> = shared
+        .iter()
+        .flat_map(|pb| ss.iter().map(|&s| row_bits(&k, pb, s)))
+        .collect();
+    let parallel: Vec<Vec<Vec<u64>>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..2)
+            .map(|thread| {
+                let shared = shared.clone();
+                scope.spawn(move || {
+                    let k = kernel();
+                    // this kernel's own definitions, of the same orders, evaluated first at
+                    // the same s
+                    let own = [
+                        blend(&k, false, 2, GN_THUMBWEIGHT_EQUAL_AREA, false),
+                        blend(&k, false, 1, 0.0, true),
+                    ];
+                    let mut out = Vec::new();
+                    for (pb, mine) in shared.iter().zip(&own) {
+                        for &s in &ss {
+                            if thread == 1 {
+                                let _ = row_bits(&k, mine, s);
+                            }
+                            out.push(row_bits(&k, pb, s));
+                        }
+                    }
+                    out
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for (thread, got) in parallel.iter().enumerate() {
+        assert_eq!(got, &serial, "thread {thread} differs from one kernel");
+    }
+}
+
+/// #2388: a support labelled a cylinder, cone, sphere or torus is rebuilt as the analytic
+/// surface its form parametrises: at every (u, v) of the form the rebuilt support
+/// evaluates as the original, to the rounding of the part, whatever frame, angles and
+/// swap the original was made on (the primitives' faces, partial ones turned from 30
+/// degrees, and a box edge's round of the exact line class, whose frame is its start
+/// rail's). A form on the surface whose own (u, v) is not the analytic's (a quarter cylinder
+/// whose arc is reparametrised) is refused.
+#[test]
+fn a_revolved_label_needs_the_form_s_parametrisation() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::blend::fillet_section::station::as_b_spline;
+    use solidcore::primitive::api_primitives::{
+        create_box, create_cone, create_cylinder, create_partial_cone, create_partial_cylinder,
+        create_partial_sphere, create_partial_torus, create_sphere, create_torus,
+    };
+    use solidcore::surface::implicit::{AnalyticSupport, SupportKind};
+    use solidcore::topology::face::p2 as face;
+    let mut k = kernel();
+    k.fixes.fillet_exact_round_classes = true;
+    let o = Point3::new(1.0, -2.0, 3.0);
+    let mut rounded = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 8.0, 6.0).unwrap();
+    let edge = rounded.edges().ids().next().unwrap();
+    fillet_edges(&mut k, &mut rounded, &[edge], 1.5, 1, 1, 1.0).unwrap();
+    let bodies = [
+        create_cylinder(&mut k, o, 2.0, 5.0).unwrap(),
+        create_cone(&mut k, o, 3.0, 1.0, 4.0).unwrap(),
+        create_sphere(&mut k, o, 2.5).unwrap(),
+        create_torus(&mut k, o, 5.0, 1.5).unwrap(),
+        create_partial_cylinder(&mut k, o, 2.0, 5.0, 30.0, 140.0).unwrap(),
+        create_partial_cone(&mut k, o, 3.0, 1.0, 4.0, 30.0, 140.0).unwrap(),
+        create_partial_sphere(&mut k, o, 2.5, 30.0, 140.0).unwrap(),
+        create_partial_torus(&mut k, o, 5.0, 1.5, 30.0, 140.0).unwrap(),
+        rounded,
+    ];
+    let mut checked = 0;
+    for b in &bodies {
+        for f in b.faces().ids() {
+            let s = face::surface(b, f).unwrap().unwrap();
+            let Some(a) = AnalyticSupport::of(s) else {
+                continue;
+            };
+            if a.kind() == SupportKind::Plane {
+                continue;
+            }
+            let form = as_b_spline(&k, s).unwrap().unwrap().into_owned();
+            let back = AnalyticSupport::derive(&k, a.kind(), &form)
+                .and_then(|d| d.build(&k, form.copy()))
+                .unwrap();
+            assert_eq!(back.type_code(), s.type_code());
+            let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let uv = Point2::new(
+                        d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0,
+                        d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0,
+                    );
+                    let off = (s.evaluate_point(&k, uv).unwrap()
+                        - back.evaluate_point(&k, uv).unwrap())
+                    .length();
+                    assert!(
+                        off <= 64.0 * f64::EPSILON * 20.0,
+                        "a {:?} support rebuilt is {off:e} off at {uv:?}",
+                        a.kind()
+                    );
+                }
+            }
+            checked += 1;
+        }
+    }
+    // (the partial torus is a surface of revolution, no support label)
+    assert_eq!(checked, 8);
+
+    // a quarter cylinder of radius 2 about z from height 0 to 5, its quarter circle the
+    // rational quadratic arc with end weights 1 and c^2 (c = 1 the circle's own
+    // parametrisation; another c the same arc reparametrised, by a Moebius map)
+    let quarter = |c: f64| {
+        let w = std::f64::consts::FRAC_1_SQRT_2 * c;
+        let arc = [(2.0, 0.0, 1.0), (2.0, 2.0, w), (0.0, 2.0, c * c)];
+        let rows: Vec<Vec<_>> = [0.0, 5.0]
+            .iter()
+            .map(|&z| {
+                arc.iter()
+                    .map(|&(x, y, wt)| {
+                        solidcore::nurbs::math::CPoint::new(x * wt, y * wt, z * wt, wt)
+                    })
+                    .collect()
+            })
+            .collect();
+        let nurb = solidcore::nurbs::srf_basic::Surface::new(
+            rows,
+            1,
+            2,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        BSplineSurface::from_nurb(nurb, true)
+    };
+    let own = quarter(1.0);
+    let built = AnalyticSupport::derive(&k, SupportKind::Cylinder, &own)
+        .and_then(|d| d.build(&k, own.copy()))
+        .unwrap();
+    for uv in [Point2::new(0.3, 0.7), Point2::new(0.9, 0.1)] {
+        let off =
+            (built.evaluate_point(&k, uv).unwrap() - own.evaluate_point(uv).unwrap()).length();
+        assert!(off <= 64.0 * f64::EPSILON * 5.0, "{off:e}");
+    }
+    let moved = quarter(2.0);
+    assert!(
+        AnalyticSupport::derive(&k, SupportKind::Cylinder, &moved)
+            .and_then(|d| d.build(&k, moved.copy()))
+            .is_err(),
+        "a cylinder form whose angle is not the circle's own parameter was taken"
+    );
 }

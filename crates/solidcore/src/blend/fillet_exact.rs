@@ -72,6 +72,7 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::knots::Side;
 use crate::surface::cone::Cone;
+use crate::surface::procedural_blend::exact::{ExactClass, ExactRound};
 use crate::surface::sphere::Sphere;
 use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -628,6 +629,10 @@ pub struct ExactBlend {
     /// `m_sDir`: circle, the axis's unit direction; conic (pair), the plane's unit normal;
     /// line (not the fork, #2405), its unit direction.
     pub dir: Vec3,
+    /// Not the fork (#2485): what [`classify_exact_blend`] read the class from, so that
+    /// [`classify_supports`] reads it again from the round's supports alone; `None` for a
+    /// blend not classified from a solver.
+    pub inputs: Option<ClassInputs>,
 }
 
 impl Default for ExactBlend {
@@ -640,8 +645,33 @@ impl Default for ExactBlend {
             radius: 0.0,
             point: Point3::ZERO,
             dir: Vec3::ZERO,
+            inputs: None,
         }
     }
+}
+
+/// Not the fork (#2485): the numbers a classification reads off a round's two faces (its
+/// supports) beside the faces themselves: where each face's quadric is read, how far the
+/// ball's centre is off each along its normal, the centre, the tolerance placements are
+/// decided within and the classification's own switches. With the supports they decide
+/// the class ([`classify_supports`]), as [`classify_exact_blend`] decided it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClassInputs {
+    /// The `(u, v)` each face's quadric is read at.
+    pub uv: [Point2; 2],
+    /// The signed offset of the ball's centre from each face, along the face's normal.
+    pub offsets: [f64; 2],
+    /// The ball's centre the spine is classified at.
+    pub centre: Point3,
+    /// The tolerance placements are decided within (the body's).
+    pub tol: f64,
+    /// Whether a face's offset collapsed onto its spine and crossed by the other is the
+    /// ball's piece ([`classify_ball_on_collapsed_offset`], `fillet_blend_corner` with a
+    /// constant ball).
+    pub ball_on_collapsed: bool,
+    /// Whether the solver's radii can change along the edge (only the line, circle and
+    /// point classes are kept then).
+    pub radii_can_change: bool,
 }
 
 /// Not the fork (#2405): the line two offsets of a line spine meet in, `O1 ∩ O2`, as its
@@ -1234,7 +1264,7 @@ pub fn classify_exact_blend(
     b: &Brep,
     tsect: &TsectPnt,
 ) -> Result<ExactBlend> {
-    let mut blend = ExactBlend::default();
+    let blend = ExactBlend::default();
     if !ops.can_make_analytic()? {
         return Ok(blend);
     }
@@ -1258,6 +1288,9 @@ pub fn classify_exact_blend(
 
     let mut radius = 0.0;
     ops.setup_offset_values(tsect, Some(&mut radius))?;
+    let mut faces = [BlendQuadric::default(); 2];
+    let mut uvs = [Point2::new(0.0, 0.0); 2];
+    let mut offs = [0.0; 2];
     let mut centre = Point3::ZERO;
     for i in 0..2 {
         let uv = tsect.uv_pos(if i == 0 {
@@ -1279,33 +1312,59 @@ pub fn classify_exact_blend(
             (face, p, n)
         };
         let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
-        let off = (q - p).dot(n);
+        if let (Some(f), Some(u), Some(o)) = (faces.get_mut(i), uvs.get_mut(i), offs.get_mut(i)) {
+            *f = face;
+            *u = uv;
+            *o = (q - p).dot(n);
+        }
+        if i == 0 {
+            centre = q;
+        }
+    }
+    let radii_can_change = ops.offset_radii_can_change()?;
+    let inputs = ClassInputs {
+        uv: uvs,
+        offsets: offs,
+        centre,
+        tol,
+        ball_on_collapsed: k.fixes.fillet_blend_corner && !radii_can_change,
+        radii_can_change,
+    };
+    Ok(classify_faces(faces, &inputs))
+}
+
+/// The class of a round on faces whose quadrics are `faces`, read with `inputs`
+/// ([`classify_exact_blend`]'s, past the faces): each face moved by its offset, the spine
+/// classified at the centre ([`classify_blend_spine`]; then, as solidcore #2403 does, a
+/// collapsed offset the other crosses), and with radii that can change only the line,
+/// circle and point classes kept.
+fn classify_faces(faces: [BlendQuadric; 2], inputs: &ClassInputs) -> ExactBlend {
+    let tol = inputs.tol;
+    let mut blend = ExactBlend {
+        inputs: Some(*inputs),
+        ..ExactBlend::default()
+    };
+    for (i, (face, off)) in faces.iter().zip(inputs.offsets).enumerate() {
         if let (Some(f), Some(o), Some(c)) = (
             blend.faces.get_mut(i),
             blend.offsets.get_mut(i),
             blend.contact.get_mut(i),
         ) {
-            *f = face;
+            *f = *face;
             *o = face.offset(off, tol);
             *c = if off > 0.0 { -1.0 } else { 1.0 };
         }
         blend.radius = off.abs();
-        if i == 0 {
-            centre = q;
-        }
     }
 
-    classify_blend_spine(centre, tol, &mut blend);
+    classify_blend_spine(inputs.centre, tol, &mut blend);
     // Not in the fork (solidcore #2403): a face that is a round of the ball's radius, its
     // offset collapsed onto its spine, which the other offset crosses: the ball's piece
-    if blend.spine == BlendSpine::Traced
-        && k.fixes.fillet_blend_corner
-        && !ops.offset_radii_can_change()?
-    {
-        classify_ball_on_collapsed_offset(centre, tol, &mut blend);
+    if blend.spine == BlendSpine::Traced && inputs.ball_on_collapsed {
+        classify_ball_on_collapsed_offset(inputs.centre, tol, &mut blend);
     }
 
-    if ops.offset_radii_can_change()?
+    if inputs.radii_can_change
         && !matches!(
             blend.spine,
             BlendSpine::Line | BlendSpine::Circle | BlendSpine::Point
@@ -1313,7 +1372,195 @@ pub fn classify_exact_blend(
     {
         blend.spine = BlendSpine::Traced;
     }
-    Ok(blend)
+    blend
+}
+
+/// Not the fork (#2485): the class of a round read again from its two supports alone (the
+/// faces [`classify_exact_blend`] read, as the round keeps them) with the numbers it read
+/// beside them, `inputs`. On the same supports it is that classification, bit for bit; on
+/// supports rebuilt from a record, whose analytic parameters are derived from their NURBS
+/// forms to rounding, it is the same class to rounding.
+///
+/// # Errors
+///
+/// Those of [`BlendQuadric::from_surface`].
+pub fn classify_supports(
+    k: &Kernel,
+    supports: [&Surface; 2],
+    inputs: &ClassInputs,
+) -> Result<ExactBlend> {
+    let mut faces = [BlendQuadric::default(); 2];
+    for ((face, support), uv) in faces.iter_mut().zip(supports).zip(inputs.uv) {
+        *face = BlendQuadric::from_surface(k, support, uv, inputs.tol)?;
+        if face.kind == QuadricKind::None {
+            return Ok(ExactBlend::default());
+        }
+    }
+    Ok(classify_faces(faces, inputs))
+}
+
+/// Not the fork (#2485): a quadric of revolution about the axis through `a` along the
+/// unit `d`, as its meridian in the half-plane `(rho, z)`, `rho` the distance from the
+/// axis and `z` the height along it from `a`: a line `p + t e` or a circle about `c` of
+/// radius `r`. `None` for a quadric that is not coaxial with it.
+#[derive(Debug, Clone, Copy)]
+enum Meridian {
+    Line { p: Point2, e: Point2 },
+    Circle { c: Point2, r: f64 },
+}
+
+fn meridian(q: &BlendQuadric, a: Point3, d: Vec3) -> Option<Meridian> {
+    let z = |x: Point3| (x - a).dot(d);
+    let rho = |x: Point3| across(x - a, d).length();
+    Some(match q.kind {
+        // a plane square to the axis: z = h
+        QuadricKind::Plane => Meridian::Line {
+            p: Point2::new(0.0, z(q.point)),
+            e: Point2::new(1.0, 0.0),
+        },
+        // a coaxial cylinder: rho = R
+        QuadricKind::Cylinder => Meridian::Line {
+            p: Point2::new(q.radius, 0.0),
+            e: Point2::new(0.0, 1.0),
+        },
+        // a cylinder as wide as the ball, collapsed onto the axis: rho = 0
+        QuadricKind::Line => Meridian::Line {
+            p: Point2::new(0.0, 0.0),
+            e: Point2::new(0.0, 1.0),
+        },
+        // a sphere about a point of the axis
+        QuadricKind::Sphere => Meridian::Circle {
+            c: Point2::new(rho(q.point), z(q.point)),
+            r: q.radius,
+        },
+        // a coaxial cone: the line from its apex at its half-angle into its nappe
+        QuadricKind::Cone => Meridian::Line {
+            p: Point2::new(rho(q.point), z(q.point)),
+            e: Point2::new(q.angle.sin(), q.angle.cos() * q.dir.dot(d).signum()),
+        },
+        _ => return None,
+    })
+}
+
+/// The crossings of two meridians (at most two).
+fn meridians_cross(a: Meridian, b: Meridian) -> Vec<Point2> {
+    let cross2 = |u: Point2, v: Point2| u.x * v.y - u.y * v.x;
+    let sub = |u: Point2, v: Point2| Point2::new(u.x - v.x, u.y - v.y);
+    let line_circle = |p: Point2, e: Point2, c: Point2, r: f64| {
+        // |p + t e - c|^2 = r^2
+        let w = sub(p, c);
+        let ee = e.x * e.x + e.y * e.y;
+        let be = w.x * e.x + w.y * e.y;
+        let disc = be * be - ee * (w.x * w.x + w.y * w.y - r * r);
+        if !(disc >= 0.0 && ee > 0.0) {
+            return Vec::new();
+        }
+        let root = disc.sqrt();
+        [(-be - root) / ee, (-be + root) / ee]
+            .iter()
+            .map(|t| Point2::new(p.x + t * e.x, p.y + t * e.y))
+            .collect()
+    };
+    match (a, b) {
+        (Meridian::Line { p: p0, e: e0 }, Meridian::Line { p: p1, e: e1 }) => {
+            let den = cross2(e0, e1);
+            if den == 0.0 {
+                return Vec::new();
+            }
+            let t = cross2(sub(p1, p0), e1) / den;
+            vec![Point2::new(p0.x + t * e0.x, p0.y + t * e0.y)]
+        }
+        (Meridian::Line { p, e }, Meridian::Circle { c, r })
+        | (Meridian::Circle { c, r }, Meridian::Line { p, e }) => line_circle(p, e, c, r),
+        (Meridian::Circle { c: c0, r: r0 }, Meridian::Circle { c: c1, r: r1 }) => {
+            // the radical line, then a line-circle crossing
+            let d = sub(c1, c0);
+            let dd = d.x * d.x + d.y * d.y;
+            if dd == 0.0 {
+                return Vec::new();
+            }
+            let along = (dd + r0 * r0 - r1 * r1) / (2.0 * dd);
+            let p = Point2::new(c0.x + along * d.x, c0.y + along * d.y);
+            line_circle(p, Point2::new(-d.y, d.x), c0, r0)
+        }
+    }
+}
+
+/// Not the fork (#2486): the plane a chamfer between two planes lies on, from its offsets
+/// alone: the plane through the feet, on the two faces, of the line the offsets meet in
+/// (its unit normal `d x (F_2 - F_1)`). `None` for a blend that is not a line spine
+/// between planes, or feet that coincide.
+#[must_use]
+pub fn chord_implicit(blend: &ExactBlend) -> Option<crate::surface::implicit::Implicit> {
+    let planes = blend.faces.iter().all(|f| f.kind == QuadricKind::Plane);
+    if blend.spine != BlendSpine::Line || !planes {
+        return None;
+    }
+    let (p, d) = (blend.point, blend.dir);
+    let [a, b] = &blend.faces;
+    let foot = |f: &BlendQuadric| p - f.dir * (p - f.point).dot(f.dir);
+    let (f1, f2) = (foot(a), foot(b));
+    let normal = d.cross(f2 - f1).unitize().ok()?;
+    Some(crate::surface::implicit::Implicit::Plane { origin: f1, normal })
+}
+
+/// Not the fork (#2485): the surface a classified round lies on, from its offsets alone:
+/// for the line, circle and point classes the analytic surface by its implicit equation
+/// (the cylinder of the ball's radius about the line the offsets meet in, the ball about
+/// the point, and the torus about the common axis whose centre circle is where the
+/// offsets' meridians cross, the crossing nearest the classified centre); for the conic,
+/// conic-pair and nodal-quartic classes the canal surface of the ball's radius about
+/// `leader`, the round's rational centre line (its parameter the net's through `map`),
+/// which must lie on both offsets. `None` for
+/// a traced round, a blend classified without its inputs, offsets whose meridians do not
+/// cross and a rational class without its leader.
+pub fn class_surface(
+    blend: &ExactBlend,
+    leader: Option<&crate::nurbs::b_spline_curve::BSplineCurve>,
+    map: &crate::surface::implicit::LeaderMap,
+) -> Option<crate::surface::implicit::ClassSurface> {
+    use crate::surface::implicit::{ClassSurface, Implicit};
+    let r = blend.radius;
+    let implicit = match blend.spine {
+        BlendSpine::Line => Some(Implicit::Cone {
+            origin: blend.point,
+            axis: blend.dir,
+            radius: r,
+            tan_angle: 0.0,
+        }),
+        BlendSpine::Point => Some(Implicit::Sphere {
+            centre: blend.point,
+            radius: r,
+        }),
+        BlendSpine::Circle => {
+            let centre = blend.inputs?.centre;
+            let (a, d) = (blend.point, blend.dir);
+            let ma = meridian(&blend.offsets[0], a, d)?;
+            let mb = meridian(&blend.offsets[1], a, d)?;
+            let near = Point2::new(across(centre - a, d).length(), (centre - a).dot(d));
+            let dist = |x: &Point2| (x.x - near.x).hypot(x.y - near.y);
+            let spine = meridians_cross(ma, mb)
+                .into_iter()
+                .filter(|x| x.x >= 0.0)
+                .min_by(|x, y| dist(x).total_cmp(&dist(y)))?;
+            Some(Implicit::Torus {
+                centre: a + d * spine.y,
+                axis: d,
+                major: spine.x,
+                minor: r,
+            })
+        }
+        BlendSpine::Conic | BlendSpine::ConicPair | BlendSpine::NodalQuartic => {
+            return Some(ClassSurface::Canal {
+                spine: Box::new(leader?.clone()),
+                map: *map,
+                offsets: [blend.offsets[0].implicit(), blend.offsets[1].implicit()],
+                radius: r,
+            });
+        }
+        BlendSpine::Traced => None,
+    };
+    implicit.map(ClassSurface::Implicit)
 }
 
 /// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
@@ -1483,6 +1730,100 @@ fn end_runs_on(b: &Brep, e: EdgeId, at: Point3, tol: f64, joined: &[EdgeId]) -> 
 /// `SetupOffsetValues` and the evaluations.
 #[allow(clippy::too_many_arguments)]
 pub fn calc_exact_fillet_geom(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+    pseudo: &mut FilletBrep,
+    blend: &ExactBlend,
+    tsects: &[TsectPnt],
+    fillet_geom: Option<FilletGeomId>,
+    recalc: bool,
+) -> Result<bool> {
+    let built = exact_fillet_geom_of_class(ops, k, b, pseudo, blend, tsects, fillet_geom, recalc)?;
+    if built && k.fixes.fillet_round_as_definition {
+        keep_definition(ops, k, pseudo, blend, fillet_geom)?;
+    }
+    Ok(built)
+}
+
+/// Not the fork (#2485, with `fillet_round_as_definition`): the round just built by its
+/// exact class keeps its definition on its surface ([`ExactRound`]): its supports (the
+/// faces the class was read off), the ball's radius, the ball's circle as its section and
+/// the centre line as its leader. Its net is its exact surface, re-certified at once
+/// ([`ExactRound::recertify`]: the class read again from the supports, the net on the
+/// class's surface). A round of a linear section (a chamfer) or of a nodal quartic (its
+/// spine on its offsets only to 2e-9 of the radius) keeps none here.
+///
+/// # Errors
+///
+/// Those of the re-certification (a class's surface not exact is refused, not kept with a
+/// bound it does not have); `SM_ERR_NULL_POINTER` for a solver without its offset surfaces;
+/// those of copying the supports.
+fn keep_definition(
+    ops: &dyn FilletSolverOps,
+    k: &Kernel,
+    pseudo: &mut FilletBrep,
+    blend: &ExactBlend,
+    fillet_geom: Option<FilletGeomId>,
+) -> Result<()> {
+    use crate::curve::curve::CurveKind;
+    let (Some(class), Some(inputs)) = (ExactClass::of_spine(blend.spine), blend.inputs) else {
+        return Ok(());
+    };
+    // a nodal quartic's spine is on its offsets only to 2e-9 of the ball's radius (its
+    // construction's; the fork's own bar is 1e-9): no bound of 0, so it keeps no definition
+    if class == ExactClass::NodalQuartic {
+        return Ok(());
+    }
+    let s = ops.solver();
+    let circular = s
+        .fsg
+        .as_ref()
+        .is_some_and(|g| g.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Circular);
+    if !circular {
+        return Ok(());
+    }
+    let support = |i: usize| -> Result<&Surface> {
+        Ok(s.surface(i)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .surface
+            .base_surface())
+    };
+    let g = match fillet_geom {
+        Some(g) => g,
+        None => s.first_fillet_geom()?,
+    };
+    let leader = match pseudo
+        .geom(g)?
+        .center_line_curve
+        .as_ref()
+        .map(crate::curve::curve::Curve::kind)
+    {
+        Some(CurveKind::BSpline(c)) => Some(c),
+        Some(CurveKind::Line(c)) => Some(c.base()),
+        Some(CurveKind::Ellipse(c)) => Some(c.base()),
+        _ => None,
+    };
+    let round = ExactRound::create(
+        k,
+        class,
+        [support(0)?, support(1)?],
+        blend.radius,
+        leader,
+        inputs,
+    )?;
+    let Some(surface) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? else {
+        return Err(SolidError::null_pointer(OP));
+    };
+    round.recertify(k, surface)?;
+    surface.set_exact_round(Some(round));
+    Ok(())
+}
+
+/// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the
+/// definition kept.
+#[allow(clippy::too_many_arguments)]
+fn exact_fillet_geom_of_class(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
     b: &Brep,

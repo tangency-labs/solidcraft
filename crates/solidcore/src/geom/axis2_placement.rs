@@ -120,6 +120,17 @@ impl Axis2Placement {
         p
     }
 
+    /// The placement as stored, its axes taken as they are (not made canonical): a
+    /// placement read back from data it was written to.
+    #[must_use]
+    pub const fn from_stored(origin: Point3, x_axis: Vec3, y_axis: Vec3) -> Self {
+        Self {
+            origin,
+            x_axis,
+            y_axis,
+        }
+    }
+
     /// Plane constructor: the placement of the plane `normal · p + d = 0`, with origin
     /// the plane point closest to the global origin, Z along `normal` and X, Y from
     /// `MakeUnitOrthoVectors` (`SmAxis2Placement(const SmVector3d&, double)`).

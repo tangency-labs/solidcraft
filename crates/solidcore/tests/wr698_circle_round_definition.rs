@@ -349,3 +349,286 @@ fn only_the_exact_circle_is_built() {
         );
     }
 }
+
+/// #2388: a round rebuilt from its record is certified again within its bound (the
+/// certificate's and the net's precision): the root round, the square corner, and the
+/// root round's net cut at u = 0.4, reversed in u, swapped and reparametrized (each a piece
+/// of the same Hermite net). A net moved three bounds off its definition at one control
+/// point is refused.
+#[test]
+fn a_rebuilt_round_is_certified_again_and_a_moved_net_refused() {
+    use solidcore::geom::extent2d::Extent2d;
+    use solidcore::nurbs::b_spline_surface::SurfParamType;
+    use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
+    let k = kernel(true);
+    let blend = |s: &Surface| match s.kind() {
+        SurfaceKind::ProceduralBlend(pb) => (**pb).clone(),
+        other => panic!("not a blend: {other:?}"),
+    };
+    for (name, (s, certified, _)) in [("root", root_round(&k)), ("corner", corner_round(&k))] {
+        let pb = blend(&s);
+        let bound = pb.bound();
+        // the certificate's, the net's rounding off its rows and three floors
+        assert!(
+            bound > certified && bound - certified < 1e-9,
+            "{name}: {bound:e}"
+        );
+        let got = pb.recertify(&k).unwrap();
+        assert!(got <= bound, "{name}: {got:e} over {bound:e}");
+        let rec = to_record(&k, &pb).unwrap();
+        let back = rebuild(&k, &rec).unwrap();
+        assert!(back.recertify(&k).unwrap() <= bound, "{name}");
+        // one interior control point of the net moved off by three bounds: the net is
+        // no longer proved within its bound
+        let mut bad = rec.clone();
+        let i = bad.net.points.len() / 2;
+        let w = bad.net.weights.as_ref().map_or(1.0, |w| w[i]);
+        bad.net.points[i][2] += 3.0 * bound * w;
+        assert!(rebuild(&k, &bad).is_err(), "{name}: a moved net was taken");
+    }
+    let (s, _, _) = root_round(&k);
+    let bound = blend(&s).bound();
+    let (l, r) = s.split_at(&k, 0.4, SurfParamType::U).unwrap();
+    let mut pieces = vec![("left", blend(&l)), ("right", blend(&r))];
+    let mut reversed = blend(&s);
+    reversed.reverse(SurfParamType::U).unwrap();
+    pieces.push(("reversed", reversed));
+    let mut swapped = Surface::from(blend(&s));
+    swapped.swap_uv(&k).unwrap();
+    pieces.push(("swapped", blend(&swapped)));
+    let mut moved = blend(&s);
+    moved
+        .reparameterize(&Extent2d::from_bounds(2.0, -1.0, 5.0, 3.0))
+        .unwrap();
+    pieces.push(("reparametrized", moved));
+    for (name, pb) in pieces {
+        let got = pb.recertify(&k).unwrap();
+        assert!(got <= bound, "{name}: {got:e} over {bound:e}");
+    }
+}
+
+/// #2388: the bound's floor is a forward error bound of how S and the net are computed
+/// (the stations' Newton stopping step through the supports' derivative bounds, and the
+/// rounding of the rows, the Hermite points and the net's division), at rounding level at
+/// part scale. A round's bound is its certificate, the stored net's measured rounding off
+/// its rows, and three floors (two cover re-computing the rows). The floor is taken in the
+/// round's own frame: moved (100, -50, 25), the root round's floor is the same to
+/// rounding, and its bound grows by the motion's rounding only.
+#[test]
+fn the_bound_s_floor_is_a_forward_error_bound() {
+    let k = kernel(true);
+    for (name, (s, certified, _)) in [("root", root_round(&k)), ("corner", corner_round(&k))] {
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            panic!("not a blend")
+        };
+        let floor = pb.precision_floor(&k).unwrap();
+        // at part scale (10 mm): above the coordinates' rounding, below 1e-9
+        assert!(floor > 1e-13 && floor < 1e-9, "{name}: floor {floor:e}");
+        let rest = pb.bound() - certified - 3.0 * floor;
+        assert!((0.0..1e-13).contains(&rest), "{name}: {rest:e}");
+        assert!(pb.recertify(&k).unwrap() <= pb.bound(), "{name}");
+    }
+    let moved = moved_root_round(&k, Point3::new(100.0, -50.0, 25.0));
+    let (s, _, _) = root_round(&k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let (f0, f1) = (
+        pb.precision_floor(&k).unwrap(),
+        moved.precision_floor(&k).unwrap(),
+    );
+    assert!(
+        (f1 - f0).abs() <= 1e-3 * f0,
+        "{f1:e} at the new place, {f0:e} before"
+    );
+    assert!(moved.bound() > pb.bound() && moved.bound() - pb.bound() < 1e-12);
+}
+
+/// The root round moved by `by`.
+fn moved_root_round(
+    k: &Kernel,
+    by: Point3,
+) -> solidcore::surface::procedural_blend::ProceduralBlend {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    let (s, _, _) = root_round(k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let mut moved = (**pb).clone();
+    let place = Axis2Placement::new(by, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    moved.transform_at_depth(k, &place, None, 0).unwrap();
+    moved
+}
+
+/// #2388: a moved round is certified again. The round's certificate, the net's distance
+/// from its rows and the floor are taken in a frame local to the round (about the centre
+/// of its net's box), so they follow the part's size, not where it lies: the root round
+/// moved by (100, -50, 25) and by (1e4, 1e4, 1e4) is certified within its bound, which is
+/// the original one with the motion's rounding added.
+#[test]
+fn a_moved_round_is_certified_again() {
+    let k = kernel(true);
+    let (s, _, _) = root_round(&k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let at_origin = pb.recertify(&k).unwrap();
+    for by in [Point3::new(100.0, -50.0, 25.0), Point3::new(1e4, 1e4, 1e4)] {
+        let moved = moved_root_round(&k, by);
+        let got = moved.recertify(&k).unwrap();
+        assert!(
+            got <= moved.bound(),
+            "{by:?}: {got:e} over {:e}",
+            moved.bound()
+        );
+        assert!(
+            moved.bound() <= 1.001 * pb.bound() && got <= 1.001 * at_origin,
+            "{by:?}: bound {:e} (was {:e}), certified {got:e} (was {at_origin:e})",
+            moved.bound(),
+            pb.bound()
+        );
+    }
+}
+
+/// #2388: a support keeps its analytic kind through the record. The square corner's
+/// supports are planes: their record labels them planes beside their NURBS forms, the
+/// rebuilt supports are planes again (derived from their forms), the record reads back bit for bit, and a rebuilt
+/// support's offset is a plane exactly 1 off. A plane labelled a cylinder is refused.
+#[test]
+fn an_analytic_support_stays_its_kind_through_the_record() {
+    use solidcore::surface::procedural_blend::convert::{from_record, rebuild, to_record};
+    use solidcore::surface::procedural_blend::record::{SupportKindRecord, SupportRecord};
+    let k = kernel(true);
+    let (s, _, _) = corner_round(&k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let rec = to_record(&k, pb).unwrap();
+    for support in &rec.definition.supports {
+        assert!(
+            matches!(
+                support,
+                SupportRecord::Nurbs {
+                    kind: SupportKindRecord::Plane,
+                    ..
+                }
+            ),
+            "{support:?}"
+        );
+    }
+    let back = rebuild(&k, &rec).unwrap();
+    assert_eq!(to_record(&k, &back).unwrap(), rec);
+    for i in 0..2 {
+        let support = back.support(i).unwrap();
+        let SurfaceKind::Plane(plane) = support.kind() else {
+            panic!("support {i} is not a plane: {}", support.type_code());
+        };
+        let off = plane.create_offset_surface(&k, 1.0).unwrap();
+        let uv = Point2::new(0.3, 0.7);
+        let (p, q) = (
+            support.evaluate_point(&k, uv).unwrap(),
+            Surface::from(off).evaluate_point(&k, uv).unwrap(),
+        );
+        assert!(
+            ((p - q).length() - 1.0).abs() <= 1e-14,
+            "{}",
+            (p - q).length()
+        );
+    }
+    let mut bad = rec.clone();
+    let SupportRecord::Nurbs { kind, .. } = &mut bad.definition.supports[1] else {
+        unreachable!()
+    };
+    *kind = SupportKindRecord::Cylinder;
+    assert!(
+        from_record(&k, &bad).is_err(),
+        "a plane labelled a cylinder was taken"
+    );
+}
+
+/// What one kernel computes on a round: S's partials over a grid, the section by the
+/// plane y = x (its curves' points), and closest point distances, as bits.
+fn evaluate_section_measure(k: &Kernel, s: &Surface) -> Vec<u64> {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use solidcore::query::api_queries::surface_closest_point;
+    use solidcore::topology::brep::planar_section::surface_planar_section_curves;
+    let mut out = Vec::new();
+    let mut push = |p: Point3| out.extend([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    for i in 0..=6 {
+        for j in 0..=4 {
+            let uv = d.evaluate(f64::from(i) / 6.0, f64::from(j) / 4.0);
+            for row in s.evaluate(k, uv, 1, 1, EvaluateFlags::default()).unwrap() {
+                row.into_iter().for_each(&mut push);
+            }
+        }
+    }
+    let bbox = s
+        .calculate_bounding_box(k, &d, [true, false, false], false)
+        .unwrap()
+        .normal_box
+        .unwrap();
+    let section = surface_planar_section_curves(
+        k,
+        s,
+        &d,
+        &bbox,
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, -1.0, 0.0),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(!section.curves_3d.is_empty(), "the section is empty");
+    for c in &section.curves_3d {
+        let ivl = c.natural_interval();
+        for i in 0..=8 {
+            push(
+                c.evaluate_point(k, ivl.min() + ivl.length() * f64::from(i) / 8.0)
+                    .unwrap(),
+            );
+        }
+    }
+    for p in [
+        Point3::new(9.0, 3.0, 1.0),
+        Point3::new(6.0, 6.0, 0.5),
+        Point3::new(2.0, 9.5, 1.5),
+    ] {
+        let c = surface_closest_point(k, s, p).unwrap();
+        push(c.closest.point);
+        push(Point3::new(c.closest.distance, 0.0, 0.0));
+    }
+    out
+}
+
+/// #2388, contract 4: one round rebuilt from its record, one `Surface` shared by reference
+/// (`Arc`) between two threads, each with its own kernel, evaluated, sectioned and measured
+/// there: each thread's results are one kernel's alone, bit for bit.
+#[test]
+fn a_rebuilt_round_shared_between_threads_gives_one_thread_s_results() {
+    use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
+    use std::sync::Arc;
+    let k = kernel(true);
+    let (s, _, _) = root_round(&k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not a blend")
+    };
+    let rec = to_record(&k, pb).unwrap();
+    // one thread, on a round of its own rebuilt from the same record
+    let serial =
+        evaluate_section_measure(&kernel(true), &Surface::from(rebuild(&k, &rec).unwrap()));
+    let shared = Arc::new(Surface::from(rebuild(&k, &rec).unwrap()));
+    let parallel: Vec<Vec<u64>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let s = Arc::clone(&shared);
+                scope.spawn(move || evaluate_section_measure(&kernel(true), &s))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for (thread, got) in parallel.iter().enumerate() {
+        assert!(got == &serial, "thread {thread} differs from one thread");
+    }
+}

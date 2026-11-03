@@ -270,6 +270,8 @@ fn generator_round(k: &Kernel, has_edgeuse: bool) -> Surface {
     );
     let ball = CircleBall {
         radii: None,
+        chord: None,
+        chamfer: None,
         ang_tol_rad: 0.1,
         law: Some(LawBall {
             has_edgeuse,
@@ -357,4 +359,41 @@ fn the_law_in_the_edge_s_parameter_is_the_solver_s() {
             }
         }
     }
+}
+
+/// #2388: the variable round goes to data and back bit for bit, is certified again within
+/// its bound when rebuilt, and evaluates S, not its net, after it.
+#[test]
+fn a_variable_round_rebuilt_from_its_record_is_its_definition() {
+    use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
+    use solidcore::surface::procedural_blend::record::{ProceduralBlendRecord, RadiusRecord};
+    let k = kernel(true);
+    let round = build(&k);
+    let s = round.surface.expect("the definition");
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        panic!("not the definition");
+    };
+    let rec = to_record(&k, pb).unwrap();
+    assert!(matches!(rec.definition.radius, RadiusRecord::Law(_)));
+    let json = serde_json::to_string(&rec).unwrap();
+    let read: ProceduralBlendRecord = serde_json::from_str(&json).unwrap();
+    let back = rebuild(&k, &read).unwrap();
+    assert_eq!(
+        serde_json::to_string(&to_record(&k, &back).unwrap()).unwrap(),
+        json
+    );
+    assert!(back.recertify(&k).unwrap() <= back.bound());
+    let back = Surface::from(back);
+    let mut off_net = 0.0_f64;
+    for i in 0..=20 {
+        let t = i as f64 * L / 20.0;
+        for j in 0..=4 {
+            let uv = Point2::new(t, j as f64 / 4.0);
+            let q = back.evaluate_point(&k, uv).unwrap();
+            assert_eq!(q, s.evaluate_point(&k, uv).unwrap(), "S at {uv:?}");
+            off_net = off_net.max(q.distance(pb.net().evaluate_point(uv).unwrap()));
+        }
+    }
+    // S, not B: the net is off it, within the bound
+    assert!(off_net > 0.0 && off_net <= round.bound, "{off_net:e}");
 }

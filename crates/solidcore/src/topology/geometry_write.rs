@@ -210,6 +210,22 @@ fn write_procedural_blend(
         db.write_boolean(has_law);
         db.write_doubles(&values);
     }
+    // a chord's sizes (order 0, not the fork's, #2486)
+    if let Some(c) = &def.chamfer {
+        let (kind, sizes) = crate::surface::procedural_blend::chamfer_to_db(c);
+        if ascii {
+            db.out_i64(kind);
+            db.out_str(" ");
+            for &v in &sizes {
+                db.out_f64(v);
+                db.out_str(" ");
+            }
+            db.out_str(" SmProceduralBlend chamfer kind, sizes, wedge\n");
+        } else {
+            db.write_long(kind);
+            db.write_doubles(&sizes);
+        }
+    }
     for support in &def.supports {
         if ascii {
             db.out_str(" SmProceduralBlend->Support\n");

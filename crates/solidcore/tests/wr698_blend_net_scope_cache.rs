@@ -66,6 +66,7 @@ fn blend(k: &Kernel) -> Surface {
         leader: &leader,
         seeds: [&seed1, &seed2],
         bound: 1e-3,
+        chamfer: None,
     };
     Surface::from(
         ProceduralBlend::create(k, &net, &input, |n, w| {
@@ -193,6 +194,7 @@ fn a_round_on_a_round_reads_the_inner_round_by_its_definition() {
         leader: &leader,
         seeds: [&seed_inner, &seed_wall],
         bound: 1e-3,
+        chamfer: None,
     };
     let outer = ProceduralBlend::create(&k, &net, &input, |n, w| {
         GnSectionFsg::is_valid(n as usize, w)

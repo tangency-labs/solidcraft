@@ -17,7 +17,11 @@ categories = ["graphics", "mathematics", "science"]
 curve-memo-off = []
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [lints]
 workspace = true

@@ -104,3 +104,115 @@ fn the_rims_of_a_through_hole_are_chamfered_with_the_fix() {
     // the cube's edges are chamfered either way, the rims only with the fix
     assert!((off - on - rims).abs() < 1e-3, "{before} {off} {on}");
 }
+
+// ---- #2486: a chamfer on a cylinder against a plane by its definition ---------------------
+
+use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
+use solidcore::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
+use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
+use solidcore::surface::surface::SurfaceKind;
+use solidcore::topology::edgeuse::p1 as eu1;
+use solidcore::SolidError;
+
+/// The section generator and rounds (and chamfers) as their definitions.
+fn definition_kernel() -> Kernel {
+    let mut k = Kernel::default();
+    k.fixes.fillet_gn_section_generator = true;
+    k.fixes.fillet_round_as_definition = true;
+    k
+}
+
+/// A cylinder of radius 5 and height 10 on the origin, its top rim chamfered by `size`:
+/// the result, the body and whether support 1 is the top plane.
+fn chamfered_rim(size: ChamferSize) -> (Kernel, Brep, bool, solidcore::Result<()>) {
+    let mut k = definition_kernel();
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 10.0).unwrap();
+    let rim = edges_where(&k, &b, |m| (m.z - 10.0).abs() < 1e-9);
+    assert_eq!(rim.len(), 1);
+    let u0 = edge::blend_edgeuse(&k, &mut b, rim[0]).unwrap().unwrap();
+    let f = eu1::face(&b, u0).unwrap().unwrap();
+    let plane_first = matches!(
+        b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+        SurfaceKind::Plane(_)
+    );
+    let r = {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers(&k, &rim, &[size]).unwrap();
+        s.do_fillet(&mut k)
+    };
+    b.refresh_cached_topology();
+    (k, b, plane_first, r)
+}
+
+/// The faces of `b` that are blends by their definitions, as their procedural blends
+/// (none is exact here: a chamfer on a cylinder is certified).
+fn definitions(b: &Brep) -> Vec<ProceduralBlend> {
+    b.face_list()
+        .iter()
+        .filter_map(
+            |&f| match b.face(f).unwrap().surface.as_ref()?.procedural_blend()? {
+                BlendRef::Procedural(pb) => Some(pb.clone()),
+                BlendRef::Exact { .. } => panic!("a chamfer on a cylinder is certified"),
+            },
+        )
+        .collect()
+}
+
+/// Each kind of chamfer of the cylinder's top rim is the chord by its definition, its
+/// sizes kept, certified; the body loses the triangle of legs a (along the top) and b
+/// (down the side) turned about the axis at its centroid's radius 5 - a/3; the record
+/// round trips and re-certifies.
+#[test]
+fn issue_2486_rim_chamfers_on_a_cylinder_are_chords_by_their_definitions() {
+    let kinds = [
+        ChamferSize::Distances([1.0, 1.0]),
+        ChamferSize::Distances([1.0, 1.5]),
+        ChamferSize::DistanceAngle {
+            distance: 1.2,
+            angle: PI / 3.0,
+        },
+    ];
+    for size in kinds {
+        let (k, mut b, plane_first, r) = chamfered_rim(size);
+        r.unwrap();
+        let defs = definitions(&b);
+        assert_eq!(defs.len(), 1, "{size:?}: one chamfer face");
+        let pb = &defs[0];
+        assert_eq!(pb.order(), 0, "{size:?}");
+        assert_eq!(pb.chamfer().unwrap().size, size, "{size:?}");
+        assert!(
+            pb.bound() > 0.0 && pb.bound() < 1e-5,
+            "{size:?}: {}",
+            pb.bound()
+        );
+        let d = ChamferDefinition::new(size, 0.5 * PI).unwrap().setbacks();
+        let [a, bb] = if plane_first { d } else { [d[1], d[0]] };
+        let want = PI * 25.0 * 10.0 - 2.0 * PI * (5.0 - a / 3.0) * a * bb / 2.0;
+        let v = volume(&k, &mut b);
+        eprintln!("{size:?}: bound {:e}, volume {v} want {want}", pb.bound());
+        assert!((v - want).abs() <= 1e-6 * want, "{size:?}: {v} vs {want}");
+        let rec = to_record(&k, pb).unwrap();
+        let back = rebuild(&k, &rec).unwrap();
+        assert!(back.same_definition(&k, pb).unwrap(), "{size:?}");
+        assert_eq!(to_record(&k, &back).unwrap(), rec);
+    }
+}
+
+/// A chamfer whose offset into the cylinder is wider than the cylinder folds: refused as
+/// before, `OffsetFolds`, naming the size that fits.
+#[test]
+fn issue_2486_a_rim_chamfer_whose_offset_folds_is_refused_naming_its_fit() {
+    // 5.5 along the top: the offset into the cylinder (radius 5) is 5.5
+    let (_, _, plane_first, _) = chamfered_rim(ChamferSize::Distances([1.0, 1.0]));
+    let d = if plane_first { [5.5, 1.0] } else { [1.0, 5.5] };
+    let (_, _, _, r) = chamfered_rim(ChamferSize::Distances(d));
+    eprintln!("{r:?}");
+    let err = r.unwrap_err();
+    let SolidError::FilletRefused { reason, fit, .. } = err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(reason, Some(NoRoomReason::OffsetFolds));
+    assert!(fit.size > 0.0 && fit.kind == FitKind::Scale, "{fit:?}");
+}

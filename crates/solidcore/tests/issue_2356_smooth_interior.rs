@@ -123,6 +123,7 @@ fn fixture_order(curved: bool, order: u32) -> (Kernel, ProceduralBlend) {
             leader: &leader,
             seeds: [&seed0, &seed1],
             bound: 1e-5,
+            chamfer: None,
         },
         |n, w| GnSectionFsg::is_valid(n as usize, w),
     )

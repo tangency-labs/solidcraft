@@ -156,6 +156,7 @@ fn inputs(k: &Kernel) -> [BSplineCurve; 4] {
         leader: &leader,
         seeds: [&seed, &seed],
         bound: 1e-3,
+        chamfer: None,
     };
     let pb = Surface::from(
         ProceduralBlend::create(k, &net, &input, |n, w| {
@@ -210,6 +211,8 @@ fn generator_round(
             [&mut w1, &mut w2],
             Some(&CircleBall {
                 radii: Some(radii),
+                chord: None,
+                chamfer: None,
                 ang_tol_rad: 0.1,
                 law: None,
             }),
@@ -478,6 +481,8 @@ fn a_revolved_torus_stays_the_torus() {
             [&mut w1, &mut w2],
             Some(&CircleBall {
                 radii: Some([R, R]),
+                chord: None,
+                chamfer: None,
                 ang_tol_rad: 0.1,
                 law: None,
             }),

@@ -148,6 +148,22 @@ and continuity grading are solved on S. B is never an operand, so error does not
 booleans: every edge on a blend face lies within its own tolerance of S, however many operations
 follow [22, 20]. Only export flattens to B and carries ε, once.
 
+**Kept as data ([#2388](https://github.com/tangency-labs/solidcore/issues/2388)).** A round
+outlives the kernel's body as plain data, `surface::procedural_blend::record`: its supports by
+value (a support as its NURBS form, the one its stations are solved on, labelled with its kind:
+plane, cylinder, cone, sphere, torus or free; a round on a round as its own record, three deep at
+most), sides, radius or law, order, thumbweight, leader, seeds, ε, the
+map from the net's parameters, and the net, every number as stored. The record holds no maths and
+moves into `solidcore-record` as it is (`docs/layers.md`). The record keeps no analytic parameters:
+rebuilding derives a labelled support's analytic surface from its form (its corners for a plane,
+the circles of its rational quadratic rows for a surface of revolution: exact, as rational NURBS
+represent these surfaces exactly), refusing a form whose implicit equation does not vanish on it,
+coefficient by coefficient on each Bézier patch, naming the face. Rebuilding is exact, and the
+net is certified again (§2.4) before the round is an operand; a net not proved within ε is
+refused, naming its face. Evaluating S is a pure function of the definition: the station memo
+keys a definition by its own identity, never by a kernel's count, so kernels on other threads
+evaluating the same rounds agree with one kernel bit for bit.
+
 Rounds of the exact classes (§4) are stored as their analytic or rational surface, with no
 definition.
 
@@ -159,9 +175,46 @@ and between grid points it is bounded by the interpolation remainder with second
 enclosed rigorously, S's from interval evaluation over the span box. Existence and uniqueness of the
 station's root over the span box are proved by Moore's interval test on the Krawczyk operator
 [32, 28, 33]: K(X) ⊆ X proves a root in X, and K(X) ⊆ X with ‖I − Y F′(X)‖ < 1 proves it unique.
-Knots are inserted until the bound reaches a tenth of the zone tolerance; the achieved bound is
-stored as ε. Where plain intervals over-estimate, the remedy is a tighter enclosure [3, 4, 31], never
-a sampled check.
+Knots are inserted until the bound reaches a tenth of the zone tolerance. The bound stored as ε is
+the achieved one, plus how far the stored net is from the Hermite rows it was made of (its control
+points are divided out of the rows and rounded), plus three floors E, a forward error bound of
+computing the rows (two floors cover rows computed again, one the rows the net was made of):
+
+E = G (D + γ_K M), γ_K = K u / (1 − K u), u = 2⁻⁵³,
+
+- D, the stations: Newton stops once its last step in each foot parameter x is at most
+  10⁻¹² (1 + |x|); converging quadratically, the root is within that step, so a foot is within
+  L_u η_u + L_v η_v of it in space, η = 10⁻¹² (1 + max |knot|) of the support, L its derivative
+  bounds (the degree times the largest control point difference over its knot span, times the
+  square of the weights' ratio when rational [48]); the jets and the centre move with the feet to
+  first order;
+- γ_K M, the rows: a control point of the net is a sum of at most 2(n + 1) products of the section's
+  coefficients with the jets, a Hermite point (two operations), its division by its weight and the
+  weight's scale (two): K = 2(n + 1) + 6 operations on coordinates of at most M, the net's size about
+  the centre of its box (the round's own frame, below);
+- G = w_max / w_min of the net: a homogeneous error divided by the weight.
+
+E does not depend on where the round lies. At part scale (a round and knots of tens of millimetres)
+it is about 10⁻¹⁰, all but 10⁻¹⁴ of it the stations' term: exact to rounding. A transform scales the
+bound and adds the motion's rounding where the round now lies (six operations per homogeneous
+coordinate, on its coordinates there). Where plain
+intervals over-estimate, the remedy is a tighter enclosure [3, 4, 31], never a sampled check.
+
+**Certified again.** A round rebuilt from its record proves its net within ε anew
+(`blend::fillet_section::recertify`), as the Ball's sphere patch is checked to lie on its sphere.
+The stations are the seeds' knots. On each span between two stations the stations are solved again
+from the definition and the span's Hermite rows H rebuilt, as the construction builds them; the
+certificate bounds |H − S| on the span, asked for what ε leaves; and |B − H| on each piece of the net
+over the span is bounded by the two rational Bézier patches' control nets [48]: with points P_i, Q_i
+and weights w_i, v_i, |B − H| ≤ max |P_i − Q_i| + max |Q_i − c| · max |w_i v_j − v_i w_j| / (min w ·
+min v) for any point c. A net cut or reparametrized after it was built is a piece of the same
+Hermite net, cut in homogeneous coordinates before the nets are compared. All of it is taken in the
+round's own frame: the round (supports, leader, net) is moved by minus the centre of its net's box,
+which rounds each coordinate once by at most u |x − c|, so the certificate's enclosures, |B − H| and
+the floor follow the round's size and not its distance from the origin; a round moved, patterned or
+mirrored is certified again within its bound. The net is refused where
+the sum with one floor passes ε, where a piece runs across a station, or where a foot crosses a support's knot line
+between two stations (the construction puts a station there).
 
 ## 3. Events of the trace
 
@@ -878,3 +931,4 @@ Titles, pages or DOIs are given only where the project's reading notes record th
 45. T. Várady, A. Rockwood, P. Salvi. Transfinite surface interpolation over irregular n-sided domains. *Computer-Aided Design* 43 (2011) 1330–1340. doi:10.1016/j.cad.2011.08.028
 46. J. Vida, R. R. Martin, T. Várady. A survey of blending methods that use parametric surfaces. *Computer-Aided Design* 26(5) (1994) 341–365. doi:10.1016/0010-4485(94)90023-X
 47. X. Ye, H. Nowacki. Ensuring compatibility of G²-continuous surface patches around a nodepoint. *Computer Aided Geometric Design* 13(9) (1996) 931–949.
+48. G. Farin. *Curves and Surfaces for CAGD: A Practical Guide*, 5th ed. Morgan Kaufmann (2002): rational Bézier patches, their convex hull and subdivision.

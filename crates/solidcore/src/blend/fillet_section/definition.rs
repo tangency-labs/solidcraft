@@ -25,7 +25,10 @@
 //!   evaluated through `&Kernel`, as every surface is. It is borrowed only to look a
 //!   station up and to store one, never across a solve, so a nested support's own
 //!   evaluations use it meanwhile, as in the fork. A hit returns what a fresh solve from
-//!   the same seeds gives (the key is the definition's serial, s and the truncation).
+//!   the same seeds gives (the key is the definition's identity, s and the truncation).
+//!   The identity is the definition's own allocation, not a kernel's count, so a kernel
+//!   evaluating a definition another kernel made never takes a station of its own
+//!   definitions for it (#2388).
 //! - **The memo's thumbweight.** The fork keeps a pointer to the slot it hit or filled
 //!   and writes the equal area thumbweight's series there; here the slot's index. Nothing
 //!   evaluates a surface between the two, so it is the same slot.
@@ -44,7 +47,10 @@ use super::tay::{gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos,
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
-use crate::surface::procedural_blend::{count_evaluation, count_solve, ProceduralBlend};
+use crate::surface::procedural_blend::{
+    count_evaluation, count_solve, DefinitionIdentity, ProceduralBlend,
+};
+use std::sync::Arc;
 
 const OP: &str = "blend::fillet_section::definition::evaluate_definition";
 
@@ -356,10 +362,10 @@ pub fn bern_taylor(b: &[f64], t0: f64, lj: usize) -> Vec<f64> {
 pub const STATION_MEMO: usize = 4;
 
 /// `sm_StationMemo`: one kept station.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, Default)]
 struct MemoSlot {
-    /// `lSerial`: the definition's serial (0: empty).
-    serial: u64,
+    /// `lSerial`: the definition's identity (held while the station is kept).
+    identity: Option<Arc<DefinitionIdentity>>,
     /// `dS`.
     s: f64,
     /// `ts`, `te`: the truncation it was solved to.
@@ -378,11 +384,12 @@ struct MemoSlot {
 
 /// The stations the definitions on a kernel solved last (`t_asMemo`, `t_lMemoNext`): an
 /// evaluation at the same s (another t) takes its station from here. Keyed by the
-/// definition's serial, never reused, so a station is never another definition's.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// definition's identity, held while the station is kept, so a station is never another
+/// definition's.
+#[derive(Clone, Debug, Default)]
 pub struct StationMemo {
-    /// The slots filled so far, at most [`STATION_MEMO`] (the fork's empty slots, serial
-    /// 0, never match: a serial is at least 1). On the heap: a station is kilobytes.
+    /// The slots filled so far, at most [`STATION_MEMO`] (the fork's empty slots never
+    /// match: they hold no identity). On the heap: a station is kilobytes.
     slots: Vec<MemoSlot>,
     next: usize,
 }
@@ -401,7 +408,8 @@ pub struct StationMemo {
 ///
 /// One station solve: the feet by Newton from the seeds, then their series in s (and in
 /// tau for the G^n jets) order by order, as the G^n section's stations are built. The
-/// section is then exact in t: n >= 2, `sum_ik c_ik(s) phi_ik(t)`, `phi_ik` the
+/// section is then exact in t: n = 0 (a chamfer, #2486), the chord `(1 - t) rho_1 + t
+/// rho_2` between the feet; n >= 2, `sum_ik c_ik(s) phi_ik(t)`, `phi_ik` the
 /// section's rational functions over its common weight (the equal area thumbweight
 /// resolved as a series in s at this station, c6d9b9a); n = 1, the rational quadratic arc
 /// from the first rail to the second on the circle the balls' envelope touches the ball
@@ -431,7 +439,12 @@ pub fn evaluate_definition(
     let n = def.order as usize;
     // the station: the jets to order n in tau (G^n), or the rails and the centre one
     // order more in s (the circle's m')
-    let (ts, te) = if n >= 2 { (ls, n) } else { (ls + 1, 0) };
+    // (n = 0, the chord: the rails to order s, #2486)
+    let (ts, te) = match n {
+        0 => (ls, 0),
+        1 => (ls + 1, 0),
+        _ => (ls, n),
+    };
     if ls > 64 || lt > 64 || ts > MAX_S || te > MAX_E || ts + te + 1 > MAX_K {
         return Err(SolidError::invalid_input(
             OP,
@@ -472,19 +485,18 @@ pub fn evaluate_definition(
     }
 
     // the memo: a station solved at this s, to this truncation, for this definition
-    let serial = def.serial;
+    let identity = &def.identity;
     let mut slot: Option<usize> = None;
     let mut at: Option<GnStation> = None;
     let mut memo_w: Option<Tay<f64>> = None;
     {
         let memo = k.blend_station_memo.borrow();
         for (m, e) in memo.slots.iter().enumerate() {
-            if e.serial == serial
-                && e.s == s
-                && e.ts == ts
-                && e.te == te
-                && (!e.sided || e.before == before)
-            {
+            let same = e
+                .identity
+                .as_ref()
+                .is_some_and(|i| Arc::ptr_eq(i, identity));
+            if same && e.s == s && e.ts == ts && e.te == te && (!e.sided || e.before == before) {
                 at = e.station;
                 memo_w = e.w;
                 slot = Some(m);
@@ -593,7 +605,7 @@ pub fn evaluate_definition(
         let m = memo.next;
         memo.next = (memo.next + 1) % STATION_MEMO;
         let entry = MemoSlot {
-            serial,
+            identity: Some(Arc::clone(identity)),
             s,
             ts,
             te,
@@ -694,6 +706,18 @@ pub fn evaluate_definition(
                 sum = sum.add(&tv_of(ff, kk, ls, lt).times(&phi));
             }
         }
+    } else if n == 0 {
+        // the chord (#2486): (1 - t) rho_1 + t rho_2, exact in t
+        let [f0, f1] = &at.f;
+        let rho1 = tv_of(f0, 0, ls, lt);
+        let rho2 = tv_of(f1, 0, ls, lt);
+        let mut a = T2::new(ls, lt, 1.0 - t);
+        let mut b = T2::new(ls, lt, t);
+        if lt >= 1 {
+            a.set(0, 1, -1.0);
+            b.set(0, 1, 1.0);
+        }
+        sum = rho1.times(&a).add(&rho2.times(&b));
     } else {
         // the centre to one order more, for its tangent m'
         let m1 = tv_of(&at.v, 0, ls + 1, lt);

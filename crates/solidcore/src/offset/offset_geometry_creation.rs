@@ -1687,6 +1687,20 @@ impl OffsetGeometryCreation {
             .face_surface(face)?
             .ok_or(dangling("face without surface"))?;
 
+        // `Kernel::fixes.offset_missing_surface_fails` (WR-464, #1072; the fork's 758829c): an
+        // offset that shrinks the surface onto its spine or past it is no surface, as the
+        // surface says, asked before the offset is made (an exact offset that refuses to pass
+        // its centre, a ball patch's, is never asked for); any other miss has failed.
+        if k.fixes.offset_missing_surface_fails
+            && brep.surface(sur)?.offset_collapses(
+                k,
+                sign * self.offset_distance,
+                self.this_approx_tol_3d / 10.0,
+            )?
+        {
+            return Ok((None, self_intersections));
+        }
+
         // construct an offset surface from this surface
         // (SER_DELETE: the surface is deleted on failure; here its handle is simply not returned)
         let Some(offset) = create_offset_surface(
@@ -1696,15 +1710,7 @@ impl OffsetGeometryCreation {
             self.this_approx_tol_3d / 10.0,
         )?
         else {
-            // `Kernel::fixes.offset_missing_surface_fails` (WR-464, #1072): only a collapse
-            // is no surface (`Surface::offset_collapses`); any other miss has failed.
-            if k.fixes.offset_missing_surface_fails
-                && !brep.surface(sur)?.offset_collapses(
-                    k,
-                    sign * self.offset_distance,
-                    self.this_approx_tol_3d / 10.0,
-                )?
-            {
+            if k.fixes.offset_missing_surface_fails {
                 return Err(sm_err(OP_FACEUSE));
             }
             return Ok((None, self_intersections));

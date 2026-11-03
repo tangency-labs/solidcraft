@@ -6,12 +6,14 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`FilletSession::prepare_per_edge_two_offsets`] | `SetFilletParameters` setup with `SmConstantRadiusFS::pdOptSecondRadius` |
+//! | [`FilletSession::prepare_chamfers`] | not upstream (#2486): chamfers by their sizes, kept in their definitions |
 //!
 //! Deviations: explicit generator descriptors replace cross-section type codes.
 //! List sizes and live edges are checked before changing session state. No recursion.
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
+use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
 use crate::topology::{edge, EdgeId};
 use crate::{EntityRef, Kernel, Result, SolidError};
 
@@ -109,6 +111,85 @@ impl FilletSession<'_> {
             self.set_solver_generator(solver, generator)?;
         }
         self.executive.initialized = true;
+        Ok(())
+    }
+
+    /// Chamfers `edges` by their sizes (`sizes`: one for all edges or one per edge): two
+    /// distances, a distance and an angle, or a chord. Each edge's sizes are converted to
+    /// its two offsets at the wedge between its faces at the edge's middle (the angle
+    /// between the directions into them there, [`ChamferDefinition::offsets`]), then
+    /// prepared as [`Self::prepare_per_edge_two_offsets`] with the linear section, and the
+    /// solver keeps the sizes: with `fixes.fillet_gn_section_generator` and
+    /// `fixes.fillet_round_as_definition` the chamfer's surface is its definition, the
+    /// chord of order 0, and keeps them too. A distance is along the edge's blend edge
+    /// use's face (support 1) or its radial mate's (support 2); an angle is to support 1.
+    /// Between planes the sizes hold all along the edge; on a curved face, where the wedge
+    /// was measured. Not upstream (solidcore's, #2486).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::prepare_per_edge_two_offsets`]; native invalid input for an edge
+    /// without a blend edge use or its mate, faces that do not make a wedge there (tangent
+    /// or folded back), sizes that are not finite and positive, an angle past the wedge's
+    /// room, or two distances that fold on it (one at most the other's `cos(wedge)`).
+    pub fn prepare_chamfers(
+        &mut self,
+        k: &Kernel,
+        edges: &[EdgeId],
+        sizes: &[ChamferSize],
+    ) -> Result<()> {
+        use crate::topology::edgeuse::p1 as eu1;
+        use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
+        if edges.is_empty() || !(sizes.len() == 1 || sizes.len() == edges.len()) {
+            return Err(invalid());
+        }
+        let mut chamfers = Vec::new();
+        let mut first = Vec::new();
+        let mut second = Vec::new();
+        for (index, &id) in edges.iter().enumerate() {
+            let u0 = self.blend_edgeuse(k, id)?.ok_or_else(invalid)?;
+            let target: &mut crate::Brep = &mut *self.objects.target;
+            let u1 = eu1::radial(target, u0)?.ok_or_else(invalid)?;
+            let t = target
+                .edge(id)
+                .map_err(|_| invalid())?
+                .interval
+                .evaluate(0.5);
+            let o = BinormalOptions::default();
+            let b0 = evaluate_binormal(k, target, u0, t, false, &o)?
+                .binormal
+                .unitize()?;
+            let b1 = evaluate_binormal(k, target, u1, t, false, &o)?
+                .binormal
+                .unitize()?;
+            let wedge = b0.dot(b1).clamp(-1.0, 1.0).acos();
+            let chamfer =
+                ChamferDefinition::new(value(sizes, index)?, wedge).map_err(|_| invalid())?;
+            let [r1, r2] = chamfer.offsets().map_err(|_| invalid())?;
+            first.push(r1);
+            second.push(r2);
+            chamfers.push(chamfer);
+        }
+        let solvers_before = self.objects.solvers.len();
+        self.prepare_per_edge_two_offsets(
+            k,
+            edges,
+            &first,
+            &second,
+            &[FilletSurfaceGenerator::Linear],
+        )?;
+        // the solvers just made, one per edge in order: each keeps its edge's sizes
+        let made: Vec<usize> = (solvers_before..self.objects.solvers.len())
+            .filter(|&i| matches!(self.objects.solvers.get(i), Some(Some(_))))
+            .collect();
+        if made.len() != chamfers.len() {
+            return Err(invalid());
+        }
+        for (i, chamfer) in made.into_iter().zip(chamfers) {
+            if let Some(Some(solver)) = self.objects.solvers.get_mut(i) {
+                solver.base_mut().chamfer = Some(chamfer);
+            }
+        }
         Ok(())
     }
 }

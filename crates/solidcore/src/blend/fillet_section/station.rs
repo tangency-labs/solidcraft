@@ -452,6 +452,12 @@ pub fn as_b_spline<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSpl
     })
 }
 
+/// The station solve's stopping step: Newton stops once its last step in every foot
+/// parameter x is at most `STATION_STEP (1 + |x|)` (with the residual within the
+/// tolerance). Converging quadratically, the root is then within that step of the
+/// computed feet, which bounds the stations' error ([`super::recertify::precision_floor`]).
+pub const STATION_STEP: f64 = 1.0e-12;
+
 /// `sm_SurfacePartials`: the partials of a face's surface at `uv` up to total order `lk`:
 /// a NURBS (every analytic surface is one, evaluated in its net's parameters) by its net,
 /// continued past its knots; any other surface, and a blend by its definition (whose net
@@ -1085,7 +1091,7 @@ fn solve_station_body(
             step = smax(step, dq.abs() / (1.0 + xq.abs()));
         }
         // converged: the residual within the tolerance and the step at rounding
-        if res <= tol && step <= 1.0e-12 {
+        if res <= tol && step <= STATION_STEP {
             converged = true;
         }
         it += 1;

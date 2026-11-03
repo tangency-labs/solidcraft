@@ -105,6 +105,7 @@ pub mod definition;
 pub mod definition_box;
 pub mod form;
 pub mod interval;
+pub mod recertify;
 pub mod section;
 pub mod series;
 pub mod smooth_interior;

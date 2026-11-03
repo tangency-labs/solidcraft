@@ -25,10 +25,16 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3, PI};
+use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::{create_box, create_cone, create_cylinder};
+use solidcore::surface::procedural_blend::convert::{exact_rebuild, exact_to_record};
+use solidcore::surface::procedural_blend::exact::ExactClass;
+use solidcore::surface::procedural_blend::record::SupportRecord;
+use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, EdgeId};
@@ -230,8 +236,14 @@ fn cylinder_flux(
 /// The plate (top face z = 0) and the r3 peg through the origin tilted 30 degrees from z,
 /// from 10 below the plate's face to 15 above it along its axis, the rim rounded r1.
 fn plate_and_peg(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
+    plate_and_peg_kept(exact, false)
+}
+
+/// [`plate_and_peg`] with `definition` (`fillet_round_as_definition`, #2485) set.
+fn plate_and_peg_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
+    k.fixes.fillet_round_as_definition = definition;
     let plate = create_box(&mut k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 25.0).unwrap();
     tilt(&mut k, &mut peg, 30f64.to_radians());
@@ -326,8 +338,14 @@ fn upstream_traces_the_oblique_plane_and_cylinder_round() {
 /// 3 / sin 45 from the origin, from 1 below the apex to 20 below it; the concave conic
 /// where the cone leaves the pole rounded r1.
 fn pole_and_cone(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
+    pole_and_cone_kept(exact, false)
+}
+
+/// [`pole_and_cone`] with `definition` (`fillet_round_as_definition`, #2485) set.
+fn pole_and_cone_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
+    k.fixes.fillet_round_as_definition = definition;
     let alpha = 45f64.to_radians();
     let d = R / alpha.sin();
     let pole = create_cylinder(&mut k, Point3::new(0.0, 0.0, -12.0), R, 20.0).unwrap();
@@ -414,4 +432,119 @@ fn upstream_traces_the_round_between_two_quadrics_touching_one_ball() {
         rounds.iter().all(|(_, rational)| !*rational),
         "the traced fit"
     );
+}
+
+// ---- #2485: an exact round is a blend by its definition, its net the exact surface ----
+
+/// The exact rounds of `b`: each one re-certified at a bound of 0, its class, the bits of
+/// its points over a 9 x 9 grid, and its record through JSON and back (re-certified, the
+/// same record again, evaluating as the round).
+fn exact_round_checks(k: &Kernel, b: &Brep) -> Vec<(ExactClass, Vec<[u64; 3]>)> {
+    let mut out = Vec::new();
+    for f in b.faces().ids() {
+        let Some(s) = face::surface(b, f).unwrap() else {
+            continue;
+        };
+        let Some(blend) = s.procedural_blend() else {
+            continue;
+        };
+        let Some(round) = blend.exact() else {
+            continue;
+        };
+        assert!(matches!(blend.net(), BlendNet::Exact(_)));
+        assert_eq!(blend.bound(), 0.0);
+        assert_eq!(blend.recertify(k).unwrap(), 0.0);
+        let rec = exact_to_record(k, s).unwrap();
+        let json = serde_json::to_string(&rec).unwrap();
+        let back = exact_rebuild(k, &serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(exact_to_record(k, &back).unwrap(), rec);
+        let bits = surface_bits(k, s);
+        assert_eq!(
+            bits,
+            surface_bits(k, &back),
+            "the rebuilt net evaluates as the round"
+        );
+        out.push((round.class(), bits));
+    }
+    out
+}
+
+/// The points of `s` over a 9 x 9 grid of its natural domain, as bits.
+fn surface_bits(k: &Kernel, s: &Surface) -> Vec<[u64; 3]> {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut pts = Vec::new();
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
+            let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
+            let p = s.evaluate_point(k, Point2::new(u, v)).unwrap();
+            pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+        }
+    }
+    pts
+}
+
+/// The points of every face of `b` as bits.
+fn body_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
+    b.faces()
+        .ids()
+        .filter_map(|f| face::surface(b, f).unwrap())
+        .map(|s| surface_bits(k, s))
+        .collect()
+}
+
+#[test]
+fn the_conic_rounds_are_their_definitions() {
+    let (spine, added, _) = plate_and_peg_round(30f64.to_radians());
+    let (k, mut b, before, rounds) = plate_and_peg_kept(true, true);
+    let checked = exact_round_checks(&k, &b);
+    assert_eq!(checked.len(), 2);
+    assert!(
+        checked.iter().all(|(c, _)| *c == ExactClass::Conic),
+        "{checked:?}"
+    );
+    assert!(off_spine(&k, &rounds, &spine) < 1e-12);
+    let after = volume(&k, &mut b);
+    assert!((after - before - added).abs() < VOLUME_TOL);
+    let (k0, b0, _, _) = plate_and_peg_kept(true, false);
+    assert_eq!(body_bits(&k, &b), body_bits(&k0, &b0));
+    // the round reversed, swapped and reparametrised is still its definition, through its
+    // record too; a moved support is refused
+    for f in b.faces().ids() {
+        let s = face::surface(&b, f).unwrap().unwrap();
+        if s.procedural_blend().and_then(|p| p.exact()).is_none() {
+            continue;
+        }
+        let mut e = s.copy(&k).unwrap();
+        e.reverse(&k, SurfParamType::U).unwrap();
+        e.swap_uv(&k).unwrap();
+        e.reparameterize(&k, &Extent2d::from_bounds(-1.0, 2.0, 3.0, 7.0))
+            .unwrap();
+        e.reverse(&k, SurfParamType::V).unwrap();
+        assert_eq!(e.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+        let rec = exact_to_record(&k, &e).unwrap();
+        exact_rebuild(&k, &rec).unwrap();
+        let mut off = rec.clone();
+        if let SupportRecord::Nurbs { form, .. } = &mut off.supports[0] {
+            for p in &mut form.points {
+                for x in p.iter_mut() {
+                    *x += 1e-3;
+                }
+            }
+        }
+        assert!(exact_rebuild(&k, &off).is_err());
+    }
+}
+
+#[test]
+fn the_conic_pair_rounds_are_their_definitions() {
+    let (k, b, _, _) = pole_and_cone_kept(true, true);
+    let checked = exact_round_checks(&k, &b);
+    assert_eq!(checked.len(), 2);
+    assert!(
+        checked.iter().all(|(c, _)| *c == ExactClass::ConicPair),
+        "{checked:?}"
+    );
+    let (k0, b0, _, _) = pole_and_cone_kept(true, false);
+    assert_eq!(body_bits(&k, &b), body_bits(&k0, &b0));
 }

@@ -36,6 +36,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use crate::nurbs::knots::Side;
+use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -225,7 +226,7 @@ fn vec3_at(v: Vec3, q: usize) -> f64 {
 }
 
 /// A station's foot parameter q (u1, v1, u2, v2) at sigma^i eps^e.
-fn param(st: &GnStation, q: usize, i: usize, e: usize) -> f64 {
+pub(crate) fn param(st: &GnStation, q: usize, i: usize, e: usize) -> f64 {
     st.x.get(q).map_or(f64::NAN, |x| x.at(i, e))
 }
 
@@ -369,6 +370,472 @@ fn gn_station_thumbweight(k: &Kernel, n: usize, rr: f64, st: &mut GnStation) -> 
     Ok(())
 }
 
+/// The faces' NURBS data for the certificate (`Build`'s): every face a NURBS surface (an
+/// analytic one by its net), and the faces that are blends by their definitions enclosed
+/// over the certificate's boxes (WR-714, c5b6bb7).
+///
+/// # Errors
+///
+/// `SM_ERR` for a face that is not a NURBS surface, or a blend by its definition the
+/// certificate does not enclose (only a round of one radius, on a round of one radius
+/// between NURBS faces, with WR-714); those of [`Nurbs::of`] and of the enclosure.
+pub(crate) fn certificate_faces<'a>(
+    k: &Kernel,
+    faces: [&'a Surface; 2],
+    order: usize,
+    has_law: bool,
+) -> Result<([Nurbs; 2], GnDefs<'a>)> {
+    let mut nurbs = Vec::new();
+    // a face that is a blend by its definition: its definition enclosed over the
+    // certificate's boxes (definition_partials_over_box), its net's knots its stations
+    // (c5b6bb7, WR-714)
+    let mut defs = GnDefs::default();
+    for (f, face) in faces.into_iter().enumerate() {
+        let Some(bs) = super::station::as_b_spline(k, face)? else {
+            // "a face that is not a NURBS surface: its blend of order 2 and up cannot
+            // be certified"
+            return Err(SolidError::sm_err(OP));
+        };
+        if matches!(face.kind(), SurfaceKind::ProceduralBlend(_)) {
+            // the certificate takes the face's partials to total order 7 in a round of
+            // one radius (its fourth s-derivatives' Taylor form, gn_fourth_over), which
+            // the definition's feet's series hold (SM_GN_MAXS); a law's touch circle,
+            // or a G^n section, takes more: "a face that is a blend by its definition:
+            // only a round of one radius is certified on it, and only on a round of one
+            // radius between NURBS faces". Without WR-714 a blend by its definition is
+            // enclosed only on its net, which is not the surface the feet are solved on
+            // (4a10ed8)
+            let enclosed = k.fixes.fillet_round_on_round_as_definition
+                && order == 1
+                && !has_law
+                && definition_enclosable(face);
+            if !enclosed {
+                return Err(SolidError::sm_err(OP));
+            }
+            if let Some(slot) = defs.faces.get_mut(f) {
+                *slot = Some(gn_def_face_of(k, face)?);
+            }
+        }
+        nurbs.push(Nurbs::of(&bs)?);
+    }
+    let mut it = nurbs.into_iter();
+    let (Some(n0), Some(n1)) = (it.next(), it.next()) else {
+        return Err(SolidError::sm_err(OP));
+    };
+    Ok(([n0, n1], defs))
+}
+
+/// A face's inner knots in u (`c = 0`) or v, each once.
+pub(crate) fn inner_knots(nf: &Nurbs, c: usize) -> Vec<f64> {
+    let (kv, deg) = if c == 0 { (&nf.u, nf.p) } else { (&nf.v, nf.q) };
+    let mut inner: Vec<f64> = Vec::new();
+    let mut m = deg + 1;
+    while m + deg + 1 < kv.len() {
+        let km = kv.get(m).copied().unwrap_or(f64::NAN);
+        if inner.last().is_none_or(|&b| km > b) {
+            inner.push(km);
+        }
+        m += 1;
+    }
+    inner
+}
+
+/// Whether a foot's parameter crosses the knot `dk` between two stations, `xa` to `xb`.
+pub(crate) fn crosses_knot(xa: f64, xb: f64, dk: f64) -> bool {
+    let margin = 1.0e-9 * (1.0 + dk.abs());
+    (xa < dk - margin && xb > dk + margin) || (xa > dk + margin && xb < dk - margin)
+}
+
+/// The varying thumbweight's certificate data: I's enclosures on a grid over the
+/// stations' equal area thumbweights (a little wider: stations put in later lie between
+/// these); empty cells without the equal area thumbweight.
+pub(crate) fn varying(n: usize, rr: f64, stations: &[GnStation], equal_area: bool) -> GnVarying {
+    let mut vary = GnVarying {
+        n,
+        rr,
+        cells: GnAreaCells::default(),
+    };
+    if equal_area {
+        let mut w_lo = f64::INFINITY;
+        let mut w_hi = f64::NEG_INFINITY;
+        for st in stations {
+            w_lo = smin(w_lo, st.w);
+            w_hi = smax(w_hi, st.w);
+        }
+        let pad = 0.05 * (w_hi - w_lo) + 1.0e-6 * (1.0 + smax(w_lo.abs(), w_hi.abs()));
+        vary.cells
+            .init(n, w_lo - pad, smin(w_hi + pad, 0.5 * (1.0 + w_hi)), 64);
+    }
+    vary
+}
+
+/// A blend's station system as `Build` solves it: the faces, the leader, the ball's
+/// offsets and sides, the series' truncation, the section's order, whether the equal area
+/// thumbweight is resolved at each station, and the radius law.
+#[derive(Clone, Copy)]
+pub(crate) struct StationSystem<'a> {
+    /// The faces.
+    pub(crate) faces: [&'a Surface; 2],
+    /// The leader.
+    pub(crate) leader: &'a BSplineCurve,
+    /// The offsets.
+    pub(crate) r: [f64; 2],
+    /// The sides.
+    pub(crate) side: [f64; 2],
+    /// The truncation.
+    pub(crate) tr: Trunc,
+    /// n.
+    pub(crate) n: usize,
+    /// The equal area thumbweight, resolved per station.
+    pub(crate) equal_area: bool,
+    /// The radius law.
+    pub(crate) law: Option<&'a GnLaw<'a>>,
+}
+
+impl StationSystem<'_> {
+    /// The station at `s` from the feet `seed`, on the pieces after it along s (`sides`:
+    /// a face's side where a foot is on one of its knot lines), its equal area thumbweight
+    /// resolved.
+    pub(crate) fn solve_after(
+        &self,
+        k: &Kernel,
+        s: f64,
+        seed: [f64; 4],
+        sides: Option<[i32; 4]>,
+    ) -> Result<GnStation> {
+        let m = self.leader.evaluate_point(s)?;
+        let law_r = law_series(self.law, s, self.tr.s(), false)?;
+        let mut st = solve_top(
+            k,
+            self.faces,
+            self.leader,
+            s,
+            seed,
+            self.r,
+            self.side,
+            self.tr,
+            1.0e-9 * smax(1.0, m.length()),
+            self.n,
+            sides,
+            false,
+            law_r.as_ref(),
+        )?;
+        if self.equal_area {
+            gn_station_thumbweight(k, self.n, self.r[0] * self.r[1], &mut st)?;
+        }
+        Ok(st)
+    }
+
+    /// The station's series on the pieces before it, for the span ending there: a Hermite
+    /// span interpolates the values and s-derivatives of its own pieces, which the
+    /// certificate bounds (3bc54a4).
+    pub(crate) fn solve_before(&self, k: &Kernel, st: &mut GnStation) -> Result<()> {
+        let on = [0, 1, 2, 3].map(|q| param(st, q, 0, 0));
+        let m = self.leader.evaluate_point(st.s)?;
+        let law_r = law_series(self.law, st.s, self.tr.s(), true)?;
+        let mut before = solve_top(
+            k,
+            self.faces,
+            self.leader,
+            st.s,
+            on,
+            self.r,
+            self.side,
+            self.tr,
+            1.0e-9 * smax(1.0, m.length()),
+            self.n,
+            Some(st.before),
+            true,
+            law_r.as_ref(),
+        )?;
+        if self.equal_area {
+            gn_station_thumbweight(k, self.n, self.r[0] * self.r[1], &mut before)?;
+            st.wdsl = before.wds;
+        }
+        st.xl = before.x;
+        st.fl = before.f;
+        st.vl = before.v;
+        st.sided = true;
+        Ok(())
+    }
+}
+
+/// The order-n section's control points across: `3 n + 2`, 3 for the ball's circle, 2 for
+/// the chord (#2486).
+pub(crate) const fn section_width(n: usize) -> usize {
+    match n {
+        0 => 2,
+        1 => 3,
+        _ => 3 * n + 2,
+    }
+}
+
+/// How a blend's net follows its stations: the section's order, its thumbweight (the
+/// equal area one resolved per station), and whether the ball's radius follows a law. The
+/// net is the Hermite interpolant along s of the section's rows at the stations: the arc's
+/// rows (n = 1), each station's own form's rows (the equal area thumbweight), or the jets
+/// themselves, which one form's rows are linear in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct NetForm {
+    /// n.
+    pub(crate) n: usize,
+    /// w, or [`GN_THUMBWEIGHT_EQUAL_AREA`].
+    pub(crate) thumbweight: f64,
+    /// The thumbweight is the equal area one, resolved per station.
+    pub(crate) equal_area: bool,
+    /// The ball's radius follows a law (n = 1).
+    pub(crate) law: bool,
+}
+
+/// What a station gives the net's Hermite curves: per curve its value, its s-derivative
+/// as the span starting there takes it (`d`) and as the one ending there does (`d_in`).
+/// The curves are the rows `W_j P_j` with their weights `W_j` in `w*` (in x), or for one
+/// fixed form the jets `c_ik` (index `f (n + 1) + k`, `w*` empty).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct StationRows {
+    v: Vec<Vec3>,
+    d: Vec<Vec3>,
+    d_in: Vec<Vec3>,
+    w: Vec<Vec3>,
+    wd: Vec<Vec3>,
+    wd_in: Vec<Vec3>,
+}
+
+impl NetForm {
+    /// The section's control points across ([`section_width`]).
+    pub(crate) const fn width(&self) -> usize {
+        section_width(self.n)
+    }
+
+    /// A station's values and s-derivatives of the curves the net interpolates.
+    pub(crate) fn station_rows(&self, st: &GnStation) -> Result<StationRows> {
+        let n = self.n;
+        let ld = self.width();
+        let mut out = StationRows::default();
+        if n == 1 {
+            // the ball's circle: the station's arc rows (sm_ArcRows) and their
+            // s-derivatives, as the span starting there and the one ending there take them
+            let o = [0.0_f64; 3];
+            for l_in in [false, true] {
+                let mut rho = [[Tay::<f64>::zero(); 3]; 2];
+                let mut mc = [Tay::<f64>::zero(); 3];
+                for q in 0..3 {
+                    for (f, rf) in rho.iter_mut().enumerate() {
+                        let value = foot(st, f, 0, 0);
+                        let d = if l_in {
+                            foot_in(st, f, 1, 0)
+                        } else {
+                            foot(st, f, 1, 0)
+                        };
+                        if let Some(x) = rf.get_mut(q) {
+                            *x = Tay::of_terms(vec3_at(value, q), vec3_at(d, q));
+                        }
+                    }
+                    // the centre's s-derivatives, as the span the rows are for takes them
+                    let cv = st.v.a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
+                    let from = if l_in && st.sided { &st.vl } else { &st.v };
+                    let cd = from.a.get(q).map_or(f64::NAN, |c| c.at(1, 0));
+                    if let Some(x) = mc.get_mut(q) {
+                        *x = Tay::of_terms(cv, cd);
+                        if self.law {
+                            x.c[2] = from.a.get(q).map_or(f64::NAN, |c| c.at(2, 0));
+                        }
+                    }
+                }
+                if self.law {
+                    // a varying ball: the circle it touches the envelope along, about
+                    // m + k m', k = (rho1 - m) . m' / m' . m' (0d43b4c)
+                    let mut dm = [Tay::<f64>::zero(); 3];
+                    for (dq, mq) in dm.iter_mut().zip(mc.iter_mut()) {
+                        *dq = Tay::of_terms(mq.c[1], 2.0 * mq.c[2]);
+                        mq.c[2] = 0.0;
+                    }
+                    let mut dd = Tay::<f64>::zero();
+                    let mut bd = Tay::<f64>::zero();
+                    for ((&dq, &mq), &r0q) in dm.iter().zip(&mc).zip(&rho[0]) {
+                        dd = dd + dq * dq;
+                        bd = bd + (r0q - mq) * dq;
+                    }
+                    let moving = dd.c[0] > 0.0;
+                    if !moving {
+                        // "the balls' centres stand still"
+                        return Err(SolidError::sm_err(OP));
+                    }
+                    let kk = bd / dd;
+                    for (mq, &dq) in mc.iter_mut().zip(&dm) {
+                        *mq = *mq + kk * dq;
+                        for c in mq.c.iter_mut().skip(2) {
+                            *c = 0.0;
+                        }
+                    }
+                }
+                let [rho0, rho1] = &rho;
+                let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
+                    // "a section of the ball's circle is a half turn or more"
+                    return Err(SolidError::sm_err(OP));
+                };
+                for (hj, wj) in h.iter().zip(&w).take(ld) {
+                    let sd = Vec3::new(hj[0].at(1), hj[1].at(1), hj[2].at(1));
+                    if l_in {
+                        out.d_in.push(sd);
+                        out.wd_in.push(Vec3::new(wj.at(1), 0.0, 0.0));
+                        continue;
+                    }
+                    out.v.push(Vec3::new(hj[0].at(0), hj[1].at(0), hj[2].at(0)));
+                    out.d.push(sd);
+                    out.w.push(Vec3::new(wj.at(0), 0.0, 0.0));
+                    out.wd.push(Vec3::new(wj.at(1), 0.0, 0.0));
+                }
+            }
+        } else if self.equal_area {
+            // the station's own form (over W_0): every row W_j P_j and weight W_j, their
+            // values and s-derivatives there (the form's in w(s) and the jets'), as the span
+            // starting here takes them, then as the one ending here (3bc54a4)
+            for l_in in [false, true] {
+                let wds = if l_in { st.in_wds() } else { st.wds };
+                let sf = gn_form_normalized(n, Tay::of_terms(st.w, wds));
+                for j in 0..ld {
+                    let mut sv = Vec3::new(0.0, 0.0, 0.0);
+                    let mut sd = Vec3::new(0.0, 0.0, 0.0);
+                    for (f, gf) in sf.g.iter().enumerate() {
+                        for (kk, gk) in gf.iter().enumerate().take(n + 1) {
+                            let c = foot(st, f, 0, kk);
+                            let c1 = if l_in {
+                                foot_in(st, f, 1, kk)
+                            } else {
+                                foot(st, f, 1, kk)
+                            };
+                            let g = gk.get(j).copied().unwrap_or_else(|| Tay::lift(f64::NAN));
+                            sv += c * g.at(0);
+                            sd = sd + c * g.at(1) + c1 * g.at(0);
+                        }
+                    }
+                    let wj = sf.w.get(j).copied().unwrap_or_else(|| Tay::lift(f64::NAN));
+                    if l_in {
+                        out.d_in.push(sd);
+                        out.wd_in.push(Vec3::new(wj.at(1), 0.0, 0.0));
+                        continue;
+                    }
+                    out.v.push(sv);
+                    out.d.push(sd);
+                    out.w.push(Vec3::new(wj.at(0), 0.0, 0.0));
+                    out.wd.push(Vec3::new(wj.at(1), 0.0, 0.0));
+                }
+            }
+        } else {
+            // one section's form: its rows are linear in the jets, so the jets carry them
+            for f in 0..2 {
+                for kk in 0..=n {
+                    out.v.push(foot(st, f, 0, kk));
+                    out.d.push(foot(st, f, 1, kk));
+                    out.d_in.push(foot_in(st, f, 1, kk));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The net's span between stations `a` and `b` (`ra`, `rb` their
+    /// [`NetForm::station_rows`]): its homogeneous control points `W P` and weights `W`,
+    /// 4 along s by [`NetForm::width`] across, `[i * width + j]`.
+    pub(crate) fn span(
+        &self,
+        a: &GnStation,
+        ra: &StationRows,
+        b: &GnStation,
+        rb: &StationRows,
+    ) -> (Vec<Vec3>, Vec<f64>) {
+        let ld = self.width();
+        let ss = [a.s, b.s];
+        let hermite = |va: &[Vec3], da: &[Vec3], vb: &[Vec3], db: &[Vec3], dib: &[Vec3], q| {
+            let at = |x: &[Vec3]| {
+                x.get(q)
+                    .copied()
+                    .unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
+            };
+            hermite_points_sided(
+                &ss,
+                &[at(va), at(vb)],
+                &[at(da), at(db)],
+                &[at(&ra.d_in), at(dib)],
+            )
+        };
+        let mut homog = vec![Vec3::new(0.0, 0.0, 0.0); 4 * ld];
+        let mut wv = vec![0.0_f64; 4 * ld];
+        if self.n == 1 || self.equal_area {
+            for j in 0..ld {
+                let hp = hermite(&ra.v, &ra.d, &rb.v, &rb.d, &rb.d_in, j);
+                let wp = {
+                    let at = |x: &[Vec3]| {
+                        x.get(j)
+                            .copied()
+                            .unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
+                    };
+                    hermite_points_sided(
+                        &ss,
+                        &[at(&ra.w), at(&rb.w)],
+                        &[at(&ra.wd), at(&rb.wd)],
+                        &[at(&ra.wd_in), at(&rb.wd_in)],
+                    )
+                };
+                for i in 0..4 {
+                    if let (Some(h), Some(w), Some(&p), Some(q)) = (
+                        homog.get_mut(i * ld + j),
+                        wv.get_mut(i * ld + j),
+                        hp.get(i),
+                        wp.get(i),
+                    ) {
+                        *h = p;
+                        *w = q.x;
+                    }
+                }
+            }
+        } else if self.n == 0 {
+            // the chord (#2486): its rows are the feet, weights 1
+            for j in 0..ld {
+                let hp = hermite(&ra.v, &ra.d, &rb.v, &rb.d, &rb.d_in, j);
+                for i in 0..4 {
+                    if let (Some(h), Some(w), Some(&p)) =
+                        (homog.get_mut(i * ld + j), wv.get_mut(i * ld + j), hp.get(i))
+                    {
+                        *h = p;
+                        *w = 1.0;
+                    }
+                }
+            }
+        } else {
+            // the jets' Hermite curves, then one form's rows of them
+            let n = self.n;
+            let form = gn_form(n, self.thumbweight);
+            let jets: Vec<Vec<Vec3>> = (0..2 * (n + 1))
+                .map(|q| hermite(&ra.v, &ra.d, &rb.v, &rb.d, &rb.d_in, q))
+                .collect();
+            let jet = |f: usize, kk: usize, i: usize| -> Vec3 {
+                jets.get(f * (n + 1) + kk)
+                    .and_then(|j| j.get(i))
+                    .copied()
+                    .unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
+            };
+            for i in 0..4 {
+                for j in 0..ld {
+                    let mut p = Vec3::new(0.0, 0.0, 0.0);
+                    for (f, gf) in form.g.iter().enumerate() {
+                        for (kk, g) in gf.iter().enumerate().take(n + 1) {
+                            p += jet(f, kk, i) * g.get(j).copied().unwrap_or(f64::NAN);
+                        }
+                    }
+                    if let (Some(h), Some(w)) = (homog.get_mut(i * ld + j), wv.get_mut(i * ld + j))
+                    {
+                        *h = p;
+                        *w = form.w.get(j).copied().unwrap_or(f64::NAN);
+                    }
+                }
+            }
+        }
+        (homog, wv)
+    }
+}
+
 impl GnSectionFsg {
     /// `SmGnSectionFSG(lOrder, dThumbweight)`.
     #[must_use]
@@ -376,6 +843,24 @@ impl GnSectionFsg {
         Self {
             order,
             thumbweight,
+            certified_bound: -1.0,
+            certified_spans: 0,
+            arcs: ArcSection {
+                approximate_arcs: true,
+                tol_percent_radius: 0.05,
+                mirror: false,
+                complement: false,
+            },
+        }
+    }
+
+    /// The chord, order 0 (a chamfer; solidcore's, #2486): the straight section between
+    /// the feet.
+    #[must_use]
+    pub const fn chord() -> Self {
+        Self {
+            order: 0,
+            thumbweight: 0.0,
             certified_bound: -1.0,
             certified_spans: 0,
             arcs: ArcSection {
@@ -487,8 +972,9 @@ impl GnSectionFsg {
             faces,
             uvs,
             true,
-            0.0,
+            [0.0, 0.0],
             false,
+            None,
             None,
         )?
         .map(|(s, _)| s)
@@ -520,8 +1006,9 @@ impl GnSectionFsg {
             faces.surfaces,
             [&mut uv1, &mut uv2],
             false,
-            0.0,
+            [0.0, 0.0],
             false,
+            None,
             None,
         )?
         .map(|(s, _)| s)
@@ -557,8 +1044,9 @@ impl GnSectionFsg {
             faces,
             uvs,
             replace_rails,
-            radius,
+            [radius, radius],
             false,
+            None,
             None,
         )?
         .map(|(s, _)| s)
@@ -592,13 +1080,68 @@ impl GnSectionFsg {
         radius: f64,
         law: Option<&GnLawRound<'_>>,
     ) -> Result<Option<Surface>> {
-        let built = self.build(k, center, rails, tol, faces, uvs, true, radius, true, law)?;
+        let built = self.build(
+            k,
+            center,
+            rails,
+            tol,
+            faces,
+            uvs,
+            true,
+            [radius, radius],
+            true,
+            law,
+            None,
+        )?;
         Ok(built.map(|(s, c)| {
             if let Some(c) = c {
                 *center = c;
             }
             s
         }))
+    }
+
+    /// The chord (order 0, a chamfer; solidcore's, #2486) between the feet of the point at
+    /// `offsets` off the two faces, as [`Self::build_given_ball`] builds the ball's circle:
+    /// the rails and uv curves replaced by the stations' feet, the surface the chamfer by
+    /// its definition, `chamfer` its sizes. `None` (nothing built, the rails and uv curves
+    /// unchanged) where the solver's rails are not those feet.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a generator that is not the chord; those of `Build`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_chord(
+        &mut self,
+        k: &Kernel,
+        center: &BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        tol: f64,
+        faces: [&Surface; 2],
+        uvs: [&mut BSplineCurve; 2],
+        offsets: [f64; 2],
+        chamfer: ChamferDefinition,
+    ) -> Result<Option<Surface>> {
+        if self.order != 0 {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a chamfer is the chord, order 0",
+            ));
+        }
+        let built = self.build(
+            k,
+            center,
+            rails,
+            tol,
+            faces,
+            uvs,
+            true,
+            offsets,
+            true,
+            None,
+            Some(chamfer),
+        )?;
+        Ok(built.map(|(s, _)| s))
     }
 
     /// `Build`: the G^n blend surface between the rails, its stations the knots of the
@@ -619,9 +1162,10 @@ impl GnSectionFsg {
         faces: [&Surface; 2],
         uvs: [&mut BSplineCurve; 2],
         replace_rails: bool,
-        radius: f64,
+        radii: [f64; 2],
         feet_check: bool,
         law_round: Option<&GnLawRound<'_>>,
+        chamfer: Option<ChamferDefinition>,
     ) -> Result<Option<Built>> {
         // a ball whose radius varies (the ball's circle only): its law r(t) and the curve
         // whose planes square to it at t hold the ball's centre (the solver's), t the
@@ -640,7 +1184,9 @@ impl GnSectionFsg {
         let leader: &BSplineCurve = law_round.map_or(center, |l| l.leader);
         let n = self.order;
         let exact_circle = n == 1 && self.arcs.is_exact_circle();
-        if !exact_circle && !Self::is_valid(n, self.thumbweight) {
+        // the chord (#2486): a chamfer, its sizes given
+        let chord = n == 0 && chamfer.is_some() && law_round.is_none();
+        if !chord && !exact_circle && !Self::is_valid(n, self.thumbweight) {
             return Err(SolidError::invalid_input(
                 OP,
                 "the order must be 1 (the ball's circle) or 2 to 4 with a thumbweight below 1",
@@ -771,8 +1317,9 @@ impl GnSectionFsg {
                 .zip(side.iter_mut())
                 .zip(rl)
                 .zip(uvs.iter())
-                .zip(faces);
-            for ((((rf, sf), rail), uv), face) in rows {
+                .zip(faces)
+                .zip(radii);
+            for (((((rf, sf), rail), uv), face), radius) in rows {
                 let rho = rail.evaluate_point(s_first)?;
                 let w = uv.evaluate_point(s_first)?;
                 let nrm = unit_normal(k, face, Point2::new(w.x, w.y))?;
@@ -887,37 +1434,22 @@ impl GnSectionFsg {
         // each station's series on the pieces before it, for the span ending there: a
         // Hermite span interpolates the values and s-derivatives of its own pieces, which
         // the certificate bounds (3bc54a4)
+        let system = StationSystem {
+            faces,
+            leader,
+            r,
+            side,
+            tr,
+            n,
+            equal_area,
+            law: gn_law,
+        };
         for st in stations.iter_mut().skip(1) {
             k.check_cancelled(OP_BUILD)?;
-            let on = [0, 1, 2, 3].map(|q| param(st, q, 0, 0));
-            let m = leader.evaluate_point(st.s)?;
-            let law_r = law_series(gn_law, st.s, tr.s(), true)?;
-            let mut before = solve_top(
-                k,
-                faces,
-                leader,
-                st.s,
-                on,
-                r,
-                side,
-                tr,
-                1.0e-9 * smax(1.0, m.length()),
-                n,
-                Some(st.before),
-                true,
-                law_r.as_ref(),
-            )?;
-            if equal_area {
-                gn_station_thumbweight(k, n, r[0] * r[1], &mut before)?;
-                st.wdsl = before.wds;
-            }
-            st.xl = before.x;
-            st.fl = before.f;
-            st.vl = before.v;
-            st.sided = true;
+            system.solve_before(k, st)?;
         }
 
-        let ld = if n >= 2 { 3 * n + 2 } else { 3 }; // the section's control points across
+        let ld = section_width(n); // the section's control points across
 
         // the jets' Hermite curves along s, all on the stations' knots
         let (u_knots, u_mult) = hermite_knots(&ss);
@@ -939,223 +1471,35 @@ impl GnSectionFsg {
         };
         let lnu = jets[0].first().map_or(0, Vec::len);
 
-        // the homogeneous control points W P and weights W, [i along s][j across]
-        let mut homog = vec![Vec3::new(0.0, 0.0, 0.0); lnu * ld];
-        let mut wv = vec![0.0_f64; lnu * ld];
-        if n == 1 {
-            // the ball's circle: each station's arc rows (sm_ArcRows) and their
-            // s-derivatives, as the span starting there and the one ending there take them,
-            // each a Hermite curve along s
-            let mut hv: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut hd: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut hd_in: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut wvv: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut wdd: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut wd_in: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let o = [0.0_f64; 3];
-            for st in &stations {
-                k.check_cancelled(OP_BUILD)?;
-                for l_in in [false, true] {
-                    let mut rho = [[Tay::<f64>::zero(); 3]; 2];
-                    let mut mc = [Tay::<f64>::zero(); 3];
-                    for q in 0..3 {
-                        for (f, rf) in rho.iter_mut().enumerate() {
-                            let value = foot(st, f, 0, 0);
-                            let d = if l_in {
-                                foot_in(st, f, 1, 0)
-                            } else {
-                                foot(st, f, 1, 0)
-                            };
-                            if let Some(x) = rf.get_mut(q) {
-                                *x = Tay::of_terms(vec3_at(value, q), vec3_at(d, q));
-                            }
-                        }
-                        // the centre's s-derivatives, as the span the rows are for takes
-                        // them
-                        let cv = st.v.a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
-                        let from = if l_in && st.sided { &st.vl } else { &st.v };
-                        let cd = from.a.get(q).map_or(f64::NAN, |c| c.at(1, 0));
-                        if let Some(x) = mc.get_mut(q) {
-                            *x = Tay::of_terms(cv, cd);
-                            if law_round.is_some() {
-                                x.c[2] = from.a.get(q).map_or(f64::NAN, |c| c.at(2, 0));
-                            }
-                        }
-                    }
-                    if law_round.is_some() {
-                        // a varying ball: the circle it touches the envelope along, about
-                        // m + k m', k = (rho1 - m) . m' / m' . m' (0d43b4c)
-                        let mut dm = [Tay::<f64>::zero(); 3];
-                        for (dq, mq) in dm.iter_mut().zip(mc.iter_mut()) {
-                            *dq = Tay::of_terms(mq.c[1], 2.0 * mq.c[2]);
-                            mq.c[2] = 0.0;
-                        }
-                        let mut dd = Tay::<f64>::zero();
-                        let mut bd = Tay::<f64>::zero();
-                        for ((&dq, &mq), &r0q) in dm.iter().zip(&mc).zip(&rho[0]) {
-                            dd = dd + dq * dq;
-                            bd = bd + (r0q - mq) * dq;
-                        }
-                        let moving = dd.c[0] > 0.0;
-                        if !moving {
-                            // "the balls' centres stand still"
-                            return Err(SolidError::sm_err(OP));
-                        }
-                        let kk = bd / dd;
-                        for (mq, &dq) in mc.iter_mut().zip(&dm) {
-                            *mq = *mq + kk * dq;
-                            for c in mq.c.iter_mut().skip(2) {
-                                *c = 0.0;
-                            }
-                        }
-                    }
-                    let [rho0, rho1] = &rho;
-                    let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
-                        // "a section of the ball's circle is a half turn or more"
-                        return Err(SolidError::sm_err(OP));
-                    };
-                    for (j, (hj, wj)) in h.iter().zip(&w).enumerate().take(ld) {
-                        let sd = Vec3::new(hj[0].at(1), hj[1].at(1), hj[2].at(1));
-                        if l_in {
-                            if let (Some(b), Some(d)) = (hd_in.get_mut(j), wd_in.get_mut(j)) {
-                                b.push(sd);
-                                d.push(Vec3::new(wj.at(1), 0.0, 0.0));
-                            }
-                            continue;
-                        }
-                        if let (Some(a), Some(b), Some(c), Some(d)) =
-                            (hv.get_mut(j), hd.get_mut(j), wvv.get_mut(j), wdd.get_mut(j))
-                        {
-                            a.push(Vec3::new(hj[0].at(0), hj[1].at(0), hj[2].at(0)));
-                            b.push(sd);
-                            c.push(Vec3::new(wj.at(0), 0.0, 0.0));
-                            d.push(Vec3::new(wj.at(1), 0.0, 0.0));
-                        }
-                    }
-                }
-            }
-            for j in 0..ld {
-                let (Some(a), Some(b), Some(c), Some(d), Some(bi), Some(di)) = (
-                    hv.get(j),
-                    hd.get(j),
-                    wvv.get(j),
-                    wdd.get(j),
-                    hd_in.get(j),
-                    wd_in.get(j),
-                ) else {
-                    return Err(SolidError::sm_err(OP));
-                };
-                let hp = hermite_points_sided(&ss, a, b, bi);
-                let wp = hermite_points_sided(&ss, c, d, di);
-                for i in 0..lnu {
-                    if let (Some(h), Some(w), Some(&p), Some(q)) = (
-                        homog.get_mut(i * ld + j),
-                        wv.get_mut(i * ld + j),
-                        hp.get(i),
-                        wp.get(i),
-                    ) {
-                        *h = p;
-                        *w = q.x;
-                    }
-                }
-            }
-        } else if equal_area {
-            // each station's own form (over W_0): every row W_j P_j and weight W_j a
-            // Hermite curve of its values and s-derivatives there (the form's in w(s) and
-            // the jets')
-            let mut hv: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut hd: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut wvv: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut wdd: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut hd_in: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            let mut wd_in: Vec<Vec<Vec3>> = vec![Vec::new(); ld];
-            for st in &stations {
-                k.check_cancelled(OP_BUILD)?;
-                // the rows' s-derivatives as the span starting here takes them, then as the
-                // one ending here (3bc54a4)
-                for l_in in [false, true] {
-                    let wds = if l_in { st.in_wds() } else { st.wds };
-                    let sf = gn_form_normalized(n, Tay::of_terms(st.w, wds));
-                    for j in 0..ld {
-                        let mut sv = Vec3::new(0.0, 0.0, 0.0);
-                        let mut sd = Vec3::new(0.0, 0.0, 0.0);
-                        for (f, gf) in sf.g.iter().enumerate() {
-                            for (kk, gk) in gf.iter().enumerate().take(n + 1) {
-                                let c = foot(st, f, 0, kk);
-                                let c1 = if l_in {
-                                    foot_in(st, f, 1, kk)
-                                } else {
-                                    foot(st, f, 1, kk)
-                                };
-                                let g = gk.get(j).copied().unwrap_or_else(|| Tay::lift(f64::NAN));
-                                sv += c * g.at(0);
-                                sd = sd + c * g.at(1) + c1 * g.at(0);
-                            }
-                        }
-                        let wj = sf.w.get(j).copied().unwrap_or_else(|| Tay::lift(f64::NAN));
-                        if l_in {
-                            if let (Some(b), Some(d)) = (hd_in.get_mut(j), wd_in.get_mut(j)) {
-                                b.push(sd);
-                                d.push(Vec3::new(wj.at(1), 0.0, 0.0));
-                            }
-                            continue;
-                        }
-                        if let (Some(a), Some(b), Some(c), Some(d)) =
-                            (hv.get_mut(j), hd.get_mut(j), wvv.get_mut(j), wdd.get_mut(j))
-                        {
-                            a.push(sv);
-                            b.push(sd);
-                            c.push(Vec3::new(wj.at(0), 0.0, 0.0));
-                            d.push(Vec3::new(wj.at(1), 0.0, 0.0));
-                        }
-                    }
-                }
-            }
-            for j in 0..ld {
-                let (Some(a), Some(b), Some(c), Some(d), Some(bi), Some(di)) = (
-                    hv.get(j),
-                    hd.get(j),
-                    wvv.get(j),
-                    wdd.get(j),
-                    hd_in.get(j),
-                    wd_in.get(j),
-                ) else {
-                    return Err(SolidError::sm_err(OP));
-                };
-                let hp = hermite_points_sided(&ss, a, b, bi);
-                let wp = hermite_points_sided(&ss, c, d, di);
-                for i in 0..lnu {
-                    if let (Some(h), Some(w), Some(&p), Some(q)) = (
-                        homog.get_mut(i * ld + j),
-                        wv.get_mut(i * ld + j),
-                        hp.get(i),
-                        wp.get(i),
-                    ) {
-                        *h = p;
-                        *w = q.x;
-                    }
-                }
-            }
-        } else {
-            // one section's form: its rows are linear in the jets, so the jets' curves
-            // carry them
-            let form = gn_form(n, self.thumbweight);
-            for i in 0..lnu {
-                k.check_cancelled(OP_BUILD)?;
-                for j in 0..ld {
-                    let mut p = Vec3::new(0.0, 0.0, 0.0);
-                    for (f, gf) in form.g.iter().enumerate() {
-                        for (kk, g) in gf.iter().enumerate().take(n + 1) {
-                            p += jet(f, kk, i) * g.get(j).copied().unwrap_or(f64::NAN);
-                        }
-                    }
-                    if let (Some(h), Some(w)) = (homog.get_mut(i * ld + j), wv.get_mut(i * ld + j))
-                    {
-                        *h = p;
-                        *w = form.w.get(j).copied().unwrap_or(f64::NAN);
-                    }
-                }
-            }
+        // the homogeneous control points W P and weights W, [i along s][j across], span by
+        // span (a span's first row is the one before's last)
+        let net_form = NetForm {
+            n,
+            thumbweight: self.thumbweight,
+            equal_area,
+            law: law_round.is_some(),
+        };
+        let mut rows = Vec::new();
+        for st in &stations {
+            k.check_cancelled(OP_BUILD)?;
+            rows.push(net_form.station_rows(st)?);
+        }
+        let mut homog: Vec<Vec3> = Vec::new();
+        let mut wv: Vec<f64> = Vec::new();
+        let mut spans: Vec<(Vec<Vec3>, Vec<f64>)> = Vec::new();
+        for (j, (pair, rp)) in stations.windows(2).zip(rows.windows(2)).enumerate() {
+            k.check_cancelled(OP_BUILD)?;
+            let ([a, b], [ra, rb]) = (pair, rp) else {
+                return Err(SolidError::sm_err(OP));
+            };
+            let (h, w) = net_form.span(a, ra, b, rb);
+            let skip = if j == 0 { 0 } else { ld };
+            homog.extend(h.iter().copied().skip(skip));
+            wv.extend(w.iter().copied().skip(skip));
+            spans.push((h, w));
+        }
+        if homog.len() != lnu * ld {
+            return Err(SolidError::sm_err(OP));
         }
         let mut w_min = BIG_DOUBLE;
         let mut w_max = 0.0_f64;
@@ -1287,6 +1631,11 @@ impl GnSectionFsg {
         let (Some(seed0), Some(seed1)) = (seeds.first(), seeds.get(1)) else {
             return Err(SolidError::sm_err(OP));
         };
+        // its bound: the certificate's, of the Hermite rows; how far the net stored (its
+        // control points divided out of the rows and its weights scaled, each rounded) is
+        // from them; and three floors, how far rows computed again may be (#2388)
+        let rounding = super::recertify::stored_net_distance(&surface, &spans, ld)?
+            + 3.0 * super::recertify::precision_floor(k, faces, n as u32, &surface)?;
         let input = BlendDefinitionInput {
             supports: faces,
             sides: side,
@@ -1296,7 +1645,8 @@ impl GnSectionFsg {
             thumbweight: self.thumbweight,
             leader,
             seeds: [seed0, seed1],
-            bound: self.certified_bound,
+            bound: self.certified_bound + rounding,
+            chamfer,
         };
         let blend = ProceduralBlend::create(k, &surface, &input, |order, w| {
             Self::is_valid(order as usize, w)
@@ -1322,44 +1672,9 @@ impl GnSectionFsg {
         equal_area: bool,
         law: Option<&GnLaw<'_>>,
     ) -> Result<(Vec<GnStation>, f64, usize)> {
-        let mut nurbs = Vec::new();
-        // a face that is a blend by its definition: its definition enclosed over the
-        // certificate's boxes (definition_partials_over_box), its net's knots its stations
-        // (c5b6bb7, WR-714)
-        let mut defs = GnDefs::default();
-        for (f, face) in faces.into_iter().enumerate() {
-            let Some(bs) = super::station::as_b_spline(k, face)? else {
-                // "a face that is not a NURBS surface: its blend of order 2 and up cannot
-                // be certified"
-                return Err(SolidError::sm_err(OP));
-            };
-            if matches!(face.kind(), SurfaceKind::ProceduralBlend(_)) {
-                // the certificate takes the face's partials to total order 7 in a round of
-                // one radius (its fourth s-derivatives' Taylor form, gn_fourth_over), which
-                // the definition's feet's series hold (SM_GN_MAXS); a law's touch circle,
-                // or a G^n section, takes more: "a face that is a blend by its definition:
-                // only a round of one radius is certified on it, and only on a round of one
-                // radius between NURBS faces". Without WR-714 a blend by its definition is
-                // enclosed only on its net, which is not the surface the feet are solved on
-                // (4a10ed8)
-                let enclosed = k.fixes.fillet_round_on_round_as_definition
-                    && self.order == 1
-                    && law.is_none()
-                    && definition_enclosable(face);
-                if !enclosed {
-                    return Err(SolidError::sm_err(OP));
-                }
-                if let Some(slot) = defs.faces.get_mut(f) {
-                    *slot = Some(gn_def_face_of(k, face)?);
-                }
-            }
-            nurbs.push(Nurbs::of(&bs)?);
-        }
+        let ([n0, n1], mut defs) = certificate_faces(k, faces, self.order, law.is_some())?;
         let any_defs = defs.faces.iter().any(Option::is_some);
-        let (Some(n0), Some(n1)) = (nurbs.first(), nurbs.get(1)) else {
-            return Err(SolidError::sm_err(OP));
-        };
-        let face_n = [n0, n1];
+        let face_n = [&n0, &n1];
         let leader = NurbsCurve::of(center)?;
         let target = 0.1 * tol;
         let solve_tol = |s: f64| -> Result<f64> {
@@ -1370,16 +1685,7 @@ impl GnSectionFsg {
         // smooth there as the knot allows, and a span's enclosures are taken on one side
         for (f, nf) in face_n.iter().enumerate() {
             for c in 0..2 {
-                let (kv, deg) = if c == 0 { (&nf.u, nf.p) } else { (&nf.v, nf.q) };
-                let mut inner: Vec<f64> = Vec::new();
-                let mut m = deg + 1;
-                while m + deg + 1 < kv.len() {
-                    let km = kv.get(m).copied().unwrap_or(f64::NAN);
-                    if inner.last().is_none_or(|&b| km > b) {
-                        inner.push(km);
-                    }
-                    m += 1;
-                }
+                let inner = inner_knots(nf, c);
                 let mut next: Vec<GnStation> = Vec::new();
                 for pair in stations.windows(2) {
                     k.check_cancelled(OP_CERTIFY)?;
@@ -1389,10 +1695,7 @@ impl GnSectionFsg {
                         let q = 2 * f + c;
                         let xa = param(a, q, 0, 0);
                         let xb = param(b, q, 0, 0);
-                        let margin = 1.0e-9 * (1.0 + dk.abs());
-                        let crosses = (xa < dk - margin && xb > dk + margin)
-                            || (xa > dk + margin && xb < dk - margin);
-                        if !crosses {
+                        if !crosses_knot(xa, xb, dk) {
                             continue;
                         }
                         // the parameter where that foot is on the knot line: the secant,
@@ -1489,23 +1792,12 @@ impl GnSectionFsg {
         // their range (a little wider: the stations put in later lie between these)
         let n = self.order;
         let rr = r[0] * r[1];
-        let mut vary = GnVarying {
-            n,
-            rr,
-            cells: GnAreaCells::default(),
-        };
         if equal_area {
-            let mut w_lo = f64::INFINITY;
-            let mut w_hi = f64::NEG_INFINITY;
             for st in &mut stations {
                 gn_station_thumbweight(k, n, rr, st)?;
-                w_lo = smin(w_lo, st.w);
-                w_hi = smax(w_hi, st.w);
             }
-            let pad = 0.05 * (w_hi - w_lo) + 1.0e-6 * (1.0 + smax(w_lo.abs(), w_hi.abs()));
-            vary.cells
-                .init(n, w_lo - pad, smin(w_hi + pad, 0.5 * (1.0 + w_hi)), 64);
         }
+        let mut vary = varying(n, rr, &stations, equal_area);
         let mut bounds = vec![-1.0_f64; stations.len().saturating_sub(1)];
         loop {
             let mut all = true;

@@ -11,6 +11,14 @@
 //! the fork's capi shell case 5eb43a1 (a box rounded r 3, shelled 2 in: each corner face
 //! on the sphere of radius 3 about its ball's centre and its offset on the concentric one
 //! of radius 1), checked here in closed form on the patch itself.
+//!
+//! smlib#102 (the fork's bc814a5, solidcore#2357): a box rounded all round keeps its eight
+//! ball patches, each with its sphere bit for bit, through the B-rep data the flat arrays
+//! are made from and read into (`SmBrepData::FromBrep`, `MakeTopologyFromData`) and through
+//! the B-rep file; a net and its definition from data are a patch only when
+//! `IsOnSphere` certifies them (the capi import); and the box shells in and out after
+//! either trip, its volume in closed form. With the patches' definitions dropped (the
+//! arrays before bc814a5 wrote a bare NURBS) the shell 2 in fails.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -20,22 +28,29 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::error::SolidError;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::nurbs::b_spline_curve::p2::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{get_edges, get_faces};
-use solidcore::surface::ball_patch::{BallPatch, BALL_PATCH_TYPE};
+use solidcore::surface::ball_patch::{BallPatch, BALL_PATCH_TYPE, ON_SPHERE_REL_TOL};
 use solidcore::surface::surface::p2::{SurfaceKind, B_SPLINE_SURFACE_TYPE};
 use solidcore::surface::surface::Surface;
+use solidcore::topology::api_files::{read_brep_from_file, write_brep_to_file};
+use solidcore::topology::brep::p10::{make_topology_from_data, MakeTopologyOptions, TopologyEnv};
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use solidcore::topology::brep_data::BrepData;
+use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
 use solidcore::topology::face::p2 as face2;
 use solidcore::topology::geometry_write::write_surface;
-use solidcore::topology::{edge, EdgeId};
+use solidcore::topology::topology::NotifyRecords;
+use solidcore::topology::{edge, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
 /// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
@@ -193,10 +208,46 @@ fn an_offset_stays_concentric() {
             "{d}"
         );
         assert!(BallPatch::is_on_sphere(q.net(), CENTRE, want, 1e-12).unwrap());
-        // the weights are unchanged
-        assert_eq!(
-            q.net().control_point_net().unwrap().weights,
-            patch(&s).net().control_point_net().unwrap().weights
+        // the weights are unchanged, and the net is the patch's scaled about the centre by
+        // (R + s d) / R: bit for bit the net with its control points so set, and each to the
+        // rounding of its homogeneous storage the scaled point
+        let (from, to) = (
+            patch(&s).net().control_point_net().unwrap(),
+            q.net().control_point_net().unwrap(),
+        );
+        assert_eq!(to.weights, from.weights);
+        let scale = want / 3.0;
+        let mut scaled_net = patch(&s).net().copy();
+        for ii in 0..from.u_count {
+            for jj in 0..from.v_count {
+                let at = ii * from.v_count + jj;
+                let scaled = CENTRE + (from.points[at] - CENTRE) * scale;
+                let o = to.points[at];
+                assert!(
+                    (o - scaled).length()
+                        <= 4.0 * f64::EPSILON * (scaled - Point3::new(0.0, 0.0, 0.0)).length(),
+                    "{d}: {o:?} {scaled:?}"
+                );
+                scaled_net
+                    .set_control_point(
+                        ControlPointForm::EuclideanRational,
+                        ii,
+                        jj,
+                        scaled,
+                        from.weights[at],
+                    )
+                    .unwrap();
+            }
+        }
+        let bits = |p: &Point3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+        let want_net = scaled_net.control_point_net().unwrap();
+        assert!(
+            want_net
+                .points
+                .iter()
+                .map(bits)
+                .eq(to.points.iter().map(bits)),
+            "{d}"
         );
         assert!(!s.offset_collapses(&k, d, 1e-6).unwrap());
     }
@@ -468,4 +519,359 @@ fn the_shelled_box_keeps_its_corners_on_concentric_spheres() {
     eprintln!("found {found:?}, surfaces off their spheres {worst:.3e}");
     assert_eq!(found, [8, 8]);
     assert!(worst <= 1e-12, "{worst:e}");
+}
+
+/// The fork's capi case `shelled_ball_box_open_at_the_front` (bc814a5, smlib#102): a 40 x 30
+/// x 60 box with all twelve edges rounded r 1.5, its eight corners Balls.
+const BOX: [f64; 3] = [40.0, 30.0, 60.0];
+const BOX_R: f64 = 1.5;
+
+fn rounded_box(k: &mut Kernel) -> Brep {
+    let mut part = create_box(k, Point3::new(0.0, 0.0, 0.0), BOX[0], BOX[1], BOX[2]).unwrap();
+    let edges = get_edges(&part).unwrap();
+    assert_eq!(edges.len(), 12);
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    {
+        let mut s = FilletSession::new(k, &mut part).unwrap();
+        s.prepare_per_edge_constant_radius(k, &edges, &[BOX_R; 12], &xs, 1, 1.0)
+            .unwrap();
+        s.do_fillet(k).unwrap();
+    }
+    stitch_and_orient(k, &mut part, &StitchAndOrientOptions::default()).unwrap();
+    part
+}
+
+/// The volume of a box `dims` rounded `r` all round: its core, its faces' slabs, its
+/// edges' quarter cylinders and its corners' eighth balls.
+fn rounded_volume(dims: [f64; 3], r: f64) -> f64 {
+    let [a, b, c] = dims.map(|x| x - 2.0 * r);
+    a * b * c
+        + 2.0 * r * (a * b + b * c + a * c)
+        + std::f64::consts::PI * r * r * (a + b + c)
+        + 4.0 / 3.0 * std::f64::consts::PI * r * r * r
+}
+
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-12, &attrs).unwrap()
+}
+
+/// The B-rep's ball patches in face order.
+fn ball_patches(b: &Brep) -> Vec<BallPatch> {
+    get_faces(b)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| match face2::surface(b, f).unwrap().unwrap().kind() {
+            SurfaceKind::BallPatch(p) => Some(p.copy()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `a` and `b` the same patch bit for bit: centre, radius, control points and weights.
+fn same_bits(a: &BallPatch, b: &BallPatch) -> bool {
+    let bits = |p: Point3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+    let (na, nb) = (
+        a.net().control_point_net().unwrap(),
+        b.net().control_point_net().unwrap(),
+    );
+    bits(a.centre()) == bits(b.centre())
+        && a.radius().to_bits() == b.radius().to_bits()
+        && (na.u_count, na.v_count) == (nb.u_count, nb.v_count)
+        && na
+            .points
+            .iter()
+            .map(|&p| bits(p))
+            .eq(nb.points.iter().map(|&p| bits(p)))
+        && na
+            .weights
+            .iter()
+            .map(|w| w.to_bits())
+            .eq(nb.weights.iter().map(|w| w.to_bits()))
+}
+
+/// The writer's identities: the B-rep's own owners, no attributes.
+fn write_env<'a>(
+    store: &'a AttributeStore,
+    records: &'a NotifyRecords,
+    key_of: &'a dyn Fn(solidcore::EntityRef) -> solidcore::geom::object::ObjectRef,
+) -> FromBrepEnv<'a> {
+    FromBrepEnv {
+        attributes: store,
+        key_of,
+        records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    }
+}
+
+/// How the box is kept between commands.
+#[derive(Clone, Copy, Debug)]
+enum Trip {
+    /// In process.
+    None,
+    /// Through the B-rep data the flat arrays are made from and read into
+    /// (`SmBrepData::FromBrep`, then `MakeTopologyFromData`).
+    Data,
+    /// The same, its ball patches written as their bare nets (the arrays before bc814a5).
+    BareNets,
+    /// Through a binary B-rep file.
+    File,
+}
+
+fn round_trip(k: &mut Kernel, b: &Brep, trip: Trip) -> Brep {
+    let store = AttributeStore::new();
+    let records = NotifyRecords::new();
+    let key_of = |e| b.owner_identity(e);
+    let env = write_env(&store, &records, &key_of);
+    let fresh = Brep::new();
+    let new_key = |e| fresh.owner_identity(e);
+    let mut attributes = AttributeStore::new();
+    let mut new_records = NotifyRecords::new();
+    let mut tenv = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &new_key,
+        records: &mut new_records,
+        next_key: 1 << 50,
+    };
+    let mut out = match trip {
+        Trip::None => return b.clone(),
+        Trip::Data | Trip::BareNets => {
+            let mut data = BrepData::from_brep(b, &env, &mut Vec::new()).unwrap();
+            if matches!(trip, Trip::BareNets) {
+                for s in &mut data.surfaces {
+                    if let SurfaceKind::BallPatch(p) = s.object.kind() {
+                        s.object = Surface::from(p.net().copy());
+                    }
+                }
+            }
+            let mut out = Brep::new_with_infinite_region().unwrap();
+            make_topology_from_data(
+                k,
+                &mut out,
+                &mut data,
+                &mut tenv,
+                MakeTopologyOptions::default(),
+            )
+            .unwrap();
+            out
+        }
+        Trip::File => {
+            let bytes = write_brep_to_file(k, Some(b), &env, false).unwrap();
+            read_brep_from_file(k, Some(bytes), false, false, &mut tenv).unwrap()
+        }
+    };
+    out.refresh_cached_topology();
+    out
+}
+
+/// The box's front face, the plane y = 0.
+fn front_face(k: &Kernel, b: &Brep) -> FaceId {
+    use solidcore::topology::topology_traverser::face_edges;
+    let fronts: Vec<FaceId> = get_faces(b)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            face_edges(b, f).unwrap().iter().all(|&e| {
+                let c = edge::curve(b, e).unwrap().unwrap();
+                let ivl = edge::interval(b, e).unwrap();
+                [ivl.min(), ivl.max()]
+                    .iter()
+                    .all(|&t| c.evaluate_point(k, t).unwrap().y.abs() <= 1e-9)
+            })
+        })
+        .collect();
+    assert_eq!(fronts.len(), 1, "one front face");
+    fronts[0]
+}
+
+/// The box rounded all round keeps its eight ball patches, each bit for bit (its sphere,
+/// its net), through the B-rep data and through the file; each corner's centre is r in
+/// from its three faces and its radius r. From data, a net with its definition is the
+/// patch when certified (the capi import): the same bits again; a net cut by inserted
+/// knots is certified too; a sphere 1e-7 larger, or moved 1e-7, is refused at every corner,
+/// and 1e-9 larger at the corner by the origin (the fork's case). The certificate's
+/// tolerance grows with |C|: at the far corner (|C| 75.5) a radius 1e-9 larger is within it.
+#[test]
+fn a_box_rounded_all_round_keeps_its_balls_through_the_data_and_the_file() {
+    let mut k = all_fixes(true);
+    let part = rounded_box(&mut k);
+    let before = ball_patches(&part);
+    assert_eq!(before.len(), 8);
+    let mut corners = [false; 8];
+    for p in &before {
+        let c = [p.centre().x, p.centre().y, p.centre().z];
+        let mut at = 0;
+        for (axis, (&x, &size)) in c.iter().zip(&BOX).enumerate() {
+            if x == size - BOX_R {
+                at |= 1 << axis;
+            } else {
+                assert_eq!(x, BOX_R, "{c:?}");
+            }
+        }
+        corners[at] = true;
+        assert_eq!(p.radius(), BOX_R);
+    }
+    assert!(corners.iter().all(|&c| c), "{corners:?}");
+    for trip in [Trip::Data, Trip::File] {
+        let back = round_trip(&mut k, &part, trip);
+        let after = ball_patches(&back);
+        assert_eq!(after.len(), 8, "{trip:?}");
+        for (a, b) in before.iter().zip(&after) {
+            assert!(same_bits(a, b), "{trip:?}");
+        }
+    }
+    let refused =
+        |r: solidcore::Result<BallPatch>| matches!(r, Err(SolidError::InvalidInput { .. }));
+    let knot_cut = |p: &BallPatch| {
+        // a knot in each direction: two Bezier pieces each way
+        let mut cut = p.net().copy();
+        let at = cut.natural_uv_domain().evaluate(0.3, 0.6);
+        cut.insert_knots(
+            solidcore::nurbs::b_spline_surface::SurfParamType::U,
+            &[at.x],
+        )
+        .unwrap();
+        cut.insert_knots(
+            solidcore::nurbs::b_spline_surface::SurfParamType::V,
+            &[at.y],
+        )
+        .unwrap();
+        cut
+    };
+    for p in &before {
+        let (c, r) = (p.centre(), p.radius());
+        let rebuilt = BallPatch::create_certified(p.net(), c, r).unwrap();
+        assert!(same_bits(&rebuilt, p));
+        assert!(BallPatch::create_certified(&knot_cut(p), c, r).is_ok());
+        // the certificate's tolerance is 1e-12 of ((R + |C|) max W)^2: at every corner a
+        // sphere 1e-7 larger, or moved 1e-7, is refused
+        assert!(refused(BallPatch::create_certified(
+            p.net(),
+            c,
+            r * (1.0 + 1e-7)
+        )));
+        assert!(refused(BallPatch::create_certified(
+            p.net(),
+            c + Vec3::new(0.0, 1e-7, 0.0),
+            r
+        )));
+        for bad in [0.0, -r, f64::NAN] {
+            assert!(
+                refused(BallPatch::create_certified(p.net(), c, bad)),
+                "{bad}"
+            );
+        }
+    }
+    // the fork's case: at the corner by the origin a sphere 1e-9 larger is refused, for the
+    // net and for the net cut by knots
+    let origin = before
+        .iter()
+        .find(|p| p.centre() == Point3::new(BOX_R, BOX_R, BOX_R))
+        .unwrap();
+    let r9 = origin.radius() * (1.0 + 1e-9);
+    assert!(refused(BallPatch::create_certified(
+        origin.net(),
+        origin.centre(),
+        r9
+    )));
+    assert!(
+        !BallPatch::is_on_sphere(&knot_cut(origin), origin.centre(), r9, ON_SPHERE_REL_TOL)
+            .unwrap()
+    );
+    // a bilinear net is on no sphere
+    let flat = BSplineSurface::create_bilinear_surface(
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+    )
+    .unwrap();
+    assert!(refused(BallPatch::create_certified(&flat, CENTRE, 3.0)));
+}
+
+/// The box rounded all round shells 2 in, open at the front (the fork's case) and closed,
+/// and 2 out, closed, in process and after each trip, its volume in closed form. The rounds
+/// and balls, thinner than the wall, have no inward offset: the cavity is the sharp box.
+/// Outward, the wall is the box rounded r + 2 about the same core less the box. 2 in, each
+/// corner's offset collapses (r 1.5 - 2): the face use's offset asks the patch first (the
+/// fork's 758829c), where it was made and refused, and the shell failed even in process.
+/// With its ball patches written as bare nets the corners' offsets no longer collapse and
+/// the shell 2 in fails (1001 here, 1034 in the fork).
+#[test]
+fn a_box_rounded_all_round_shells_in_and_out_after_a_round_trip() {
+    use solidcore::offset::offset_executive::p2::{shell_brep_simple, OffsetOptions, ShellOptions};
+    let t = 2.0;
+    let [dx, dy, dz] = BOX;
+    let rounded = rounded_volume(BOX, BOX_R);
+    let cases = [
+        (
+            -t,
+            true,
+            rounded - (dx - 2.0 * t) * (dz - 2.0 * t) * (dy - t),
+        ),
+        (
+            -t,
+            false,
+            rounded - (dx - 2.0 * t) * (dy - 2.0 * t) * (dz - 2.0 * t),
+        ),
+        (
+            t,
+            false,
+            rounded_volume(BOX.map(|x| x + 2.0 * t), BOX_R + t) - rounded,
+        ),
+    ];
+    let options = |distance| ShellOptions {
+        offset: OffsetOptions {
+            distance,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: false,
+    };
+    let mut k = all_fixes(true);
+    let part = rounded_box(&mut k);
+    // every shell in process; after the data the fork's and the outward one; after the file
+    // the fork's (each a debug-build minute or more)
+    for (trip, which) in [
+        (Trip::None, &[0, 1, 2][..]),
+        (Trip::Data, &[0, 2][..]),
+        (Trip::File, &[0][..]),
+    ] {
+        let body = round_trip(&mut k, &part, trip);
+        for &(d, open, want) in which.iter().map(|&i| &cases[i]) {
+            let faces = if open {
+                vec![front_face(&k, &body)]
+            } else {
+                Vec::new()
+            };
+            let mut shell = shell_brep_simple(&mut k, &body, options(d), &faces)
+                .unwrap_or_else(|e| panic!("{trip:?} {d} open {open}: {e:?}"));
+            let got = volume(&k, &mut shell);
+            let rel = (got - want).abs() / want;
+            eprintln!(
+                "{trip:?}: shelled {d} open {open}: volume {got:.9}, closed form {want:.9}, {rel:.2e}"
+            );
+            assert!(
+                rel <= 1e-9,
+                "{trip:?} {d} open {open}: {got} {want} {rel:e}"
+            );
+        }
+    }
+    let bare = round_trip(&mut k, &part, Trip::BareNets);
+    assert!(ball_patches(&bare).is_empty());
+    let front = front_face(&k, &bare);
+    let got = shell_brep_simple(&mut k, &bare, options(-t), &[front]);
+    eprintln!(
+        "bare nets, shelled 2 in open at the front: {:?}",
+        got.as_ref().err()
+    );
+    assert!(got.is_err());
 }

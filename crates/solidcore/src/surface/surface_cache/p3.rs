@@ -1688,6 +1688,7 @@ mod tests {
             leader: &leader,
             seeds: [&seed, &seed],
             bound: 1e-3,
+            chamfer: None,
         };
         let pb = Surface::from(
             ProceduralBlend::create(&k, &square(0.5), &input, |_, w| w < 1.0).unwrap(),

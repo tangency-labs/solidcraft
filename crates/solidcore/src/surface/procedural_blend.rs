@@ -23,22 +23,35 @@
 //! | [`ProceduralBlend::evaluate_definition`]     | `EvaluateDefinition` ([`crate::blend::fillet_section::definition`]) |
 //! | [`PROCEDURAL_BLEND_TYPE`], [`BLEND_MAX_DEPTH`] | `SmProceduralBlend_TYPE`, `SM_BLEND_MAX_DEPTH` |
 //! | [`NetScope`], [`NetScope::is_active`]        | `SmBlendNetScope`, `IsActive`                |
+//! | [`ProceduralBlend::recertify`], [`recertify_faces`] | not in the fork (#2388; the Ball's `SmBallPatch::IsOnSphere` is its counterpart) |
+//! | [`record`], [`convert`]                      | not in the fork (#2388: the definition as plain data) |
+//! | [`chamfer`], order 0                         | not in the fork (#2486: a chamfer, the chord, its sizes kept) |
 //! | [`BlendCounts`]                              | `SmBlendCounts` (`GetCounts`, `ResetCounts` on [`crate::kernel::Kernel`]) |
 //!
 //! Deviations:
-//! - **Kernel state.** The fork's `thread_local` net-scope depth, its process-wide
-//!   evaluation counts and its serial counter are fields of [`crate::kernel::Kernel`]
-//!   (`blend_net_scope`, `blend_counts`, `blend_last_serial`). They are `Cell`s: the
-//!   evaluators that read the scope and count their work take `&Kernel` (every surface
-//!   evaluation does), so they cannot take `&mut Kernel`. A `Cell` keeps the kernel
-//!   `Send`, and the values are deterministic (one kernel, one thread at a time).
+//! - **Kernel state.** The fork's `thread_local` net-scope depth and its process-wide
+//!   evaluation counts are fields of [`crate::kernel::Kernel`] (`blend_net_scope`,
+//!   `blend_counts`). They are `Cell`s: the evaluators that read the scope and count their
+//!   work take `&Kernel` (every surface evaluation does), so they cannot take
+//!   `&mut Kernel`. A `Cell` keeps the kernel `Send`, and the values are deterministic
+//!   (one kernel, one thread at a time).
+//! - **Identity.** The fork's serial (`m_lSerial`, from the process-wide `s_lLastSerial`)
+//!   is a [`DefinitionIdentity`] the definition holds, compared by identity: unique
+//!   among every definition alive in any kernel, so the station memo of one kernel never
+//!   takes the station of a definition another kernel (another thread) made (#2388).
 //! - **Ownership.** The supports, the leader, the seeds and the law are owned values, not
 //!   pointers; a copy is a deep copy, as the fork's `CopyDefinition`.
 //! - **Nesting.** A support may itself be a procedural blend, at most
 //!   [`BLEND_MAX_DEPTH`] deep (the fork's cap, checked at [`ProceduralBlend::create`]),
 //!   so every walk over the supports is bounded by 3.
 
+pub mod chamfer;
+pub mod convert;
+pub mod exact;
+pub mod record;
+
 use std::cell::Cell;
+use std::sync::Arc;
 
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::curve::curve::{Curve, CurveKind};
@@ -57,6 +70,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use chamfer::{ChamferDefinition, ChamferSize};
 
 const OP_CREATE: &str = "surface::procedural_blend::ProceduralBlend::create";
 const OP_EVAL: &str = "surface::procedural_blend::ProceduralBlend::evaluate";
@@ -64,6 +78,7 @@ const OP_EVAL_SIMPLE: &str = "surface::procedural_blend::ProceduralBlend::evalua
 const OP_REPARAM: &str = "surface::procedural_blend::ProceduralBlend::reparameterize";
 const OP_TRANSFORM: &str = "surface::procedural_blend::ProceduralBlend::transform";
 const OP_READ: &str = "surface::procedural_blend::ProceduralBlend::read_from_db";
+const OP_RECERTIFY: &str = "surface::procedural_blend::recertify_faces";
 
 /// `SURF_BASE_TYPE` (`SmTypes.h`).
 const SURF_BASE_TYPE: i64 = 15000;
@@ -77,6 +92,14 @@ pub const BLEND_MAX_DEPTH: u32 = 3;
 
 /// `SM_GN_MAX_ORDER`: the highest section order of a definition.
 const MAX_ORDER: u32 = 4;
+
+/// Validates a section order and thumbweight for a definition: the chord (0, not the
+/// fork's, #2486), the ball's circle (1), or a G^n section (2 to 4) whose thumbweight
+/// [`GnSectionFsg::is_valid`] takes.
+#[must_use]
+pub fn order_is_valid(order: u32, thumbweight: f64) -> bool {
+    order <= 1 || GnSectionFsg::is_valid(order as usize, thumbweight)
+}
 
 /// `SmBlendCounts`: the work the definitions of a kernel's procedural blends did, machine
 /// independent (unlike timings). Diagnostics only: no result reads them.
@@ -131,8 +154,15 @@ impl Drop for NetScope<'_> {
     }
 }
 
+/// The identity of a definition for the station memo (the fork's `m_lSerial`): a
+/// definition made, copied or moved takes a new one, and two are the same only when they
+/// are one allocation ([`Arc::ptr_eq`]). The memo holds one while it keeps a station, so
+/// an identity is never reused while a station is kept for it.
+#[derive(Debug, Default)]
+pub struct DefinitionIdentity;
+
 /// A blend's definition (the members of `SmProceduralBlend` past its net). A clone
-/// keeps the serial: it is the same definition (the fork's copy constructor renews it,
+/// keeps the identity: it is the same definition (the fork's copy constructor renews it,
 /// which only matters once one of the two moves, and every move here renews).
 #[derive(Debug, Clone)]
 pub struct BlendDefinition {
@@ -144,7 +174,8 @@ pub struct BlendDefinition {
     pub(crate) offsets: [f64; 2],
     /// `m_pLaw`: the radius r(s) as the x of a curve over the leader's parameter, or none.
     pub(crate) law: Option<BSplineCurve>,
-    /// `m_lOrder`: the section's order n, 1 to 4.
+    /// `m_lOrder`: the section's order n, 0 to 4 (0 the chord, a chamfer: not the fork's,
+    /// #2486).
     pub(crate) order: u32,
     /// `m_dThumbweight`: n >= 2, the G^n section's thumbweight rule (0 for n = 1).
     pub(crate) thumbweight: f64,
@@ -154,6 +185,9 @@ pub struct BlendDefinition {
     pub(crate) seeds: [BSplineCurve; 2],
     /// `m_dBound`: the net's certified distance from the definition, > 0.
     pub(crate) bound: f64,
+    /// A chamfer's sizes (order 0 only; not the fork's, #2486): what its offsets were
+    /// asked as.
+    pub(crate) chamfer: Option<ChamferDefinition>,
     /// `m_adA`: `(s, t) = (a[0] + b[0] p, a[1] + b[1] q)`.
     pub(crate) map_a: [f64; 2],
     /// `m_adB`.
@@ -161,8 +195,8 @@ pub struct BlendDefinition {
     /// `m_bSwapped`: `(p, q)` is `(v, u)`.
     pub(crate) swapped: bool,
     /// `m_lSerial`: the definition's identity for the station memo, new whenever the
-    /// definition is made or moved (`Renew`), never reused.
-    pub(crate) serial: u64,
+    /// definition is made or moved (`Renew`), never reused while it is held.
+    pub(crate) identity: Arc<DefinitionIdentity>,
 }
 
 /// The inputs of [`ProceduralBlend::create`] (`SmProceduralBlend::Create`'s arguments).
@@ -186,6 +220,8 @@ pub struct BlendDefinitionInput<'a> {
     pub seeds: [&'a BSplineCurve; 2],
     /// `dBound`.
     pub bound: f64,
+    /// A chamfer's sizes: present exactly for order 0, its offsets `offsets` (#2486).
+    pub chamfer: Option<ChamferDefinition>,
 }
 
 /// `SmProceduralBlend`: a blend of order n between two surfaces, by its definition, on
@@ -221,6 +257,37 @@ fn copy_curve(curve: &BSplineCurve) -> BSplineCurve {
     let mut copy = curve.copy();
     copy.set_out_of_bounds_enabled(true);
     copy
+}
+
+/// A chamfer's sizes as the database holds them (#2486): kind 0 two distances, 1 a
+/// distance and an angle, 2 a chord (its one size the first), then the wedge.
+fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
+    let [a, b, wedge] = sizes;
+    let size = match kind {
+        0 => ChamferSize::Distances([a, b]),
+        1 => ChamferSize::DistanceAngle {
+            distance: a,
+            angle: b,
+        },
+        2 => ChamferSize::Chord(a),
+        _ => {
+            return Err(SolidError::invalid_input(
+                OP_READ,
+                "a chamfer's sizes are two distances, a distance and an angle, or a chord",
+            ))
+        }
+    };
+    ChamferDefinition::new(size, wedge)
+}
+
+/// The database's numbers of a chamfer's sizes ([`chamfer_of_db`]'s inverse).
+#[must_use]
+pub fn chamfer_to_db(c: &ChamferDefinition) -> (i64, [f64; 3]) {
+    match c.size {
+        ChamferSize::Distances([a, b]) => (0, [a, b, c.wedge]),
+        ChamferSize::DistanceAngle { distance, angle } => (1, [distance, angle, c.wedge]),
+        ChamferSize::Chord(l) => (2, [l, 0.0, c.wedge]),
+    }
 }
 
 /// `GetDepth` of a support: 1 more than a procedural support's depth, else 0.
@@ -263,11 +330,9 @@ pub(crate) fn count_area_root(k: &Kernel) {
     k.blend_counts.set(c);
 }
 
-/// `++s_lLastSerial`: a new serial from the kernel.
-pub(crate) fn next_serial(k: &Kernel) -> u64 {
-    let serial = k.blend_last_serial.get().wrapping_add(1);
-    k.blend_last_serial.set(serial);
-    serial
+/// `++s_lLastSerial`: a new identity.
+fn new_identity() -> Arc<DefinitionIdentity> {
+    Arc::new(DefinitionIdentity)
 }
 
 impl ProceduralBlend {
@@ -287,10 +352,22 @@ impl ProceduralBlend {
         thumbweight_is_valid: impl Fn(u32, f64) -> bool,
     ) -> Result<Self> {
         let order = input.order;
-        if !(1..=MAX_ORDER).contains(&order) {
+        if order > MAX_ORDER {
             return Err(SolidError::invalid_input(
                 OP_CREATE,
-                "a section's order is 1 to 4",
+                "a section's order is 0 to 4",
+            ));
+        }
+        // the chord is a chamfer: its sizes, of a constant pair of offsets (#2486)
+        let chamfer_held = match (&input.chamfer, order, input.law) {
+            (Some(c), 0, None) => c.holds(input.offsets),
+            (None, 1..=MAX_ORDER, _) => true,
+            _ => false,
+        };
+        if !chamfer_held {
+            return Err(SolidError::invalid_input(
+                OP_CREATE,
+                "a chord is a chamfer of two offsets its sizes give, and only a chord is",
             ));
         }
         if order >= 2 && (input.law.is_some() || !thumbweight_is_valid(order, input.thumbweight)) {
@@ -359,10 +436,11 @@ impl ProceduralBlend {
             leader: copy_curve(input.leader),
             seeds: [copy_curve(seed0), copy_curve(seed1)],
             bound: input.bound,
+            chamfer: input.chamfer,
             map_a: [0.0, 0.0],
             map_b: [1.0, 1.0],
             swapped: false,
-            serial: next_serial(k),
+            identity: new_identity(),
         };
         Ok(Self {
             net: net.copy(),
@@ -407,10 +485,16 @@ impl ProceduralBlend {
         self.def.bound
     }
 
-    /// `GetOrder`: the section's order n, 1 to 4.
+    /// `GetOrder`: the section's order n, 0 (the chord, #2486) to 4.
     #[must_use]
     pub const fn order(&self) -> u32 {
         self.def.order
+    }
+
+    /// A chamfer's sizes (order 0, #2486): how its offsets were asked for.
+    #[must_use]
+    pub const fn chamfer(&self) -> Option<&ChamferDefinition> {
+        self.def.chamfer.as_ref()
     }
 
     /// `GetSupport(i)`: the surface S1 (0) or S2 (1) the ball rolls on.
@@ -521,6 +605,7 @@ impl ProceduralBlend {
             && a.order == b.order
             && a.thumbweight == b.thumbweight
             && a.bound == b.bound
+            && a.chamfer == b.chamfer
             && a.swapped == b.swapped)
     }
 
@@ -554,20 +639,20 @@ impl ProceduralBlend {
         self.net.is_kind_of(t)
     }
 
-    /// `Renew`: a new serial, so the station memo never takes another definition's.
-    pub(crate) fn renew(&mut self, k: &Kernel) {
-        self.def.serial = next_serial(k);
+    /// `Renew`: a new identity, so the station memo never takes another definition's.
+    pub(crate) fn renew(&mut self) {
+        self.def.identity = new_identity();
     }
 
     /// `Copy` (the copy constructor and `CopyDefinition`): a deep copy whose definition
-    /// takes a new serial.
+    /// takes a new identity (the kernel, which the surfaces' copies take, is not needed).
     #[must_use]
-    pub fn copy(&self, k: &Kernel) -> Self {
+    pub fn copy(&self, _k: &Kernel) -> Self {
         let mut c = Self {
             net: self.net.copy(),
             def: self.def.clone(),
         };
-        c.renew(k);
+        c.renew();
         c
     }
 
@@ -718,6 +803,41 @@ impl ProceduralBlend {
             }
             (order as u64, swapped, has_law, values)
         };
+        // a chord's sizes (order 0, not the fork's, #2486): its kind, two sizes and wedge
+        let chamfer = if order == 0 {
+            let (kind, sizes) = if ascii {
+                let st = db
+                    .in_stream_mut()
+                    .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                let kind = st.extract_int();
+                let mut sizes = [0.0_f64; 3];
+                let mut read = true;
+                for v in &mut sizes {
+                    match st.extract_double() {
+                        Some(x) => *v = x,
+                        None => read = false,
+                    }
+                }
+                db.go_to_next_line();
+                let failed = db.in_stream().is_none_or(InputStream::fail);
+                match kind {
+                    Some(kd) if read && !failed => (i64::from(kd), sizes),
+                    // "its definition could not be read"
+                    _ => return Err(SolidError::sm_err(OP_READ)),
+                }
+            } else {
+                let kind = db.read_long()?;
+                let v = db.read_doubles(3)?;
+                let mut sizes = [0.0_f64; 3];
+                for (x, &y) in sizes.iter_mut().zip(&v) {
+                    *x = y;
+                }
+                (kind, sizes)
+            };
+            Some(chamfer_of_db(kind, sizes)?)
+        } else {
+            None
+        };
         let mut supports = Vec::new();
         for _ in 0..2 {
             if ascii {
@@ -781,6 +901,7 @@ impl ProceduralBlend {
             leader: &leader,
             seeds: [seed0, seed1],
             bound,
+            chamfer,
         };
         let mut blend = Self::create(k, &net, &input, |n, w| {
             GnSectionFsg::is_valid(n as usize, w)
@@ -789,6 +910,35 @@ impl ProceduralBlend {
         blend.def.map_b = [b0, b1];
         blend.def.swapped = swapped;
         Ok(blend)
+    }
+
+    /// Re-certifies the net against the definition (#2388): proves the net within the
+    /// definition's bound of S again, as a blend rebuilt from a record must be before it
+    /// is an operand ([`crate::blend::fillet_section::recertify`]). Returns the distance
+    /// proved, at most the bound.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`crate::blend::fillet_section::recertify::recertify`]: a net not proved
+    /// within the bound, or not a net of its definition's stations, is refused.
+    pub fn recertify(&self, k: &Kernel) -> Result<f64> {
+        crate::blend::fillet_section::recertify::recertify(k, self)
+    }
+
+    /// The floor of the bound (#2388): a forward error bound, at part scale at rounding
+    /// level, of how S and the net are computed
+    /// ([`crate::blend::fillet_section::recertify::precision_floor`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the supports' and the net's NURBS data.
+    pub fn precision_floor(&self, k: &Kernel) -> Result<f64> {
+        crate::blend::fillet_section::recertify::precision_floor(
+            k,
+            self.supports(),
+            self.def.order,
+            &self.net,
+        )
     }
 
     /// `Evaluate`: the definition's partials at `uv` in the surface's parameters (the
@@ -1022,14 +1172,15 @@ impl ProceduralBlend {
         Ok(())
     }
 
-    /// `SplitAt`: the net's pieces, each with this definition and map (a new serial).
+    /// `SplitAt`: the net's pieces, each with this definition and map (a new identity; the
+    /// kernel, which the surfaces' splits take, is not needed).
     ///
     /// # Errors
     ///
     /// Those of the net's.
     pub fn split_at(
         &self,
-        k: &Kernel,
+        _k: &Kernel,
         param: f64,
         surf_param: SurfParamType,
     ) -> Result<(Self, Self)> {
@@ -1038,17 +1189,37 @@ impl ProceduralBlend {
             net: l,
             def: self.def.clone(),
         };
-        left.renew(k);
+        left.renew();
         let mut right = Self {
             net: r,
             def: self.def.clone(),
         };
-        right.renew(k);
+        right.renew();
         Ok((left, right))
     }
 
+    /// The blend moved by `by` (its supports, leader and net), its bound as it is: the
+    /// blend in another frame ([`crate::blend::fillet_section::recertify`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the supports', the leader's and the net's transforms.
+    pub(crate) fn translated(&self, k: &Kernel, by: Vec3) -> Result<Self> {
+        let place = Axis2Placement::from_stored(by, Vec3::X, Vec3::Y);
+        let mut moved = self.clone();
+        for support in &mut moved.def.supports {
+            support.transform_at_depth(k, &place, None, 1)?;
+        }
+        moved.def.leader.transform(&place, None)?;
+        moved.net.transform(&place, None)?;
+        moved.renew();
+        Ok(moved)
+    }
+
     /// `Transform`: a rigid motion with a uniform scale; the supports, the leader and
-    /// the net move alike, the radius and the bound scale.
+    /// the net move alike, the radius and the bound scale, and the bound takes in the
+    /// motion's rounding where the round now lies (#2388; the bound is of the round's own
+    /// frame, which moves with it).
     ///
     /// # Errors
     ///
@@ -1081,15 +1252,137 @@ impl ProceduralBlend {
         for r in &mut self.def.offsets {
             *r *= factor;
         }
-        self.def.bound *= factor;
-        self.renew(k);
-        self.net.transform(rotate_n_move, scale)
+        self.def.chamfer = self.def.chamfer.map(|c| c.scaled(factor));
+        self.renew();
+        self.net.transform(rotate_n_move, scale)?;
+        // (#2388) the bound is taken in the round's own frame, which moves with it: it
+        // scales, and takes in the motion's own rounding where the round now lies
+        self.def.bound = self.def.bound * factor
+            + crate::blend::fillet_section::recertify::transform_rounding(&self.net)?;
+        Ok(())
+    }
+}
+
+/// Re-certifies every face of `b` whose surface is a blend by its definition
+/// ([`ProceduralBlend::recertify`]), as a body rebuilt from a record must be before its
+/// faces are operands.
+///
+/// # Errors
+///
+/// `SM_ERR` naming the first face whose net is not proved within its bound of its
+/// definition (or is not a net of its definition's stations); those of the face lookups.
+pub fn recertify_faces(k: &Kernel, b: &crate::topology::Brep) -> Result<()> {
+    for &f in b.face_list() {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        if let Some(blend) = surface.procedural_blend() {
+            blend.recertify(k).map_err(|e| {
+                // (a cancel ends the operation; it is no refusal of the face)
+                if e.is_cancelled() {
+                    return e;
+                }
+                SolidError::Upstream {
+                    operation: OP_RECERTIFY,
+                    code: crate::error::SM_ERR,
+                    entity: Some(crate::error::EntityRef::Face(f)),
+                }
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// A blend face's net (#2485): a certified B-spline approximation of its definition, or
+/// its exact surface.
+#[derive(Debug, Clone, Copy)]
+pub enum BlendNet<'a> {
+    /// A procedural blend's net, within its bound of the definition.
+    Approx(&'a BSplineSurface),
+    /// An exact round's surface, which is its definition (bound 0).
+    Exact(&'a Surface),
+}
+
+/// A blend face by its definition (#2485), whatever its surface's kind: a procedural blend
+/// ([`SurfaceKind::ProceduralBlend`]), or a round of an exact class, which keeps its
+/// analytic kind and carries its definition ([`exact::ExactRound`]). Every blend face is
+/// reached through [`Surface::procedural_blend`], not by matching its kind.
+#[derive(Debug, Clone, Copy)]
+pub enum BlendRef<'a> {
+    /// A procedural blend.
+    Procedural(&'a ProceduralBlend),
+    /// An exact round and its surface.
+    Exact {
+        /// The definition.
+        round: &'a exact::ExactRound,
+        /// The surface, its net.
+        net: &'a Surface,
+    },
+}
+
+impl<'a> BlendRef<'a> {
+    /// The net.
+    #[must_use]
+    pub const fn net(&self) -> BlendNet<'a> {
+        match *self {
+            Self::Procedural(p) => BlendNet::Approx(&p.net),
+            Self::Exact { net, .. } => BlendNet::Exact(net),
+        }
+    }
+
+    /// The net's certified distance from the definition (0 for an exact round).
+    #[must_use]
+    pub const fn bound(&self) -> f64 {
+        match *self {
+            Self::Procedural(p) => p.def.bound,
+            Self::Exact { round, .. } => round.bound(),
+        }
+    }
+
+    /// The section's order.
+    #[must_use]
+    pub const fn order(&self) -> u32 {
+        match *self {
+            Self::Procedural(p) => p.def.order,
+            Self::Exact { round, .. } => round.order(),
+        }
+    }
+
+    /// The surface S1 (0) or S2 (1) the ball rolls on.
+    #[must_use]
+    pub fn support(&self, i: usize) -> Option<&'a Surface> {
+        match *self {
+            Self::Procedural(p) => p.support(i),
+            Self::Exact { round, .. } => round.support(i),
+        }
+    }
+
+    /// The exact round's definition, for an exact round.
+    #[must_use]
+    pub const fn exact(&self) -> Option<&'a exact::ExactRound> {
+        match *self {
+            Self::Procedural(_) => None,
+            Self::Exact { round, .. } => Some(round),
+        }
+    }
+
+    /// Re-certifies the net against the definition ([`ProceduralBlend::recertify`],
+    /// [`exact::ExactRound::recertify`]): the distance proved.
+    ///
+    /// # Errors
+    ///
+    /// Those of the two re-certifications.
+    pub fn recertify(&self, k: &Kernel) -> Result<f64> {
+        match *self {
+            Self::Procedural(p) => p.recertify(k),
+            Self::Exact { round, net } => round.recertify(k, net),
+        }
     }
 }
 
 impl BlendDefinition {
     /// This definition on the given supports (copies that copy the supports their own
-    /// way), the serial kept.
+    /// way), the identity kept.
     fn with_supports(&self, supports: [Box<Surface>; 2]) -> Self {
         Self {
             supports,
@@ -1101,10 +1394,11 @@ impl BlendDefinition {
             leader: self.leader.clone(),
             seeds: self.seeds.clone(),
             bound: self.bound,
+            chamfer: self.chamfer,
             map_a: self.map_a,
             map_b: self.map_b,
             swapped: self.swapped,
-            serial: self.serial,
+            identity: Arc::clone(&self.identity),
         }
     }
 }
@@ -1170,6 +1464,7 @@ mod tests {
             leader: &leader,
             seeds: [&seed0, &seed1],
             bound,
+            chamfer: None,
         };
         ProceduralBlend::create(k, &square(0.5), &input, |_, w| w < 1.0)
     }
@@ -1186,6 +1481,59 @@ mod tests {
         assert!(blend(&k, 1, [1.0, 1.0], [f64::NAN, f64::NAN], 1e-6).is_err());
         assert!(blend(&k, 1, [1.0, 1.0], [2.0, 2.0], 0.0).is_err());
         assert!(blend(&k, 1, [1.0, 1.0], [2.0, 2.0], f64::INFINITY).is_err());
+    }
+
+    fn chord(
+        k: &Kernel,
+        order: u32,
+        offsets: [f64; 2],
+        chamfer: Option<ChamferDefinition>,
+    ) -> Result<ProceduralBlend> {
+        let s0 = Surface::from(square(0.0));
+        let s1 = Surface::from(square(1.0));
+        let (leader, seed0, seed1) = (line(), line(), line());
+        let input = BlendDefinitionInput {
+            supports: [&s0, &s1],
+            sides: [1.0, 1.0],
+            offsets,
+            law: None,
+            order,
+            thumbweight: 0.0,
+            leader: &leader,
+            seeds: [&seed0, &seed1],
+            bound: 1e-6,
+            chamfer,
+        };
+        ProceduralBlend::create(k, &square(0.5), &input, |_, w| w < 1.0)
+    }
+
+    /// The chord (#2486) is a chamfer, its sizes those of its offsets; nothing else is.
+    #[test]
+    fn a_chord_is_a_chamfer_of_its_offsets() {
+        let k = Kernel::default();
+        let right = 0.5 * crate::math::PI;
+        let c = ChamferDefinition::new(ChamferSize::Distances([1.0, 2.0]), right).ok();
+        let pb = chord(&k, 0, [2.0, 1.0], c).unwrap();
+        assert_eq!(pb.order(), 0);
+        assert_eq!(pb.chamfer(), c.as_ref());
+        // its sizes kept through a scale
+        let mut scaled = pb.clone();
+        scaled
+            .transform_at_depth(
+                &k,
+                &Axis2Placement::default(),
+                Some(Vec3::new(2.0, 2.0, 2.0)),
+                0,
+            )
+            .unwrap();
+        let sc = scaled.chamfer().copied();
+        assert_eq!(sc.map(|c| c.size), Some(ChamferSize::Distances([2.0, 4.0])));
+        assert!(sc.is_some_and(|c| c.holds(scaled.def.offsets)));
+        // a chord without sizes, sizes off its offsets, a chamfer of another order
+        assert!(chord(&k, 0, [2.0, 1.0], None).is_err());
+        assert!(chord(&k, 0, [1.0, 2.0], c).is_err());
+        assert!(chord(&k, 1, [2.0, 1.0], c).is_err());
+        assert!(chord(&k, 2, [2.0, 1.0], c).is_err());
     }
 
     #[test]
@@ -1205,6 +1553,7 @@ mod tests {
                 leader: &leader,
                 seeds: [&seed0, &seed1],
                 bound: 1e-6,
+                chamfer: None,
             };
             let made = ProceduralBlend::create(&k, &square(0.5), &input, |_, w| w < 1.0);
             if depth <= 3 {
@@ -1256,7 +1605,7 @@ mod tests {
         let k = Kernel::default();
         let b = blend(&k, 1, [1.0, 1.0], [2.0, 2.0], 1e-6).unwrap();
         let c = b.copy(&k);
-        assert_ne!(b.def.serial, c.def.serial);
+        assert!(!Arc::ptr_eq(&b.def.identity, &c.def.identity));
         assert!(b.same_definition(&k, &c).unwrap());
         let (l, r) = b.split_at(&k, 0.5, SurfParamType::U).unwrap();
         assert_eq!(

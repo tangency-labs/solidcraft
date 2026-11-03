@@ -13,6 +13,7 @@ pub mod ball_patch;
 pub mod bend_volume;
 pub mod cone;
 pub mod curve_bounded_surface;
+pub mod implicit;
 pub mod offset_surface;
 pub mod plane;
 pub mod procedural_blend;

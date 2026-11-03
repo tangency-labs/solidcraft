@@ -289,7 +289,10 @@ use crate::surface::cone::Cone;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::plane::Plane;
-use crate::surface::procedural_blend::{NetScope, ProceduralBlend, PROCEDURAL_BLEND_TYPE};
+use crate::surface::procedural_blend::exact::ExactRound;
+use crate::surface::procedural_blend::{
+    BlendRef, NetScope, ProceduralBlend, PROCEDURAL_BLEND_TYPE,
+};
 use crate::surface::sphere::Sphere;
 use crate::surface::srf_in_volume::SrfInVolume;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
@@ -430,6 +433,11 @@ pub struct Surface {
     /// Not upstream: the memo of the natural boundary curves `CoincidenceCheck` makes
     /// (`BoundaryMemo`); a copy starts an empty one, an edit replaces it.
     boundary_memo: BoundaryMemo,
+    /// Not upstream (#2485): a round of an exact class, this surface its net, keeps its
+    /// definition here ([`Surface::procedural_blend`]). A copy, a piece, an extension and
+    /// an edit of the parametrization carry it (the definition is S, a set); a motion
+    /// moves it; an evaluation copy, which only evaluates, has none.
+    exact_round: Option<Box<ExactRound>>,
 }
 
 /// What a surface's cache slot (`SmAObject::m_pCacheObj`) holds, as far as a reader of
@@ -615,6 +623,7 @@ impl Clone for Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
+            exact_round: self.exact_round.clone(),
         };
         s.update_owned_bases();
         s
@@ -908,6 +917,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
+            exact_round: None,
         })
     }
 
@@ -986,6 +996,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
+            exact_round: self.exact_round.clone(),
         }
     }
 }
@@ -1150,7 +1161,34 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
+            exact_round: None,
         }
+    }
+
+    /// The blend this surface is by its definition (#2485): a procedural blend, or a round
+    /// of an exact class whose definition this surface (its net) carries. Every blend face
+    /// is reached here, whatever its kind; `None` for a surface that is no blend's.
+    #[must_use]
+    pub fn procedural_blend(&self) -> Option<BlendRef<'_>> {
+        if let Some(round) = self.exact_round.as_deref() {
+            return Some(BlendRef::Exact { round, net: self });
+        }
+        match self.kind() {
+            SurfaceKind::ProceduralBlend(p) => Some(BlendRef::Procedural(p)),
+            _ => None,
+        }
+    }
+
+    /// Keeps `round` as the definition of this surface, its exact net (#2485).
+    pub(crate) fn set_exact_round(&mut self, round: Option<ExactRound>) {
+        self.exact_round = round.map(Box::new);
+    }
+
+    /// This surface's exact round's definition carried onto `piece`, a piece, extension or
+    /// copy of it (#2485).
+    fn carry_exact_round(&self, mut piece: Self) -> Self {
+        piece.exact_round.clone_from(&self.exact_round);
+        piece
     }
 
     /// The state of this surface's cache slot (see [`CacheTreeState`]), shared with its
@@ -1742,6 +1780,11 @@ impl Surface {
     /// [`MAX_GEOMETRY_NESTING`]; none
     /// for the other ported kinds (the base default is `SM_ERR`).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
+        self.copy_of_kind(k).map(|c| self.carry_exact_round(c))
+    }
+
+    /// [`Surface::copy`] of the kind alone.
+    fn copy_of_kind(&self, k: &Kernel) -> Result<Self> {
         self.check_evaluation_copy_depth(0)?;
         self.make_revolution_nurb_for_copy(k)?;
         match self.kind() {
@@ -1784,6 +1827,12 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is [`Surface::copy`]).
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Self> {
+        self.copy_and_add_analytics_of_kind(k)
+            .map(|c| self.carry_exact_round(c))
+    }
+
+    /// [`Surface::copy_and_add_analytics`] of the kind alone.
+    fn copy_and_add_analytics_of_kind(&self, k: &Kernel) -> Result<Self> {
         self.check_evaluation_copy_depth(0)?;
         self.make_revolution_nurb_for_copy(k)?;
         match self.kind() {
@@ -3000,6 +3049,30 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn reverse(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
+        // (#2485) an exact round's leader map follows the net's reversal, w = lo + hi - w'
+        let before = self.exact_map_domain(k)?;
+        self.reverse_kind(k, param)?;
+        if let (Some(round), Some(d)) = (self.exact_round.as_mut(), before) {
+            for (u, ivl) in [(true, d.u_interval()), (false, d.v_interval())] {
+                if (param == SurfParamType::U) == u || param == SurfParamType::Both {
+                    round.reparametrize_map(u, ivl.min() + ivl.max(), -1.0);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The natural domain an exact round's leader map is read against, before an edit of
+    /// the parametrisation (`None` for a surface that is no exact round).
+    fn exact_map_domain(&self, k: &Kernel) -> Result<Option<Extent2d>> {
+        if self.exact_round.is_none() {
+            return Ok(None);
+        }
+        self.natural_uv_domain_with_nurb(k).map(Some)
+    }
+
+    /// [`Surface::reverse`] of the kind alone.
+    fn reverse_kind(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
@@ -3066,6 +3139,23 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn reparameterize(&mut self, k: &Kernel, new_domain: &Extent2d) -> Result<()> {
+        // (#2485) an exact round's leader map follows the net's affine reparametrisation
+        let before = self.exact_map_domain(k)?;
+        self.reparameterize_kind(k, new_domain)?;
+        if let (Some(round), Some(d)) = (self.exact_round.as_mut(), before) {
+            for (u, old, new) in [
+                (true, d.u_interval(), new_domain.u_interval()),
+                (false, d.v_interval(), new_domain.v_interval()),
+            ] {
+                let beta = (old.max() - old.min()) / (new.max() - new.min());
+                round.reparametrize_map(u, old.min() - new.min() * beta, beta);
+            }
+        }
+        Ok(())
+    }
+
+    /// [`Surface::reparameterize`] of the kind alone.
+    fn reparameterize_kind(&mut self, k: &Kernel, new_domain: &Extent2d) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
@@ -3112,6 +3202,20 @@ impl Surface {
     ///
     /// Those of [`Surface::swap_uv`] and of `notify`.
     pub(crate) fn swap_uv_notifying(
+        &mut self,
+        k: &Kernel,
+        notify: &mut SurfaceEditNotify<'_>,
+    ) -> Result<()> {
+        self.swap_uv_kind_notifying(k, notify)?;
+        // (#2485) an exact round's leader map follows the swap
+        if let Some(round) = self.exact_round.as_mut() {
+            round.swap_map();
+        }
+        Ok(())
+    }
+
+    /// [`Surface::swap_uv_notifying`] of the kind alone.
+    fn swap_uv_kind_notifying(
         &mut self,
         k: &Kernel,
         notify: &mut SurfaceEditNotify<'_>,
@@ -3275,6 +3379,31 @@ impl Surface {
     ) -> Result<()> {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
+        // (#2485) an exact round's definition moves with its net; one that cannot move so
+        // (a scale that is not uniform) refuses before the net moves
+        let moved = match self.exact_round.as_deref() {
+            Some(round) => {
+                let mut moved = round.clone();
+                moved.transform(k, rotate_n_move, scale, depth)?;
+                Some(Box::new(moved))
+            }
+            None => None,
+        };
+        self.transform_kind_at_depth(k, rotate_n_move, scale, depth)?;
+        if moved.is_some() {
+            self.exact_round = moved;
+        }
+        Ok(())
+    }
+
+    /// [`Surface::transform_at_depth`] of the kind alone.
+    fn transform_kind_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::Cone(s) => s.transform(k, rotate_n_move, scale),
             SurfaceKind::Sphere(s) => s.transform(k, rotate_n_move, scale),
@@ -3383,6 +3512,18 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn split_at(
+        &self,
+        k: &Kernel,
+        param: f64,
+        surf_param: SurfParamType,
+    ) -> Result<(Self, Self)> {
+        // (#2485) each piece of an exact round is on its definition's S
+        let (l, r) = self.split_kind_at(k, param, surf_param)?;
+        Ok((self.carry_exact_round(l), self.carry_exact_round(r)))
+    }
+
+    /// [`Surface::split_at`] of the kind alone.
+    fn split_kind_at(
         &self,
         k: &Kernel,
         param: f64,
