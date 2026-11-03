@@ -163,8 +163,7 @@ fn rotated_component_disconnected_bend_reports_world_point() {
 fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     let (t, k, r, gap) = (2.0, 0.44, 2.0, 0.5);
     let mut s = Session::default();
-    // The shell's own thickness counts, not the rule's.
-    rule(&mut s, "Test", 3.0, k, r, gap);
+    rule(&mut s, "Test", t, k, r, gap);
     tray(&mut s, t);
     let out = run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
     assert!(out["warning"].is_null(), "{out}");
@@ -357,9 +356,14 @@ fn a_tapered_tray_converts_with_72_degree_walls_and_slanted_corners() {
 fn the_sheet_follows_the_solid_through_parameter_changes_undo_and_reopening() {
     let (t, k, r) = (2.0, 0.44, 2.0);
     let mut s = Session::default();
-    rule(&mut s, "Test", t, k, r, 0.5);
     run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
     run(&mut s, "parameters.add", json!({"name": "T", "expression": "2 mm"}));
+    // The stock is the parameter the shell is made with.
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Test", "thickness": "T", "k_factor": format!("{k}"), "bend_radius": "2 mm", "gap": "0.5 mm", "active": true}),
+    );
     run(&mut s, "solid.box", json!({"length": "L", "width": 60, "height": 30, "body_name": "Tray"}));
     run(&mut s, "solid.shell", json!({"faces": [[50, 30, 30]], "thickness": "T"}));
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
@@ -371,7 +375,7 @@ fn the_sheet_follows_the_solid_through_parameter_changes_undo_and_reopening() {
     assert!(same_size(flat_size(&mut s), (200.0 - 2.0 * bd(t), 120.0 - 2.0 * bd(t)), 1e-6), "{:?}", flat_size(&mut s));
     let (_, hi) = bbox(&mut s);
     assert!((hi[0] - 140.0).abs() < 1e-6, "{hi:?}");
-    // Thicker walls: the sheet takes the shell's new thickness.
+    // Thicker stock: the rule's thickness, the shell's parameter, is the sheet's.
     run(&mut s, "parameters.change", json!({"name": "T", "expression": "3 mm"}));
     assert!(s.model.results.iter().all(|x| x.error.is_none()));
     assert!((flat(&mut s)["thickness"].as_f64().unwrap_or(0.0) - 3.0).abs() < 1e-9);
@@ -513,36 +517,38 @@ fn bent_section(s: &mut Session, outer: &[(f64, f64)], t: f64, ri: f64, len: f64
     corners.iter().map(|&(.., (m, mi))| ([m.0, m.1, z], [mi.0, mi.1, z])).collect()
 }
 
-/// A bend modelled with its radius keeps it (#6748): the corner, an inside radius of one thickness,
-/// is a bend at the model's radius whatever the rule's, picked on either cylinder, from either
-/// side of the sheet. An L: a base 60 and a leg 40 to the sharp corner outside, 2 thick and 100
-/// long, its corner bent R 2 inside and R 4 outside, under a rule that bends R 3.
+/// A bend modelled with another radius than the rule's takes the rule's (#6748): the tooling makes
+/// the part. The corner, an inside radius of one thickness, is a bend of the rule's radius at the
+/// legs' virtual sharp, picked on either cylinder, from either side of the sheet. An L: a base 60
+/// and a leg 40 to the sharp corner outside, 2 thick and 100 long, its corner modelled R 2 inside
+/// and R 4 outside, under a rule that bends R 3.
 #[test]
-fn a_bend_modelled_with_its_radius_is_a_bend_of_that_radius() {
+fn a_bend_modelled_with_another_radius_takes_the_rules() {
     let (t, k, r) = (2.0, 0.5, 3.0);
-    // The outside lengths less the corner's R + T each way, and the bend on its neutral radius
-    // R + K T; from the inside, the inside lengths less R each way, the same blank.
-    let across = 60.0 + 40.0 - 2.0 * (2.0 + t) + FRAC_PI_2 * (2.0 + k * t);
-    assert!((58.0 + 38.0 - 2.0 * 2.0 + FRAC_PI_2 * (2.0 + k * t) - across).abs() < 1e-9);
+    // The outside lengths less a deduction at the rule's radius; from the inside, the inside
+    // lengths less 2 R - π/2 (R + K T), the same blank.
+    let across = 60.0 + 40.0 - deduction(FRAC_PI_2, r, t, k);
+    assert!((58.0 + 38.0 - 2.0 * r + FRAC_PI_2 * (r + k * t) - across).abs() < 1e-9);
     for (face, inner_pick) in [([30.0, 0.0, 50.0], false), ([30.0, 0.0, 50.0], true), ([30.0, 2.0, 50.0], false), ([30.0, 2.0, 50.0], true)] {
         let mut s = Session::default();
         rule(&mut s, "Test", t, k, r, 0.5);
         let (outer, inner) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], t, 2.0, 100.0)[0];
-        let solid = volume(&mut s);
         let bend = if inner_pick { inner } else { outer };
         run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": face, "bends": [bend]}));
         let f = flat(&mut s);
         let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
-        assert!(f["rolls"] == 0 && radii.len() == 1 && (radii[0] - 2.0).abs() < 1e-9, "{face:?} {bend:?}: {f}");
+        assert!(f["rolls"] == 0 && radii.len() == 1 && (radii[0] - r).abs() < 1e-9, "{face:?} {bend:?}: {f}");
         assert!(same_size(flat_size(&mut s), (across, 100.0), 1e-6), "{face:?} {bend:?}: {:?} vs {across}", flat_size(&mut s));
-        assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{face:?} {bend:?}: {} vs {solid}", volume(&mut s));
+        // K one half: the folded metal is the flat's.
+        let metal = across * 100.0 * t;
+        assert!((volume(&mut s) - metal).abs() < 1e-6 * metal, "{face:?} {bend:?}: {} vs {metal}", volume(&mut s));
     }
 }
 
 /// Whether a cylinder modelled between two planes is a bend or a roll is its inside radius in
 /// thicknesses, as DIN 6935 has the neutral fiber: short of 10^0.7 (about 5) the fiber moves
-/// toward the inside, a bend's; from there it lies halfway through the sheet, a roll's, which keeps
-/// its lines in the flat. Either way the sheet is the body.
+/// toward the inside, a bend's, bent with the rule's radius; from there it lies halfway through
+/// the sheet, a roll's, which keeps the model's radius and has its lines in the flat.
 #[test]
 fn a_modelled_corner_is_a_bend_short_of_about_five_thicknesses_and_a_roll_from_there() {
     let t = 2.0;
@@ -556,7 +562,13 @@ fn a_modelled_corner_is_a_bend_short_of_about_five_thicknesses_and_a_roll_from_t
         let (bends, rolls, lines) =
             (f["bends"].as_array().map_or(0, Vec::len), f["rolls"].as_u64().unwrap_or(0), f["roll_lines"].as_array().map_or(0, Vec::len));
         assert_eq!((bends, rolls, lines), if bend { (1, 0, 0) } else { (0, 1, 3) }, "{inside}: {f}");
-        assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{inside}: {} vs {solid}", volume(&mut s));
+        if bend {
+            // The rule's radius, as the tooling bends it.
+            assert_eq!(f["bends"][0]["radius"].as_f64(), Some(2.0), "{f}");
+        } else {
+            // A roll keeps the model's.
+            assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{inside}: {} vs {solid}", volume(&mut s));
+        }
     }
 }
 
@@ -598,32 +610,27 @@ fn a_channel_with_its_bends_modelled_folds_back_into_itself_under_its_own_radius
     assert!((volume(&mut s) - solid).abs() < 1e-3 * solid);
 }
 
-/// A rule's values follow the sheet's own thickness (#4328): an L shell 2 thick, its bend
+/// A converted shell is the rule's, as the tooling makes it (#6748): an L shell 2 thick, its bend
 /// modelled R 2 inside, converted under the default rule (2.5 thick, bends R `Thickness`) is a
-/// sheet 2 thick bent R 2, the solid unchanged; an edge flange added to it bends R 2.
+/// sheet 2.5 thick bent R 2.5 from its picked side; an edge flange added to it bends R 2.5.
 #[test]
-fn a_converted_shell_takes_its_rules_values_at_its_own_thickness() {
+fn a_converted_shell_takes_the_rules_thickness_and_radius() {
     let mut s = Session::default();
     let (outer, _) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], 2.0, 2.0, 100.0)[0];
-    let solid = volume(&mut s);
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [30, 0, 50], "bends": [outer]}));
-    assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{} vs {solid}", volume(&mut s));
     let f = flat(&mut s);
-    assert!(
-        f["thickness"].as_f64() == Some(2.0) && f["rolls"] == 0 && f["bends"][0]["radius"].as_f64().is_some_and(|r| (r - 2.0).abs() < 1e-9),
-        "{f}"
-    );
+    let radii = |f: &Value| f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect::<Vec<f64>>();
+    assert!(f["thickness"].as_f64() == Some(2.5) && f["rolls"] == 0 && radii(&f).iter().all(|r| (r - 2.5).abs() < 1e-9), "{f}");
     run(&mut s, "sheet.flange", json!({"edges": [[0, 40, 50]], "height": 10}));
     let f = flat(&mut s);
-    let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
-    assert!(radii.len() == 2 && radii.iter().all(|r| (r - 2.0).abs() < 1e-9), "{f}");
+    assert!(radii(&f).len() == 2 && radii(&f).iter().all(|r| (r - 2.5).abs() < 1e-9), "{f}");
 }
 
-/// A block's filleted edge is a bend at the fillet's radius (#6748): its bottom edge rounded R 5,
-/// the rule's thickness taken inward, an L with a 100 base and a 30 wall outside, bent R 3 inside
-/// (one and a half thicknesses, short of a roll's).
+/// A block's filleted edge is a bend of the rule's radius (#6748): its bottom edge rounded R 5, the
+/// rule's thickness taken inward, an L with a 100 base and a 30 wall outside rounded R 3 inside
+/// (one and a half thicknesses, short of a roll's), bent R 2 at its virtual sharp.
 #[test]
-fn a_filleted_edge_of_a_solid_block_is_a_bend_of_its_radius() {
+fn a_filleted_edge_of_a_solid_block_is_a_bend_of_the_rules_radius() {
     let (t, k, r) = (2.0, 0.44, 2.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
@@ -632,9 +639,9 @@ fn a_filleted_edge_of_a_solid_block_is_a_bend_of_its_radius() {
     let h = 5.0 * (1.0 - 0.5f64.sqrt());
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Block", "face": [50, 30, 0], "bends": [[100.0 - h, 30.0, h]]}));
     let f = flat(&mut s);
-    assert!(f["rolls"] == 0 && f["bends"][0]["radius"].as_f64().is_some_and(|r| (r - 3.0).abs() < 1e-9), "{f}");
-    // The faces up to the fillet, and the bend on its neutral radius 5 - T + K T.
-    let across = 95.0 + 25.0 + FRAC_PI_2 * (5.0 - t + k * t);
+    assert!(f["rolls"] == 0 && f["bends"][0]["radius"].as_f64().is_some_and(|x| (x - r).abs() < 1e-9), "{f}");
+    // The outside lengths to the sharp corner less a deduction at the rule's radius.
+    let across = 100.0 + 30.0 - deduction(FRAC_PI_2, r, t, k);
     assert!(same_size(flat_size(&mut s), (across, 60.0), 1e-6), "{:?} vs {across}", flat_size(&mut s));
 }
 
@@ -877,6 +884,7 @@ fn convert_step_plate(tag: &str, loops: &[Vec<Wall>], t: f64, pick: [f64; 2]) ->
     let mut s = Session::default();
     run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_file(&path);
+    rule(&mut s, "Plate", t, 0.44, t, 0.5);
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [pick[0], pick[1], t]}));
     s
 }
@@ -988,6 +996,7 @@ fn rounded_corners_slot_ends_and_split_sides_keep_each_edge_of_the_body() {
 fn a_plate_with_holes_drilled_here_converts_with_round_holes() {
     let (w, t, r) = (30.0, 2.0, 2.0);
     let mut s = Session::default();
+    rule(&mut s, "Plate", t, 0.44, t, 0.5);
     run(&mut s, "solid.box", json!({"length": w, "width": w, "height": t, "body_name": "Plate"}));
     for x in [6.0, 15.0, 24.0] {
         for y in [6.0, 15.0, 24.0] {
@@ -1006,6 +1015,8 @@ fn a_plate_with_holes_drilled_here_converts_with_round_holes() {
 /// picked on its top face.
 fn convert_box(l: f64, w: f64, t: f64, holes: &[([f64; 2], f64)]) -> Session {
     let mut s = Session::default();
+    // Stock of the plate's thickness: Convert makes the rule's sheet.
+    rule(&mut s, "Plate", t, 0.44, t, 0.5);
     run(&mut s, "solid.box", json!({"length": l, "width": w, "height": t, "body_name": "Plate"}));
     for (c, d) in holes {
         run(&mut s, "solid.hole", json!({"position": [c[0], c[1], t], "diameter": d}));
@@ -1021,6 +1032,7 @@ fn convert_box(l: f64, w: f64, t: f64, holes: &[([f64; 2], f64)]) -> Session {
 fn a_converted_plate_stays_where_the_plate_was() {
     for pick in [[40.0, 15.0, 2.0], [40.0, 15.0, 0.0]] {
         let mut s = Session::default();
+        rule(&mut s, "Plate", 2.0, 0.44, 2.0, 0.5);
         run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 2, "body_name": "Plate"}));
         let before = bbox(&mut s);
         run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": pick}));
@@ -1078,6 +1090,7 @@ fn a_long_thin_strip_keeps_its_small_round_holes() {
 
 /// A 60 x 40 x 1 plate on XY.
 fn plate(s: &mut Session) {
+    rule(s, "Plate", 1.0, 0.44, 1.0, 0.5);
     run(s, "solid.box", json!({"length": 60, "width": 40, "height": 1, "body_name": "Plate"}));
 }
 
@@ -1169,6 +1182,7 @@ fn a_plate_with_an_engraving_converts_with_the_engraving_as_a_pocket() {
 #[test]
 fn a_large_plate_keeps_an_engraving_shallower_than_its_tessellation_tolerance() {
     let mut s = Session::default();
+    rule(&mut s, "Plate", 1.0, 0.44, 1.0, 0.5);
     run(&mut s, "solid.box", json!({"length": 600, "width": 400, "height": 1, "body_name": "Plate"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 1, "name": "Label"}));
     label_rectangle(&mut s);
@@ -1278,6 +1292,7 @@ fn a_plates_recesses_are_the_sheets_at_any_depth_from_either_face() {
 #[test]
 fn one_face_of_a_bent_part_thickens_alone() {
     let mut s = Session::default();
+    rule(&mut s, "Test", 2.0, 0.44, 2.0, 0.5);
     section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], 2.0, 40.0);
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [25, 0, 20]}));
     let f = flat(&mut s);

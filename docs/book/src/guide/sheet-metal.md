@@ -10,12 +10,14 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a body into sheet metal from its faces: every face becomes
-  a panel, with no face fixed; sharp edges are cut open but the ones picked as bends. A
-  cylinder modelled between two flat faces is a bend of its own inside radius while that radius
-  is short of 10^0.7 (about 5) thicknesses, where DIN 6935 puts the neutral fiber halfway
-  through the sheet, and a roll from there; other cylinders and cones are rolls of their own
-  radius. A roll's flat pattern has its lines where it starts and ends and halfway between, and
-  the DXF draws them on a `ROLL` layer. Its **Thicken** mode (`mode: thicken`)
+  a panel, with no face fixed; sharp edges are cut open but the ones picked as bends. The sheet
+  is the rule's, as your tooling makes it: the rule's thickness, its bends at the rule's radius
+  and its corners with the rule's reliefs, whatever a vendor's file has. A cylinder modelled
+  between two flat faces is a bend while its inside radius is short of 10^0.7 (about 5)
+  thicknesses, where DIN 6935 puts the neutral fiber halfway through the sheet, and a roll from
+  there; other cylinders and cones are rolls, which keep their own radius. A roll's flat pattern
+  has its lines where it starts and ends and halfway between, and the DXF draws them on a `ROLL`
+  layer. Its **Thicken** mode (`mode: thicken`)
   turns a plate of constant thickness into sheet metal from a fixed face, or, with bend edges, a
   solid or a shelled body.
 - **Create Flat Pattern** (`sheet.flat_pattern`) shows the flat part with its bend lines and a
@@ -263,8 +265,9 @@ sharp in one bend of the rule's radius, and the strip is no face of the sheet. A
 with its radius (a cylinder between two flat faces tangent to it, as sheet metal parts from
 other systems come, or a filleted edge) is picked anywhere on its cylinder, on either skin, and
 converts the same way while its inside radius is short of about five thicknesses (see Convert
-above): the sheet is bent there with the modelled inside radius and the rule's K-factor, so the
-sheet is the part as modelled; from five thicknesses on it is a roll. The result is an
+above): the sheet is bent there with the rule's radius and K-factor, not the modelled radius, so
+the flat pattern is the one your tooling makes; from five thicknesses on it is a roll. The
+result is an
 ordinary sheet body: edge flanges, cuts, Unfold, the flat pattern and its exports work on it,
 and it follows the solid when a parameter changes (the edges and the fixed face are found by
 their names). Without bend edges Thicken expects a plate, as before. Either way round walls

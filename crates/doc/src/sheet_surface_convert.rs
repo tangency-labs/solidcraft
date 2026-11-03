@@ -3,12 +3,15 @@
 //! is a panel like any other, and the flat is drawn in the largest one's plane.
 //!
 //! The sheet is every face of a solid, or of one side of a shell or a plate (the side its largest
-//! face is on, reached across every edge but a rim's), less the faces the user skips. A cylinder
-//! or a cone is a roll that keeps its modeled radius, joined by seams where the sheet runs on
-//! smoothly. Every sharp edge between two faces of the sheet is cut open, half the rule's gap
-//! from the plane halfway between the two faces as `sheet.convert` cuts it, unless the user picks
-//! it as a bend. A ring of bends and seams is refused, naming its edges. A solid's material lies
-//! inside its faces, or outside them; a shell or a plate keeps its own.
+//! face is on, reached across every edge but a rim's), less the faces the user skips. The sheet
+//! is the rule's, as the tooling makes it: the rule's thickness, taken into the material from
+//! that side whatever the body's, and its bends at the rule's radius. A cylinder modelled between
+//! two planes, its inside radius short of 10^0.7 times the body's thickness (DIN 6935), is a bend
+//! at the planes' virtual sharp; any other cylinder or cone is a roll that keeps its modeled
+//! radius, joined by seams where the sheet runs on smoothly. Every sharp edge between two faces
+//! of the sheet is cut open, half the rule's gap from the plane halfway between the two faces as
+//! `sheet.convert` cuts it, unless the user picks it as a bend. A ring of bends and seams is
+//! refused, naming its edges. A solid's material lies inside its faces, or outside them.
 //!
 //! No panel comes first, and nothing depends on which way a joint runs. Two bends standing on one
 //! panel and meeting at a corner of it end where their tangent lines on it cross, with the
@@ -123,9 +126,13 @@ pub struct SurfaceConversion {
     pub thickness: f64,
     pub notes: Vec<String>,
     pub reliefs: Reliefs,
-    /// The sheet keeps the body's own thickness (a shell's or a plate's), so its faces' recesses
-    /// are the sheet's.
-    pub own_thickness: bool,
+    /// The body's own thickness, where it has one (a shell's or a plate's): its faces' recesses
+    /// are read there and kept on the sheet, which takes the rule's.
+    pub own_thickness: Option<f64>,
+    /// Each bend modelled with its radius: its joint and the inside radius the body has there.
+    pub modelled_radii: Vec<(usize, f64)>,
+    /// The rule's bend radius, every bend's.
+    pub rule_radius: f64,
     /// The flat's pieces, cut once for both the flat and the folded solid.
     pieces: std::sync::OnceLock<Vec<(Piece, Region2)>>,
 }
@@ -790,8 +797,8 @@ const ROLL_FROM: f64 = 5.011_872_336_272_722;
 
 /// A bend modelled with its radius: a cylinder of the sheet between two of its planes, each
 /// tangent to it along a straight edge parallel to its axis. The cylinder is no panel; the two
-/// planes run on to where they cross, the bend's virtual sharp, and bend there with the
-/// cylinder's inside radius.
+/// planes run on to where they cross, the bend's virtual sharp, and bend there with the rule's
+/// radius, the tooling's, whatever the model's.
 struct Modelled {
     roll: usize,
     /// Each plane, the edge it meets the cylinder along, and how far it runs on past that edge,
@@ -799,6 +806,7 @@ struct Modelled {
     sides: [(usize, usize, f64); 2],
     /// The sharp's ends, square across from the cylinder's ends.
     sharp: (Vec3, Vec3),
+    /// The cylinder's inside radius, as modelled.
     inside: f64,
 }
 
@@ -815,10 +823,11 @@ pub enum SheetFaces<'a> {
 /// Converts `mb` to sheet metal from its `faces`, bending at the `bends` and cutting every other
 /// sharp edge between two faces of the sheet open. A bend is picked on its edge, or, where it is
 /// modelled with its radius, on its roll: the roll and the faces it runs smoothly into join the
-/// sheet. A solid's material lies inside its faces, or outside them when `outward`. The rule's
-/// values are read at the sheet's thickness: `rule(Some(t))` for a shell's or a plate's own,
-/// `rule(None)` for a solid, which takes the rule's. Points are the body's own; what it says
-/// gives them where `to_world` puts them.
+/// sheet. A solid's material lies inside its faces, or outside them when `outward`. The sheet is
+/// the rule's, as the tooling makes it: its thickness and its bends' radius are the rule's
+/// (`rule(None)`), whatever the body's; a shell's or a plate's own thickness only tells its sides
+/// apart and how a modelled corner is rounded. Points are the body's own; what it says gives
+/// them where `to_world` puts them.
 pub fn convert_surfaces(
     mb: &ModelBody,
     rule: &dyn Fn(Option<f64>) -> Result<ConvertRule>,
@@ -970,9 +979,11 @@ pub fn convert_surfaces(
             None => return err("not supported yet: a body with no face that is a plane, a cylinder or a cone"),
         },
     };
-    let t = sheet.map(|d| (d * 1e9).round() / 1e9);
-    let rule = &rule(t)?;
-    let t = t.unwrap_or(rule.thickness);
+    let own = sheet.map(|d| (d * 1e9).round() / 1e9);
+    let rule = &rule(None)?;
+    let t = rule.thickness;
+    // The body as modelled: its own thickness, or the rule's for a solid.
+    let modelled_t = own.unwrap_or(t);
     let shapes: Vec<std::result::Result<Shape, &'static str>> = (0..count).map(|f| Shape::of(b, &q, f, outward && sheet.is_none(), tol)).collect();
     let shape = |f: usize| shapes.get(f).copied().unwrap_or(Err("a face the body does not have"));
     let smooth = |e: usize, x: &Shape, y: &Shape| -> bool {
@@ -1184,8 +1195,8 @@ pub fn convert_surfaces(
     let mut modelled: Vec<Modelled> = Vec::new();
     for (&f, sf) in &shaped {
         let Shape::Cylinder { origin, axis, radius, inward, .. } = *sf else { continue };
-        let inside = if inward { radius - t } else { radius };
-        if !(inside >= 0.0 && inside < ROLL_FROM * t) {
+        let inside = if inward { radius - modelled_t } else { radius };
+        if !(inside >= 0.0 && inside < ROLL_FROM * modelled_t) {
             continue;
         }
         let mut sides: Vec<(usize, usize)> = Vec::new();
@@ -1510,7 +1521,9 @@ pub fn convert_surfaces(
         edges.push(mid);
     }
 
-    // Each modelled bend, at its sharp, with its cylinder's inside radius.
+    // Each modelled bend, at its sharp, with the rule's radius; the joint and the radius it was
+    // modelled with are kept, to read the body as it is (see `SurfaceConversion::as_modelled`).
+    let mut modelled_radii: Vec<(usize, f64)> = Vec::new();
     for m in &modelled {
         let [(x, ..), (y, ..)] = m.sides;
         let (a, b) = if parent.get(&x) != Some(&y) { (x, y) } else { (y, x) };
@@ -1537,7 +1550,7 @@ pub fn convert_surfaces(
         let len = s0.dist(s1);
         let bend = Bend {
             angle: na.dot(*nb).clamp(-1.0, 1.0).acos(),
-            radius: m.inside,
+            radius: rule.bend_radius,
             toward_material: lift < 0.0,
             datum: Datum::Sharp,
             length: len,
@@ -1545,6 +1558,7 @@ pub fn convert_surfaces(
             tails: (Tail::Keep, Tail::Keep),
             relief: (Relief::None, Relief::None),
         };
+        modelled_radii.push((joints.len(), m.inside));
         joints.push(Joint {
             a: Anchor { panel: ia, origin: a0, dir: da },
             b: Anchor { panel: ib, origin: b0, dir: db },
@@ -1555,7 +1569,17 @@ pub fn convert_surfaces(
 
     let mut model = Sheet { thickness: t, k_factor: rule.k_factor, panels, joints, corners: Vec::new(), cuts: Vec::new() };
     let reliefs = Reliefs::of(rule);
-    let notes = settle(&mut model, &places, &reliefs, &|_| None, tol, &at)?;
+    let mut notes = settle(&mut model, &places, &reliefs, &|_| None, tol, &at)?;
+    // Where the rule's tooling changes the body, say so.
+    if let Some(own) = own.filter(|own| (own - t).abs() > tol) {
+        notes.insert(0, format!("the body is {own:.3} mm thick: the sheet is the rule's {t:.3} mm"));
+    }
+    for (j, inside) in &modelled_radii {
+        if (inside - rule.bend_radius).abs() > tol {
+            let p = edges.get(*j).copied().unwrap_or_default();
+            notes.push(format!("the corner at {} modelled R {inside:.3} bends at the rule's R {:.3}", at(p), rule.bend_radius));
+        }
+    }
     // A hole reaching into the band a bend takes from its panel has no one place in the flat.
     for joint in &model.joints {
         let JointKind::Bend(bend) = &joint.kind else { continue };
@@ -1608,7 +1632,9 @@ pub fn convert_surfaces(
         thickness: t,
         notes,
         reliefs,
-        own_thickness: sheet.is_some(),
+        own_thickness: own,
+        modelled_radii,
+        rule_radius: rule.bend_radius,
         pieces: std::sync::OnceLock::new(),
     })
 }
@@ -2054,6 +2080,20 @@ impl SurfaceSheet {
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         Ok((sheet, c.solid()?))
+    }
+
+    /// The sheet as the body it was converted from has it, `own` thick and its modelled bends
+    /// at the radii `modelled` gives (joint, inside radius), not the rule's: what to read the
+    /// body's own engravings against.
+    pub fn as_modelled(&self, own: f64, modelled: &[(usize, f64)]) -> SurfaceSheet {
+        let mut out = self.clone();
+        out.sheet.thickness = own;
+        for (j, r) in modelled {
+            if let Some(Joint { kind: JointKind::Bend(b), .. }) = out.sheet.joints.get_mut(*j) {
+                b.radius = *r;
+            }
+        }
+        out
     }
 
     /// Lays the sheet out again after a change to it, and builds its body: the folded sheet, or

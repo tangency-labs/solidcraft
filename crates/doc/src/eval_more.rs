@@ -469,7 +469,7 @@ fn rebuild_sheet(st: &mut ModelState, idx: usize) -> Result<()> {
 
 /// Converts the body `body` to sheet metal from its surfaces (#6748), its `faces` as Convert or
 /// Thicken chooses them: the body becomes the folded sheet, and the model keeps the sheet. The
-/// rule's values are read at the sheet's own thickness where the body has one.
+/// sheet is the rule's: its thickness and bends are, whatever the body's.
 #[allow(clippy::too_many_arguments)]
 fn convert_to_sheet(
     doc: &Document,
@@ -506,8 +506,23 @@ fn convert_to_sheet(
         append_warning(warning, note.clone());
     }
     let (sheet, solid) = crate::SurfaceSheet::converted(&mb.name, &r.name, &conversion)?;
-    // A shell's or a plate's recesses are the sheet's, from either face.
-    let (sheet, solid) = if conversion.own_thickness { crate::sheet_surface_cuts::engraved(&sheet, &solid, &mb.body)? } else { (sheet, solid) };
+    // A shell's or a plate's recesses are the sheet's, from either face: read where the body has
+    // its own thickness, and kept, each as deep from its face, at the rule's.
+    let same = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(1.0);
+    let as_ruled = |own: f64| same(own, sheet.thickness) && conversion.modelled_radii.iter().all(|(_, r)| same(*r, conversion.rule_radius));
+    let (sheet, solid) = match conversion.own_thickness {
+        None => (sheet, solid),
+        Some(own) if as_ruled(own) => crate::sheet_surface_cuts::engraved(&sheet, &solid, &mb.body)?,
+        Some(own) => {
+            let mut as_modelled = sheet.as_modelled(own, &conversion.modelled_radii);
+            let built = as_modelled.build()?;
+            let (read, _) = crate::sheet_surface_cuts::engraved(&as_modelled, &built, &mb.body)?;
+            let mut sheet = sheet;
+            sheet.recesses = read.recesses;
+            let solid = if sheet.recesses.is_empty() { solid } else { sheet.build()? };
+            (sheet, solid)
+        }
+    };
     if let Some(b) = st.bodies.iter_mut().find(|b| b.name == *body) {
         replace_sheet_body(b, solid);
     }

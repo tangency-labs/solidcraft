@@ -95,12 +95,12 @@ fn a_channel_converts_with_its_modelled_corners_as_bends() {
     assert!((rolled - today).abs() < 1e-9 * today, "{rolled} vs {today}");
 }
 
-/// A roll keeps its modeled radius, whatever the rule's: a channel rounded R 10 inside flattens
-/// to its walls' flat stretches and two quarter turns at 10 + K x T, where `sheet.convert` would
-/// bend it at the rule's R 2.
+/// A roll keeps its modeled radius, whatever the rule's: a channel rounded R 12 inside (six
+/// thicknesses, past a bend's) flattens to its walls' flat stretches and two quarter turns at
+/// 12 + K x T, where a bend would take the rule's R 2.
 #[test]
 fn a_roll_keeps_its_modeled_radius() {
-    let (t, k, r) = (2.0, 0.4, 10.0);
+    let (t, k, r) = (2.0, 0.4, 12.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, 2.0, 0.5);
     bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
