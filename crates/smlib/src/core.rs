@@ -364,7 +364,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.fillet_surface_plane_curve_on_plane_equation = true;
-    f.fillet_extended_rail_end_at_side_edge_crossing = true;
     f.fillet_gn_section_generator = true;
     f.face_trim_curves_kept_where_exact = true;
     f.swap_uv_keeps_analytic_definition = true;
@@ -375,13 +374,20 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_keep_features = false;
+    f.fillet_keep_features = true;
     f.fillet_blend_corner = true;
     f.fillet_exact_arc_sections = true;
     f.fillet_exact_arc_spans = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
+    f.cone_unbounded_parameterized_as_nurb = true;
+    f.ellipse_open_arc_keeps_end_angle = true;
+    f.fillet_round_as_definition = true;
+    f.fillet_round_on_round_as_definition = true;
+    f.fillet_overflow_crease_along_edge = true;
+    f.plane_first_torus_section_exact = true;
+    f.keep_exact_pcurves = true;
+    f.shell_one_construction = true;
     f
 }
 
@@ -399,13 +405,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
 /// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
 /// #1080 and #5835. A fix under the same flag is in progress on solidcore.
-///
-/// `fillet_keep_features` (WR-703, solidcore#2287): sound geometry refused. A 30 x 20 x 8 block
-/// with an r 6 boss joined on its top, its front top edge rounded r 3 (a band clear of the boss),
-/// is refused with SM_ERR_INVALID_INPUT; off it builds 6099.225530 mm³, its closed form, as the
-/// C++ fork does (solidcore#2370; ui-egui's `opening_a_large_design_never_stalls_the_window`).
 #[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_keep_features", "fillet_refuse_rounds_breaking_through"];
+const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
 
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
