@@ -6,5 +6,29 @@
   "de": {
     "prefs.hover_edge_lit": "Verrundung und Fase: Kanten unter dem Zeiger einfärben",
     "prefs.hover_edge_lit_help": "In Verrundung und Fase werden die Kanten, die ein Klick nehmen würde, in eigener Farbe gezeichnet: die Kante unter dem Zeiger oder die Kanten der Fläche darunter. Wenn deaktiviert, werden Kante oder Fläche wie überall sonst hervorgehoben."
+  },
+  "ar": {
+    "prefs.hover_edge_lit": "تقويس وشطف: تلوين الحواف تحت المؤشر",
+    "prefs.hover_edge_lit_help": "في التقويس والشطف تُرسم الحواف التي ستأخذها النقرة بلونها الخاص: الحافة تحت المؤشر، أو حواف الوجه الذي تحته. عند الإيقاف تُبرز الحافة أو الوجه كما في أي مكان آخر."
+  },
+  "he": {
+    "prefs.hover_edge_lit": "עיגול פינה ופאזה: צביעת הקצוות מתחת לסמן",
+    "prefs.hover_edge_lit_help": "בעיגול פינה ובפאזה הקצוות שלחיצה תיקח מצוירים בצבע משלהם: הקצה מתחת לסמן, או קצוות הפאה שמתחתיו. כשהאפשרות כבויה, הקצה או הפאה מודגשים כמו בכל מקום אחר."
+  },
+  "ja": {
+    "prefs.hover_edge_lit": "フィレットと面取り: ポインター下のエッジに色を付ける",
+    "prefs.hover_edge_lit_help": "フィレットと面取りでは、クリックで選ばれるエッジを専用の色で描きます。ポインター下のエッジ、またはその下にある面のエッジです。オフのときは、エッジや面は他の場所と同じように強調表示されます。"
+  },
+  "ko": {
+    "prefs.hover_edge_lit": "필렛 및 모따기: 포인터 아래 모서리에 색 입히기",
+    "prefs.hover_edge_lit_help": "필렛과 모따기에서 클릭하면 선택될 모서리를 고유한 색으로 그립니다. 포인터 아래의 모서리 또는 그 아래 면의 모서리입니다. 끄면 모서리나 면이 다른 곳과 같이 강조 표시됩니다."
+  },
+  "vi": {
+    "prefs.hover_edge_lit": "Bo tròn mép và Vát mép: tô màu các cạnh dưới con trỏ",
+    "prefs.hover_edge_lit_help": "Trong Bo tròn mép và Vát mép, các cạnh mà một cú nhấp sẽ chọn được vẽ bằng màu riêng: cạnh dưới con trỏ, hoặc các cạnh của mặt bên dưới nó. Khi tắt, cạnh hoặc mặt được làm nổi bật như ở mọi nơi khác."
+  },
+  "zh": {
+    "prefs.hover_edge_lit": "圆角和倒角：为指针下的边着色",
+    "prefs.hover_edge_lit_help": "在圆角和倒角中，单击将选取的边以专用颜色绘制：指针下的边，或其下方面的各条边。关闭时，边或面与其他地方一样高亮显示。"
   }
 }
