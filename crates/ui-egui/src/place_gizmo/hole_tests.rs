@@ -211,6 +211,26 @@ fn a_typed_distance_survives_a_drag_along_the_edge() {
 }
 
 #[test]
+fn a_measured_distance_finer_than_its_field_survives_a_drag_along_the_edge() {
+    let mut h = held_by_the_left_edge();
+    // A place a few micrometres off the whole millimetre: the field shows 10.00 mm, the model
+    // keeps the measured value.
+    if let Some(Sel::Face { point, .. }) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()).and_then(|i| i.items.first_mut()) {
+        *point = Vec3::new(10.0034, 10.0, 20.0);
+    }
+    h.frames(2);
+    assert_eq!(distances(&h)[0], "10.00 mm");
+    let to = screen(&mut h, Vec3::new(25.0, 22.0, 20.0));
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to], "steps": 12})).unwrap();
+    h.settle();
+    assert!(
+        matches!(places(&h).as_slice(), [p] if (p.x - 10.0034).abs() < 1e-6 && (p.y - 22.0).abs() < 0.3),
+        "the measured distance, not the shown one: {:?}",
+        places(&h)
+    );
+}
+
+#[test]
 fn a_pick_elsewhere_on_the_face_keeps_a_held_hole_on_its_line() {
     let mut h = held_by_the_left_edge();
     h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
