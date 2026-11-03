@@ -40,6 +40,7 @@ use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::query::brep::{BoundingBoxOptions, calculate_bounding_box};
+use solidcore::surface::ball_patch::BallPatch;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::sphere::Sphere;
@@ -236,6 +237,7 @@ const SURFACE_CYLINDER_I: i64 = SURFACE_CYLINDER as i64;
 const SURFACE_CONE_I: i64 = SURFACE_CONE as i64;
 const SURFACE_SPHERE_I: i64 = SURFACE_SPHERE as i64;
 const SURFACE_TORUS_I: i64 = SURFACE_TORUS as i64;
+const SURFACE_BALL_PATCH_I: i64 = SURFACE_BALL_PATCH as i64;
 
 /// The `SmBSplineCurve` part of a curve that is one (`IsKindOf(SmBSplineCurve_TYPE)`), with its
 /// NURB (`GetOrCreateGwNurbPointer`: a lazy line or conic makes it on a copy); `None` for the
@@ -271,6 +273,11 @@ pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<
 fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSplineSurface>> {
     Ok(match s.kind_with_nurb(k).map_err(sc("SmSurface::GetOrCreateGwNurbPointer"))? {
         SurfaceKind::BSpline(b) => Some(b),
+        // A procedural round (solidcore#2274, `fixes.fillet_round_as_definition`) and a Ball corner's
+        // patch (solidcore#2319, `fixes.fillet_blend_corner`) are their nets, as the fork casts them
+        // to `SmBSplineSurface`: the face goes out as that NURBS, exactly.
+        SurfaceKind::BallPatch(bp) => Some(bp.net()),
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::Cone(c) => Some(c.rev().base()),
         SurfaceKind::Sphere(s) => Some(s.base().base()),
@@ -881,12 +888,16 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
             SurfaceKind::Cone(c) if c.is_cylinder_class() => SURFACE_CYLINDER_I,
             SurfaceKind::Cone(_) => SURFACE_CONE_I,
             SurfaceKind::Torus(_) => SURFACE_TORUS_I,
+            SurfaceKind::BallPatch(_) => SURFACE_BALL_PATCH_I,
             _ => SURFACE_NURBS_I,
         };
+        // A ball patch is a NURBS face (its net, range and trims) with its sphere as its
+        // definition.
+        let nurbs_kind = ty == SURFACE_NURBS_I || ty == SURFACE_BALL_PATCH_I;
         // A curved analytic face goes with its NURBS form, whose parameters its range and trims
         // are in; a plane's (u, v) are distances along its unit axes, an affine image of its
         // NURBS (u, v).
-        let nurbs_form = ty != SURFACE_NURBS_I && ty != SURFACE_PLANE_I;
+        let nurbs_form = !nurbs_kind && ty != SURFACE_PLANE_I;
         let mut plane_map = None;
         if let SurfaceKind::Plane(p) = surface.kind() {
             let scale = p.uv_scale();
@@ -911,7 +922,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
             let (Some(x), Some(m)) = (loop_exports_uv.get_mut(li), loop_plane_map.get_mut(li)) else {
                 return Err(bad("face loop index is out of bounds"));
             };
-            *x = ty == SURFACE_NURBS_I || nurbs_form || plane_map.is_some();
+            *x = nurbs_kind || nurbs_form || plane_map.is_some();
             *m = plane_map;
         }
 
@@ -919,7 +930,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         // domain, angles in radians
         let d = fd.uv_domain;
         let (mut umin, mut vmin, mut umax, mut vmax) = (d.u_min(), d.v_min(), d.u_max(), d.v_max());
-        if ty != SURFACE_NURBS_I && !nurbs_form {
+        if !nurbs_kind && !nurbs_form {
             let step = surface.step_uv_domain();
             if ty == SURFACE_SPHERE_I || ty == SURFACE_TORUS_I {
                 (umin, vmin, umax, vmax) = (deg2rad(step.u_min()), deg2rad(step.v_min()), deg2rad(step.u_max()), deg2rad(step.v_max()));
@@ -975,9 +986,14 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
                 o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major_radius());
                 o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor_radius());
             }
+            SurfaceKind::BallPatch(bp) => {
+                o.i(FACE_DEFINITION_REAL_COUNT).push(4);
+                o.r3(FACE_DEFINITION_REALS, bp.centre());
+                o.r(FACE_DEFINITION_REALS).push(bp.radius());
+            }
             _ => {}
         }
-        if nurbs_form || ty == SURFACE_NURBS_I {
+        if nurbs_form || nurbs_kind {
             // Every analytic class is an SmBSplineSurface: its own NURBS, in face order with the
             // NURBS faces' surfaces. Another surface (an offset) is approximated within the
             // curves' tolerance, splitting its spans up to 5 times; its status fails the export,
@@ -1361,7 +1377,7 @@ fn good_edges(e: &EdgeIn<'_>, n: usize, n_vertices: usize) -> bool {
 }
 
 fn face_has_nurbs(f: &In<'_>, i: usize) -> bool {
-    f.i(FACE_SURFACE_TYPE).get(i) == Some(&SURFACE_NURBS_I) || has_form(f.i(FACE_NURBS_FORM), i)
+    matches!(f.i(FACE_SURFACE_TYPE).get(i), Some(&(SURFACE_NURBS_I | SURFACE_BALL_PATCH_I))) || has_form(f.i(FACE_NURBS_FORM), i)
 }
 
 /// `Validate`: every check the build relies on; `None` on anything malformed.
@@ -1443,9 +1459,15 @@ fn validate(f: &In<'_>) -> Option<Shape> {
         || trim_type.len() != s.faces
         || range.len() != 4 * s.faces
         || !bits(trim_type)
-        || !in_range(surface_type, SURFACE_NURBS_I, SURFACE_TORUS_I)
+        || !in_range(surface_type, SURFACE_NURBS_I, SURFACE_BALL_PATCH_I)
         || !in_range(loop_count, 1, MAX_TOPOLOGY)
     {
+        return None;
+    }
+    // A ball patch's definition: four reals (its sphere's centre and radius) each, in face order.
+    let patches = surface_type.iter().filter(|&&t| t == SURFACE_BALL_PATCH_I).count();
+    let definitions = f.i(FACE_DEFINITION_REAL_COUNT);
+    if definitions.len() != patches || definitions.iter().any(|&c| c != 4) || f.r(FACE_DEFINITION_REALS).len() != 4 * patches {
         return None;
     }
     let form = f.i(FACE_NURBS_FORM);
@@ -1453,7 +1475,7 @@ fn validate(f: &In<'_>) -> Option<Shape> {
         if form.len() != s.faces || !bits(form) {
             return None;
         }
-        if form.iter().zip(surface_type).any(|(&fm, &t)| fm == 1 && (t == SURFACE_NURBS_I || t == SURFACE_PLANE_I)) {
+        if form.iter().zip(surface_type).any(|(&fm, &t)| fm == 1 && (t == SURFACE_NURBS_I || t == SURFACE_PLANE_I || t == SURFACE_BALL_PATCH_I)) {
             return None;
         }
     }
@@ -1611,12 +1633,12 @@ fn validate(f: &In<'_>) -> Option<Shape> {
     }
 
     // Surfaces
-    let mut n_t = [0usize; 6];
+    let mut n_t = [0usize; 7];
     for &t in surface_type {
         *n_t.get_mut(t as usize)? += 1;
     }
     let n_n = (0..s.faces).filter(|&i| face_has_nurbs(f, i)).count();
-    let [_, n_p, n_cy, n_co, n_s, n_to] = n_t;
+    let [_, n_p, n_cy, n_co, n_s, n_to, _] = n_t;
     let (cu_v, cv_v, ou_v, ov_v) = (f.i(FACE_NURBS_U_VERTEX_COUNT), f.i(FACE_NURBS_V_VERTEX_COUNT), f.i(FACE_NURBS_U_ORDER), f.i(FACE_NURBS_V_ORDER));
     if cu_v.len() != n_n || cv_v.len() != n_n || ou_v.len() != n_n || ov_v.len() != n_n {
         return None;
@@ -2216,10 +2238,10 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
     // Faces and their surfaces
     let mut start_loop = 0u64;
     let mut nurbs_cursor = Cursor::default();
-    let (mut i_sphere, mut i_plane, mut i_cyl, mut i_cone, mut i_torus) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut i_sphere, mut i_plane, mut i_cyl, mut i_cone, mut i_torus, mut i_ball) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
     for i in 0..s.faces {
         let ty = get(f.i(FACE_SURFACE_TYPE), i)?;
-        let form = ty != SURFACE_NURBS_I && face_has_nurbs(f, i);
+        let form = ty != SURFACE_NURBS_I && ty != SURFACE_BALL_PATCH_I && face_has_nurbs(f, i);
         // "rectangular" -> TRUE; "general" -> UNSURE (not determined)
         let rectangular = if get(f.i(FACE_TRIM_TYPE), i)? == 1 { 1 } else { UNSURE };
         let r = f.r(FACE_RANGE);
@@ -2307,13 +2329,22 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             let p = placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)?;
             let (major, minor) = (get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j)?);
             Surface::from(Torus::create_canonical(k, &p, major, minor, TorusOptions::default(), None).map_err(sc("SmTorus::CreateCanonical"))?)
+        } else if ty == SURFACE_BALL_PATCH_I {
+            // its net, on the sphere of its definition (`SmBallPatch::Create`)
+            let j = i_ball;
+            i_ball += 1;
+            let net = bspline_surface_3d(f, &mut nurbs_cursor)?;
+            let reals = f.r(FACE_DEFINITION_REALS);
+            let at = |c: usize| j.checked_mul(4).and_then(|x| x.checked_add(c)).map_or_else(|| Err(bad("index past its array")), |x| get(reals, x));
+            let (centre, radius) = (Point3::new(at(0)?, at(1)?, at(2)?), at(3)?);
+            Surface::from(BallPatch::create(&net, centre, radius).map_err(sc("SmBallPatch::Create"))?)
         } else {
             Surface::from(bspline_surface_3d(f, &mut nurbs_cursor)?)
         };
 
         // An analytic surface over its STEP range, and the face's domain its NURBS image (the
         // natural domain the topology build intersects with).
-        if ty != SURFACE_NURBS_I && !form && domain.is_bounded() {
+        if ty != SURFACE_NURBS_I && ty != SURFACE_BALL_PATCH_I && !form && domain.is_bounded() {
             surface.adjust_step_uv_domain(k, &domain).map_err(sc("AdjustSTEPUVDomain"))?;
             let nurbs_domain = surface.convert_domain_from_step_to_nurbs(k, &domain).map_err(sc("ConvertDomainFromSTEPToNURBS"))?;
             fd.uv_domain = extent2d(nurbs_domain.u_min(), nurbs_domain.v_min(), nurbs_domain.u_max(), nurbs_domain.v_max())?;
