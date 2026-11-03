@@ -211,6 +211,41 @@ fn details_native_value_edits_run_real_commands_and_only_sections_enter_history(
     }
 }
 
+/// An edit in the details card keeps a section on its origin plane: it stays on XY, its distance
+/// is saved without the float's last bits, and Flip turns the section's own side round (#3977).
+#[test]
+fn details_section_edits_keep_the_origin_plane() {
+    use crate::ui_kit::DetailValue as V;
+    use solidcraft_engine::doc::section_analysis::SectionPlane;
+    for plane in ["XY", "XZ", "YZ"] {
+        let mut h = Harness::new();
+        h.app.session.doc_mut().units = "in".into();
+        h.app.run("inspect.section", json!({"plane":plane,"at":"25.4 mm"})).unwrap();
+        let effect = h.app.session.status_items().remove(0);
+        let units = h.app.session.doc.units.clone();
+        let params = crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: 1.5 * 25.4, units, decimals: 3 }).unwrap();
+        h.app.run("inspect.section", params).unwrap();
+        let sec = h.app.session.doc.section_analyses.visible().cloned().unwrap();
+        assert_eq!(sec.plane, SectionPlane::Origin { name: plane.into() }, "{plane}: the section stays on its plane");
+        assert_eq!(sec.offset.trim_start_matches('-'), "38.1 mm", "{plane}: {}", sec.offset);
+        assert_eq!(h.app.session.doc.section_analyses.items.len(), 1, "the card edits the section, it adds none");
+        let cut = h.app.session.section.unwrap();
+        let effect = h.app.session.status_items().remove(0);
+        let flip = match crate::viewport_details::description(&h.app, &effect).settings.iter().find(|s| s.id == "flip").unwrap().value {
+            V::Check(value) => value,
+            _ => panic!("actual flip checkbox"),
+        };
+        let params = crate::viewport_details::edit_params(&h.app, &effect, "flip", &V::Check(!flip)).unwrap();
+        h.app.run("inspect.section", params).unwrap();
+        let flipped = h.app.session.doc.section_analyses.visible().cloned().unwrap();
+        assert_eq!(flipped.plane, sec.plane);
+        assert_eq!(flipped.offset, sec.offset);
+        assert_eq!(flipped.flip, !sec.flip, "{plane}: Flip turns the section round");
+        let now = h.app.session.section.unwrap();
+        assert!((now.0 - cut.0).len() < 1e-9 && (now.1 + cut.1).len() < 1e-9, "{plane}: the same cut, seen from the other side");
+    }
+}
+
 #[test]
 fn details_owned_dropdown_suspends_without_leaking_above_preferences_or_mode_changes() {
     let mut h = Harness::new();

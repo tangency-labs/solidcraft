@@ -188,10 +188,22 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 base = base.into_iter().zip(new_n).map(|(o, n)| o - n * projection).collect();
             }
             let flip = normal.iter().zip(n).map(|(a, b)| a * b).sum::<f64>() < 0.0;
+            let offset = if id == "offset" { scalar(value)? } else { old_offset };
+            let hatch = if id == "hatch" { check(value)? } else { hatch };
+            // A section on an origin plane stays on it: the card's distance is the cut's world
+            // coordinate on the plane's axis, which `at` takes, and its flip is the section's own,
+            // turned round when the box is (XZ's normal need not be the card's axis).
+            if id != "plane"
+                && let Some(sec) = app.session.doc.section_analyses.visible()
+                && let solidcraft_engine::doc::section_analysis::SectionPlane::Origin { name } = &sec.plane
+            {
+                let flip = if id == "flip" { sec.flip != (check(value)? != flip) } else { sec.flip };
+                return Some(json!({"plane":name,"at":mm_text(offset),"flip":flip,"hatch":hatch,"replace":true}));
+            }
             // `replace`: the card edits the section shown in place; without it every field change
             // would add a new Section Analysis to the design (#3977).
-            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":format!("{} mm",if id=="offset"{scalar(value)?}else{old_offset}),
-                "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch},"replace":true}))
+            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":mm_text(offset),
+                "flip":if id=="flip"{check(value)?}else{flip},"hatch":hatch,"replace":true}))
         }
         StatusSetting::Continuity { .. } => {
             let rows = app.session.continuity_details();
@@ -205,6 +217,12 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
         }
         StatusSetting::Environment => None,
     }
+}
+/// A length in mm as the design keeps it: to 13 significant digits, so a value typed in another
+/// unit (1.5 in) is saved as "38.1 mm", not with the float's last bits.
+fn mm_text(mm: f64) -> String {
+    let rounded = format!("{mm:.12e}").parse::<f64>().unwrap_or(mm);
+    format!("{} mm", if rounded == 0.0 { 0.0 } else { rounded })
 }
 fn scalar(value: &DetailValue) -> Option<f64> {
     match value {
