@@ -130,7 +130,7 @@ fn dependent_profile_and_extrude_follow_the_placement() {
     run(&mut s, "sketch.dimension", json!({"entities":[side(2)],"type":"length","value":8}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":sketch,"distance":4,"operation":"new","body_name":"Bracket"}));
-    let bounds = |s: &Session| s.world_state().body("Bracket").unwrap().mesh().bounds();
+    let bounds = |s: &Session| s.world_state().unwrap().body("Bracket").unwrap().body.exact_bounds().unwrap();
     let b = bounds(&s);
     assert!((b.min.y - 0.0).abs() < 1e-6 && (b.min.x - 50.0).abs() < 1e-6 && (b.max.x - 60.0).abs() < 1e-6, "{b:?}");
     run(&mut s, "occurrence.move", json!({"occurrence":a1,"translate":[0,-40,0]}));
@@ -146,7 +146,7 @@ fn dependent_profile_and_extrude_follow_the_placement() {
     // Saved and reopened: the same.
     let mut reopened = Session { doc: solidcraft_doc::format::read(&s.doc.to_json()).unwrap().into(), ..Default::default() };
     reopened.refresh();
-    let b = reopened.world_state().body("Bracket").unwrap().mesh().bounds();
+    let b = reopened.world_state().unwrap().body("Bracket").unwrap().body.exact_bounds().unwrap();
     assert!((b.min.y - 12.0).abs() < 1e-6, "{b:?}");
 }
 

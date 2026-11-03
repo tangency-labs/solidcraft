@@ -882,22 +882,21 @@ fn resolve_anchored_face_omitting(
     let body = st.body(&anchor.target.body).ok_or_else(|| lost("anchored projection body"))?;
     // The sketch's plane says when the face was found by fallback; its projection follows it.
     let (indices, _) = doc.anchored_face_indices(st, body, &anchor.target)?;
-    resolve_face_indices_omitting(st, plane, kind, &body.name, &indices, skip)
+    resolve_face_indices(st, plane, kind, &body.name, &indices, skip, None)
 }
 
 /// Project explicitly selected current face indices, without claiming persistent provenance.
-/// Callers retaining a link must supply their own replay identity policy.
-pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body_name: &str, indices: &[usize]) -> Result<Resolved> {
-    resolve_face_indices_omitting(st, plane, kind, body_name, indices, &std::collections::BTreeSet::new())
-}
-
-fn resolve_face_indices_omitting(
+/// Callers retaining a link must supply their own replay identity policy. The edges in `skip`
+/// (a face link's deleted members) are left out. `pieces`, when given, receives each projected
+/// source edge with the geometry it gives the sketch ([`face_link_edges`]).
+pub fn resolve_face_indices(
     st: &ModelState,
     plane: &Plane,
     kind: LinkKind,
     body_name: &str,
     indices: &[usize],
     skip: &std::collections::BTreeSet<usize>,
+    pieces: Option<&mut Vec<EdgePieces>>,
 ) -> Result<Resolved> {
     let body = st.body(body_name).ok_or_else(|| lost("projection body"))?;
     let mesh = body.mesh();
@@ -927,6 +926,34 @@ fn resolve_face_indices_omitting(
             order::family_edges(&mesh, &selected, plane)?
         };
         let edges: Vec<usize> = edges.into_iter().filter(|e| !skip.contains(e)).collect();
+        if let Some(out) = pieces {
+            // Each edge's pieces as the link has them: a circle whose two edges fit to the same
+            // half is made whole again across all of them (`merge_split_circles`), keeping which
+            // edge each is of. Each edge is read as `projected_edges` reads it.
+            let names = crate::naming::edge_names(body);
+            let mut owner = Vec::new();
+            let mut flat = Vec::new();
+            for (k, (e, exact)) in edges.iter().zip(exact_edges(body, plane, &edges)).enumerate() {
+                let fitted = || mesh.edges.get(*e).map(|pts| fit_world(plane, pts)).unwrap_or_default();
+                for g in exact.unwrap_or_else(fitted) {
+                    owner.push(k);
+                    flat.push(g);
+                }
+            }
+            *out = edges
+                .iter()
+                .map(|e| {
+                    let name = names.get(*e).cloned().unwrap_or_default();
+                    let faces_exact = mesh.edge_faces.get(*e).is_some_and(|fs| fs.iter().all(|f| crate::naming::face_name_exact(body, *f as usize)));
+                    EdgePieces { exact: !name.is_empty() && faces_exact, name, geom: Vec::new() }
+                })
+                .collect();
+            for (k, g) in owner.into_iter().zip(merge_split_circles(flat)) {
+                if let Some(edge) = out.get_mut(k) {
+                    edge.geom.push(g);
+                }
+            }
+        }
         geometry.extend(projected_edges(body, &mesh, plane, &edges));
     }
     if kind != LinkKind::Intersect && (indices.len() > 1 || indices.first().is_some_and(|index| certified_planar_construction(body, *index))) {
@@ -1244,8 +1271,9 @@ impl Motion2 {
             LinkGeom::Arc { c, a, b } => LinkGeom::Arc { c: f(c), a: f(a), b: f(b) },
             LinkGeom::Conic { a, apex, b, rho } => LinkGeom::Conic { a: f(a), apex: f(apex), b: f(b), rho: *rho },
             LinkGeom::Ellipse { c, major, minor } => LinkGeom::Ellipse { c: f(c), major: f(major), minor: *minor },
-            LinkGeom::Spline { pts, control, degree, periodic } => {
-                LinkGeom::Spline { pts: pts.iter().map(f).collect(), control: *control, degree: *degree, periodic: *periodic }
+            // Knots and weights don't change under a rigid motion.
+            LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
+                LinkGeom::Spline { pts: pts.iter().map(f).collect(), control: *control, degree: *degree, periodic: *periodic, nurbs: nurbs.clone() }
             }
         }
     }
@@ -1338,54 +1366,19 @@ pub fn face_link_edges(
     if target.body.is_mesh() {
         return Err(DocError::Invalid("a mesh body's edges have no names to keep deleted members by".into()));
     }
-    let mesh = target.mesh();
-    let index = |i: usize| u32::try_from(i).map_err(|_| DocError::Invalid("face index exceeds limit".into()));
-    let edges = match anchor.filter(|_| link.auto_face) {
-        Some(anchor) => {
-            let (indices, _) = doc.anchored_face_indices(st, target, &anchor.target)?;
-            match indices.as_slice() {
-                [i] => projection_face_edges(target, &mesh, index(*i)?, &plane)?,
-                _ => order::family_edges(&mesh, &indices.iter().copied().collect(), &plane)?,
-            }
-        }
-        None => {
-            let face = match &link.face_name {
+    let indices = match anchor.filter(|_| link.auto_face) {
+        Some(anchor) => doc.anchored_face_indices(st, target, &anchor.target)?.0,
+        None => vec![
+            match &link.face_name {
                 Some(name) => crate::naming::face_on_body(target, name, *at).map(|(i, ..)| i),
-                None => nearest_face(&mesh, *at).and_then(|(f, ..)| usize::try_from(f).ok()),
+                None => crate::appearance::nearest_face(target, *at).map(|(_, f)| f),
             }
-            .ok_or_else(|| lost("the projected face"))?;
-            projection_face_edges(target, &mesh, index(face)?, &plane)?
-        }
+            .ok_or_else(|| lost("the projected face"))?,
+        ],
     };
-    let names = crate::naming::edge_names(target);
-    // Each edge's pieces as the link has them: a circle whose two edges fit to the same half is
-    // made whole again across all of them (`merge_split_circles`), keeping which edge each is of.
-    // Each edge is read as `projected_edges` reads it: exactly when it can be, else fitted.
-    let mut owner = Vec::new();
-    let mut flat = Vec::new();
-    for (k, (e, exact)) in edges.iter().zip(exact_edges(target, &plane, &edges)).enumerate() {
-        let pieces = match exact {
-            Some(g) => g,
-            None => mesh.edges.get(*e).map(|pts| fit_world(&plane, pts)).unwrap_or_default(),
-        };
-        for g in pieces {
-            owner.push(k);
-            flat.push(g);
-        }
-    }
-    let mut out: Vec<EdgePieces> = edges
-        .iter()
-        .map(|e| {
-            let name = names.get(*e).cloned().unwrap_or_default();
-            let faces_exact = mesh.edge_faces.get(*e).is_some_and(|fs| fs.iter().all(|f| crate::naming::face_name_exact(target, *f as usize)));
-            EdgePieces { exact: !name.is_empty() && faces_exact, name, geom: Vec::new() }
-        })
-        .collect();
-    for (k, g) in owner.into_iter().zip(merge_split_circles(flat)) {
-        if let Some(edge) = out.get_mut(k) {
-            edge.geom.push(g);
-        }
-    }
+    // The face's edges as the link resolves them, so a member is the same edge both ways.
+    let mut out = Vec::new();
+    resolve_face_indices(st, &plane, link.kind, body, &indices, &std::collections::BTreeSet::new(), Some(&mut out))?;
     Ok(out)
 }
 

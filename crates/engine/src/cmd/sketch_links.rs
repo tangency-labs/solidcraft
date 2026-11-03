@@ -240,8 +240,8 @@ fn piece_on(sk: &Sketch, ci: usize, g: &LinkGeom, tol: f64) -> bool {
         LinkGeom::Conic { a, apex, b, rho } => vec![solidcraft_sketch::conic_point(*a, *apex, *b, *rho, 0.5), *a, *b],
         LinkGeom::Circle(c, r) => vec![g.spot(), *c - Vec2::X * *r, *c + Vec2::Y * *r],
         LinkGeom::Ellipse { major, .. } => vec![*major],
-        LinkGeom::Spline { pts, control, degree, periodic } => {
-            [0.0, 0.5, 1.0].map(|t| solidcraft_sketch::spline_point_mode(pts, *control, *degree, *periodic, t)).to_vec()
+        LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
+            [0.0, 0.5, 1.0].map(|t| solidcraft_sketch::spline_point_mode(pts, *control, *degree, *periodic, nurbs.as_ref(), t)).to_vec()
         }
     };
     probe.iter().all(|p| on_curve(sk, ci, *p, tol))

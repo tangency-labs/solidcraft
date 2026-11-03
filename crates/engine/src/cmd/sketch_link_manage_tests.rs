@@ -620,9 +620,9 @@ fn exact_spline_and_conic_pieces_lie_on_their_curves() {
     let spline = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Spline { .. })).unwrap();
     let conic = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Conic { .. })).unwrap();
     let pts = vec![Vec2::new(0., 0.), Vec2::new(0., 12.), Vec2::new(20., 12.), Vec2::new(20., 0.)];
-    let piece = LinkGeom::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false };
+    let piece = LinkGeom::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: None };
     assert!(super::piece_on(&sk, spline, &piece, 1e-7));
-    let lifted = LinkGeom::Spline { pts: pts.iter().map(|p| *p + Vec2::Y).collect(), control: true, degree: 3, periodic: false };
+    let lifted = LinkGeom::Spline { pts: pts.iter().map(|p| *p + Vec2::Y).collect(), control: true, degree: 3, periodic: false, nurbs: None };
     assert!(!super::piece_on(&sk, spline, &lifted, 1e-7));
     let piece = LinkGeom::Conic { a: Vec2::new(30., 0.), apex: Vec2::new(35., 6.), b: Vec2::new(40., 0.), rho: 0.7 };
     assert!(super::piece_on(&sk, conic, &piece, 1e-7));

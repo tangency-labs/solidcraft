@@ -800,9 +800,13 @@ impl Sketch {
             CurveKind::Arc { c, a, b } => LinkGeom::Arc { c: p(c)?, a: p(a)?, b: p(b)? },
             CurveKind::Conic { a, b, apex, rho } => LinkGeom::Conic { a: p(a)?, apex: p(apex)?, b: p(b)?, rho: *rho },
             CurveKind::Ellipse { c, m, r } => LinkGeom::Ellipse { c: p(c)?, major: p(m)?, minor: *r },
-            CurveKind::Spline { pts, control, degree, periodic } => {
-                LinkGeom::Spline { pts: pts.iter().map(p).collect::<Option<_>>()?, control: *control, degree: *degree, periodic: *periodic }
-            }
+            CurveKind::Spline { pts, control, degree, periodic, nurbs } => LinkGeom::Spline {
+                pts: pts.iter().map(p).collect::<Option<_>>()?,
+                control: *control,
+                degree: *degree,
+                periodic: *periodic,
+                nurbs: nurbs.clone(),
+            },
         })
     }
 

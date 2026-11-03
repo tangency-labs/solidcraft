@@ -1095,7 +1095,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     let mut sk = sketch_store::read(&doc, id)?.clone();
     let mut links = Vec::with_capacity(indices.len());
     for &index in indices {
-        let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
+        let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index], &Default::default(), None)?;
         let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
         if let Some(entry) = sk.links.iter_mut().find(|entry| entry.id == link) {
             entry.face_name = names.get(index).cloned();
