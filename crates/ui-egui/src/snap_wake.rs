@@ -7,8 +7,8 @@
 //! (a face only replaces a face's points), or when the input stops taking them.
 
 use egui::{Painter, Pos2, Stroke};
-use solidcraft_engine::Sel;
 use solidcore_record::Vec3;
+use solidcraft_engine::Sel;
 use solidcraft_engine::snap::{SnapKind, SnapPoint, snap_points};
 
 use crate::SolveApp;
