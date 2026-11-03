@@ -2,7 +2,7 @@
 
 use solidcraft_geom::{Vec2, Vec3};
 
-use crate::ops::Heights;
+use crate::params::Heights;
 use crate::path::{MAX_MOVES, Move, Toolpath};
 use crate::{CamError, Result};
 

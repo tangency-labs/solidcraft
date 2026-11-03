@@ -56,10 +56,6 @@ impl Shape {
         Ok(Shape { loops })
     }
 
-    pub fn loops(&self) -> &[Vec<Piece>] {
-        &self.loops
-    }
-
     fn pieces(&self) -> impl Iterator<Item = &Piece> {
         self.loops.iter().flatten()
     }

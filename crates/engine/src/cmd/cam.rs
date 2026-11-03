@@ -988,7 +988,14 @@ mod tests {
         assert!(!x0.is_empty(), "{g0}");
         assert_ne!(x0, x10, "origin must move posted X\n{g0}\n{g10}");
         let shifted: Vec<i64> = x0.iter().map(|x| x - 1000).collect();
-        assert_eq!(shifted, x10, "X(origin 10) should be X(origin 0) minus 10 mm\n{g0}\n{g10}");
+        // The origin shift is exact in geometry, but the posted strings are
+        // decimals: a coordinate on a half-hundredth boundary (an arc chord
+        // at X-1.005) parses back with the two runs' products rounding on
+        // opposite sides of .5, so the comparison carries the post's own
+        // one-hundredth precision.
+        for (i, (a, b)) in shifted.iter().zip(x10.iter()).enumerate() {
+            assert!((a - b).abs() <= 1, "word {i}: X(origin 10) should be X(origin 0) minus 10 mm within a hundredth: {a} vs {b}\n{g0}\n{g10}");
+        }
     }
 
     #[test]
