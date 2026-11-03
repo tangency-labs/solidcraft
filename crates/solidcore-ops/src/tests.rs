@@ -728,3 +728,34 @@ fn a_result_stated_solid_must_be_one() {
     assert_eq!(r, Err(Error::NotSolid));
     assert_eq!(b.to_smb(false).unwrap(), before);
 }
+
+/// A body goes to the record and back through ops with its order: record face, edge and vertex
+/// `i` is the kernel entity `Order` names, in both directions; a record the conversion refuses
+/// is the operation's refusal, as data.
+#[test]
+fn a_body_goes_to_the_record_and_back_in_record_order() {
+    all_fixes();
+    let b = make_cylinder([1.0, 2.0, 3.0], 4.0, 5.0).unwrap();
+    let (r, order) = b.to_record().unwrap();
+    assert_eq!(order.faces.len(), r.faces.len());
+    assert_eq!(order.edges.len(), r.edges.len());
+    assert_eq!(order.vertices.len(), r.vertices.len());
+    let (back, back_order) = Body::from_record(&r, true).unwrap();
+    assert_eq!(back.counts().unwrap(), b.counts().unwrap());
+    // record vertex i is the kernel vertex the order names, at the record's point
+    {
+        let kernel = back.lock();
+        for (i, v) in back_order.vertices.iter().enumerate() {
+            let p = kernel.vertex(*v).unwrap().point;
+            assert_eq!([p.x, p.y, p.z], r.vertices[i].point, "vertex {i}");
+        }
+    }
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(again, r);
+    let mut bad = r.clone();
+    bad.version = 3;
+    assert!(matches!(
+        Body::from_record(&bad, true),
+        Err(Error::Record(_))
+    ));
+}

@@ -17,6 +17,9 @@ use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::{Brep, Vec3};
 
+use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
+use solidcore_record::brep::Brep as Record;
+
 use crate::error::status;
 use crate::session::{measure_body, read_body, run, with_body};
 use crate::{Error, Result};
@@ -125,6 +128,74 @@ impl Body {
 /// largest (a choice of ops: SolidCraft's station maps take the same): a map flattening a body
 /// more than this is refused as singular.
 pub const REGULAR_RATIO: f64 = 1e-9;
+
+/// A conversion's refusal as the operation's: the kernel's error by its type ([`status`]), the
+/// record's by what it is.
+fn refused(e: Unsupported) -> Error {
+    match e {
+        Unsupported::Kernel(e) => status(e),
+        Unsupported::Invalid(w) => Error::Record(w.to_owned()),
+        Unsupported::NotYet(w) => Error::Unsupported(w),
+    }
+}
+
+impl Body {
+    /// The record as a kernel body ([`to_kernel`]), and the kernel entity each record face,
+    /// edge and vertex is: picks and history name entities in record order, and [`Order`] takes
+    /// them to the kernel's. `trusted`: the record comes from a modeller that keeps the kernel's
+    /// rules, so the kernel's healer is skipped.
+    ///
+    /// # Errors
+    /// [`Error::Record`] for a record that fails its validation or the kernel's limits;
+    /// [`Error::Unsupported`] for what the conversion does not carry yet; the kernel's error by
+    /// its type.
+    pub fn from_record(record: &Record, trusted: bool) -> Result<(Body, Order)> {
+        let mut out = None;
+        let mut refusal = None;
+        let made = run("brep::to_kernel", |k| match to_kernel(k, record, trusted) {
+            Ok((b, order)) => {
+                out = Some(order);
+                Ok(Some(b))
+            }
+            Err(Unsupported::Kernel(e)) => Err(e),
+            Err(e) => {
+                refusal = Some(refused(e));
+                Ok(None)
+            }
+        });
+        if let Some(e) = refusal {
+            return Err(e);
+        }
+        match (made?, out) {
+            (Some(b), Some(order)) => Ok((Body::new(b), order)),
+            _ => Err(Error::Exception),
+        }
+    }
+
+    /// This body as the record in canonical order ([`to_record`]), and the kernel entity each
+    /// record face, edge and vertex is. The kernel gives every use on a face its UV trim first,
+    /// which is why the body is edited.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] for what the record cannot carry (yet); [`Error::Record`] for
+    /// kernel data that does not make a valid record; the kernel's error by its type.
+    pub fn to_record(&self) -> Result<(Record, Order)> {
+        let mut out = None;
+        let mut refusal = None;
+        with_body("brep::to_record", self, |k, b| {
+            match to_record(k, b) {
+                Ok(made) => out = Some(made),
+                Err(Unsupported::Kernel(e)) => return Err(e),
+                Err(e) => refusal = Some(refused(e)),
+            }
+            Ok(())
+        })?;
+        if let Some(e) = refusal {
+            return Err(e);
+        }
+        out.ok_or(Error::Exception)
+    }
+}
 
 /// What an operation's result must be ([`finish`]), as its input says: a solid input must give
 /// a solid. Made from the input ([`Expect::of`]), never chosen by a caller; the two exceptions

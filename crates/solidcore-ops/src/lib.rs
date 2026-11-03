@@ -12,7 +12,9 @@
 //!   call running now and the failure callback;
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
-//!   bytes ([`file`]) and the validity check ([`check`]);
+//!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
+//!   ([`Body::from_record`], [`Body::to_record`]) with the [`Order`] that takes record indices to
+//!   the kernel's entities;
 //! - `finish`: the result contract, from what the input was (crate-internal: the families use it);
 //! - [`provenance`]: the hook an application's construction history rides on.
 //!
@@ -33,6 +35,7 @@ pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body
 pub use check::{CheckLevel, CheckReport};
 pub use error::{Error, FitKind, Result, RoomReason};
 pub use offset::{offset_faces, offset_sheet, shell, thicken};
+pub use solidcore_convert::brep::Order;
 
 #[cfg(test)]
 mod tests;
