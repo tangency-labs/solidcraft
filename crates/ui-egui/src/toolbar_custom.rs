@@ -474,7 +474,7 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
 }
 
 /// Customize Toolbar: every command of the tab's panels with a check box (on the toolbar or
-/// not), how to drag them, and Reset Toolbar.
+/// not) and its ribbon icon, how to drag them, and Reset Toolbar.
 pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.toolbar_custom.customizing {
         return;
@@ -512,7 +512,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 let shown = buttons(app, &tab, panel, &cmds, n);
                                 for c in &cmds {
                                     let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox(ui, app.tr_label(c.label), &mut on);
+                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), c.icon, &mut on);
                                     crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
                                     if r.changed() {
                                         changes.push((c.id, on));

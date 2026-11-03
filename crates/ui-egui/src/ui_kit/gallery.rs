@@ -1879,6 +1879,9 @@ const ELEMENTS: &[Element] = &[
     element!("checkbox_disabled_mixed", |ui, _| {
         ui.add_enabled_ui(false, |ui| checkbox_indeterminate(ui, "Option", &mut false, true));
     }),
+    element!("checkbox_icon", |ui, _| {
+        checkbox_icon(ui, "Extrude", "extrude", &mut true);
+    }),
     element!("checkbox_focused", |ui, _| {
         egui::Frame::new().inner_margin(Tokens::get().space_4).show(ui, |ui| {
             checkbox(ui, "Option", &mut true).request_focus();
