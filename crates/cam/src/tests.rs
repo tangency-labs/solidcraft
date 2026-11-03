@@ -174,7 +174,7 @@ fn pocket_stays_inside_the_walls_and_clears_everything_the_tool_can_reach() {
 fn pocket_goes_round_an_island() {
     let island = Loop2::circle(v(30.0, 20.0), 5.0);
     let regions = [Region2 { outer: rect(0.0, 0.0, 60.0, 40.0).outer, holes: vec![island] }];
-    let params = PocketParams { stepover: 3.0, climb: false, stock_to_leave: 0.5, tolerance: 0.01, ramp_angle: 0.0 };
+    let params = PocketParams { stepover: 3.0, climb: true, stock_to_leave: 0.5, tolerance: 0.01, ramp_angle: 0.0 };
     let path = pocket(&regions, &tool(6.0), &params, &cut(0.0, -2.0, 2.0)).unwrap();
     let shape = Shape::from_regions(&regions, 0.01).unwrap();
     let pts = cutting_points(&path, 0.0);
@@ -272,10 +272,11 @@ fn ramps_replace_plunges_into_material() {
     // In a pocket the first ring is short, so the ramp goes round it several times.
     let params = PocketParams { stepover: 2.5, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: ramp };
     let path = pocket(&regions, &tool(6.0), &params, &cut(0.0, -5.0, 2.5)).unwrap();
-    // Descents into uncut material never exceed the ramp angle. The router's
-    // own link hops re-engage with one extra step's descent into the channel
-    // it just cut — a fraction of a millimetre, not an entry into material —
-    // so those are exempt.
+    // Descents into uncut material never exceed the ramp angle. The
+    // planner's SafeZ link hops land half a millimetre above the floor and
+    // re-enter with one move down into the channel they just cut — cut
+    // area, not a ramp into material — so re-entries of that depth are
+    // exempt.
     let pts = path.points(0.002);
     let mut angle = 0.0f64;
     let mut plunges = false;
@@ -287,7 +288,7 @@ fn ramps_replace_plunges_into_material() {
         let run = (b.x - a.x).hypot(b.y - a.y);
         if run < 1e-9 {
             plunges = true;
-        } else if a.z - b.z > 0.11 {
+        } else if a.z - b.z > 0.5 + 1e-9 {
             angle = angle.max((a.z - b.z).atan2(run));
         }
     }
@@ -803,4 +804,24 @@ fn adaptive_splits_a_pocket_at_a_narrow_passage() {
         let d = dist_to_cuts(&path, -3.0 + 1e-6, spot);
         assert!(d > 3.0, "{spot:?} is {d} from the nearest pass");
     }
+}
+
+#[test]
+fn clearing_runs_in_the_climb_direction_only_until_the_planner_walks_both() {
+    // The clearing engine holds a wrong-side safehold in conventional
+    // direction (a planner defect, not a milling rule): the operations
+    // refuse the request instead of handing the planner a crash.
+    let regions = [rect(0.0, 0.0, 40.0, 30.0)];
+    let pocket_params = PocketParams { stepover: 2.5, climb: false, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let adaptive_params = AdaptiveParams { stepover: 2.5, climb: false, stock_to_leave: 0.0, tolerance: 0.01 };
+    let c = cut(0.0, -5.0, 2.0);
+    let pocket_refused = pocket(&regions, &tool(6.0), &pocket_params, &c).unwrap_err().to_string();
+    assert!(pocket_refused.contains("not supported yet"), "{pocket_refused}");
+    let adaptive_refused = adaptive(&regions, &tool(6.0), &adaptive_params, &c).unwrap_err().to_string();
+    assert!(adaptive_refused.contains("not supported yet"), "{adaptive_refused}");
+    // The same operations run in climb direction.
+    let climb = PocketParams { climb: true, ..pocket_params };
+    assert!(pocket(&regions, &tool(6.0), &climb, &c).is_ok());
+    let climb = AdaptiveParams { climb: true, ..adaptive_params };
+    assert!(adaptive(&regions, &tool(6.0), &climb, &c).is_ok());
 }

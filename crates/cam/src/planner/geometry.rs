@@ -5,7 +5,7 @@
 //! else in the crate.
 
 use raygeo::geo::types::{Point, Polygon};
-use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Vec2};
 use solidcraft_geom::prelude::*;
 
 /// Appends one closed loop to `g` at Z 0 (the engine lifts every move to

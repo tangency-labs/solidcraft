@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("cam.op.pocket", "2D Pocket", pocket_cmd).icon("hole").params(
         "setup; name; tool (number); sketch?: id or name, with profiles?; faces?; or outer/regions; holes?; \
-         stepover? (default half the tool diameter); climb?; stock_to_leave?; tolerance?; ramp_angle?: deg; \
+         stepover? (default half the tool diameter); climb? (default true; conventional is refused in clearing yet); stock_to_leave?; tolerance?; ramp_angle?: deg; \
          clearance?; retract?; top?; bottom; stepdown?; feed?; plunge_feed?; spindle_rpm?; coolant?",
     ),
     CommandSpec::new("cam.op.adaptive", "Adaptive Clear", adaptive_cmd).icon("hole").params(
@@ -1078,7 +1078,11 @@ mod tests {
     }
 
     #[test]
-    fn circle_sketch_posts_g2_or_g3() {
+    fn circle_sketch_posts_within_its_tolerance() {
+        // A circle wall comes out as a tolerance chain, not arcs: the
+        // planner's exact offsetting covers line walls only (rolled
+        // corners included), and arc walls are followed within the
+        // operation's tolerance until it learns arc boundaries.
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane": "XY"}));
         run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
@@ -1096,7 +1100,7 @@ mod tests {
         );
         let posted = run(&mut s, "cam.post", json!({"setup": "Top"}));
         let gcode = posted["gcode"].as_str().unwrap();
-        assert!(gcode.contains("G2 ") || gcode.contains("G3 "), "{gcode}");
+        assert!(gcode.contains("X-11.99") || gcode.contains("X-12") || gcode.contains("Y-11.99"), "the wall follows the circle: {gcode}");
         assert!(posted["readback"]["within"].as_bool().unwrap());
     }
 }

@@ -41,9 +41,10 @@ pub fn contour(regions: &[Region2], tool: &Tool, params: &ContourParams, cut: &C
     if regions.is_empty() {
         return invalid("the operation has no regions");
     }
+    let regions = fit_arcs(regions, params.tolerance);
     let mut moves: Vec<Move> = Vec::new();
     let mut pos: Option<Vec3> = None;
-    for region in regions {
+    for region in &regions {
         planner::contour_region(region, params, tool, cut, &mut moves, &mut pos)?;
     }
     finish(moves, &cut.heights, "the tool does not fit the profile")
@@ -66,13 +67,21 @@ pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut
     if !(params.stepover >= 1.0e-3) || !(params.stepover <= tool.diameter) {
         return invalid("the stepover must be between 1 micron and the tool diameter");
     }
+    if !params.climb {
+        // The clearing planner walks islands and walls in climb direction
+        // only: a conventional request would hand it a direction its
+        // adaptive stepper cannot walk yet (it holds a wrong-side
+        // safehold), so the operation refuses rather than guessing.
+        return Err(crate::CamError::Unsupported("not supported yet: conventional (non-climb) pocket clearing".into()));
+    }
     if regions.is_empty() {
         return invalid("the operation has no regions");
     }
     // The stock to leave comes off the walls before the planner saw the
     // pocket (the crate's own offsetting, as preparer); a region that
     // vanishes was too narrow for the tool and the stock.
-    let prepared = prepare_stock(regions, params.stock_to_leave, params.tolerance)?;
+    let regions = fit_arcs(regions, params.tolerance);
+    let prepared = prepare_stock(&regions, params.stock_to_leave, params.tolerance)?;
     if prepared.is_empty() {
         return invalid("the tool does not fit the pocket with that stock to leave");
     }
@@ -89,6 +98,7 @@ pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut
             params.stepover,
             params.ramp_angle,
             true,
+            params.climb,
             params.tolerance,
             cut,
             &Clamp::Region { shape, keep_out: r },
@@ -113,6 +123,9 @@ pub fn adaptive(regions: &[Region2], tool: &Tool, params: &AdaptiveParams, cut: 
     if !(params.stepover >= 1.0e-3) || !(params.stepover <= tool.diameter) {
         return invalid("the stepover must be between 1 micron and the tool diameter");
     }
+    if !params.climb {
+        return Err(crate::CamError::Unsupported("not supported yet: conventional (non-climb) adaptive clearing".into()));
+    }
     if !params.stock_to_leave.is_finite() || !(0.0..=crate::params::MAX_COORD).contains(&params.stock_to_leave) {
         return invalid("the stock to leave must be 0 or more");
     }
@@ -123,7 +136,8 @@ pub fn adaptive(regions: &[Region2], tool: &Tool, params: &AdaptiveParams, cut: 
     // pocket (the crate's own offsetting, as preparer). A region that
     // vanishes was too narrow for the tool and the stock; an island grows
     // by the same amount.
-    let prepared = prepare_stock(regions, params.stock_to_leave, params.tolerance)?;
+    let regions = fit_arcs(regions, params.tolerance);
+    let prepared = prepare_stock(&regions, params.stock_to_leave, params.tolerance)?;
     if prepared.is_empty() {
         return invalid("the tool does not fit the pocket with that stock to leave");
     }
@@ -139,6 +153,7 @@ pub fn adaptive(regions: &[Region2], tool: &Tool, params: &AdaptiveParams, cut: 
             // operation exposes a ramp angle today.
             0.0,
             false,
+            params.climb,
             params.tolerance,
             cut,
             &Clamp::Region { shape, keep_out: tool.radius() },
@@ -147,6 +162,20 @@ pub fn adaptive(regions: &[Region2], tool: &Tool, params: &AdaptiveParams, cut: 
         )?;
     }
     finish(moves, &cut.heights, "the tool does not fit the pocket")
+}
+
+/// Sketch profiles arrive as fitted splines; the exact offsetting and the
+/// arc output need lines and arcs, so every free-form segment is fitted by
+/// them within the operation's tolerance first. A region with a segment
+/// that cannot be fitted stays as it is and is followed as a line chain.
+fn fit_arcs(regions: &[Region2], tolerance: f64) -> Vec<Region2> {
+    regions
+        .iter()
+        .map(|region| Region2 {
+            outer: region.outer.fit_arcs(tolerance).unwrap_or_else(|| region.outer.clone()),
+            holes: region.holes.iter().map(|h| h.fit_arcs(tolerance).unwrap_or_else(|| h.clone())).collect(),
+        })
+        .collect()
 }
 
 /// The boundaries of `regions` moved by `stock` into the material (the

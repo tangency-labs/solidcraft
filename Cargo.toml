@@ -15,7 +15,7 @@ repository = "https://github.com/bherbruck/solidcraft"
 [workspace.dependencies]
 robust = "1.2"
 # CAM engine (MIT): exact line/arc offsets, profile passes, contour plans
-raygeo = "1.70.0"
+raygeo = "1.72.0"
 # internal
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }

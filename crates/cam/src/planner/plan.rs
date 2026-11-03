@@ -7,12 +7,12 @@ use raygeo::cnc::plan::clearing::{ClearingWorkplanOptions, plan_clearing};
 use raygeo::cnc::plan::plan::{Plan, PlanStep};
 use raygeo::error::RaygeoError;
 use raygeo::geo::geometry::Geometry;
+use raygeo::ops::assembly::adaptive::TravelMode;
 use raygeo::ops::assembly::profile::{ProfileKind, ProfileRampSpec, ProfileSpec};
 use raygeo::ops::container::Ops;
 use raygeo::ops::part::part::Part;
 use raygeo::ops::types::CutDirection;
 use solidcore_record::{Region2, Vec3};
-use solidcraft_geom::prelude::*;
 
 use crate::Result;
 use crate::params::{ContourParams, Side};
@@ -61,46 +61,26 @@ pub(crate) fn profile_level(
         return invalid("the tool does not fit the profile");
     };
     let mut plan = Plan::new(boundary, islands, cut.heights.clearance);
+    // The operation's feeds ride on the plan's cut state: descents come out
+    // at the plunge feed, cuts at the cut feed.
+    plan.cut_state.feed_rate = Some(cut.feeds.cut.round() as i32);
+    plan.cut_state.plunge_feed = Some(cut.feeds.plunge.round() as i32);
+    // The ramps go first: the descent walks the loop at the angle, and the
+    // profile pass enters in the channel it cut.
     if ramp_angle > 0.0 {
-        plan.steps.push(PlanStep {
-            face_id: String::new(),
-            spec: std::sync::Arc::new(ProfileRampSpec {
-                kind,
-                tool_radius: tool.radius(),
-                wall_margin,
-                stock_to_leave,
-                ramp_angle,
-                z_start: cut.heights.clearance,
-                z_end: z,
-                cut_direction: direction,
-                tolerance,
-            }),
-            region_boundary: None,
-        });
+        let mut ramp = ProfileRampSpec::for_tool(kind, tool.radius(), ramp_angle, cut.heights.clearance, z);
+        ramp.wall_margin = wall_margin;
+        ramp.stock_to_leave = stock_to_leave;
+        ramp.cut_direction = direction;
+        ramp.tolerance = tolerance;
+        plan.steps.push(PlanStep { face_id: String::new(), spec: std::sync::Arc::new(ramp), region_boundary: None });
     }
-    plan.steps.push(PlanStep {
-        face_id: String::new(),
-        spec: std::sync::Arc::new(ProfileSpec {
-            kind,
-            tool_radius: tool.radius(),
-            step_over: tool.radius(),
-            step_length: tool.radius() * 0.2,
-            target_z: z,
-            safe_z: cut.heights.clearance,
-            wall_margin,
-            stock_to_leave,
-            cut_direction: direction,
-            start_pos: None,
-            tolerance,
-            expansion_batch_size: 20,
-            cancel_check: None,
-            engagement_area_threshold: 1.0,
-            engagement_angle_threshold: 30.0,
-            feed_reduction_factor: 0.5,
-            trace_path: None,
-        }),
-        region_boundary: None,
-    });
+    let mut spec = ProfileSpec::for_tool(kind, tool.radius(), z, cut.heights.clearance);
+    spec.wall_margin = wall_margin;
+    spec.stock_to_leave = stock_to_leave;
+    spec.cut_direction = direction;
+    spec.tolerance = tolerance;
+    plan.steps.push(PlanStep { face_id: String::new(), spec: std::sync::Arc::new(spec), region_boundary: None });
     let output = run_plan(&plan, &part).map_err(|e| match e {
         RaygeoError::Cancelled => engine_failed("profiling engine", "it was cancelled"),
         other => engine_failed("profiling engine", other),
@@ -111,12 +91,9 @@ pub(crate) fn profile_level(
 /// One depth level of clearing — pocket roughing with a finishing wall pass
 /// when `finishing`, adaptive clearing when not: regions split around
 /// narrow passages, ordered, entered and linked by the engine's clearing
-/// planner. `ramp_angle` (radians) caps how steeply the entries and the
-/// finishing pass descend into material.
-///
-/// Upstream gap: `plan_clearing` hardcodes its cut direction (CCW), so
-/// climb/conventional cannot be forwarded yet; every clearing path the
-/// engine generates is climb-convention.
+/// planner, in the requested cut direction. `ramp_angle` (radians) caps
+/// how steeply the entries and the finishing pass descend into material.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn clearing_level(
     boundary: &[raygeo::geo::types::Point],
     islands: &[Vec<raygeo::geo::types::Point>],
@@ -125,33 +102,24 @@ pub(crate) fn clearing_level(
     step_over: f64,
     ramp_angle: f64,
     finishing: bool,
+    direction: CutDirection,
     cut: &crate::params::Cut,
     z: f64,
 ) -> Result<Ops> {
     let part = Part::from_polygons(&raygeo::geo::types::Polygon::from(boundary.to_vec()), islands, size);
-    // The scales follow the engine's own defaults (a 3 mm-radius tool steps
-    // 0.6 mm along a pass and a third of a radius down per turn); step-over
-    // and depth come from the operation.
-    let options = ClearingWorkplanOptions {
-        tool_radius: tool.radius(),
-        step_over,
-        step_length: tool.radius() * 0.2,
-        target_z: z,
-        safe_z: cut.heights.clearance,
-        wall_margin: 0.0,
-        safe_margin: tool.radius() * 0.2,
-        stock_to_leave: 0.0,
-        plunge_pitch: tool.radius() * 0.3,
-        angular_step: 0.1,
-        area_tolerance: 1.0,
-        max_deflection_deg: 30.0,
-        finishing,
-        max_entry_angle_deg: ramp_angle.to_degrees(),
-        // Feeds are chosen per move by the translator, from the operation's
-        // own feeds.
-        feed_rate: None,
-        plunge_feed: None,
-    };
+    // The tuning scales are the constructor's (a fifth-of-a-radius step
+    // length and safe margin, a third-of-a-radius plunge pitch, the
+    // planner's angular and area tuning); step-over, depth, finishing, the
+    // entry-angle cap and the direction come from the operation.
+    let mut options = ClearingWorkplanOptions::for_tool(tool.radius(), step_over, z, cut.heights.clearance);
+    options.finishing = finishing;
+    options.max_entry_angle_deg = ramp_angle.to_degrees();
+    options.cut_direction = direction;
+    // The operation's feeds ride on the plan's cut state, and travels keep
+    // to the SafeZ shape: this crate judges a path from the path alone.
+    options.travel_mode = TravelMode::SafeZ;
+    options.feed_rate = Some(cut.feeds.cut);
+    options.plunge_feed = Some(cut.feeds.plunge);
     let plan = plan_clearing(&part, "", &options).map_err(|e| engine_failed("clearing planner", e))?;
     if plan.steps.is_empty() {
         return Ok(Ops::new());
@@ -226,18 +194,20 @@ pub(crate) fn clearing_region(
     stepover: f64,
     ramp_angle: f64,
     finishing: bool,
+    climb: bool,
     tolerance: f64,
     cut: &crate::params::Cut,
     clamp: &Clamp,
     moves: &mut Vec<Move>,
     pos: &mut Option<Vec3>,
 ) -> Result<()> {
+    let direction = direction(Side::Inside, climb);
     let (boundary, islands, size) = clearing_input(region, tolerance);
     if boundary.len() < 3 {
         return invalid("the tool does not fit the pocket");
     }
     for z in cut.levels()? {
-        let ops = clearing_level(&boundary, &islands, size, tool, stepover, ramp_angle, finishing, cut, z)?;
+        let ops = clearing_level(&boundary, &islands, size, tool, stepover, ramp_angle, finishing, direction, cut, z)?;
         translate::append(&ops, cut, moves, pos, clamp)?;
         check_limit(moves)?;
     }
