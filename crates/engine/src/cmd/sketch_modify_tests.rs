@@ -1194,6 +1194,35 @@ fn transform_scales_turns_and_moves_in_one_step() {
     }
 }
 
+/// #11721: turning a rectangle with Transform keeps it a rectangle at the new angle. Its
+/// horizontal and vertical constraints turn with it, as they do in Move, instead of pulling the
+/// turned sides back to the axes when the sketch solves.
+#[test]
+fn transform_turns_a_rectangle_with_its_axis_constraints() {
+    for angle in [30.0, 90.0] {
+        let mut s = new_sketch();
+        let made = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        let sides = ids(&made["curves"]);
+        let corners = |s: &Session| {
+            let sk = sketch(s);
+            let mut out: Vec<Vec2> = sides.iter().map(|c| sk.point(sk.resolve_point(&format!("{c}.start")).unwrap()).unwrap()).collect();
+            out.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+            out
+        };
+        let before = corners(&s);
+        let reply = run(&mut s, "sketch.transform", json!({"entities": sides, "angle": angle, "center": [20, 10]}));
+        assert!(reply["sketch"]["solved"].as_bool().unwrap_or(false), "{angle}: the sketch stays solved: {reply}");
+        let (s_, c_) = f64::to_radians(angle).sin_cos();
+        let turned = |q: Vec2| Vec2::new(20.0 + (q.x - 20.0) * c_ - (q.y - 10.0) * s_, 10.0 + (q.x - 20.0) * s_ + (q.y - 10.0) * c_);
+        let mut want: Vec<Vec2> = before.iter().map(|q| turned(*q)).collect();
+        want.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+        let got = corners(&s);
+        for (g, w) in got.iter().zip(&want) {
+            assert!(g.dist(*w) < 1e-6, "{angle}: a corner went to {g:?}, not {w:?}: {got:?}");
+        }
+    }
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.

@@ -3526,7 +3526,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
-/// then moved by `translate`.
+/// then moved by `translate`. Constraints tied to the sketch axes turn with them, as in Move.
 fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.transform";
     let k = match p.get("factor") {
@@ -3538,14 +3538,19 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (cs, ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(c + (q - c) * k) + t;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        // The horizontal and vertical relations turn with the entities, as in Move, or the
+        // solve pulls a turned rectangle back to the axes and shrinks it (#11721).
+        let moved = involved_points(sk, &cs, &ps);
+        rotate_axis_constraints(sk, doc, &moved, ang)?;
         Ok(ids_of(sk, &cs))
     })?;
+    s.doc_mut().prune_model_params();
     Ok(json!({"curves": out, "sketch": info}))
 }
 
