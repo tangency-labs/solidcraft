@@ -1036,6 +1036,8 @@ pub enum FeatureKind {
     Split {
         body: BodyName,
         plane: PlaneRef,
+        // The tool face is picked (and named), so the split follows it (#11674).
+        #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
