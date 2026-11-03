@@ -3224,7 +3224,7 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
 /// The item as a hit: what lights up when it is hovered. `None` for bodies, features and
 /// components, which light up whole instead, and for constraints.
 pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
-    let st = app.session.world_state();
+    let st = app.session.world_state().ok()?;
     let active = app.session.active_sketch;
     let point = |sketch: u64, id: &str| {
         let sk = &st.sketch(sketch)?.sketch;

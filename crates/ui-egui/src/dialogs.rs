@@ -1893,13 +1893,17 @@ impl Dialog {
     /// chain holds it.
     pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, item: &Sel) {
         let shell_chain = i == 0 && self.shell_faces(s).is_some();
-        let state = s.world_state();
+        let state = s.world_state().ok();
         let Some(inp) = self.inputs.get_mut(i) else { return };
         if shell_chain {
             let Sel::Face { body, index, .. } = item else { return };
             inp.items.retain(|pick| {
                 let Sel::Face { body: b, point, .. } = pick else { return true };
-                b != body || !state.body(b).is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
+                b != body
+                    || !state
+                        .as_ref()
+                        .and_then(|st| st.body(b))
+                        .is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
             });
         } else {
             let mut gone = crate::viewport::grouped_selection(s, item);
