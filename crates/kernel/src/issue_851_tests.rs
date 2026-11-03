@@ -361,3 +361,29 @@ fn rounds_ending_in_a_sphere_of_any_size_never_panic() {
         }
     }
 }
+
+/// The front's top edge rounded r 2, then the edge between that round and the arc wall (the
+/// middle of the arc top edge's tangent chain) at the round's own radius: the ball sits on the
+/// round's axis, fixed, and the plane square to the edge at its top end misses that centre, so
+/// no round ends there. solidcore refuses it as a collapsed offset (`NoRoomReason::
+/// OffsetCollapses`, solidcore#2431), naming 2 less its fit margin; the refusal says why.
+#[test]
+fn a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why() {
+    let rounded = fillet(&part(), &[tf()], 2.0).unwrap();
+    let middle = Vec3::new(41.17486688363082, -20.413218067968561, 9.415188112149071);
+    let why = match fillet(&rounded, &[middle], 2.0) {
+        Err(KernelError::TooLarge(why)) => why,
+        other => panic!("{:?}", other.map(|b| b.face_count())),
+    };
+    assert!(
+        why.contains("the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"),
+        "{why}"
+    );
+    // 2 less solidcore's fit margin.
+    let largest: f64 = why
+        .split_once("the largest radius that fits is ")
+        .and_then(|(_, n)| n.split_once(" mm"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("{why}"));
+    assert!(largest < 2.0 && largest > 1.9, "{why}");
+}

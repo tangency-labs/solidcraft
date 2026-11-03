@@ -640,3 +640,26 @@ fn an_l_sheet_thickens() {
     let core = thicken(&sheet, 2.0, false).unwrap();
     assert!(rel(volume(&core, 1e-8).unwrap(), 840.0) < 1e-9);
 }
+
+/// solidcore#2350's parabolic sheet: the quadratic Bézier (-10, 0), (0, 10), (10, 0) lofted 20
+/// along z, a B-spline face whose radius of curvature at its apex is 10. Thickened 11 towards
+/// its centre of curvature its offset folds there: solidcore's one construction refuses it
+/// naming 10, the largest wall that works (`fixes.shell_one_construction`); 2 builds.
+#[test]
+fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
+    use crate::sweeps::Curve;
+    let parabola = |z: f64| Curve::Nurbs {
+        degree: 2,
+        points: vec![[-10.0, 0.0, z, 1.0], [0.0, 10.0, z, 1.0], [10.0, 0.0, z, 1.0]],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let sheet = super::sweep::loft(&[vec![parabola(0.0)], vec![parabola(20.0)]], 1, false).unwrap();
+    // Towards the centre is the side where an 11 wall folds; the other side takes any wall.
+    let folds: Vec<String> = [11.0, -11.0].iter().filter_map(|&t| thicken(&sheet, t, false).err()).map(|e| e.to_string()).collect();
+    let [why] = folds.as_slice() else { panic!("one side folds: {folds:?}") };
+    let (words, largest) = why.split_once("; the largest wall that works is ").unwrap_or_else(|| panic!("{why}"));
+    assert_eq!(words, "the wall is thicker than a face curves, so the face's offset folds");
+    let largest: f64 = largest.parse().unwrap();
+    assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    assert!(thicken(&sheet, 2.0, false).is_ok() && thicken(&sheet, -2.0, false).is_ok());
+}
