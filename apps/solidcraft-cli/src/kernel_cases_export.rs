@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
-use solidcraft_engine::geom::brep::Brep;
+use solidcore_record::brep::Brep;
 use solidcraft_engine::kernel::smlib_trace::{self, Event};
 
 use crate::read_json;
