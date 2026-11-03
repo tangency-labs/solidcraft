@@ -1379,3 +1379,18 @@ fn a_saved_automatic_thread_keeps_its_old_size() {
     let thread = saved["features"].as_array().unwrap().iter().find(|f| f["type"] == json!("thread")).unwrap();
     assert_eq!(thread["old_auto_size"], json!(true));
 }
+
+/// Editing a saved automatic thread (which keeps its old size) does not change its size.
+#[test]
+fn editing_a_saved_automatic_thread_keeps_its_old_size() {
+    let mut s = block_with_bore(12.0);
+    let made = run(&mut s, "solid.thread", json!({"face": [6, 0, 10]}));
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/49");
+    v.as_object_mut().unwrap().remove("format_pending");
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let designations = |s: &Session| -> Vec<String> { s.model.state().threads.iter().map(|t| t.designation.clone()).collect() };
+    assert_eq!(designations(&s), ["M14"]);
+    run(&mut s, "timeline.redefine", json!({"feature": made["feature"], "command": "solid.thread", "params": {"face": [6, 0, 10], "hand": "left"}}));
+    assert_eq!(designations(&s), ["M14"]);
+}
