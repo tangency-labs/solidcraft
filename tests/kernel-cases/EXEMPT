@@ -91,6 +91,11 @@ inspect.colored_components        display: component colours
 inspect.compare_picture           display analysis: a picture compared with the outline
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
+inspect.section.delete            section analyses kept in the design (engine tests: several_section_analyses_one_shown_at_a_time)
+inspect.section.edit              section analyses kept in the design (engine tests: several_section_analyses_one_shown_at_a_time)
+inspect.section.list              section analyses kept in the design (engine tests: several_section_analyses_one_shown_at_a_time)
+inspect.section.rename            section analyses kept in the design (engine tests: several_section_analyses_one_shown_at_a_time)
+inspect.section.visibility        section analyses kept in the design (engine tests: several_section_analyses_one_shown_at_a_time)
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
