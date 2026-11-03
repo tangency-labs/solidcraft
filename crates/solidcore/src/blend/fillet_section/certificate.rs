@@ -456,6 +456,47 @@ pub fn leader_series_over(
     Ok((l, t))
 }
 
+/// [`leader_series_over`] over an `s` that may cross the leader's knots (not upstream): `s`
+/// cut at the knots strictly inside it, each part's series on its own piece, their hull
+/// coefficient by coefficient. Each coefficient encloses its derivative at every point of
+/// its part (at a knot, from either side), and the feet's series use them point by point
+/// (Krawczyk's test is over the feet, for each s), so the hull is an enclosure whatever
+/// the leader's continuity: where it has a corner in its parameter the two sides' values
+/// widen the hull, and the bounds with it. Only a leader that is not continuous at a
+/// crossed knot, or an `s` past its knots, is refused.
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] for such a knot or `s`; those of [`leader_series_over`].
+pub fn leader_series_piecewise(
+    leader: &NurbsCurve,
+    s: Ivl,
+    tr: Trunc,
+) -> Result<(VSer<Ivl>, VSer<Ivl>)> {
+    let hull = |a: &mut VSer<Ivl>, b: &VSer<Ivl>| {
+        for (sa, sb) in a.a.iter_mut().zip(&b.a) {
+            for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+                for (x, y) in ra.iter_mut().zip(rb) {
+                    *x = x.hull(*y);
+                }
+            }
+        }
+    };
+    let mut out: Option<(VSer<Ivl>, VSer<Ivl>)> = None;
+    for (a, b, k) in knot_cuts(&leader.u, leader.p, leader.n, s.lo, s.hi, 0)? {
+        let (l, t) = leader_series_over(leader, Ivl::new(a, b), tr, Some(k))?;
+        out = Some(match out {
+            None => (l, t),
+            Some((mut hl, mut ht)) => {
+                hull(&mut hl, &l);
+                hull(&mut ht, &t);
+                (hl, ht)
+            }
+        });
+    }
+    out.ok_or_else(|| SolidError::sm_err(OP))
+}
+
 /// `sm_GnLaw` (0d43b4c): a ball whose radius varies, its law r(s) over the leader's
 /// parameter (the x of a B-spline curve), with the curve's NURBS data.
 #[derive(Clone, Debug)]
@@ -641,6 +682,111 @@ pub fn face_partials_over(
     nurbs_partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk)
 }
 
+/// The parts of `[lo, hi]` between the knots strictly inside it, each with the span whose
+/// closed interval holds it: a knot crossed where the direction is continuous to less than
+/// `continuity` (degree minus multiplicity) is refused, and so is an interval past the
+/// knots' range (the face or curve is not defined there).
+fn knot_cuts(
+    knots: &[f64],
+    p: usize,
+    n: usize,
+    lo: f64,
+    hi: f64,
+    continuity: usize,
+) -> Result<Vec<(f64, f64, usize)>> {
+    let refused = |reason| SolidError::Unsupported {
+        operation: OP,
+        reason,
+    };
+    let (first, last) = (knot(knots, p as isize), knot(knots, n as isize));
+    if !(lo >= first && hi <= last && lo <= hi) {
+        return Err(refused("a box past the face's knots"));
+    }
+    let mut at = vec![lo];
+    let mut prev = f64::NAN;
+    for &x in knots {
+        if x > lo && x < hi && x != prev {
+            let m = knots.iter().filter(|&&y| y == x).count();
+            if p.checked_sub(m).is_none_or(|c| c < continuity) {
+                return Err(refused(
+                    "a box crosses a knot line where the face or curve is not continuous enough",
+                ));
+            }
+            at.push(x);
+        }
+        prev = x;
+    }
+    at.push(hi);
+    Ok(at
+        .iter()
+        .zip(at.iter().skip(1))
+        .map(|(&a, &b)| (a, b, span(knots, p, n, 0.5 * (a + b))))
+        .collect())
+}
+
+/// The continuity a face must have at a knot line a feet's box crosses
+/// ([`nurbs_partials_over_box`]): Krawczyk's mean-value form needs the feet's system (the
+/// faces' points and first partials) continuous, with its Jacobian (their second partials)
+/// enclosed wherever it exists; at C^2 the system is C^1 across the line.
+pub const FEET_BOX_CONTINUITY: usize = 2;
+
+/// A NURBS face's partials `P[a][b]`, `a + b <= lk`, over `[ua, ub] x [va, vb]` wherever
+/// it lies on the face's knots, enclosed (not upstream): the box cut at the knot lines
+/// strictly inside it, each part enclosed on its own polynomial piece
+/// ([`nurbs_partials_over_piece`] over the part, its closed span), and the enclosures'
+/// hull. Every point of the box lies in some closed part, where that piece is the face, so
+/// the hull holds, at every point, each partial the face has there (on a knot line, from
+/// either side): an enclosure point by point, whatever the continuity. A use that also
+/// integrates over the box (a mean-value form) needs the face continuous to some order
+/// across the lines it crosses: a crossed line where the face's continuity (degree minus
+/// the knot's multiplicity) is below `continuity` is refused, as is a box past the knots'
+/// range. No station invariant is assumed.
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] for a crossed knot line of too low a continuity or a box
+/// past the knots; those of [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_over_box(
+    cn: &Nurbs,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+    continuity: usize,
+) -> Result<Partials<Ivl>> {
+    let us = knot_cuts(&cn.u, cn.p, cn.nu, ua, ub, continuity)?;
+    let vs = knot_cuts(&cn.v, cn.q, cn.nv, va, vb, continuity)?;
+    let mut out: Option<Partials<Ivl>> = None;
+    for &(a0, a1, ku) in &us {
+        for &(b0, b1, kv) in &vs {
+            let p = nurbs_partials_over_piece(cn, ku, kv, a0, a1, b0, b1, lk)?;
+            out = Some(match out {
+                None => p,
+                Some(mut h) => {
+                    for a in 0..=lk {
+                        for b in 0..=(lk - a) {
+                            let (x, y) = (h.at(a, b), p.at(a, b));
+                            h.set(
+                                a,
+                                b,
+                                V3 {
+                                    x: x.x.hull(y.x),
+                                    y: x.y.hull(y.y),
+                                    z: x.z.hull(y.z),
+                                },
+                            );
+                        }
+                    }
+                    h
+                }
+            });
+        }
+    }
+    out.ok_or_else(|| SolidError::sm_err(OP))
+}
+
 /// A span the feet are enclosed over (`sm_GnSpanAt`, c5b6bb7): S, the feet's guesses at
 /// its ends (their hull, widened, is the first box), each face's polynomial piece over it
 /// and the leader's (`None`: the one the middle of S lies in).
@@ -658,6 +804,12 @@ pub struct SpanAt {
     pub kv: [usize; 2],
     /// `lLeader`.
     pub leader: Option<usize>,
+    /// Not upstream: a NURBS face's partials over a box, and the leader's series over S,
+    /// are enclosed piece by piece ([`nurbs_partials_over_box`],
+    /// [`leader_series_piecewise`]), so the feet and S may cross knot lines (`ku`, `kv` and
+    /// `leader` unused for them); `false`: on the pieces `ku`, `kv` and `leader`, continued
+    /// (upstream's, which relies on the station invariant).
+    pub piecewise: bool,
 }
 
 /// `sm_GnEnclose`: the feet's series over `S = [a.s, b.s]` (a point when they are one
@@ -691,6 +843,7 @@ pub fn gn_enclose(
         ku: [0; 2],
         kv: [0; 2],
         leader: None,
+        piecewise: false,
     };
     // each face's polynomial piece over the span: the one its middle lies in. A station
     // stands where a foot crosses a knot line, so every foot over the span lies in that
@@ -743,7 +896,11 @@ pub fn gn_enclose_over(
         None => None,
     };
     let law_r = law_r.as_ref();
-    let (leader, tangent) = gn_try!(leader_series_over(leader_n, s, tr, at.leader), None);
+    let (leader, tangent) = if at.piecewise {
+        gn_try!(leader_series_piecewise(leader_n, s, tr), None)
+    } else {
+        gn_try!(leader_series_over(leader_n, s, tr, at.leader), None)
+    };
     let ax = |c: usize| at.xa.get(c).copied().unwrap_or(f64::NAN);
     let bx = |c: usize| at.xb.get(c).copied().unwrap_or(f64::NAN);
     let [ku0, ku1] = at.ku;
@@ -760,6 +917,12 @@ pub fn gn_enclose_over(
             }
             None => (None, None),
         };
+        if at.piecewise && d0.is_none() && d1.is_none() {
+            return Ok([
+                nurbs_partials_over_box(n0, l0, h0, l1, h1, lk, FEET_BOX_CONTINUITY)?,
+                nurbs_partials_over_box(n1, l2, h2, l3, h3, lk, FEET_BOX_CONTINUITY)?,
+            ]);
+        }
         Ok([
             face_partials_over(k, n0, d0, ku0, kv0, l0, h0, l1, h1, lk)?,
             face_partials_over(k, n1, d1, ku1, kv1, l2, h2, l3, h3, lk)?,
@@ -1884,6 +2047,86 @@ mod tests {
 
     fn contains(i: Ivl, x: f64) -> bool {
         i.lo <= x && x <= i.hi
+    }
+
+    /// A cubic in u with an interior knot of multiplicity `m` at u = 1 (knots 0 x4, 1 xm,
+    /// 2 x4), linear in v, its control points' z not a polynomial across the knot.
+    fn cubic_with_knot(m: usize) -> Nurbs {
+        let mut u = vec![0.0; 4];
+        u.extend(std::iter::repeat_n(1.0, m));
+        u.extend([2.0; 4]);
+        let nu = u.len() - 4;
+        let mut pw = Vec::new();
+        let zs = [0.0, 1.0, -0.5, 2.0, 0.3, -1.2];
+        for (i, z) in (0..nu).zip(zs.iter().cycle()) {
+            for y in [0.0, 1.0] {
+                pw.extend([i as f64, y, z + 0.25 * y, 1.0]);
+            }
+        }
+        Nurbs {
+            p: 3,
+            q: 1,
+            nu,
+            nv: 2,
+            u,
+            v: vec![0.0, 0.0, 1.0, 1.0],
+            pw,
+        }
+    }
+
+    /// A box across a knot line: the piecewise enclosure holds every partial of the face on
+    /// both sides (the third u-partial jumps at the knot), which one piece continued over the
+    /// box does not; a knot of too low a continuity, and a box past the knots, are refused.
+    #[test]
+    fn a_box_across_a_knot_line_is_enclosed_piece_by_piece() {
+        let n = cubic_with_knot(1);
+        let (ua, ub, va, vb) = (0.9, 1.1, 0.2, 0.3);
+        let e = nurbs_partials_over_box(&n, ua, ub, va, vb, 3, FEET_BOX_CONTINUITY).unwrap();
+        let left = nurbs_partials_over_piece(&n, 3, 1, ua, ub, va, vb, 3).unwrap();
+        let mut continued_misses = false;
+        for &u in &[0.9, 0.95, 1.0, 1.05, 1.1] {
+            for &v in &[0.2, 0.25, 0.3] {
+                // at the knot itself, either side's piece
+                let spans = if u == 1.0 {
+                    vec![3, 4]
+                } else {
+                    vec![span(&n.u, 3, n.nu, u)]
+                };
+                for ku in spans {
+                    let x = nurbs_partials::<f64>(&n, ku, 1, u, v, 3);
+                    for a in 0..=3 {
+                        for b in 0..=(3 - a) {
+                            let (p, q) = (x.at(a, b), e.at(a, b));
+                            for (c, i) in [(p.x, q.x), (p.y, q.y), (p.z, q.z)] {
+                                let slack = 1e-9 * (1.0 + c.abs());
+                                assert!(
+                                    i.lo - slack <= c && c <= i.hi + slack,
+                                    "P[{a}][{b}] at ({u}, {v}): {c} not in {i:?}"
+                                );
+                            }
+                        }
+                    }
+                    let c = x.at(3, 0).z;
+                    continued_misses |= !contains(left.at(3, 0).z, c);
+                }
+            }
+        }
+        assert!(
+            continued_misses,
+            "the left piece continued is not the face past the knot"
+        );
+        // a double knot (C^1) crossed by a feet's box is refused; at C^1 asked, enclosed
+        let d = cubic_with_knot(2);
+        assert!(matches!(
+            nurbs_partials_over_box(&d, ua, ub, va, vb, 3, FEET_BOX_CONTINUITY),
+            Err(SolidError::Unsupported { .. })
+        ));
+        assert!(nurbs_partials_over_box(&d, ua, ub, va, vb, 3, 1).is_ok());
+        // past the knots
+        assert!(matches!(
+            nurbs_partials_over_box(&n, 1.9, 2.1, va, vb, 2, FEET_BOX_CONTINUITY),
+            Err(SolidError::Unsupported { .. })
+        ));
     }
 
     /// Two planes at a square corner, the ball of radius r on the edge along y (the

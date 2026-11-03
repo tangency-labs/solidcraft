@@ -10,11 +10,11 @@ use solidcore::kernel::Kernel;
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::certified::Verdict;
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::mass::integrator::properties::{brep_volume, no_unsure_region, PropertyAttributes};
 use solidcore::primitive::api_primitives as primitives;
-use solidcore::topology::brep::is_outward_solid;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p3::brep_copy;
+use solidcore::topology::brep::{is_outward_solid, is_outward_touching_solids};
 use solidcore::{Brep, Vec3};
 
 use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
@@ -111,9 +111,11 @@ impl Body {
     /// contract takes it (ops passes it on as given).
     ///
     /// # Errors
-    /// The kernel's (an accuracy it refuses is its status).
+    /// [`Error::UnsureRegion`] for a region the kernel is unsure is material (never read as
+    /// void, a volume of 0); the kernel's (an accuracy it refuses is its status).
     pub fn volume(&self, relative_accuracy: f64) -> Result<f64> {
         measure_body("brep_volume", self, |k, b| {
+            no_unsure_region(b)?;
             let store = AttributeStore::default();
             let attrs = PropertyAttributes {
                 store: &store,
@@ -204,6 +206,8 @@ impl Body {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Expect {
     solid: bool,
+    /// A solid result may be solids touching along edges or at vertices (a boolean's).
+    touching: bool,
 }
 
 impl Expect {
@@ -211,27 +215,39 @@ impl Expect {
     ///
     /// # Errors
     /// The kernel's, from the solid test.
-    #[allow(dead_code)] // the families' operations derive it from their inputs
     pub(crate) fn of(k: &mut Kernel, input: &mut Brep) -> solidcore::Result<Expect> {
         Ok(Expect {
             solid: is_outward_solid(k, input)?,
+            touching: false,
         })
     }
 
+    /// As [`Expect::of`], a solid's result allowed to be solids touching along edges or at
+    /// vertices (closed, `brep_is_closed_touching_solids`), as a boolean's may be.
+    pub(crate) fn touching(self) -> Expect {
+        Expect {
+            touching: true,
+            ..self
+        }
+    }
+
+    /// A result that must be a solid (an operation whose every input is one).
+    pub(crate) const SOLID: Expect = Expect {
+        solid: true,
+        touching: false,
+    };
+
     /// A result of an operation with no solid input (a primitive, a sheet's).
-    #[allow(dead_code)]
-    pub(crate) const FACES: Expect = Expect { solid: false };
+    pub(crate) const FACES: Expect = Expect {
+        solid: false,
+        touching: false,
+    };
 
     /// Whether a result must be a solid: closed, manifold, valid and facing out.
     #[must_use]
     pub(crate) const fn solid(self) -> bool {
         self.solid
     }
-
-    /// A result that must be a solid whatever its input, for an operation that makes one
-    /// from a sheet (a thickened sheet): the operation states it, as its own contract.
-    #[allow(dead_code)] // the families' operations that make a solid from a sheet
-    pub(crate) const SOLID: Expect = Expect { solid: true };
 }
 
 /// The result contract: a result has faces ([`Error::Empty`] if not), and a solid input gives a
@@ -239,7 +255,6 @@ impl Expect {
 ///
 /// # Errors
 /// The kernel's error from the solid test.
-#[allow(dead_code)] // the families' operations finish with it
 pub(crate) fn finish(
     k: &mut Kernel,
     mut b: Brep,
@@ -248,7 +263,14 @@ pub(crate) fn finish(
     if b.face_list().is_empty() {
         return Ok(Err(Error::Empty));
     }
-    if expect.solid && !is_outward_solid(k, &mut b)? {
+    let solid = |k: &mut Kernel, b: &mut Brep| {
+        if expect.touching {
+            is_outward_touching_solids(k, b)
+        } else {
+            is_outward_solid(k, b)
+        }
+    };
+    if expect.solid && !solid(k, &mut b)? {
         return Ok(Err(Error::NotSolid));
     }
     Ok(Ok(b))

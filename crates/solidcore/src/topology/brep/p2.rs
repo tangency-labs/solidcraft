@@ -185,6 +185,17 @@ pub fn shell_vertices(b: &Brep, attribute: Option<&AttributeFilter<'_>>) -> Resu
 ///
 /// [`SolidError::NotFound`] for a dangling id.
 pub fn is_manifold_solid(b: &Brep) -> Result<bool> {
+    is_closed_where(b, edge::is_manifold)
+}
+
+/// [`is_manifold_solid`]'s walk with its edge test given: at least two regions, no shell
+/// vertices and `edge_ok` for every edge (not upstream: shared with the closed-body tests
+/// that allow other edges, `query::api_queries::brep_is_closed_touching_solids`).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of `edge_ok`.
+pub fn is_closed_where(b: &Brep, edge_ok: impl Fn(&Brep, EdgeId) -> Result<bool>) -> Result<bool> {
     if brep_regions(b)?.len() < 2 {
         return Ok(false);
     }
@@ -194,7 +205,7 @@ pub fn is_manifold_solid(b: &Brep) -> Result<bool> {
     }
 
     for e in brep_edges(b)? {
-        if !edge::is_manifold(b, e)? {
+        if !edge_ok(b, e)? {
             return Ok(false);
         }
     }

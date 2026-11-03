@@ -310,10 +310,13 @@ pub fn bern_taylor_over(b: &[f64], t: Ivl, lj: usize) -> Vec<Ivl> {
 /// then the arc in `(sigma, dt)` over the box's t, as `EvaluateDefinition` makes it (the
 /// circle's centre the ball's: a constant radius), in rounded interval arithmetic.
 ///
+/// The station invariant is the construction's and is not checked here (the certificate's
+/// boxes rely on it); [`definition_partials_piecewise`] needs none.
+///
 /// # Errors
 ///
 /// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn definition_partials_naive(
     k: &Kernel,
     d: &mut GnDefFace<'_>,
@@ -325,6 +328,50 @@ pub fn definition_partials_naive(
     va: f64,
     vb: f64,
     lk: usize,
+) -> Result<Partials<Ivl>> {
+    partials_naive(k, d, net, [ku, kv], [ua, ub, va, vb], lk, false)
+}
+
+/// [`definition_partials_naive`] without the station invariant: the faces it rolls on are
+/// enclosed piece by piece over the feet's boxes
+/// ([`super::certificate::nurbs_partials_over_box`]: cut at the knot lines a box crosses,
+/// each part on its own piece, the hull), so a foot may cross a face's knot line (at a
+/// station, or anywhere on a refitted net) and the enclosure is still of the definition,
+/// certified to the faces' continuity there; the leader's series over the box's s likewise
+/// ([`super::certificate::leader_series_piecewise`]). Refused where a crossed knot line's
+/// continuity is below the order the feet's system needs (its Jacobian's second partials,
+/// and one more than `lk` for the series), or the box is past a face's or the leader's
+/// knots. Not upstream (the certified normal's and point's query, `query::normal`).
+///
+/// # Errors
+///
+/// `SM_ERR` where an enclosure is not proved (a crossed knot line refused among them);
+/// those of [`definition_partials_naive`].
+#[allow(clippy::too_many_arguments)]
+pub fn definition_partials_piecewise(
+    k: &Kernel,
+    d: &mut GnDefFace<'_>,
+    net: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    partials_naive(k, d, net, [ku, kv], [ua, ub, va, vb], lk, true)
+}
+
+#[allow(clippy::too_many_lines)]
+fn partials_naive(
+    k: &Kernel,
+    d: &mut GnDefFace<'_>,
+    net: &Nurbs,
+    [ku, kv]: [usize; 2],
+    [ua, ub, va, vb]: [f64; 4],
+    lk: usize,
+    piecewise: bool,
 ) -> Result<Partials<Ivl>> {
     if lk > MAX_S {
         return Err(SolidError::sm_err(OP));
@@ -351,7 +398,9 @@ pub fn definition_partials_naive(
         ku: piece.ku,
         kv: piece.kv,
         leader: Some(piece.leader),
+        piecewise,
     };
+
     let da = s.lo - piece.s;
     let db = s.hi - piece.s;
     for (q, (xa, xb)) in at.xa.iter_mut().zip(at.xb.iter_mut()).enumerate() {

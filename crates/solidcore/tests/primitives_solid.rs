@@ -112,8 +112,9 @@ fn default_sphere_precise_properties_fail_at_tight_accuracy() {
             assert!(
                 matches!(
                     result,
+                    // the step control failing: upstream's SM_ERR, named by its cause
                     Err(SolidError::Upstream {
-                        operation: "mass::integrator",
+                        operation: "mass::integrator::step_control",
                         code: solidcore::error::SM_ERR,
                         ..
                     })

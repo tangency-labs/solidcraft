@@ -18,24 +18,35 @@
 //! - `finish`: the result contract, from what the input was (crate-internal: the families use it);
 //! - [`provenance`]: the hook an application's construction history rides on.
 //!
+//! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
+//! distances and normals), [`boolean`], [`stitch`].
+//!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
 
 pub mod body;
+pub mod boolean;
 pub mod check;
 pub mod error;
 pub mod file;
+pub mod measure;
 pub mod offset;
+pub mod order;
 pub mod provenance;
 pub mod session;
+pub mod stitch;
 
 pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
+pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use error::{Error, FitKind, Result, RoomReason};
+pub use measure::{
+    point_distance, Distance, EdgePoint, GapSample, MassPropertiesEstimate, Normal, PointClass,
+};
 pub use offset::{offset_faces, offset_sheet, shell, thicken};
-pub use solidcore_convert::brep::Order;
+pub use order::Order;
 
 #[cfg(test)]
 mod tests;

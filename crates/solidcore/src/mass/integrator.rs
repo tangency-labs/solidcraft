@@ -30,6 +30,15 @@ use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
 use crate::{Kernel, Result, SolidError};
 
 const OP: &str = "mass::integrator";
+/// The operation an ODE integration's `SM_ERR` names when its step control fails: the
+/// step underflows, or the steps or retries run out (not upstream: upstream's status is
+/// `SM_ERR` for every failure; the code is the same, the name says which).
+pub(crate) const OP_STEP_CONTROL: &str = "mass::integrator::step_control";
+/// The operation an ODE integration's `SM_ERR` names when the integrand is not finite.
+pub(crate) const OP_INTEGRAND: &str = "mass::integrator::integrand";
+/// A step's refusal of an accuracy below its error's rounding: its step control cannot
+/// meet it.
+const UNACHIEVABLE: &str = "unachievable accuracy";
 const MAX_COMPONENTS: usize = 4096;
 const MAX_STEPS: u32 = 1_000_000;
 const MAX_RETRIES: u32 = 1024;
@@ -178,7 +187,18 @@ impl OdeIntegrator {
                 &mut evaluate,
                 &mut scratch,
             )
-            .map_err(SolidError::nl_ser(OP))?;
+            .map_err(|e| match e {
+                SolidError::Upstream {
+                    operation: OP_STEP_CONTROL | OP_INTEGRAND,
+                    ..
+                } => e,
+                // the step control cannot meet the accuracy (upstream: SM_ERR, as below)
+                SolidError::InvalidInput {
+                    reason: UNACHIEVABLE,
+                    ..
+                } => SolidError::sm_err(OP_STEP_CONTROL),
+                e => SolidError::nl_ser(OP)(e),
+            })?;
             if step.taken == h {
                 counts.good += 1;
             } else {
@@ -192,11 +212,11 @@ impl OdeIntegrator {
                 return Ok(counts);
             }
             if step.next.abs() <= options.minimum_step {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::sm_err(OP_STEP_CONTROL));
             }
             h = step.next;
         }
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::sm_err(OP_STEP_CONTROL))
     }
 
     /// `RungeKutta5thOrderStep`; also applies the upstream in-place scale floor.
@@ -274,7 +294,7 @@ impl OdeIntegrator {
                 errmax = errmax.max((error / *s).abs());
             }
             if accuracy <= errmax * EFF_ZERO {
-                return Err(SolidError::invalid_input(OP, "unachievable accuracy"));
+                return Err(SolidError::invalid_input(OP, UNACHIEVABLE));
             }
             errmax /= accuracy;
             if errmax <= 1.0 {
@@ -296,10 +316,10 @@ impl OdeIntegrator {
                 htemp.min(0.1 * h)
             };
             if !h.is_finite() || are_same(x + h, x) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::sm_err(OP_STEP_CONTROL));
             }
         }
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::sm_err(OP_STEP_CONTROL))
     }
 }
 
@@ -313,7 +333,7 @@ fn finite(values: &[f64]) -> Result<()> {
     if values.iter().all(|v| v.is_finite()) {
         Ok(())
     } else {
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::sm_err(OP_INTEGRAND))
     }
 }
 fn validate_scale(scale: &[f64]) -> Result<()> {
@@ -949,6 +969,56 @@ mod tests {
         assert_eq!(
             fixes.flag_mut("integrator_propagates_failure").copied(),
             Some(true)
+        );
+    }
+
+    /// An integration's failures name their cause: a non-finite integrand, and a step
+    /// control that cannot meet the accuracy (here: below the rounding of the error), each
+    /// `SM_ERR` as upstream's.
+    #[test]
+    fn a_failure_names_its_cause() {
+        let options = |accuracy| OdeOptions {
+            accuracy,
+            initial_step: 0.1,
+            minimum_step: 0.0,
+            scale: None,
+        };
+        let mut y = [0.0];
+        let nan = OdeIntegrator::default().integrate(&mut y, 0.0, 1.0, options(1e-6), |x, _, d| {
+            if let Some(d) = d.first_mut() {
+                *d = if x > 0.5 { f64::NAN } else { 1.0 };
+            }
+            Ok(())
+        });
+        assert!(
+            matches!(
+                nan,
+                Err(SolidError::Upstream {
+                    operation: OP_INTEGRAND,
+                    code: crate::error::SM_ERR,
+                    ..
+                })
+            ),
+            "{nan:?}"
+        );
+        let mut y = [0.0];
+        let tight =
+            OdeIntegrator::default().integrate(&mut y, 0.0, 1.0, options(1e-300), |x, _, d| {
+                if let Some(d) = d.first_mut() {
+                    *d = (10.0 * x).sin();
+                }
+                Ok(())
+            });
+        assert!(
+            matches!(
+                tight,
+                Err(SolidError::Upstream {
+                    operation: OP_STEP_CONTROL,
+                    code: crate::error::SM_ERR,
+                    ..
+                })
+            ),
+            "{tight:?}"
         );
     }
 }

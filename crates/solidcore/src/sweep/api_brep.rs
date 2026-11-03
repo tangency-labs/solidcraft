@@ -1554,7 +1554,7 @@ mod tests {
     }
 
     /// The volume of `wr471_whole_sphere`, 4/3 pi 5^3. The default integrator fails
-    /// at tight accuracy; WR-472's existing body-length error scale converges on the
+    /// at tight accuracy (its step control: upstream's `SM_ERR`, named by its cause); WR-472's existing body-length error scale converges on the
     /// same face. This is separate from WR-471's placement of the sphere's poles.
     #[test]
     fn wr471_whole_sphere_volume() {
@@ -1583,7 +1583,7 @@ mod tests {
                         matches!(
                             result,
                             Err(SolidError::Upstream {
-                                operation: "mass::integrator",
+                                operation: crate::mass::integrator::OP_STEP_CONTROL,
                                 code: crate::error::SM_ERR,
                                 ..
                             })

@@ -254,7 +254,6 @@ pub(crate) fn run_on<T: Answer>(
 ///
 /// # Errors
 /// As [`run_on`].
-#[allow(dead_code)] // the consuming families' calls
 pub(crate) fn run_taking<T: Answer>(
     call: &'static str,
     inputs: Inputs<'_>,
@@ -360,7 +359,6 @@ fn written(
 ///
 /// # Errors
 /// The kernel's error when it stands for no status.
-#[allow(dead_code)] // the families' calls answer with statuses
 pub(crate) fn answer<T>(r: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
@@ -468,4 +466,4 @@ pub fn crash_test() -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

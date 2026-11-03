@@ -17,6 +17,7 @@
 //! | [`face_bounding_box`], [`face_internal_point`], [`face_classify_uv`], [`face_closest_point`], [`face_closest_point_in_shape`] | `SmApiFaceBoundingBox`, `SmApiFaceInternalPoint`, `SmApiFaceClassifyUV`, `SmApiFaceClosestPoint` |
 //! | [`edge_bounding_box`], [`edge_closest_point`], [`edge_parameter_range`], [`edge_classify_parameter`], [`edge_tangent`] | `SmApiEdgeBoundingBox`, `SmApiEdgeClosestPoint`, `SmApiEdgeParameterRange`, `SmApiEdgeClassifyParameter`, `SmApiEdgeTangent` |
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
+//! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
 //!
@@ -49,7 +50,9 @@ use crate::geom::object::{BrepStore, FaceKey, ObjectRef, Shape, ShapeMember};
 use crate::geom::solution_array::{
     ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType,
 };
+use crate::geom::tol::{context_xsect_tol_3d, SmallTopoType};
 use crate::geom::tools::{self, EdgePick};
+use crate::heal::gap::GapFunction;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
@@ -59,13 +62,16 @@ use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::BrepClassifier;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
+use crate::query::normal::{certify as certify_normal, Sense, UnitVector};
 use crate::surface::surface::p1::zone_tol_3d;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
+use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{
-    edge, edgeuse::p1 as eu, face::p2 as face, Brep, BrepId, EdgeId, FaceId, VertexId,
+    edge, edgeuse::p1 as eu, face::p2 as face, Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId,
+    VertexId,
 };
 
 const OP: &str = "query::api_queries";
@@ -634,8 +640,7 @@ pub fn brep_relationship_classify<O: SolutionObject>(
         handle: (),
     };
     let distance = solution.start.solution_value;
-    let tolerance =
-        crate::geom::tol::context_zone_tol_3d(k, None, crate::geom::tol::SmallTopoType::NormalSize);
+    let tolerance = crate::geom::tol::context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
     let (mut target_a, mut target_b) = (Target::new(a.brep), Target::new(b.brep));
     if distance > a.brep.tolerance() + b.brep.tolerance() {
         let pa = ignored(solution_point(k, objects, solution, 0))?;
@@ -784,6 +789,26 @@ pub fn find_faces(
 /// Manifold solid predicate (`SmApiBrepIsManifoldSolid`: `SmBrep::IsManifoldSolid`).
 pub fn brep_is_manifold_solid(brep: &Brep) -> Result<bool> {
     crate::topology::brep::p2::is_manifold_solid(brep)
+}
+
+/// Whether `brep` is a closed body whose solids touch only along edges or at vertices
+/// (not upstream: the result test of a boolean of solids that may touch): at least two
+/// regions, no shell vertex, and every edge closed, neither a wire nor bounding a face
+/// on only one side: its edge uses come four to each face round it (two faces, each used
+/// on both sides), so a count that is a positive multiple of four.
+///
+/// # Errors
+///
+/// Those of the topology queries.
+pub fn brep_is_closed_touching_solids(brep: &Brep) -> Result<bool> {
+    crate::topology::brep::p2::is_closed_where(brep, |b, e| {
+        if edge::is_wire(b, e)? {
+            return Ok(false);
+        }
+        let n = edge::edgeuses(b, e, None, None)?.len();
+        // (a multiple of four: its two lowest bits clear)
+        Ok(n >= 4 && n.trailing_zeros() >= 2)
+    })
 }
 
 /// Counts a B-rep's material regions and enclosed void cavities
@@ -1004,6 +1029,256 @@ pub fn vertex_get_point(brep: &Brep, id: VertexId) -> Result<Point3> {
     Ok(brep.vertex(id)?.point)
 }
 
+/// A distance with a proved bound on its rounding: the exact distance between the
+/// stated points is in `[value - bound, value + bound]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Distance {
+    /// The distance as rounded, bit for bit `Vec3::distance` of the same points.
+    pub value: f64,
+    /// A proved bound on `|value - exact|`, finite and not negative.
+    pub bound: f64,
+}
+
+/// The distance between `a` and `b` with a proved bound on its rounding (not
+/// upstream). The value is `a.distance(b)` bit for bit; the bound comes from the same
+/// sum of squares in rounded interval arithmetic
+/// ([`crate::blend::fillet_section::interval`]), so it holds below the normal range
+/// too, where a squared difference underflows.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite coordinate, or a distance that
+/// overflows.
+pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
+    use crate::blend::fillet_section::interval::{cmax, round_up, Ivl};
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !finite(a) || !finite(b) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    let value = a.distance(b);
+    let square = |x: f64, y: f64| {
+        let d = Ivl::from(x) - Ivl::from(y);
+        d * d
+    };
+    let exact = (square(a.x, b.x) + square(a.y, b.y) + square(a.z, b.z)).sqrt();
+    // each difference rounded up: the bound is at least each end's distance from value
+    let bound = cmax(round_up(exact.hi - value), round_up(value - exact.lo));
+    if !value.is_finite() || !bound.is_finite() {
+        return Err(SolidError::invalid_input(OP, "distance overflows"));
+    }
+    Ok(Distance {
+        value,
+        bound: cmax(bound, 0.0),
+    })
+}
+
+/// The distance from vertex `id`'s point to `point`, as [`point_distance`] (not
+/// upstream; the point picks' vertex distance).
+///
+/// # Errors
+///
+/// Those of [`point_distance`]; [`SolidError::NotFound`] for a dangling id.
+pub fn vertex_distance(brep: &Brep, id: VertexId, point: Point3) -> Result<Distance> {
+    point_distance(brep.vertex(id)?.point, point)
+}
+
+/// [`edgeuse_face_frame`]'s result.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeuseFaceFrame {
+    /// The surface parameters of the edge use's point (its UV trim curve's), where
+    /// the normal is taken.
+    pub uv: Point2,
+    /// The face's unit normal there, turned by the faceuse's sense, with its proved
+    /// bound ([`crate::query::normal`]).
+    pub normal: UnitVector,
+}
+
+/// The unit normal, at the edge parameter `parameter`, of the face edge use `eu`
+/// bounds, in the sense of `faceuse` (one of that face's two uses): the surface normal
+/// at the edge use's point on the surface ([`evaluate_binormal`]'s (u, v)), unitised,
+/// negated where `faceuse` is opposite to the surface, and certified against the exact
+/// normal there in `faceuse`'s sense ([`crate::query::normal::certify`] with
+/// [`Sense::Reversed`] for a use opposite to the surface: the sense is the use's
+/// orientation, proved, never taken from the value). Not upstream (the point picks' and
+/// chamfer sides' face normal at an edge). The binormal is not returned: it is not yet
+/// certified.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge use bounding no face, a `faceuse` of another
+/// face, a face without a surface, or a zero normal; [`SolidError::Unsupported`] for a
+/// `faceuse` whose orientation is `Unknown` (no sense to prove); those of [`evaluate_binormal`],
+/// the surface normal and [`crate::query::normal::certify`].
+pub fn edgeuse_face_frame(
+    k: &Kernel,
+    brep: &mut Brep,
+    eu: EdgeuseId,
+    parameter: f64,
+    faceuse: FaceuseId,
+) -> Result<EdgeuseFaceFrame> {
+    let f = eu::face(brep, eu)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge use bounds no face"))?;
+    let use_ = brep.faceuse(faceuse)?;
+    if use_.face != Some(f) {
+        return Err(SolidError::invalid_input(OP, "a faceuse of another face"));
+    }
+    let (sign, sense) = match use_.orientation {
+        OrientType::Same => (1.0, Sense::Surface),
+        OrientType::Opposite => (-1.0, Sense::Reversed),
+        OrientType::Unknown => {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a faceuse whose orientation is unknown has no proved sense",
+            })
+        }
+    };
+    let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
+    let surface = brep
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
+    let n = qbrep::evaluate_surface_normal(k, Some(surface), at.uv)?;
+    let len = n.length();
+    if !(len > 0.0 && len.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "zero normal"));
+    }
+    Ok(EdgeuseFaceFrame {
+        uv: at.uv,
+        normal: certify_normal(k, surface, at.uv, n * (sign / len), sense)?,
+    })
+}
+
+/// [`edgeuse_face_frame`] of face `f`'s use of edge `e`, at the middle of the edge's
+/// interval, in the sense of `faceuse` (not upstream: the parameter an application's
+/// face normal at an edge is taken at).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge that does not bound `f` or an edge interval
+/// that is not finite; those of [`edgeuse_face_frame`].
+pub fn face_normal_at_edge(
+    k: &Kernel,
+    brep: &mut Brep,
+    e: EdgeId,
+    f: FaceId,
+    faceuse: FaceuseId,
+) -> Result<EdgeuseFaceFrame> {
+    let eu = edge::edgeuse_of_face(brep, e, Some(f))?
+        .ok_or_else(|| SolidError::invalid_input(OP, "the edge does not bound the face"))?;
+    let ivl = brep.edge(e)?.interval;
+    let t = 0.5 * (ivl.min() + ivl.max());
+    if !t.is_finite() {
+        return Err(SolidError::invalid_input(OP, "edge interval not finite"));
+    }
+    edgeuse_face_frame(k, brep, eu, t, faceuse)
+}
+
+/// One sample of [`edge_face_gap_samples`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeFaceGapSample {
+    /// The edge curve's parameter.
+    pub edge_parameter: f64,
+    /// The curve's point there, as evaluated.
+    pub edge_point: Point3,
+    /// The surface's (u, v) the drop found.
+    pub face_uv: Point2,
+    /// The surface's point there, as evaluated (rounded: not a proved point of S).
+    pub face_point: Point3,
+    /// The distance between the two evaluated points, with its proved rounding bound.
+    pub distance: Distance,
+    /// A proved upper bound on the distance from `edge_point` to the surface S
+    /// ([`crate::query::normal`]): the largest distance from `edge_point` to the
+    /// enclosure of the exact S(`face_uv`). `None` where S(`face_uv`) is not enclosed: a
+    /// kind [`crate::query::normal::surface_point`] refuses, or a point where it does not
+    /// prove the net's weight positive (its `Degenerate`); the sample is then a sample
+    /// only, and the other samples keep their bounds.
+    pub surface_bound: Option<f64>,
+}
+
+/// The samples of SMLib's edge/face gap function (`SmCrvSrfGapFunction` with 20
+/// samples over the edge interval, as `SmEdgeuse::CalcMaxEdgeFaceGap` builds it) for
+/// edge `e`'s curve and face `f`'s surface, over that surface's own domain; the edge
+/// and face need not be adjacent (not upstream as a query).
+///
+/// What is proved, per sample: `distance` is the distance between the two evaluated
+/// points within its bound; `surface_bound`, where present, is an upper bound on the
+/// distance from `edge_point` to the surface, from the enclosure of the exact
+/// S(`face_uv`) (the evaluated `face_point` is rounded, so `distance` alone bounds
+/// nothing about S). What is not proved: that the drop found the nearest surface point
+/// (the sample may overestimate the gap), that `edge_point` is the curve's exact point,
+/// or that the largest sample is the largest gap along the edge (the curve is sampled,
+/// not bounded between the samples).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an
+/// edge without a curve, a face without a surface, or an empty interval; those of
+/// [`GapFunction::build_sample_set`], [`point_distance`] and
+/// [`crate::query::normal::surface_point`] other than its refusal of a kind or of a point
+/// (those make a sample's `surface_bound` `None`).
+pub fn edge_face_gap_samples(
+    k: &Kernel,
+    brep: &Brep,
+    e: EdgeId,
+    f: FaceId,
+) -> Result<Vec<EdgeFaceGapSample>> {
+    let interval = brep.edge(e)?.interval;
+    let curve = brep
+        .edge(e)?
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
+    let surface = brep
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
+    if interval.max().partial_cmp(&interval.min()) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "empty edge interval"));
+    }
+    // The tolerance only classifies the samples (in or out of tolerance); it changes no
+    // distance.
+    let tol = context_xsect_tol_3d(k, None, SmallTopoType::NormalSize);
+    let mut gaps = GapFunction::crv_srf(tol, curve, &interval, surface, 20);
+    gaps.build_sample_set(k, false)?;
+    gaps.samples()
+        .iter()
+        .map(|s| {
+            Ok(EdgeFaceGapSample {
+                edge_parameter: s.this_param().x,
+                edge_point: s.this_pos(),
+                face_uv: s.other_param(),
+                face_point: s.other_pos(),
+                distance: point_distance(s.this_pos(), s.other_pos())?,
+                surface_bound: surface_bound(k, surface, s.this_pos(), s.other_param())?,
+            })
+        })
+        .collect()
+}
+
+/// The largest distance from `p` to the enclosure of S(`uv`), rounded up; `None` where
+/// S(`uv`) is not enclosed ([`crate::query::normal::surface_point`]'s `Unsupported` and
+/// `Degenerate`: that sample has no bound, the query goes on).
+fn surface_bound(k: &Kernel, surface: &Surface, p: Point3, uv: Point2) -> Result<Option<f64>> {
+    use crate::blend::fillet_section::interval::{cmax, round_up, Ivl};
+    let s = match crate::query::normal::surface_point(k, surface, uv) {
+        Ok(s) => s,
+        Err(SolidError::Unsupported { .. } | SolidError::Degenerate { .. }) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let far = |x: f64, c: Ivl| {
+        let m = cmax(
+            (Ivl::from(x) - Ivl::from(c.lo)).mag(),
+            (Ivl::from(x) - Ivl::from(c.hi)).mag(),
+        );
+        let m = Ivl::from(round_up(m));
+        m * m
+    };
+    let b = round_up((far(p.x, s[0]) + far(p.y, s[1]) + far(p.z, s[2])).sqrt().hi);
+    Ok(b.is_finite().then_some(b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1013,6 +1288,265 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
+
+    /// The true distance is in `[value - bound, value + bound]` and the value is
+    /// `Vec3::distance`'s, bit for bit.
+    fn encloses(d: Distance, a: Point3, b: Point3, exact: f64) {
+        assert_eq!(d.value.to_bits(), a.distance(b).to_bits());
+        assert!(d.bound >= 0.0 && d.bound.is_finite(), "{d:?}");
+        assert!((d.value - exact).abs() <= d.bound, "{d:?} vs {exact}");
+    }
+
+    #[test]
+    fn point_distance_closed_forms_and_their_bounds() {
+        // 3-4-12-13: every step exact, the bound only the interval's widening
+        let (a, b) = (Point3::new(1.0, 2.0, 3.0), Point3::new(4.0, 6.0, 15.0));
+        let d = point_distance(a, b).unwrap();
+        encloses(d, a, b, 13.0);
+        // a few ulps of 13 (the interval's outward widening at each of its 9 steps)
+        assert!(d.bound <= 16.0 * f64::EPSILON * 13.0, "{d:?}");
+        assert_eq!(point_distance(b, a).unwrap(), d);
+        // sqrt 2 is not a double: the bound covers its rounding (about 1e-16)
+        let (a, b) = (Point3::ZERO, Point3::new(1.0, 1.0, 0.0));
+        let d = point_distance(a, b).unwrap();
+        let sqrt2_error = 9.667e-17; // 1.4142135623730950488... - fl(sqrt 2)
+        assert!(
+            d.bound >= sqrt2_error && d.bound <= 16.0 * f64::EPSILON * d.value,
+            "{d:?}"
+        );
+        // equal points: zero, and a bound at the underflow floor
+        let d = point_distance(a, a).unwrap();
+        assert_eq!(d.value, 0.0);
+        assert!(d.bound <= 1e-149, "{d:?}");
+    }
+
+    #[test]
+    fn point_distance_is_proved_where_the_squares_underflow() {
+        // 3e-170, 4e-170: the squares underflow to zero, so the value is 0 while the
+        // exact distance is 5e-170; the bound still covers it
+        let (a, b) = (Point3::ZERO, Point3::new(3e-170, 4e-170, 0.0));
+        let d = point_distance(a, b).unwrap();
+        assert_eq!(d.value, 0.0);
+        encloses(d, a, b, 5e-170);
+    }
+
+    #[test]
+    fn point_distance_refuses_non_finite_and_overflowing_input() {
+        let far = Point3::new(1e200, 0.0, 0.0);
+        assert!(point_distance(Point3::ZERO, far).is_err());
+        let nan = Point3::new(f64::NAN, 0.0, 0.0);
+        assert!(point_distance(Point3::ZERO, nan).is_err());
+        let inf = Point3::new(0.0, f64::INFINITY, 0.0);
+        assert!(point_distance(inf, Point3::ZERO).is_err());
+    }
+
+    #[test]
+    fn vertex_distance_is_the_point_distance_to_the_vertex() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let p = Point3::new(4.0, 6.0, 15.0);
+        for (v, vertex) in b.vertices().iter() {
+            let d = vertex_distance(&b, v, p).unwrap();
+            assert_eq!(d, point_distance(vertex.point, p).unwrap());
+        }
+        let far = Point3::new(1.0, 2.0, 3.0);
+        let corner = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point == far)
+            .unwrap();
+        encloses(vertex_distance(&b, corner, p).unwrap(), far, p, 13.0);
+    }
+
+    #[test]
+    fn edge_face_gap_samples_of_a_box_edge_on_its_own_and_a_far_face() {
+        // A box edge on its own face's plane: every sample's gap is 0. On the opposite
+        // face's plane (z = 3 against z = 0): every sample's gap is 3.
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let plane_z = |f: FaceId, z: f64| {
+            let bx = face_bounding_box(&k, &b, f, true).unwrap();
+            (bx.min().z - z).abs() < 1e-12 && (bx.max().z - z).abs() < 1e-12
+        };
+        let top = *faces.iter().find(|&&f| plane_z(f, 3.0)).unwrap();
+        let bottom = *faces.iter().find(|&&f| plane_z(f, 0.0)).unwrap();
+        let bottom_edge = get_edges(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let x = edge_bounding_box(&k, &b, e, true).unwrap();
+                x.max().z.abs() < 1e-12
+            })
+            .unwrap();
+        let own = edge_face_gap_samples(&k, &b, bottom_edge, bottom).unwrap();
+        assert!(!own.is_empty());
+        for s in &own {
+            assert!(s.distance.value <= 1e-12, "{s:?}");
+            encloses(
+                s.distance,
+                s.edge_point,
+                s.face_point,
+                s.edge_point.distance(s.face_point),
+            );
+        }
+        let far = edge_face_gap_samples(&k, &b, bottom_edge, top).unwrap();
+        assert_eq!(far.len(), own.len());
+        for s in &far {
+            assert!((s.distance.value - 3.0).abs() <= 1e-12, "{s:?}");
+            assert!(s.distance.bound <= 1e-14, "{s:?}");
+            // the plane z = 3 is 3 from a point at z = 0: the proved bound holds it
+            let sb = s.surface_bound.unwrap();
+            assert!((3.0..=3.0 + 1e-12).contains(&sb), "{s:?}");
+        }
+        for s in &own {
+            let sb = s.surface_bound.unwrap();
+            assert!(sb >= s.edge_point.z.abs() && sb <= 1e-12, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn a_gap_sample_s_surface_bound_covers_the_exact_surface() {
+        // a sphere's seam edge against its own face: the exact distance from each sample's
+        // edge point to the sphere, | |p - c| - r |, is within the proved bound, which a
+        // rounded face point alone does not give (it is off the sphere by its rounding)
+        let mut k = Kernel::default();
+        let c = Point3::new(0.3, -0.7, 0.1);
+        let r = 1.0 / 3.0;
+        let b = crate::primitive::api_primitives::create_sphere(&mut k, c, r).unwrap();
+        let f = get_faces(&b).unwrap()[0];
+        let mut n = 0;
+        for e in get_edges(&b).unwrap() {
+            for s in edge_face_gap_samples(&k, &b, e, f).unwrap() {
+                let sb = s.surface_bound.unwrap();
+                let exact = (point_distance(s.edge_point, c).unwrap().value - r).abs();
+                assert!(sb + 1e-15 >= exact, "{s:?}");
+                assert!(sb <= 1e-12, "{s:?}");
+                n += 1;
+            }
+        }
+        assert!(n > 0);
+        // an offset surface is not enclosed: its samples are samples only
+        let sphere = b.face(f).unwrap().surface.clone().unwrap();
+        let off = Surface::from(
+            crate::surface::offset_surface::OffsetSurface::new(&k, 0.1, sphere, true, 0).unwrap(),
+        );
+        assert_eq!(
+            surface_bound(&k, &off, Point3::ZERO, Point2::new(10.0, 5.0)).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_sample_where_the_weight_is_not_proved_positive_has_no_bound() {
+        // a bilinear patch whose weight is 0 at its corner (0, 0): S is not enclosed there
+        // (surface_point's Degenerate), so that sample has no bound, and the query goes on;
+        // inside the patch the weight is positive and the bound is given
+        let k = Kernel::default();
+        let knots = vec![0., 0., 1., 1.];
+        let s = Surface::from(BSplineSurface::from_nurb(
+            NlSurface::new(
+                vec![
+                    vec![CPoint::new(0., 0., 0., 0.), CPoint::new(0., 1., 0., 1.)],
+                    vec![CPoint::new(1., 0., 0., 1.), CPoint::new(1., 1., 0., 1.)],
+                ],
+                1,
+                1,
+                knots.clone(),
+                knots,
+            )
+            .unwrap(),
+            false,
+        ));
+        assert!(matches!(
+            crate::query::normal::surface_point(&k, &s, Point2::new(0.0, 0.0)),
+            Err(SolidError::Degenerate { .. })
+        ));
+        let p = Point3::new(0.5, 0.5, 1.0);
+        assert_eq!(
+            surface_bound(&k, &s, p, Point2::new(0.0, 0.0)).unwrap(),
+            None
+        );
+        assert!(surface_bound(&k, &s, p, Point2::new(0.5, 0.5))
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn edgeuse_face_frame_normals_of_a_box_edge() {
+        // every edge use of a box: its face's normal there is that face's axis, the two
+        // uses of the face give opposite senses, each proved to rounding; a cylinder's
+        // side at an edge of its cap: radial
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let uses: Vec<EdgeuseId> = b.edgeuses().ids().collect();
+        let mut checked = 0;
+        for u in uses {
+            let Some(f) = eu::face(&b, u).unwrap() else {
+                continue;
+            };
+            let e = b.edgeuse(u).unwrap().edge.unwrap();
+            let ivl = b.edge(e).unwrap().interval;
+            let t = 0.5 * (ivl.min() + ivl.max());
+            let (x, y) = face::faceuses(&b, f).unwrap();
+            let (x, y) = (x.unwrap(), y.unwrap());
+            let a = edgeuse_face_frame(&k, &mut b, u, t, x).unwrap();
+            let c = edgeuse_face_frame(&k, &mut b, u, t, y).unwrap();
+            assert_eq!(a.normal.value, -c.normal.value);
+            let n = a.normal.value;
+            let axis = [n.x.abs(), n.y.abs(), n.z.abs()];
+            assert_eq!(axis.iter().filter(|&&v| v == 1.0).count(), 1, "{n:?}");
+            // (the net's enclosure widened at each of its few dozen operations)
+            assert!(a.normal.bound <= 1e-13, "{:?}", a.normal);
+            checked += 1;
+        }
+        // 12 edges, each in 2 faces, each face with a loop use on each of its 2 face uses
+        assert_eq!(checked, 48);
+        // another face's faceuse is refused
+        let u = b.edgeuses().ids().next().unwrap();
+        let f = eu::face(&b, u).unwrap().unwrap();
+        let other = get_faces(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&g| g != f)
+            .unwrap();
+        let (x, _) = face::faceuses(&b, other).unwrap();
+        assert!(edgeuse_face_frame(&k, &mut b, u, 0.5, x.unwrap()).is_err());
+        // a faceuse whose orientation is unknown has no proved sense: refused, not taken as
+        // reversed
+        let (x, _) = face::faceuses(&b, f).unwrap();
+        let x = x.unwrap();
+        b.faceuse_mut(x).unwrap().orientation = OrientType::Unknown;
+        assert!(matches!(
+            edgeuse_face_frame(&k, &mut b, u, 0.5, x),
+            Err(SolidError::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn closed_touching_solids_of_a_box_a_sheet_and_two_boxes_on_an_edge() {
+        use crate::geom::a_object::BooleanOperation;
+        use crate::primitive::api_primitives::{create_box, create_plane};
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let a = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        assert!(brep_is_closed_touching_solids(&a).unwrap());
+        let sheet = create_plane(&mut k, Point3::ZERO, 1.0, 1.0).unwrap();
+        assert!(!brep_is_closed_touching_solids(&sheet).unwrap());
+        // two unit boxes meeting along the edge x = y = 1: closed, not a manifold solid
+        let b = create_box(&mut k, Point3::new(1.0, 1.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let u = crate::boolean::api_brep::boolean(&mut k, a, b, BooleanOperation::Union)
+            .unwrap()
+            .result;
+        assert!(!brep_is_manifold_solid(&u).unwrap());
+        assert!(brep_is_closed_touching_solids(&u).unwrap());
+    }
 
     #[test]
     fn material_census_of_a_box_and_an_empty_brep() {

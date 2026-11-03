@@ -78,9 +78,13 @@ const SIGN_ACCURACY: f64 = 1e-3;
 /// surfaces reversed with its uses) has a negative volume. The sign's margin is the whole
 /// volume, so it is measured at a relative accuracy of `1e-3`.
 ///
+/// A region the kernel is unsure of is [`crate::SolidError::UnsureRegion`], not "not a solid":
+/// the volume's sign would read it as void.
+///
 /// # Errors
 ///
-/// Those of the manifold test, the validity check and the volume.
+/// Those of the manifold test, the validity check and the volume;
+/// [`crate::SolidError::UnsureRegion`].
 pub fn is_outward_solid(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
@@ -88,10 +92,36 @@ pub fn is_outward_solid(
     if !is_manifold_solid(b)? {
         return Ok(false);
     }
+    is_valid_and_outward(k, b)
+}
+
+/// As [`is_outward_solid`], the body allowed to be closed solids touching along edges or at
+/// vertices ([`crate::query::api_queries::brep_is_closed_touching_solids`]), as a boolean's
+/// result may be.
+///
+/// # Errors
+///
+/// As [`is_outward_solid`], and those of the touching-solids test.
+pub fn is_outward_touching_solids(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<bool> {
+    if !is_manifold_solid(b)? && !crate::query::api_queries::brep_is_closed_touching_solids(b)? {
+        return Ok(false);
+    }
+    is_valid_and_outward(k, b)
+}
+
+/// The validity check, no unsure region, and the volume's sign, for a closed body.
+fn is_valid_and_outward(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<bool> {
     let c = validation::check_brep(k, b, validation::CheckLevel::Level0)?;
     if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid != Some(true) {
         return Ok(false);
     }
+    crate::mass::integrator::properties::no_unsure_region(b)?;
     let volume = crate::mass::integrator::properties::brep_volume_default(k, b, SIGN_ACCURACY)?;
     // (false for a NaN too)
     Ok(volume > 0.0)

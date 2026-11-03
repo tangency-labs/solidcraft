@@ -176,8 +176,8 @@ use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::topology as topo;
 use crate::topology::vertexuse as vu1;
 use crate::topology::{
-    Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, LoopuseStart, VertexId,
-    VertexuseId,
+    Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, LoopuseStart, RegionId,
+    VertexId, VertexuseId,
 };
 
 const OP: &str = "topology::face::p2";
@@ -341,6 +341,23 @@ pub fn faceuses(b: &Brep, f: FaceId) -> Result<(Option<FaceuseId>, Option<Faceus
         return Ok((None, None));
     };
     Ok((Some(fu), b.faceuse(fu)?.mate))
+}
+
+/// The regions on face `f`'s two sides, in the order of [`faceuses`] (primary, mate): each
+/// its use's region (`SmFaceuse::GetRegion`, [`eu1::faceuse_region`]), `None` for a side with
+/// no use, no shell or no region. Not upstream (the one reading of a face's two sides for the
+/// measures, the stitch and the outward normal).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn face_side_regions(b: &Brep, f: FaceId) -> Result<[Option<RegionId>; 2]> {
+    let side = |u: Option<FaceuseId>| match u {
+        Some(u) => eu1::faceuse_region(b, u),
+        None => Ok(None),
+    };
+    let (x, y) = faceuses(b, f)?;
+    Ok([side(x)?, side(y)?])
 }
 
 /// `GetLoops`: the loops of the primary face use's loop uses selected as

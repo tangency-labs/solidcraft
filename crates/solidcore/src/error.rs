@@ -258,6 +258,18 @@ pub enum SolidError {
         iterations: u32,
     },
 
+    /// A region whose side the kernel is unsure of (`SmRegion::IsVoid`'s `UNSURE`), where
+    /// the answer depends on whether it is material: refused, never read as material or
+    /// void. Not upstream (upstream's `TRUE` test reads `UNSURE` as void); its
+    /// [`SolidError::sm_status`] is `None`.
+    #[error("{operation}: unsure whether region {} is material", .region.index())]
+    UnsureRegion {
+        /// Operation that needed the region's side.
+        operation: &'static str,
+        /// The region.
+        region: RegionId,
+    },
+
     /// The operation is not supported for this combination of inputs
     /// (e.g. a geometry type upstream does not handle).
     #[error("{operation}: unsupported: {reason}")]
@@ -901,6 +913,7 @@ impl SolidError {
             | Self::PreparationRequired { .. }
             | Self::Cancelled { .. }
             | Self::FaceTrimsUnavailable { .. }
+            | Self::UnsureRegion { .. }
             | Self::Unported { .. } => None,
         }
     }
@@ -959,7 +972,8 @@ impl SolidError {
             Self::NotFound { .. } => ErrorKind::NotFound,
             Self::Degenerate { .. } => ErrorKind::Degenerate,
             Self::NotConverged { .. } => ErrorKind::NotConverged,
-            Self::Unsupported { .. } => ErrorKind::Unsupported,
+            // a region the kernel cannot classify: the query does not decide it
+            Self::Unsupported { .. } | Self::UnsureRegion { .. } => ErrorKind::Unsupported,
             Self::FaceTrimsUnavailable { .. } => ErrorKind::FaceTrimsUnavailable,
             Self::Upstream { code, .. } => ErrorKind::of_status(*code),
             Self::Nlib { code, .. } => match code {
@@ -1038,6 +1052,7 @@ impl SolidError {
             | Self::Degenerate { operation, .. }
             | Self::NotConverged { operation, .. }
             | Self::Unsupported { operation, .. }
+            | Self::UnsureRegion { operation, .. }
             | Self::PortInvariant { operation, .. }
             | Self::Upstream { operation, .. }
             | Self::FilletRefused { operation, .. }
@@ -1057,6 +1072,7 @@ impl SolidError {
             Self::NotFound { entity, .. } | Self::FaceTrimsUnavailable { entity, .. } => {
                 Some(*entity)
             }
+            Self::UnsureRegion { region, .. } => Some(EntityRef::Region(*region)),
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }
             | Self::FilletRefused { entity, .. } => *entity,

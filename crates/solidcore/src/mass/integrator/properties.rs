@@ -12,6 +12,7 @@
 //! | [`MassPropertyBehavior`] | `SmMassPropertyBehavior` |
 //! | [`edge_length`], [`face_area`], [`face_centroid`] | `SmApiEdgeComputeLength`, `SmApiFaceComputeArea`, `SmApiFaceComputeCentroid` |
 //! | [`brep_area`], [`brep_volume`], [`brep_mass_properties`] | `SmApiBrepComputeArea`, `SmApiBrepComputeVolume`, `SmApiBrepComputeMassProperties` |
+//! | [`brep_mass_properties_estimated`], [`MassPropertyRequest`], [`EstimatedMassProperties`], [`sheet_face`], [`brep_area_about`], [`estimate_accuracy`] | not upstream: the same computation with sheets' area, a no-material area centroid and centroidal moments (the SolidCraft fork's `smlib_brep_mass_properties`) |
 //!
 //! Deviations: arena ids replace pointers, results replace output arguments; attribute
 //! storage and object keys are supplied by the caller; the `_default` B-rep wrappers
@@ -47,6 +48,9 @@ use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, V
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "mass::integrator::properties";
+/// The operation the `SM_ERR` of a span the integrator took no step over names (not
+/// upstream: the code is upstream's, the name says which failure it is).
+const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
 
 /// Surface/volume measures and the eight moment vectors of upstream.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -447,7 +451,7 @@ pub fn boundary_properties(
                     // Success with no steps means the integrator skipped the span.
                     .and_then(|counts| {
                         if counts.good + counts.reduced == 0 {
-                            Err(SolidError::sm_err(OP))
+                            Err(SolidError::sm_err(OP_SKIPPED_SPAN))
                         } else {
                             Ok(())
                         }
@@ -506,19 +510,77 @@ fn edges(b: &Brep) -> Result<Vec<EdgeId>> {
 fn vertices(b: &Brep) -> Result<Vec<VertexId>> {
     crate::topology::brep::p1::vertices(b, None)
 }
-/// The region on the side of face use `fu`.
+/// The region on the side of face use `fu` (`SmFaceuse::GetRegion`); a use with no shell or
+/// no region is upstream's null pointer.
 fn faceuse_region(b: &Brep, fu: FaceuseId) -> Result<RegionId> {
-    let shell = b
-        .faceuse(fu)?
-        .shell
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    b.shell(shell)?
-        .region
-        .ok_or_else(|| SolidError::null_pointer(OP))
+    crate::topology::edgeuse::p1::faceuse_region(b, fu)?.ok_or_else(|| SolidError::null_pointer(OP))
 }
 /// `SmRegion::IsVoid` as a C truth value (`UNSURE`, 2, counts as void).
 fn region_void(b: &Brep, r: RegionId) -> Result<bool> {
-    Ok(b.region(r)?.is_void() != 0)
+    Ok(!upstream_region_is_material(b, r)?)
+}
+
+/// Upstream's reading of whether region `r` is material, kept for parity on the API's
+/// paths (`brep_properties`, `SmApiBrepComputeMassProperties`, `SmApiBrepComputeVolume`):
+/// `IsVoid` is FALSE, so its `UNSURE` reads as void, as upstream's `TRUE` test of `IsVoid`
+/// reads it in every mass property. Every other caller uses [`region_material`], which
+/// refuses `UNSURE`.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub(crate) fn upstream_region_is_material(b: &Brep, r: RegionId) -> Result<bool> {
+    Ok(b.region(r)?.is_void() == 0)
+}
+
+/// Whether region `r` is material, refusing where the kernel is unsure: `IsVoid` FALSE is
+/// material, TRUE is void, and `UNSURE` (or any other value) is
+/// [`SolidError::UnsureRegion`] naming `r`, never read as either. Not upstream: the rule
+/// of every measure and point class that must not decide on a region it cannot classify
+/// ([`brep_mass_properties_estimated`]).
+///
+/// # Errors
+///
+/// [`SolidError::UnsureRegion`]; [`SolidError::NotFound`] for a dangling id.
+pub fn region_material(b: &Brep, r: RegionId) -> Result<bool> {
+    match b.region(r)?.is_void() {
+        0 => Ok(true),
+        1 => Ok(false),
+        _ => Err(SolidError::UnsureRegion {
+            operation: OP_REGION,
+            region: r,
+        }),
+    }
+}
+
+const OP_REGION: &str = "mass::integrator::properties::region_material";
+
+/// Refuses a body with a region the kernel is unsure of ([`region_material`]): the guard
+/// of every measure that must not read `UNSURE` as void, in front of the API's
+/// computations (the estimated mass properties; ops' volume and orientation test).
+///
+/// # Errors
+///
+/// [`SolidError::UnsureRegion`] naming the first such region; [`SolidError::NotFound`].
+pub fn no_unsure_region(b: &Brep) -> Result<()> {
+    for r in crate::topology::brep::p1::regions(b, None)? {
+        region_material(b, r)?;
+    }
+    Ok(())
+}
+
+/// Whether face `f` is a partition: its two sides are two distinct material regions
+/// ([`region_material`]).
+///
+/// # Errors
+///
+/// [`SolidError::UnsureRegion`] for a side the kernel is unsure of;
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn partition_face(b: &Brep, f: FaceId) -> Result<bool> {
+    Ok(match crate::topology::face::p2::face_side_regions(b, f)? {
+        [Some(a), Some(c)] => a != c && region_material(b, a)? && region_material(b, c)?,
+        _ => false,
+    })
 }
 fn manifold_solid(b: &Brep) -> Result<bool> {
     crate::topology::brep::p2::is_manifold_solid(b)
@@ -768,14 +830,71 @@ pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Resu
         origin + *p.moments.first().ok_or_else(|| SolidError::sm_err(OP))? / p.area,
     ))
 }
-/// `SmApiBrepComputeArea`, including open shells and sheets.
+/// `SmApiBrepComputeArea`, including open shells and sheets: [`brep_area_about`] each
+/// face's own box middle.
 pub fn brep_area(k: &Kernel, b: &mut Brep, accuracy: f64) -> Result<f64> {
-    valid_api_number(accuracy)?;
-    let mut area = 0.0;
-    for f in faces(b)? {
-        area += face_area(k, b, f, accuracy)?;
+    area_about(k, b, accuracy, AreaAbout::FaceMiddle)
+}
+
+/// The point each face's area integral is taken about: it changes no exact area, only
+/// the integrator's error scale (and so its estimate's rounding).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AreaAbout {
+    /// Each face's own bounding-box middle (`SmApiFaceComputeArea`).
+    FaceMiddle,
+    /// One point for every face.
+    Point(Point3),
+}
+
+/// Every face's area counted once, open shells and sheets included, each face integrated
+/// on its own about `about` (one implementation with [`brep_area`]), at `accuracy`
+/// clamped by [`estimate_accuracy`]. **Requested accuracy, estimated, not proved**
+/// ([`EstimatedMassProperties`]).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an accuracy that is not finite and positive, or a
+/// point that is not finite; those of [`face_properties`].
+pub fn brep_area_about(k: &Kernel, b: &mut Brep, accuracy: f64, about: AreaAbout) -> Result<f64> {
+    area_about(k, b, estimate_accuracy(accuracy)?, about)
+}
+
+/// The accuracy an estimated property is asked at: finite and positive, clamped to
+/// [[`ESTIMATE_ACCURACY_FINEST`], [`ESTIMATE_ACCURACY_COARSEST`]].
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an accuracy that is not finite, or not positive.
+pub fn estimate_accuracy(accuracy: f64) -> Result<f64> {
+    if !accuracy.is_finite() || accuracy.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "accuracy not finite and positive",
+        ));
     }
-    Ok(area)
+    // `f64::clamp` is on the panic-site list (a reversed range panics); the bounds are
+    // constants in order.
+    #[allow(clippy::manual_clamp)]
+    Ok(accuracy
+        .max(ESTIMATE_ACCURACY_FINEST)
+        .min(ESTIMATE_ACCURACY_COARSEST))
+}
+
+/// The finest accuracy an estimated property is asked at: finer, the integrator's step
+/// control works below the rounding of its sums.
+pub const ESTIMATE_ACCURACY_FINEST: f64 = 1e-8;
+/// The coarsest accuracy an estimated property is asked at.
+pub const ESTIMATE_ACCURACY_COARSEST: f64 = 1e-1;
+
+/// [`brep_area_about`] at an accuracy as given (`SmApiBrepComputeArea`'s rules).
+fn area_about(k: &Kernel, b: &mut Brep, accuracy: f64, about: AreaAbout) -> Result<f64> {
+    valid_api_number(accuracy)?;
+    if let AreaAbout::Point(p) = about {
+        for v in [p.x, p.y, p.z] {
+            valid_api_number(v)?;
+        }
+    }
+    Ok(faces_area_about(k, b, accuracy, about, false, false)?.0)
 }
 /// `SmApiBrepComputeVolume`, computed about the bounding-box midpoint.
 ///
@@ -866,6 +985,12 @@ fn valid_api_number(value: f64) -> Result<()> {
 /// `SmApiBrepComputeMassProperties`, with upstream validation: integrated once about the
 /// bounding-box midpoint, the moments then shifted to `origin` (which avoids
 /// cancellation for a distant origin).
+///
+/// The accuracy is the integrator's requested accuracy: its error ESTIMATE is held under
+/// it, which is not a proved bound (see [`EstimatedMassProperties`]).
+///
+/// [`brep_mass_properties_estimated`]'s computation with [`MassPropertyRequest::api`],
+/// with upstream's statuses (an integration that does not converge is `SM_ERR`).
 pub fn brep_mass_properties(
     k: &Kernel,
     b: &mut Brep,
@@ -874,13 +999,215 @@ pub fn brep_mass_properties(
     origin: Point3,
     attributes: &PropertyAttributes<'_>,
 ) -> Result<MassProperties> {
+    let r = estimate(
+        k,
+        b,
+        accuracy,
+        &MassPropertyRequest::api(density, origin),
+        attributes,
+    )?;
+    Ok(MassProperties {
+        properties: r.properties,
+        centroid: r.centroid,
+        inertia: r.inertia,
+        products: r.products,
+    })
+}
+
+/// Where [`brep_mass_properties_estimated`] takes the second moments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MomentsAbout {
+    /// About this point, by the parallel-axis shift from the box's middle through the
+    /// static moment (`SmApiBrepComputeMassProperties`).
+    Point(Point3),
+    /// About the centroid: the moments about the box's middle less the mass times the
+    /// squared offsets of the centroid.
+    Centroid,
+}
+
+/// What [`brep_mass_properties_estimated`] measures, and what it refuses.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MassPropertyRequest {
+    /// The density of every material region (per-entity mass attributes are refused).
+    pub density: f64,
+    /// Where the second moments are taken.
+    pub moments_about: MomentsAbout,
+    /// Refuse a body that is not a manifold solid (`SmApiBrepComputeMassProperties`);
+    /// otherwise the sum over the body's material regions, so several lumps, or lumps
+    /// touching along edges or at points, measure too.
+    pub manifold_solid_only: bool,
+    /// Add the area of the [`sheet_face`]s (void on both sides, or one material region on
+    /// both sides) to the solid boundary's: the area then counts every face once but the
+    /// partitions between two material regions, which are no part of it. That needs
+    /// `brep_area_between_solid_and_void` (WR-535), without which the boundary counts a
+    /// partition once from each side: a body with a partition is then refused.
+    pub sheet_faces_area: bool,
+    /// For a body with no material region: its faces' area, volume and mass 0, the
+    /// centroid of the area, no moments (otherwise refused as no mass).
+    pub area_centroid_without_material: bool,
+}
+
+impl MassPropertyRequest {
+    /// `SmApiBrepComputeMassProperties`' request: `density`, moments about `origin`,
+    /// manifold solids only, no sheets, no material refused.
+    #[must_use]
+    pub const fn api(density: f64, origin: Point3) -> Self {
+        Self {
+            density,
+            moments_about: MomentsAbout::Point(origin),
+            manifold_solid_only: true,
+            sheet_faces_area: false,
+            area_centroid_without_material: false,
+        }
+    }
+
+    /// Every body at unit density: moments about the centroid, the sum over material
+    /// regions, sheet faces' area counted, and a body with no material measured by its
+    /// area and the area's centroid.
+    #[must_use]
+    pub const fn centroidal() -> Self {
+        Self {
+            density: 1.0,
+            moments_about: MomentsAbout::Centroid,
+            manifold_solid_only: false,
+            sheet_faces_area: true,
+            area_centroid_without_material: true,
+        }
+    }
+}
+
+/// [`brep_mass_properties_estimated`]'s result.
+///
+/// **Requested accuracy, estimated, not proved.** Every number comes from an adaptive
+/// Runge-Kutta integration whose per-step error estimate is held under
+/// `requested_accuracy` times a per-property scale. That estimate is not a bound: the
+/// error is not proved to be below the requested accuracy, and no caller may treat it
+/// as one (decide a tolerance on these numbers only with that in mind). A certified
+/// quadrature is a separate, later entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstimatedMassProperties {
+    /// The accuracy asked of the integrator's error estimate (not a proved bound).
+    pub requested_accuracy: f64,
+    /// The B-rep's precise measures about the bounding box's middle (all zero but the
+    /// area for a body with no material).
+    pub properties: PreciseProperties,
+    /// Surface area (with the sheet faces' when asked).
+    pub area: f64,
+    /// Volume of the material regions.
+    pub volume: f64,
+    /// Density-weighted volume.
+    pub mass: f64,
+    /// Centre of mass in world coordinates; of the area for a body with no material.
+    pub centroid: Point3,
+    /// Mass axial inertia (y^2+z^2, z^2+x^2, x^2+y^2) about [`MassPropertyRequest::moments_about`].
+    pub inertia: Vec3,
+    /// Raw positive products (yz, zx, xy) about the same point.
+    pub products: Vec3,
+}
+
+/// Mass properties as `request` asks (one implementation:
+/// [`brep_mass_properties`] is its `SmApiBrepComputeMassProperties` request). Integrated
+/// once about the bounding box's middle: volume and moments over the material regions
+/// (`SmBrep::ComputePreciseProperties`), the area of the faces between a solid and a
+/// void, then the moments moved to the point asked, or to the centroid. **The accuracy is
+/// requested and estimated, not proved** ([`EstimatedMassProperties`]).
+///
+/// `accuracy` must be finite and positive; it is clamped to
+/// [[`ESTIMATE_ACCURACY_FINEST`], [`ESTIMATE_ACCURACY_COARSEST`]] ([`estimate_accuracy`]),
+/// and the result's `requested_accuracy` is the clamped value.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an accuracy that is not finite and positive, an
+/// invalid number (density, point), a density below epsilon, per-entity mass attributes, a body that is not a manifold
+/// solid when `manifold_solid_only`, no mass or volume (or, for a body with no material
+/// measured by its area, no area, or a non-finite area or centroid);
+/// a non-finite result (the centroidal moments too); [`SolidError::NotConverged`] where the
+/// integrator's step control fails (it cannot meet the requested accuracy's estimate:
+/// #2545, WR-472's error scale off; the step count is not reported, `iterations` is 0);
+/// [`SolidError::Degenerate`] for a non-finite integrand; [`SolidError::Unsupported`]
+/// for a span the integrator took no step over, or for `sheet_faces_area` on a body with a
+/// partition without `brep_area_between_solid_and_void` (WR-535: without it each side of a
+/// partition adds its area, so the area would count it twice); [`SolidError::UnsureRegion`]
+/// for a body with a region the kernel is unsure of (its volume and its faces' area depend
+/// on whether it is material: refused, not read as void); those of the integration.
+pub fn brep_mass_properties_estimated(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    request: &MassPropertyRequest,
+    attributes: &PropertyAttributes<'_>,
+) -> Result<EstimatedMassProperties> {
+    let accuracy = estimate_accuracy(accuracy)?;
+    no_unsure_region(b)?;
+    if request.sheet_faces_area && !k.fixes.brep_area_between_solid_and_void {
+        for f in faces(b)? {
+            if partition_face(b, f)? {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: "a partition's area is counted from both sides without \
+                             brep_area_between_solid_and_void",
+                });
+            }
+        }
+    }
+    estimate(k, b, accuracy, request, attributes).map_err(typed_failure)
+}
+
+/// The integration's failures as their own errors (upstream's `SM_ERR` for each): its step
+/// control failing is [`SolidError::NotConverged`]; a non-finite integrand (a surface
+/// evaluated to no number) is [`SolidError::Degenerate`]; a span it took no step over is
+/// [`SolidError::Unsupported`]. Every other error is as it came.
+fn typed_failure(e: SolidError) -> SolidError {
+    use super::{OP_INTEGRAND, OP_STEP_CONTROL};
+    match e {
+        SolidError::Upstream {
+            operation: OP_STEP_CONTROL,
+            code: crate::error::SM_ERR,
+            ..
+        } => SolidError::NotConverged {
+            operation: OP,
+            iterations: 0,
+        },
+        SolidError::Upstream {
+            operation: OP_INTEGRAND,
+            code: crate::error::SM_ERR,
+            entity,
+        } => SolidError::Degenerate {
+            operation: OP_INTEGRAND,
+            entity,
+        },
+        SolidError::Upstream {
+            operation: OP_SKIPPED_SPAN,
+            code: crate::error::SM_ERR,
+            ..
+        } => SolidError::Unsupported {
+            operation: OP,
+            reason: "the integrator took no step over a span of a face",
+        },
+        e => e,
+    }
+}
+
+/// The one computation of [`brep_mass_properties`] and
+/// [`brep_mass_properties_estimated`], with upstream's statuses.
+fn estimate(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    request: &MassPropertyRequest,
+    attributes: &PropertyAttributes<'_>,
+) -> Result<EstimatedMassProperties> {
+    let density = request.density;
     valid_api_number(accuracy)?;
     valid_api_number(density)?;
     if density < EFF_ZERO {
         return Err(SolidError::invalid_input(OP, "density below epsilon"));
     }
-    for v in [origin.x, origin.y, origin.z] {
-        valid_api_number(v)?;
+    if let MomentsAbout::Point(origin) = request.moments_about {
+        for v in [origin.x, origin.y, origin.z] {
+            valid_api_number(v)?;
+        }
     }
     if faces(b)?
         .into_iter()
@@ -897,10 +1224,13 @@ pub fn brep_mass_properties(
             "per-entity mass attributes override density",
         ));
     }
-    if !manifold_solid(b)? {
+    if request.manifold_solid_only && !manifold_solid(b)? {
         return Err(SolidError::invalid_input(OP, "not a manifold solid"));
     }
     let mid = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?.mid();
+    if request.area_centroid_without_material && !has_material(b)? {
+        return area_centroid(k, b, accuracy, mid);
+    }
     let properties = brep_properties(
         k,
         b,
@@ -927,34 +1257,207 @@ pub fn brep_mass_properties(
             .ok_or_else(|| SolidError::sm_err(OP))
     };
     let static_moment = moment(4)?;
-    // Shift to origin: with d = mid - origin, the integral of (a+d_a)(b+d_b) dm gains
-    // d_a S_b + d_b S_a + d_a d_b m.
-    let d = mid - origin;
-    let comp = |v: Vec3, i: usize| match i {
-        0 => v.x,
-        1 => v.y,
-        _ => v.z,
-    };
     let mass = properties.mass;
-    let shift = |a: usize, b: usize| {
-        comp(d, a) * comp(static_moment, b)
-            + comp(d, b) * comp(static_moment, a)
-            + comp(d, a) * comp(d, b) * mass
+    let (inertia, products) = match request.moments_about {
+        MomentsAbout::Point(origin) => {
+            // Shift to origin: with d = mid - origin, the integral of (a+d_a)(b+d_b) dm
+            // gains d_a S_b + d_b S_a + d_a d_b m.
+            let d = mid - origin;
+            let comp = |v: Vec3, i: usize| match i {
+                0 => v.x,
+                1 => v.y,
+                _ => v.z,
+            };
+            let shift = |a: usize, b: usize| {
+                comp(d, a) * comp(static_moment, b)
+                    + comp(d, b) * comp(static_moment, a)
+                    + comp(d, a) * comp(d, b) * mass
+            };
+            (
+                moment(7)?
+                    + Vec3::new(
+                        shift(1, 1) + shift(2, 2),
+                        shift(0, 0) + shift(2, 2),
+                        shift(0, 0) + shift(1, 1),
+                    ),
+                moment(6)? + Vec3::new(shift(1, 2), shift(2, 0), shift(0, 1)),
+            )
+        }
+        MomentsAbout::Centroid => {
+            // the centroid's offset d = S / m from the midpoint; about the centroid the
+            // integral of a b dm loses m d_a d_b
+            let d = static_moment / mass;
+            let (m6, m7) = (moment(6)?, moment(7)?);
+            (
+                Vec3::new(
+                    m7.x - mass * (d.y * d.y + d.z * d.z),
+                    m7.y - mass * (d.x * d.x + d.z * d.z),
+                    m7.z - mass * (d.x * d.x + d.y * d.y),
+                ),
+                Vec3::new(
+                    m6.x - mass * d.y * d.z,
+                    m6.y - mass * d.z * d.x,
+                    m6.z - mass * d.x * d.y,
+                ),
+            )
+        }
     };
-    let inertia = moment(7)?
-        + Vec3::new(
-            shift(1, 1) + shift(2, 2),
-            shift(0, 0) + shift(2, 2),
-            shift(0, 0) + shift(1, 1),
-        );
-    let products = moment(6)? + Vec3::new(shift(1, 2), shift(2, 0), shift(0, 1));
     let centroid = mid + static_moment / mass;
-    Ok(MassProperties {
+    let area = if request.sheet_faces_area {
+        properties.area + faces_area_about(k, b, accuracy, AreaAbout::Point(mid), false, true)?.0
+    } else {
+        properties.area
+    };
+    let r = EstimatedMassProperties {
+        requested_accuracy: accuracy,
+        area,
+        volume: properties.volume,
+        mass,
         properties,
         centroid,
         inertia,
         products,
+    };
+    // the API's request keeps `SmApiBrepComputeMassProperties`' contract (no finiteness
+    // test); the centroidal one refuses a number that is not finite
+    if request.moments_about == MomentsAbout::Centroid {
+        finite_result(&r)?;
+    }
+    Ok(r)
+}
+
+/// A body with no material: its faces' area and the area's centroid.
+fn area_centroid(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    mid: Point3,
+) -> Result<EstimatedMassProperties> {
+    let (area, first) = faces_area_about(k, b, accuracy, AreaAbout::Point(mid), true, false)?;
+    if area.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "no area"));
+    }
+    let r = EstimatedMassProperties {
+        requested_accuracy: accuracy,
+        properties: PreciseProperties {
+            area,
+            ..PreciseProperties::default()
+        },
+        area,
+        volume: 0.0,
+        mass: 0.0,
+        centroid: Point3::new(
+            mid.x + first.x / area,
+            mid.y + first.y / area,
+            mid.z + first.z / area,
+        ),
+        inertia: Vec3::ZERO,
+        products: Vec3::ZERO,
+    };
+    finite_result(&r)?;
+    Ok(r)
+}
+
+fn finite_result(r: &EstimatedMassProperties) -> Result<()> {
+    let v = |x: Vec3| x.x.is_finite() && x.y.is_finite() && x.z.is_finite();
+    if r.area.is_finite()
+        && r.volume.is_finite()
+        && r.mass.is_finite()
+        && v(r.centroid)
+        && v(r.inertia)
+        && v(r.products)
+    {
+        Ok(())
+    } else {
+        Err(SolidError::invalid_input(OP, "non-finite result"))
+    }
+}
+
+/// Whether a region of `b` is material ([`region_material`]; reached only behind
+/// [`no_unsure_region`], on the centroidal request).
+fn has_material(b: &Brep) -> Result<bool> {
+    for r in crate::topology::brep::p1::regions(b, None)? {
+        if region_material(b, r)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether face `f` is outside the solid boundary's area: the boundary counts a face with
+/// material on one side and void on the other, so these are the faces whose two sides are
+/// both void (a sheet, standing free or hung on a solid) or are one material region (a
+/// fin inside the material, the same region on both sides). A face between two distinct
+/// material regions (a partition) is in neither: it bounds no part of the area
+/// (`brep_area_between_solid_and_void`, WR-535). A side with no faceuse, no shell or no
+/// region is void; a region the kernel is unsure of is refused ([`region_material`]).
+///
+/// # Errors
+///
+/// [`SolidError::UnsureRegion`]; [`SolidError::NotFound`] for a dangling id.
+pub fn sheet_face(b: &Brep, f: FaceId) -> Result<bool> {
+    // the side's region when it is material, `None` when void
+    let material = |r: Option<RegionId>| -> Result<Option<RegionId>> {
+        match r {
+            Some(r) => Ok(region_material(b, r)?.then_some(r)),
+            None => Ok(None),
+        }
+    };
+    let [x, y] = crate::topology::face::p2::face_side_regions(b, f)?;
+    Ok(match (material(x)?, material(y)?) {
+        (None, None) => true,
+        (Some(a), Some(c)) => a == c,
+        _ => false,
     })
+}
+
+/// Every face's area counted once (or only the [`sheet_face`]s), each integrated on its
+/// own about `about` with an area estimate from its loose box, and with `first` the
+/// area's first moments about that point (meant with one point for every face). A trim
+/// boundary integrated the other way round flips both.
+fn faces_area_about(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    about: AreaAbout,
+    first: bool,
+    only_sheets: bool,
+) -> Result<(f64, Vec3)> {
+    let flags = if first {
+        PPF_AREA | PPF_AREA_FIRST_MOMENTS
+    } else {
+        PPF_AREA
+    };
+    let mut area = 0.0;
+    let mut sum = Vec3::ZERO;
+    for f in faces(b)? {
+        if only_sheets && !sheet_face(b, f)? {
+            continue;
+        }
+        let fbox = face_box(k, b, f)?;
+        let origin = match about {
+            AreaAbout::FaceMiddle => fbox.mid(),
+            AreaAbout::Point(p) => p,
+        };
+        let p = face_properties(
+            k,
+            b,
+            f,
+            OrientType::Same,
+            accuracy,
+            origin,
+            area_estimate(&fbox),
+            0.0,
+            flags,
+        )?;
+        // |area|, as `SmApiFaceComputeArea` takes it; the first moments flip with it
+        area += p.area.abs();
+        if first {
+            let sign = if p.area < 0.0 { -1.0 } else { 1.0 };
+            sum += *p.moments.first().ok_or_else(|| SolidError::sm_err(OP))? * sign;
+        }
+    }
+    Ok((area, sum))
 }
 
 #[cfg(test)]
@@ -1005,6 +1508,274 @@ mod tests {
             "the trims are made on the box itself"
         );
     }
+    fn no_attributes() -> AttributeStore {
+        AttributeStore::default()
+    }
+
+    fn estimated(
+        k: &Kernel,
+        b: &mut Brep,
+        request: &MassPropertyRequest,
+    ) -> Result<EstimatedMassProperties> {
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        brep_mass_properties_estimated(k, b, 1e-8, request, &attrs)
+    }
+
+    fn near(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol * b.abs().max(1.0)
+    }
+
+    /// A 1 x 2 x 3 box: volume 6, area 22, centroid its middle, centroidal inertia
+    /// m (b^2 + c^2) / 12 and its turns, no products.
+    #[test]
+    fn centroidal_mass_properties_of_a_box() {
+        let mut k = Kernel::default();
+        let o = Point3::new(10.0, -20.0, 30.0);
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, o, 1.0, 2.0, 3.0).unwrap();
+        let r = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
+        assert_eq!(r.requested_accuracy, 1e-8);
+        assert!(
+            near(r.volume, 6.0, 1e-9) && near(r.mass, 6.0, 1e-9),
+            "{r:?}"
+        );
+        assert!(near(r.area, 22.0, 1e-9), "{r:?}");
+        let c = o + Vec3::new(0.5, 1.0, 1.5);
+        assert!((r.centroid - c).length() <= 1e-9, "{r:?}");
+        let (ixx, iyy, izz) = (6.0 * 13.0 / 12.0, 6.0 * 10.0 / 12.0, 6.0 * 5.0 / 12.0);
+        assert!(near(r.inertia.x, ixx, 1e-8), "{r:?}");
+        assert!(near(r.inertia.y, iyy, 1e-8), "{r:?}");
+        assert!(near(r.inertia.z, izz, 1e-8), "{r:?}");
+        for p in [r.products.x, r.products.y, r.products.z] {
+            assert!(p.abs() <= 1e-8, "{r:?}");
+        }
+        // the API request about the centroid agrees with the centroidal moments
+        let api = estimated(&k, &mut b, &MassPropertyRequest::api(1.0, r.centroid)).unwrap();
+        assert!((api.inertia - r.inertia).length() <= 1e-8, "{api:?}");
+        assert!((api.products - r.products).length() <= 1e-8, "{api:?}");
+    }
+
+    /// A sphere of radius 2: volume 4/3 pi r^3, area 4 pi r^2, inertia 2/5 m r^2.
+    #[test]
+    fn centroidal_mass_properties_of_a_sphere() {
+        let mut k = Kernel::default();
+        k.fixes.precise_properties_body_length_scale = true;
+        let c = Point3::new(1.0, 2.0, -3.0);
+        let mut b = crate::primitive::api_primitives::create_sphere(&mut k, c, 2.0).unwrap();
+        let r = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
+        let v = 4.0 / 3.0 * PI * 8.0;
+        assert!(near(r.volume, v, 1e-6), "{r:?}");
+        assert!(near(r.area, 16.0 * PI, 1e-6), "{r:?}");
+        assert!((r.centroid - c).length() <= 1e-6, "{r:?}");
+        let i = 0.4 * v * 4.0;
+        for m in [r.inertia.x, r.inertia.y, r.inertia.z] {
+            assert!(near(m, i, 1e-6), "{r:?}");
+        }
+    }
+
+    /// #2545: a whole sphere at 1e-8 with WR-472's error scale off does not converge;
+    /// the estimated entry says so, typed, where the API entry keeps upstream's `SM_ERR`.
+    #[test]
+    fn a_sphere_that_does_not_converge_is_typed_not_converged() {
+        let mut k = Kernel::default();
+        k.fixes.precise_properties_body_length_scale = false;
+        let mut b =
+            crate::primitive::api_primitives::create_sphere(&mut k, Point3::ZERO, 3.0).unwrap();
+        let typed = estimated(&k, &mut b, &MassPropertyRequest::centroidal());
+        assert!(
+            matches!(typed, Err(SolidError::NotConverged { .. })),
+            "{typed:?}"
+        );
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let api = brep_mass_properties(&k, &mut b, 1e-8, 1.0, Point3::ZERO, &attrs);
+        assert!(
+            matches!(
+                api,
+                Err(SolidError::Upstream {
+                    code: crate::error::SM_ERR,
+                    ..
+                })
+            ),
+            "{api:?}"
+        );
+    }
+
+    /// The estimated entry types each integration failure by its cause, and only step
+    /// control as not converging.
+    #[test]
+    fn integration_failures_are_typed_by_cause() {
+        use super::super::{OP_INTEGRAND, OP_STEP_CONTROL};
+        assert!(matches!(
+            typed_failure(SolidError::sm_err(OP_STEP_CONTROL)),
+            SolidError::NotConverged { .. }
+        ));
+        assert!(matches!(
+            typed_failure(SolidError::sm_err(OP_INTEGRAND)),
+            SolidError::Degenerate { .. }
+        ));
+        assert!(matches!(
+            typed_failure(SolidError::sm_err(OP_SKIPPED_SPAN)),
+            SolidError::Unsupported { .. }
+        ));
+        // any other status stays as it came
+        let other = SolidError::sm_err(OP);
+        assert_eq!(typed_failure(other.clone()), other);
+    }
+
+    /// A box whose region is made void has no material: its area is its faces' (22) and
+    /// its centroid the area's (the middle, by symmetry); the API request refuses it.
+    #[test]
+    fn a_body_with_no_material_measures_its_area_and_its_centroid() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let regions = crate::topology::brep::p1::regions(&b, None).unwrap();
+        for r in regions {
+            b.region_mut(r).unwrap().set_is_void(1);
+        }
+        assert!(!has_material(&b).unwrap());
+        let r = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
+        assert!(near(r.area, 22.0, 1e-9), "{r:?}");
+        assert_eq!((r.volume, r.mass), (0.0, 0.0));
+        assert!(
+            (r.centroid - Point3::new(0.5, 1.0, 1.5)).length() <= 1e-9,
+            "{r:?}"
+        );
+        assert_eq!((r.inertia, r.products), (Vec3::ZERO, Vec3::ZERO));
+        // every face is a sheet face now
+        for f in faces(&b).unwrap() {
+            assert!(sheet_face(&b, f).unwrap());
+        }
+        let refuse = MassPropertyRequest {
+            area_centroid_without_material: false,
+            ..MassPropertyRequest::centroidal()
+        };
+        assert!(estimated(&k, &mut b, &refuse).is_err());
+        assert!(estimated(&k, &mut b, &MassPropertyRequest::api(1.0, Point3::ZERO)).is_err());
+    }
+
+    /// A torus's area 4 pi^2 R r about each face's middle (the API's) and about one point:
+    /// the same area to the estimate's rounding, the API's bit for bit.
+    #[test]
+    fn brep_area_about_a_point_or_each_face() {
+        let mut k = Kernel::default();
+        k.fixes.precise_properties_body_length_scale = true;
+        let mut b = crate::primitive::api_primitives::create_torus(
+            &mut k,
+            Point3::new(3.0, 0.0, -1.0),
+            4.0,
+            1.0,
+        )
+        .unwrap();
+        let exact = 4.0 * PI * PI * 4.0;
+        let api = brep_area(&k, &mut b, 1e-8).unwrap();
+        let mid = brep_area_about(&k, &mut b, 1e-8, AreaAbout::FaceMiddle).unwrap();
+        assert_eq!(api.to_bits(), mid.to_bits());
+        // `SmApiBrepComputeArea` as upstream sums it, `SmApiFaceComputeArea` face by face:
+        // the one implementation gives its numbers bit for bit
+        let mut upstream = 0.0;
+        for f in faces(&b).unwrap() {
+            upstream += face_area(&k, &mut b, f, 1e-8).unwrap();
+        }
+        assert_eq!(api.to_bits(), upstream.to_bits());
+        let at = brep_area_about(&k, &mut b, 1e-8, AreaAbout::Point(Point3::ZERO)).unwrap();
+        assert!(
+            near(api, exact, 1e-7) && near(at, exact, 1e-7),
+            "{api} {at} {exact}"
+        );
+        let bad = AreaAbout::Point(Point3::new(f64::NAN, 0.0, 0.0));
+        assert!(brep_area_about(&k, &mut b, 1e-8, bad).is_err());
+    }
+
+    /// The estimated entries own their accuracy: not finite or not positive refused, the rest
+    /// clamped to [1e-8, 1e-1] and reported as clamped.
+    #[test]
+    fn an_estimate_refuses_or_clamps_its_accuracy() {
+        for bad in [0.0, -1e-6, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(estimate_accuracy(bad).is_err(), "{bad}");
+        }
+        assert_eq!(estimate_accuracy(1e-15).unwrap(), 1e-8);
+        assert_eq!(estimate_accuracy(0.5).unwrap(), 1e-1);
+        assert_eq!(estimate_accuracy(1e-5).unwrap(), 1e-5);
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let request = MassPropertyRequest::centroidal();
+        for bad in [0.0, -1.0, f64::NAN] {
+            assert!(brep_mass_properties_estimated(&k, &mut b, bad, &request, &attrs).is_err());
+            assert!(brep_area_about(&k, &mut b, bad, AreaAbout::FaceMiddle).is_err());
+        }
+        let r = brep_mass_properties_estimated(&k, &mut b, 1e-12, &request, &attrs).unwrap();
+        assert_eq!(r.requested_accuracy, 1e-8);
+        let r = brep_mass_properties_estimated(&k, &mut b, 2.0, &request, &attrs).unwrap();
+        assert_eq!(r.requested_accuracy, 1e-1);
+    }
+
+    /// A solid's faces are not sheet faces, so asking for the sheets' area adds none.
+    #[test]
+    fn a_solid_has_no_sheet_faces() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        for f in faces(&b).unwrap() {
+            assert!(!sheet_face(&b, f).unwrap());
+        }
+        let with = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
+        let without = MassPropertyRequest {
+            sheet_faces_area: false,
+            ..MassPropertyRequest::centroidal()
+        };
+        let without = estimated(&k, &mut b, &without).unwrap();
+        assert_eq!(with, without);
+    }
+
+    /// A sheet inside a box, merged into it, lies in the box's material region on both
+    /// sides (a fin): it is neither a boundary face nor void on both sides, and the area
+    /// that counts every face once counts it (6 x 1 x 2 + 2 x 1 x 3 + 2 x 2 x 3 = 22, and
+    /// the fin's 0.5 x 0.5).
+    #[test]
+    fn a_fin_inside_the_material_is_counted_once() {
+        use crate::primitive::api_primitives::{create_box, create_plane};
+        let mut k = Kernel::default();
+        k.fixes.brep_area_between_solid_and_void = true;
+        k.fixes.precise_properties_body_length_scale = true;
+        let a = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let fin = create_plane(&mut k, Point3::new(0.25, 0.5, 1.5), 0.5, 0.5).unwrap();
+        let mut b = crate::boolean::api_brep::boolean_merge(&mut k, a, fin).unwrap();
+        let fins: Vec<FaceId> = faces(&b)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                let (x, y) = crate::topology::face::p2::faceuses(&b, f).unwrap();
+                let region = |u: Option<FaceuseId>| {
+                    let sh = b.faceuse(u.unwrap()).unwrap().shell.unwrap();
+                    b.shell(sh).unwrap().region.unwrap()
+                };
+                region(x) == region(y)
+            })
+            .collect();
+        assert_eq!(fins.len(), 1, "one face with one region on both sides");
+        assert!(sheet_face(&b, fins[0]).unwrap());
+        let r = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
+        assert!(near(r.area, 22.25, 1e-9), "{r:?}");
+        assert!(near(r.volume, 6.0, 1e-9), "{r:?}");
+    }
+
     /// WR-535 (the fork's tangency-labs/smlib@d2d9586): the merge of two overlapping 10
     /// mm cubes has three solid regions; its area counts only the faces between solid
     /// and void (800, not 1200 with the two inner faces counted from both sides), and
@@ -1033,5 +1804,59 @@ mod tests {
         .unwrap();
         assert!((p.area - 800.0).abs() <= 1e-6, "area {}", p.area);
         assert!((p.volume - 1500.0).abs() <= 1e-6, "volume {}", p.volume);
+    }
+
+    /// A region the kernel is unsure of is refused by name, never read as void (which
+    /// would give a box volume 0) or as material.
+    #[test]
+    fn an_unsure_region_is_refused_by_name() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let infinite = b.infinite_region();
+        let inner: Vec<RegionId> = crate::topology::brep::p1::regions(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&r| Some(r) != infinite)
+            .collect();
+        assert_eq!(inner.len(), 1);
+        b.region_mut(inner[0]).unwrap().set_is_void(2);
+        assert_eq!(
+            estimated(&k, &mut b, &MassPropertyRequest::centroidal()),
+            Err(SolidError::UnsureRegion {
+                operation: OP_REGION,
+                region: inner[0],
+            })
+        );
+        assert!(region_material(&b, inner[0]).is_err());
+        // upstream's reading, kept for the API's request: UNSURE is void
+        assert!(!upstream_region_is_material(&b, inner[0]).unwrap());
+    }
+
+    /// Without WR-535 each side of a partition adds its area, so an area counting every
+    /// face once would count the partition twice: the request is refused; with WR-535 the
+    /// partitions are no part of the area (800).
+    #[test]
+    fn a_partition_s_area_needs_wr535() {
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let a = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let b = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let mut merged = crate::boolean::api_brep::boolean_merge(&mut k, a, b).unwrap();
+        let partitions = faces(&merged)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| partition_face(&merged, f).unwrap())
+            .count();
+        assert_eq!(partitions, 2);
+        assert!(matches!(
+            estimated(&k, &mut merged, &MassPropertyRequest::centroidal()),
+            Err(SolidError::Unsupported { .. })
+        ));
+        k.fixes.brep_area_between_solid_and_void = true;
+        let r = estimated(&k, &mut merged, &MassPropertyRequest::centroidal()).unwrap();
+        assert!(near(r.area, 800.0, 1e-9), "{r:?}");
+        assert!(near(r.volume, 1500.0, 1e-9), "{r:?}");
     }
 }

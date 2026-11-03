@@ -24,10 +24,10 @@ use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, FaceId, Kernel, SolidError};
-use solidcore_convert::brep::Order;
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
+use crate::order::{self, Order};
 use crate::session::with_body;
 use crate::{Error, Result};
 
@@ -66,7 +66,7 @@ fn distance_ok(x: f64) -> bool {
 fn faces_of(b: &Brep, order: &Order, faces: &[usize]) -> Result<Vec<FaceId>> {
     let mut out: Vec<FaceId> = Vec::new();
     for &i in faces {
-        let f = order.faces.get(i).copied().ok_or(Error::Argument)?;
+        let f = order::face(order, i)?;
         if out.contains(&f) || !b.face_list().contains(&f) {
             return Err(Error::Argument);
         }

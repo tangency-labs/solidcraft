@@ -12,7 +12,7 @@ fn all_fixes() {
 }
 
 /// The hook is process-wide: the tests that install one take turns.
-static HOOKED: Mutex<()> = Mutex::new(());
+pub(crate) static HOOKED: Mutex<()> = Mutex::new(());
 
 #[test]
 fn a_panic_is_an_error_and_the_kernel_is_fresh_after() {
