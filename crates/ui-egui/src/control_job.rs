@@ -135,6 +135,19 @@ pub(crate) fn changes_the_design(method: &str) -> bool {
     matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch")
 }
 
+/// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
+fn shows_design(session: &solidcraft_engine::Session, doc: &Arc<solidcraft_engine::doc::Document>) -> bool {
+    Arc::ptr_eq(&session.doc, doc) || session.undo.iter().chain(&session.redo).any(|snap| Arc::ptr_eq(&snap.doc, doc))
+}
+
+/// The reply to a request whose design left the window while it computed.
+fn design_replaced(label: &str) -> Value {
+    json!({
+        "ok": false,
+        "error": format!("the design was replaced (another tab, or a file opened) while `{label}` computed; nothing was applied"),
+    })
+}
+
 /// What a request computes off the window thread.
 enum Work {
     /// Evaluated ahead: once in, the request runs here. `doc` and `revision` are the design it
@@ -490,6 +503,16 @@ impl SolveApp {
             self.control_job = None;
             return;
         }
+        // The design it computes for has left the window (closed, another tab, a file opened):
+        // refused now, however long its computation has left, so the requests behind it, which
+        // are for the design shown, don't wait for it.
+        let left = matches!(&job.work, Work::Ahead { doc, .. } if !shows_design(&self.session, doc));
+        if left {
+            if let Some(job) = self.control_job.take() {
+                let _ = job.req.reply.send(design_replaced(&job.label));
+            }
+            return;
+        }
         if job.poll().is_none() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
@@ -503,13 +526,8 @@ impl SolveApp {
         let Work::Ahead { commands, doc, revision, tries, kept } = job.work else { return };
         let s = &self.session;
         let same = Arc::ptr_eq(&s.doc, &doc);
-        // The design it was computed for is still this one, edited since (an undo step away).
-        let edited = !same && s.undo.iter().chain(&s.redo).any(|snap| Arc::ptr_eq(&snap.doc, &doc));
-        if !same && !edited {
-            let _ = job.req.reply.send(json!({
-                "ok": false,
-                "error": format!("the design was replaced (another tab, or a file opened) while `{}` computed; nothing was applied", job.label),
-            }));
+        if !shows_design(s, &doc) {
+            let _ = job.req.reply.send(design_replaced(&job.label));
             return;
         }
         if (!same || s.revision != revision) && tries < MAX_TRIES {

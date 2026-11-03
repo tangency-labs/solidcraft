@@ -1463,6 +1463,8 @@ impl SolveApp {
                     self.applying = None;
                     self.editing_state = None;
                     self.pending_feature_edit = None;
+                    // So does what it had computing: none of it may land in the new design.
+                    self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
                     self.cam = Camera::default();
