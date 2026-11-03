@@ -206,12 +206,18 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
+/// Every fix but `geometric_g2_continuity` and `fillet_exact_round_classes`, with or without
+/// `fillet_blend_corner`. The pins are the fork's; `fillet_exact_round_classes` carries a
+/// solidcore-native change the fork does not have (#2419, WR-669 addendum: a line round's
+/// cylinder on its exact spine), which moves the volumes by about 1e-10.
 fn all_fixes(blend: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity"
+            && name != "fillet_exact_round_classes"
+            && (blend || name != "fillet_blend_corner")
+        {
             *f.flag_mut(name).unwrap() = true;
         }
     }
