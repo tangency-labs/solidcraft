@@ -2385,6 +2385,30 @@ fn contents_rows_select_the_active_sketchs_entities() {
     assert_eq!(h.app.session.selection, vec![Sel::SketchConstraint { id: dimension }]);
 }
 
+/// A Text row stands for the outlines the text generated: selecting it lights the letters, not
+/// the whole sketch.
+#[test]
+fn clicking_a_text_row_selects_its_outlines() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Text"})).unwrap();
+    let text = h.app.run("sketch.text", json!({"text":"II","at":[0,0],"height":10})).unwrap();
+    let link = text["link"].as_str().unwrap().to_owned();
+    let curve = text["curves"][0].as_str().unwrap().to_owned();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/text"));
+    h.settle();
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-row:s:{sketch}:text:{link}")}})).unwrap();
+    assert!(
+        h.app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchCurve { id, .. } if id == &curve)),
+        "the text row selects its outlines: {:?}",
+        h.app.session.selection
+    );
+}
+
 /// Stage 3: a row of a sketch that is not being edited is an external pick, which the viewport
 /// lights through the same path a viewport pick uses; its constraint row stands for the geometry
 /// it ties together, and its eye is untouched.

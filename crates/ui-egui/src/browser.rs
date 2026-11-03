@@ -886,8 +886,10 @@ fn contents_key_sels(app: &SolveApp, key: &str) -> Option<Vec<Sel>> {
         "conics" => RowKind::Conic,
         "constraints" => RowKind::Constraint,
         "dimensions" => RowKind::Dimension,
-        // Patterns, offsets, links, text and 3D curves have no entity selection of their own:
-        // their row stands for the sketch, as it did before they got a key.
+        "links" => RowKind::Link,
+        "text" => RowKind::Text,
+        // Patterns, offsets and 3D curves have no entity selection of their own: their row
+        // stands for the sketch, as it did before they got a key.
         _ => return Some(vec![Sel::Feature { id: sketch }]),
     };
     Some(contents_target(app, kind, id, sketch, editable, true))
@@ -3310,8 +3312,37 @@ fn contents_target(app: &SolveApp, kind: RowKind, id: &str, sketch: u64, editabl
         RowKind::Line | RowKind::Arc | RowKind::Circle | RowKind::Spline | RowKind::Conic => vec![Sel::ExternalSketchCurve { sketch, id }],
         RowKind::Constraint | RowKind::Dimension if editable => vec![Sel::SketchConstraint { id }],
         RowKind::Constraint | RowKind::Dimension if expand || has_external_selection(app, sketch) => external_constraint_targets(app, sketch, &id),
+        RowKind::Link | RowKind::Text => link_targets(app, sketch, &id, editable),
         _ => Vec::new(),
     }
+}
+
+/// The geometry a link generated (a projected edge, the outlines of one text): selecting the
+/// link's row lights its curves, or its points when it made only points.
+fn link_targets(app: &SolveApp, sketch: u64, link: &str, editable: bool) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    let mut curves = Vec::new();
+    for curve in &sk.curves {
+        if curve.link.as_deref() != Some(link) {
+            continue;
+        }
+        curves.push(if editable {
+            Sel::SketchCurve { id: curve.id.clone(), sketch: None }
+        } else {
+            Sel::ExternalSketchCurve { sketch, id: curve.id.clone() }
+        });
+    }
+    if !curves.is_empty() {
+        return curves;
+    }
+    sk.points
+        .iter()
+        .filter(|point| point.link.as_deref() == Some(link))
+        .map(|point| if editable { Sel::SketchPoint { id: point.id.clone() } } else { Sel::ExternalSketchPoint { sketch, id: point.id.clone() } })
+        .collect()
 }
 
 /// Is any geometry of `sketch` selected as an external pick? Only then can an inactive constraint

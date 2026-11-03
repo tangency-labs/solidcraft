@@ -137,6 +137,12 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
         if index == 0 && point.id == "origin" {
             continue;
         }
+        // A link's generated geometry (projected edges, text outlines) is the link's row to
+        // show: listing every generated point and curve again buries the local geometry, and
+        // one text can make hundreds of them.
+        if point.link.is_some() {
+            continue;
+        }
         let mut summary = format!("{}, {}", num(point.pos.x), num(point.pos.y));
         if point.fixed {
             summary.push_str(" · fixed");
@@ -145,6 +151,9 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
     }
 
     for (index, curve) in source.curves.iter().enumerate() {
+        if curve.link.is_some() {
+            continue;
+        }
         let (group, kind, word) = match &curve.kind {
             CurveKind::Line { .. } => (GroupKind::Lines, RowKind::Line, "Line"),
             CurveKind::Arc { .. } => (GroupKind::Arcs, RowKind::Arc, "Arc"),
@@ -652,6 +661,45 @@ mod tests {
         let rows: usize = contents.groups.iter().map(|group| group.rows.len()).sum();
         assert_eq!(rows, 744 + 372);
         assert!(group(&contents, GroupKind::Lines).rows.iter().all(|row| row.label.starts_with("Line l")));
+    }
+
+    #[test]
+    fn linked_geometry_stays_on_its_link_row() {
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let c = sk.add_point(Vec2::new(0.0, 5.0), None).unwrap();
+        let d = sk.add_point(Vec2::new(5.0, 5.0), None).unwrap();
+        let linked = sk.add_line_pts(c, d, None).unwrap();
+        let linked_curve = sk.curves[linked].id.clone();
+        let linked_points = [sk.points[c].id.clone(), sk.points[d].id.clone()];
+        sk.curves[linked].link = Some("text1".into());
+        sk.points[c].link = Some("text1".into());
+        sk.points[d].link = Some("text1".into());
+        sk.links.push(Link {
+            id: "text1".into(),
+            kind: LinkKind::Text,
+            source: LinkSource::Text {
+                text: "HI".into(),
+                at: Vec2::ZERO,
+                height: 5.0,
+                angle: 0.0,
+                font: None,
+                style: TextStyle::default(),
+                exprs: TextExprs::default(),
+            },
+            face_name: None,
+            edge_name: None,
+            auto_face: false,
+            lost: false,
+        });
+        let (doc, sketch) = document(sk);
+        let contents = build(&doc, None, sketch, true);
+
+        assert!(group(&contents, GroupKind::Lines).rows.iter().all(|row| row.id != linked_curve), "a linked line is not a local line");
+        assert!(group(&contents, GroupKind::Points).rows.iter().all(|row| !linked_points.contains(&row.id)), "a linked point is not a local point");
+        assert_eq!(row(&contents, GroupKind::Text, "text1").kind, RowKind::Text);
     }
 
     #[test]
