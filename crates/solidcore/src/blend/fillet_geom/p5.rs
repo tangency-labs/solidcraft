@@ -15,6 +15,7 @@
 //! | [`FilletBrep::calc_fillet_int_side_face`]         | `SmFilletEdge::CalcFilletIntSideFace`            |
 //! | [`FilletBrep::calc_edge_on_extended_edge`]        | `SmFilletEdge::CalcEdgeOnExtendedEdge`           |
 //! | `calc_edge_on_tangent_seam` (private)             | `SmFilletEdge::CalcEdgeOnTangentSeam` (fork 856b54e) |
+//! | `definition_section_in_plane` (private)           | none (#2406: an End's rib on a round by its definition, its section in the End's plane) |
 //! | [`FilletBrep::make_fillet_edge`]                  | `SmFilletEdge::MakeFilletEdge`                   |
 //! | [`FilletGeom::new`] (in `blend.fillet_geom_p1`)   | `SmFilletGeom(SmFilletSolver*, SmFilletGeomType)` (CO-PORTED there) |
 //! | [`FilletBrep::copy_fillet_geom`]                  | `SmFilletGeom(SmFilletGeom*)`                    |
@@ -140,6 +141,164 @@ use crate::topology::brep_cache::CacheObject;
 const OP_INT_FILLET: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_fillet";
 const OP_CROSS: &str = "blend::fillet_geom::p5::FilletBrep::calc_cross_section";
 const OP_SIDE: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_side_face";
+
+/// Not the fork's (#2406; `fixes.fillet_blend_corner` with
+/// `fixes.fillet_round_as_definition`): where the plane `end` holds a section of the round
+/// `fillet` by its definition (a [`SurfaceKind::ProceduralBlend`]) that runs from one of
+/// `ends` (the rib's start, then its end) to the other, the end rib is that section: the
+/// definition's rational quadratic arc of the ball's circle (`EvaluateDefinition`, order 1)
+/// between its feet, its uv on the round the line along the section's t at its s, and on
+/// the plane the arc's image. The section's s is the one whose middle lies on the plane
+/// (Newton on the definition from the start's foot); it is taken when its feet are
+/// within `tol` of the rib's ends and its points lie within `tol` of the plane. `None`
+/// otherwise (the rib is then the surfaces' intersection, as the fork's).
+///
+/// # Errors
+///
+/// Those of the drop, the definition's evaluations and the curve constructions.
+fn definition_section_in_plane(
+    k: &Kernel,
+    fillet: &Surface,
+    end: &Surface,
+    ends: [Point3; 2],
+    tol: f64,
+) -> Result<Option<SrfSrfCurves>> {
+    use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+    let (SurfaceKind::ProceduralBlend(pb), SurfaceKind::Plane(plane)) = (fillet.kind(), end.kind())
+    else {
+        return Ok(None);
+    };
+    if pb.order() != 1 {
+        return Ok(None);
+    }
+    let [start, finish] = ends;
+    let (origin, normal, _) = plane.is_planar();
+    let domain = fillet.natural_uv_domain_with_nurb(k)?;
+    let foot = fillet.drop_point::<crate::surface::surface::p4::NoObject>(
+        k,
+        start,
+        &domain,
+        &crate::surface::surface::p5::DropPointOptions::default(),
+    )?;
+    if !foot.success {
+        return Ok(None);
+    }
+    // the s whose section's middle is on the plane (at most 16 Newton steps)
+    let mut s = pb.definition_parameters(foot.result_uv).x;
+    for _ in 0..16 {
+        let d = pb.evaluate_definition(k, s, 0.5, 1, 0)?;
+        let (Some(p), Some(ds)) = (
+            d.first().and_then(|r| r.first()).copied(),
+            d.get(1).and_then(|r| r.first()).copied(),
+        ) else {
+            return Ok(None);
+        };
+        let slope = ds.dot(normal);
+        if slope.abs() <= EFF_ZERO {
+            return Ok(None);
+        }
+        let step = (p - origin).dot(normal) / slope;
+        s -= step;
+        if step.abs() <= EFF_ZERO * (1.0 + s.abs()) {
+            break;
+        }
+    }
+    let at = |t: f64| -> Result<Point3> {
+        pb.evaluate_definition(k, s, t, 0, 0)?
+            .first()
+            .and_then(|r| r.first())
+            .copied()
+            .ok_or_else(|| SolidError::null_pointer(OP_SIDE))
+    };
+    let (a, mid, b) = (at(0.0)?, at(0.5)?, at(1.0)?);
+    let forward = a.distance(start) <= tol && b.distance(finish) <= tol;
+    if !(forward || (b.distance(start) <= tol && a.distance(finish) <= tol)) {
+        return Ok(None);
+    }
+    for t in [0.25, 0.75] {
+        if (at(t)? - origin).dot(normal).abs() > tol {
+            return Ok(None);
+        }
+    }
+    for p in [a, mid, b] {
+        if (p - origin).dot(normal).abs() > tol {
+            return Ok(None);
+        }
+    }
+    // the ball's circle through the feet and the middle: its centre, the angle between the
+    // feet, the arc's middle control point and weight cos(theta / 2)
+    let (u, v) = (a - mid, b - mid);
+    let w_axis = u.cross(v);
+    let area = w_axis.dot(w_axis);
+    if area <= EFF_ZERO {
+        return Ok(None);
+    }
+    let centre = mid + (w_axis.cross(u) * v.dot(v) + v.cross(w_axis) * u.dot(u)) / (2.0 * area);
+    let (ra, rb) = (a - centre, b - centre);
+    let cos_theta = ra.dot(rb) / (ra.length() * rb.length());
+    let half = 0.5 * (1.0 + cos_theta);
+    if half <= EFF_ZERO {
+        return Ok(None);
+    }
+    let weight = half.sqrt();
+    let middle = centre + ((a + b) * 0.5 - centre) / half;
+    let arc_mid = (a * 0.25 + middle * (0.5 * weight) + b * 0.25) / (0.5 + 0.5 * weight);
+    if arc_mid.distance(mid) > tol {
+        return Ok(None);
+    }
+    // from the rib's start: t runs with it, or against it
+    let (p0, p2, t0, t1) = if forward {
+        (a, b, 0.0, 1.0)
+    } else {
+        (b, a, 1.0, 0.0)
+    };
+    let arc = |dim: u64, cps: &[Point3]| -> Result<BSplineCurve> {
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim,
+            degree: 2,
+            control_points: cps,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, weight, 1.0]),
+            trim: None,
+        })
+    };
+    let curve_3d = arc(3, &[p0, middle, p2])?;
+    let on_plane = |p: Point3| {
+        let uv = plane.project_point_to_uv_domain(p);
+        Point3::new(uv.x, uv.y, 0.0)
+    };
+    let end_uv = arc(2, &[on_plane(p0), on_plane(middle), on_plane(p2)])?;
+    // the round's (u, v) at the section's (s, t): the inverse of its definition map
+    let (map_a, map_b, swapped) = pb.definition_map();
+    let uv_at = |t: f64| -> Point3 {
+        let p = (s - map_a[0]) / map_b[0];
+        let q = (t - map_a[1]) / map_b[1];
+        if swapped {
+            Point3::new(q, p, 0.0)
+        } else {
+            Point3::new(p, q, 0.0)
+        }
+    };
+    let fillet_uv = BSplineCurve::create_canonical(&CanonicalData {
+        dim: 2,
+        degree: 1,
+        control_points: &[uv_at(t0), uv_at(t1)],
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[2, 2],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: None,
+        trim: None,
+    })?;
+    Ok(Some(SrfSrfCurves {
+        curve_3d: Some(Curve::from(curve_3d)),
+        uv_curve1: Some(Curve::from(fillet_uv)),
+        uv_curve2: Some(Curve::from(end_uv)),
+    }))
+}
 /// The `SmBSplineCurve` of a curve that is one (`SM_CAST_PTR(SmBSplineCurve, ..)`).
 fn b_spline_part(c: &Curve) -> Option<&BSplineCurve> {
     match c.kind() {
@@ -1321,6 +1480,25 @@ impl FilletBrep {
                     // NER(pEnd)
                     None => Err(SolidError::null_pointer(OP_SIDE)),
                 }
+            } else if let Some(section) = match &surface {
+                // Not the fork's (#2406): an End's plane that holds a section of a round
+                // by its definition through both rail ends cuts the round in that section
+                Some(surface)
+                    if k.fixes.fillet_blend_corner
+                        && k.fixes.fillet_round_as_definition
+                        && the_corner.end_cap.is_some() =>
+                {
+                    definition_section_in_plane(
+                        k,
+                        &fillet_surface1,
+                        surface,
+                        [start_pnt, end_pnt],
+                        approx_tol,
+                    )?
+                }
+                _ => None,
+            } {
+                Ok(section)
             } else {
                 match &surface {
                     Some(surface) => {

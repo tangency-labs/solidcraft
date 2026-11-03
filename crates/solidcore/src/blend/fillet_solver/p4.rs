@@ -1721,7 +1721,7 @@ fn c2_trace_to_edge_ends(
         ops.solver()
             .setup_offset_extension(cx.k, &st.base_surfaces[1], &mut domain2)?;
         let mut end_tsect = TsectPnt::new();
-        super::p3::find_fillet_tsect_pnt_in(
+        match super::p3::find_fillet_tsect_pnt_in(
             ops,
             cx.k,
             Some(&mut *cx.target),
@@ -1732,7 +1732,21 @@ fn c2_trace_to_edge_ends(
             &mut end_tsect,
             Some(&domain1),
             Some(&domain2),
-        )?;
+        ) {
+            Ok(()) => {}
+            // Not the fork's (#2406): at an End at a smooth vertex past a tangent edge of
+            // a face of the edge the ball may have left that face before the edge's end,
+            // its section there not on these faces: the trace goes on without it, out to
+            // its extended domains, and the rails' rollover traces it again on the face
+            // beyond (the End's rail ends then found on its plane)
+            Err(e)
+                if !e.is_unported_or_cancelled()
+                    && c2_end_past_tangent_edge(ops, cx, st, end == 1)? =>
+            {
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
         end_tsect.curve_parameter = -BIG_DOUBLE;
         let r = st.store.alloc(end_tsect);
         if end == 0 {
@@ -1742,6 +1756,76 @@ fn c2_trace_to_edge_ends(
         }
     }
     Ok(())
+}
+
+/// Not the fork's (#2406): whether the corner at the edge's end (`at_end`, else its start)
+/// is an End at a smooth vertex past a tangent edge of a face of the edge
+/// ([`crate::blend::blend_corner::end::end_past_tangent_edge`]), found through a rail end
+/// of geometry 0 on an extended edge (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`) at that end; false
+/// without the executive's corners.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a missing edge use, edge or rail; those of the corner lookup
+/// and the tangency test.
+fn c2_end_past_tangent_edge(
+    ops: &dyn FilletSolverOps,
+    cx: &mut Cx<'_>,
+    st: &CalcState,
+    at_end: bool,
+) -> Result<bool> {
+    use crate::blend::fillet_geom::p1::FilletVertexType;
+    use crate::topology::edge as topo_edge;
+
+    let GeometrySolvers::Live(context) = &cx.solvers else {
+        return Ok(false);
+    };
+    let corners = context.corners();
+    let eu0 = ops
+        .solver()
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let corner_vertex = if at_end {
+        topo_edge::end_vertex(cx.target, edge)?
+    } else {
+        topo_edge::start_vertex(cx.target, edge)?
+    };
+    for which_rail in 0..2 {
+        let rail = cx
+            .fillets
+            .geom(st.geom0)?
+            .rail(which_rail)
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let brep = cx.fillets.brep();
+        let first = topo_edge::vertex(brep, rail)?;
+        let second = match first {
+            Some(v) => topo_edge::other_vertex(brep, rail, Some(v))?,
+            None => None,
+        };
+        for fv in [first, second].into_iter().flatten() {
+            let fillet_vertex = cx.fillets.fillet_vertex(fv)?;
+            if fillet_vertex.fillet_vertex_type() != FilletVertexType::RailXExtendedEdgeuse {
+                continue;
+            }
+            let Some(id) = fillet_vertex.fillet_corner() else {
+                continue;
+            };
+            let corner = corners.corner(id)?;
+            if corner.filleted_vertex() != corner_vertex {
+                continue;
+            }
+            return crate::blend::blend_corner::end::end_past_tangent_edge(
+                cx.k,
+                cx.target,
+                cx.fillets,
+                corner,
+                eu0,
+                ops.solver().tangency_tolerance,
+            );
+        }
+    }
+    Ok(false)
 }
 
 /// :1872-1920: `SM_ERR` without points; with more than two, drop the penultimate

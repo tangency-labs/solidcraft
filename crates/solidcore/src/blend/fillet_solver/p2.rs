@@ -17,6 +17,7 @@
 //! | [`FilletSolver::rail_edgeuse_intersect`]                 | `SmFilletSolver::RailEdgeuseIntersect`       |
 //! | [`FilletSolver::rail_rail_intersect`]                    | `SmFilletSolver::RailRailIntersect`          |
 //! | [`find_rollover_side_edge`]                              | `sm_FindRolloverSideEdge` (static)           |
+//! | `rolls_over_tangent_edge` (private)                      | none (#2406, `fillet_blend_corner`)          |
 //! | [`FilletSolver::create_cliff_roll_over_side_fg`]         | `SmFilletSolver::CreateCliffRollOverSideFG`  |
 //! | [`FilletSolver::record_fillet_error`], [`FilletSolver::record_fillet_error_in`], [`SolverErrorObject`] | `SmFilletSolver::RecordFilletError` |
 //!
@@ -3040,6 +3041,17 @@ fn eu_vertex(b: &Brep, e: EdgeuseId) -> Result<Option<VertexId>> {
     vertexuse::vertex(b, vu)
 }
 
+/// Not upstream (#2406, `fixes.fillet_blend_corner`): whether the side edge `io` found
+/// is a tangent edge the ball rolls over. The two faces continue each other there (their
+/// normals agree, not opposite: no knife edge), so their offsets continue each other
+/// across the edge's offset and the spine runs on onto the face beyond: the blend neither
+/// crashes into that face nor hangs over a cliff, whatever the edge's convexity (the
+/// convexity of a tangent edge does not say which way the side face run on past it leaves
+/// the face beyond). Upstream decides a tangent edge by its convexity as a sharp one.
+fn rolls_over_tangent_edge(k: &Kernel, io: &RolloverSideEdge) -> bool {
+    k.fixes.fillet_blend_corner && io.is_tangential_side_edge && !io.opposite_normals
+}
+
 /// `sm_FindRolloverSideEdge(pCC, rlCurrIndx, pRail, pOrigRailCurve, pOrigRailUVCurve,
 /// pOrigFillet, bConvexFillet, rpSideEdge, rbIsTangentialSideEdge, rbTrimSideFaces,
 /// rbOppositeNormals, rpRolloverCornerEU, rpRolloverCornerV, dTangencyTolRad,
@@ -3121,7 +3133,7 @@ pub fn find_rollover_side_edge<O: ClassObject>(
 
             // Same convexity: the fillet crashes into the adjoining face (trim it);
             // otherwise it hangs over a cliff.
-            if convex_fillet == convex_side_edge {
+            if convex_fillet == convex_side_edge && !rolls_over_tangent_edge(k, io) {
                 // Trimming process
                 io.trim_side_faces = true;
                 io.curr_index += 1;
@@ -3262,7 +3274,7 @@ pub fn find_rollover_side_edge<O: ClassObject>(
             test_side_edge_convexity(k, b, side_edge, io.is_tangential_side_edge)?;
 
         // Cliff or crash (comment above).
-        if convex_fillet == convex_side_edge {
+        if convex_fillet == convex_side_edge && !rolls_over_tangent_edge(k, io) {
             // Trimming process
             io.trim_side_faces = true;
             return Ok(());

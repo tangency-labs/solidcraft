@@ -1017,7 +1017,7 @@ fn public_support_helper_uses_the_real_surface_intersection() {
 fn rollover_trim_uses_the_live_solver_at_its_nonzero_id() {
     let mut f = Fixture::new([&[1.0], &[1.0]], false);
     let id = f.geom;
-    let solver_id = crate::blend::fillet_geom::p1::FilletSolverId(37);
+    let solver_id = FilletSolverId(37);
     f.fb.geom_mut(id).unwrap().solver = Some(solver_id);
     f.fb.geom_mut(id).unwrap().set_fillet_surface(Some(
         Plane::new(
@@ -1045,13 +1045,7 @@ fn rollover_trim_uses_the_live_solver_at_its_nonzero_id() {
         );
     }
     assert!(matches!(
-        f.fb.trim_rail_curves_with_solver(
-            &f.k,
-            id,
-            crate::blend::fillet_geom::p1::FilletSolverId(0),
-            &f.solver,
-            &f.target
-        ),
+        f.fb.trim_rail_curves_with_solver(&f.k, id, FilletSolverId(0), &f.solver, &f.target),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
     ));
 }
@@ -1060,7 +1054,7 @@ fn rollover_trim_uses_the_live_solver_at_its_nonzero_id() {
 fn rollover_corner_vertex_delegates_to_the_available_geom_port() {
     let mut f = Fixture::new([&[1.0], &[1.0]], false);
     let id = f.geom;
-    f.fb.geom_mut(id).unwrap().solver = Some(crate::blend::fillet_geom::p1::FilletSolverId(37));
+    f.fb.geom_mut(id).unwrap().solver = Some(FilletSolverId(37));
     let rail = f.fb.geom(id).unwrap().rail(0).unwrap();
     let start = f.context().start(rail).unwrap();
     let r = Missing.corner_vertex(&mut f.context(), start, id);
@@ -1078,7 +1072,7 @@ fn rollover_corner_vertex_delegates_to_the_available_geom_port() {
 fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let mut f = Fixture::new([&[1.0], &[1.0]], false);
     let id = f.geom;
-    let solver_id = crate::blend::fillet_geom::p1::FilletSolverId(37);
+    let solver_id = FilletSolverId(37);
     f.fb.geom_mut(id).unwrap().solver = Some(solver_id);
     f.solver.executive = Some(crate::blend::fillet_solver::p1::FilletExecutiveRef);
     for rail in f.fb.geom(id).unwrap().rails.into_iter().flatten() {
@@ -1127,7 +1121,7 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
 fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
     let mut f = Fixture::new([&[1.0], &[1.0]], false);
     let id = f.geom;
-    f.fb.geom_mut(id).unwrap().solver = Some(crate::blend::fillet_geom::p1::FilletSolverId(37));
+    f.fb.geom_mut(id).unwrap().solver = Some(FilletSolverId(37));
     let err = Missing
         .recalc(&mut f.context(), id, false, Some(Vec3::Y))
         .unwrap_err();
