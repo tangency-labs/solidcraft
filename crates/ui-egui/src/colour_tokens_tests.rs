@@ -71,7 +71,7 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 fn every_axis_is_drawn_in_one_set_of_colours() {
     use crate::theme::{ColorVision, set_dark, set_vision};
     use egui::{Pos2, Rect, vec2};
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_engine::render::Camera::default();

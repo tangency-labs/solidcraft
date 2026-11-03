@@ -973,7 +973,7 @@ mod tests {
         h.settle();
         // A click on the face of `body` at `point` in the Print face input; that face's index.
         let pick = |h: &mut crate::scenario::Harness, body: &str, point: [f64; 3]| {
-            let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+            let p = solidcore_record::Vec3::new(point[0], point[1], point[2]);
             let index = solidcraft_engine::doc::appearance::face_index_at(h.app.session.world_state().unwrap().body(body).unwrap(), p).unwrap();
             let d = h.app.dialog.as_mut().unwrap();
             d.active = 1;

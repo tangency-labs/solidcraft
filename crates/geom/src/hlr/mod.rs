@@ -19,12 +19,13 @@ mod silhouette;
 pub(crate) mod surface;
 mod trim;
 
+use crate::prelude::*;
 use serde::Serialize;
 
-use crate::brep::Brep;
 use crate::section::CurveAccuracy;
-use crate::{Seg2, Vec2, Vec3};
 use curve::{C3, as_circle};
+use solidcore_record::brep::Brep;
+use solidcore_record::{Seg2, Vec2, Vec3};
 use surface::{Analytic, Hit, S3};
 use trim::Trim;
 
@@ -192,7 +193,7 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
     if !(1..=MAX_TRIM_SAMPLES).contains(&opts.trim_samples) {
         return Err(HlrError::Invalid("trim samples"));
     }
-    b.validate().map_err(|_| HlrError::Invalid("portable B-rep"))?;
+    crate::brep::check::validate(b).map_err(|_| HlrError::Invalid("portable B-rep"))?;
     // Work on the body moved to its own centre: rounding in ray and inversion formulas grows
     // with the coordinates, and a part may be modelled far from the origin (W05a finding 7).
     let offset = anchor(b);
@@ -208,14 +209,14 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
         }
         let (c, acc) = C3::of_edge(e)?;
         let record = match &e.curve {
-            crate::brep::Curve::Line { .. } => "line",
-            crate::brep::Curve::Circle { .. } => "circle_arc",
-            crate::brep::Curve::Ellipse { .. } => "ellipse_arc",
-            crate::brep::Curve::Polyline { .. } => "polyline",
-            crate::brep::Curve::Spline { .. } => "spline",
-            crate::brep::Curve::RationalSpline { .. } => "rational_spline",
+            solidcore_record::brep::Curve::Line { .. } => "line",
+            solidcore_record::brep::Curve::Circle { .. } => "circle_arc",
+            solidcore_record::brep::Curve::Ellipse { .. } => "ellipse_arc",
+            solidcore_record::brep::Curve::Polyline { .. } => "polyline",
+            solidcore_record::brep::Curve::Spline { .. } => "spline",
+            solidcore_record::brep::Curve::RationalSpline { .. } => "rational_spline",
             // Only one with a spline to follow gets here: what was an `intersection` record.
-            crate::brep::Curve::SurfaceIntersection { .. } => "intersection",
+            solidcore_record::brep::Curve::SurfaceIntersection { .. } => "intersection",
         };
         let shape = if matches!(c, C3::Line { .. }) {
             "line"
@@ -406,7 +407,10 @@ fn anchor(b: &Brep) -> Vec3 {
 /// The body's records with every position moved by `-d`: points, control points and NURBS forms,
 /// a placed revolution through its matrix; regions, parameters and pcurves as they are.
 fn shifted(b: &Brep, d: Vec3) -> Brep {
-    b.moved(&crate::brep::placement::Rigid { rotation: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], translation: [-d.x, -d.y, -d.z] })
+    crate::brep::placement::moved(
+        b,
+        &crate::brep::placement::Rigid { rotation: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], translation: [-d.x, -d.y, -d.z] },
+    )
 }
 
 #[derive(Clone, Copy, Debug)]

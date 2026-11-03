@@ -592,8 +592,8 @@ fn target_names(targets: &[Sel]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use solidcore_record::Vec3;
     use solidcraft_engine::Session;
-    use solidcraft_engine::geom::Vec3;
 
     use super::*;
     use crate::Services;

@@ -6,7 +6,8 @@ pub(super) mod review;
 use super::{ImageMethod, materials, setups};
 use crate::{SolveApp, theme::Tokens, ui_kit};
 use serde_json::{Value, json};
-use solidcraft_engine::{doc::Document, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::doc::Document;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Weak},

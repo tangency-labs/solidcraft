@@ -15,7 +15,7 @@
 
 use std::collections::BTreeSet;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::body::Body;
 use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
@@ -271,6 +271,7 @@ mod tests {
     use crate::blend::Faces;
     use crate::{box_solid, fillet, measure};
     use solidcraft_geom::brep::eval::CurveEval;
+    use solidcraft_geom::prelude::*;
 
     /// The 20 mm box and the three edges at its corner (20, 0, 20): `a` along y, `b` along x,
     /// `c` up.
@@ -551,7 +552,7 @@ mod tests {
 
     #[test]
     fn sloped_basin_rim_fillets() {
-        use solidcraft_geom::{Loop2, Plane, Vec2};
+        use solidcore_record::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
         let pocket =
@@ -588,7 +589,7 @@ mod tests {
     /// each piece: 375.673069 taken from V0 = 140333.333333 (the prismatoid), 139957.660264.
     #[test]
     fn a_rim_loop_chamfer_running_off_its_rim_builds() {
-        use solidcraft_geom::{Loop2, Plane, Vec2};
+        use solidcore_record::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
         let pocket =

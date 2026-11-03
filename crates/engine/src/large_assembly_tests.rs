@@ -7,9 +7,9 @@
 //! `SOLIDCRAFT_BENCH_PARTS=400 cargo test --release -p solidcraft-engine bench_generated_assembly -- --ignored --nocapture`
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_doc::BodyName;
 use solidcraft_doc::{Document, FeatureKind, Operation, mat_inverse, point_expr, rigid};
-use solidcraft_geom::Vec3;
 
 use crate::Session;
 

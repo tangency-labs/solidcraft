@@ -10,7 +10,7 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
 
 #[test]
 fn select_geometry_resolves_points_and_indices_without_changing_history() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name":"Block", "corner":[20,30,40], "length":10, "width":10, "height":10}));
@@ -47,7 +47,7 @@ fn select_geometry_curved_picks_round_trip_and_add_without_duplicates() {
         let index = serde_json::to_value(&s.selection[0]).unwrap()["index"].clone();
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Round","index":index}]}));
         let complete = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
         assert!((pick.x.hypot(pick.y) - 5.0).abs() < 1e-6, "the inferred point lies on the cylinder: {complete}");
         let mut partial = complete.clone();
         partial.as_object_mut().unwrap().remove("index");
@@ -73,7 +73,7 @@ fn select_geometry_uses_the_placed_body_in_world_coordinates() {
         assert_eq!(complete["body"], name);
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":name,"index":complete["index"]}]}));
         let inferred = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
         assert!((pick.z - 4.0).abs() < 1e-9 && (7.0..=10.0).contains(&pick.x) && (20.0..=22.0).contains(&pick.y), "{inferred}");
         assert!(s.execute("select.set", &json!({"items":[{"type":kind,"body":name,"point":[1,1,4]}]})).is_err());
         assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), inferred);
@@ -1515,7 +1515,7 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     let history = (s.undo.len(), s.redo.len(), s.evaluations);
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
-    let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
+    let point = solidcore_record::Vec3::new(40.0, 5.0, 5.0);
     let face = solidcraft_doc::appearance::face_index_at(s.world_state().unwrap().body("C").unwrap(), point).unwrap();
     run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
     run(&mut s, "select.same_look", json!({}));

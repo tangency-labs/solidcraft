@@ -29,7 +29,7 @@ fn pending_and_reverted_moves_replace_cached_transforms() {
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0],"capture":false})).unwrap();
     let moved = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&first, &moved));
-    assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcraft_engine::geom::Vec3::ZERO).x - 20.0).abs() < 1e-9);
+    assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcore_record::Vec3::ZERO).x - 20.0).abs() < 1e-9);
     h.app.run("component.revert_position", json!({"occurrences":[occurrence]})).unwrap();
     let reverted = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&moved, &reverted));
@@ -96,7 +96,7 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     h.app.tree.collapsed.extend([one.clone(), two.clone(), format!("{two}/bodies")]);
     h.frames(2);
     assert!(!h.app.tree.order.contains(&format!("b:{second}")), "the body's row is closed away");
-    let face = Sel::Face { body: second.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(55.0, 5.0, 10.0) };
+    let face = Sel::Face { body: second.clone(), index: 0, point: solidcore_record::Vec3::new(55.0, 5.0, 10.0) };
     crate::viewport::select(&mut h.app, Some(face), false, false);
     assert_eq!(h.app.tree.reveal.as_deref(), Some(second.as_str()));
     h.frames(2);
@@ -207,7 +207,7 @@ fn render_browser_swatch_resolves_face_body_component_then_physical_material() {
     assert_eq!(swatch(&h).name, "ABS - Red");
     h.app.run("appearance.assign", json!({"bodies":["Body1"],"appearance":"ABS - Blue"})).unwrap();
     assert_eq!(swatch(&h).name, "ABS - Blue");
-    let point = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 5.0);
+    let point = solidcore_record::Vec3::new(0.0, 5.0, 5.0);
     h.app.run("appearance.assign", json!({"body":"Body1","faces":[point],"appearance":"ABS - Red"})).unwrap();
     let state = crate::open_meshing::session_world(&h.app.session);
     let body = state.body("Body1").unwrap();

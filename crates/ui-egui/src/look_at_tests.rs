@@ -2,7 +2,8 @@
 //! origin, so a sketch drawn far from the origin (an imported part placed there) stays in view.
 
 use serde_json::json;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -88,7 +89,7 @@ fn the_viewport_menu_looks_at_a_plane_under_the_cursor() {
     let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a plane's menu has Look At");
     crate::context_menu::run_item(&mut h.app, &look, egui::Pos2::ZERO);
-    let normal = solidcraft_engine::geom::Plane::named("XZ").unwrap().normal();
+    let normal = solidcore_record::Plane::named("XZ").unwrap().normal();
     assert!((h.app.cam.back().cross(normal)).len() < 1e-6, "facing the plane along its normal: {:?}", h.app.cam.back());
 }
 

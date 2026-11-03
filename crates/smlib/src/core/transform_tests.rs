@@ -110,7 +110,7 @@ struct Measured {
 
 type Got = std::result::Result<Measured, Error>;
 
-fn kinds(rec: &solidcraft_geom::brep::Brep) -> BTreeMap<String, usize> {
+fn kinds(rec: &solidcore_record::brep::Brep) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for f in &rec.faces {
         let v = serde_json::to_value(&f.surface).unwrap();
@@ -168,7 +168,7 @@ fn solidcore_case(name: &str) -> Got {
     let c = case(name);
     let got = transform(&c.shape.core(), &c.matrix).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { volume: volume(&b, 1e-8).unwrap(), bounds: bounds(&b).unwrap(), counts: counts(&b).unwrap(), kinds: kinds(&rec) }
     });
     judge(name, "solidcore", got)

@@ -16,7 +16,9 @@ use solidcraft_engine::io::vfs;
 use crate::disk;
 use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetFileOptions, FileSystemWritableFileStream};
+use web_sys::{
+    FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetDirectoryOptions, FileSystemGetFileOptions, FileSystemWritableFileStream,
+};
 
 /// Where OPFS files appear to the engine.
 pub const OPFS: &str = disk::OPFS_PREFIX;
@@ -111,7 +113,7 @@ thread_local! {
     static LOCAL: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Local storage keys of stored files.
+/// Local storage keys of stored files (under the channel's name, see `channel.rs`).
 const LOCAL_PREFIX: &str = "solidcraft.file.";
 /// Local-storage files kept by earlier releases (compatibility shim, docs/compatibility.md):
 /// still listed and opened; removing one removes either key.
@@ -169,7 +171,17 @@ fn has(sm: &web_sys::StorageManager, method: &str) -> bool {
 async fn root() -> Result<FileSystemDirectoryHandle, String> {
     let sm = storage_manager().filter(|sm| has(sm, "getDirectory")).ok_or("this page has no private file storage (it needs https or localhost)")?;
     let dir = JsFuture::from(sm.get_directory()).await.map_err(err)?;
-    dir.dyn_into::<FileSystemDirectoryHandle>().map_err(|_| "this browser has no private file storage (OPFS)".to_string())
+    let dir = dir.dyn_into::<FileSystemDirectoryHandle>().map_err(|_| "this browser has no private file storage (OPFS)".to_string())?;
+    // Stable keeps its files in the root, where they have always been; a pre-release channel has a folder of its own.
+    match crate::channel::current() {
+        "" => Ok(dir),
+        channel => {
+            let opts = FileSystemGetDirectoryOptions::new();
+            opts.set_create(true);
+            let sub = JsFuture::from(dir.get_directory_handle_with_options(&format!("channel-{channel}"), &opts)).await.map_err(err)?;
+            sub.dyn_into::<FileSystemDirectoryHandle>().map_err(|_| "not a folder".to_string())
+        }
+    }
 }
 
 pub(crate) async fn read_handle(h: &FileSystemFileHandle) -> Result<Vec<u8>, String> {
@@ -191,7 +203,7 @@ async fn file_handle(dir: &FileSystemDirectoryHandle, name: &str, create: bool) 
 async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
     if local_only() {
         return local()?
-            .set_item(&format!("{LOCAL_PREFIX}{name}"), &encode(bytes))
+            .set_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}")), &encode(bytes))
             .map_err(|e| format!("local storage is full or blocked: {}", err(e)));
     }
     let dir = root().await?;
@@ -207,7 +219,7 @@ async fn remove_file(name: &str) -> Result<(), String> {
     if local_only() {
         let st = local()?;
         st.remove_item(&format!("{LEGACY_LOCAL_PREFIX}{name}")).map_err(err)?;
-        return st.remove_item(&format!("{LOCAL_PREFIX}{name}")).map_err(err);
+        return st.remove_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}"))).map_err(err);
     }
     let dir = root().await?;
     JsFuture::from(dir.remove_entry(name)).await.map_err(err)?;
@@ -220,7 +232,10 @@ fn read_local() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
     let mut out = Vec::new();
     for i in 0..st.length().unwrap_or(0).min(10_000) {
         let Some(k) = st.key(i).ok().flatten() else { continue };
-        let Some(name) = k.strip_prefix(LOCAL_PREFIX).or_else(|| k.strip_prefix(LEGACY_LOCAL_PREFIX)) else { continue };
+        let own = crate::channel::key(LOCAL_PREFIX);
+        // The old names belong to stable; a pre-release channel has none.
+        let legacy = crate::channel::current().is_empty().then_some(LEGACY_LOCAL_PREFIX);
+        let Some(name) = k.strip_prefix(own.as_str()).or_else(|| legacy.and_then(|l| k.strip_prefix(l))) else { continue };
         if let Some(v) = st.get_item(&k).ok().flatten() {
             out.push((name.to_string(), decode(&v), 0.0));
         }

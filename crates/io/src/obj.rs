@@ -3,7 +3,7 @@
 //! are split into fans. Texture coordinates, normals and materials are ignored. The file is
 //! untrusted: counts are capped and bad lines become warnings.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::threemf::MeshObject;
 use crate::{IoError, Result};

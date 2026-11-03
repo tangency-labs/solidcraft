@@ -4,7 +4,8 @@
 //! `inspect.analysis` says which or turns it off.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
@@ -943,7 +944,7 @@ mod tests {
         s.execute("inspect.environment_map", &json!({})).unwrap();
         assert_eq!(s.analysis, Some(SurfaceAnalysis::Environment));
         s.execute("inspect.accessibility", &json!({"direction": [0, 0, -3]})).unwrap();
-        assert_eq!(s.analysis, Some(SurfaceAnalysis::Access { dir: solidcraft_geom::Vec3::new(0.0, 0.0, -1.0) }));
+        assert_eq!(s.analysis, Some(SurfaceAnalysis::Access { dir: solidcore_record::Vec3::new(0.0, 0.0, -1.0) }));
         s.execute("inspect.curvature_map", &json!({"clear": true})).unwrap();
         assert_eq!(s.analysis, None);
         assert_eq!(s.undo.len(), undo, "no undo steps");
@@ -1123,7 +1124,7 @@ mod tests {
         let seam = s.continuity[0].clone();
         let revision = s.revision;
         s.execute("view.apply", &json!({"camera":{"target":[1,2,3],"yaw":0,"pitch":0,"distance":40}})).unwrap();
-        assert_eq!(s.camera.unwrap().target, solidcraft_geom::Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(s.camera.unwrap().target, solidcore_record::Vec3::new(1.0, 2.0, 3.0));
         // Camera apply is an echo; these real display changes advance Session's view revision.
         s.execute("browser.visibility", &json!({"items":[seam.body],"visible":false})).unwrap();
         s.execute("browser.visibility", &json!({"items":[seam.body],"visible":true})).unwrap();

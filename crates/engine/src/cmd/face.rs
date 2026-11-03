@@ -3,8 +3,10 @@
 //! edges become lines, circular edges circles or arcs, anything else a chain of lines.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::{EmbossFace, apply_point, mat_inverse, mat_mul};
-use solidcraft_geom::{Mesh, Vec2, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
@@ -254,7 +256,7 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
     }
     let state = s.model.state();
     let mut picked = Vec::new();
-    let mut common: Option<(String, solidcraft_geom::Plane)> = None;
+    let mut common: Option<(String, solidcore_record::Plane)> = None;
     for &point in points {
         if !point.is_finite() {
             return Err(bad(cmd, "faces must be finite points"));

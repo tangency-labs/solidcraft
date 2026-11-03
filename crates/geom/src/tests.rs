@@ -1,4 +1,5 @@
 use crate::*;
+use solidcore_record::{MAX_BEZIER_CTRL, Plane, Seg2, Vec2, Vec3};
 
 fn cube_mesh(s: f64) -> Mesh {
     let p = |x: f64, y: f64, z: f64| Vec3::new(x * s, y * s, z * s);
@@ -334,7 +335,7 @@ fn surface_patches_cross_only_hidden_seams() {
 
 #[test]
 fn cubic_and_conic_segments_measure_exactly() {
-    use crate::{Loop2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Seg2, Vec2};
     // An ellipse (a = 5, b = 3) as four quarter conics: area π a b.
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let (a, b) = (5.0, 3.0);
@@ -389,7 +390,7 @@ fn cubic_and_conic_segments_measure_exactly() {
 
 #[test]
 fn split_at_and_closest_param() {
-    use crate::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let quarter = Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w };
     for t in [0.2, 0.5, 0.8] {

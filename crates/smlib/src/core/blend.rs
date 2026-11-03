@@ -161,7 +161,7 @@ pub(super) fn pick_edges(
 }
 
 /// `pick_vertices` (`vertex_distance`).
-fn pick_vertices(b: &Brep, points: &[[f64; 3]], tol: f64) -> solidcore::Result<std::result::Result<(Vec<VertexId>, Vec<usize>), Miss>> {
+pub(super) fn pick_vertices(b: &Brep, points: &[[f64; 3]], tol: f64) -> solidcore::Result<std::result::Result<(Vec<VertexId>, Vec<usize>), Miss>> {
     let all = brep_p1::vertices(b, None)?;
     pick(&all, points, tol, b.tolerance(), |v, p| Ok(Some((b.vertex(v)?.point - p).length())))
 }
@@ -604,7 +604,7 @@ pub(super) fn finish(b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
     Ok(Ok(b))
 }
 
-/// Runs `f` on a copy of `body` (`brep_copy`) under the kernel's lock.
+/// Runs `f` on a copy of `body` (`brep_copy`).
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));

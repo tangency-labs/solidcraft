@@ -1,5 +1,6 @@
 use super::*;
 use crate::brep;
+use solidcore_record::brep as rec;
 
 // The fixtures below write a body as data: shells each with their own vertices, edges and faces,
 // curves and surfaces carrying their bounds, edges numbered as the fixture likes. `Brep::record`
@@ -40,7 +41,7 @@ struct EdgeUse {
 #[derive(Clone)]
 enum Curve {
     Line { start: [f64; 3], end: [f64; 3] },
-    CircleArc { frame: brep::Frame, radius: f64, angle: [f64; 2] },
+    CircleArc { frame: rec::Frame, radius: f64, angle: [f64; 2] },
     Polyline { points: Vec<[f64; 3]> },
     Spline { knots: Vec<f64>, points: Vec<[f64; 3]> },
     RationalSpline { knots: Vec<f64>, homogeneous: Vec<[f64; 4]> },
@@ -60,26 +61,26 @@ enum Surface {
         v_point: [f64; 3],
     },
     Cylinder {
-        frame: brep::Frame,
+        frame: rec::Frame,
         radius: f64,
         angle: [f64; 2],
         height: [f64; 2],
     },
     Cone {
-        frame: brep::Frame,
+        frame: rec::Frame,
         radius_at_origin: f64,
         half_angle: f64,
         angle: [f64; 2],
         height: [f64; 2],
     },
     Sphere {
-        frame: brep::Frame,
+        frame: rec::Frame,
         radius: f64,
         longitude: [f64; 2],
         latitude: [f64; 2],
     },
     Torus {
-        frame: brep::Frame,
+        frame: rec::Frame,
         major_radius: f64,
         minor_radius: f64,
         longitude: [f64; 2],
@@ -114,23 +115,23 @@ enum Surface {
 
 const IDENTITY: [[f64; 4]; 4] = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
 
-fn range(natural: brep::Natural) -> [f64; 2] {
+fn range(natural: rec::Natural) -> [f64; 2] {
     match natural {
-        brep::Natural::Range(a, b) => [a, b],
-        brep::Natural::Periodic => [0., std::f64::consts::TAU],
+        rec::Natural::Range(a, b) => [a, b],
+        rec::Natural::Periodic => [0., std::f64::consts::TAU],
     }
 }
 
 impl Curve {
     /// What the curve is, unbounded.
-    fn label(&self) -> brep::Curve {
+    fn label(&self) -> rec::Curve {
         match self {
-            Curve::Line { start, end } => brep::Curve::Line { start: *start, end: *end },
-            Curve::CircleArc { frame, radius, .. } => brep::Curve::Circle { frame: frame.clone(), radius: *radius },
-            Curve::Polyline { points } => brep::Curve::Polyline { points: points.clone() },
-            Curve::Spline { knots, points } => brep::Curve::Spline { knots: knots.clone(), points: points.clone() },
-            Curve::RationalSpline { knots, homogeneous } => brep::Curve::RationalSpline { knots: knots.clone(), homogeneous: homogeneous.clone() },
-            Curve::SurfaceIntersection { surfaces, leader, tolerance } => brep::Curve::SurfaceIntersection {
+            Curve::Line { start, end } => rec::Curve::Line { start: *start, end: *end },
+            Curve::CircleArc { frame, radius, .. } => rec::Curve::Circle { frame: frame.clone(), radius: *radius },
+            Curve::Polyline { points } => rec::Curve::Polyline { points: points.clone() },
+            Curve::Spline { knots, points } => rec::Curve::Spline { knots: knots.clone(), points: points.clone() },
+            Curve::RationalSpline { knots, homogeneous } => rec::Curve::RationalSpline { knots: knots.clone(), homogeneous: homogeneous.clone() },
+            Curve::SurfaceIntersection { surfaces, leader, tolerance } => rec::Curve::SurfaceIntersection {
                 surfaces: [Box::new(surfaces[0].label()), Box::new(surfaces[1].label())],
                 leader: Box::new(leader.label()),
                 tolerance: *tolerance,
@@ -148,7 +149,7 @@ impl Curve {
     }
 
     /// The label, its NURBS form and the interval the edge's parameter runs over.
-    fn parts(&self) -> (brep::Curve, Option<brep::Curve>, [f64; 2]) {
+    fn parts(&self) -> (rec::Curve, Option<rec::Curve>, [f64; 2]) {
         let label = self.label();
         match self {
             Curve::CircleArc { angle, .. } => {
@@ -162,31 +163,31 @@ impl Curve {
 
 impl Surface {
     /// What the surface is, unbounded.
-    fn label(&self) -> brep::Surface {
+    fn label(&self) -> rec::Surface {
         match self {
-            Surface::Plane { origin, u_axis, v_axis } => brep::Surface::Plane { origin: *origin, u_axis: *u_axis, v_axis: *v_axis },
+            Surface::Plane { origin, u_axis, v_axis } => rec::Surface::Plane { origin: *origin, u_axis: *u_axis, v_axis: *v_axis },
             Surface::PlaneThrough { origin, u_point, v_point } => {
-                brep::Surface::PlaneThrough { origin: *origin, u_point: *u_point, v_point: *v_point }
+                rec::Surface::PlaneThrough { origin: *origin, u_point: *u_point, v_point: *v_point }
             }
-            Surface::Cylinder { frame, radius, .. } => brep::Surface::Cylinder { frame: frame.clone(), radius: *radius },
+            Surface::Cylinder { frame, radius, .. } => rec::Surface::Cylinder { frame: frame.clone(), radius: *radius },
             Surface::Cone { frame, radius_at_origin, half_angle, .. } => {
-                brep::Surface::Cone { frame: frame.clone(), radius_at_origin: *radius_at_origin, half_angle: *half_angle }
+                rec::Surface::Cone { frame: frame.clone(), radius_at_origin: *radius_at_origin, half_angle: *half_angle }
             }
-            Surface::Sphere { frame, radius, .. } => brep::Surface::Sphere { frame: frame.clone(), radius: *radius },
+            Surface::Sphere { frame, radius, .. } => rec::Surface::Sphere { frame: frame.clone(), radius: *radius },
             Surface::Torus { frame, major_radius, minor_radius, .. } => {
-                brep::Surface::Torus { frame: frame.clone(), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: 0. }
+                rec::Surface::Torus { frame: frame.clone(), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: 0. }
             }
             Surface::Spline { u_knots, v_knots, points } => {
-                brep::Surface::Spline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), points: points.clone() }
+                rec::Surface::Spline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), points: points.clone() }
             }
             Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
-                brep::Surface::RationalSpline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), homogeneous: homogeneous.clone() }
+                rec::Surface::RationalSpline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), homogeneous: homogeneous.clone() }
             }
             // A revolution from its profile, u the angle and v along the profile.
             Surface::Revolution { profile, origin, axis, .. } => {
-                brep::Surface::PlacedRevolution { profile: Box::new(profile.label()), origin: *origin, axis: *axis, matrix: IDENTITY, forward: false }
+                rec::Surface::PlacedRevolution { profile: Box::new(profile.label()), origin: *origin, axis: *axis, matrix: IDENTITY, forward: false }
             }
-            Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => brep::Surface::PlacedRevolution {
+            Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => rec::Surface::PlacedRevolution {
                 profile: Box::new(profile.label()),
                 origin: *origin,
                 axis: *axis,
@@ -206,14 +207,14 @@ impl Surface {
             Surface::Revolution { profile, angle, .. } => [*angle, profile.extent()],
             Surface::PlacedRevolution { profile, forward: true, .. } => [profile.extent(), turn],
             Surface::PlacedRevolution { profile, forward: false, .. } => [turn, profile.extent()],
-            Surface::Spline { .. } | Surface::RationalSpline { .. } => self.label().natural().map(range),
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => brep::label::surface_natural(&self.label()).map(range),
             // Nothing reads a plane's domain; this is around anything a fixture draws on one.
             Surface::Plane { .. } | Surface::PlaneThrough { .. } => [[-1e12, 1e12]; 2],
         }
     }
 
     /// The label, its NURBS form and the face's domain.
-    fn parts(&self) -> (brep::Surface, Option<brep::Surface>, [[f64; 2]; 2]) {
+    fn parts(&self) -> (rec::Surface, Option<rec::Surface>, [[f64; 2]; 2]) {
         let (label, bounds) = (self.label(), self.bounds());
         match self {
             Surface::Plane { .. } | Surface::PlaneThrough { .. } | Surface::Spline { .. } | Surface::RationalSpline { .. } => (label, None, bounds),
@@ -231,7 +232,7 @@ impl Brep {
     /// in canonical order, first appearance walking faces, loops and uses. Pcurves carry the edge's
     /// interval, which `Brep::validate` checks; neither it nor hidden lines read their points, as
     /// hidden lines trace trims from the edges in 3D, so these are not on the surface.
-    fn record(&self) -> (brep::Brep, Vec<usize>) {
+    fn record(&self) -> (rec::Brep, Vec<usize>) {
         let (mut points, mut edges, mut faces, mut spans) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for s in &self.shells {
             let (base_edge, base_vertex) = (edges.len() as u32, points.len() as u32);
@@ -245,7 +246,7 @@ impl Brep {
         }
         let mut order: Vec<Option<u32>> = vec![None; edges.len()];
         let mut numbers: Vec<usize> = Vec::new();
-        let mut walked: Vec<Vec<brep::EdgeUseRef>> = vec![Vec::new(); edges.len()];
+        let mut walked: Vec<Vec<rec::EdgeUseRef>> = vec![Vec::new(); edges.len()];
         let mut visit = |e: usize, order: &mut Vec<Option<u32>>| {
             if order[e].is_none() {
                 order[e] = Some(numbers.len() as u32);
@@ -258,7 +259,7 @@ impl Brep {
                     let position = if f.forward { k } else { l.len() - 1 - k };
                     let u = l[position];
                     visit(u.edge as usize, &mut order);
-                    let at = brep::EdgeUseRef { face: fi as u32, r#loop: li as u32, position: position as u32, upper: !u.forward };
+                    let at = rec::EdgeUseRef { face: fi as u32, r#loop: li as u32, position: position as u32, upper: !u.forward };
                     walked[u.edge as usize].push(at);
                 }
             }
@@ -285,15 +286,15 @@ impl Brep {
             let (label, nurbs, interval) = edges[e].curve.parts();
             let ends = edges[e].vertices.map(|v| {
                 *vertex_order[v as usize].get_or_insert_with(|| {
-                    vertices.push(brep::Vertex { point: points[v as usize], tolerance: 1e-6 });
+                    vertices.push(rec::Vertex { point: points[v as usize], tolerance: 1e-6 });
                     vertices.len() as u32 - 1
                 })
             });
-            edge_records.push(brep::Edge { curve: label, nurbs, interval, vertices: ends, tolerance: 1e-6, uses: walked[e].clone() });
+            edge_records.push(rec::Edge { curve: label, nurbs, interval, vertices: ends, tolerance: 1e-6, uses: walked[e].clone() });
         }
         let pcurve = |edge: u32| {
             let [t0, t1] = edge_records[number(edge) as usize].interval;
-            brep::Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![[0., 0.], [1., 0.]] }
+            rec::Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![[0., 0.], [1., 0.]] }
         };
         let face_records = faces
             .iter()
@@ -302,32 +303,32 @@ impl Brep {
                 let loops = f
                     .loops
                     .iter()
-                    .map(|l| brep::Loop::Edges {
-                        edges: l.iter().map(|u| brep::OrientedEdge { edge: number(u.edge), forward: u.forward, pcurve: pcurve(u.edge) }).collect(),
+                    .map(|l| rec::Loop::Edges {
+                        edges: l.iter().map(|u| rec::OrientedEdge { edge: number(u.edge), forward: u.forward, pcurve: pcurve(u.edge) }).collect(),
                     })
                     .collect();
-                brep::Face { surface, nurbs, domain, loops }
+                rec::Face { surface, nurbs, domain, loops }
             })
             .collect();
-        let mut regions = vec![brep::Region { shells: (0..self.shells.len() as u32).collect(), void: false }];
+        let mut regions = vec![rec::Region { shells: (0..self.shells.len() as u32).collect(), void: false }];
         let mut shells = Vec::new();
         for (s, (shell_faces, _)) in spans.iter().enumerate() {
             // A closed shell (each edge on its faces used twice among them) also bounds a region.
             let used = |e: u32| faces[shell_faces.clone()].iter().flat_map(|f| f.loops.iter().flatten()).filter(|u| u.edge == e).count();
             if faces[shell_faces.clone()].iter().flat_map(|f| f.loops.iter().flatten()).all(|u| used(u.edge) >= 2) {
-                regions.push(brep::Region { shells: vec![s as u32], void: false });
+                regions.push(rec::Region { shells: vec![s as u32], void: false });
             }
-            let oriented = shell_faces.clone().map(|f| brep::OrientedFace { face: f as u32, forward: faces[f].forward }).collect();
-            shells.push(brep::Shell::Faces { faces: oriented, wires: wires[s].clone() });
+            let oriented = shell_faces.clone().map(|f| rec::OrientedFace { face: f as u32, forward: faces[f].forward }).collect();
+            shells.push(rec::Shell::Faces { faces: oriented, wires: wires[s].clone() });
         }
-        let record = brep::Brep { version: self.version, tolerance: 1e-6, regions, shells, faces: face_records, edges: edge_records, vertices };
+        let record = rec::Brep { version: self.version, tolerance: 1e-6, regions, shells, faces: face_records, edges: edge_records, vertices };
         (record, numbers)
     }
 }
 
 /// The real `prepare_cancellable` on the fixture's record, its edges then back in the fixture's
 /// numbering and its arcs on the angles the fixture counted them from (the record's are within a
-/// turn of zero: `Edge::curve_interval`), which is what the assertions below speak of.
+/// turn of zero: `label::edge_curve_interval`), which is what the assertions below speak of.
 fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) -> Result<Prepared, HlrError> {
     let (record, numbers) = b.record();
     let mut def = super::prepare_cancellable(&record, opts, cancel)?;
@@ -385,7 +386,7 @@ fn cuboid(lo: [f64; 3], hi: [f64; 3]) -> Brep {
         Face { loops: vec![cycle([0, 4, 6, 2])], surface: plane(0, 4, 2), forward: true },
         Face { loops: vec![cycle([1, 3, 7, 5])], surface: plane(1, 3, 5), forward: true },
     ];
-    Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices, edges, faces }] }
+    Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices, edges, faces }] }
 }
 
 fn identity(body: usize, t: [f64; 3]) -> Placement {
@@ -445,7 +446,7 @@ fn quadratic_roots_with_no_linear_term() {
 #[test]
 fn a_torus_seen_along_its_axis_has_both_equator_silhouettes() {
     // A whole-meridian torus record: the outer equator sits where the closed profile's ends meet.
-    let frame = crate::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    let frame = solidcore_record::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let tau = std::f64::consts::TAU;
     let s = chart(&Surface::Torus { frame, major_radius: 20., minor_radius: 5., longitude: [0., tau], meridian: [0., tau] });
     let mut radii: Vec<f64> = s
@@ -516,7 +517,7 @@ fn a_ray_from_the_hole_crosses_a_thin_large_torus() {
 fn a_torus_seen_nearly_along_its_axis_keeps_its_silhouettes() {
     // Meridian starting off the equator and a view 1e-4 rad from the axis: the silhouette lives
     // in narrow profile intervals around the equators, which must not fall between samples.
-    let frame = crate::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    let frame = solidcore_record::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let tau = std::f64::consts::TAU;
     let shift = std::f64::consts::PI / 720.;
     let s = chart(&Surface::Torus { frame, major_radius: 1000., minor_radius: 500., longitude: [0., tau], meridian: [shift, shift + tau] });
@@ -544,8 +545,8 @@ fn a_shallow_cut_through_a_torus_tube_is_found() {
 }
 
 /// A frame at `o` with x along +X and y along +Y (z along +Z).
-fn frame_at(o: [f64; 3]) -> crate::brep::Frame {
-    crate::brep::Frame { origin: o, x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }
+fn frame_at(o: [f64; 3]) -> solidcore_record::brep::Frame {
+    solidcore_record::brep::Frame { origin: o, x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }
 }
 
 /// A full circle about Z through vertex `v`.
@@ -586,7 +587,7 @@ fn turned(r0: f64, r1: f64, h: f64) -> Brep {
             forward: true,
         },
     ];
-    Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: vec![[r0, 0., 0.], [r1, 0., h]], edges, faces }] }
+    Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: vec![[r0, 0., 0.], [r1, 0., h]], edges, faces }] }
 }
 
 /// A sphere of radius `r` at the origin: two hemispheres meeting at the equator.
@@ -598,7 +599,7 @@ fn sphere(r: f64) -> Brep {
         forward: true,
     };
     let faces = vec![hemisphere([0., half], true), hemisphere([-half, 0.], false)];
-    Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: vec![[r, 0., 0.]], edges: vec![circle([0.; 3], r, 0)], faces }] }
+    Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: vec![[r, 0., 0.]], edges: vec![circle([0.; 3], r, 0)], faces }] }
 }
 
 /// A torus about Z (major radius `big`, minor `small`): top and bottom halves meeting at the
@@ -612,7 +613,10 @@ fn torus(big: f64, small: f64) -> Brep {
     };
     let edges = vec![circle([0.; 3], big + small, 0), circle([0.; 3], big - small, 1)];
     let faces = vec![half([0., pi], true), half([pi, tau], false)];
-    Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: vec![[big + small, 0., 0.], [big - small, 0., 0.]], edges, faces }] }
+    Brep {
+        version: solidcore_record::brep::VERSION,
+        shells: vec![Shell { vertices: vec![[big + small, 0., 0.], [big - small, 0., 0.]], edges, faces }],
+    }
 }
 
 /// A bilinear (twisted) spline patch over x, y in [-5, 5] with z between 0 and 1.
@@ -625,7 +629,7 @@ fn twisted_patch() -> Brep {
         surface: Surface::Spline { u_knots: vec![0., 0., 1., 1.], v_knots: vec![0., 0., 1., 1.], points: vec![vec![p[0], p[3]], vec![p[1], p[2]]] },
         forward: true,
     };
-    Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] }
+    Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] }
 }
 
 fn pieces(d: &Drawing) -> impl Iterator<Item = &Piece> {
@@ -827,9 +831,11 @@ fn a_flat_spline_patch_is_a_plane_that_hides_for_certain() {
         surface: Surface::Spline { u_knots: vec![0., 0., 1., 1.], v_knots: vec![0., 0., 1., 1.], points: vec![vec![p[0], p[3]], vec![p[1], p[2]]] },
         forward: true,
     };
-    let patch =
-        prepare(&Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] }, &Options::default())
-            .unwrap();
+    let patch = prepare(
+        &Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] },
+        &Options::default(),
+    )
+    .unwrap();
     assert!(patch.report.freeform_faces.is_empty());
     let bar = prepare(&cuboid([-2., -1., -3.], [2., 1., -1.]), &Options::default()).unwrap();
     let view = View::new(Vec3::new(0.1, 0.05, -1.), Vec3::new(0., 1., 0.)).unwrap();
@@ -870,7 +876,7 @@ fn a_circle_racing_through_its_first_turn_is_drawn_whole_edge_on() {
     let homogeneous: Vec<[f64; 4]> = num.iter().zip(&w).map(|((re, im), w)| [10. * re, 10. * im, 0., *w]).collect();
     let start = [10., 0., 0.];
     let disc = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![start],
             edges: vec![Edge { vertices: [0, 0], curve: Curve::RationalSpline { knots: [[0.; 7], [1.; 7]].concat(), homogeneous } }],
@@ -909,7 +915,7 @@ fn an_arc_racing_through_almost_a_full_turn_is_drawn_whole() {
     let sweep_want = 4. * phi;
     let end = [10. * sweep_want.cos(), 10. * sweep_want.sin(), 0.];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
             edges: vec![
@@ -956,7 +962,7 @@ fn a_short_piece_of_a_fast_arc_turns_its_own_way() {
     let homogeneous: Vec<[f64; 4]> = first.iter().chain(second.iter().skip(1)).copied().collect();
     let end = [10. * 5.8f64.cos(), 10. * 5.8f64.sin(), 0.];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
             edges: vec![
@@ -1006,7 +1012,7 @@ fn an_arc_whose_whole_domain_is_8_roundings_wide_is_not_guessed() {
     let k = 0.25 + 2f64.powi(-51);
     let end = [10. * 3.75f64.cos(), 10. * 3.75f64.sin(), 0.];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
             edges: vec![
@@ -1049,7 +1055,7 @@ fn a_piece_in_a_knot_span_of_1e_11_turns_its_own_way() {
     let k = 0.25 + 1e-11;
     let end = [10. * 4.5f64.cos(), 10. * 4.5f64.sin(), 0.];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
             edges: vec![
@@ -1101,7 +1107,7 @@ fn a_curve_that_swerves_where_its_weight_is_near_zero_is_not_taken_for_a_circle(
         })
         .collect();
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[0., -10., 0.], [0., 10., 0.]],
             edges: vec![
@@ -1135,9 +1141,11 @@ fn an_edge_leaving_a_left_out_faces_box_in_front_stays_visible() {
         surface: Surface::Plane { origin: c[0], u_axis: [10., 0., 6.], v_axis: [0., 0.2, 0.] },
         forward: true,
     };
-    let strip =
-        prepare(&Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: c.to_vec(), edges, faces: vec![face] }] }, &Options::default())
-            .unwrap();
+    let strip = prepare(
+        &Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: c.to_vec(), edges, faces: vec![face] }] },
+        &Options::default(),
+    )
+    .unwrap();
     let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
     let d = hidden_lines(&[patch, strip], &[identity(0, [0.; 3]), identity(1, [0.; 3])], &view, &Options::default(), &never).unwrap();
     let states: Vec<([f64; 2], Visibility)> = edge_line(&d, 1, 0).pieces.iter().map(|p| (p.t, p.visibility)).collect();
@@ -1150,7 +1158,7 @@ fn a_nearly_straight_cubic_is_not_taken_for_a_huge_circle() {
     // about 1e7, which is 2e-10 of that radius but 2e-6 of the curve. Drawn as chords.
     let pts = [[0., 0., 0.], [1000. / 3., 0.071 / 3., 0.], [2000. / 3., 0.071 * 2. / 3. - 0.113 / 3., 0.], [1000., 0., 0.]];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[0.; 3], [1000., 0., 0.]],
             edges: vec![
@@ -1185,15 +1193,17 @@ fn an_edge_dipping_behind_a_left_out_face_between_samples_is_uncertain() {
         surface: Surface::Spline { u_knots: vec![0., 0., 1., 1.], v_knots: vec![0., 0., 1., 1.], points: vec![vec![p[0], p[3]], vec![p[1], p[2]]] },
         forward: true,
     };
-    let patch =
-        prepare(&Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] }, &Options::default())
-            .unwrap();
+    let patch = prepare(
+        &Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] },
+        &Options::default(),
+    )
+    .unwrap();
     assert_eq!(patch.report.freeform_faces, vec![0]);
     // z = 20 t^2 - 0.625 t + 0.0035625 as a quadratic Bezier.
     let z = [0.0035625, 0.0035625 - 0.3125, 20. - 0.625 + 0.0035625];
     let c = [[0., 0.5, z[0]], [5., 0.5, z[1]], [10., 0.5, z[2]]];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![c[0], c[2]],
             edges: vec![
@@ -1228,7 +1238,7 @@ fn an_arc_that_turns_back_is_drawn_as_chords() {
     let th = 2. * u3[3].atan();
     let end = [10. * th.cos(), 10. * th.sin(), 0.];
     let shape = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
             edges: vec![
@@ -1257,7 +1267,7 @@ fn a_cone_tip_trimmed_near_the_apex_is_only_its_tip() {
     // tip below it: a box edge at x = 40, z = 50 to 150, seen along +X, is in front of nothing.
     let tau = std::f64::consts::TAU;
     let tip = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[0.25, 0., 1.]],
             edges: vec![circle([0., 0., 1.], 0.25, 0)],
@@ -1294,7 +1304,7 @@ fn an_edge_behind_a_left_out_freeform_face_is_uncertain_there() {
     let tau = std::f64::consts::TAU;
     let profile = Curve::Spline { knots: vec![0., 0., 0., 1., 1., 1.], points: vec![[12.5, 0., 0.], [13., 0., 5.], [12.5, 0., 10.]] };
     let tube = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[12.5, 0., 0.], [12.5, 0., 10.]],
             edges: vec![circle([10., 0., 0.], 2.5, 0), circle([10., 0., 10.], 2.5, 1), Edge { vertices: [0, 1], curve: profile.clone() }],
@@ -1336,9 +1346,11 @@ fn a_sloping_edge_that_runs_behind_a_left_out_face_is_uncertain() {
         surface: Surface::Plane { origin: c[0], u_axis: [8., 0., -1.6], v_axis: [0., 0.2, 0.] },
         forward: true,
     };
-    let strip =
-        prepare(&Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: c.to_vec(), edges, faces: vec![face] }] }, &Options::default())
-            .unwrap();
+    let strip = prepare(
+        &Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: c.to_vec(), edges, faces: vec![face] }] },
+        &Options::default(),
+    )
+    .unwrap();
     let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
     let d = hidden_lines(&[patch, strip], &[identity(0, [0.; 3]), identity(1, [0.; 3])], &view, &Options::default(), &never).unwrap();
     for p in &edge_line(&d, 1, 0).pieces {
@@ -1370,8 +1382,9 @@ fn a_torus_stored_as_a_rational_spline_patch_is_recognised() {
         })
         .collect();
     let at = |t: f64, f: f64| [(big + small * f.cos()) * t.cos(), (big + small * f.cos()) * t.sin(), small * f.sin()];
-    let parallel = |f: f64| crate::brep::Frame { origin: [0., 0., small * f.sin()], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
-    let meridian = |t: f64| crate::brep::Frame { origin: [big * t.cos(), big * t.sin(), 0.], x_axis: [t.cos(), t.sin(), 0.], y_axis: [0., 0., 1.] };
+    let parallel = |f: f64| solidcore_record::brep::Frame { origin: [0., 0., small * f.sin()], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    let meridian =
+        |t: f64| solidcore_record::brep::Frame { origin: [big * t.cos(), big * t.sin(), 0.], x_axis: [t.cos(), t.sin(), 0.], y_axis: [0., 0., 1.] };
     let edges = vec![
         Edge { vertices: [0, 1], curve: Curve::CircleArc { frame: parallel(-q), radius: big + small * q.cos(), angle: [-q, q] } },
         Edge { vertices: [1, 2], curve: Curve::CircleArc { frame: meridian(q), radius: small, angle: [-q, q] } },
@@ -1384,7 +1397,7 @@ fn a_torus_stored_as_a_rational_spline_patch_is_recognised() {
         forward: true,
     };
     let patch = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell { vertices: vec![at(-q, -q), at(q, -q), at(q, q), at(-q, q)], edges, faces: vec![face] }],
     };
     let def = prepare(&patch, &Options::default()).unwrap();
@@ -1436,8 +1449,9 @@ fn a_torus_patch_with_a_bump_in_a_narrow_knot_span_is_not_taken_for_a_torus() {
         })
         .collect();
     let at = |t: f64, f: f64| [(big + small * f.cos()) * t.cos(), (big + small * f.cos()) * t.sin(), small * f.sin()];
-    let parallel = |f: f64| crate::brep::Frame { origin: [0., 0., small * f.sin()], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
-    let meridian = |t: f64| crate::brep::Frame { origin: [big * t.cos(), big * t.sin(), 0.], x_axis: [t.cos(), t.sin(), 0.], y_axis: [0., 0., 1.] };
+    let parallel = |f: f64| solidcore_record::brep::Frame { origin: [0., 0., small * f.sin()], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    let meridian =
+        |t: f64| solidcore_record::brep::Frame { origin: [big * t.cos(), big * t.sin(), 0.], x_axis: [t.cos(), t.sin(), 0.], y_axis: [0., 0., 1.] };
     let edges = vec![
         Edge { vertices: [0, 1], curve: Curve::CircleArc { frame: parallel(-q), radius: big + small * q.cos(), angle: [-q, q] } },
         Edge { vertices: [1, 2], curve: Curve::CircleArc { frame: meridian(q), radius: small, angle: [-q, q] } },
@@ -1454,7 +1468,7 @@ fn a_torus_patch_with_a_bump_in_a_narrow_knot_span_is_not_taken_for_a_torus() {
         forward: true,
     };
     let patch = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell { vertices: vec![at(-q, -q), at(q, -q), at(q, q), at(-q, q)], edges, faces: vec![face] }],
     };
     let def = prepare(&patch, &Options::default()).unwrap();
@@ -1470,9 +1484,9 @@ fn a_big_circle_passing_behind_a_thin_left_out_face_is_uncertain_there() {
     let tau = std::f64::consts::TAU;
     let turn = 8.5 * std::f64::consts::PI / 256.;
     let (c, sn) = (turn.cos(), turn.sin());
-    let frame = crate::brep::Frame { origin: [0.; 3], x_axis: [-c, -sn, 0.], y_axis: [sn, -c, 0.] };
+    let frame = solidcore_record::brep::Frame { origin: [0.; 3], x_axis: [-c, -sn, 0.], y_axis: [sn, -c, 0.] };
     let disc = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[-5000. * c, -5000. * sn, 0.]],
             edges: vec![Edge { vertices: [0, 0], curve: Curve::CircleArc { frame, radius: 5000., angle: [0., tau] } }],
@@ -1490,13 +1504,13 @@ fn a_big_circle_passing_behind_a_thin_left_out_face_is_uncertain_there() {
     let end = |y: f64, v: u32| Edge {
         vertices: [v, v],
         curve: Curve::CircleArc {
-            frame: crate::brep::Frame { origin: [5000., y, 1.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
+            frame: solidcore_record::brep::Frame { origin: [5000., y, 1.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
             radius: 0.01,
             angle: [0., tau],
         },
     };
     let tube = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[5000.01, -100., 1.], [5000.01, 100., 1.]],
             edges: vec![end(-100., 0), end(100., 1), Edge { vertices: [0, 1], curve: profile.clone() }],
@@ -1550,11 +1564,11 @@ fn an_arc_folding_back_under_a_left_out_face_seen_edge_on_is_uncertain_there() {
 fn folding_arc_under_a_patch(offset: f64) {
     let step = std::f64::consts::PI / 256.;
     let ta = -step / 4. + offset;
-    let frame = crate::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] };
+    let frame = solidcore_record::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] };
     let at = |t: f64| [10000. * t.cos(), 0., 10000. * t.sin()];
     let (start, end) = (at(ta), at(ta + std::f64::consts::PI / 8.));
     let arc = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![start, end],
             edges: vec![
@@ -1577,7 +1591,7 @@ fn folding_arc_under_a_patch(offset: f64) {
         surface: Surface::Spline { u_knots: vec![0., 0., 1., 1.], v_knots: vec![0., 0., 1., 1.], points: vec![vec![p[0], p[3]], vec![p[1], p[2]]] },
         forward: true,
     };
-    let patch = Brep { version: crate::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] };
+    let patch = Brep { version: solidcore_record::brep::VERSION, shells: vec![Shell { vertices: p.to_vec(), edges, faces: vec![face] }] };
     let defs = [prepare(&patch, &Options::default()).unwrap(), prepare(&arc, &Options::default()).unwrap()];
     assert_eq!(defs[0].report.freeform_faces, vec![0]);
     let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
@@ -1613,7 +1627,7 @@ fn a_left_out_face_curling_over_its_own_edge_makes_it_uncertain() {
         forward: true,
     };
     let sheet = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell { vertices: vec![at(a, 0.), at(c, 0.), at(c, 8000.), at(a, 8000.)], edges, faces: vec![face] }],
     };
     let def = prepare(&sheet, &Options::default()).unwrap();
@@ -1684,7 +1698,7 @@ fn a_sphere_with_a_spline_band_between_record_caps_is_one_sphere() {
         forward: true,
     };
     let body = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[rho, 0., -z], [rho, 0., z]],
             edges: vec![circle([0., 0., -z], rho, 0), circle([0., 0., z], rho, 1)],
@@ -1719,7 +1733,7 @@ fn chords_of_a_racing_circle_stay_within_their_stated_deviation() {
     let w = bernstein_product(&bernstein_product(&q, &q), &q);
     let homogeneous: Vec<[f64; 4]> = num.iter().zip(&w).map(|((re, im), w)| [*re, *im, 0., *w]).collect();
     let disc = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[1., 0., 0.]],
             edges: vec![Edge { vertices: [0, 0], curve: Curve::RationalSpline { knots: [[0.; 7], [1.; 7]].concat(), homogeneous } }],
@@ -1761,7 +1775,7 @@ fn a_big_arc_is_cut_where_it_meets_a_left_out_faces_box() {
     let a0 = -std::f64::consts::PI / 8.;
     let (start, end) = ([10000. * a0.cos(), 10000. * a0.sin(), 0.], [10000., 0., 0.]);
     let arc = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![start, end],
             edges: vec![
@@ -1783,13 +1797,13 @@ fn a_big_arc_is_cut_where_it_meets_a_left_out_faces_box() {
     let end_circle = |y: f64, v: u32| Edge {
         vertices: [v, v],
         curve: Curve::CircleArc {
-            frame: crate::brep::Frame { origin: [x, y, 1.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
+            frame: solidcore_record::brep::Frame { origin: [x, y, 1.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
             radius: 2.5,
             angle: [0., tau],
         },
     };
     let tube = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[x + 2.5, -4000., 1.], [x + 2.5, 3000., 1.]],
             edges: vec![end_circle(-4000., 0), end_circle(3000., 1), Edge { vertices: [0, 1], curve: profile.clone() }],
@@ -1832,7 +1846,7 @@ fn narrow_torus_strips_keep_their_outline() {
     };
     let phis: [f64; 3] = [0.3002, 0.3005, 0.3008];
     let body = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: phis.iter().map(|p| [20. + 10. * p.cos(), 0., 10. * p.sin()]).collect(),
             edges: vec![ring(phis[0], 0), ring(phis[1], 1), ring(phis[2], 2)],
@@ -1973,7 +1987,7 @@ fn disc(r: f64, pts: [[f64; 2]; 9], knots: Vec<f64>) -> Brep {
     let s = std::f64::consts::FRAC_1_SQRT_2;
     let homogeneous = pts.iter().enumerate().map(|(i, p)| if i % 2 == 1 { [p[0] * s, p[1] * s, 0., s] } else { [p[0], p[1], 0., 1.] }).collect();
     Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![[r, 0., 0.]],
             edges: vec![Edge { vertices: [0, 0], curve: Curve::RationalSpline { knots, homogeneous } }],
@@ -2065,7 +2079,7 @@ fn nearly_coaxial_cones_far_out_keep_their_own_silhouettes() {
     // 1e7 mm out, and 1 km ones 0.4 mm apart 1e9 mm out.
     for (x, r, gap) in [(1e7, 5., 0.005), (1e9, 1e6, 0.4)] {
         let shells = vec![frustum([x, 0., 0.], r, 0.25, [0., 10.]), frustum([x + gap, 0., 0.], r, 0.25, [20., 30.])];
-        check_two_cone_outlines(&Brep { version: crate::brep::VERSION, shells });
+        check_two_cone_outlines(&Brep { version: solidcore_record::brep::VERSION, shells });
     }
 }
 
@@ -2098,7 +2112,7 @@ fn nearly_coincident_cone_sectors_both_draw_their_outline() {
         cone_sector([x, 0., 0.], 1000., 0.25, [0., 1000.], [0., 0.02]),
         cone_sector([x + 3e-6, 0., 0.], 1000., 0.25, [2000., 3000.], [0., 0.02]),
     ];
-    let def = prepare(&Brep { version: crate::brep::VERSION, shells }, &Options::default()).unwrap();
+    let def = prepare(&Brep { version: solidcore_record::brep::VERSION, shells }, &Options::default()).unwrap();
     let view = View::new(Vec3::new(-(0.01f64.sin()), 0.01f64.cos(), 0.), Vec3::new(0., 0., 1.)).unwrap();
     let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
     for (z0, z1) in [(0., 1000.), (2000., 3000.)] {
@@ -2141,7 +2155,7 @@ fn spherical_caps_through_one_circle_keep_their_own_outlines() {
         cap([0.; 3], r, lat(0.), edge(), [ring, 0., z]),
         cap([0., 0., dz], (ring * ring + (z - dz).powi(2)).sqrt(), lat(dz), edge(), [ring, 0., z]),
     ];
-    let def = prepare(&Brep { version: crate::brep::VERSION, shells }, &Options::default()).unwrap();
+    let def = prepare(&Brep { version: solidcore_record::brep::VERSION, shells }, &Options::default()).unwrap();
     let view = View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap();
     let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
     // Above the ring the outline is a half circle of about pi * 1000 * 0.41 mm on each side.
@@ -2161,7 +2175,7 @@ fn spherical_caps_through_one_circle_keep_their_own_outlines() {
 fn tilted_cone(tilt: f64, h: [f64; 2]) -> Shell {
     let (x, y, z) = (Vec3::new(tilt.cos(), 0., -tilt.sin()), Vec3::new(0., 1., 0.), Vec3::new(tilt.sin(), 0., tilt.cos()));
     let arr = |v: Vec3| [v.x, v.y, v.z];
-    let frame = |o: Vec3| crate::brep::Frame { origin: arr(o), x_axis: arr(x), y_axis: arr(y) };
+    let frame = |o: Vec3| solidcore_record::brep::Frame { origin: arr(o), x_axis: arr(x), y_axis: arr(y) };
     let at = |hh: f64| x * (0.25 * hh) + z * hh;
     let ring = |hh: f64, v: u32| Edge {
         vertices: [v, v],
@@ -2187,7 +2201,7 @@ fn cones_with_slightly_turned_axes_keep_their_own_outlines() {
     // One apex, axes 3e-7 rad apart, heights 1000 to 3000 and 6000 to 8000: each frustum draws
     // both rulings of its own outline.
     let shells = vec![tilted_cone(0., [1000., 3000.]), tilted_cone(3e-7, [6000., 8000.])];
-    let def = prepare(&Brep { version: crate::brep::VERSION, shells }, &Options::default()).unwrap();
+    let def = prepare(&Brep { version: solidcore_record::brep::VERSION, shells }, &Options::default()).unwrap();
     let view = View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap();
     let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
     for (z0, z1) in [(1000., 3000.), (6000., 8000.)] {
@@ -2239,7 +2253,7 @@ fn a_high_degree_spline_through_points_of_a_circle_is_not_taken_for_one() {
     let knots: Vec<f64> = std::iter::repeat_n(0., n + 1).chain(std::iter::repeat_n(1., n + 1)).collect();
     let start = points[0];
     let disc = Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![start],
             edges: vec![Edge { vertices: [0, 0], curve: Curve::Spline { knots, points } }],
@@ -2613,7 +2627,7 @@ fn a_placement_that_is_not_rigid_is_refused() {
 fn a_revolved_circle_is_a_torus_drawn_at_both_equators() {
     // The halves of `torus` stored as revolutions of half circles.
     let half = |a: [f64; 2]| Curve::CircleArc {
-        frame: crate::brep::Frame { origin: [20., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
+        frame: solidcore_record::brep::Frame { origin: [20., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
         radius: 5.,
         angle: a,
     };
@@ -2631,15 +2645,15 @@ fn a_revolved_circle_is_a_torus_drawn_at_both_equators() {
 }
 
 /// A record's edge on `curve` over `interval`, its form `nurbs`.
-fn bounded_edge(curve: brep::Curve, nurbs: Option<brep::Curve>, interval: [f64; 2]) -> brep::Edge {
-    brep::Edge { curve, nurbs, interval, vertices: [0, 1], tolerance: 1e-6, uses: Vec::new() }
+fn bounded_edge(curve: rec::Curve, nurbs: Option<rec::Curve>, interval: [f64; 2]) -> rec::Edge {
+    rec::Edge { curve, nurbs, interval, vertices: [0, 1], tolerance: 1e-6, uses: Vec::new() }
 }
 
 #[test]
 fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     let close = |a: Vec3, b: [f64; 3]| a.dist(Vec3::new(b[0], b[1], b[2])) < 1e-12;
     // A line through two points, from t = 2 to 3, without and with a form.
-    let line = brep::Curve::Line { start: [0.; 3], end: [1., 0., 0.] };
+    let line = rec::Curve::Line { start: [0.; 3], end: [1., 0., 0.] };
     let (c, acc) = C3::of_edge(&bounded_edge(line.clone(), None, [2., 3.])).unwrap();
     assert_eq!(acc, CurveAccuracy::Analytic);
     assert!(close(c.at(0.), [2., 0., 0.]) && close(c.at(1.), [3., 0., 0.]), "{c:?}");
@@ -2649,7 +2663,7 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     assert!(close(c.at(0.), [2., 0., 0.]) && close(c.at(1.), [3., 0., 0.]), "{c:?}");
     // An ellipse's angles come back from its form's parameter.
     let frame = frame_at([1., 2., 3.]);
-    let ellipse = brep::Curve::Ellipse { frame, radii: [4., 2.] };
+    let ellipse = rec::Curve::Ellipse { frame, radii: [4., 2.] };
     let (form, interval) = brep::form::curve(&ellipse, [0.5, 2.5]).unwrap();
     let (c, _) = C3::of_edge(&bounded_edge(ellipse, Some(form), interval)).unwrap();
     let [a0, a1] = c.domain();
@@ -2657,7 +2671,7 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     assert!(close(c.at(a0), [1. + 4. * 0.5f64.cos(), 2. + 2. * 0.5f64.sin(), 3.]), "{c:?}");
     // A polyline between its second and fourth points' middles.
     let points = vec![[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]];
-    let (c, _) = C3::of_edge(&bounded_edge(brep::Curve::Polyline { points }, None, [0.5, 2.5])).unwrap();
+    let (c, _) = C3::of_edge(&bounded_edge(rec::Curve::Polyline { points }, None, [0.5, 2.5])).unwrap();
     assert_eq!(c.domain(), [0., 3.]);
     assert!(
         close(c.at(0.), [0.5, 0., 0.]) && close(c.at(1.), [1., 0., 0.]) && close(c.at(2.), [1., 1., 0.]) && close(c.at(3.), [1., 1., 0.5]),
@@ -2666,7 +2680,7 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     // A cubic spline of two spans, cut across its inner knot: the same points, on its own domain
     // and breaks, its hull and Bezier pieces of the part alone.
     let (knots, points) = (vec![0., 0., 0., 0., 0.5, 1., 1., 1., 1.], vec![[0., 0., 0.], [1., 3., 0.], [2., -3., 1.], [3., 3., 0.], [4., 0., 2.]]);
-    let spline = brep::Curve::Spline { knots, points };
+    let spline = rec::Curve::Spline { knots, points };
     let (whole, _) = C3::of_edge(&bounded_edge(spline.clone(), None, [0., 1.])).unwrap();
     let (part, _) = C3::of_edge(&bounded_edge(spline.clone(), None, [0.25, 0.75])).unwrap();
     assert_eq!(part.domain(), [0.25, 0.75]);
@@ -2684,13 +2698,10 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     assert!(part.at(0.15).dist(whole.at(0.15)) < 1e-12);
     // A traced intersection with a spline leader on its surfaces is that spline, good to its
     // tolerance; with a polyline leader there is no curve to follow.
-    let plane = Box::new(brep::Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
-    let traced = |leader: brep::Curve| brep::Curve::SurfaceIntersection {
-        surfaces: [plane.clone(), plane.clone()],
-        leader: Box::new(leader),
-        tolerance: 1e-4,
-    };
-    let flat = brep::Curve::Spline {
+    let plane = Box::new(rec::Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
+    let traced =
+        |leader: rec::Curve| rec::Curve::SurfaceIntersection { surfaces: [plane.clone(), plane.clone()], leader: Box::new(leader), tolerance: 1e-4 };
+    let flat = rec::Curve::Spline {
         knots: vec![0., 0., 0., 0., 0.5, 1., 1., 1., 1.],
         points: vec![[0., 0., 0.], [1., 3., 0.], [2., -3., 0.], [3., 3., 0.], [4., 0., 0.]],
     };
@@ -2700,7 +2711,7 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     assert!(c.at(0.5).dist(whole.at(0.5)) < 1e-12);
     // That spline leaves the plane: it is not their intersection.
     assert!(matches!(C3::of_edge(&bounded_edge(traced(spline), None, [0.25, 0.75])), Err(HlrError::Unsupported("surface intersection curve"))));
-    let leader = brep::Curve::Polyline { points: vec![[0.; 3], [1., 0., 0.]] };
+    let leader = rec::Curve::Polyline { points: vec![[0.; 3], [1., 0., 0.]] };
     assert!(matches!(C3::of_edge(&bounded_edge(traced(leader), None, [0., 1.])), Err(HlrError::Unsupported("surface intersection curve"))));
 }
 
@@ -2709,9 +2720,9 @@ fn a_faces_chart_is_where_its_form_lies_on_its_label() {
     // A torus face from a tube start of 0.3: the chart's second coordinate is the tube angle, a
     // third of the way up the tube from there, whichever way round the frame's angle counts.
     let frame = frame_at([1., 0., 0.]);
-    let label = brep::Surface::Torus { frame, major_radius: 20., minor_radius: 5., tube_start: 0.3 };
+    let label = rec::Surface::Torus { frame, major_radius: 20., minor_radius: 5., tube_start: 0.3 };
     let (form, domain) = brep::form::surface(&label, [[-0.5, 1.], [0.2, 2.]]).unwrap();
-    let face = brep::Face { surface: label, nurbs: Some(form.clone()), domain, loops: Vec::new() };
+    let face = rec::Face { surface: label, nurbs: Some(form.clone()), domain, loops: Vec::new() };
     let s = S3::of_face(&face).unwrap();
     let [angle, tube] = s.domain();
     assert!((angle[0] + 0.5).abs() < 1e-12 && (angle[1] - 1.).abs() < 1e-12, "{angle:?}");
@@ -2721,9 +2732,9 @@ fn a_faces_chart_is_where_its_form_lies_on_its_label() {
     let uv = s.inverse(p, None).unwrap();
     assert!(s.point(uv).dist(p) < 1e-9, "{uv:?}");
     // A whole turn comes to the periodic chart.
-    let label = brep::Surface::Cylinder { frame: frame_at([0.; 3]), radius: 2. };
+    let label = rec::Surface::Cylinder { frame: frame_at([0.; 3]), radius: 2. };
     let (form, domain) = brep::form::surface(&label, [[1., 1. + std::f64::consts::TAU], [-1., 3.]]).unwrap();
-    let s = S3::of_face(&brep::Face { surface: label, nurbs: Some(form), domain, loops: Vec::new() }).unwrap();
+    let s = S3::of_face(&rec::Face { surface: label, nurbs: Some(form), domain, loops: Vec::new() }).unwrap();
     assert_eq!(s.periods()[0], Some(std::f64::consts::TAU));
     assert!(s.point([0., 0.]).dist(Vec3::new(2., 0., -1.)) < 1e-12);
     assert!(s.point([0., 1.]).dist(Vec3::new(2., 0., 3.)) < 1e-12);
@@ -2737,35 +2748,35 @@ fn a_form_turned_against_its_label_keeps_the_face_on_the_loops_side() {
     // same loop on the unturned form is the south hemisphere's.
     let tau = std::f64::consts::TAU;
     let half = std::f64::consts::FRAC_PI_2;
-    let label = brep::Surface::Sphere { frame: frame_at([0.; 3]), radius: 10. };
+    let label = rec::Surface::Sphere { frame: frame_at([0.; 3]), radius: 10. };
     let chart = S3::bounded(&label, [[0., tau], [-half, half]]).unwrap();
-    let circle = brep::Curve::Circle { frame: frame_at([0.; 3]), radius: 10. };
+    let circle = rec::Curve::Circle { frame: frame_at([0.; 3]), radius: 10. };
     let (edge_form, interval) = brep::form::curve(&circle, [0., tau]).unwrap();
     let edge = bounded_edge(circle, Some(edge_form), interval);
     let curves = vec![C3::of_edge(&edge).unwrap().0];
-    let backward = brep::Loop::Edges {
-        edges: vec![brep::OrientedEdge {
+    let backward = rec::Loop::Edges {
+        edges: vec![rec::OrientedEdge {
             edge: 0,
             forward: false,
-            pcurve: brep::Curve2::Spline { knots: vec![interval[0], interval[0], interval[1], interval[1]], points: vec![[0., 0.], [1., 0.]] },
+            pcurve: rec::Curve2::Spline { knots: vec![interval[0], interval[0], interval[1], interval[1]], points: vec![[0., 0.], [1., 0.]] },
         }],
     };
     let (form, domain) = brep::form::surface(&label, [[0., tau], [0., half]]).unwrap();
-    let brep::Surface::RationalSpline { u_knots, v_knots, homogeneous } = form.clone() else { panic!("a sphere's form is rational") };
+    let rec::Surface::RationalSpline { u_knots, v_knots, homogeneous } = form.clone() else { panic!("a sphere's form is rational") };
     let columns = homogeneous[0].len();
     let swapped = (0..columns).map(|j| homogeneous.iter().map(|row| row[j]).collect()).collect();
-    let turned = brep::Face {
+    let turned = rec::Face {
         surface: label.clone(),
-        nurbs: Some(brep::Surface::RationalSpline { u_knots: v_knots, v_knots: u_knots, homogeneous: swapped }),
+        nurbs: Some(rec::Surface::RationalSpline { u_knots: v_knots, v_knots: u_knots, homogeneous: swapped }),
         domain: [domain[1], domain[0]],
         loops: vec![backward.clone()],
     };
-    assert_eq!(turned.form_turns(), Some(true));
+    assert_eq!(brep::label::form_turns(&turned), Some(true));
     let north = trim::build(&turned, &curves, &chart, 64);
     assert_eq!((north.contains([1., 1.]), north.contains([1., -1.])), (Some(true), Some(false)));
     let (form, domain) = brep::form::surface(&label, [[0., tau], [-half, 0.]]).unwrap();
-    let plain = brep::Face { surface: label, nurbs: Some(form), domain, loops: vec![backward] };
-    assert_eq!(plain.form_turns(), Some(false));
+    let plain = rec::Face { surface: label, nurbs: Some(form), domain, loops: vec![backward] };
+    assert_eq!(brep::label::form_turns(&plain), Some(false));
     let south = trim::build(&plain, &curves, &chart, 64);
     assert_eq!((south.contains([1., 1.]), south.contains([1., -1.])), (Some(false), Some(true)));
 }

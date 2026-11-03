@@ -55,7 +55,7 @@ fn both_modes_keep_their_geometry_and_fit_clear_of_covered_rects() {
             assert!(!layout.drawable.intersect(covered).is_positive(), "{layout:?} {covered:?}");
         }
         let projection = crate::viewport::projection(&h.app, viewport);
-        for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(40.0, 30.0, 20.0)] {
+        for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(40.0, 30.0, 20.0)] {
             assert!(layout.drawable.contains(projection.to_screen(point).unwrap()));
         }
         h.app.start("solid.extrude");
@@ -108,7 +108,7 @@ fn floating_sketch_palette_and_compass_share_measured_clearance() {
             assert!(layout.viewport.expand(1.0).contains_rect(palette), "{palette:?} {layout:?}");
             assert!(palette.contains(crate::scenario::handle_at("sketch_palette:look_at").unwrap()));
             let proj = crate::viewport::projection(&h.app, layout.viewport);
-            for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(20.0, 0.0, 0.0)] {
+            for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(20.0, 0.0, 0.0)] {
                 assert!(layout.drawable.contains(proj.to_screen(point).unwrap()), "{layout:?}");
             }
             if width > 1000.0 {

@@ -35,6 +35,7 @@ mod bench_assistant;
 mod crashes;
 mod fuzz;
 mod kernel_cases;
+mod kernel_cases_export;
 mod logger;
 mod oracle;
 mod preview;
@@ -85,7 +86,7 @@ const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
 const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
 /// `kernel-cases`'s lines in the usage.
-const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [--json] [--dumps=DIR] [--validation=each_step|each_feature|off]\n      (the kernel regression rig, tests/kernel-cases, on SMLib; --dumps: each case's\n       failing SMLib calls leave their inputs for replay in DIR/<area>-<case>; --validation: when SMLib's\n       full check runs (diagnostics.validation), default each_feature)\n";
+const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [--json] [--dumps=DIR] [--export=DIR] [--validation=each_step|each_feature|off]\n      (the kernel regression rig, tests/kernel-cases, on SMLib; --dumps: each case's\n       failing SMLib calls leave their inputs for replay in DIR/<area>-<case>; --export: each case's\n       kernel operations, input records and expected values for solidcore's rig, in DIR/<area>/<case>.json; --validation: when SMLib's\n       full check runs (diagnostics.validation), default each_feature)\n";
 /// `fuzz`'s lines in the usage.
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";

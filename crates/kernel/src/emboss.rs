@@ -8,9 +8,11 @@ use crate::history::Change;
 use crate::numbered::NumberedRegion;
 use crate::offset::{Surf, face_edges, surf_of};
 use crate::{KernelError, Result, guard};
+use solidcore_record::brep::{Brep, Curve, Frame, Loop, Surface};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{Brep, Curve, Frame, Loop, Surface, form};
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::brep::form;
+use solidcraft_geom::prelude::*;
 
 fn fail(s: &str) -> KernelError {
     KernelError::Invalid(format!("cylinder emboss: {s}"))
@@ -44,7 +46,7 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
         // whole turn, from the seam, for a wall in one piece).
         let c = CurveEval::new(&e.curve).ok()?;
-        let [t0, t1] = e.curve_interval()?;
+        let [t0, t1] = solidcraft_geom::brep::label::edge_curve_interval(e)?;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
         let half = 0.5 * (t1 - t0);
         return Some((am - half, am + half));
@@ -607,7 +609,7 @@ fn profile_interval_overlaps(plane: &Plane, regions: &[Region2], o: Vec3, axis: 
                         add(p)?;
                     }
                 }
-                Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
+                Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) => {
                     for p in p.iter().take(usize::from(n) + 1) {
                         add(*p)?;
                     }

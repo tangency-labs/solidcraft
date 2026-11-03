@@ -28,10 +28,11 @@
 
 use egui::Pos2;
 use serde_json::{Map, Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{PatternAlignment, VariableUnit};
 
 use crate::SolveApp;

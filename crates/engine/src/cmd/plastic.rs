@@ -1,12 +1,13 @@
 //! Plastic (enclosure) features: Boss, Lip / Groove, Snap Fit and Rest, and plastic rules.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::BodyName;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::plastic::PlasticRule;
 use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
@@ -272,7 +273,8 @@ fn snap_fit(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
     use std::f64::consts::PI;
 
     use serde_json::{Value, json};
@@ -348,9 +350,9 @@ mod tests {
                 for groove in [false, true] {
                     let mut s = Session::default();
                     let plane = if tilted {
-                        solidcraft_geom::Plane::new(Vec3::new(7., -3., 5.), Vec3::new(1., -1., 0.), Vec3::new(1., 1., -2.)).unwrap()
+                        solidcore_record::Plane::new(Vec3::new(7., -3., 5.), Vec3::new(1., -1., 0.), Vec3::new(1., 1., -2.)).unwrap()
                     } else {
-                        solidcraft_geom::Plane::XY
+                        solidcore_record::Plane::XY
                     };
                     if obround {
                         run(&mut s, "sketch.create", json!({"plane": plane, "name": "Rim"}));

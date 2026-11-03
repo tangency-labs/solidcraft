@@ -37,3 +37,5 @@ registry and the keymap (`keymap.rs`).
 * The per-row "reset" and "clear" affordances are two icon buttons on the board; check `keymap.rs` for
   what today's keymap edit offers before building them.
 * The board's footer is the shared "Restore page defaults / Cancel / OK".
+
+The search field has a leading magnifier. Done, Export and Import follow it on the same row; Export and Import use tray-arrow icons. The toolbar wraps only when the available width cannot fit the controls.

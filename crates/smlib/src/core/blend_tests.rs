@@ -215,7 +215,7 @@ struct Measured {
     kinds: BTreeMap<String, usize>,
 }
 
-fn kinds(rec: &solidcraft_geom::brep::Brep) -> BTreeMap<String, usize> {
+fn kinds(rec: &solidcore_record::brep::Brep) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for f in &rec.faces {
         let v = serde_json::to_value(&f.surface).unwrap();
@@ -280,7 +280,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let v = volume(&body, 1e-8).unwrap_or_else(|e| panic!("{name}: volume: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            rec.validate().unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             Measured { volume: v, counts: n, kinds: kinds(&rec) }
         });
         judge(name, "solidcore", &c.expect, got)
@@ -557,7 +557,7 @@ fn a_setback_corner_left_open_returns_its_hole() {
     assert_eq!(hole.edges.len(), 12);
     let flat = to_arrays(&open).unwrap();
     let (rec, _) = native(&flat).unwrap();
-    rec.validate().unwrap();
+    solidcraft_geom::brep::check::validate(&rec).unwrap();
     let ends = &flat.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &crate::HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
@@ -592,7 +592,7 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
     for (at, alpha) in [(a, 0.75 * PI), (b, 0.5 * PI)] {
         let round = blend(&chamfered, Blend::Curvature, &[at], &[r], TOL, &[], &[], Corners::Filled).unwrap();
         let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
-        rec.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&rec).unwrap();
         let removed = v0 - volume(&round, 1e-8).unwrap();
         assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
     }
@@ -620,7 +620,7 @@ fn a_variable_round_is_the_union_of_its_balls() {
     let removed = |radii: &[f64], start: [f64; 3]| {
         let r = fillet_variable(&b, TOP_FRONT, TOL, start, 1, &[0.0, 0.0, 1.0, 1.0], radii).unwrap();
         let (rec, _) = native(&to_arrays(&r).unwrap()).unwrap();
-        rec.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&rec).unwrap();
         ABC - volume(&r, 1e-8).unwrap()
     };
     let constant = removed(&[2.0, 2.0], [0.0, 0.0, 10.0]);
@@ -848,7 +848,7 @@ fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
     let removed = volume(&plate, 1e-8).unwrap() - volume(&round, 1e-8).unwrap();
     assert!(rel(removed, want) < 1e-6, "removed {removed}, expected {want}");
     let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
-    rec.validate().unwrap();
+    solidcraft_geom::brep::check::validate(&rec).unwrap();
     assert!(super::is_manifold_solid(&round).unwrap());
     assert!(super::check(&round, crate::check::CheckLevel::All).unwrap().is_valid());
 }
@@ -857,7 +857,7 @@ fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
 /// with one blend on its top front edge (y = 0, z = 10), leaves the bottom and back as they were,
 /// trims the top, front and both sides, and makes the blend face.
 mod history {
-    use solidcraft_geom::brep::history::Change;
+    use solidcore_record::brep::history::Change;
 
     use crate::history::Raw;
     use crate::{Blend, Brep};

@@ -2,8 +2,9 @@
 
 use egui::Stroke;
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::cmd::{construction_line_choice, construction_line_mode, construction_line_solutions, construction_segment};
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::tools::Tool;

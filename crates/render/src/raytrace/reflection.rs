@@ -2,7 +2,8 @@
 use super::{Result, TraceError};
 use crate::anisotropic_surface::{AnisotropicSurface, VisualFrame};
 use crate::surface::{OpaqueSurface, unit_direction};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 #[cfg(test)]
 use std::f64::consts::{PI, TAU};
 #[derive(Clone, Copy, Debug)]
@@ -133,6 +134,7 @@ mod vndf_tests;
 #[cfg(test)]
 mod tests {
     use super::{OpaqueSurface, PI, Vec3, hash_variates as variates, mirror, rough_specular};
+    use solidcraft_geom::prelude::*;
     fn white() -> OpaqueSurface {
         OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap()
     }

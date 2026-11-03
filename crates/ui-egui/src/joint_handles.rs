@@ -1,5 +1,7 @@
 //! Explicit assembly Move: only the selected part's allowed joint axes are shown. Distances
 //! and angles are relative to the current drag, and each drag is one cancellable undo step.
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -10,7 +12,6 @@ use serde_json::json;
 use solidcraft_engine::{
     Sel,
     doc::{Document, apply_point, joints, mat_inverse, mat_mul},
-    geom::Vec3,
 };
 
 use crate::{
@@ -1001,6 +1002,33 @@ mod tests {
         h.app.start("occurrence.move");
         h.frames(2);
         assert!(visible(&h.app));
+    }
+
+    #[test]
+    fn tools_near_and_far_fields_edit_coarse_and_fine_without_ordering_them() {
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Tools"}));
+            for (query, key, text, expected) in
+                [("Near-axis step", "joint_rotation_coarse", "0.025", (0.025, 0.1)), ("Far-axis step", "joint_rotation_fine", "12.5", (0.025, 12.5))]
+            {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let target = format!("prefs:{key}");
+                crate::prefs::reveal_preference(&mut h, &target);
+                h.step(&json!({"click":{"handle":target},"double":true})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), expected, "{theme}: {query}");
+            }
+            h.call("ui.prefs", json!({"button":"apply"}));
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), (10.0, 0.1));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), (0.025, 12.5));
+        }
     }
 
     #[test]

@@ -1,13 +1,11 @@
 //! Straight extrusion feedback from existing display triangles, without a scratch design.
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_engine::{
-    Sel,
-    doc::Document,
-    geom::{Aabb3, Seg2, Vec3},
-};
+use solidcore_record::{Seg2, Vec3};
+use solidcraft_engine::{Sel, doc::Document, geom::Aabb3};
 
 use crate::{
     SolveApp,

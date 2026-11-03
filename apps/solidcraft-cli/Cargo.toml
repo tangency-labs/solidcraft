@@ -28,6 +28,7 @@ raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 profile = ["solidcraft-engine/profile"]
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }

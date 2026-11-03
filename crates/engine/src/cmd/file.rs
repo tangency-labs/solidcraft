@@ -181,7 +181,7 @@ fn exporter_up(import: &solidcraft_kernel::StepImport) -> Option<(&'static str, 
 
 /// A quarter turn about X through the origin: a file's Y up becomes Z up.
 fn quarter_turn_x() -> solidcraft_doc::Mat {
-    solidcraft_doc::rigid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::X, std::f64::consts::FRAC_PI_2)
+    solidcraft_doc::rigid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, std::f64::consts::FRAC_PI_2)
 }
 
 /// Add an Import feature for a STEP file to the session's design, in a new component named
@@ -1290,7 +1290,7 @@ mod tests {
             assert_eq!(s.doc.features.len(), 1);
             let id = s.active_sketch.unwrap();
             let sketch = s.doc.sketch(id).unwrap();
-            assert_eq!(s.model.state().sketch(id).unwrap().plane, solidcraft_geom::Plane::XY);
+            assert_eq!(s.model.state().sketch(id).unwrap().plane, solidcore_record::Plane::XY);
             assert_eq!(sketch.curves.len(), 3);
             assert_eq!(s.doc.name, "outline");
             assert!(s.path.is_none(), "Save must ask for a design path");

@@ -5,8 +5,9 @@
 //! Book eq. 4.8 and 4.20); a revolution turns its profile's derivatives by the rotation's own.
 
 use super::{EvalCurve, EvalSurface, affine, linear, onto_knots};
-use crate::Vec3;
 use crate::bspline::{MAX_SPLINE_DEGREE, basis_derivatives, binomial};
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// The highest total order of [`Partials`].
 pub const MAX_PARTIAL_ORDER: usize = 4;

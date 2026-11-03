@@ -163,6 +163,18 @@ the most complete description of the house style.
 
 The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
 `cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](docs/kernel-ladder.md)).
+
+**Kernel cases go to solidcore.** A case that checks a kernel operation (a boolean, a blend, a
+shell, a sweep, an import's geometry) is a new entry in solidcore's corpus,
+`crates/solidcore/tests/kernel_cases/<area>/` in
+[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore), with an answer in closed
+form or exact. Draft it as a rig case here, export it with
+`cargo xtask kernel-cases --area <area> --export DIR`, add `DIR/<area>/<case>.json` and its
+`.bodies.json.gz` there, and delete the draft; or write the entry by hand as that folder's README
+describes. `tests/kernel-cases/` takes no new cases: its `CASES` list only shrinks
+(`cargo xtask lists`). App-level cases (what a command does, the UI, product rules) stay in
+SolidCraft, as tests in their area's existing test file or UI scenarios.
+
 The naming corpus checks persistent names: every name a corpus design stores still finds a face or
 an edge, and two builds name its faces and edges alike
 (`cargo test --profile ci -p solidcraft-cli --test naming_corpus`).

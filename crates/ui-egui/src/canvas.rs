@@ -7,9 +7,11 @@
 
 use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Stroke, vec2};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::{Mesh, Vec2, Vec3};
+use solidcraft_engine::geom::Mesh;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -39,7 +41,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                     .collect();
                 let regions = solidcraft_engine::sketch::merge_regions(&regions);
                 let points: Vec<_> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
-                points.iter().fold(solidcraft_engine::geom::Vec2::default(), |sum, p| sum + *p) * (1.0 / points.len().max(1) as f64)
+                points.iter().fold(solidcore_record::Vec2::default(), |sum, p| sum + *p) * (1.0 / points.len().max(1) as f64)
             } else {
                 p.region.interior_point()
             };
@@ -77,7 +79,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // made, as a body sits at the middle of its box.
         Sel::Feature { id } => (crate::viewport::feature_bounds(app, *id)?.center(), None),
         Sel::Plane { name } => {
-            let pl = solidcraft_engine::geom::Plane::named(name).or_else(|| {
+            let pl = solidcore_record::Plane::named(name).or_else(|| {
                 solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl)
             })?;
             (pl.origin, Some(pl.normal()))
@@ -87,7 +89,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     Some(match &d.kind {
         Kind::Extrude { start, .. } => {
             let n = normal?;
-            let plane = solidcraft_engine::geom::Plane::from_normal(at, n)?;
+            let plane = solidcore_record::Plane::from_normal(at, n)?;
             let from = reference_height(app, d, "From Object", &plane, at).unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
             (at + n * (from + offset), Some(n))
@@ -189,19 +191,19 @@ fn poly_mid(poly: &[Vec2]) -> Option<(Vec2, Vec2)> {
     last
 }
 
-pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcraft_engine::geom::Plane> {
+pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_record::Plane> {
     let component = app.session.doc.feature(sketch)?.component;
     let state = app.session.model.state();
     let plane = state.sketch(sketch)?.plane;
     let frame = crate::dialogs::feature_frame(&app.session, component);
-    solidcraft_engine::geom::Plane::new(
+    solidcore_record::Plane::new(
         solidcraft_engine::doc::apply_point(&frame, plane.origin),
         solidcraft_engine::doc::apply_vector(&frame, plane.x),
         solidcraft_engine::doc::apply_vector(&frame, plane.y),
     )
 }
 
-fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcraft_engine::geom::Plane, centre: Vec3) -> Option<f64> {
+fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
     let point = crate::dialogs::object_point(&d.inputs, label)?;
     let p = point.as_array()?;
     let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
@@ -523,7 +525,7 @@ fn offset_plane_quad(proj: &Proj, c: Vec3, n: Vec3, h: f64) -> Option<Vec<Pos2>>
 fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, base: Vec3, bs: Pos2, dir: Option<Vec3>) {
     let t = Tokens::get();
     let to_span = dir.and_then(|n| {
-        let plane = solidcraft_engine::geom::Plane::from_normal(base, n)?;
+        let plane = solidcore_record::Plane::from_normal(base, n)?;
         reference_height(app, d, "To Object", &plane, base)
     });
     let all_span = if matches!(d.kind, Kind::Extrude { all: true, .. }) {
@@ -531,7 +533,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             let state = crate::open_meshing::session_world(&app.session);
             let plane = match d.inputs.first()?.items.first()? {
                 Sel::Profile { sketch, .. } => profile_plane(app, *sketch)?,
-                _ => solidcraft_engine::geom::Plane::from_normal(base, n)?,
+                _ => solidcore_record::Plane::from_normal(base, n)?,
             };
             let targets: Vec<String> = d
                 .extra
@@ -659,7 +661,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             let ang = crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
             let before = taper.clone();
             let st = crate::open_meshing::session_world(&app.session);
-            let regions: Vec<&solidcraft_engine::geom::Region2> = d
+            let regions: Vec<&solidcore_record::Region2> = d
                 .inputs
                 .first()
                 .map(|i| &i.items[..])
@@ -1560,7 +1562,7 @@ pub(crate) fn taper_limits((inward, outward): (f64, f64), height: f64) -> (f64, 
 /// The smallest inradius of `regions` and of their holes (infinite for none), which
 /// [`taper_limits`] turns into angles. A grid search over every side of every loop, so the
 /// extrude window keeps it while its profiles stay the same ([`taper_radii_kept`]).
-pub(crate) fn taper_radii(regions: &[&solidcraft_engine::geom::Region2]) -> (f64, f64) {
+pub(crate) fn taper_radii(regions: &[&solidcore_record::Region2]) -> (f64, f64) {
     #[cfg(test)]
     TAPER_RADII_WORKED_OUT.with(|n| n.set(n.get() + 1));
     let inward = regions.iter().map(|r| r.inradius(1e-3)).fold(f64::INFINITY, f64::min);
@@ -1570,10 +1572,7 @@ pub(crate) fn taper_radii(regions: &[&solidcraft_engine::geom::Region2]) -> (f64
 
 /// [`taper_radii`] of `regions`, worked out again only when they differ from the ones `kept`
 /// holds: the extrude window draws its taper handle every frame, and only the height changes.
-fn taper_radii_kept(
-    kept: &mut Option<(Vec<solidcraft_engine::geom::Region2>, (f64, f64))>,
-    regions: &[&solidcraft_engine::geom::Region2],
-) -> (f64, f64) {
+fn taper_radii_kept(kept: &mut Option<(Vec<solidcore_record::Region2>, (f64, f64))>, regions: &[&solidcore_record::Region2]) -> (f64, f64) {
     if let Some((was, radii)) = kept
         && was.len() == regions.len()
         && was.iter().zip(regions).all(|(a, b)| a == *b)
@@ -2157,7 +2156,8 @@ mod tests {
 #[cfg(test)]
 mod taper_limit_tests {
     use super::{taper_limits, taper_radii};
-    use solidcraft_engine::geom::{Loop2, Region2, Vec2};
+    use solidcore_record::{Loop2, Region2, Vec2};
+    use solidcraft_engine::geom::prelude::*;
 
     /// #1602: a drag stops just short of the taper that closes the profile, either way.
     #[test]

@@ -4,9 +4,11 @@
 //! A round origin's end is kept by the name of the face across the rim at that end, so it is the
 //! same end after the design changes; an x reference keeps the origin's turn about its axis.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::{Loop2, Mesh, Plane, Ring, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+use solidcraft_geom::{Mesh, Ring};
 use solidcraft_kernel::CylinderFace;
 
 use super::{Snap, XRef, component_bodies};

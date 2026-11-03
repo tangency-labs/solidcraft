@@ -1696,7 +1696,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     assert!(gpu.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().all(|v| color(v) == Some([51, 102, 153, 102])));
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::X));
+    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
@@ -1716,8 +1716,7 @@ fn transmission_uses_legacy_preview_buffers_and_invalidates_the_opaque_cache() {
     let (opaque_key, opaque) = gpu_scene(&solidcraft_engine::product_scene::extract(&s).unwrap()).unwrap();
     assert!(!opaque.pbr.is_empty());
     let mut scene = solidcraft_engine::product_scene::extract(&s).unwrap();
-    scene.meshes[0].transmission =
-        Some(solidcraft_engine::render::transmission::Transmission::new(solidcraft_engine::geom::Vec3::ZERO, None).unwrap());
+    scene.meshes[0].transmission = Some(solidcraft_engine::render::transmission::Transmission::new(solidcore_record::Vec3::ZERO, None).unwrap());
     let (glass_key, glass) = gpu_scene(&scene).unwrap();
     assert_ne!(opaque_key, glass_key);
     assert!(glass.pbr.is_empty());
@@ -2619,7 +2618,7 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         // A standard view from the navigator.
         h.step(&json!({"click":{"handle":"axis_view:z"}})).unwrap();
         h.settle();
-        assert!(h.app.cam.back().dot(solidcraft_engine::geom::Vec3::Z) > 0.999, "{style:?}: view from +Z, got {:?}", h.app.cam.back());
+        assert!(h.app.cam.back().dot(solidcore_record::Vec3::Z) > 0.999, "{style:?}: view from +Z, got {:?}", h.app.cam.back());
         assert!(h.app.session.selection.is_empty());
     }
 }
@@ -2731,7 +2730,7 @@ fn gpu_material_recipes_use_exact_linear_absorption_without_changing_saved_appea
         assert_eq!(wire["body_name"], "Optics");
         assert_eq!(wire["ior"], recipe.dielectric_ior);
         let [r, g, b]: [f64; 3] = serde_json::from_value(wire["absorption_per_mm"].clone()).unwrap();
-        let medium = solidcraft_engine::render::transmission::Transmission::new(solidcraft_engine::geom::Vec3::new(r, g, b), None).unwrap();
+        let medium = solidcraft_engine::render::transmission::Transmission::new(solidcore_record::Vec3::new(r, g, b), None).unwrap();
         let transmitted = medium.attenuation(recipe.reference_path_mm).unwrap();
         for (actual, expected) in [transmitted.x, transmitted.y, transmitted.z].into_iter().zip(recipe.transmission_linear_rgb) {
             assert!((actual - expected).abs() < 1e-12, "the actual optical consumer must reproduce the recipe's linear transmittance");
@@ -3812,7 +3811,8 @@ fn product_preview_exact_payload_preserves_mixed_surfaces_and_refuses_overflow()
 #[cfg(all(not(target_arch = "wasm32"), target_pointer_width = "64"))]
 #[test]
 fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction() {
-    use solidcraft_engine::geom::{Mesh, Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::Mesh;
     use solidcraft_engine::render::{ProductMesh, surface::OpaqueSurface};
     // One immutable original triangle repeated in the index list; this tests
     // payload admission only. Actual SELENE upload is separate native evidence.
@@ -4523,7 +4523,7 @@ fn assert_product_fits_canvas(app: &SolveApp) {
                 let (sx, sy, _) = app
                     .cam
                     .to_screen(
-                        solidcraft_engine::geom::Vec3::new(x, y, z),
+                        solidcore_record::Vec3::new(x, y, z),
                         f64::from(layout.viewport.width()),
                         f64::from(layout.viewport.height()),
                         bounds.diagonal().max(10.0),
@@ -4801,8 +4801,8 @@ fn render_workspace_click_modifiers_clear_and_browser_share_selection() {
     h.settle();
     h.app.run("select.filter", json!({"mode":"body"})).unwrap();
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
-    let left = proj.to_screen(solidcraft_engine::geom::Vec3::new(-20.0, 10.0, 20.0)).unwrap();
-    let right = proj.to_screen(solidcraft_engine::geom::Vec3::new(40.0, 10.0, 20.0)).unwrap();
+    let left = proj.to_screen(solidcore_record::Vec3::new(-20.0, 10.0, 20.0)).unwrap();
+    let right = proj.to_screen(solidcore_record::Vec3::new(40.0, 10.0, 20.0)).unwrap();
     h.step(&json!({"click":[left.x,left.y]})).unwrap();
     assert_eq!(h.app.session.selection, [Sel::Body { name: "Left".into() }]);
     h.step(&json!({"click":[right.x,right.y],"shift":true})).unwrap();
@@ -4916,7 +4916,7 @@ fn render_workspace_product_pass_draws_only_requested_face_or_body_overlay() {
 #[test]
 fn render_workspace_pick_projection_matches_orthographic_and_custom_perspective_camera() {
     use egui::{Event, Modifiers, PointerButton};
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     for fov in [0.0, 0.6, 1.1] {
         let mut app = nav_app(true, "fusion", crate::prefs::OrbitAround::ViewCentre);
         app.cam.fov = fov;
@@ -4947,7 +4947,8 @@ fn render_workspace_pick_projection_matches_orthographic_and_custom_perspective_
 #[test]
 fn render_workspace_component_filter_keeps_nested_repeated_occurrences_distinct() {
     use crate::viewport::{Hit, candidate};
-    use solidcraft_engine::{Sel, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     let mut h = Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Parent"})).unwrap();
     let child = h.app.run("component.create", json!({"name":"Part"})).unwrap();
@@ -6650,7 +6651,7 @@ fn render_assign_gestures_geometry_and_theme_evidence() {
                 .app
                 .viewport
                 .rect
-                .and_then(|rect| crate::viewport::projection(&h.app, rect).to_screen(solidcraft_engine::geom::Vec3::new(0.0, 0.0, 28.0)))
+                .and_then(|rect| crate::viewport::projection(&h.app, rect).to_screen(solidcore_record::Vec3::new(0.0, 0.0, 28.0)))
                 .filter(|_| frame == 1)
                 .map(|at| vec![egui::Event::PointerMoved(at)])
                 .unwrap_or_default();
@@ -6842,7 +6843,7 @@ fn render_results_compare_divider_drag_clamps_and_blocks_all_camera_input() {
 
 #[test]
 fn render_results_compare_live_projection_matches_image_fit_zoom_and_pan_without_an_oversized_gpu_viewport() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 200.0), egui::vec2(800.0, 600.0));
     for fov in [0.0, 0.6] {
         let camera = Camera { fov, roll: 0.25, ..Default::default() };
@@ -6966,9 +6967,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
             mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 20], ..Default::default() }),
             color: [128; 3],
             opacity: 1.0,
-            surface: Some(
-                solidcraft_engine::render::surface::OpaqueSurface::new(solidcraft_engine::geom::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
-            ),
+            surface: Some(solidcraft_engine::render::surface::OpaqueSurface::new(solidcore_record::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap()),
             transmission: None,
             faces: Vec::new(),
         }],
@@ -7038,7 +7037,8 @@ fn the_field_of_view_rescales_only_the_design_view() {
 /// taller than wide moves the camera back so the sides hold it too.
 #[test]
 fn fit_aspect_keeps_the_product_inside_a_tall_image() {
-    use solidcraft_engine::geom::{Aabb3, Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::Aabb3;
     let bounds = Aabb3 { min: Vec3::new(-30.0, -30.0, -30.0), max: Vec3::new(30.0, 30.0, 30.0) };
     let radius = bounds.diagonal();
     for fov in [0.0, std::f64::consts::FRAC_PI_4] {
@@ -7063,12 +7063,12 @@ fn fit_aspect_keeps_the_product_inside_a_tall_image() {
     }
 }
 
-fn corners(b: &solidcraft_engine::geom::Aabb3) -> Vec<solidcraft_engine::geom::Vec3> {
+fn corners(b: &solidcraft_engine::geom::Aabb3) -> Vec<solidcore_record::Vec3> {
     let mut out = Vec::new();
     for x in [b.min.x, b.max.x] {
         for y in [b.min.y, b.max.y] {
             for z in [b.min.z, b.max.z] {
-                out.push(solidcraft_engine::geom::Vec3::new(x, y, z));
+                out.push(solidcore_record::Vec3::new(x, y, z));
             }
         }
     }
