@@ -667,11 +667,9 @@ impl<'a> Reader<'a> {
                 } else {
                     Arc::new(self.read_curve(b, sp, depth + 1)?)
                 };
-                // Conic parameters are angles; every other basis curve's are plain numbers.
-                let kind = match &*basis {
-                    Curve::Circle { .. } | Curve::Ellipse { .. } => ParamKind::Angle,
-                    _ => ParamKind::Plain,
-                };
+                // A trimmed curve's parameters are its basis's: angles on a conic, also through
+                // an offset, trimmed or surface curve of one; plain numbers otherwise.
+                let kind = Self::curve_param_kind(&basis);
                 let trim_1 = self.trims(p.get(2), kind, sp)?;
                 let trim_2 = self.trims(p.get(3), kind, sp)?;
                 let sense = boolean(p.get(4), "trimmed curve sense")?;

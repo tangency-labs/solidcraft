@@ -342,7 +342,7 @@ fn polyline_and_trimmed_curve() {
 }
 
 /// A trimmed curve's parameters are its basis's: through an offset, a trimmed or a surface
-/// curve of a conic they are still angles, so a file in degrees gives radians (CodeRabbit on
+/// curve of a conic they are still angles, so a file in degrees gives radians (a review on
 /// #2592). SolidCraft's reader looked at the direct basis only and kept 90 unscaled.
 #[test]
 fn trims_on_a_curve_over_a_conic_are_angles() {
