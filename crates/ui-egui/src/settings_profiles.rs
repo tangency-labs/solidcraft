@@ -1,10 +1,10 @@
-//! Settings profiles (#6237): the input and interface settings kept together under a name, such
-//! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
-//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar (with its
-//! quick-access bar), S box favourites, imported theme it uses, and the custom view navigator's
-//! texture, arrows and Home, and its body (when one is chosen; a profile without one leaves the
-//! current body alone). Page moves preserve that stored key set; device-specific 3D mouse keys,
-//! graphics, recent files and Assistant settings stay out.
+//! Settings profiles: personal settings kept together under a name, such as "Laptop" and
+//! "Large monitor", and switched at once. Each preference declares its profile scope beside
+//! its default in `prefs::preference_settings`. A profile also holds keyboard shortcuts,
+//! the toolbar with its quick-access bar, S box favourites, the imported theme, and custom view
+//! navigator settings and body.
+//! Profiles without a navigator body leave the current body alone. Device configuration,
+//! graphics performance, recent files and Assistant permissions stay on this computer.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
@@ -38,115 +38,26 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// The original 98 Interface, Navigation, Sketch and language keys, plus explicitly added
-/// settings. Device-specific space_mouse_* and orbit_cursor stay outside profiles. Page moves
-/// and title tags never remove stored keys such as the bridge, origin names and direct interaction.
-const PROFILE_KEYS: &[&str] = &[
-    "browser_bodies_folders",
-    "browser_collapsed",
-    "browser_eye_left",
-    "browser_float",
-    "browser_share",
-    "browser_show",
-    "browser_width",
-    "center_arc_follows_cursor",
-    "color_vision",
-    "dialog_buttons",
-    "dialog_place",
-    "direct_interaction",
-    "free_orbit",
-    "free_orbit_upright",
-    "hidden_toolbar_tabs",
-    "hide_constraint_glyphs_zoomed_out",
-    "history_in_browser",
-    "history_play_button",
-    "history_sketches",
-    "home_fit_size",
-    "invert_navigator_arrows",
-    "keep_work_on_tab_switch",
-    "language",
-    "layout",
-    "line_drag_draws_one",
-    "line_hover_tangent_arc",
-    "logo_accent",
-    "look_at_anim",
-    "look_at_speed",
-    "manipulator_free_alt",
-    "middle_double_click",
-    "mouse_gestures",
-    "nav",
-    "nav_bridge_enabled",
-    "nav_bridge_port",
-    "navigation_bar",
-    "navigator_fit",
-    "navigator_style",
-    "orbit_around",
-    "orbit_reverse",
-    "origin_plane_names",
-    "pan_reverse_x",
-    "pan_reverse_y",
-    "persistent_ribbon_pressed",
-    "prefer_free_sketch_points",
-    "project_options_dialog",
-    "quick_measure",
-    "radial_context_menu",
-    "ribbon_click_ends_tool",
-    "ribbon_icon_grid",
-    "ribbon_labels",
-    "ribbon_menus_follow_hover",
-    "ribbon_menus_skip_pinned",
-    "ribbon_reveal",
-    "ribbon_tabs_only",
-    "right_drag_orbits",
-    "select_other_hidden",
-    "selection_shift_add_only",
-    "shortcut_cycles_modes",
-    "sketch_align_points",
-    "sketch_auto_dimensions",
-    "sketch_auto_locate",
-    "sketch_conflict_colour",
-    "sketch_construction_lines",
-    "sketch_exit_view",
-    "sketch_face_activates_part",
-    "sketch_open_look_at",
-    "sketch_recent_snap",
-    "sketch_state_icons",
-    "sketch_tab_always",
-    "sketch_tracking_guides",
-    "sketch_tracking_points",
-    "smooth_wheel_zoom",
-    "status_bar",
-    "suppress_sketch_snap",
-    "theme",
-    "theme_follow",
-    "theme_options",
-    "timeline_collapsed",
-    "timeline_left",
-    "timeline_left_browser_collapsed",
-    "timeline_left_width",
-    "timeline_origin_bodies",
-    "timeline_under_browser",
-    "toast_place",
-    "trackpad_pan",
-    "trackpad_zoom_modifier",
-    "ui_font",
-    "ui_scale",
-    "view_confirm_corner",
-    "viewport_analysis_status",
-    "viewport_background",
-    "viewport_section_status",
-    "viewport_status_details",
-    "viewport_status_summary",
-    "viewport_theme",
-    "wheel_zoom_speed",
-    "zoom_reverse",
-    "zoom_stop_at_model",
-    "zoom_to_cursor",
-];
-
-/// The preferences a profile holds, by their stored key.
+/// The preferences a profile holds, by their stored key. Page moves never change the scope.
 pub fn keys() -> impl Iterator<Item = &'static str> {
-    prefs::FIELD_PAGES.iter().map(|(key, _)| *key).filter(|key| PROFILE_KEYS.contains(key))
+    prefs::FIELDS.iter().filter(|field| field.scope == prefs::ProfileScope::Profile).map(|field| field.key)
+}
+
+/// Page chips and whether only part of that page belongs to this scope. Unpaged settings
+/// share an Other settings chip. Both capture and this summary use the declaration's scope.
+pub(crate) fn groups(scope: prefs::ProfileScope) -> impl Iterator<Item = (&'static str, &'static str, bool)> {
+    prefs::WINDOW_PAGES
+        .iter()
+        .enumerate()
+        .map(|(index, page)| (Some(index), page.label, page.icon))
+        .chain([(None, "prefs.profiles_other_settings", "settings")])
+        .filter_map(move |(page, label, icon)| {
+            let fields = || prefs::FIELDS.iter().filter(|field| field.page == page);
+            if !fields().any(|field| field.scope == scope) {
+                return None;
+            }
+            Some((label, icon, fields().any(|field| field.scope != scope)))
+        })
 }
 
 /// The kept profiles, which one was applied or saved last, and the Preferences section's state.
@@ -253,8 +164,7 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
         "toolbar": app.toolbar_custom.prefs(),
         "themes": themes,
     });
-    // The custom view navigator's own settings ride in their own entry: they are newer than the
-    // profile key set above, which never changes.
+    // Keep the custom view navigator entry for compatibility with existing profiles.
     if let Some(o) = doc.as_object_mut() {
         o.insert("view_navigator".into(), crate::view_gizmo::profile_settings(app));
     }
@@ -674,37 +584,34 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = t.space_8;
-            for (label, chips, accent) in [
-                (
-                    app.tr("prefs.general.held"),
-                    &[
-                        ("prefs.structure.appearance", "prefs_appearance"),
-                        ("prefs.structure.layout", "prefs_layout"),
-                        ("ui.navigation", "prefs_navigation"),
-                        ("prefs.structure.sketch", "prefs_sketch"),
-                        ("prefs.shortcuts", "prefs_shortcuts"),
-                        ("ui.language", "settings"),
-                    ][..],
-                    true,
-                ),
-                (
-                    app.tr("prefs.general.this_computer"),
-                    &[("prefs.structure.mouse3d", "lock"), ("ui.graphics", "lock"), ("prefs.assistant", "lock")][..],
-                    false,
-                ),
-            ] {
+            for (label, scope) in
+                [(app.tr("prefs.general.held"), prefs::ProfileScope::Profile), (app.tr("prefs.general.this_computer"), prefs::ProfileScope::Computer)]
+            {
+                let accent = scope == prefs::ProfileScope::Profile;
                 let key = if accent { "held" } else { "computer" };
-                let row = ui.horizontal_top(|ui| {
+                let stacked = ui.available_width() < 432.0;
+                let layout = if stacked { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
+                let row = ui.with_layout(layout, |ui| {
                     ui.spacing_mut().item_spacing.x = t.space_6;
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24 * 3.0 + t.space_12, t.space_24), egui::Sense::hover());
-                    let mut label_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-                    let caption = ui_kit::text(&mut label_ui, label, ui_kit::Text::Inline);
+                    let caption = if stacked {
+                        ui_kit::text(ui, label, ui_kit::Text::Inline)
+                    } else {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24 * 3.0 + t.space_12, t.space_24), egui::Sense::hover());
+                        let mut label_ui =
+                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        ui_kit::text(&mut label_ui, label, ui_kit::Text::Inline)
+                    };
                     crate::scenario::publish_rect(&format!("prefs:profiles:{key}:label"), caption.rect);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
-                        for (index, (chip, icon)) in chips.iter().enumerate() {
-                            let response =
-                                ui_kit::settings_chip(ui, app.tr(chip), ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() });
+                        let locale = crate::i18n::Locale::for_language(&app.preferences.language);
+                        for (index, (chip, icon, partial)) in groups(scope).enumerate() {
+                            let label = if partial {
+                                locale.format("prefs.profiles_partial_page", &[("page", app.tr(chip))])
+                            } else {
+                                app.tr(chip).to_string()
+                            };
+                            let response = ui_kit::settings_chip(ui, &label, ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() });
                             if index == 0 {
                                 crate::scenario::publish_rect(&format!("prefs:profiles:{key}:first_chip"), response.rect);
                             }

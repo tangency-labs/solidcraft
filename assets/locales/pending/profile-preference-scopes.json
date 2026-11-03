@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.profiles_other_settings": "إعدادات أخرى",
+    "prefs.profiles_partial_page": "{page} (بعض الإعدادات)"
+  },
+  "de": {
+    "prefs.profiles_other_settings": "Weitere Einstellungen",
+    "prefs.profiles_partial_page": "{page} (teilweise)"
+  },
+  "en": {
+    "prefs.profiles_other_settings": "Other settings",
+    "prefs.profiles_partial_page": "{page} (some)"
+  },
+  "he": {
+    "prefs.profiles_other_settings": "הגדרות אחרות",
+    "prefs.profiles_partial_page": "{page} (חלק מההגדרות)"
+  },
+  "ja": {
+    "prefs.profiles_other_settings": "その他の設定",
+    "prefs.profiles_partial_page": "{page}（一部）"
+  },
+  "ko": {
+    "prefs.profiles_other_settings": "기타 설정",
+    "prefs.profiles_partial_page": "{page} (일부)"
+  },
+  "vi": {
+    "prefs.profiles_other_settings": "Cài đặt khác",
+    "prefs.profiles_partial_page": "{page} (một số)"
+  },
+  "zh": {
+    "prefs.profiles_other_settings": "其他设置",
+    "prefs.profiles_partial_page": "{page}（部分）"
+  }
+}

@@ -338,7 +338,7 @@ pub const PAGE_ASSISTANT: usize = 10;
 pub const PAGE_PLUGINS: usize = 11;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
-const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
+pub(crate) const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
     ui_kit::WindowPage {
         icon: "prefs_general",
         label: "ui.general",
@@ -980,11 +980,26 @@ impl BodiesFolders {
     }
 }
 
-// The stored fields, their defaults, page resets and simple form controls share this table.
+/// Whether a preference travels in settings profiles or stays with this computer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProfileScope {
+    Profile,
+    Computer,
+}
+
+/// One stored preference's profile scope and Defaults page, declared beside its value.
+pub(crate) struct PreferenceField {
+    pub key: &'static str,
+    pub page: Option<usize>,
+    pub scope: ProfileScope,
+}
+
+// The stored fields, profile scopes, defaults, page resets and form controls share this table.
+// Every row must choose Profile or Computer; there is no implicit scope for new settings.
 // Omitted pages keep fields such as grid_follows_view and added agents when restoring defaults.
 // Accepted control-channel ranges may differ from slider ranges (look_at_speed).
 macro_rules! preference_settings {
-    ($( $(#[$doc:meta])* $field:ident: $ty:ty = $default:expr $(, $page:expr)? $(, accept($accepted:expr))? $(=> $control:ident($($args:tt)*))? ;)*) => {
+    ($( $(#[$doc:meta])* $scope:ident $field:ident: $ty:ty = $default:expr $(, $page:expr)? $(, accept($accepted:expr))? $(=> $control:ident($($args:tt)*))? ;)*) => {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         #[serde(default)]
         pub struct Prefs { $($(#[$doc])* pub $field: $ty,)* }
@@ -993,8 +1008,10 @@ macro_rules! preference_settings {
             fn default() -> Self { Self { $($field: $default,)* } }
         }
 
-        /// Every stored field and the page whose Defaults resets it (`None`: no page).
-        pub(crate) const FIELD_PAGES: &[(&str, Option<usize>)] = &[$((stringify!($field), preference_settings!(@page $($page)?)),)*];
+        /// Every stored field, its profile scope and its Defaults page (`None`: no page).
+        pub(crate) const FIELDS: &[PreferenceField] = &[$(PreferenceField {
+            key: stringify!($field), page: preference_settings!(@page $($page)?), scope: ProfileScope::$scope,
+        },)*];
 
         fn reset_preferences(p: &mut Prefs, page: usize) {
             let d = Prefs::default();
@@ -1051,352 +1068,352 @@ macro_rules! preference_settings {
 
 preference_settings! {
     /// Units of new designs.
-    default_units: String = "mm".into(), PAGE_DESIGN;
+    Profile default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
-    nav: String = "fusion".into(), PAGE_NAVIGATION;
+    Profile nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
-    free_orbit: bool = false, PAGE_NAVIGATION;
+    Profile free_orbit: bool = false, PAGE_NAVIGATION;
     /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
     /// the pole limit) instead of the screen's.
-    free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
+    Profile free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
     /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
-    right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
+    Profile right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
     /// A middle or right drag keeps the mode it started with until its button is released, as a
     /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
     /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
-    nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
+    Profile nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
     /// View orientation widget: original signed axes (default) or compact cube.
-    navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
+    Profile navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
-    navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
+    Profile navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
     /// The custom view gizmo has the cube's orbit and roll arrows around it.
-    navigator_arrows: bool = true, PAGE_NAVIGATION;
+    Profile navigator_arrows: bool = true, PAGE_NAVIGATION;
     /// The custom view gizmo has the cube's Home button beside it.
-    navigator_home: bool = true, PAGE_NAVIGATION;
+    Profile navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
-    radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+    Profile radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
-    direct_interaction: bool = false, PAGE_TOOLS;
+    Profile direct_interaction: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
-    mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
+    Profile mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
-    zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
+    Profile zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
     /// What an orbit turns around.
-    orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
+    Profile orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
     /// The cursor preference as releases before the origin option saved it (`true` = the point
     /// under the cursor). [`migrate`] folds it into `orbit_around` when saved preferences are
     /// read, so an existing choice survives the upgrade; this version only writes `false`.
-    orbit_cursor: bool = false, PAGE_NAVIGATION;
+    Computer orbit_cursor: bool = false;
     /// Whether a connected 3D mouse moves the view.
-    space_mouse_enabled: bool = true, PAGE_MOUSE3D => check("Navigate with the 3D mouse");
+    Computer space_mouse_enabled: bool = true, PAGE_MOUSE3D => check("Navigate with the 3D mouse");
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
     /// left corner. Off by default.
-    space_mouse_in_view: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_show_in_view");
+    Computer space_mouse_in_view: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_show_in_view");
     /// 3D mouse orbit: traced (on) turns the view around the model in the middle of the view when
     /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
     /// (off, the default) turns it around the view's centre, as it did before.
-    space_mouse_model_pivot: bool = false, PAGE_MOUSE3D;
+    Computer space_mouse_model_pivot: bool = false, PAGE_MOUSE3D;
     /// Whether the 3D mouse also turns the view while a sketch is edited and still seen square on
     /// (#2227), as the mouse can. Off (the default): the cap pans and zooms a square-on sketch and
     /// turns it only after the view is tilted away from it.
-    space_mouse_sketch_orbit: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_sketch_orbit");
+    Computer space_mouse_sketch_orbit: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_sketch_orbit");
     /// Speed multiplier for 3D mouse navigation.
-    space_mouse_speed: f32 = 1.0, PAGE_MOUSE3D;
+    Computer space_mouse_speed: f32 = 1.0, PAGE_MOUSE3D;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
     /// the other way.
-    space_mouse_reverse: [bool; 6] = [false; 6], PAGE_MOUSE3D;
+    Computer space_mouse_reverse: [bool; 6] = [false; 6], PAGE_MOUSE3D;
     /// Per physical axis of the cap, a multiplier on top of `space_mouse_speed`; 0 switches it off.
-    space_mouse_axis_speed: [f32; 6] = [1.0; 6], PAGE_MOUSE3D;
+    Computer space_mouse_axis_speed: [f32; 6] = [1.0; 6], PAGE_MOUSE3D;
     /// Per physical axis of the cap, which of its motions drives it (`space_mouse::reassigned`),
     /// applied after calibration; each motion drives exactly one axis.
-    space_mouse_axis_source: [usize; 6] = crate::space_mouse::SAME_AXES, PAGE_MOUSE3D;
+    Computer space_mouse_axis_source: [usize; 6] = crate::space_mouse::SAME_AXES, PAGE_MOUSE3D;
     /// Which program reads the 3D mouse when spacenavd and the device itself are both there (Linux).
-    space_mouse_driver: SpaceMouseDriver = SpaceMouseDriver::default(), PAGE_MOUSE3D;
+    Computer space_mouse_driver: SpaceMouseDriver = SpaceMouseDriver::default(), PAGE_MOUSE3D;
     /// Where the 3D mouse picture sits in the 3D view, when it is shown there (`space_mouse_in_view`).
-    space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_MOUSE3D;
+    Computer space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_MOUSE3D;
     /// The user turned the calibration offer off for good ("Never show again"). Unlike closing the
     /// card, which only records that device, this stops every offer, for every device: it is one flag,
     /// not kept per device key. Like the settings beside it, the dialog's Restore Defaults puts it back
     /// (the 3D mouse section's own restore leaves it).
-    space_mouse_offer_never: bool = false, PAGE_MOUSE3D;
+    Computer space_mouse_offer_never: bool = false, PAGE_MOUSE3D;
     /// Per 3D mouse (`space_mouse::Input::device`), the calibration that puts its axes on
     /// 3Dconnexion's. A device without one is read as it reports. Page resets keep calibrations.
     #[serde(deserialize_with = "calibrations_that_read")]
-    space_mouse_calibrations: std::collections::BTreeMap<String, solidcraft_space_mouse::Calibration> = Default::default();
+    Computer space_mouse_calibrations: std::collections::BTreeMap<String, solidcraft_space_mouse::Calibration> = Default::default();
     /// Per 3D mouse, what each of its buttons does, by number from 1, once the user has changed
     /// any of them; until then a measured device has its printed keys' jobs
     /// (`space_mouse::default_button_jobs`). Kept, like calibrations, when settings are reset.
     #[serde(deserialize_with = "button_jobs_that_read")]
-    space_mouse_buttons: std::collections::BTreeMap<String, std::collections::BTreeMap<u8, crate::space_mouse::ButtonJob>> = Default::default();
+    Computer space_mouse_buttons: std::collections::BTreeMap<String, std::collections::BTreeMap<u8, crate::space_mouse::ButtonJob>> = Default::default();
     /// The 3D mice (`space_mouse::Input::device`) whose calibration has been offered and dismissed, so
     /// the offer (`space_mouse_offer`) is made once per device. A saved entry that is not text is dropped.
     /// Kept when settings are reset, like the calibrations and button mappings it goes with: resetting
     /// the page would otherwise bring the offer back for every device.
     #[serde(deserialize_with = "devices_that_read")]
-    space_mouse_offered: std::collections::BTreeSet<String> = Default::default();
+    Computer space_mouse_offered: std::collections::BTreeSet<String> = Default::default();
     /// A device's own app on this computer moves the view (the navigation bridge, docs/3d-mouse.md):
     /// the desktop app connects to it on `nav_bridge_port`. Off unless asked for, so the app
     /// doesn't connect to whatever else listens on that port.
-    nav_bridge_enabled: bool = false, PAGE_MOUSE3D;
+    Profile nav_bridge_enabled: bool = false, PAGE_MOUSE3D;
     /// The loopback port the device app listens on (0: none).
-    nav_bridge_port: u16 = 8765, PAGE_MOUSE3D;
+    Profile nav_bridge_port: u16 = 8765, PAGE_MOUSE3D;
     /// Anti-aliasing samples (applies on restart).
-    msaa: u32 = 4, PAGE_GRAPHICS;
+    Computer msaa: u32 = 4, PAGE_GRAPHICS;
     /// Share shading and Continuity; false preserves their independent legacy behavior.
-    single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
+    Profile single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
     /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
-    window_system: String = "auto".into(), PAGE_GRAPHICS;
+    Computer window_system: String = "auto".into(), PAGE_GRAPHICS;
     /// Exact graphics adapter name; empty selects automatically on the next start.
-    graphics_adapter: String = String::new(), PAGE_GRAPHICS;
+    Computer graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
-    ambient_occlusion: bool = false, PAGE_GRAPHICS;
+    Computer ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
-    ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
+    Profile ground_shadow_follows_model: bool = false, PAGE_GRAPHICS => check_id("prefs.ground_shadow_follows_model");
     /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
     /// (#7974). Off by default: the viewport shades as it always has.
-    dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
+    Profile dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
-    cosmetic_threads: bool = false, PAGE_GRAPHICS;
+    Profile cosmetic_threads: bool = false, PAGE_GRAPHICS;
     /// A section hatches each cut body its own way (the default), or every one alike, in the cap
     /// colour at 45 degrees, as before.
-    section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
+    Profile section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
-    grid_follows_view: bool = false => check_id("ui.grid_follows_view");
+    Profile grid_follows_view: bool = false => check_id("ui.grid_follows_view");
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
-    reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
+    Profile reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
-    vertex_markers: bool = false;
+    Profile vertex_markers: bool = false;
     /// A preview of a feature that changes a body draws the surface it adds in the preview
     /// colour, working out face by face which surface that is. Off: the body is drawn as itself
     /// and nothing is worked out (`preview::Colors::tint_new`).
-    preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
+    Profile preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
     /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
     /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
-    cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
+    Profile cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
-    render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
+    Computer render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
     /// `ultra` (#1287). Only the display plan the viewport draws; never the design or exports.
-    display_quality: String = "normal".into(), PAGE_GRAPHICS;
+    Computer display_quality: String = "normal".into(), PAGE_GRAPHICS;
     /// Supersampling (#1288): the view drawn at this many times its pixels each way and filtered
     /// down (1, 1.5 or 2; 1 is off).
-    supersampling: f32 = 1.0, PAGE_GRAPHICS;
+    Computer supersampling: f32 = 1.0, PAGE_GRAPHICS;
     /// Supersample only while the view holds still (full speed while orbiting).
-    supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("prefs.graphics_page.supersampling_adaptive");
+    Computer supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("prefs.graphics_page.supersampling_adaptive");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
-    show_frame_rate: bool = false, PAGE_GRAPHICS;
+    Computer show_frame_rate: bool = false, PAGE_GRAPHICS;
     /// Record where the time goes (SMLib's calls, kernel operations, features, commands, imports)
     /// for `diagnostics.profile` (docs/perf.md). Off by default: nothing is recorded.
-    profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
+    Computer profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
-    frame_rate_details: bool = false, PAGE_GRAPHICS;
+    Computer frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
-    sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
+    Profile sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// Show the view's pitch, yaw and roll and its projection under the orientation gizmo (#6032).
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
-    show_view_angles: bool = false, PAGE_GRAPHICS;
+    Profile show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
-    measure_axis_distances: bool = true, PAGE_TOOLS;
+    Profile measure_axis_distances: bool = true, PAGE_TOOLS;
     /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
     /// saved value outside that range as the default ([`perspective_fov`]).
-    perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
+    Profile perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
     /// Decimals shown for lengths and angles.
-    length_decimals: u8 = 2, PAGE_DESIGN;
-    angle_decimals: u8 = 1, PAGE_DESIGN;
+    Profile length_decimals: u8 = 2, PAGE_DESIGN;
+    Profile angle_decimals: u8 = 1, PAGE_DESIGN;
     /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
     /// list light in a large design.
-    parameter_list_rows: u16 = 50, PAGE_DESIGN;
+    Profile parameter_list_rows: u16 = 50, PAGE_DESIGN;
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
-    step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    Profile step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
     /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
     /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
     /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
-    validation: solidcraft_engine::kernel::Validation = solidcraft_engine::kernel::Validation::EachFeature, PAGE_DESIGN;
+    Computer validation: solidcraft_engine::kernel::Validation = solidcraft_engine::kernel::Validation::EachFeature, PAGE_DESIGN;
     /// A command's value (Extrude's Distance, Fillet's Radius…) in a box beside its handle in the
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
-    value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
+    Profile value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
     /// The Parameters dialog applies an expression as soon as its field is left (#9279). Off: the
     /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
     /// step. Its checkbox is in the dialog itself.
-    parameters_apply_live: bool = true;
+    Profile parameters_apply_live: bool = true;
     /// A design coming back to its tab reads again the linked designs whose files changed since
     /// it last read them. Off: they wait for Update Links, as before.
-    update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
+    Profile update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
     /// A double-click on a component, in the browser or on its face in the view, opens a linked
     /// one's design with the assembly around it (`edit_in_place`) and activates any other. Off:
     /// a double-click in the browser activates every component and one in the view does nothing,
     /// as before.
-    double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
+    Profile double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
-    insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
+    Profile insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
-    reopen_designs: bool = true, PAGE_GENERAL;
+    Profile reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
-    open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
+    Computer open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Web app (#10220): keep each open design's unsaved changes current in the browser's
     /// private storage, so closing or reloading the tab doesn't ask through the browser's own
     /// "leave site?" box; the next visit offers them back. Off: the browser asks, as before.
-    keep_unsaved_in_browser: bool = false, PAGE_GENERAL;
-    keep_unsaved_also_asks: bool = true, PAGE_GENERAL;
+    Profile keep_unsaved_in_browser: bool = false, PAGE_GENERAL;
+    Profile keep_unsaved_also_asks: bool = true, PAGE_GENERAL;
     /// The largest STEP or import file opened, in MB (#4086): from the default (512) up to 16 GB.
     /// `--max-file-size` overrides it for one run. The browser keeps the default.
-    max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
+    Computer max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
     /// The largest design file opened or saved, in MB (#4086): from the default (256) up to 16 GB.
-    max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
+    Computer max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
-    assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
+    Profile assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
-    joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
+    Profile joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
     /// Degrees per step after pulling the cursor outside the precision guide.
-    joint_rotation_fine: f64 = 0.1, PAGE_TOOLS;
+    Profile joint_rotation_fine: f64 = 0.1, PAGE_TOOLS;
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
-    theme: String = "dark".into(), PAGE_APPEARANCE;
+    Profile theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
-    background_image: String = String::new(), PAGE_APPEARANCE;
+    Computer background_image: String = String::new(), PAGE_APPEARANCE;
     /// The 3D view's colours: the theme's own, or the Light or Dark theme's whatever the window
     /// uses (#4146).
-    viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_APPEARANCE;
+    Profile viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_APPEARANCE;
     /// The 3D view's background, one colour for the whole application (#7688), or `None` (the
     /// default) for the theme's gradient.
-    viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
+    Profile viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
-    logo_accent: bool = false, PAGE_APPEARANCE;
+    Profile logo_accent: bool = false, PAGE_APPEARANCE;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
-    custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
+    Computer custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
     /// Desktop: a `solidcraft-theme/1` file another tool writes, followed as the theme and
     /// reloaded when it changes (#7573). Empty (the default): no file is followed.
-    theme_follow: String = String::new(), PAGE_APPEARANCE;
+    Profile theme_follow: String = String::new(), PAGE_APPEARANCE;
     /// Per-theme overrides. Raw JSON retains entries from newer or hand-edited settings.
-    theme_options: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new(), PAGE_APPEARANCE;
+    Profile theme_options: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new(), PAGE_APPEARANCE;
     /// Interface language: a registered locale ID, or `system` to follow the system's language
     /// on every start (#10138). A saved language keeps winning, so existing users don't change.
-    language: String = "system".into(), 0;
+    Profile language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
-    layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
+    Profile layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
-    navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
+    Profile navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
     /// Show command names beneath ribbon icons, independently of workspace layout.
-    ribbon_labels: bool = true, PAGE_LAYOUT;
+    Profile ribbon_labels: bool = true, PAGE_LAYOUT;
     /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
-    persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
-    viewport_analysis_status: bool = true, PAGE_GRAPHICS;
-    viewport_section_status: bool = true, PAGE_GRAPHICS;
-    viewport_status_details: bool = true, PAGE_GRAPHICS;
-    viewport_status_summary: bool = true, PAGE_GRAPHICS;
+    Profile persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
+    Profile viewport_analysis_status: bool = true, PAGE_GRAPHICS;
+    Profile viewport_section_status: bool = true, PAGE_GRAPHICS;
+    Profile viewport_status_details: bool = true, PAGE_GRAPHICS;
+    Profile viewport_status_summary: bool = true, PAGE_GRAPHICS;
     /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
     /// tools then start a sketch first (#7904).
-    sketch_tab_always: bool = false, PAGE_LAYOUT;
+    Profile sketch_tab_always: bool = false, PAGE_LAYOUT;
     /// Each design tab keeps its open dialog or tool, and its toolbar tab, while another design is
     /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
     /// them and shows the MODEL tab.
-    keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
+    Profile keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
-    ribbon_reveal: bool = false, PAGE_LAYOUT;
+    Profile ribbon_reveal: bool = false, PAGE_LAYOUT;
     /// Fold the ribbon to its tab row, so the view has the room its panels took (#10112). A tab's
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
-    ribbon_tabs_only: bool = false, PAGE_LAYOUT;
+    Profile ribbon_tabs_only: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
-    dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
+    Profile dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
     /// centre, as before #7893.
-    toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_LAYOUT;
+    Profile toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_LAYOUT;
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
-    hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
+    Profile hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
     /// instead of a list of small icons with names (#4739).
-    ribbon_icon_grid: bool = false, PAGE_LAYOUT;
+    Profile ribbon_icon_grid: bool = false, PAGE_LAYOUT;
     /// After a ribbon panel menu is open, hover another panel to switch to its menu.
-    ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
+    Profile ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
-    ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
+    Profile ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
     /// Interface scale (1 = 100 %).
-    ui_scale: f32 = 1.0, PAGE_APPEARANCE, accept(0.5..=2.5);
+    Profile ui_scale: f32 = 1.0, PAGE_APPEARANCE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
     /// (#1290). Menus, dialogs and labels use it; glyphs it lacks fall back as before.
-    ui_font: String = String::new(), PAGE_APPEARANCE;
+    Profile ui_font: String = String::new(), PAGE_APPEARANCE;
     /// While a dialog or a sketch is open, OK and Cancel in the view's top right corner, with the
     /// axis view moved down below them (#6709). Off by default.
-    view_confirm_corner: bool = false, PAGE_LAYOUT;
+    Profile view_confirm_corner: bool = false, PAGE_LAYOUT;
     /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
     /// and the design's units (#7243). Off by default.
-    status_bar: bool = false, PAGE_LAYOUT;
+    Profile status_bar: bool = false, PAGE_LAYOUT;
     /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
     /// default.
-    quick_measure: bool = false, PAGE_GRAPHICS;
+    Profile quick_measure: bool = false, PAGE_GRAPHICS;
     /// Put the feature history to the left of the browser instead of below the viewport.
-    timeline_left: bool = false, PAGE_LAYOUT;
+    Profile timeline_left: bool = false, PAGE_LAYOUT;
     /// Measured outer width; the contents react to this width without a names mode.
-    timeline_left_width: f32 = 130.0, PAGE_LAYOUT;
+    Profile timeline_left_width: f32 = 130.0, PAGE_LAYOUT;
     /// Share the browser column, vertically, instead of a separate left column.
-    timeline_under_browser: bool = false, PAGE_LAYOUT;
+    Profile timeline_under_browser: bool = false, PAGE_LAYOUT;
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
-    history_in_browser: bool = false, PAGE_LAYOUT;
+    Profile history_in_browser: bool = false, PAGE_LAYOUT;
     /// Fold the shared-column history to its header.
-    timeline_collapsed: bool = false, PAGE_LAYOUT;
+    Profile timeline_collapsed: bool = false, PAGE_LAYOUT;
     /// The browser's share of the column's height when History sits under it, which the user
     /// drags at the seam between the two cards (#7371).
-    browser_share: f32 = DEFAULT_BROWSER_SHARE, PAGE_LAYOUT;
+    Profile browser_share: f32 = DEFAULT_BROWSER_SHARE, PAGE_LAYOUT;
     /// Whether the browser beside the vertical history is collapsed to its rail.
-    timeline_left_browser_collapsed: bool = false, PAGE_LAYOUT;
+    Profile timeline_left_browser_collapsed: bool = false, PAGE_LAYOUT;
     /// Whether the History at the left lists a sketch under the feature built from it.
-    history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
+    Profile history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
-    history_play_button: bool = true, PAGE_LAYOUT;
+    Profile history_play_button: bool = true, PAGE_LAYOUT;
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
-    timeline_origin_bodies: bool = false, PAGE_LAYOUT;
+    Profile timeline_origin_bodies: bool = false, PAGE_LAYOUT;
     /// Width of the browser sidebar, which
     /// the user drags wider or narrower at its right edge.
-    browser_width: f32 = DEFAULT_BROWSER_WIDTH, PAGE_LAYOUT;
+    Profile browser_width: f32 = DEFAULT_BROWSER_WIDTH, PAGE_LAYOUT;
     /// Render shell preference, independent of the document and Design history.
-    render_shots_strip: bool = true;
-    render_inspector_side: String = "right".into();
-    render_inspector_width: f32 = 305.0;
-    render_browser_side: String = "left".into();
-    render_browser_width: f32 = 266.0;
+    Profile render_shots_strip: bool = true;
+    Profile render_inspector_side: String = "right".into();
+    Profile render_inspector_width: f32 = 305.0;
+    Profile render_browser_side: String = "left".into();
+    Profile render_browser_width: f32 = 266.0;
     /// Resource identities and history belong to the user, never the design.
-    render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
-    render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
+    Computer render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
+    Computer render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
     /// Draw the parts browser on a translucent card over the 3D view instead of a column of its
     /// own, so the workspace keeps the whole window width.
-    browser_float: bool = false, PAGE_LAYOUT;
+    Profile browser_float: bool = false, PAGE_LAYOUT;
     /// The browser card folded to its header with the chevron in that header, kept from one run
     /// to the next like the toolbar's pins (#8692).
-    browser_collapsed: bool = false, PAGE_LAYOUT;
+    Profile browser_collapsed: bool = false, PAGE_LAYOUT;
     /// Whether the browser card is always shown or kept out of sight until the pointer comes to
     /// it, as the navigation bar's "Hide until hovered" does (#8692).
-    browser_show: crate::browser::BrowserShow = Default::default(), PAGE_LAYOUT;
+    Profile browser_show: crate::browser::BrowserShow = Default::default(), PAGE_LAYOUT;
     /// Where command dialogs open: at the view's edge, or in the left column in place of the
     /// browser and the History there (#6707).
-    dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_LAYOUT;
+    Profile dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_LAYOUT;
     /// The names the browser, dialogs and lists show for the origin planes (#6491).
-    origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
+    Profile origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
     /// When components' bodies sit in a Bodies folder in the browser (#4217).
-    browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_LAYOUT;
+    Profile browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_LAYOUT;
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
-    browser_eye_left: bool = false, PAGE_LAYOUT;
+    Profile browser_eye_left: bool = false, PAGE_LAYOUT;
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
-    browser_components_open: bool = false, PAGE_LAYOUT;
+    Profile browser_components_open: bool = false, PAGE_LAYOUT;
     /// Folders in the Browser start closed, and placements too whatever "Components start open"
     /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
     /// Browser, which opens just the rows down to its body and closes again the ones the last find
@@ -1404,284 +1421,284 @@ preference_settings! {
     /// Browser found has the rows above it marked, so a large assembly's placements are not named
     /// again after each edit. Off by default: folders start open, placements as "Components start
     /// open" says, and a pick in the 3D view opens the Browser down to its body (#3005), as before.
-    browser_rows_start_closed: bool = false, PAGE_LAYOUT;
+    Profile browser_rows_start_closed: bool = false, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
-    zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
+    Profile zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
-    wheel_zoom_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => slider("ui.wheel_zoom_speed", 0.25..=4.0, 0.05, |v| format!("{v:.2}×"), "prefs:wheel_zoom_speed");
+    Profile wheel_zoom_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => slider("ui.wheel_zoom_speed", 0.25..=4.0, 0.05, |v| format!("{v:.2}×"), "prefs:wheel_zoom_speed");
     /// Opt-in surface anchoring for the 3D mouse, navigation bridge and drag-zoom. The wheel
     /// and pinch retain their independent `zoom_to_cursor` preference.
-    zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
+    Profile zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
-    smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    Profile smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
-    trackpad_pan: bool = true, PAGE_NAVIGATION;
+    Profile trackpad_pan: bool = true, PAGE_NAVIGATION;
     /// Hold this modifier alone to zoom with vertical wheel or two-finger scroll.
-    trackpad_zoom_modifier: TrackpadZoomModifier = TrackpadZoomModifier::default(), PAGE_NAVIGATION;
+    Profile trackpad_zoom_modifier: TrackpadZoomModifier = TrackpadZoomModifier::default(), PAGE_NAVIGATION;
     /// Horizontal trackpad and thumb-wheel scrolling pans the view the other way (#2007).
-    pan_reverse_x: bool = false, PAGE_NAVIGATION => check("ui.reverse_horizontal_pan_direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
+    Profile pan_reverse_x: bool = false, PAGE_NAVIGATION => check("ui.reverse_horizontal_pan_direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
     /// Vertical trackpad scrolling pans the view the other way (#5240).
-    pan_reverse_y: bool = false, PAGE_NAVIGATION => check("ui.reverse_vertical_pan_direction", "Vertical two-finger scrolling pans the other way");
+    Profile pan_reverse_y: bool = false, PAGE_NAVIGATION => check("ui.reverse_vertical_pan_direction", "Vertical two-finger scrolling pans the other way");
     /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
     /// as natural scrolling turns it (#8410).
-    orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
+    Profile orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
     /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
-    look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
-    look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
+    Profile look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
+    Profile look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
     /// Default modelling orientation: `z` (Z up) or `y` (Y up) (#3).
-    up_axis: String = "z".into(), PAGE_DESIGN;
+    Profile up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
-    offer_stand_up: bool = true, PAGE_DESIGN => check_tr("ui.offer_to_stand_up_y_up_files");
+    Profile offer_stand_up: bool = true, PAGE_DESIGN => check_tr("ui.offer_to_stand_up_y_up_files");
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
-    stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
+    Profile stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
-    extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
+    Profile extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
-    extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
+    Profile extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
     /// With `extrude_view_isometric`: when Extrude closes (OK or Cancel) the view goes back to
     /// where it was before it turned (#9176). Off (the default): it stays isometric.
-    extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
+    Profile extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
-    auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
+    Profile auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
-    remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    Profile remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
-    hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
+    Profile hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
     /// A placed Single hole has a handle that drags it, and a pick elsewhere on a face that has a
     /// hole moves the hole there (`hole_place`). Off by default: a second pick on its face takes
     /// the hole out, and a hole is moved by taking it out and picking again.
-    hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
+    Profile hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
-    hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+    Profile hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
     /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
     /// by its click only, as before, and its Position input takes faces only.
-    placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
+    Profile placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the
     /// servers in `network_hosts`, or one the user allows when asked (`network_prompt`).
-    network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
+    Computer network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
-    network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
+    Computer network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
-    middle_double_click: String = "home".into(), PAGE_NAVIGATION;
+    Profile middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a cube face, corner or arrow, an axis tip) also frames the
     /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
     /// target and zoom.
-    navigator_fit: bool = false, PAGE_NAVIGATION;
+    Profile navigator_fit: bool = false, PAGE_NAVIGATION;
     /// The view cube's directional arrows orbit the camera the way the arrow points, as in
     /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
     /// the cube toward the side it sits on, so the arrow on the left swings the camera left.
-    invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
+    Profile invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
     /// The view cube's two curved arrows roll the view the other way: the clockwise arrow rolls
     /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
     /// #10483). Off by default: each arrow rolls the view the way it curls.
-    invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
+    Profile invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
     /// How much of the view the model fills when Home, Fit, an opened design or a navigator
     /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
     /// panels, the compass and the navigation bar, as before.
-    home_fit_size: f32 = 1.0, PAGE_NAVIGATION, accept(0.1..=1.0);
+    Profile home_fit_size: f32 = 1.0, PAGE_NAVIGATION, accept(0.1..=1.0);
     /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
-    color_vision: crate::theme::ColorVision = crate::theme::ColorVision::Off, PAGE_APPEARANCE;
+    Profile color_vision: crate::theme::ColorVision = crate::theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
-    check_updates: bool = true, 0;
+    Computer check_updates: bool = true, 0;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
-    update: crate::update::Memo = crate::update::Memo::default();
+    Computer update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
     /// Spline): the family's button and shortcut start it again (`sketch_families`).
-    sketch_variants: crate::sketch_families::Choices = crate::sketch_families::Choices::default();
+    Computer sketch_variants: crate::sketch_families::Choices = crate::sketch_families::Choices::default();
     /// Personal Hole parameter combinations, shared by every design in this profile.
     /// No page reset discards this user-authored library.
-    hole_presets: crate::hole_presets::Library = crate::hole_presets::Library::default();
+    Computer hole_presets: crate::hole_presets::Library = crate::hole_presets::Library::default();
     /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
     /// (#9346). No page reset discards this user-authored library.
-    personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
+    Computer personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
-    save_mesh_format: String = "stl".into();
+    Profile save_mesh_format: String = "stl".into();
     /// Hidden edges in the current-view DXF export (false: omit, true: dashed).
-    view_dxf_dashed: bool = false;
+    Profile view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.
-    view_dxf_tolerance: f64 = 0.01;
+    Profile view_dxf_tolerance: f64 = 0.01;
     /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
-    send_slicer: String = String::new();
+    Computer send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
-    slicer_single_instance: bool = true, 0;
+    Computer slicer_single_instance: bool = true, 0;
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
-    print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
+    Profile print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
     /// The line about sending again replacing the slicer's file has been shown.
-    slicer_resend_hint_seen: bool = false;
+    Computer slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
-    easyprint_consent: bool = false;
+    Computer easyprint_consent: bool = false;
     /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
-    save_mesh_quality: String = "standard".into();
+    Profile save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
-    custom_slicers: Vec<String> = Vec::new();
+    Computer custom_slicers: Vec<String> = Vec::new();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
-    ai_features: bool = true, PAGE_ASSISTANT;
+    Computer ai_features: bool = true, PAGE_ASSISTANT;
     /// The Assistant button in the application bar (the shortcut and View menu entry stay).
-    ai_toolbar_button: bool = true, PAGE_ASSISTANT;
+    Computer ai_toolbar_button: bool = true, PAGE_ASSISTANT;
     /// An agent's slow commands over the control channel (MCP) compute off the window thread,
     /// so the window stays live while they run (#1989, [`crate::control_job`]). Off: they run on
     /// the window thread, and the window waits for each, as before (the default).
-    agent_off_thread: bool = false, PAGE_ASSISTANT;
+    Computer agent_off_thread: bool = false, PAGE_ASSISTANT;
     /// Let AI agents connect: the localhost control channel (MCP) opens on the default port at
     /// start-up, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one. Read at start-up.
-    agent_control: bool = true, PAGE_ASSISTANT;
+    Computer agent_control: bool = true, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.
-    connect_ai_apps: bool = true, PAGE_ASSISTANT;
+    Computer connect_ai_apps: bool = true, PAGE_ASSISTANT;
     /// Agents the user added (the installed ones are found by themselves). API keys are never
     /// here: they live in the system keychain.
-    agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
+    Computer agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
     /// The agent a new conversation starts with (an agent's id; empty: the first one available).
-    agent_default: String = String::new();
+    Computer agent_default: String = String::new();
     /// The agent the chat last started (an agent's id; empty: none yet).
-    agent_last: String = String::new();
+    Computer agent_last: String = String::new();
     /// When SolidCraft starts: connect the agent started last (`agent_last`, else the one a new
     /// conversation starts with), and open the panel (#7009). Off by default: an agent starts
     /// only when a message is sent or Connect is pressed, and the panel opens when asked for.
-    agent_connect_at_start: bool = false, PAGE_ASSISTANT;
-    agent_chat_open_at_start: bool = false, PAGE_ASSISTANT;
+    Computer agent_connect_at_start: bool = false, PAGE_ASSISTANT;
+    Computer agent_chat_open_at_start: bool = false, PAGE_ASSISTANT;
     /// How much the agent may do without asking (`ask`, `edits`, `all`), and per agent.
-    ai_permissions: crate::agent_chat::agents::Mode = crate::agent_chat::agents::Mode::Edits, PAGE_ASSISTANT;
-    agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_ASSISTANT;
+    Computer ai_permissions: crate::agent_chat::agents::Mode = crate::agent_chat::agents::Mode::Edits, PAGE_ASSISTANT;
+    Computer agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_ASSISTANT;
     /// The model last chosen in the chat, per agent: put back when the agent offers it again.
-    agent_models: std::collections::BTreeMap<String, String> = Default::default();
+    Computer agent_models: std::collections::BTreeMap<String, String> = Default::default();
     /// "Always allow" answers: per agent, the tools it may use without asking.
-    agent_always_allow: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    Computer agent_always_allow: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     /// The side the panel docks on (`left` or `right`), its width, and whether it is folded to a strip.
-    agent_chat_side: String = "right".into(), PAGE_ASSISTANT;
-    agent_chat_width: f32 = 380.0, PAGE_ASSISTANT;
-    agent_chat_minimized: bool = false, PAGE_ASSISTANT;
+    Computer agent_chat_side: String = "right".into(), PAGE_ASSISTANT;
+    Computer agent_chat_width: f32 = 380.0, PAGE_ASSISTANT;
+    Computer agent_chat_minimized: bool = false, PAGE_ASSISTANT;
     /// Whether the chat is in its own window instead of the side panel, and that window's place
     /// and size as the system last reported them (`[x, y, width, height]`, points; `x` can be
     /// negative or past the main screen when the window sits on another one).
-    agent_chat_popped: bool = false, PAGE_ASSISTANT;
-    agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
+    Computer agent_chat_popped: bool = false, PAGE_ASSISTANT;
+    Computer agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
-    agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
+    Computer agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
     /// Custom instructions (#8220): text the agent chat adds to its system note when a session
     /// starts (`agent_chat::acp::system_note`). No page reset discards this user-authored text.
-    agent_instructions: String = String::new();
+    Computer agent_instructions: String = String::new();
     /// Compact output for agents connected through the MCP server (`solidcraft-cli mcp`, docs/mcp.md):
     /// `inspect_design` summarises sketches and tool JSON is not pretty-printed. Off: as always.
     /// The server asks once per agent session (`mcp.options`), so a change applies to the next one.
-    mcp_compact: bool = false, PAGE_ASSISTANT;
+    Computer mcp_compact: bool = false, PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
     /// Default: Alt/Option. Set to Ctrl/Cmd for the alternate mapping.
-    suppress_sketch_snap: ModifierCombo = ModifierCombo::CTRL_ALT, PAGE_SKETCH;
+    Profile suppress_sketch_snap: ModifierCombo = ModifierCombo::CTRL_ALT, PAGE_SKETCH;
     /// Temporary horizontal/vertical guides from hovered centres and edge midpoints.
-    sketch_tracking_guides: bool = true, PAGE_SKETCH;
+    Profile sketch_tracking_guides: bool = true, PAGE_SKETCH;
     /// While a drawing tool waits for a point, hovered sketch points (ends, corners, free
     /// points) start tracking guides too (#9105). Off: only centres and midpoints, as before.
-    sketch_tracking_points: bool = true, PAGE_SKETCH;
+    Profile sketch_tracking_points: bool = true, PAGE_SKETCH;
     /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
     /// Off: the guides stay visual and the cursor does not move (#8694).
-    sketch_recent_snap: bool = false, PAGE_SKETCH;
+    Profile sketch_recent_snap: bool = false, PAGE_SKETCH;
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
-    sketch_align_points: bool = false, PAGE_SKETCH;
+    Profile sketch_align_points: bool = false, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
-    project_options_dialog: bool = true, PAGE_SKETCH;
+    Profile project_options_dialog: bool = true, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
-    manipulator_free_alt: bool = true, PAGE_SKETCH;
+    Profile manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
     /// tooltip names the state (#7245). Off: every sketch has the same icon, as before.
-    sketch_state_icons: bool = true, PAGE_SKETCH;
+    Profile sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
-    sketch_construction_lines: bool = true, PAGE_SKETCH;
+    Profile sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
-    sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    Profile sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
-    shortcut_cycles_modes: bool = false, PAGE_SKETCH;
+    Profile shortcut_cycles_modes: bool = false, PAGE_SKETCH;
     /// A click on the ribbon button of the sketch tool that is running ends the tool, so clicks
     /// in the view select again (#10151). Off: the click starts the tool again, as before.
-    ribbon_click_ends_tool: bool = true, PAGE_SKETCH;
+    Profile ribbon_click_ends_tool: bool = true, PAGE_SKETCH;
     /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
     /// it is, and Look At faces the sketch when asked.
-    sketch_open_look_at: bool = true, PAGE_SKETCH;
+    Profile sketch_open_look_at: bool = true, PAGE_SKETCH;
     /// A sketch started on a face of a body in another component than the active one activates
     /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
     /// #10215). Off (the default): the sketch belongs to the active component, as before.
-    sketch_face_activates_part: bool = false, PAGE_SKETCH;
+    Profile sketch_face_activates_part: bool = false, PAGE_SKETCH;
     /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
     /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
     /// runs its command, and one that builds a feature finishes the sketch first (#2815).
-    sketch_keys_only: bool = false, PAGE_SHORTCUTS;
+    Profile sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
-    sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
+    Profile sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
     /// other size the shape has at its size as drawn (`sketch.draw.dimensioned` with `as_drawn`).
     /// Shapes `solidcraft_engine::dimension_roles` doesn't list are drawn as before.
-    sketch_auto_dimensions: bool = false, PAGE_SKETCH;
+    Profile sketch_auto_dimensions: bool = false, PAGE_SKETCH;
     /// With `sketch_auto_dimensions`: new shapes are also placed from the sketch origin until they
     /// are fully constrained (`sketch.draw.dimensioned` with `locate`). A shape already anchored to
     /// the origin or to placed geometry gets nothing more.
-    sketch_auto_locate: bool = false, PAGE_SKETCH;
+    Profile sketch_auto_locate: bool = false, PAGE_SKETCH;
     /// A centre-point arc runs the way the cursor goes round its centre from the start (#6645).
     /// Off: it always runs counter-clockwise from the start, as it did before.
-    center_arc_follows_cursor: bool = true, PAGE_SKETCH;
+    Profile center_arc_follows_cursor: bool = true, PAGE_SKETCH;
     /// In the Line tool, a press, a drag and the release draw one line from the press to the
     /// release and end there (#7247); clicks still draw a chain. Off (the default): a drag is a
     /// click that moved on the way, placing a point where it is let go (#2448).
-    line_drag_draws_one: bool = false, PAGE_SKETCH;
+    Profile line_drag_draws_one: bool = false, PAGE_SKETCH;
     /// In the Line tool, leaving the chain's last point and resting back on it switches to a
     /// tangent arc, and the same again back to lines (#9489). Off (the default): resting there
     /// does nothing, and tangent arcs are the Arc tool's.
-    line_hover_tangent_arc: bool = false, PAGE_SKETCH;
+    Profile line_hover_tangent_arc: bool = false, PAGE_SKETCH;
     /// Allow ordinary edge picks through faces in Shaded with hidden edges.
     /// Off preserves the visible-only picking used in v0.30.1.
-    select_hidden_edges: bool = false, PAGE_SKETCH;
+    Profile select_hidden_edges: bool = false, PAGE_SKETCH;
     /// Include hidden geometry and a small pointer neighbourhood in Select Other.
-    select_other_hidden: bool = true, PAGE_SKETCH;
+    Profile select_other_hidden: bool = true, PAGE_SKETCH;
     /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
     /// window at it whose arrows step the value (#7246, `dim_view::window`).
-    dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
+    Profile dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
     /// What the dimension window's arrows, Up/Down and the wheel add to a length (millimetres,
     /// converted to the unit the value is written in) and to an angle (degrees).
-    dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
-    dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
+    Profile dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
+    Profile dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
-    selection_shift_add_only: bool = false, PAGE_SKETCH;
+    Profile selection_shift_add_only: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
-    prefer_free_sketch_points: bool = true, PAGE_SKETCH;
+    Profile prefer_free_sketch_points: bool = true, PAGE_SKETCH;
     /// While the open sketch's constraints conflict, the curves and points a failing constraint
     /// holds, and its glyph or dimension, are drawn in `sketch_conflict` (#7244). Off: only the
     /// glyphs and dimensions are red, in `error`, as before.
-    sketch_conflict_colour: bool = true, PAGE_SKETCH;
+    Profile sketch_conflict_colour: bool = true, PAGE_SKETCH;
     /// Hide constraint glyphs when the sketch is zoomed out so far that a millimetre of the plane
     /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980) and the sketch spans
     /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
     /// size at every zoom, as before.
-    hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
+    Profile hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
     /// The Ellipse tool draws the major and minor axes as construction lines with the ellipse, so
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
-    ellipse_axes: bool = true, PAGE_SKETCH;
+    Profile ellipse_axes: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
-    drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
+    Profile drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
     /// is still picked and highlighted, as before #7273. Off by default: such a drag picks nothing,
     /// so a step neither meshes the dragged bodies where they stand nor looks up the Browser row a
     /// highlight follows (`drag_layer::holds_pointer`).
-    move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
+    Profile move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
-    disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    Computer disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
 }
 
 /// What a middle-button double-click in the view does.
@@ -6266,12 +6283,13 @@ mod tests {
         let groups: Vec<_> = WINDOW_PAGES.iter().enumerate().filter_map(|(i, p)| p.group.map(|g| (i, crate::i18n::tr(g)))).collect();
         assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
         let mut fields = std::collections::BTreeSet::new();
-        for (field, page) in FIELD_PAGES {
-            assert!(fields.insert(field), "duplicate home for {field}");
-            assert!(page.is_none_or(|p| p < PAGES.len()), "invalid page for {field}");
+        for field in FIELDS {
+            assert!(fields.insert(field.key), "duplicate home for {}", field.key);
+            assert!(field.page.is_none_or(|p| p < PAGES.len()), "invalid page for {}", field.key);
         }
         let saved = serde_json::to_value(Prefs::default()).unwrap();
-        assert_eq!(fields.len(), saved.as_object().unwrap().len(), "every stored field has exactly one metadata entry");
+        let stored = saved.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(fields, stored, "every stored field has exactly one scope and page entry");
         for (i, name) in PAGES.iter().enumerate() {
             assert_eq!(crate::i18n::tr(WINDOW_PAGES[i].label), *name);
             assert_eq!(WINDOW_PAGES[i].handle, format!("prefs:page:{name}"));
@@ -7697,11 +7715,12 @@ mod tests {
             h.call("ui.prefs", json!({"button":"defaults"}));
             let reset = serde_json::to_value(&h.app.preferences).unwrap();
             let defaults = serde_json::to_value(Prefs::default()).unwrap();
-            for (field, owner) in FIELD_PAGES {
+            for field in FIELDS {
                 assert_eq!(
-                    &reset[*field],
-                    if *owner == Some(PAGE_SKETCH) { &defaults[*field] } else { &expected[*field] },
-                    "{field}: only Sketch resets"
+                    &reset[field.key],
+                    if field.page == Some(PAGE_SKETCH) { &defaults[field.key] } else { &expected[field.key] },
+                    "{}: only Sketch resets",
+                    field.key
                 );
             }
             assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));

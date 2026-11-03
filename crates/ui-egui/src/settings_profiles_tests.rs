@@ -15,11 +15,12 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 }
 
 #[test]
-fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
+fn a_profile_holds_personal_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 100, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 167, "profiles retain the previous 100 settings and include the new personal preferences");
     for key in [
         "nav",
+        "nav_drag_keeps_mode",
         "mouse_gestures",
         "radial_context_menu",
         "zoom_reverse",
@@ -27,10 +28,76 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "ui_scale",
         "ui_font",
         "navigator_style",
+        "navigator_texture",
+        "navigator_arrows",
+        "navigator_home",
+        "ellipse_axes",
+        "select_hidden_edges",
         "nav_bridge_enabled",
         "nav_bridge_port",
         "language",
         "suppress_sketch_snap",
+        "dimension_input",
+        "dimension_step_mm",
+        "dimension_step_deg",
+        "default_units",
+        "length_decimals",
+        "angle_decimals",
+        "parameter_list_rows",
+        "step_values",
+        "value_boxes_in_view",
+        "update_changed_links",
+        "double_click_components",
+        "insert_lists_open_designs",
+        "up_axis",
+        "offer_stand_up",
+        "stand_up_unknown",
+        "hide_origin",
+        "measure_axis_distances",
+        "assembly_move_handles",
+        "joint_rotation_coarse",
+        "joint_rotation_fine",
+        "extrude_auto_to_object",
+        "extrude_view_isometric",
+        "extrude_view_return",
+        "auto_operation",
+        "remember_dialog_values",
+        "hole_snaps",
+        "hole_moves",
+        "placement_handles",
+        "drive_joints_ghost",
+        "move_drag_highlights",
+        "invert_curved_roll_arrows",
+        "single_surface_analysis",
+        "dark_parts_shading",
+        "ground_shadow_follows_model",
+        "cosmetic_threads",
+        "reference_geometry_through_bodies",
+        "sketch_halo",
+        "show_view_angles",
+        "perspective_fov",
+        "reopen_designs",
+        "keep_unsaved_in_browser",
+        "keep_unsaved_also_asks",
+        "print_face_highlight",
+        "grid_follows_view",
+        "vertex_markers",
+        "parameters_apply_live",
+        "render_shots_strip",
+        "render_inspector_side",
+        "render_inspector_width",
+        "render_browser_side",
+        "render_browser_width",
+        "save_mesh_format",
+        "save_mesh_quality",
+        "view_dxf_dashed",
+        "view_dxf_tolerance",
+        "section_hatch",
+        "preview_tint_new_faces",
+        "cut_preview_tint",
+        "browser_components_open",
+        "browser_rows_start_closed",
+        "sketch_keys_only",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
@@ -43,16 +110,47 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_reverse",
         "space_mouse_buttons",
         "space_mouse_enabled",
-        "dark_parts_shading",
         "msaa",
         "window_system",
-        "default_units",
-        "extrude_view_isometric",
-        "extrude_view_return",
         "update",
         "agents",
         "custom_themes",
+        "background_image",
+        "agent_instructions",
+        "mcp_compact",
         "orbit_cursor",
+        "graphics_adapter",
+        "ambient_occlusion",
+        "display_quality",
+        "supersampling",
+        "supersampling_adaptive",
+        "render_previous_geometry_budget",
+        "show_frame_rate",
+        "frame_rate_details",
+        "profile_operations",
+        "validation",
+        "max_step_file_mb",
+        "max_design_file_mb",
+        "network_locations",
+        "network_hosts",
+        "open_designs",
+        "send_slicer",
+        "custom_slicers",
+        "slicer_single_instance",
+        "disabled_plugins",
+        "ai_features",
+        "agent_control",
+        "connect_ai_apps",
+        "ai_permissions",
+        "agent_permissions",
+        "check_updates",
+        "slicer_resend_hint_seen",
+        "easyprint_consent",
+        "render_library_recent",
+        "hole_presets",
+        "personal_sheet_rules",
+        "render_library_favorites",
+        "sketch_variants",
     ] {
         assert!(!keys.contains(&key), "{key} stays out of a profile");
     }
@@ -60,6 +158,65 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let doc = capture(&h.app, "Laptop");
     assert_eq!(doc["format"], FORMAT);
     assert_eq!(sanitize(&doc).unwrap(), doc, "a captured profile passes its own checks unchanged");
+}
+
+#[test]
+fn personal_design_and_tool_settings_survive_profile_export_import_and_apply() {
+    let mut h = Harness::new();
+    let personal = json!({
+        "default_units":"in", "length_decimals":4, "extrude_view_isometric":true,
+        "extrude_view_return":true, "dark_parts_shading":true, "invert_curved_roll_arrows":true,
+        "grid_follows_view":true, "save_mesh_format":"obj", "save_mesh_quality":"fine",
+        "ground_shadow_follows_model":true, "ribbon_tabs_only":true, "remember_dialog_values":true,
+        "move_drag_highlights":true
+    });
+    let out = h.call("ui.prefs", personal.clone());
+    assert!(out["error"].is_null(), "{out}");
+    run(&mut h, "settings.profile.save", json!({"name":"Inch tools"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Inch tools"}))["profile"].clone();
+    for (key, value) in personal.as_object().unwrap() {
+        assert_eq!(&profile["preferences"][key], value, "export must retain {key}");
+    }
+    let mut other = Harness::new();
+    run(&mut other, "settings.profile.import", json!({"profile":profile}));
+    assert_eq!(other.app.preferences.default_units, "mm", "import does not apply the profile");
+    let out = run(&mut other, "settings.profile.apply", json!({"name":"Inch tools"}));
+    assert_eq!(out["skipped"], json!([]));
+    let applied = other.call("ui.prefs", json!({}));
+    for (key, value) in personal.as_object().unwrap() {
+        assert_eq!(&applied["result"][key], value, "apply must restore {key}");
+    }
+}
+
+#[test]
+fn older_profiles_leave_newly_supported_settings_unchanged() {
+    let mut h = Harness::new();
+    h.app.preferences.default_units = "in".into();
+    h.app.preferences.extrude_view_isometric = true;
+    h.app.preferences.dark_parts_shading = true;
+    let old = json!({"format":FORMAT, "name":"Older", "preferences":{"zoom_reverse":true}});
+    run(&mut h, "settings.profile.import", json!({"profile":old}));
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Older"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert_eq!(h.app.preferences.default_units, "in");
+    assert!(h.app.preferences.extrude_view_isometric && h.app.preferences.dark_parts_shading);
+    assert!(h.app.preferences.zoom_reverse);
+}
+
+#[test]
+fn profile_summary_distinguishes_personal_and_computer_settings_on_mixed_pages() {
+    use crate::prefs::ProfileScope::{Computer, Profile};
+    let held: Vec<_> = crate::settings_profiles::groups(Profile).collect();
+    let computer: Vec<_> = crate::settings_profiles::groups(Computer).collect();
+    assert!(held.contains(&("ui.design", "prefs_design", true)));
+    assert!(held.contains(&("ui.graphics", "prefs_graphics", true)));
+    assert!(computer.contains(&("ui.graphics", "prefs_graphics", true)));
+    assert!(held.iter().any(|(label, _, partial)| *label == "ui.navigation" && !partial));
+    assert!(!computer.iter().any(|(label, _, _)| *label == "ui.navigation"));
+    assert!(held.iter().any(|(label, _, partial)| *label == "prefs.structure.tools" && !partial));
+    assert!(computer.iter().any(|(label, _, partial)| *label == "prefs.assistant" && !partial));
+    assert!(!held.iter().any(|(label, _, _)| *label == "prefs.assistant"));
+    assert!(held.iter().any(|(label, _, _)| *label == "prefs.profiles_other_settings"));
 }
 
 #[test]
@@ -274,7 +431,12 @@ fn hostile_profiles_are_refused_or_cut_down_without_panicking() {
         "format": FORMAT,
         "name": "A",
         "unknown": 1,
-        "preferences": {"ui_scale": "big", "msaa": 8, "nav": "solidworks", "space_mouse_speed": 9.0, "no_such": true, "zoom_reverse": true},
+        "preferences": {
+            "ui_scale": "big", "msaa": 8, "nav": "solidworks", "space_mouse_speed": 9.0, "no_such": true, "zoom_reverse": true,
+            "max_design_file_mb":1024, "network_locations":true, "network_hosts":["example.test"], "open_designs":["private.sc"],
+            "send_slicer":"local-slicer", "custom_slicers":["local-slicer"], "slicer_single_instance":false,
+            "ai_features":false, "agent_control":false, "disabled_plugins":["local-only"]
+        },
         "shortcuts": Value::Object(shortcuts),
         "favourites": (0..500).map(|i| json!(format!("f{i}"))).chain([json!(3), json!("x".repeat(300))]).collect::<Vec<_>>(),
         "themes": [{"format": "solidcraft-theme/1", "name": "Bad", "base": "grey"}],
@@ -739,7 +901,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_baseline_and_explicit_additions() {
+fn profile_keys_retain_every_previously_saved_setting() {
     let expected = [
         "browser_bodies_folders",
         "browser_collapsed",
@@ -845,7 +1007,9 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     assert_eq!(expected.len(), 100);
-    assert_eq!(actual, expected);
+    for key in expected {
+        assert!(actual.contains(&key), "older profiles must still restore {key}");
+    }
 }
 
 #[test]
@@ -854,7 +1018,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let defaults = crate::prefs::Prefs::default();
     assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc && !defaults.ribbon_menus_follow_hover);
     for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
-        let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
+        let homes: Vec<_> = crate::prefs::FIELDS.iter().filter_map(|field| (field.key == key).then_some(field.page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
     }
     h.app.preferences.nav_bridge_enabled = true;
@@ -886,7 +1050,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     ] {
         assert_eq!(doc["preferences"][key], value, "capture retains {key}");
     }
-    assert!(doc["preferences"].get("dark_parts_shading").is_none());
+    assert_eq!(doc["preferences"]["dark_parts_shading"], false);
     assert_eq!(sanitize(&doc).unwrap(), doc);
     h.app.settings_profiles.load(&serde_json::from_str::<Value>(&serde_json::to_string(&saved).unwrap()).unwrap());
     assert_eq!(h.app.settings_profiles.list[0], doc);

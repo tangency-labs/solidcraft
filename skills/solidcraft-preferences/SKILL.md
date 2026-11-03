@@ -14,7 +14,8 @@ People rely on how SolidCraft behaves today. A change that makes users see or do
   - `Changes a default: yes - <what changes>, old behaviour kept behind preference <name>`
 
 ## Adding a preference
-Settings live in the `preference_settings!` table in `crates/ui-egui/src/prefs.rs`: the field, its default, the page whose reset restores it, an optional accepted range for the control channel, and the form control. Add one row there.
+Settings live in the `preference_settings!` table in `crates/ui-egui/src/prefs.rs`: the profile scope, field, default, page whose reset restores it, optional accepted range for the control channel, and form control. Add one row there.
+- Every row starts with `Profile` or `Computer`. Use `Profile` for personal workflow and appearance settings; use `Computer` for device configuration, performance, local paths, programs, permissions and bookkeeping. The macro requires this choice. Profiles and the General page's summary both use it, independently of the setting's page. Keep personal libraries local unless their separate import/export policy changes.
 - A new setting that changes nothing by default needs no `yes` on the line; one that changes what users see by default does.
 - Give it a label and help text through the catalogs (`skills/solidcraft-ui-text/SKILL.md`).
 - A reset on its page restores the default; fields left out of every page keep their values when defaults are restored.
