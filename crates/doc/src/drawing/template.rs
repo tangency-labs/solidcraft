@@ -23,7 +23,7 @@ use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, Pa
 use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::{self, CellKind};
 
-use super::{Drawing, fields};
+use super::Drawing;
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 use crate::{DocError, Document, Result};
@@ -157,18 +157,16 @@ pub fn apply(drawing: &Drawing, template: &Drawing) -> Result<(Drawing, Vec<Rest
     let mut changed = Vec::new();
     for (at, sheet) in d.sheets.iter_mut().enumerate() {
         let Some(from) = template.sheets.get(at).or(template.sheets.last()) else { continue };
-        let kept = |name: &String| fields::overridable(from.title_block.as_ref(), name);
-        let lost: Vec<String> = sheet.title_block_overrides.keys().filter(|name| !kept(name)).cloned().collect();
         let paper = sheet.sheet != from.sheet;
         let (border, title_block) = (sheet.border != from.border, sheet.title_block != from.title_block);
-        if !(paper || border || title_block || !lost.is_empty()) {
+        // A sheet's typed text is always its own block's ([`Drawing::validate`]), so the same block loses none.
+        if !(paper || border || title_block) {
             continue;
         }
         let sheet = Arc::make_mut(sheet);
         sheet.sheet = from.sheet;
         sheet.border = from.border;
-        sheet.title_block = from.title_block.clone();
-        sheet.title_block_overrides.retain(|name, _| kept(name));
+        let lost = sheet.set_title_block(from.title_block.clone());
         changed.push(Restyled { sheet: sheet.id, paper, border, title_block, lost });
     }
     d.validate()?;

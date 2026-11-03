@@ -234,6 +234,16 @@ impl Sheet {
         let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
         Ok(Some(block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?.outline))
     }
+
+    /// Gives the sheet `block` (`None`: no title block). Text typed over a cell stays while `block`
+    /// has a text cell of that name; answers the cells whose typed text is dropped.
+    pub fn set_title_block(&mut self, block: Option<TitleBlock>) -> Vec<String> {
+        let kept = |name: &String| fields::overridable(block.as_ref(), name);
+        let lost = self.title_block_overrides.keys().filter(|name| !kept(name)).cloned().collect();
+        self.title_block_overrides.retain(|name, _| kept(name));
+        self.title_block = block;
+        lost
+    }
 }
 
 /// What is on one of a drawing's sheets ([`Drawing::on_sheet`]), each kind by id.

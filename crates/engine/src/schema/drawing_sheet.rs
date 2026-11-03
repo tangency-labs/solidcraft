@@ -231,6 +231,10 @@ pub struct SheetsResult {
     /// author's choice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<super::drawing_view::OutsideResult>,
+    /// After a new title block from `drawing.sheet.set`, the cells whose typed text it drops: it has
+    /// no text cell of that name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lost: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::drawing::fields::overridable;
 use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
@@ -54,7 +53,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "sheet: id or name; name?, size?, orientation?, title_block?: a definition or null (a new block keeps the overrides of the text cells it still has), dpi?; \
              documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
              its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper or title block `outside`: the sheet's views whose \
-             boundary leaves its drawing space (none is moved). One undo step, none when nothing changes.",
+             boundary leaves its drawing space or lies over its title block (none is moved), and after a new title block `lost`: the cells whose typed text \
+             it drops. One undo step, none when nothing changes.",
         ),
     CommandSpec::new("drawing.sheet.reorder", "Reorder Sheets", crate::checked!("drawing.sheet.reorder", reorder))
         .icon("reorder")
@@ -77,9 +77,9 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 /// The drawing's sheets, as each command answers (`sheet`: the one `drawing.sheet.add` made;
 /// `outside`: the views `drawing.sheet.set`'s paper leaves outside).
-fn answer(s: &Session, cmd: &str, sheet: Option<u64>, outside: Vec<OutsideResult>) -> Result<Value> {
+fn answer(s: &Session, cmd: &str, sheet: Option<u64>, outside: Vec<OutsideResult>, lost: Vec<String>) -> Result<Value> {
     let sheets = s.drawing(cmd)?.sheets.iter().map(|sheet| SheetName { id: ids::encode(sheet.id), name: sheet.name.clone() }).collect();
-    let reply = SheetsResult { sheet: sheet.map(ids::encode), sheets, outside, param_warnings: Vec::new() };
+    let reply = SheetsResult { sheet: sheet.map(ids::encode), sheets, outside, lost, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -116,8 +116,9 @@ fn sheet_at(cmd: &str, d: &Drawing, p: &Value, key: &str) -> Result<usize> {
     d.sheet_index(named).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// The settings `p` gives a sheet, over the ones it has.
-fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
+/// The settings `p` gives a sheet, over the ones it has. Answers the cells whose typed text a new
+/// title block drops ([`Sheet::set_title_block`]).
+fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
     if let Some(name) = p.get("name") {
         sheet.name = name.as_str().ok_or_else(|| bad(cmd, "`name` must be text"))?.to_string();
     }
@@ -129,18 +130,14 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
         sheet.sheet.orientation =
             serde_json::from_value::<Orientation>(orientation.clone()).map_err(|_| bad(cmd, "`orientation` is landscape or portrait"))?;
     }
-    match p.get("title_block") {
-        None => {}
-        Some(Value::Null) => sheet.title_block = None,
+    let lost = match p.get("title_block") {
+        None => Vec::new(),
+        Some(Value::Null) => sheet.set_title_block(None),
         Some(block) => {
             let block = serde_json::from_value::<TitleBlock>(block.clone()).map_err(|e| bad(cmd, format!("`title_block`: {e}")))?;
-            sheet.title_block = Some(block);
+            sheet.set_title_block(Some(block))
         }
-    }
-    if p.get("title_block").is_some() {
-        let block = sheet.title_block.clone();
-        sheet.title_block_overrides.retain(|name, _| overridable(block.as_ref(), name));
-    }
+    };
     match p.get("title_block_overrides") {
         None => {}
         Some(Value::Null) => sheet.title_block_overrides.clear(),
@@ -179,7 +176,7 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
         };
         sheet.excluded = Excluded { count: flag("count", sheet.excluded.count)?, print: flag("print", sheet.excluded.print)? };
     }
-    Ok(())
+    Ok(lost)
 }
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -196,23 +193,23 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         d.sheets.insert(after + 1, Arc::new(sheet));
         Ok(())
     })?;
-    answer(s, cmd, Some(id), Vec::new())
+    answer(s, cmd, Some(id), Vec::new(), Vec::new())
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
-    let (id, room) = s.edit_drawing(cmd, |d| {
+    let (id, room, lost) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
         let was = (sheet.sheet, sheet.title_block.clone());
-        apply(cmd, sheet, p)?;
-        Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was))
+        let lost = apply(cmd, sheet, p)?;
+        Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was, lost))
     })?;
     // Only a change of paper or block changes the room views have; each view measured once.
     let d = s.drawing(cmd)?;
     let on: Vec<u64> = if room { d.on_sheet(id).views } else { Vec::new() };
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, d, &on, cmd)?);
-    answer(s, cmd, None, outside)
+    answer(s, cmd, None, outside, lost)
 }
 
 fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -238,7 +235,7 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         d.sheets = sheets;
         Ok(())
     })?;
-    answer(s, cmd, None, Vec::new())
+    answer(s, cmd, None, Vec::new(), Vec::new())
 }
 
 /// Whether `p` asks for what is in the way to go too: `contents: "delete"`, refused otherwise with
@@ -283,7 +280,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         d.remove_sheet(sheet.id);
         Ok(())
     })?;
-    answer(s, cmd, None, Vec::new())
+    answer(s, cmd, None, Vec::new(), Vec::new())
 }
 
 #[cfg(test)]

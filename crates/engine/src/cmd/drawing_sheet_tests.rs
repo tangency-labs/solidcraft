@@ -363,7 +363,18 @@ fn a_title_blocks_cells_read_the_model() {
     assert_eq!(overrides(&s), BTreeMap::from([("title".to_string(), "Bracket, left".to_string())]));
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"title": null}}));
     assert!(overrides(&s).is_empty());
-    run(&mut s, "drawing.sheet.set", title);
+    run(&mut s, "drawing.sheet.set", title.clone());
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": null}));
     assert!(overrides(&s).is_empty());
+    // A new block without that text cell drops its typed text, and the reply names the cell.
+    run(&mut s, "drawing.sheet.set", title);
+    let mut renamed = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    for cell in renamed["cells"].as_array_mut().unwrap().iter_mut().filter(|cell| cell["name"] == "title") {
+        cell["name"] = json!("heading");
+    }
+    let reply = run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": renamed}));
+    assert_eq!(reply["lost"], json!(["title"]));
+    assert!(overrides(&s).is_empty());
+    let reply = run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block()}));
+    assert!(reply.get("lost").is_none(), "nothing typed, nothing lost: {reply}");
 }
