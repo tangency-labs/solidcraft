@@ -1245,6 +1245,17 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-92--addendum-2026-11-01-topological-vertex-cusps-and-errors.md`).
     /// Off by default for pinned C++ parity.
     pub is_topological_vertex_rejects_cusps_and_tangent_errors: bool,
+    /// `SmVertex::IsTopologicalVertex` ([`crate::topology::vertex::is_topological_vertex`])
+    /// counts a vertex as removable only when every one of its uses is an edge use of its
+    /// two edges, the precondition of joining two edges at a vertex (Mäntylä's `KEV`).
+    /// Upstream counts only edges, so a vertex that also is a vertex loop in another face
+    /// (two solids touching at one point that lies inside an edge: a sphere touching a box
+    /// face on its seam meridian) passed. `SmMerge::BooleanPostProcess` then joined the
+    /// edge's two halves through `DeleteTopologicalVertex`, whose `SqueezeEdge` moved the
+    /// other face's vertex loop to the far end of the deleted half (the sphere's pole,
+    /// 7.5 off the face: `Bad Vertex Gap`) (WR-727, #2520). Off by default for pinned C++
+    /// parity.
+    pub topological_vertex_has_only_edge_uses: bool,
     /// An offset surface evaluated beyond its base's domain extends the base itself on every side that can grow at once, each by the domain size times the least power of two that reaches the point and never less than the extension it replaces, so two copies of one offset give the same points whatever was evaluated first (WR-458, #419; the fork's tangency-labs/smlib@9f54d05 (was 2d7c7ed)).
     pub offset_extension_from_base: bool,
     /// With `offset_extension_from_base` (which must be on too; this flag does nothing without it), an offset surface whose base is a cylinder, cone, sphere or torus extends that base past its domain as itself, where upstream's tangent ruled extension (G1R) leaves the surface at once: a cylinder R25 continued 0.44 past its face's end was 0.0036 off the circle, and a round traced there was built that far off all along (WR-633, #960; the SolidCraft fork's tangency-labs/smlib@de0a6b8, branch `replay/1.0.1`). The extension is built from the analytic surface (the fork's @93db777): the base's spans are kept and new ones joined at its ends with a knot of full multiplicity, every row round the axis continues in rational quadratic arc spans, a sphere's or torus's generator in quarter turns, and a cone's line straight. Round the axis it reaches no further than closing the turn, half the gap past either end, and once it reaches the closure that direction wraps like a periodic one (WR-650, #1986; the fork's @b298cc2): a 294 deg arc was extended to 882 deg and more. A surface of revolution whose generator is an arc of one circle (SMLib's concave round of a circular edge) continues it as its own circle, as a torus does (the fork's @43fd6b6).

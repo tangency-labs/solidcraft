@@ -62,6 +62,10 @@
 //!   [`crate::kernel::UpstreamFixes::is_topological_vertex_rejects_cusps_and_tangent_errors`],
 //!   a failed start-tangent evaluation propagates `Err` and tangents are oriented
 //!   through the vertex so cusps return `Ok(false)` (WR-92).
+//! - **Other uses.** `IsTopologicalVertex` counts only the vertex's edges, so a vertex
+//!   that also is a vertex loop in another face (a point contact inside an edge) is
+//!   removable; with [`crate::kernel::UpstreamFixes::topological_vertex_has_only_edge_uses`]
+//!   a vertex with any use that is not an edge use is not (WR-727).
 //! - **Curve identity.** Each edge owns its curve, so `pCurve1 != pCurve2` in
 //!   `IsTopologicalVertex` is false only when neither edge has a curve (upstream two
 //!   edges may share one curve object; the difftest rejects such B-reps).
@@ -852,7 +856,10 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
 /// With [`crate::kernel::UpstreamFixes::is_topological_vertex_rejects_cusps_and_tangent_errors`],
 /// edge tangents are oriented along traversal through `v` so `180°` cusps return
 /// `Ok(false)`, and a failed start-tangent evaluation (`GetEndTangent(true)`) propagates
-/// its [`SolidError`] instead of returning `Ok(true)` (WR-92).
+/// its [`SolidError`] instead of returning `Ok(true)` (WR-92). With
+/// [`crate::kernel::UpstreamFixes::topological_vertex_has_only_edge_uses`], a vertex
+/// with a use that is not an edge use (a vertex loop in another face) is not
+/// topological (WR-727).
 ///
 /// # Errors
 ///
@@ -877,6 +884,16 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
     // the seam
     if edge1 == edge2 {
         return Ok(false);
+    }
+
+    // WR-727: joining the two edges removes every use of the vertex, so a use that is
+    // not one of theirs (a vertex loop in another face, a shell vertex) keeps it
+    if k.fixes.topological_vertex_has_only_edge_uses {
+        for vu in vertexuses(b, v)? {
+            if !vertexuse::is_edge_vertexuse(b, vu)? {
+                return Ok(false);
+            }
+        }
     }
 
     // skip verices marking poles
