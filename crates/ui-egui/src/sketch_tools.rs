@@ -1668,28 +1668,24 @@ fn glyph_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 
 
 /// The constraints that draw a glyph: no dimensions, one MidPoint glyph where lines' midpoints
 /// meet, and a pattern's constraints once, on its first instance.
-fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> Vec<&solidcraft_engine::sketch::Constraint> {
-    let mut midpoints: Vec<usize> = Vec::new();
-    sk.constraints
-        .iter()
-        .filter(|c| {
-            if c.kind.is_dimension() {
+fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<Item = &solidcraft_engine::sketch::Constraint> {
+    let mut midpoints = std::collections::HashSet::new();
+    sk.constraints.iter().filter(move |c| {
+        if c.kind.is_dimension() {
+            return false;
+        }
+        if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
+            && !c.driven
+        {
+            if !midpoints.insert(p) {
                 return false;
             }
-            if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
-                && !c.driven
-            {
-                if midpoints.contains(&p) {
-                    return false;
-                }
-                midpoints.push(p);
-            }
-            !(matches!(
-                c.kind,
-                solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
-            ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
-        })
-        .collect()
+        }
+        !(matches!(
+            c.kind,
+            solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
+        ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
+    })
 }
 
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
