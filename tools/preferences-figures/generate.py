@@ -576,6 +576,9 @@ def main():
     parts.append('\n'.join(slot_table) + '\n')
     parts.append('use egui::{Painter, Rect};\nuse super::preferences_figure_ops::paint;\n')
     for n in names:
+        if n == 'mouse-mapping':
+            parts.append('/// The mouse figure, with its own slightly heavier lettering.\npub(crate) fn paint_mouse_mapping(p: &Painter, rect: Rect) {\n    super::preferences_figure_ops::paint_mouse(p, rect);\n}\n')
+            continue
         parts.append('/// The `%s` figure of `docs/design/preferences/figures`.\npub(crate) fn %s(p: &Painter, rect: Rect) {\n    paint(p, rect, &%s, None, None);\n}\n' % (n, fn_name(n), const_name(n)))
     parts.append('/// Every figure painter by file name, for the gallery and the tests.\npub(crate) const FIGURES: &[(&str, [f32; 2], fn(&Painter, Rect))] = &[\n%s];\n' % ''.join('    ("%s", %s.size, %s),\n' % (n, const_name(n), fn_name(n)) for n in names))
     open(OUT, 'w', encoding='utf8', newline='\n').write('\n'.join(parts))

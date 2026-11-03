@@ -75,7 +75,7 @@ pub(super) fn card_width(available: f32, columns: usize, gap: f32) -> f32 {
 }
 
 fn card_height(t: &Tokens, width: f32, card: &Card) -> f32 {
-    let pad = t.space_6;
+    let pad = t.space_4;
     let aspect = if card.aspect.is_finite() && card.aspect > 0.01 { card.aspect } else { 1.0 };
     let figure = ((width - 2.0 * pad).max(0.0) / aspect).min(dimension(f32::MAX));
     let sub = if card.sub.is_some() { t.space_14 } else { 0.0 };
@@ -138,7 +138,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     if look.focus_ring {
         p.rect_stroke(rect.expand(t.space_2), radius + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
-    let inset = t.space_6;
+    let inset = t.space_4;
     let figure = Rect::from_min_size(
         rect.min + vec2(inset, inset),
         vec2((rect.width() - 2.0 * inset).max(0.0), ((rect.width() - 2.0 * inset).max(0.0) / card.aspect.max(0.01)).min(rect.height())),
@@ -147,7 +147,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
         let figure_painter = p.with_clip_rect(figure.intersect(p.clip_rect()));
         (card.figure)(&figure_painter, figure);
         if !enabled {
-            p.rect_filled(figure, 0.0, t.control_fill.gamma_multiply(0.5));
+            p.rect_filled(figure, (radius - inset).max(0.0), t.control_fill.gamma_multiply(0.5));
         }
     }
     let ink = match look.ink {
