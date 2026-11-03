@@ -401,9 +401,13 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                     let covering = entry.get("covering").and_then(vec3).ok_or_else(|| bad(cmd, "a corner needs a covering edge point"))?;
                     let covered = entry.get("covered").and_then(vec3).ok_or_else(|| bad(cmd, "a corner needs a covered edge point"))?;
-                    let corner_type = str_(entry, "corner_type")
-                        .filter(|kind| ["butt", "partial", "full"].contains(kind))
-                        .ok_or_else(|| bad(cmd, "corner type must be butt, partial or full"))?;
+                    let corner_type = match entry.get("corner_type").filter(|v| !v.is_null()) {
+                        Some(v) => v.as_str()
+                            .filter(|kind| ["butt", "partial", "full"].contains(kind))
+                            .ok_or_else(|| bad(cmd, "corner type must be butt, partial or full"))?
+                            .to_string(),
+                        None => "butt".to_string(),
+                    };
                     let overlap = expr(entry, "overlap");
                     if corner_type == "partial" && overlap.is_none() {
                         return Err(bad(cmd, "partial overlap needs an overlap length"));
