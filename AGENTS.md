@@ -60,7 +60,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 A pull request is green when they pass. The difftest against the C++ reference is a tool, not
 the gate: maintainers run it on a pull request that needs it, from the CI workflow's Run workflow
 with `difftest` set (`.github/workflows/ci.yml`), and the reference it builds is set in
-`scripts/upstream-pin.env`. When it runs, it holds the rules below.
+`scripts/upstream-pin.env`. Pushes to main still run the sweep and publish main's reports,
+which are the exact base a requested run checks against. When it runs, it holds the rules below.
 
 **Difftest parity.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within

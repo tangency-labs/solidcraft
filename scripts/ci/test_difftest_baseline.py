@@ -588,6 +588,15 @@ class WorkflowGateTests(unittest.TestCase):
         # requests, the merge queue or pushes (#2398).
         self.assertIn("github.event_name == 'workflow_dispatch' && inputs.difftest", perturb)
 
+    def test_sweep_publishes_main_and_runs_on_request(self):
+        # Pushes to main still run the sweep, which publishes the reports a requested run's
+        # exact-base check and the site read; pull requests and the merge queue skip it (#2398).
+        sweep = self.jobs()["difftest-sweep"]
+        self.assertIn(
+            "(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.difftest))",
+            sweep,
+        )
+
     def test_sweep_does_not_wait_for_the_base(self):
         sweep = self.jobs()["difftest-sweep"]
         self.assertIn("needs: changes\n", sweep)  # the classifier only, never the base

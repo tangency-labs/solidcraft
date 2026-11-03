@@ -246,11 +246,13 @@ jobs:
           retention-days: 1
 
   difftest-sweep:
-    # Manual runs only (the `difftest` input). Starts right after `changes`: it is the
+    # Pushes to main, where its reports are main's published set (the exact base a requested
+    # run checks against, and the site's case counts), and manual runs with the `difftest`
+    # input. Pull requests and the merge queue skip it. Starts right after `changes`: it is the
     # longest part. Clippy with the cpp feature and the runner tests run in the clippy and test
     # jobs, in parallel with this one.
     needs: changes
-    if: needs.changes.outputs.code == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
     runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -340,7 +342,7 @@ jobs:
         if: always() && steps.green.outputs.any == 'true'
         run: sccache --show-stats || true
 
-  # Mandatory on every pull_request and merge_group run, in parallel with the sweep.
+  # On request only (the `difftest` input), in parallel with the sweep.
   difftest-perturb:
     needs: changes
     if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
