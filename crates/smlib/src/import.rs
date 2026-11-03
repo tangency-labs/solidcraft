@@ -1,6 +1,6 @@
 //! Schema 4 records (`solidcraft_geom::brep::Brep`) into SMLib: the record is laid out as the C
-//! API's flat arrays (`capi/include/smlib.h`, "Flat B-rep arrays"), which `smlib_brep_import`
-//! builds into an `SmBrep`.
+//! API's flat arrays (`capi/include/smlib.h`, "Flat B-rep arrays"), which solidcore builds into
+//! its B-rep ([`crate::core::from_arrays`]).
 //!
 //! The two models differ in four places, and the mapping takes care of each:
 //! - A closed shell is one record listed by the two regions it separates; SMLib keeps one shell
@@ -666,15 +666,20 @@ mod analytic;
 mod tests;
 
 impl crate::Brep {
+    /// A body from flat arrays.
+    pub(crate) fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
+        crate::core::from_arrays(a).map(crate::Brep::made_core)
+    }
+
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
         let a = arrays(brep, trusted).map_err(crate::Error::Record)?;
-        crate::flat::Flat::from_arrays(&a)?.import()
+        crate::Brep::from_arrays(&a)
     }
 
     /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].
     pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
         let a = arrays_keeping_splines(brep, trusted).map_err(crate::Error::Record)?;
-        crate::flat::Flat::from_arrays(&a)?.import()
+        crate::Brep::from_arrays(&a)
     }
 }

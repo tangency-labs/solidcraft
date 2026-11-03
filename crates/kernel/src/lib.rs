@@ -97,7 +97,7 @@ mod ops;
 #[cfg(test)]
 mod outline_tests;
 mod par;
-pub use par::{for_each_on_threads, map_on_threads, map_with_local_pools};
+pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
 mod pinch_tests;
 #[cfg(test)]
@@ -157,7 +157,8 @@ pub mod watch;
 
 pub use blend::{
     ChamferSide, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
-    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, tangent_chain,
+    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, largest_fit_note,
+    names_largest_fit, tangent_chain, with_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
@@ -236,7 +237,7 @@ pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, m
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
 pub use validation::{Validation, check_kept, validating};
-pub use validity::{SmlibCheck, Validity, smlib_built, smlib_dump_dir, validity};
+pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KernelError {
@@ -255,6 +256,48 @@ pub enum KernelError {
 
 pub type Result<T> = std::result::Result<T, KernelError>;
 
+/// Why a kernel step failed: a message, or an error of the solidcore wrapper, which may be a
+/// panic the wrapper caught ([`solidcraft_smlib::Error::Internal`]).
+pub(crate) trait Cause: std::fmt::Display {
+    /// The panic's message, when the cause is one.
+    fn panic(&self) -> Option<&str> {
+        None
+    }
+}
+
+impl Cause for solidcraft_smlib::Error {
+    fn panic(&self) -> Option<&str> {
+        match self {
+            solidcraft_smlib::Error::Internal(m) => Some(m),
+            _ => None,
+        }
+    }
+}
+
+impl Cause for str {}
+impl Cause for String {}
+impl Cause for solidcraft_smlib::CheckReport {}
+impl Cause for solidcraft_smlib::export::ExportError {}
+impl Cause for solidcraft_geom::brep::history::Failed {}
+impl Cause for solidcraft_geom::brep::pcurve::Error {}
+impl<T: Cause + ?Sized> Cause for &T {
+    fn panic(&self) -> Option<&str> {
+        (**self).panic()
+    }
+}
+
+impl KernelError {
+    /// A kernel step's failure, `context` before its cause: a panic the solidcore wrapper caught
+    /// (its kernel replaced by a fresh one) stays an internal error ([`KernelError::Internal`]),
+    /// so the engine reports it as one; any other cause is the operation's failure.
+    pub(crate) fn smlib(context: impl std::fmt::Display, e: impl Cause) -> KernelError {
+        match e.panic() {
+            Some(m) => KernelError::Internal(format!("{context}: {m}")),
+            None => KernelError::Failed(format!("{context}: {e}")),
+        }
+    }
+}
+
 /// The native kernel call running right now (SMLib), for crash reports.
 pub fn native_call_in_flight() -> Option<String> {
     solidcraft_smlib::current_call()
@@ -267,7 +310,13 @@ thread_local! {
 /// Is this thread inside [`guard`]? (A panic now will be caught and turned into an error; the
 /// engine's crash reports mark it recovered.)
 pub fn guarded() -> bool {
-    GUARDED.with(std::cell::Cell::get) > 0
+    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call()
+}
+
+/// A panic inside a solidcore call, caught there and reported as the kernel's internal error
+/// ([`KernelError::Internal`]): the crash-report check (`diagnostics.crash_test`'s kernel mode).
+pub fn crash_test() -> Result<()> {
+    solidcraft_smlib::crash_test().map_err(|e| KernelError::smlib("crash test", e))
 }
 
 /// Run third-party kernel code, converting a panic into an error.

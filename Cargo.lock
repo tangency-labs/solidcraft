@@ -4052,6 +4052,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore"
+version = "1.0.1"
+source = "git+https://github.com/tangency-labs/solidcore?rev=8ddce901671f1cebd9214a31d21895d725e886c8#8ddce901671f1cebd9214a31d21895d725e886c8"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft"
 version = "0.30.1"
 dependencies = [
@@ -4277,13 +4285,12 @@ dependencies = [
 name = "solidcraft-smlib"
 version = "0.30.1"
 dependencies = [
- "cc",
  "flate2",
  "log",
  "serde_json",
+ "solidcore",
  "solidcraft-geom",
  "solidcraft-profile",
- "web-time",
 ]
 
 [[package]]

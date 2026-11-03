@@ -21,8 +21,8 @@ fn edge_middle(e: &brep::Edge) -> Option<Vec3> {
     CurveEval::new(e.parameters()).ok()?.point(0.5 * (t0 + t1))
 }
 
-fn failed(e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib planar regularization: {e}"))
+fn failed(e: impl crate::Cause) -> KernelError {
+    KernelError::smlib("SMLib planar regularization", e)
 }
 
 impl Body {

@@ -102,7 +102,7 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
         return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
     }
     let m = crate::guard("SMLib mass properties", || {
-        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::Failed(format!("SMLib mass properties: {e}")))
+        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
     })?;
     let [x, y, z] = m.centroid;
     Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })

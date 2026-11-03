@@ -4367,8 +4367,13 @@ mod tests {
     #[test]
     fn saved_preferences_with_a_removed_setting_still_load() {
         use serde_json::json;
-        for removed in ["metric_tap_drill_major_less_pitch", "surface_extrude_symmetric_per_side"] {
-            let saved = json!({"length_decimals": 4, removed: true});
+        for (removed, value) in [
+            ("geometry_kernel", json!("smlib")),
+            ("geometry_kernel", json!("solidcore")),
+            ("metric_tap_drill_major_less_pitch", json!(true)),
+            ("surface_extrude_symmetric_per_side", json!(true)),
+        ] {
+            let saved = json!({"length_decimals": 4, removed: value});
             let p = serde_json::from_value::<super::Prefs>(saved.clone()).unwrap();
             assert_eq!(p.length_decimals, 4, "{removed}");
             assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");

@@ -309,7 +309,7 @@ impl ModelBody {
                 return None;
             }
             let body = self.clone();
-            let started = std::thread::Builder::new().name("plan-mesh".into()).spawn(move || {
+            let started = kernel::kernel_thread("plan-mesh").spawn(move || {
                 let _ = body.plan_mesh_at(q);
                 if let Ok(mut warming) = WARMING.lock() {
                     warming.retain(|k| *k != key);
@@ -444,8 +444,12 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
+    // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
+    // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
+    // search finds none.
     match search() {
-        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; the largest {size} that fits is {} mm", show_mm(largest))),
+        Ok(Some((largest, _))) if kernel::names_largest_fit(&why) => kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest)),
+        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest))),
         Ok(None) => kernel::KernelError::TooLarge(why),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");
@@ -1026,6 +1030,10 @@ pub struct FeatureResult {
     pub id: u64,
     pub name: String,
     pub error: Option<String>,
+    /// `error` is the kernel's internal error (a panic it caught, [`kernel::KernelError::Internal`]),
+    /// not the feature's failure: the command that made the feature reports it as one.
+    #[serde(skip)]
+    pub internal: bool,
     pub warning: Option<String>,
     /// An Import feature's warnings by kind and part, with what came in of the file's parts
     /// (`warning` is the first of them as the kernel words them).
@@ -2081,6 +2089,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: None,
+                    internal: false,
                     warning: None,
                     import_report: None,
                     repair: None,
@@ -2114,6 +2123,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: Some(e),
+                    internal: false,
                     warning: None,
                     import_report: None,
                     repair: None,
@@ -2152,6 +2162,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: c.error,
+                    internal: false,
                     warning: c.warning,
                     import_report: c.import_report,
                     repair: c.repair,
@@ -2220,7 +2231,11 @@ impl Model {
                 None => kernel::guard(&f.name, || {
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
-                    r.map_err(|e| kernel::KernelError::Failed(e.in_feature(&f.name).to_string()))?;
+                    r.map_err(|e| match e {
+                        // A panic the kernel caught stays one.
+                        crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
+                        e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                    })?;
                     // The checks the feature's steps left to its end: the bodies it keeps.
                     if deferred { check_kept(&state, &next) } else { Ok(()) }
                 }),
@@ -2240,6 +2255,7 @@ impl Model {
                 note_join_apart(&state, &next, f, &mut warning);
             }
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
             let error = match r {
                 Ok(()) => {
                     // Copies are named after their sources through the instance transforms.
@@ -2283,7 +2299,8 @@ impl Model {
                 }
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
-            if !self.no_cache && !watched.cancelled() {
+            // A panic is no result to reuse: the kernel was replaced after it.
+            if !self.no_cache && !watched.cancelled() && !internal {
                 let e = CachedEval {
                     error: error.clone(),
                     warning: warning.clone(),
@@ -2305,6 +2322,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error,
+                internal,
                 warning,
                 import_report,
                 repair,

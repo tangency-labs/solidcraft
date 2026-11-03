@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 
 use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, Failed, History, Side};
 
-use crate::{Brep, Error, Result, error, ffi};
+use crate::{Brep, Result, core};
 
 /// A result face as SMLib reports it: how it relates to its origins, and the (operand, face)
 /// pairs it came from, sorted.
@@ -68,53 +68,17 @@ impl Brep {
     /// SMLib's order, which the copy keeps). Run an operation on tagged copies, then read its
     /// result's [`Brep::history`].
     pub fn tagged(&self, operand: usize) -> Result<Brep> {
-        let operand = i32::try_from(operand).map_err(|_| Error::Argument)?;
-        ffi::history::tag(&self.0, operand).map(Brep).map_err(error)
+        core::history::tag(self.core(), operand).map(Brep::made_core)
     }
 
     /// The history of this body, made by an operation from tagged operands: each face's and
     /// edge's origins among them. Faces and edges no tag reached have none.
     pub fn history(&self) -> Result<Raw> {
-        let v = ffi::history::read(&self.0).map_err(error)?;
-        Raw::decode(&v).ok_or(Error::Exception)
+        core::history::read(self.core())
     }
 }
 
 impl Raw {
-    /// Decodes `smlib_history_read`'s records; `None` where they don't read as its layout.
-    fn decode(v: &[i64]) -> Option<Raw> {
-        let mut r = Reader(v.iter());
-        if r.next()? != usize::try_from(ffi::history::VERSION).ok()? {
-            return None;
-        }
-        let (nf, ne) = (r.next()?, r.next()?);
-        // Every entry takes at least two values: no more entries than values.
-        if nf.saturating_add(ne) > v.len() {
-            return None;
-        }
-        let mut faces = Vec::with_capacity(nf);
-        for _ in 0..nf {
-            let change = match r.next()? {
-                0 => Change::Kept,
-                1 => Change::Modified,
-                2 => Change::Split,
-                3 => Change::Merged,
-                4 => Change::Generated,
-                _ => return None,
-            };
-            let n = r.next()?;
-            faces.push(RawFace { change, origins: r.pairs(n)? });
-        }
-        let mut edges = Vec::with_capacity(ne);
-        for _ in 0..ne {
-            let m = r.next()?;
-            let bounds = (0..m).map(|_| r.next()).collect::<Option<Vec<_>>>()?;
-            let n = r.next()?;
-            edges.push(RawEdge { faces: bounds, origins: r.pairs(n)? });
-        }
-        r.0.next().is_none().then_some(Raw { faces, edges })
-    }
-
     /// As a [`History`] over `operands.len()` operands, every index renumbered into canonical
     /// order: operand k's through `operands[k]`, the result's through `result`. An edge with no
     /// origin is where its two faces meet; one bounding other than two faces, or a face new to
@@ -255,24 +219,6 @@ pub fn blends(h: &mut History, operand: &[EdgeProv], picked: &[usize], taken_up:
             edges = taken_up.iter().filter(under).copied().collect();
         }
         f.origins = edges.into_iter().map(|e| FaceOrigin::Edge { operand: 0, edge: e }).collect();
-    }
-}
-
-/// Reads non-negative values off the records.
-struct Reader<'a>(std::slice::Iter<'a, i64>);
-
-impl Reader<'_> {
-    fn next(&mut self) -> Option<usize> {
-        self.0.next().and_then(|x| usize::try_from(*x).ok())
-    }
-
-    /// `n` pairs; `None` past the end (so a huge `n` costs nothing).
-    fn pairs(&mut self, n: usize) -> Option<Vec<(usize, usize)>> {
-        let mut v = Vec::with_capacity(n.min(self.0.len() / 2));
-        for _ in 0..n {
-            v.push((self.next()?, self.next()?));
-        }
-        Some(v)
     }
 }
 

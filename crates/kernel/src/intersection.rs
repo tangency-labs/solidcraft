@@ -22,8 +22,8 @@ pub struct MeetingEdge {
     pub points: Vec<Vec3>,
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib intersection curve: {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib intersection curve: {what}"), e)
 }
 
 /// `body` itself, or its faces `faces` (in its face order) alone as a surface body.

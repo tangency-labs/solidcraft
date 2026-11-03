@@ -1724,17 +1724,14 @@ fn tabbed_plate_area(da: f64, dt: f64) -> f64 {
     0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
 }
 
-#[test]
-fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
+/// The tabbed plate's outer outline, reconstructed from its seven public pick coordinates: an R25
+/// plate, x = ±4 tab sides, R2 corners centred at (±2, 280/9) and a 4 mm straight top.
+fn tabbed_plate_outline() -> Loop2 {
     use solidcraft_geom::Seg2;
-    // Reconstruct the outer outline from its seven public pick coordinates:
-    // R25 plate, x=+/-4 tab sides, R2 corners and a 4 mm straight top.
-    // The hole's dimensions come from the public reproduction, not an original design file.
     let theta = (4.0_f64 / 25.0).acos();
     let y = (625.0_f64 - 16.0).sqrt();
     let corner_y = 280.0 / 9.0;
-    let hole_y = 262.0 / 9.0;
-    let outline = Loop2 {
+    Loop2 {
         segs: vec![
             Seg2::Arc { center: Vec2::ZERO, radius: 25.0, start: PI - theta, sweep: PI + 2.0 * theta },
             Seg2::Line { a: Vec2::new(4.0, y), b: Vec2::new(4.0, corner_y) },
@@ -1743,7 +1740,44 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
             Seg2::Arc { center: Vec2::new(-2.0, corner_y), radius: 2.0, start: PI / 2.0, sweep: PI / 2.0 },
             Seg2::Line { a: Vec2::new(-4.0, corner_y), b: Vec2::new(-4.0, y) },
         ],
-    };
+    }
+}
+
+/// solidcore#2223: the tabbed plate's R25 rim and one R2 tab corner arc, which share no vertex,
+/// rounded together at r 0.5 on the plate 2 high (no hole). Each rounds alone; together they
+/// failed 1001 in cliff_overflow. They take off the sum: the rim alone's closed form,
+/// 7.958672911836132 (its spandrel (1 − π/4) r² revolved about the disc's axis outside |x| < 4,
+/// solidcore#2176's test; the rim's End, `fillet_blend_corner`, builds it to 5e-8), and the
+/// corner arc's Pappus volume with flat ends, 0.15913583972191622 (the spandrel about the
+/// corner's axis at 2 − its centroid over a quarter turn), 8.117808752.
+#[test]
+fn fillet_tabbed_plate_rim_and_one_corner_arc_together() {
+    let body = extrude(&Plane::XY, &[Region2 { outer: tabbed_plate_outline(), holes: vec![] }], 0.0, 2.0).unwrap().pop().unwrap();
+    let r = 0.5;
+    let (spandrel, centroid) = ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    let corner = spandrel * (PI / 2.0) * (2.0 - centroid);
+    assert!((corner - 0.159_135_839_721_916_22).abs() < 1e-12, "{corner}");
+    let want = 7.958_672_911_836_132 + corner;
+    let picks = [
+        Vec3::new(-24.91935125502191, -2.0064727829797544, 2.0),
+        Vec3::new(24.919351255429795, -2.006472777913911, 2.0),
+        Vec3::new(3.4142135598750105, 32.525324672801695, 2.0),
+    ];
+    let blended = fillet(&body, &picks, r).unwrap_or_else(|e| panic!("rim and corner arc together: {e}"));
+    assert!(blended.validity().is_empty(), "{:?}", blended.validity());
+    assert_eq!(blended.face_count(), 12);
+    let got = measure(&body).unwrap().volume - measure(&blended).unwrap().volume;
+    assert!((got - want).abs() < 1e-7, "removed {got}, expected {want}");
+}
+
+#[test]
+fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
+    // The hole's dimensions come from the public reproduction, not an original design file.
+    let theta = (4.0_f64 / 25.0).acos();
+    let y = (625.0_f64 - 16.0).sqrt();
+    let corner_y = 280.0 / 9.0;
+    let hole_y = 262.0 / 9.0;
+    let outline = tabbed_plate_outline();
     let body =
         extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![Loop2::circle(Vec2::new(0.0, hole_y), 1.5)] }], 0.0, 2.0).unwrap().pop().unwrap();
     let r = 0.5;

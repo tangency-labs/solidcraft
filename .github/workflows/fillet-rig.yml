@@ -1,5 +1,5 @@
 # The fillet rig as a regression gate: a pull request that touches fillet code (the paths below)
-# runs every case in tests/kernel-cases/fillets/ on SMLib, through one release build of
+# runs every case in tests/kernel-cases/fillets/ through one release build of
 # solidcraft-cli, and fails on a regression (a case that fails and
 # tests/kernel-cases/fillets/KNOWN_FAILING does not list) or on a listed case that now passes
 # (it is fixed: remove its line, so the list only shrinks). See tests/kernel-cases/README.md.
@@ -25,7 +25,6 @@ on:
       # The rig itself: the grading, the runner and this workflow.
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
-      - "scripts/fetch-smlib.sh"
       - ".github/workflows/fillet-rig.yml"
   push:
     branches: [main, develop]
@@ -42,7 +41,6 @@ on:
       # The rig itself: the grading, the runner and this workflow.
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
-      - "scripts/fetch-smlib.sh"
       - ".github/workflows/fillet-rig.yml"
   workflow_dispatch:
 
@@ -86,15 +84,12 @@ jobs:
         with:
           key: fillet-rig
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
-      - name: Build the CLI (release, SMLib)
-        run: cargo build --release --locked -p solidcraft-cli --features smlib
+      - name: Build the CLI (release)
+        run: cargo build --release --locked -p solidcraft-cli
       - name: Run the fillet cases against the known-failing list
         run: >-
           cargo run -q --locked -p xtask -- kernel-cases --area fillets

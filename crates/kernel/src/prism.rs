@@ -108,7 +108,6 @@ struct Regions {
     touching: bool,
 }
 
-#[cfg(feature = "smlib")]
 mod sheets {
     use solidcraft_geom::Loop2;
     use solidcraft_geom::Vec3;
@@ -119,8 +118,8 @@ mod sheets {
     use super::*;
     use crate::prism_curve::{Run, projected};
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib planar regions: {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib planar regions: {what}"), e)
     }
 
     /// `regions` (in the plane's own coordinates) as one sheet on z = 0. SMLib's face builder
@@ -286,30 +285,6 @@ mod sheets {
             Surface::PlaneThrough { origin, u_point, v_point } => (v(*u_point) - v(*origin)).cross(v(*v_point) - v(*origin)).normalized(),
             _ => None,
         }
-    }
-}
-
-#[cfg(not(feature = "smlib"))]
-mod sheets {
-    use super::*;
-
-    fn refused<T>() -> Result<T> {
-        Err(KernelError::Failed("not supported yet: planar region booleans run on SMLib (build with the feature `smlib`)".into()))
-    }
-
-    /// A sheet stands for nothing without SMLib.
-    pub(super) enum Sheet {}
-
-    pub(super) fn sheet(_: &[Region2], _: f64) -> Result<Sheet> {
-        refused()
-    }
-
-    pub(super) fn combine(a: &Sheet, _: &Sheet, _: BoolOp) -> Result<Option<Sheet>> {
-        match *a {}
-    }
-
-    pub(super) fn regions(sheet: &Sheet, _: f64) -> Result<Regions> {
-        match *sheet {}
     }
 }
 

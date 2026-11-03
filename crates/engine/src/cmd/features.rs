@@ -826,8 +826,10 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         }
     }
     let r = s.model.result(id).cloned();
-    if let Some(e) = r.as_ref().and_then(|r| r.error.clone()) {
-        return Err(EngineError::Other(e));
+    if let Some(r) = &r
+        && let Some(e) = r.error.clone()
+    {
+        return Err(EngineError::of_feature(r, e));
     }
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();

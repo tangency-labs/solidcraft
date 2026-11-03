@@ -1,10 +1,9 @@
-//! The sweeps against analytic volumes, each result a valid closed solid (built with SMLib only).
-#![cfg(feature = "native")]
+//! The sweeps against analytic volumes, each result a valid closed solid.
 
 use std::f64::consts::{PI, TAU};
 
 use super::*;
-use crate::CheckLevel;
+use crate::{CheckLevel, Error};
 
 fn solid_volume(b: &Brep, what: &str) -> f64 {
     let report = b.check(CheckLevel::All).unwrap();

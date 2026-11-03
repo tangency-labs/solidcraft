@@ -420,6 +420,8 @@ pub struct Refusal {
     pub surface: Option<SurfaceKind>,
     /// SMLib's reason for the whole body, as the log words it.
     pub why: String,
+    /// The reason is a panic the wrapper caught, not a refusal ([`KernelError::Internal`]).
+    pub internal: bool,
 }
 
 /// Where a point lies against a body ([`Body::classify_point`]).
@@ -451,13 +453,16 @@ const MAX_REFUSAL_PROBES: usize = 20_000;
 impl Refusal {
     /// The refusal of `record` for `error`, with the face SMLib refuses on its own.
     fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
+        if let solidcraft_smlib::Error::Internal(why) = error {
+            return Refusal { face: None, surface: None, why: why.clone(), internal: true };
+        }
         let _span = solidcraft_profile::span("kernel", "smlib_refusal_face");
         let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
         let face = (record.faces.len() <= MAX_REFUSAL_PROBES)
             .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
             .flatten();
         let surface = face.and_then(|f| record.faces.get(f)).map(|f| SurfaceKind::of(&f.surface));
-        Refusal { face, surface, why: error.to_string() }
+        Refusal { face, surface, why: error.to_string(), internal: false }
     }
 }
 
@@ -540,7 +545,9 @@ impl Body {
         self.smlib
             .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
             .as_ref()
-            .map_err(|r| KernelError::Failed(format!("SMLib: {}", r.why)))
+            .map_err(
+                |r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) },
+            )
     }
 
     /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation
@@ -1047,7 +1054,7 @@ impl Body {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
-        let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::Failed(format!("SMLib bounds: {e}")))?;
+        let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
         Ok(Aabb3 { min: v3(lo), max: v3(hi) })
     }
 
@@ -1380,7 +1387,7 @@ impl Body {
                 PointClass::Outside
             });
         }
-        let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::Failed(format!("SMLib point classification: {e}")))?;
+        let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
         Ok(match class {
             solidcraft_smlib::PointClass::Inside => PointClass::Inside,
             solidcraft_smlib::PointClass::Outside => PointClass::Outside,

@@ -110,9 +110,10 @@ fn fillet_as_wide_as_a_face_rounds_it_off() {
 /// The owner's ruling of 2026-10-30: two edges of a 20 mm box rounded r2 in one fillet (they
 /// meet in a mitre at the corner (20, 0, 20), the upright edge there sharp), then the upright edge
 /// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is the
-/// body rounding all three at once makes (kernel `fillet_radii` of the box with each edge's
-/// radius, `three_rounds_at_a_corner`: SMLib's setback corner, 15 faces, 7928.142563938 mm³); the
-/// r2 rounds keep their names, and the r3 round and the corner's patches are the second fillet's.
+/// one solidcore 8ddce9016 builds for three rounds of different radii there: one patch, 10
+/// faces, 7928.743041456134 mm³ (the fork's setback corner, 15 faces and 7928.142563938, waits
+/// for solidcore#2310). The r2 rounds keep their names, and the r3 round and the corner's patch
+/// are the second fillet's.
 #[test]
 fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let mut s = Session::default();
@@ -134,17 +135,17 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let v = volume(&mut s);
-    assert!((v - 7928.142563938).abs() < 1e-6, "{v}");
+    assert!((v - 7928.743041456134).abs() < 1e-6, "{v}");
     let faces = run(&mut s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
-    assert_eq!(faces.len(), 15);
+    assert_eq!(faces.len(), 10);
     let after: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
     assert_eq!(after, before);
     // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
     assert!(named(&mut s, solidcraft_geom::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
-    // the r3 round and the corner's six patches (a setback patch per round, three in the triangle)
-    assert_eq!(made, 7, "{faces:?}");
+    // the r3 round and the corner's patch
+    assert_eq!(made, 2, "{faces:?}");
 }
 
 #[test]

@@ -2,13 +2,13 @@
 //!
 //! `tests/kernel-cases/ladder/ladder.json` lists tiers in order of complexity and, per tier, its
 //! cases in order (paths under `tests/kernel-cases/`, so a tier may also list rig cases from other
-//! areas). Each case is a test like any rig case, graded against its own `expected.json`, on
-//! SMLib. On top, `tests/kernel-cases/ladder/golden.json` records per case the status, the
+//! areas). Each case is a test like any rig case, graded against its own `expected.json`. On top,
+//! `tests/kernel-cases/ladder/golden.json` records per case the status, the
 //! commands' time and what was made (counts, volume, area): the run compares with it and flags
 //! slowdowns and changes; cases run one at a time unless `--jobs` says otherwise, so the times are
 //! not shared with other cases. `--record REASON` re-measures the golden and re-sorts each tier
 //! by time, fastest first; both files are committed. The run's output folder (`--out`, default
-//! `target/kernel-ladder`) holds `results.json` and the SMLib dumps, as the rig's does.
+//! `target/kernel-ladder`) holds `results.json` and the kernel's dumps, as the rig's does.
 //! `--gate` makes the run a regression gate instead of the report: it fails on any case whose
 //! status or counts differ from the golden (times aside, which are the machine's).
 //!

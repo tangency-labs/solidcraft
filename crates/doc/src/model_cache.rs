@@ -786,6 +786,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
                     .get("import_report")

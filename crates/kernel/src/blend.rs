@@ -25,6 +25,34 @@ pub(crate) fn too_large(msg: &str) -> KernelError {
     KernelError::TooLarge(msg.into())
 }
 
+/// The note on a blend's refusal as too large that names the largest `size` (radius, distance)
+/// that fits: "the largest radius that fits is 3 mm". The kernel's own sized refusals and a fillet
+/// feature's search for the size ([`fillet_max`]) word it alike.
+pub fn largest_fit_note(size: &str, largest: f64) -> String {
+    format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
+}
+
+/// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
+pub fn names_largest_fit(why: &str) -> bool {
+    why.contains("that fits is ")
+}
+
+/// `why` with the largest size that fits it names ([`largest_fit_note`]) replaced by `largest`:
+/// solidcore names the size less a margin (34.99 where 35 builds), a feature's search the
+/// largest it built. `why` itself where it names none.
+pub fn with_fit_note(why: &str, size: &str, largest: f64) -> String {
+    let Some(start) = why.find("the largest ") else { return why.to_owned() };
+    let Some(len) = why.get(start..).and_then(|rest| rest.find(" mm")) else { return why.to_owned() };
+    let (head, tail) = (why.get(..start).unwrap_or_default(), why.get(start + len + 3..).unwrap_or_default());
+    format!("{head}{}{tail}", largest_fit_note(size, largest))
+}
+
+/// `v` to the micrometre, without trailing zeros.
+pub(crate) fn trimmed_mm(v: f64) -> String {
+    let s = format!("{v:.6}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }

@@ -87,7 +87,7 @@ pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
 /// The body in SMLib (see [`Body::smlib`]), as an owned copy.
 pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
     let _span = solidcraft_profile::span("kernel", "smlib_body");
-    body.smlib()?.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
+    body.smlib()?.try_clone().map_err(|e| KernelError::smlib("SMLib", e))
 }
 
 /// Decode bounded untrusted data. Validate indices before topology extraction.
@@ -140,7 +140,7 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
 /// the body's record does. `None` where it does not.
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
     let brep = smlib_body(body)?;
-    Ok((brep.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?, numbering(body.record(), &brep)))
+    Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(body.record(), &brep)))
 }
 
 /// `record` in SMLib, imported as given (SMLib's own form; a record it refuses is an error that
@@ -149,7 +149,7 @@ pub(crate) fn smlib_record_ordered(
     record: &solidcraft_geom::brep::Brep,
 ) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
     let _span = solidcraft_profile::span("kernel", "smlib_record_ordered");
-    let brep = solidcraft_smlib::Brep::from_record(record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
+    let brep = solidcraft_smlib::Brep::from_record(record, true).map_err(|e| KernelError::smlib("SMLib", e))?;
     let order = numbering(record, &brep);
     Ok((brep, order))
 }
