@@ -349,7 +349,7 @@ fn strict_takes_plane_and_axis_names_in_any_case() {
 
 #[test]
 fn plane_and_axis_names_publish_the_cases_they_take() {
-    use crate::schema::sketch_3d::{AxisName, PlaneName};
+    use crate::schema::sketch_3d::{AxisName, PlaneName, PlaneTarget};
     // The published pattern is any case, as the reader is.
     let pattern = |v: serde_json::Value| v["pattern"].as_str().unwrap_or_default().to_string();
     let plane = pattern(serde_json::to_value(schemars::schema_for!(PlaneName)).unwrap_or_default());
@@ -361,6 +361,13 @@ fn plane_and_axis_names_publish_the_cases_they_take() {
     }
     for name in ["xw", "x", "xyz"] {
         assert!(serde_json::from_value::<PlaneName>(json!(name)).is_err(), "{name}");
+    }
+    // On Plane also takes a construction plane by name or a planar model face (#10616).
+    for plane in [json!("xy"), json!("Plane1"), json!({"face": [1, 2, 3]}), json!({"face": [1, 2, 3], "body": "Body1"})] {
+        assert!(serde_json::from_value::<PlaneTarget>(plane.clone()).is_ok(), "{plane}");
+    }
+    for plane in [json!(""), json!(5), json!({"face": [1, 2]}), json!({"face": [1, 2, 3], "edge": [0, 0, 0]}), json!({"body": "Body1"})] {
+        assert!(serde_json::from_value::<PlaneTarget>(plane.clone()).is_err(), "{plane}");
     }
     for name in ["x", "Y", "z"] {
         assert!(serde_json::from_value::<AxisName>(json!(name)).is_ok(), "{name}");

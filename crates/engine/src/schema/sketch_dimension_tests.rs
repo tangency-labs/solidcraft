@@ -47,6 +47,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.dimension", json!({"entities": vec!["l1"; 1001]})),
         ("sketch.dimension", json!({"entities": [{"edge": 5}]})),
         ("sketch.dimension", json!({"entities": [{"vertex": [1, 2]}]})),
+        // A planar model face is a 3D sketch's plane (#10616): the 3D handler reads it.
+        ("sketch.dimension", json!({"entities": ["w1.start", {"face": [0, 0, 10], "body": "Body1"}]})),
         // The handler looks the sketch up before it reads a model reference's form.
         ("sketch.dimension", json!({"entities": [{"edge": 5}], "sketch": true})),
         ("sketch.dimension", json!({"entities": ["l1"], "half_axes": "no"})),
