@@ -191,7 +191,7 @@ fn every_entry_point_is_in_the_guard() {
 fn every_entry_point_answers() {
     use crate::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use crate::trim::{Continuation, Holes};
-    use crate::{Blend, BooleanOp, ChamferSecond, CheckLevel};
+    use crate::{Blend, BooleanOp, ChamferSecond, CheckLevel, Turn};
     fn says<T>(_name: &str, r: Result<T>) -> Option<T> {
         r.ok()
     }
@@ -222,7 +222,7 @@ fn every_entry_point_answers() {
     says("fillet", a.fillet(&edge, 0.1, 1.0));
     says("chamfer", a.chamfer(&edge, 0.1, 1.0));
     says("blend", a.blend(Blend::Round, &edge, &[1.0], 0.1));
-    says("blend_dropping", a.blend_dropping(Blend::Round, &edge, &[1.0], 0.1));
+    says("blend_dropping", a.blend_dropping(Blend::Round, Turn::Mitre, &edge, &[1.0], 0.1));
     let corner = [p(10.0, 10.0, 10.0)];
     let three = [p(5.0, 10.0, 10.0), p(10.0, 5.0, 10.0), p(10.0, 10.0, 5.0)];
     says("blend_setback", a.blend_setback(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
