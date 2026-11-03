@@ -597,6 +597,16 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
             .then(|| dimension.id.clone())
         })
         .collect();
+    // Points held at the middle of the trimmed curve (a center rectangle's centre, an ellipse's
+    // centre on its axis): `release_extent` drops that hold, so remember them for the cuts below.
+    let midpoints: Vec<usize> = sk
+        .constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            ConstraintKind::Midpoint { p, l } if l == ci => Some(p),
+            _ => None,
+        })
+        .collect();
     release_extent(sk, ci);
     let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
@@ -608,8 +618,35 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     } else {
         ts.iter().filter(|t| **t < tq).count()
     };
+    // A cut on a point already held there ends the piece on that point: no second point.
+    let mut welds: Vec<(usize, usize)> = Vec::new();
     for (pi, c) in pts.iter().zip(&cuts) {
-        pin(sk, *pi, c.2)?;
+        let cutter = c.2;
+        let Some(at) = sk.point(*pi) else { continue };
+        let near = |sk: &Sketch, p: usize| sk.point(p).is_some_and(|q| q.dist(at) < TOL * 10.0);
+        // The cutter's middle, held there, is taken as its ends are (`pin`).
+        let held = sk.constraints.iter().find_map(|k| match k.kind {
+            ConstraintKind::Midpoint { p, l } if l == cutter && near(sk, p) => Some(p),
+            _ => None,
+        });
+        if let Some(m) = held {
+            welds.push((*pi, m));
+        } else if let Some(m) = midpoints.iter().copied().find(|m| near(sk, *m)) {
+            // The trimmed curve's middle: it moves to the cutter's middle when it is that too
+            // (a center rectangle's diagonals bisect each other), else it stays on the cutter.
+            welds.push((*pi, m));
+            let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
+                Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
+                _ => None,
+            };
+            if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) {
+                add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
+            } else {
+                pin(sk, m, cutter)?;
+            }
+        } else {
+            pin(sk, *pi, cutter)?;
+        }
     }
     let gone = pieces.get(k).copied().ok_or_else(|| bad(cmd, "piece"))?;
     let keep: Vec<usize> = pieces.iter().copied().filter(|x| *x != gone).collect();
@@ -639,6 +676,13 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
                 && let ConstraintKind::PointLineDistance { p, .. } = &mut dimension.kind
             {
                 *p = a;
+            }
+        }
+    }
+    for &(from, to) in &welds {
+        for piece in &keep {
+            if let Some(c) = sk.curves.get_mut(*piece) {
+                c.kind.map_points(&|p| if p == from { to } else { p });
             }
         }
     }
