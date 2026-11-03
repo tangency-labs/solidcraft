@@ -173,8 +173,9 @@ impl FaceEnds<'_> {
     fn clear_of_end_plane(&self, side: usize) -> bool {
         let (p, e) = (self.pitch, self.pitch * 1e-3);
         let inside = if side == 0 { (self.cyl.start + e, self.cyl.start + p) } else { (self.cyl.end - p, self.cyl.end - e) };
-        // From just off the face itself, as `free`: only touching it is not in the groove's way.
-        kernel::material_in_ring(self.body, self.cyl, self.cyl.radius + e, self.cyl.radius + 0.25 * p, inside).is_ok_and(|hit| !hit)
+        // All the radii the groove cuts beyond the face; only touching their rims is not in its
+        // way, as in `free`.
+        kernel::material_in_ring(self.body, self.cyl, self.beyond.0 + e, self.beyond.1 - e, inside).is_ok_and(|hit| !hit)
     }
 }
 
@@ -1019,6 +1020,47 @@ mod tests {
         pub(super) static FAIL_TRIM: Cell<bool> = const { Cell::new(false) };
     }
 
+    fn ask() -> ThreadAsk<'static> {
+        ThreadAsk {
+            form: None,
+            designation: Some("M10"),
+            hand: ThreadHand::Right,
+            starts: 1,
+            steep: SteepFlank::default(),
+            extent: Extent::Full,
+            from: None,
+            modeled: true,
+            ease_out: (0.0, 0.0),
+            tapped: false,
+            old_auto_size: false,
+        }
+    }
+
+    /// How a thread's ends meet the face at (5, 0, z) of `body`.
+    fn ends_of(body: Body, z: f64) -> [End; 2] {
+        let mut st = ModelState::default();
+        st.bodies.push(ModelBody::new("Part".into(), body, 1));
+        thread_on(&st, 1, Vec3::new(5.0, 0.0, z), &ask()).unwrap().ends
+    }
+
+    /// A shoulder that stays beyond the face's end takes the trim. One rising back along the face
+    /// (a slanted plate, a boss on a round body) keeps the square stop.
+    #[test]
+    fn only_a_shoulder_that_stays_beyond_the_faces_end_takes_the_trim() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let join = |a: &Body, b: &Body| kernel::boolean(a, b, BoolOp::Union).unwrap().unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 2.0), z, 5.0, 26.0).unwrap();
+        let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, -6.0), Vec3::new(20.0, 20.0, 2.0)).unwrap();
+        let flat = ends_of(join(&plate, &boss), 20.0);
+        assert!(flat.contains(&End::Shoulder), "{flat:?}");
+        let tilted = kernel::cylinder(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.2, 0.0, 1.0), 20.0, 6.0).unwrap();
+        let slanted = ends_of(join(&tilted, &boss), 20.0);
+        assert!(slanted.contains(&End::Closed) && !slanted.contains(&End::Shoulder), "{slanted:?}");
+        let round = kernel::cylinder(Vec3::new(0.0, -20.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 10.0, 40.0).unwrap();
+        let on_round = ends_of(join(&round, &boss), 20.0);
+        assert!(on_round.contains(&End::Closed) && !on_round.contains(&End::Shoulder), "{on_round:?}");
+    }
+
     /// Where the kernel can't make the trimmed cut, a thread at a shoulder that built with the
     /// square stop still builds with it, and the feature says its last turn is left uncut.
     #[test]
@@ -1029,20 +1071,7 @@ mod tests {
         let build = |fail: bool| {
             let mut st = ModelState::default();
             st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
-            let ask = ThreadAsk {
-                form: None,
-                designation: Some("M10"),
-                hand: ThreadHand::Right,
-                starts: 1,
-                steep: SteepFlank::default(),
-                extent: Extent::Full,
-                from: None,
-                modeled: true,
-                ease_out: (0.0, 0.0),
-                tapped: false,
-                old_auto_size: false,
-            };
-            let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask).unwrap();
+            let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask()).unwrap();
             FAIL_TRIM.set(fail);
             let note = cut(&mut st, on, (ThreadTip::None, None, None));
             FAIL_TRIM.set(false);
