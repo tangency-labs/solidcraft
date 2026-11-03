@@ -1,0 +1,2182 @@
+{
+  "samples": [
+    {
+      "command": "construct.plane.offset",
+      "slug": "plane-offset",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.offset",
+          "params": {
+            "base": {
+              "face": [
+                0,
+                0,
+                20
+              ]
+            },
+            "offset": 12,
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          15
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              0,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point": [
+            0,
+            0,
+            32
+          ],
+          "normal": [
+            0,
+            0,
+            1
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Plane parallel to the top face, 12 above it. The block remains 40 \u00d7 30 \u00d7 20."
+    },
+    {
+      "command": "construct.plane.at_angle",
+      "slug": "plane-at_angle",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.at_angle",
+          "params": {
+            "base": {
+              "face": [
+                0,
+                0,
+                20
+              ]
+            },
+            "axis": {
+              "edge": [
+                0,
+                -15,
+                20
+              ]
+            },
+            "angle": "35 deg",
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              0,
+              20
+            ]
+          },
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point_on_plane": [
+            0,
+            -15,
+            20
+          ],
+          "normal": [
+            0,
+            -0.573576436351046,
+            0.8191520442889918
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Top-face plane rotates 35\u00b0 around its front horizontal edge."
+    },
+    {
+      "command": "construct.plane.midplane",
+      "slug": "plane-midplane",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.midplane",
+          "params": {
+            "a": {
+              "face": [
+                0,
+                0,
+                0
+              ]
+            },
+            "b": {
+              "face": [
+                0,
+                0,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              0,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point": [
+            0,
+            0,
+            10
+          ],
+          "normal_parallel": [
+            0,
+            0,
+            1
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Horizontal plane halfway between the bottom and top faces."
+    },
+    {
+      "command": "construct.plane.two_edges",
+      "slug": "plane-two_edges",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.two_edges",
+          "params": {
+            "a": {
+              "edge": [
+                0,
+                -15,
+                0
+              ]
+            },
+            "b": {
+              "edge": [
+                0,
+                15,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              0
+            ]
+          },
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point_on_plane": [
+            0,
+            -15,
+            0
+          ],
+          "other_point_on_plane": [
+            0,
+            15,
+            20
+          ],
+          "normal_parallel": [
+            0,
+            -20,
+            30
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Slanted plane contains the front-bottom and back-top parallel edges."
+    },
+    {
+      "command": "construct.plane.axis_point",
+      "slug": "plane-axis_point",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "construct.axis.edge",
+          "params": {
+            "edge": {
+              "edge": [
+                -20,
+                -15,
+                10
+              ]
+            },
+            "name": "ReferenceAxis"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.axis_point",
+          "params": {
+            "axis": {
+              "axis": "ReferenceAxis"
+            },
+            "point": {
+              "vertex": [
+                20,
+                15,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "axis",
+            "name": "ReferenceAxis"
+          },
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              20,
+              15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_axes": true,
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point_on_plane": [
+            -20,
+            -15,
+            0
+          ],
+          "other_point_on_plane": [
+            20,
+            15,
+            20
+          ],
+          "normal_parallel": [
+            -30,
+            40,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Plane contains the front-left vertical axis and the opposite upper corner. Keep ReferenceAxis visible."
+    },
+    {
+      "command": "construct.plane.three_points",
+      "slug": "plane-three_points",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.three_points",
+          "params": {
+            "a": {
+              "vertex": [
+                -20,
+                -15,
+                20
+              ]
+            },
+            "b": {
+              "vertex": [
+                20,
+                -15,
+                20
+              ]
+            },
+            "c": {
+              "vertex": [
+                20,
+                15,
+                0
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              -20,
+              -15,
+              20
+            ]
+          },
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              20,
+              -15,
+              20
+            ]
+          },
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              20,
+              15,
+              0
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point_on_plane": [
+            -20,
+            -15,
+            20
+          ],
+          "other_point_on_plane": [
+            20,
+            15,
+            0
+          ],
+          "normal_parallel": [
+            0,
+            20,
+            30
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Three actual block vertices define a plane sloping from front top to back bottom."
+    },
+    {
+      "command": "construct.plane.tangent",
+      "slug": "plane-tangent",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 14,
+            "height": 30,
+            "operation": "new",
+            "body_name": "Cylinder"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.tangent",
+          "params": {
+            "face": {
+              "face": [
+                0,
+                -14,
+                15
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          15
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Cylinder",
+            "point": [
+              0,
+              -14,
+              15
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 18472.564803107984,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point": [
+            0,
+            -14,
+            15
+          ],
+          "normal_parallel": [
+            0,
+            -1,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005
+      },
+      "explanation": "Plane touches the front of the cylindrical wall; normal points radially outward."
+    },
+    {
+      "command": "construct.plane.along_path",
+      "slug": "plane-along_path",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.arc.center_point",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "start": [
+              18,
+              0
+            ],
+            "end": [
+              0,
+              18
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.along_path",
+          "params": {
+            "path": {
+              "sketch": "Guide",
+              "curve": "a1"
+            },
+            "t": 0.5,
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          10,
+          10,
+          0
+        ],
+        "yaw": -1.2,
+        "pitch": 0.6154797086703874,
+        "distance": 75
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "external_sketch_curve",
+            "sketch": 1,
+            "id": "a1"
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 0,
+        "body_count": 0,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point": [
+            12.727922061357855,
+            12.727922061357855,
+            0
+          ],
+          "normal_parallel": [
+            -1,
+            1,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005
+      },
+      "explanation": "Plane square to a genuine quarter-circle path at its halfway point. Keep Guide visible."
+    },
+    {
+      "command": "construct.plane.perpendicular",
+      "slug": "plane-perpendicular",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.plane.perpendicular",
+          "params": {
+            "plane": {
+              "face": [
+                0,
+                0,
+                20
+              ]
+            },
+            "line": {
+              "edge": [
+                0,
+                -15,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              0,
+              20
+            ]
+          },
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "plane",
+          "name": "Result",
+          "point_on_plane": [
+            0,
+            -15,
+            20
+          ],
+          "normal_parallel": [
+            0,
+            1,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Vertical plane holds the front top edge and is perpendicular to the top face."
+    },
+    {
+      "command": "construct.axis.through_cylinder",
+      "slug": "axis-through_cylinder",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 14,
+            "height": 30,
+            "operation": "new",
+            "body_name": "Cylinder"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.axis.through_cylinder",
+          "params": {
+            "face": {
+              "face": [
+                14,
+                0,
+                15
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          15
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Cylinder",
+            "point": [
+              14,
+              0,
+              15
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_axes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 18472.564803107984,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "axis",
+          "name": "Result",
+          "origin_on_axis": [
+            0,
+            0,
+            0
+          ],
+          "direction_parallel": [
+            0,
+            0,
+            1
+          ]
+        },
+        "geometry_tolerance_mm": 0.005
+      },
+      "explanation": "Construction axis passes through the actual cylindrical wall centreline."
+    },
+    {
+      "command": "construct.axis.normal_to_face",
+      "slug": "axis-normal_to_face",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.axis.normal_to_face",
+          "params": {
+            "face": {
+              "face": [
+                0,
+                -15,
+                10
+              ]
+            },
+            "point": {
+              "point": [
+                6,
+                -15,
+                10
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              10
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_axes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "axis",
+          "name": "Result",
+          "origin": [
+            6,
+            -15,
+            10
+          ],
+          "direction_parallel": [
+            0,
+            -1,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Construction axis normal to the front face through its chosen surface point."
+    },
+    {
+      "command": "construct.axis.two_planes",
+      "slug": "axis-two_planes",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "construct.plane.offset",
+          "params": {
+            "base": "YZ",
+            "offset": 6,
+            "name": "GuidePlane"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.axis.two_planes",
+          "params": {
+            "a": {
+              "plane": "GuidePlane"
+            },
+            "b": {
+              "face": [
+                0,
+                -15,
+                10
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              10
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_axes": true,
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "axis",
+          "name": "Result",
+          "origin_on_axis": [
+            6,
+            -15,
+            0
+          ],
+          "direction_parallel": [
+            0,
+            0,
+            1
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Axis is the intersection of a real offset guide plane x=6 and the front face y=\u221215. Keep GuidePlane visible."
+    },
+    {
+      "command": "construct.axis.two_points",
+      "slug": "axis-two_points",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.axis.two_points",
+          "params": {
+            "a": {
+              "vertex": [
+                -20,
+                -15,
+                0
+              ]
+            },
+            "b": {
+              "vertex": [
+                20,
+                15,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              -20,
+              -15,
+              0
+            ]
+          },
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              20,
+              15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_axes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "axis",
+          "name": "Result",
+          "origin_on_axis": [
+            -20,
+            -15,
+            0
+          ],
+          "direction_parallel": [
+            40,
+            30,
+            20
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Body diagonal construction axis joins two opposite real vertices."
+    },
+    {
+      "command": "construct.axis.edge",
+      "slug": "axis-edge",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.axis.edge",
+          "params": {
+            "edge": {
+              "edge": [
+                0,
+                -15,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_axes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "axis",
+          "name": "Result",
+          "origin_on_axis": [
+            0,
+            -15,
+            20
+          ],
+          "direction_parallel": [
+            1,
+            0,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Axis extends the genuine front top straight edge of the block."
+    },
+    {
+      "command": "construct.point.vertex",
+      "slug": "point-vertex",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.point.vertex",
+          "params": {
+            "point": {
+              "vertex": [
+                20,
+                -15,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              20,
+              -15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "point",
+          "name": "Result",
+          "position": [
+            20,
+            -15,
+            20
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Construction point placed on the visible upper front-right vertex.",
+      "focus_point": [
+        20,
+        -15,
+        20
+      ]
+    },
+    {
+      "command": "construct.point.two_edges",
+      "slug": "point-two_edges",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.point.two_edges",
+          "params": {
+            "a": {
+              "edge": [
+                0,
+                -15,
+                20
+              ]
+            },
+            "b": {
+              "edge": [
+                20,
+                0,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              20
+            ]
+          },
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              20,
+              0,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "point",
+          "name": "Result",
+          "position": [
+            20,
+            -15,
+            20
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Construction point at the intersection of the front-top and right-top straight edges.",
+      "focus_point": [
+        20,
+        -15,
+        20
+      ]
+    },
+    {
+      "command": "construct.point.three_planes",
+      "slug": "point-three_planes",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.point.three_planes",
+          "params": {
+            "a": {
+              "face": [
+                20,
+                0,
+                10
+              ]
+            },
+            "b": {
+              "face": [
+                0,
+                -15,
+                10
+              ]
+            },
+            "c": {
+              "face": [
+                0,
+                0,
+                20
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              20,
+              0,
+              10
+            ]
+          },
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              10
+            ]
+          },
+          {
+            "type": "face",
+            "body": "Block",
+            "point": [
+              0,
+              0,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "point",
+          "name": "Result",
+          "position": [
+            20,
+            -15,
+            20
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Construction point is the common intersection of the right, front and top face planes.",
+      "focus_point": [
+        20,
+        -15,
+        20
+      ]
+    },
+    {
+      "command": "construct.point.center",
+      "slug": "point-center",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.torus",
+          "params": {
+            "major": 14,
+            "minor": 4,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Ring"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.point.center",
+          "params": {
+            "of": {
+              "face": [
+                18,
+                0,
+                8
+              ]
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          8
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Ring",
+            "point": [
+              18,
+              0,
+              8
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 4421.582771688032,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "point",
+          "name": "Result",
+          "position": [
+            0,
+            0,
+            8
+          ]
+        },
+        "geometry_tolerance_mm": 0.005
+      },
+      "explanation": "Real centre of a torus face, visible in its central opening.",
+      "focus_point": [
+        0,
+        0,
+        8
+      ]
+    },
+    {
+      "command": "construct.point.edge_plane",
+      "slug": "point-edge_plane",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "construct.plane.offset",
+          "params": {
+            "base": "YZ",
+            "offset": 6,
+            "name": "GuidePlane"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.point.edge_plane",
+          "params": {
+            "edge": {
+              "edge": [
+                0,
+                -15,
+                20
+              ]
+            },
+            "plane": {
+              "plane": "GuidePlane"
+            },
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "edge",
+            "body": "Block",
+            "point": [
+              0,
+              -15,
+              20
+            ]
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        },
+        "hint_capture": {
+          "emphasize_planes": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 24000,
+        "body_count": 1,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "point",
+          "name": "Result",
+          "position": [
+            6,
+            -15,
+            20
+          ]
+        },
+        "geometry_tolerance_mm": 0.005,
+        "bbox": {
+          "min": [
+            -20,
+            -15,
+            0
+          ],
+          "max": [
+            20,
+            15,
+            20
+          ]
+        }
+      },
+      "explanation": "Point where the top-front edge crosses the actual guide plane x=6. Keep GuidePlane visible.",
+      "focus_point": [
+        6,
+        -15,
+        20
+      ]
+    },
+    {
+      "command": "construct.point.along_path",
+      "slug": "point-along_path",
+      "group": "CONSTRUCT",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.arc.center_point",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "start": [
+              18,
+              0
+            ],
+            "end": [
+              0,
+              18
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "construct.point.along_path",
+          "params": {
+            "path": {
+              "sketch": "Guide",
+              "curve": "a1"
+            },
+            "t": 0.5,
+            "name": "Result"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          10,
+          10,
+          0
+        ],
+        "yaw": -1.2,
+        "pitch": 0.6154797086703874,
+        "distance": 75
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "external_sketch_curve",
+            "sketch": 1,
+            "id": "a1"
+          }
+        ],
+        "prefs": {
+          "reference_geometry_through_bodies": true
+        }
+      },
+      "expected": {
+        "volume_mm3": 0,
+        "body_count": 0,
+        "closed": true,
+        "relative_volume_tolerance": 0.001,
+        "construction": {
+          "type": "point",
+          "name": "Result",
+          "position": [
+            12.727922061357855,
+            12.727922061357855,
+            0
+          ]
+        },
+        "geometry_tolerance_mm": 0.005
+      },
+      "explanation": "Native construction point at half the arc length of a genuine quarter-circle sketch. Keep Guide visible.",
+      "focus_point": [
+        12.727922061357855,
+        12.727922061357855,
+        0
+      ]
+    }
+  ]
+}

@@ -1301,7 +1301,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = solidcraft_theme::Tokens::view();
-    let stroke = Stroke::new(1.5, tk.sketch_accent);
+    let stroke = crate::viewport::sketch_preview_stroke(app, tk.sketch_accent);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
@@ -1312,7 +1312,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
         // The design's coordinates: not while a value is typed and the sketch is drawn at it.
-        if crate::dim_view::preview_world(app).is_none() {
+        if !app.viewport.hint_capture_emphasize_sketches && crate::dim_view::preview_world(app).is_none() {
             let readout = painter.text(
                 crate::tool_cursor::readout_at(painter, proj.rect, sp),
                 egui::Align2::LEFT_TOP,

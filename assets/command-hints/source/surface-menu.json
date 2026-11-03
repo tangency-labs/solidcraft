@@ -1,0 +1,1383 @@
+{
+  "samples": [
+    {
+      "command": "surface.extrude",
+      "slug": "surface-extrude",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Profile"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -20,
+                -12
+              ],
+              [
+                20,
+                -12
+              ],
+              [
+                20,
+                12
+              ],
+              [
+                -20,
+                12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.extrude",
+          "params": {
+            "sketch": "Profile",
+            "curves": [
+              "l1",
+              "l2",
+              "l3"
+            ],
+            "distance": 28,
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "An open U-shaped sketch extrudes into three surface walls without end caps."
+    },
+    {
+      "command": "surface.revolve",
+      "slug": "surface-revolve",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XZ",
+            "name": "Profile"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                14,
+                0
+              ],
+              [
+                22,
+                -12
+              ],
+              [
+                18,
+                -28
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.revolve",
+          "params": {
+            "sketch": "Profile",
+            "curves": [
+              "l1",
+              "l2"
+            ],
+            "axis": "Z",
+            "angle": "270 deg",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A 270-degree turn of an open profile makes uncapped surfaces of revolution."
+    },
+    {
+      "command": "surface.sweep",
+      "slug": "surface-sweep",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Section"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                0,
+                -10
+              ],
+              [
+                0,
+                10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XZ",
+            "name": "Path"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                -12
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.arc.center_point",
+          "params": {
+            "center": [
+              12,
+              -12
+            ],
+            "start": [
+              0,
+              -12
+            ],
+            "end": [
+              12,
+              -24
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.sweep",
+          "params": {
+            "sketch": "Section",
+            "curves": [
+              "l1"
+            ],
+            "path_sketch": "Path",
+            "path": [
+              "l1",
+              "a1"
+            ],
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          6,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 85
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A straight section follows a tangent line and curved path to form a ribbon surface."
+    },
+    {
+      "command": "surface.loft",
+      "slug": "surface-loft",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Lower"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                0
+              ],
+              [
+                22,
+                0
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Middle",
+            "offset": 14
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -18,
+                -9
+              ],
+              [
+                18,
+                9
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Upper",
+            "offset": 28
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -14,
+                0
+              ],
+              [
+                14,
+                0
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.loft",
+          "params": {
+            "sections": [
+              {
+                "sketch": "Lower",
+                "curves": [
+                  "l1"
+                ]
+              },
+              {
+                "sketch": "Middle",
+                "curves": [
+                  "l1"
+                ]
+              },
+              {
+                "sketch": "Upper",
+                "curves": [
+                  "l1"
+                ]
+              }
+            ],
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "Three open section curves form a smooth lofted sheet with open boundaries."
+    },
+    {
+      "command": "surface.patch",
+      "slug": "surface-patch",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Outline"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -24,
+                -14
+              ],
+              [
+                5,
+                -14
+              ],
+              [
+                5,
+                -3
+              ],
+              [
+                24,
+                -3
+              ],
+              [
+                24,
+                14
+              ],
+              [
+                -24,
+                14
+              ]
+            ],
+            "infer": false,
+            "closed": true
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.patch",
+          "params": {
+            "sketch": "Outline",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A closed stepped outline becomes a planar surface patch."
+    },
+    {
+      "command": "surface.boundary",
+      "slug": "surface-boundary",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Boundary"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                -10
+              ],
+              [
+                22,
+                -10
+              ],
+              [
+                22,
+                8
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.arc.three_point",
+          "params": {
+            "start": [
+              22,
+              8
+            ],
+            "end": [
+              -22,
+              8
+            ],
+            "through": [
+              0,
+              24
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -22,
+                8
+              ],
+              [
+                -22,
+                -10
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.boundary",
+          "params": {
+            "sketch": "Boundary",
+            "curves": [
+              "l1",
+              "l2",
+              "a1",
+              "l3"
+            ],
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          4,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A boundary surface spans an ordered closed loop of straight and curved edges."
+    },
+    {
+      "command": "surface.offset",
+      "slug": "surface-offset",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 28,
+            "height": 14,
+            "corner": [
+              -20,
+              -14,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.offset",
+          "params": {
+            "faces": [
+              [
+                0,
+                0,
+                14
+              ]
+            ],
+            "distance": 10,
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The top face is copied into a separate surface 10 mm above the source block."
+    },
+    {
+      "command": "surface.ruled",
+      "slug": "surface-ruled",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 28,
+            "height": 14,
+            "corner": [
+              -20,
+              -14,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.ruled",
+          "params": {
+            "body": "Block",
+            "edges": [
+              [
+                0,
+                -14,
+                14
+              ],
+              [
+                20,
+                0,
+                14
+              ],
+              [
+                0,
+                14,
+                14
+              ],
+              [
+                -20,
+                0,
+                14
+              ]
+            ],
+            "face": [
+              0,
+              0,
+              14
+            ],
+            "distance": 7,
+            "mode": "tangent",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "An uncapped ruled strip extends tangentially around the four top edges."
+    },
+    {
+      "command": "surface.blend",
+      "slug": "surface-blend",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 12,
+            "height": 10,
+            "corner": [
+              -20,
+              -20,
+              0
+            ],
+            "body_name": "A"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 12,
+            "height": 16,
+            "corner": [
+              -20,
+              8,
+              0
+            ],
+            "body_name": "B"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.blend",
+          "params": {
+            "from": {
+              "body": "A",
+              "edges": [
+                [
+                  0,
+                  -8,
+                  10
+                ]
+              ]
+            },
+            "to": {
+              "body": "B",
+              "edges": [
+                [
+                  0,
+                  8,
+                  16
+                ]
+              ]
+            },
+            "continuity": [
+              "g1",
+              "g1"
+            ],
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 3
+      },
+      "explanation": "A tangent blend surface joins the facing top edges of two blocks at different heights."
+    },
+    {
+      "command": "surface.trim",
+      "slug": "surface-trim",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Outline"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -24,
+              -17
+            ],
+            "p1": [
+              24,
+              17
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "surface.patch",
+          "params": {
+            "sketch": "Outline",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.trim",
+          "params": {
+            "body": "Sheet",
+            "plane": {
+              "origin": [
+                3,
+                0,
+                0
+              ],
+              "normal": [
+                1,
+                0,
+                0
+              ]
+            },
+            "keep": [
+              15,
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The cutting plane trims away the left side of the planar sheet."
+    },
+    {
+      "command": "surface.untrim",
+      "slug": "surface-untrim",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Outline"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -24,
+              -17
+            ],
+            "p1": [
+              24,
+              17
+            ]
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "radius": 8
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "surface.patch",
+          "params": {
+            "sketch": "Outline",
+            "profiles": [
+              {
+                "point": [
+                  18,
+                  0
+                ]
+              }
+            ],
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.untrim",
+          "params": {
+            "face": {
+              "body": "Sheet",
+              "point": [
+                18,
+                0,
+                0
+              ]
+            },
+            "in_place": true
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "Removing the inner trim restores the planar surface across its circular hole."
+    },
+    {
+      "command": "surface.extend",
+      "slug": "surface-extend",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Outline"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -24,
+              -17
+            ],
+            "p1": [
+              24,
+              17
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "surface.patch",
+          "params": {
+            "sketch": "Outline",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.extend",
+          "params": {
+            "body": "Sheet",
+            "edges": [
+              [
+                24,
+                0,
+                0
+              ]
+            ],
+            "distance": 18
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          9,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 145
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Sheet"
+          }
+        ],
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The selected boundary continues 18 mm along the same surface."
+    },
+    {
+      "command": "surface.thicken",
+      "slug": "surface-thicken",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Outline"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              -24,
+              -17
+            ],
+            "p1": [
+              24,
+              17
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "surface.patch",
+          "params": {
+            "sketch": "Outline",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.thicken",
+          "params": {
+            "bodies": [
+              "Sheet"
+            ],
+            "thickness": 8,
+            "body_name": "Slab"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          4
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "select": [
+          {
+            "type": "body",
+            "name": "Slab"
+          }
+        ],
+        "showSketches": false,
+        "hiddenBodies": [
+          "Sheet"
+        ]
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The zero-thickness sheet becomes an 8 mm closed solid slab."
+    },
+    {
+      "command": "surface.unstitch",
+      "slug": "surface-unstitch",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 28,
+            "height": 14,
+            "corner": [
+              -20,
+              -14,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.unstitch",
+          "params": {
+            "body": "Block",
+            "faces": [
+              [
+                0,
+                0,
+                14
+              ]
+            ]
+          }
+        },
+        {
+          "command": "solid.move",
+          "params": {
+            "bodies": [
+              "Body1"
+            ],
+            "translate": [
+              0,
+              0,
+              13
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "showSketches": false,
+        "select": [
+          {
+            "type": "body",
+            "name": "Body1"
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The top face is separated as a genuine surface body and moved upward to expose the open shell."
+    },
+    {
+      "command": "surface.stitch",
+      "slug": "surface-stitch",
+      "group": "SURFACE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 28,
+            "height": 14,
+            "corner": [
+              -20,
+              -14,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "surface.unstitch",
+          "params": {
+            "body": "Block",
+            "faces": [
+              [
+                0,
+                0,
+                14
+              ]
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "surface.stitch",
+          "params": {
+            "bodies": [
+              "Block",
+              "Body1"
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false,
+        "hiddenBodies": [
+          "Body1"
+        ]
+      },
+      "after_ui": {
+        "showSketches": false,
+        "hiddenBodies": [],
+        "select": [
+          {
+            "type": "body",
+            "name": "Block"
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The top surface is sewn back into the open shell to make a closed solid."
+    }
+  ]
+}

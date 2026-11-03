@@ -1309,18 +1309,28 @@ pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
     }
     let ctx = ui.ctx();
     let tip_id = resp.id.with("sc_dropdown_tip_area");
-    // Last pass's size; the first pass assumes the tip fits on the right.
+    // Keep the outer edge anchored beside the menu even before the first size is known.
     let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
     let screen = ctx.content_rect();
-    let gap = 6.0;
-    let x = if menu.right() + gap + size.x <= screen.right() { menu.right() + gap } else { (menu.left() - gap - size.x).max(screen.left()) };
+    let gap = Tokens::get().space_6;
+    let right_room = (screen.right() - menu.right() - gap).max(0.0);
+    let left_room = (menu.left() - screen.left() - gap).max(0.0);
+    let on_right = if size.x > 0.0 && right_room >= size.x { true } else { right_room >= left_room };
+    let room = if on_right { right_room } else { left_room };
+    let x = if on_right { menu.right() + gap } else { menu.left() - gap };
     let y = resp.rect.top().min((screen.bottom() - size.y).max(screen.top()));
     let area = Container::new(ctx, Surface::Popup)
         .area(tip_id)
         .order(egui::Order::Tooltip)
         .interactable(false)
+        .pivot(if on_right { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_TOP })
         .fixed_pos(pos2(x, y))
-        .show(ctx, |ui| Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), add));
+        .show(ctx, |ui| {
+            Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), |ui| {
+                ui.set_max_width((room - gap * 2.0).max(1.0));
+                add(ui);
+            })
+        });
     Some(area.inner.response.rect)
 }
 
