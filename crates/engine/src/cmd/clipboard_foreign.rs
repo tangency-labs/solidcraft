@@ -427,6 +427,6 @@ fn onto_plane(matrix: &solidcraft_doc::Mat, plane: solidcraft_sketch::OriginPlan
         Axis::Y => OriginPlane::Xz,
         Axis::Z => OriginPlane::Xy,
     };
-    let shift = solidcraft_doc::apply_point(matrix, solidcraft_geom::Vec3::ZERO).dot(to.normal());
+    let shift = solidcraft_doc::apply_point(matrix, solidcore_record::Vec3::ZERO).dot(to.normal());
     Some((to, n.dot(to.normal()) < 0.0, shift))
 }

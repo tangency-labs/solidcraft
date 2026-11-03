@@ -1021,13 +1021,13 @@ fn a_new_3d_dimension_s_bad_value_is_refused_as_its_value() {
 }
 
 #[test]
-fn a_tangent_line_arc_line_path_pipes_to_its_analytic_volume() {
+fn a_tangent_line_leaves_a_fixed_arc_along_its_end_and_a_loose_line_is_refused() {
+    // Pipes along 3D sketch paths are graded in tests/kernel-cases/sweeps (#10615).
     // A quarter arc of radius 20 about the origin, from (20,0,0) round to (0,20,0), with a line
     // into it along +Y and a line out of it drawn off true; Tangent turns the second one onto -X.
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
-    let sketch = s.active_sketch.unwrap();
     let d = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
     let into = run(&mut s, "sketch.line3d", json!({"points":[[20,-30,0],[20,0,0]]}))["curves"][0].as_str().unwrap().to_string();
     let arc = run(&mut s, "sketch.arc3d", json!({"start":[20,0,0],"through":[d,d,0],"end":[0,20,0]}))["curves"][0].as_str().unwrap().to_string();
@@ -1038,16 +1038,10 @@ fn a_tangent_line_arc_line_path_pipes_to_its_analytic_volume() {
     near(fit(&s, &out, 0), Vec3::new(0.0, 20.0, 0.0));
     let end = fit(&s, &out, 1);
     assert!((end.y - 20.0).abs() < 1e-7 && end.z.abs() < 1e-7 && end.x < -25.0, "{end:?}");
-    let out_len = -end.x;
     // A line not touching the arc has no tangent to take.
     let loose = run(&mut s, "sketch.line3d", json!({"points":[[50,50,0],[60,50,0]]}))["curves"][0].as_str().unwrap().to_string();
-    assert!(s.execute("sketch.constraint.tangent", &json!({"a": loose, "b": arc})).is_err());
-    run(&mut s, "sketch.delete", json!({"entities": [loose]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[into, arc, out],"diameter":4}));
-    let measure = solidcraft_kernel::measure(&s.world_state().bodies.last().unwrap().body).unwrap();
-    let length = 30.0 + 10.0 * std::f64::consts::PI + out_len;
-    assert!((measure.volume - 4.0 * std::f64::consts::PI * length).abs() < 1.0, "{} vs {}", measure.volume, 4.0 * std::f64::consts::PI * length);
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": loose, "b": arc})).unwrap_err().to_string();
+    assert!(e.contains("meet"), "{e}");
 }
 
 #[test]
