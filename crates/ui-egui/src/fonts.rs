@@ -155,8 +155,8 @@ pub const HEBREW_FALLBACK: &str = "hebrew_fallback";
 /// digits and Latin text, so each Arabic word is one shaped run (see [`crate::bidi`]).
 pub const ARABIC_FALLBACK: &str = "arabic_fallback";
 
-/// Name of the Georgian fallback entry in [`egui::FontDefinitions`], last: egui's built-in faces
-/// have no Georgian (Mkhedruli, Asomtavruli, Mtavruli), so without one it shows as empty boxes.
+/// Name of the Georgian fallback entry in [`egui::FontDefinitions`], placed before Hack: egui's
+/// built-in faces have no Asomtavruli or Mtavruli, and only Hack's monospace Mkhedruli.
 pub const GEORGIAN_FALLBACK: &str = "georgian_fallback";
 
 /// egui's built-in monospace face, also the last fallback of every sans family (#2955).
