@@ -621,6 +621,26 @@ fn a_point_picked_in_the_box_dialog_becomes_its_corner_or_centre() {
 }
 
 #[test]
+fn a_point_picked_in_the_box_dialog_reads_in_the_design_unit() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
+    let mut h = design("in");
+    h.app.preferences.auto_operation = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Face { body: "Base".into(), index: 0, point: Vec3::new(25.4, 50.8, 12.7) });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_shown(&h, &[("X", "1 in".into()), ("Y", "2 in".into()), ("Z", "0.5 in".into())]);
+    assert_eq!(sent(&h)["corner"], json!(["1 in", "2 in", "0.5 in"]));
+    ok(&mut h);
+    assert_near(bounds(&mut h.app.session)[1].0, [25.4, 50.8, 12.7]);
+}
+
+#[test]
 fn the_sphere_torus_and_cone_dialogs_take_their_placement() {
     let mut h = design("mm");
     // The sphere by its centre: left alone at the origin, as before.

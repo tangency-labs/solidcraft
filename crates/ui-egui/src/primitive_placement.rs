@@ -101,12 +101,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<St
     enter
 }
 
-/// A coordinate of a picked point as a field shows it, in millimetres.
-fn mm(v: f64) -> String {
+/// A coordinate of a picked point (mm) as a field shows it, in the design's length unit.
+fn coord(s: &Session, v: f64) -> String {
     let v = (v * 1e6).round() / 1e6;
     // No "-0 mm".
     let v = if v == 0.0 { 0.0 } else { v };
-    format!("{v} mm")
+    crate::length_input::model(&s.doc, v)
 }
 
 /// Where a pick is in the world: a vertex, or a point on an edge or face, where it was picked; a
@@ -132,7 +132,7 @@ pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>
         return;
     }
     let Some((index, _)) = current(s, cmd, extra) else { return };
-    store(cmd, extra, index, &[mm(point.x), mm(point.y), mm(point.z)]);
+    store(cmd, extra, index, &[coord(s, point.x), coord(s, point.y), coord(s, point.z)]);
     *at = None;
 }
 
