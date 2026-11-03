@@ -3,8 +3,9 @@
 //!
 //! A [`NurbsCurve`] is only made by [`NurbsCurve::from_homogeneous`], which checks everything that
 //! ties its parts together: the degree, `n + degree + 1` knots for `n` control points, knots that
-//! never decrease, a non-empty domain, finite points no further than [`MAX_COORDINATE`] from the
-//! origin, positive weights. Arithmetic on a valid curve can still overflow or run out of
+//! never decrease, room to clamp them, no inner knot repeated more than the degree, a non-empty
+//! domain, finite points no further than [`MAX_COORDINATE`] from the origin, positive weights that
+//! can be divided by. Arithmetic on a valid curve can still overflow or run out of
 //! precision, so its operations return [`SplineResult`].
 //!
 //! Every piece carries intervals that hold its exact control points ([`super::interval`]): the
@@ -13,7 +14,7 @@
 //! way; their `f64` control points are numbers inside those intervals.
 
 use super::interval::{HInterval, Interval};
-use super::{Blend, HPoint, MAX_SPLINE_DEGREE, SplineError, SplineResult, check_knots, clamp_row, invalid};
+use super::{Blend, HPoint, MAX_KNOTS, MAX_SPLINE_DEGREE, SplineError, SplineResult, check_knots, clamp_row, invalid};
 
 /// Furthest a control point may be from the origin along any axis (mm).
 const MAX_COORDINATE: f64 = 1e12;
@@ -38,13 +39,29 @@ impl NurbsCurve {
             return invalid(format!("{n} control points of degree {p} need {} knots, not {}", n + p + 1, knots.len()));
         }
         check_knots(&knots)?;
+        // Clamping inserts each end of the domain up to `p` times more.
+        if knots.len() + 2 * p > MAX_KNOTS {
+            return Err(SplineError::TooLarge(format!("{} knots of degree {p} (at most {})", knots.len(), MAX_KNOTS - 2 * p)));
+        }
         let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(n)) else { return invalid("too few knots") };
         if hi <= lo {
             return invalid("the curve's domain is empty");
         }
+        for run in knots.get(p + 1..n).unwrap_or_default().chunk_by(|a, b| a == b) {
+            if let Some(&u) = run.first()
+                && run.len() > p
+                && lo < u
+                && u < hi
+            {
+                return invalid(format!("the inner knot {u} repeats more than the degree"));
+            }
+        }
         for h in ctrl {
             if !(h.w.is_finite() && h.w > 0.0) {
                 return invalid("weights must be positive numbers");
+            }
+            if h.w < f64::MIN_POSITIVE {
+                return invalid(format!("a weight of {:e} is too small to divide by", h.w));
             }
             let q = h.project().ok_or_else(|| SplineError::Invalid("a control point is not finite".into()))?;
             if q.x.abs().max(q.y.abs()).max(q.z.abs()) > MAX_COORDINATE {
@@ -58,7 +75,7 @@ impl NurbsCurve {
     /// The curve's Bézier pieces: one per span of non-zero length of its domain, in order. The
     /// curve is clamped on its domain, then split in one pass (NURBS Book A5.6), in work linear in
     /// its length, all in intervals. An inner knot repeated more than the degree (a curve broken
-    /// there) is refused.
+    /// there) is refused when the curve is made; this refuses it too.
     pub fn pieces(&self) -> SplineResult<Vec<CurvePiece>> {
         let p = self.degree;
         let (u, pw) = clamp_row(p, &self.knots, &self.exact)?;
@@ -141,6 +158,7 @@ impl CurvePiece {
 mod tests {
     use super::super::tests::Lcg;
     use super::*;
+    use crate::prelude::*;
     use solidcore_record::Vec3;
 
     /// A double-double number: `hi + lo` with `|lo|` at most half an ulp of `hi`, about 106 bits.
@@ -358,7 +376,7 @@ mod tests {
         ] {
             assert!(made(p, knots, &three, None).is_err(), "{p} {knots:?}");
         }
-        for w in [[1.0, 0.0, 1.0], [1.0, -1.0, 1.0], [1.0, f64::INFINITY, 1.0]] {
+        for w in [[1.0, 0.0, 1.0], [1.0, -1.0, 1.0], [1.0, f64::INFINITY, 1.0], [1.0, 1e-310, 1.0]] {
             assert!(made(2, &clamped, &three, Some(&w)).is_err(), "{w:?}");
         }
         assert!(made(2, &clamped, &plain(&[(f64::NAN, 0.0), (1.0, 1.0), (2.0, 0.0)]), None).is_err());
@@ -370,10 +388,21 @@ mod tests {
         let same = made(2, &clamped, &three, Some(&[1.0, 3.0, 1.0])).unwrap();
         let (a, b) = (&small.pieces().unwrap()[0], &same.pieces().unwrap()[0]);
         assert!(point(a, 0.3).dist(point(b, 0.3)) < 1e-15);
-        // A line through three points breaks at an inner knot repeated twice (past degree 1).
+        // A line through three points breaks at an inner knot repeated twice (past degree 1),
+        // which is refused when the curve is made, not first when it is split.
         let four = plain(&[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0), (3.0, 1.0)]);
         assert!(made(1, &[0.0, 0.0, 0.5, 1.0, 1.0], &four[..3], None).unwrap().pieces().is_ok());
-        assert!(made(1, &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0], &four, None).unwrap().pieces().is_err());
+        assert!(made(1, &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0], &four, None).is_err());
+        // A curve made has room to be clamped and split: knots just under the limit, unclamped.
+        let p = 3;
+        for len in [MAX_KNOTS - 2 * p, MAX_KNOTS - 2 * p + 1] {
+            let knots: Vec<f64> = (0..len).map(|i| i as f64).collect();
+            let pts = plain(&vec![(0.0, 0.0); len - p - 1]);
+            match made(p, &knots, &pts, None) {
+                Ok(c) => assert!(len == MAX_KNOTS - 2 * p && c.pieces().is_ok(), "{len} knots"),
+                Err(e) => assert!(len > MAX_KNOTS - 2 * p, "{len} knots refused: {e}"),
+            }
+        }
     }
 
     /// A knot inserted just short of the next, beside a weight of 10¹² and one of 1: `1 − α`,
@@ -437,7 +466,7 @@ mod tests {
             match curve.and_then(|c| c.pieces()) {
                 Ok(pieces) => {
                     made += 1;
-                    for piece in pieces.iter().take(2) {
+                    for piece in &pieces {
                         for t in [0.0, 0.5, 1.0] {
                             assert!(encloses(&def, piece, t), "degree {p}, span {:?}, knots {knots:?}, at {t}", piece.span());
                         }

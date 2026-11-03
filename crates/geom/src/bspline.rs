@@ -935,6 +935,20 @@ pub(crate) mod tests {
         assert!(worst < 1e-13, "deviation {worst}");
         assert!(insert_knot(p, &KNOTS, &ctrl, 1.5).is_err());
         assert!(insert_knot(p, &KNOTS, &ctrl, f64::NAN).is_err());
+        // Beside a weight of 10¹², α = (1.5 − 2⁻⁵²)/1.5 is so near 1 that `1 − α` keeps a
+        // quarter of the other factor wrong; from knot differences it stays on the curve.
+        let ub = 1.5 - 2f64.powi(-52);
+        let heavy = [
+            HPoint::weighted(Vec3::new(0.0, 0.0, 0.0), 1.0),
+            HPoint::weighted(Vec3::new(10.0, 20.0, 0.0), 1e12),
+            HPoint::weighted(Vec3::new(20.0, 0.0, 0.0), 1.0),
+        ];
+        let open = [0.0, 0.0, 0.0, 1.5, 1.5, 1.5];
+        let (kn, pts) = insert_knot(2, &open, &heavy, ub).unwrap();
+        for u in [0.75, 1.4, ub, 1.5] {
+            let off = curve(2, &open, &heavy, u).dist(curve(2, &kn, &pts, u));
+            assert!(off < 1e-9, "{off:e} off the curve at {u}");
+        }
     }
 
     pub(crate) fn random_surface(seed: u64, ku: Vec<f64>, kv: Vec<f64>, degree: [usize; 2]) -> NurbsSurface {
