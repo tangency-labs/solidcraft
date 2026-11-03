@@ -9,6 +9,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Axis, WireConstraintKind, WirePoint, WireSpace};
 
 use super::sketch::edit;

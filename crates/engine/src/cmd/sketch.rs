@@ -497,8 +497,8 @@ pub(super) fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
     }
     let (lo, hi) = old.values().flat_map(|w| w.fit.iter().copied()).fold(
         (
-            solidcraft_geom::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
-            solidcraft_geom::Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+            solidcore_record::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            solidcore_record::Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
         ),
         |(lo, hi), p| (lo.min(p), hi.max(p)),
     );
