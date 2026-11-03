@@ -714,6 +714,10 @@ pub struct FilletCorner {
     /// The fork's Ball's own members (`m_pBallSurface` and its loop; smlib#79 step 4c,
     /// WR-697): set by its topology on a blend corner that is a Ball.
     pub ball: Option<crate::blend::blend_corner::ball::BallCorner>,
+    /// The blend corner's chamfer event (WR-716, #2345, `fixes.fillet_chamfer_corner`): its
+    /// corner type, exact points and, until the patch takes it, the facet's face; set
+    /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
+    pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -1057,6 +1061,7 @@ impl FilletCorner {
             blend: None,
             swept: None,
             ball: None,
+            chamfer_corner: None,
             setback: None,
             mixed: None,
             end_cap: None,
@@ -2360,7 +2365,8 @@ impl FilletCorner {
         nxn: impl FnOnce(&mut Self, &mut C) -> Result<()>,
     ) -> Result<()> {
         // the fork's SmBlendCorner::AdjustTopology: a Ball, a Setback, a Mixed corner, a Join,
-        // an End or a Swept turn adjusts nothing (WR-697; 543d25a, 53c47b8)
+        // an End or a Swept turn adjusts nothing (WR-697; 543d25a, 53c47b8); nor does the
+        // chamfer event (WR-716: no patch to stretch)
         if self.blend.is_some_and(|blend| {
             blend.is_ball()
                 || blend.is_setback()
@@ -2368,6 +2374,7 @@ impl FilletCorner {
                 || blend.is_join()
                 || blend.is_end()
                 || blend.is_swept()
+                || blend.is_chamfer()
         }) {
             return Ok(());
         }
@@ -2725,7 +2732,7 @@ impl FilletCorner {
     ) -> Result<()> {
         // the fork's SmBlendCorner::AdjustTangentCorner: nothing at a Ball, a Setback, a Mixed
         // corner, a Join, an End or a Swept turn (WR-697; 543d25a, 53c47b8; the Mitre turn's is
-        // the Nx2 port's)
+        // the Nx2 port's), nor at the chamfer event (WR-716)
         if self.blend.is_some_and(|blend| {
             blend.is_ball()
                 || blend.is_setback()
@@ -2733,6 +2740,7 @@ impl FilletCorner {
                 || blend.is_join()
                 || blend.is_end()
                 || blend.is_swept()
+                || blend.is_chamfer()
         }) {
             return Ok(());
         }

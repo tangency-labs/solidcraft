@@ -26,6 +26,7 @@
 //! | [`mixed`]                    | the Mixed corner (`ClassifyMixed`, `MakeMixedTopology`, `CalcMixedVertGeom`, `CalcMixedEdgeGeom`, `CreateMixedPatches`; 6fd0411, 6e79de5, e1a2153) |
 //! | [`setback`]                  | the Setback (`ClassifySetBack`, `MakeSetBackTopology`, `BuildSetBackFill`, `CreateSetBackPatches`; 61547af, 1506e2f, f1d81f4) |
 //! | [`swept`]                    | the Swept turn (`Classify`'s Swept part, `BuildSweptSurface`, `CreateSweptPatch`) |
+//! | [`BlendChamferCorner`], [`chamfer`] | not the fork's: chamfers meeting at a vertex, closed by their planes (WR-716, #2345) |
 //!
 //! Deviations: the blend corner is not its own corner kind here. The fork's `SmBlendCorner`
 //! builds the Join, the corners of four edges and the Mitre turn with the two-blend
@@ -64,6 +65,7 @@ use crate::topology::face::p2 as face2;
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 
 pub mod ball;
+pub mod chamfer;
 pub mod end;
 pub mod mixed;
 pub mod setback;
@@ -94,6 +96,9 @@ pub enum BlendCornerEvent {
     /// `SM_BCE_MIXED` (the fork's 6fd0411, smlib#82): a convex and a concave blend
     /// continuing each other G1 across a tangent seam ([`mixed`]).
     Mixed,
+    /// Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every edge is
+    /// chamfered, closed by their planes ([`chamfer`]).
+    Chamfer,
 }
 
 /// `SmBlendEnd` (the fork's 53c47b8): how an End ends, chosen when the corner is made.
@@ -122,6 +127,18 @@ pub enum BlendTurn {
     Mitre,
     /// `SM_BT_SWEPT`: the blends' section revolved about the side edge (G1).
     Swept,
+}
+
+/// The two ways the blend corner closes chamfers meeting at a vertex
+/// ([`chamfer`], `Kernel::fixes.fillet_chamfer_corner`), as [`BlendTurn`] is a Turn's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlendChamferCorner {
+    /// Each chamfer plane runs on until it meets the others: three meet at one point,
+    /// pairwise along lines to it, and there is no corner face (the default).
+    #[default]
+    Mitre,
+    /// One plane through the rails' crossings cuts the corner off: one new planar face.
+    Facet,
 }
 
 /// The blend corner's own members (`m_eEvent`, `m_eTurn`, `m_eEnd`) on a corner built as
@@ -180,6 +197,12 @@ impl BlendCorner {
     #[must_use]
     pub fn is_mixed(self) -> bool {
         self.event == BlendCornerEvent::Mixed
+    }
+
+    /// The chamfer event ([`chamfer`]; WR-716).
+    #[must_use]
+    pub fn is_chamfer(self) -> bool {
+        self.event == BlendCornerEvent::Chamfer
     }
 
     /// `IsSwept`: a Turn, Swept.

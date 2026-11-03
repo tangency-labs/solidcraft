@@ -1109,6 +1109,9 @@ pub enum CornerCreation<O> {
         /// The blended edge no size builds (the fork's `NoteFitRadius(0.0, edge)`), noted
         /// before the refusal.
         fit_edge: Option<O>,
+        /// The size of `fit_edge`'s blend that builds and what it sizes, where one does
+        /// (the chamfer event's, WR-716); `None` notes 0, no size.
+        fit: Option<(f64, crate::blend::fillet_executive::FitKind)>,
     },
 }
 
@@ -1198,12 +1201,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     error,
                     comment,
                     fit_edge,
+                    fit,
                 } => {
-                    // NoteFitRadius(0.0, edge)
+                    // NoteFitRadius(0.0, edge), or the size that builds where one does
                     if let Some(edge) = fit_edge {
-                        self.fit_radius = 0.0;
+                        let (size, kind) =
+                            fit.unwrap_or((0.0, crate::blend::fillet_executive::FitKind::Radius));
+                        self.fit_radius = size;
                         self.fit_edge = Some(edge);
-                        self.fit_kind = crate::blend::fillet_executive::FitKind::Radius;
+                        self.fit_kind = kind;
                     }
                     self.error.note_vertex_error(
                         vertex,

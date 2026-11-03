@@ -54,6 +54,9 @@ pub enum CornerKind {
     Swept,
     /// A Mixed corner's faces (`SM_BCE_MIXED`).
     Mixed,
+    /// The chamfer event's faces (not the fork's; WR-716, #2345): a Facet's plane, or a
+    /// corner patch's bilinear quadrilaterals round the crossings' centroid.
+    Chamfer,
     /// A corner the blend corner does not build: the pinned corner hierarchy
     /// (`SmFilletCorner` and its subclasses, #2400), or a blend corner of no event.
     Pinned,
@@ -77,6 +80,7 @@ impl CornerKind {
                 BlendTurn::Swept => Self::Swept,
             },
             BlendCornerEvent::Mixed => Self::Mixed,
+            BlendCornerEvent::Chamfer => Self::Chamfer,
             BlendCornerEvent::None => Self::Pinned,
         }
     }
@@ -92,6 +96,7 @@ impl CornerKind {
             Self::Mitre => "mitre",
             Self::Swept => "swept",
             Self::Mixed => "mixed",
+            Self::Chamfer => "chamfer",
             Self::Pinned => "pinned",
         }
     }
@@ -142,6 +147,7 @@ impl BlendFaceKind {
                 CornerKind::Swept => 15,
                 CornerKind::Mixed => 16,
                 CornerKind::Pinned => 17,
+                CornerKind::Chamfer => 18,
             },
         }
     }
@@ -161,6 +167,7 @@ impl BlendFaceKind {
             15 => Self::Corner(CornerKind::Swept),
             16 => Self::Corner(CornerKind::Mixed),
             17 => Self::Corner(CornerKind::Pinned),
+            18 => Self::Corner(CornerKind::Chamfer),
             _ => return None,
         })
     }
@@ -349,6 +356,7 @@ mod tests {
             CornerKind::Mitre,
             CornerKind::Swept,
             CornerKind::Mixed,
+            CornerKind::Chamfer,
             CornerKind::Pinned,
         ];
         let mut kinds = vec![

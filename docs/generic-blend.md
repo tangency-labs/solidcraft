@@ -270,6 +270,7 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Join** | two blends meeting G1 and continuing each other | one shared section |
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces | the corner ball's sphere |
+| **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
 | **Setback** | everything else: unequal radii, four or more blends, mixed convexity, and any corner where G2 is selected | the setback hole and its certified convex fill |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
@@ -291,6 +292,20 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
 - **Ball.** Three equal rounds at three faces end on the corner ball's sphere [37, 6]. The corner
   face is always one rational patch exactly on the sphere, of degree (4, 2) by stereographic
   construction [8], with no analytic sphere special case: one code path.
+- **Chamfer.** Where every edge at the vertex is chamfered and every chamfer is a plane, the
+  chamfer planes close the corner exactly. The Mitre runs each plane on until it meets the others:
+  three meet at one point M (a 3x3 solve), pairwise along the exact lines from the rails' crossings
+  X_i to M, with no corner face. The Facet cuts the corner off with the plane through the X_i; its
+  edges are the chamfers' end sections. Validity is sign tests on linear forms at the part-scale
+  rounding gate. A mitre point outside the corner is refused, naming the largest size of the
+  too-wide chamfer that keeps it inside. Four or more chamfers build the facet where their
+  crossings are coplanar (their mitre is refused, naming why); where they are not, the corner is a
+  patch whichever type was asked: the chamfers stop at their crossings and n bilinear
+  quadrilaterals round the crossings' centroid close the skew polygon of their end sections, G0
+  to each other and to each chamfer (at four sides, the one bilinear patch of the crossings).
+  Chamfer planes so nearly coplanar
+  that the points where they meet are not determined to the part's rounding are refused, naming
+  that. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
 - **Setback** [44, 43]. Each blend stops at a setback distance from the vertex. The hole has 2n
   sides: n profile curves (the blends' end sections) alternating with n spring curves on the faces.
   Plain trimlines that simply meet give poor shapes for unequal radii, edges far from 90° and
