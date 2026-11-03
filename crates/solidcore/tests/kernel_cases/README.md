@@ -2,7 +2,7 @@
 
 # Kernel rig corpus
 
-This folder holds SolidCraft's kernel rig as data: every case of `tests/kernel-cases/` in SolidCraft, one entry each, by area. An entry holds the operation that made the case's result, its operand bodies as B-rep records (`solidcore-record`), its parameters, the fix set and the expected values. It's the input of solidcore's operation-level gate (#2394). The gate checks whole fillets, shells, booleans, sweeps and threads against exact or closed-form values.
+This folder holds the kernel's operation-level cases as data, one entry each, by area: every case of SolidCraft's kernel rig (`tests/kernel-cases/` there, which takes no new cases), and every kernel case added since. An entry holds the operation that made the case's result, its operand bodies as B-rep records (`solidcore-record`), its parameters, the fix set and the expected values. It's the input of solidcore's operation-level gate (#2394). The gate checks whole fillets, shells, booleans, sweeps and threads against exact or closed-form values.
 
 The runner that replays the entries lands with `solidcore-ops`. The operations are SolidCraft's compositions of kernel calls (picks, per-edge fillet sessions, setbacks, the overflow retry, the stitch, error mapping), and their one home is `solidcore-ops` (`docs/layers.md`). Until then, `crates/solidcore-record/tests/kernel_cases_corpus.rs` checks the corpus itself:
 - every record reads as the record and passes its structural validation;
@@ -11,7 +11,7 @@ The runner that replays the entries lands with `solidcore-ops`. The operations a
 
 ## Where it comes from
 
-The corpus is exported, never written by hand. In a SolidCraft checkout at the commit `manifest.json` names (`solidcraft`), pinned to the solidcore rev it names (`solidcore`), run:
+SolidCraft's cases were exported. In a SolidCraft checkout at the commit `manifest.json` names (`solidcraft`), pinned to the solidcore rev it names (`solidcore`), run:
 
 ```sh
 cargo xtask kernel-cases --cli target/release/solidcraft-cli --export DIR
@@ -49,6 +49,19 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 | `ungraded` | What SolidCraft grades that the kernel doesn't measure: `continuity`, `watertight`, `files`, `results`, `construction`, `flat_pattern`, counts that SolidCraft's merging across analytic surfaces changes, and a refusal graded on SolidCraft's wording of the kernel's error. |
 | `traced_ops` | Every operation the case's commands made, for reference. |
 
+## Adding a case
+
+New kernel cases come here. A case about a command, the UI or a product rule stays in SolidCraft as a test there.
+
+1. **The entry**, `<area>/<case>.json` in an existing area (a new area is a new folder): `case` (`<source number>-<short-name>`, the issue or pull request it comes from), `area`, `sources`, `what`, `calls`, `bodies`, `records`, `params`, `result`, `expected`, `operation_expressible`, `expressible` and, where they apply, `why_not` and `ungraded`, as [An entry](#an-entry) gives them. `rig`, `golden`, `outcome` and `traced_ops` come with an export and are left out of a hand-written entry.
+2. **The operand records**, `<case>.bodies.json.gz` beside it (gzip, no timestamp): `{"b<n>": record}`, one solidcore B-rep record per body `bodies` names. Keep them small: the bodies the operation takes, not a whole design.
+3. **The expected values** in `expected` (SolidCraft's `expected.json` format) are closed-form or exact: a volume, an area, a distance or a count derived by hand or from analysis, with the derivation in `what`. Never a kernel's output, solidcore's included, and never a value taken from commercial CAD.
+4. **The manifest:** add one to the area's `cases` in `manifest.json` (and to `not_expressible` with the reason, for a case the kernel alone does not account for).
+
+To export a case from SolidCraft instead of writing it: draft it there as `tests/kernel-cases/<area>/<id>/recipe.json` and `expected.json`, run `cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli --export DIR`, copy `DIR/<area>/<id>.json` and its `.bodies.json.gz` here, and delete the draft there.
+
+Today `cargo test -p solidcore-record --test kernel_cases_corpus` checks the structure (the three checks at the top); the runner that executes the entries and grades them against `expected` arrives with `solidcore-ops` (stage 3b).
+
 ## Updating
 
-Re-export at the new pin and replace the folder in one pull request. The SolidCraft and solidcore commits are in `manifest.json`.
+Re-export SolidCraft's cases at the new pin and replace their entries in one pull request, keeping the cases added here. The SolidCraft and solidcore commits are in `manifest.json`.

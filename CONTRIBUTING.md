@@ -50,6 +50,10 @@ case, replacing the code they supersede. This page is the short version;
 
 ## Cases and known failures
 
+A new case for a kernel operation goes to the corpus in
+[crates/solidcore/tests/kernel_cases/](crates/solidcore/tests/kernel_cases/README.md#adding-a-case)
+(exported from SolidCraft or written by hand), not to SolidCraft's rig.
+
 Fillet and chamfer cases from SolidCraft's kernel rig are listed in
 [docs/generic-blend.md §7](docs/generic-blend.md#7-case-gallery), each with its state: passes,
 refused as expected (with the size that fits), or known failing (with its reason). When your change
