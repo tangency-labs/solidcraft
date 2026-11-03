@@ -5,7 +5,7 @@
 //! well as any; each place's volume, centre and box are then measured exactly, on the pieces of
 //! the two cuts a − b and b − a that lie there, as `inspect.measure` measures a body.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::compare::{self, CompareOptions, Side};
