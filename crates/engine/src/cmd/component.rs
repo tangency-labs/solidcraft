@@ -175,7 +175,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
     CommandSpec::new("component.paste_new", "Paste New", paste_new).icon("paste").params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
     CommandSpec::new("occurrence.move", "Move Occurrence", move_occurrence).icon("move")
-        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared"),
+        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
     CommandSpec::new("occurrence.drag", "Drag Occurrence", drag::drag).icon("move").params(
         "occurrence or path: exact placement; at: [x,y,z] world point on it; point: [x,y,z] where it goes. Moves the placement by \
          point - at (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
@@ -730,11 +730,33 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
             x.transform = next;
         }
+        if !s.doc.assembly.joints.is_empty() {
+            return Ok(after_joints(s, p, id, next, cmd));
+        }
     } else {
         s.pending_moves.insert(id, next);
         s.revision += 1;
     }
     Ok(json!({"occurrence": id, "transform": next, "pending": !bool_(p, "capture").unwrap_or(true)}))
+}
+
+/// The reply to a captured move once the joints are solved (#11723): a part its joints hold to
+/// something fixed is put back by that solve, so the reply gives where it is now, says
+/// `reverted`, and names the joint and what to change instead.
+fn after_joints(s: &mut Session, p: &Value, id: u64, moved: Mat, cmd: &str) -> Value {
+    s.refresh();
+    let now = s.doc.occurrences.iter().find(|o| o.id == id).map_or(moved, |o| o.transform);
+    let same = now.iter().flatten().zip(moved.iter().flatten()).all(|(a, b)| (a - b).abs() <= 1e-6);
+    if same {
+        return json!({"occurrence": id, "transform": now, "pending": false});
+    }
+    let name = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_default();
+    let why = occurrence_path(s, p, id, cmd).and_then(|path| s.drag_group(&path)).err().map(|e| format!("{e}. ")).unwrap_or_default();
+    let warning = format!(
+        "{why}The joints put {name} back where they hold it. To move it, change the joint (joint.edit for its offset or angle, \
+         joint.drive for a hinge or slider value), move what it is held to, or use joint.reach"
+    );
+    json!({"occurrence": id, "transform": now, "pending": false, "reverted": true, "warning": warning})
 }
 
 fn ground(s: &mut Session, p: &Value) -> Result<Value> {
