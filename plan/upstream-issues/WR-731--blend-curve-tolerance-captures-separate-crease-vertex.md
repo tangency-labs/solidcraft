@@ -1,4 +1,4 @@
-#### WR-723. A blend curve's approximation tolerance captures a separate crease vertex
+#### WR-731. A blend curve's approximation tolerance captures a separate crease vertex
 
 - **Severity:** Wrong result
 - **Area:** Fillets and topology insertion

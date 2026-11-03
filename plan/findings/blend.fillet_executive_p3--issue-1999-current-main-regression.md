@@ -35,7 +35,7 @@ The physical gaps match the original issue, suggesting the retained split-vertex
 
 The blend curve's approximation allowance admitted an existing crease vertex outside
 the body's vertex/face incidence bound. Under `fillet_blend_corner`, the classification
-now requires that strict body bound before inserting a vertex contact; see WR-723.
+now requires that strict body bound before inserting a vertex contact; see WR-731.
 It changes no entity tolerance and does not repair vertices after construction.
 
 On the fixed implementation, all four integration tests pass: the 36-case profile
