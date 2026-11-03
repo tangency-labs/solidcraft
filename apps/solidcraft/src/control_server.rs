@@ -1246,7 +1246,7 @@ mod tests {
                 }
             }
         });
-        let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100) };
+        let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100), token: TOKEN_WAIT };
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
