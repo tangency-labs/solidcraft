@@ -18,7 +18,7 @@ use solidcore_record::Vec3;
 mod curve;
 mod interval;
 
-pub use curve::{Certified, CurvePiece, Fit, MIN_CONIC_RHO_GAP, NurbsCurve, follow};
+pub use curve::{Certified, CurvePiece, Fit, MIN_CONIC_RHO_GAP, MIN_CONTROL_GAP, NurbsCurve, follow};
 
 /// Highest polynomial degree accepted in either direction: the B-rep record's own bound
 /// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of

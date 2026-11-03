@@ -19,11 +19,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.insert_dxf", "Insert DXF", insert_dxf)
         .at("SKETCH", "INSERT")
         .icon("sketch_dxf")
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fit_tolerance?: mm a spline may be from the file's curve in the sketch, 0.0001 to 10 (default 0.001; half for following it, half for joining its ends; one that can't be followed that close in 4096 curves a piece comes in within a tolerance 4, 16, … times looser, and the reply's warnings give its proven distance); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", insert_svg)
         .at("SKETCH", "INSERT")
         .icon("svg")
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fit_tolerance?: mm a curve may be from the file's curve in the sketch, 0.0001 to 10 (default 0.001; half for following it, half for joining its ends; one that can't be followed that close in 4096 curves a piece comes in within a tolerance 4, 16, … times looser, and the reply's warnings give its proven distance); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
         .icon("svg")
         .noundo()
@@ -115,8 +115,9 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
             Geom2::Spline { pts, control, degree } => {
                 // Only the ends join other curves: an inner point moved would reshape the curve. A
-                // through-point spline keeps one of two equal points in a row; a control point
-                // repeated shapes the curve (a Bézier [A, A, B, C] pulls towards A), so stays.
+                // through-point spline keeps one of two equal points in a row; a control-point one
+                // repeating a point never comes here ([`split_nurbs`] follows it with curves that
+                // don't), so its points are kept as they are.
                 let mut pts: Vec<Vec2> = pts.iter().take(MAX_SPLINE_POINTS).copied().collect();
                 if !*control {
                     pts.dedup();
@@ -222,30 +223,72 @@ fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, V
     Ok((geom, bounds))
 }
 
-/// Within this (mm, in the sketch) of the file's curve, a B-spline comes in: half of it for the
-/// curves that follow it, half for joining their ends to other curves. An end moved further to
-/// join another (a join tolerance above that) is reported.
-const FIT_TOLERANCE: f64 = 1e-3;
+/// How far (mm, in the sketch) a B-spline may come in from the file's curve unless `fit_tolerance`
+/// says otherwise: half of it for the curves that follow it, half for joining their ends to other
+/// curves. An end moved further to join another (a join tolerance above that) is reported.
+const DEFAULT_FIT_TOLERANCE: f64 = 1e-3;
 /// Most sketch curves one Bézier piece of a B-spline may become.
 const MAX_PIECE_CURVES: usize = 4096;
 /// Most sketch curves a drawing's B-splines may become together: a bound on the work and memory
 /// a hostile file can ask for.
 const MAX_SPLINE_CURVES: usize = 200_000;
+/// How much a tolerance a piece can't be followed within is loosened each time, and how many
+/// times at most: from 0.0005 mm, past a kilometre.
+const LOOSEN: f64 = 4.0;
+const MAX_LOOSENINGS: usize = 32;
+
+/// The `fit_tolerance` asked for (mm), within the bounds an equation curve's tolerance has.
+fn fit_tolerance(p: &Value, cmd: &str) -> Result<f64> {
+    use solidcraft_doc::sketch_equation::{MAX_TOLERANCE, MIN_TOLERANCE};
+    match p.get("fit_tolerance") {
+        None | Some(Value::Null) => Ok(DEFAULT_FIT_TOLERANCE),
+        Some(v) => v
+            .as_f64()
+            .filter(|t| t.is_finite() && (MIN_TOLERANCE..=MAX_TOLERANCE).contains(t))
+            .ok_or_else(|| bad(cmd, format!("`fit_tolerance` must be a number of mm from {MIN_TOLERANCE} to {MAX_TOLERANCE}"))),
+    }
+}
+
+/// Whether two neighbouring points of a control-point spline repeat ([`bspline::MIN_CONTROL_GAP`]),
+/// which the sketch's own splines don't: at an end it leaves the curve no direction there.
+fn repeats(pts: &[Vec2]) -> bool {
+    pts.windows(2).any(|w| w[0].dist(w[1]) < bspline::MIN_CONTROL_GAP)
+}
+
+/// [`bspline::follow`] within `tolerance`, or, when the piece can't be followed that close in
+/// `room` curves, within the first of the tolerances [`LOOSEN`] times looser, up to
+/// [`MAX_LOOSENINGS`] times, that it can be: not the closest fit there is, but one with its bound
+/// proven. With whether it was loosened. A piece still not followed then, or that can't be at all
+/// (its points don't project, its weights lose their precision), is refused.
+fn follow_loosened(piece: &bspline::CurvePiece, tolerance: f64, room: usize) -> bspline::SplineResult<(Vec<bspline::Certified<Fit>>, bool)> {
+    let mut at = tolerance;
+    for _ in 0..=MAX_LOOSENINGS {
+        match bspline::follow(piece, at, MAX_BEZIER_DEGREE, room) {
+            Ok(fits) => return Ok((fits, at > tolerance)),
+            Err(bspline::SplineError::TooLarge(_) | bspline::SplineError::Unsupported(_)) => at *= LOOSEN,
+            Err(e) => return Err(e),
+        }
+    }
+    bspline::follow(piece, at, MAX_BEZIER_DEGREE, room).map(|fits| (fits, true))
+}
 
 /// A drawing's B-splines as the curves a sketch holds. One that is the sketch's own spline
 /// ([`sketch_own`]) comes in as that one editable spline. Any other is split into Bézier pieces,
 /// each followed within `tolerance` (mm, in the drawing) of the file's curve with the bound proven
 /// ([`bspline::follow`]): a polynomial piece of degree at most 9 as a control-point spline (a line
 /// at degree 1), a rational quadratic one as a conic, any other as cubic control-point splines.
-/// That is every [`Geom2::Nurbs`], and every control-point spline with more points than a sketch
-/// spline holds, which would otherwise lose the rest. Also what the import should say about them,
-/// its distances in the sketch's millimetres (`k` per drawing millimetre), and how many curves
-/// they became. A B-spline that can't be followed within the tolerance refuses the drawing, with
-/// the reason, rather than bringing in another curve.
+/// That is every [`Geom2::Nurbs`], every control-point spline with more points than a sketch
+/// spline holds, which would otherwise lose the rest, and every one that repeats a control point,
+/// which a sketch spline doesn't (a zero-length handle leaves its end no direction, and the solid
+/// kernel refuses to build on it). A piece that can't be followed within the tolerance comes in
+/// within a looser one, its bound proven ([`follow_loosened`]). Also what the import should say
+/// about them, its distances in the sketch's millimetres (`k` per drawing millimetre), and how
+/// many curves they became. A spline that isn't a curve, can't be followed even loosened, or makes
+/// more curves than a drawing may, refuses the drawing with the reason.
 fn split_nurbs(geom: Vec<Geom2>, tolerance: f64, k: f64) -> std::result::Result<(Vec<Geom2>, Vec<String>, usize), String> {
-    let bad = |e: &dyn std::fmt::Display| format!("a spline can't be brought in within {FIT_TOLERANCE} mm: {e}");
+    let bad = |e: &dyn std::fmt::Display| format!("a spline can't be brought in: {e}");
     let mut out = Vec::with_capacity(geom.len());
-    let (mut fitted, mut worst, mut made) = (0usize, 0.0f64, 0usize);
+    let (mut fitted, mut worst, mut made, mut repeated, mut loosened, mut loosest) = (0usize, 0.0f64, 0usize, 0usize, 0usize, 0.0f64);
     for g in geom {
         let curve = match g {
             Geom2::Nurbs(curve) => match sketch_own(&curve) {
@@ -256,17 +299,24 @@ fn split_nurbs(geom: Vec<Geom2>, tolerance: f64, k: f64) -> std::result::Result<
                 }
                 None => curve,
             },
-            Geom2::Spline { pts, control: true, degree } if pts.len() > MAX_SPLINE_POINTS => sketch_spline(&pts, degree).map_err(|e| bad(&e))?,
+            Geom2::Spline { pts, control: true, degree } if pts.len() > MAX_SPLINE_POINTS || repeats(&pts) => {
+                sketch_spline(&pts, degree).map_err(|e| bad(&e))?
+            }
             g => {
                 out.push(g);
                 continue;
             }
         };
+        repeated += usize::from(repeats(&flat_ctrl(&curve)));
         for piece in curve.pieces().map_err(|e| bad(&e))? {
             if made >= MAX_SPLINE_CURVES {
                 return Err(format!("the drawing's splines make more than {MAX_SPLINE_CURVES} curves"));
             }
-            let fits = bspline::follow(&piece, tolerance, MAX_BEZIER_DEGREE, MAX_PIECE_CURVES.min(MAX_SPLINE_CURVES - made)).map_err(|e| bad(&e))?;
+            let (fits, wider) = follow_loosened(&piece, tolerance, MAX_PIECE_CURVES.min(MAX_SPLINE_CURVES - made)).map_err(|e| bad(&e))?;
+            if wider {
+                loosened += 1;
+                loosest = fits.iter().fold(loosest, |w, c| w.max(c.bound()));
+            }
             // The piece itself: over its own control points, or a conic.
             let own_points: Vec<Vec3> = piece.ctrl().filter_map(|h| h.project()).collect();
             let own = match &fits[..] {
@@ -282,10 +332,22 @@ fn split_nurbs(geom: Vec<Geom2>, tolerance: f64, k: f64) -> std::result::Result<
         }
     }
     let mut warnings = Vec::new();
+    if repeated > 0 {
+        warnings.push(format!(
+            "{repeated} spline(s) repeat a control point, which a sketch spline can't (a zero-length handle leaves its end no direction): each comes in as curves that follow it"
+        ));
+    }
     if fitted > 0 {
         warnings.push(format!(
             "{fitted} spline piece(s) have no exact sketch curve: each comes in as cubic splines, at most {:.1e} mm from the file's curve",
             worst * k
+        ));
+    }
+    if loosened > 0 {
+        warnings.push(format!(
+            "{loosened} spline piece(s) can't be followed within the fit tolerance of {:.1e} mm in {MAX_PIECE_CURVES} curves: they come in up to {:.1e} mm from the file's curve",
+            2.0 * tolerance * k,
+            loosest * k
         ));
     }
     Ok((out, warnings, made))
@@ -308,9 +370,9 @@ fn sketch_spline(pts: &[Vec2], degree: u8) -> bspline::SplineResult<NurbsCurve> 
 }
 
 /// `curve` as one sketch spline when it is the sketch's own: degree at most 9, at most 500
-/// points, its weights all alike (which is no weighting), its knots clamped and evenly spaced up
-/// to the rounding of a number (4ε of the domain). Knots written to fewer digits than that are a
-/// different curve, which comes in as its exact pieces.
+/// points, no point repeated ([`repeats`]), its weights all alike (which is no weighting), its
+/// knots clamped and evenly spaced up to the rounding of a number (4ε of the domain). Knots
+/// written to fewer digits than that are a different curve, which comes in as its exact pieces.
 fn sketch_own(curve: &NurbsCurve) -> Option<Geom2> {
     let p = curve.degree();
     let degree = u8::try_from(p).ok().filter(|_| p <= MAX_BEZIER_DEGREE)?;
@@ -325,7 +387,12 @@ fn sketch_own(curve: &NurbsCurve) -> Option<Geom2> {
         return None;
     }
     let pts = ctrl.iter().map(|h| h.project().map(|q| Vec2::new(q.x, q.y))).collect::<Option<Vec<_>>>()?;
-    Some(Geom2::Spline { pts, control: true, degree })
+    (!repeats(&pts)).then_some(Geom2::Spline { pts, control: true, degree })
+}
+
+/// The control points of `curve` in the drawing's plane.
+fn flat_ctrl(curve: &NurbsCurve) -> Vec<Vec2> {
+    curve.ctrl().filter_map(|h| h.project()).map(|q| Vec2::new(q.x, q.y)).collect()
 }
 
 /// A curve a sketch holds for a fit (z dropped: the file's curves have z = 0).
@@ -371,8 +438,9 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         None => sized("height", |n| n.1)?,
     };
     let k = from_size.or_else(|| num(p, "scale")).filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
-    // The sketch's curves are the drawing's scaled by `k`: half of FIT_TOLERANCE there.
-    let (geom, mut warnings, from_bsplines) = split_nurbs(geom, FIT_TOLERANCE / 2.0 / k, k).map_err(|e| drawing_error(p, svg, e))?;
+    // The sketch's curves are the drawing's scaled by `k`: half of the fit tolerance there.
+    let fit = fit_tolerance(p, cmd)?;
+    let (geom, mut warnings, from_bsplines) = split_nurbs(geom, fit / 2.0 / k, k).map_err(|e| drawing_error(p, svg, e))?;
     let angle = match p.get("angle") {
         Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
         None => 0.0,
@@ -407,7 +475,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         let (cs, texts, moved) = add_geometry(sk, &geom, &f, k, tol)?;
         Ok((ids_of(sk, &cs), texts, moved))
     })?;
-    if from_bsplines > 0 && moved > FIT_TOLERANCE / 2.0 {
+    if from_bsplines > 0 && moved > fit / 2.0 {
         warnings.push(format!(
             "curve ends moved up to {moved:.1e} mm to join others (the join tolerance is {tol} mm), so a spline from the file can be that far from it at an end"
         ));
@@ -724,21 +792,16 @@ mod tests {
 
     /// #9355: a SPLINE with uneven knots, a double knot or unclamped closed knots comes in as the
     /// curve its own knots describe: one control-point spline per span of its domain, each on the
-    /// file's curve (by de Boor) all along, not one spline over the points with even knots. A
-    /// repeated control point stays repeated, in a plain Bézier and in an exact piece alike.
+    /// file's curve (by de Boor) all along, not one spline over the points with even knots.
     #[test]
     fn a_spline_comes_in_as_its_own_knots_describe() {
         let open = [[0.0, 0.0], [10.0, 25.0], [30.0, 30.0], [45.0, 5.0], [60.0, 20.0], [80.0, 0.0]];
         let (a, b, c) = ([0.0, 0.0], [20.0, 0.0], [10.0, 20.0]);
         let closed = [a, b, c, a, b, c];
-        let bezier = [a, a, b, c];
-        let repeated = [a, a, b, c, [30.0, 5.0]];
         for (ctrl, knots, closes) in [
             (&open[..], vec![0.0, 0.0, 0.0, 0.0, 0.1, 0.15, 1.0, 1.0, 1.0, 1.0], false),
             (&open, vec![0.0, 0.0, 0.0, 0.0, 0.4, 0.4, 1.0, 1.0, 1.0, 1.0], false),
             (&closed, (0..10).map(f64::from).collect(), true),
-            (&bezier, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], false),
-            (&repeated, vec![0.0, 0.0, 0.0, 0.0, 0.3, 1.0, 1.0, 1.0, 1.0], false),
         ] {
             let (r, sk, profiles) = insert_one(&spline_dxf(3, ctrl, &knots, &[]));
             assert_eq!(r["warnings"], json!([]), "{r}");
@@ -756,6 +819,82 @@ mod tests {
             }
             assert_eq!(profiles, usize::from(closes), "{knots:?}");
         }
+    }
+
+    /// Whether sketch spline `i` repeats a control point, which the sketch's own spline tool
+    /// refuses.
+    fn repeats_a_point(sk: &Sketch, i: usize) -> bool {
+        let CurveKind::Spline { pts, .. } = &sk.curves[i].kind else { return false };
+        pts.windows(2).any(|w| sk.point(w[0]).unwrap().dist(sk.point(w[1]).unwrap()) < solidcraft_geom::bspline::MIN_CONTROL_GAP)
+    }
+
+    /// A spline repeating a control point (a Bézier [A, A, B, C], one with the zero-length handle
+    /// at its end, an exact piece starting so) has an end with no direction, which a sketch spline
+    /// can't have and the solid kernel won't build on: it comes in as curves that repeat no point,
+    /// within 0.001 mm of the file's curve, and the import says so. An SVG path's zero-length handle
+    /// (`C4,31 8,20 8,20`) alike.
+    #[test]
+    fn a_repeated_control_point_comes_in_as_curves_that_dont_repeat_it() {
+        let (a, b, c) = ([0.0, 0.0], [20.0, 0.0], [10.0, 20.0]);
+        let cubic = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        for (ctrl, knots) in [
+            (vec![a, a, b, c], cubic.clone()),
+            (vec![a, b, c, c], cubic),
+            (vec![a, a, b, c, [30.0, 5.0]], vec![0.0, 0.0, 0.0, 0.0, 0.3, 1.0, 1.0, 1.0, 1.0]),
+        ] {
+            let (r, sk, _) = insert_one(&spline_dxf(3, &ctrl, &knots, &[]));
+            let warned = r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().starts_with("1 spline(s) repeat a control point"));
+            assert!(warned, "{r}");
+            assert!((0..sk.curves.len()).all(|i| !repeats_a_point(&sk, i)), "{ctrl:?}: {:?}", sk.curves);
+            assert_within(&sk, 0, &ctrl, &[], &knots, 3, 1.0, 1e-3);
+        }
+        let svg = r#"<svg width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M5,35 C4,31 8,20 8,20"/></svg>"#;
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().sketch.clone();
+        assert!(sk.curves.len() > 1 && (0..sk.curves.len()).all(|i| !repeats_a_point(&sk, i)), "{r}");
+    }
+
+    /// `fit_tolerance` sets how close a spline with no exact sketch curve comes in, apart from the
+    /// join `tolerance`: looser takes fewer curves. Outside 0.0001 to 10 mm it is refused.
+    #[test]
+    fn the_fit_tolerance_sets_how_close_a_spline_comes_in() {
+        let (ctrl, weights, knots) =
+            ([[0.0, 0.0], [5.0, 30.0], [40.0, 30.0], [50.0, 0.0]], [1.0, 3.0, 0.5, 1.0], [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        let dxf = spline_dxf(3, &ctrl, &knots, &weights);
+        let curves = |fit: f64| {
+            let (r, sk, _) = insert_with(json!({"text": dxf, "fit_tolerance": fit})).unwrap();
+            assert_within(&sk, 0, &ctrl, &weights, &knots, 3, 1.0, fit);
+            assert!(r["warnings"].as_array().unwrap().iter().all(|w| !w.as_str().unwrap().contains("can't be followed")), "{r}");
+            sk.curves.len()
+        };
+        let (loose, default, tight) = (curves(0.1), curves(0.001), curves(0.0001));
+        assert!(loose < default && default < tight, "{loose} {default} {tight}");
+        for bad in [json!(0.0), json!(-1.0), json!(1e-5), json!(11.0), json!("0.01")] {
+            let e = insert_with(json!({"text": dxf, "fit_tolerance": bad})).unwrap_err();
+            assert!(e.contains("`fit_tolerance` must be a number of mm from 0.0001 to 10"), "{bad}: {e}");
+        }
+    }
+
+    /// A spline that can't be followed within the fit tolerance in the curves a piece may take (a
+    /// 1000 km curve with weights 10⁸ apart) comes in within a looser tolerance, and the import
+    /// gives the proven distance; it is not refused.
+    #[test]
+    fn a_spline_that_cant_be_followed_closely_comes_in_and_says_how_close() {
+        let (ctrl, weights, knots) =
+            ([[0.0, 0.0], [0.0, 1e9], [1e9, 3e8], [2e8, 0.0]], [1.0, 1e4, 1e-4, 1.0], [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        let (r, sk, _) = insert_one(&spline_dxf(3, &ctrl, &knots, &weights));
+        let warning = r["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|w| w.as_str())
+            .find(|w| w.contains("can't be followed"))
+            .unwrap_or_else(|| panic!("{r}"));
+        let close: f64 =
+            warning.split("up to ").nth(1).and_then(|w| w.split(' ').next()).and_then(|x| x.parse().ok()).unwrap_or_else(|| panic!("{warning}"));
+        assert!(close > 5e-4, "{warning}");
+        assert_within(&sk, 0, &ctrl, &weights, &knots, 3, 1.0, close * 1.1);
     }
 
     /// A SPLINE that is the sketch's own (clamped, evenly spaced knots, no weights or all alike)

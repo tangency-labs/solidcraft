@@ -34,6 +34,10 @@ use solidcore_record::Vec3;
 pub const MIN_CONIC_RHO_GAP: f64 = 1e-9;
 /// Furthest a control point may be from the origin along any axis (mm).
 const MAX_COORDINATE: f64 = 1e12;
+/// Least distance between neighbouring control points of a [`Fit`], as the sketch's own spline
+/// tool asks of the points it is given: nearer, a point repeats, which at an end leaves the curve
+/// no direction there (a zero-length handle), and the solid kernel refuses to build on it.
+pub const MIN_CONTROL_GAP: f64 = 1e-9;
 
 /// A rational B-spline curve of `degree` with `knots` and homogeneous control points, checked when
 /// it is made (module documentation).
@@ -221,8 +225,11 @@ impl<T> Certified<T> {
 /// proven ([`Certified`]): the piece itself as a polynomial Bézier when it is one (up to its
 /// parametrisation) and its degree is at most `max_degree`; a quadratic one as a conic; otherwise
 /// cubics matching the ends of parts of it and their tangents, a part halved until its bound is
-/// within the tolerance. Refused, with how close it came, when that would take more than
-/// `max_fits` curves, or the intervals can't prove it (a tolerance below the piece's rounding).
+/// within the tolerance. No fit repeats a control point ([`MIN_CONTROL_GAP`]): a piece that does
+/// (an end with no direction, as a zero-length handle leaves) is followed by cubics whose handles
+/// point the way the piece leaves that end. Refused, with how close it came, when that would take
+/// more than `max_fits` curves, or the intervals can't prove it (a tolerance below the piece's
+/// rounding).
 pub fn follow(piece: &CurvePiece, tolerance: f64, max_degree: usize, max_fits: usize) -> SplineResult<Vec<Certified<Fit>>> {
     if !(tolerance.is_finite() && tolerance > 0.0) {
         return invalid("the tolerance must be a positive number");
@@ -238,7 +245,7 @@ pub fn follow(piece: &CurvePiece, tolerance: f64, max_degree: usize, max_fits: u
     let whole = |value: Fit, bound: f64| vec![Certified { value, bound, along: [0.0, 1.0] }];
     let (Some(first), Some(last)) = (mids.first(), mids.last()) else { return invalid("a curve piece has no points") };
     let n = mids.len() - 1;
-    if (1..=max_degree).contains(&n) {
+    if (1..=max_degree).contains(&n) && !repeats(&pts) {
         // Weights 1, c, c², … with c from the end weights' ratio, so the parametrisations meet.
         let c = (last.w / first.w).powf(1.0 / n as f64);
         let c = Interval::point(if c.is_finite() && c > 0.0 { c } else { 1.0 });
@@ -279,6 +286,12 @@ fn weighted(pts: &[Vec3], w: &[Interval]) -> Vec<HInterval> {
         .collect()
 }
 
+/// Whether two neighbouring points of `pts` are closer than [`MIN_CONTROL_GAP`], and not all of
+/// them are (a curve smaller than that is a point, whatever its points: it is kept as it is).
+fn repeats(pts: &[Vec3]) -> bool {
+    pts.windows(2).any(|w| w[0].dist(w[1]) < MIN_CONTROL_GAP) && !pts.iter().all(|p| p.dist(pts[0]) < MIN_CONTROL_GAP)
+}
+
 /// Cubic Hermite curves that follow the enclosed Bézier `exact`, halving a part until its bound is
 /// within `tolerance` ([`follow`]).
 fn cubics(exact: &[HInterval], tolerance: f64, max_fits: usize) -> SplineResult<Vec<Certified<Fit>>> {
@@ -290,9 +303,16 @@ fn cubics(exact: &[HInterval], tolerance: f64, max_fits: usize) -> SplineResult<
     while let Some((part, along)) = parts.pop() {
         mids.clear();
         mids.extend(part.iter().map(|h| h.mid()));
-        let ctrl = hermite(&mids)?;
-        let bound = error_bound(&part, &weighted(&ctrl, &ones))?;
-        if bound <= tolerance {
+        let (ctrl, run) = hermite(&mids)?;
+        // Traced as `run` goes, the cubic is still every one of its points, so a bound between the
+        // part and it bounds the distance from each point of either to the other.
+        let traced = match run {
+            Run::Even => weighted(&ctrl, &ones),
+            Run::Stops(psi) => composed(&ctrl, psi),
+        };
+        let bound = error_bound(&part, &traced)?;
+        // A cubic with a repeated point (a part too small for its handles) is split, as one too far.
+        if bound <= tolerance && !repeats(&ctrl) {
             out.push(Certified { value: Fit::Bezier(ctrl.to_vec()), bound, along });
             continue;
         }
@@ -315,22 +335,114 @@ fn cubics(exact: &[HInterval], tolerance: f64, max_fits: usize) -> SplineResult<
     Ok(out)
 }
 
+/// How a cubic is traced when it is compared with the part it follows: as its own parameter runs,
+/// or as `ψ` (Bernstein coefficients, rising from 0 to 1) runs, which stops at an end, as a part
+/// that arrives at an end with no speed does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Run {
+    Even,
+    Stops(&'static [f64]),
+}
+
+/// `ψ(s) = s²`: stops at the start.
+const STOPS_AT_START: &[f64] = &[0.0, 0.0, 1.0];
+/// `ψ(s) = 1 − (1 − s)²`: stops at the end.
+const STOPS_AT_END: &[f64] = &[0.0, 1.0, 1.0];
+/// `ψ(s) = 3s² − 2s³`: stops at both.
+const STOPS_AT_BOTH: &[f64] = &[0.0, 0.0, 1.0, 1.0];
+
 /// The cubic with the ends of the Bézier `q` and its tangents there (cubic Hermite): a rational
-/// Bézier's derivative at its start is `n·(w₁/w₀)·(p₁ − p₀)`, and alike at its end. Any cubic would
-/// do: the bound is computed for the one made.
-fn hermite(q: &[HPoint]) -> SplineResult<[Vec3; 4]> {
+/// Bézier's derivative at its start is `n·(w₁/w₀)·(p₁ − p₀)`, and alike at its end; traced evenly.
+///
+/// Where the derivative leaves a handle shorter than [`MIN_CONTROL_GAP`] (the end has no
+/// direction: `p₁` on `p₀`, as a zero-length handle in a drawing leaves it), the curve arrives
+/// there with no speed and turns ever more sharply into it. A cubic that follows it as closely in
+/// the same parameter would have to turn as sharply. Instead the cubic is traced as a `ψ` that
+/// stops there too ([`Run::Stops`]), and its handle matches the part's second derivative there,
+/// `n(n−1)·(w₂/w₀)·(p₂ − p₀)`, through `ψ`: it points the way the curve leaves that end and is
+/// long, so the cubic bends gently where the part bends sharply, within its bound of it. The other
+/// end's handle matches its derivative through `ψ` likewise. Any cubic would do: the bound is
+/// computed for the one made.
+fn hermite(q: &[HPoint]) -> SplineResult<([Vec3; 4], Run)> {
     let n = q.len().saturating_sub(1);
     let at = |i: usize| q.get(i).and_then(|h| h.project().map(|p| (p, h.w)));
     let (Some((p0, w0)), Some((p1, w1)), Some((pm, wm)), Some((pn, wn))) = (at(0), at(1), at(n.saturating_sub(1)), at(n)) else {
         return invalid("a curve piece's points don't project");
     };
-    let n = u32::try_from(n).map(f64::from).or_else(|_| invalid("a curve piece's degree is too high"))?;
-    let (d0, d1) = ((p1 - p0) * (n * w1 / w0), (pn - pm) * (n * wm / wn));
-    let ctrl = [p0, p0 + d0 / 3.0, pn - d1 / 3.0, pn];
+    let nf = u32::try_from(n).map(f64::from).or_else(|_| invalid("a curve piece's degree is too high"))?;
+    let chord = p0.dist(pn);
+    // The derivatives at the ends, into the curve.
+    let (d0, d1) = ((p1 - p0) * (nf * w1 / w0), (pm - pn) * (nf * wm / wn));
+    // An end stops where its handle would have no length and the part is long enough for one.
+    let stops = |d: Vec3| n >= 2 && d.len() / 3.0 < MIN_CONTROL_GAP && chord / 3.0 >= MIN_CONTROL_GAP;
+    // A stopped end's handle, for `ψ` with `bend = ψ''` there: the second derivative into the curve
+    // over three times `bend`; where that has no length either, a third of the chord along the
+    // first of the points that leaves the end.
+    let stopped = |from: Vec3, w: f64, next: usize, others: &mut dyn Iterator<Item = usize>, bend: f64| -> Vec3 {
+        let second = at(next).map_or(Vec3::ZERO, |(p, wn2)| (p - from) * (nf * (nf - 1.0) * wn2 / w));
+        if second.len() / (3.0 * bend) >= MIN_CONTROL_GAP {
+            return second / (3.0 * bend);
+        }
+        let away = others.filter_map(|i| at(i).map(|(p, _)| p - from)).find(|v| v.len() >= MIN_CONTROL_GAP);
+        away.and_then(Vec3::normalized).map_or(Vec3::ZERO, |u| u * (chord / 3.0))
+    };
+    let (h0, h1, run) = match (stops(d0), stops(d1)) {
+        (false, false) => (d0 / 3.0, d1 / 3.0, Run::Even),
+        // ψ = 1 − (1 − s)²: ψ'(0) = 2, ψ''(1) = −2.
+        (false, true) => (d0 / 6.0, stopped(pn, wn, n.saturating_sub(2), &mut (0..n.saturating_sub(2)).rev(), 2.0), Run::Stops(STOPS_AT_END)),
+        // ψ = s²: ψ''(0) = 2, ψ'(1) = 2.
+        (true, false) => (stopped(p0, w0, 2, &mut (3..=n), 2.0), d1 / 6.0, Run::Stops(STOPS_AT_START)),
+        // ψ = 3s² − 2s³: ψ''(0) = 6, ψ''(1) = −6.
+        (true, true) => (
+            stopped(p0, w0, 2, &mut (3..=n), 6.0),
+            stopped(pn, wn, n.saturating_sub(2), &mut (0..n.saturating_sub(2)).rev(), 6.0),
+            Run::Stops(STOPS_AT_BOTH),
+        ),
+    };
+    let ctrl = [p0, p0 + h0, pn + h1, pn];
     if !ctrl.iter().all(|p| p.is_finite()) {
         return invalid("a curve piece's tangents overflow");
     }
-    Ok(ctrl)
+    Ok((ctrl, run))
+}
+
+/// The polynomial Bézier `q` traced as `psi` runs (Bernstein coefficients of `ψ`): `q(ψ(s))`, of
+/// degree 3·deg ψ, as homogeneous intervals of weight 1 that hold its exact control points.
+fn composed(q: &[Vec3; 4], psi: &[f64]) -> Vec<HInterval> {
+    let one = Interval::point(1.0);
+    let psi: Vec<Interval> = psi.iter().map(|&x| Interval::point(x)).collect();
+    let rest: Vec<Interval> = psi.iter().map(|&x| one.sub(x)).collect();
+    let power = |f: &[Interval], k: usize| (0..k).fold(vec![one], |acc, _| bernstein_mul(&acc, f));
+    let mut out: Vec<[Interval; 3]> = Vec::new();
+    for (i, qi) in q.iter().enumerate() {
+        // C(3, i) ψⁱ (1 − ψ)³⁻ⁱ, the Bernstein basis function through ψ.
+        let basis = bernstein_mul(&power(&psi, i), &power(&rest, 3 - i));
+        out.resize(basis.len(), [Interval::ZERO; 3]);
+        let c = Interval::point(binomial(3, i));
+        for (o, b) in out.iter_mut().zip(&basis) {
+            let b = c.mul(*b);
+            for (oc, qc) in o.iter_mut().zip([qi.x, qi.y, qi.z]) {
+                *oc = oc.add(b.mul(Interval::point(qc)));
+            }
+        }
+    }
+    out.into_iter().map(|[x, y, z]| HInterval { x, y, z, w: one }).collect()
+}
+
+/// The Bernstein coefficients of the product of two polynomials given by theirs (of degrees
+/// `f.len() − 1` and `g.len() − 1`).
+fn bernstein_mul(f: &[Interval], g: &[Interval]) -> Vec<Interval> {
+    let (a, b) = (f.len().saturating_sub(1), g.len().saturating_sub(1));
+    let mut out = vec![Interval::ZERO; a + b + 1];
+    for (i, fi) in f.iter().enumerate() {
+        for (j, gj) in g.iter().enumerate() {
+            let c = Interval::point(binomial(a, i) * binomial(b, j)).div(Interval::point(binomial(a + b, i + j)));
+            if let Some(o) = out.get_mut(i + j) {
+                *o = o.add(c.mul(fi.mul(*gj)));
+            }
+        }
+    }
+    out
 }
 
 /// A bound, proven in intervals, on the distance at each `t` from the rational Bézier `c` to the
@@ -907,5 +1019,45 @@ mod tests {
         assert_eq!(piece.span(), [a, b]);
         let fits = follow(piece, 1e-3, 9, 1000).unwrap();
         assert_follows(&def, piece, &fits, 1e-3, 3);
+    }
+
+    /// A cubic whose handle at an end has no length (`C4,31 8,20 8,20` in an SVG path, both ends,
+    /// or a rational one) is followed by cubics with no repeated point, within the tolerance,
+    /// proven; so is each handle shortened towards none. At a stalled end the cubic leaves the way
+    /// the curve does.
+    #[test]
+    fn an_end_with_no_direction_is_followed_by_curves_that_have_one() {
+        let cubic = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let svg = plain(&[(5.0, -35.0), (4.0, -31.0), (8.0, -20.0), (8.0, -20.0)]);
+        let both = plain(&[(0.0, 0.0), (0.0, 0.0), (30.0, 10.0), (30.0, 10.0)]);
+        let start = plain(&[(0.0, 0.0), (0.0, 0.0), (10.0, 20.0), (30.0, 0.0)]);
+        for (pts, w, tolerance) in [(&svg, None, 5e-4), (&svg, None, 1e-6), (&both, None, 5e-4), (&start, Some(&[1.0, 2.0, 0.5, 1.0][..]), 5e-4)] {
+            let (curve, def) = cartesian(3, &cubic, pts, w);
+            let piece = &curve.pieces().unwrap()[0];
+            let fits = follow(piece, tolerance, 9, 4096).unwrap();
+            assert!(fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if !repeats(p))), "{pts:?}: {fits:?}");
+            assert!(fits.len() < 100, "{pts:?} at {tolerance}: {} cubics", fits.len());
+            assert_follows(&def, piece, &fits, tolerance, 3);
+            let leaves = |f: &Certified<Fit>, end: bool| match f.value() {
+                Fit::Bezier(p) if end => p[2] - p[3],
+                Fit::Bezier(p) => p[1] - p[0],
+                Fit::Conic { .. } => Vec3::ZERO,
+            };
+            for (stalled, end, along) in [(pts[0] == pts[1], false, pts[2] - pts[0]), (pts[3] == pts[2], true, pts[1] - pts[3])] {
+                let fit = if end { fits.last() } else { fits.first() };
+                let way = fit.map_or(Vec3::ZERO, |f| leaves(f, end));
+                // Parallel up to the rounding of the halved parts' points near the end (their
+                // offsets from it are 10⁻⁷ of their size there).
+                assert!(!stalled || (way.cross(along).len() <= 1e-6 * way.len() * along.len() && way.dot(along) > 0.0), "{pts:?}: {way:?}");
+            }
+        }
+        for gap in [1e-3, 1e-8, 1e-10] {
+            let pts = plain(&[(5.0, -35.0), (4.0, -31.0), (8.0, -20.0 - gap), (8.0, -20.0)]);
+            let (curve, def) = cartesian(3, &cubic, &pts, None);
+            let piece = &curve.pieces().unwrap()[0];
+            let fits = follow(piece, 5e-4, 9, 4096).unwrap();
+            assert!(fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if !repeats(p))), "{gap}: {fits:?}");
+            assert_follows(&def, piece, &fits, 5e-4, 3);
+        }
     }
 }

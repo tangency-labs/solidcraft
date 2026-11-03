@@ -3780,7 +3780,9 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
         let mut s = new_sketch();
         run(&mut s, "sketch.insert_svg", json!({"text": svg}));
         let sources = sketch(&s).curves.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
-        assert_eq!(sources.len(), 5);
+        // Four curves as written; the one with the zero-length handle comes in as several that
+        // have a direction at that end, which a sketch spline needs (Insert SVG).
+        assert!(sources.len() > 5, "{sources:?}");
         // Picking every curve of the chain makes one offset, not one per curve.
         let out = run(&mut s, "sketch.offset", json!({"curves": sources, "distance": distance}));
         let curves = ids(&out["curves"]);
@@ -3789,8 +3791,8 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
             curves.iter().any(|c| matches!(sk.curves[sk.curve_index(c).unwrap()].kind, CurveKind::Arc { .. })),
             "an outer corner is rounded: {out}"
         );
-        assert_eq!(sk.curves.len(), 5 + curves.len());
-        let source: Vec<_> = (0..5).flat_map(|i| sk.exact_pieces(i)).collect();
+        assert_eq!(sk.curves.len(), sources.len() + curves.len());
+        let source: Vec<_> = (0..sources.len()).flat_map(|i| sk.exact_pieces(i)).collect();
         for c in &curves {
             for seg in sk.exact_pieces(sk.curve_index(c).unwrap()) {
                 for k in 0..=8 {
