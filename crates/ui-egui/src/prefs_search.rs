@@ -946,8 +946,6 @@ mod tests {
         assert!(!matches_text("dark", &["Units of new designs"]));
     }
 
-    /// A multi-word right-to-left label reaches the search in display order while the query is
-    /// typed in reading order: typing the label's words as written must find the row (#10471).
     #[test]
     fn layout_controls_keep_one_real_search_target_and_native_names() {
         use egui::accesskit::Role;
@@ -983,6 +981,8 @@ mod tests {
         }
     }
 
+    /// A multi-word right-to-left label reaches the search in display order while the query is
+    /// typed in reading order: typing the label's words as written must find the row (#10471).
     #[test]
     fn search_finds_right_to_left_labels_typed_in_reading_order() {
         let _language = crate::i18n::scope("he");
