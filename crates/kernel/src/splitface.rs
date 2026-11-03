@@ -49,8 +49,8 @@ fn invalid(what: impl Into<String>) -> KernelError {
     KernelError::Invalid(what.into())
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib {what}"), e)
 }
 
 fn a3(v: Vec3) -> [f64; 3] {

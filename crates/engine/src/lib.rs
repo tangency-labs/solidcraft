@@ -84,7 +84,10 @@ pub enum EngineError {
 
 impl From<solidcraft_doc::DocError> for EngineError {
     fn from(e: solidcraft_doc::DocError) -> Self {
-        EngineError::Other(e.to_string())
+        match e {
+            solidcraft_doc::DocError::Kernel(e) => e.into(),
+            e => EngineError::Other(e.to_string()),
+        }
     }
 }
 impl From<solidcraft_sketch::SketchError> for EngineError {
@@ -94,7 +97,19 @@ impl From<solidcraft_sketch::SketchError> for EngineError {
 }
 impl From<solidcraft_kernel::KernelError> for EngineError {
     fn from(e: solidcraft_kernel::KernelError) -> Self {
-        EngineError::Other(e.to_string())
+        match e {
+            // A panic the kernel caught: internal, as one in the command would be. The command's id
+            // is filled in where the command is run (`Session::execute`).
+            solidcraft_kernel::KernelError::Internal(m) => EngineError::Internal(String::new(), m),
+            e => EngineError::Other(e.to_string()),
+        }
+    }
+}
+
+impl EngineError {
+    /// The error a failed feature's result reports: internal when the kernel caught a panic.
+    pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
+        if r.internal { EngineError::Internal(String::new(), error) } else { EngineError::Other(error) }
     }
 }
 impl From<solidcraft_io::IoError> for EngineError {
@@ -1648,6 +1663,11 @@ impl Session {
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
         };
+        // The kernel's internal errors come up without the command's id.
+        let r = r.map_err(|e| match e {
+            EngineError::Internal(id, msg) if id.is_empty() => EngineError::Internal(spec.id.to_string(), msg),
+            e => e,
+        });
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
         // same undo step; a refused definition fails the command, which leaves the design as it was.
         let r = match r {
@@ -2174,8 +2194,10 @@ impl Session {
             {
                 self.doc_mut().marker = Some(idx + 1);
                 self.refresh();
-                if let Some(e) = self.model.result(fid).and_then(|r| r.error.clone()) {
-                    return Err(EngineError::Other(e));
+                if let Some(r) = self.model.result(fid)
+                    && let Some(e) = r.error.clone()
+                {
+                    return Err(EngineError::of_feature(r, e));
                 }
             }
         }

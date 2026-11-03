@@ -123,8 +123,8 @@ mod imp {
     use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
     use crate::{KernelError, Result, guard, record};
 
-    fn failed(what: &str, step: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib {what}: {step}: {e}"))
+    fn failed(what: &str, step: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib {what}: {step}"), e)
     }
 
     /// How far a pick may lie from its edge.

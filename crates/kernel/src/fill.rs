@@ -795,7 +795,7 @@ fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b
     }
     let mut made = assemble(Parts { vertices, edges, faces: vec![PartFace { surface, forward: true, loops: vec![uses] }], tolerance: tol }, false)?;
     hold_gap(&mut made.brep, tol);
-    let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("patch: SMLib: {e}")))?;
+    let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::smlib("patch: SMLib", e))?;
     let (patch, order) = crate::native::body_from_smlib_ordered(&smlib)?;
     // The patch's edges in its own order, each from the loop edge it is.
     let Some(order) = order else { return Ok(patch) };
@@ -920,7 +920,7 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, to
     }
     let mut made = assemble(Parts { vertices, edges, faces, tolerance: tol }, false)?;
     hold_gap(&mut made.brep, tol);
-    let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("patch: SMLib: {e}")))?;
+    let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::smlib("patch: SMLib", e))?;
     let (sheet, order) = crate::native::body_from_smlib_ordered(&smlib)?;
     let Some(order) = order else { return Ok(sheet) };
     let place = |list: &[usize], c: usize| if list.is_empty() { Some(c) } else { list.get(c).copied() };

@@ -93,8 +93,8 @@ mod imp {
     use crate::provenance::{closest_on_tri, face_tris};
     use crate::record;
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib {what}"), e)
     }
 
     fn corner(c: crate::DraftCorner) -> DraftCorner {

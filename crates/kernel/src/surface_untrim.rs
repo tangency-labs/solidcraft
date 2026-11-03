@@ -102,8 +102,8 @@ pub fn untrim(body: &Body, face: usize, holes: UntrimHoles, outer: bool, in_plac
     Ok(out.with_checked_history(history, &crate::record::counts(&[body])))
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib untrim: {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib untrim: {what}"), e)
 }
 
 /// A point inside face `face` of `body`: the centre of its largest mesh triangle.

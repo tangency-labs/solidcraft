@@ -206,9 +206,9 @@ fn moved_from(history: Option<&History>, f: usize) -> Option<usize> {
 
 /// `body` moved by a matrix that is not a rigid motion, in SMLib, its history from SMLib's tags.
 fn transformed(body: &Body, m: &[[f64; 4]; 4]) -> Result<Body> {
-    let failed = |what: &str, e: &dyn std::fmt::Display| KernelError::Failed(format!("SMLib transform: {what}: {e}"));
+    let failed = |what: &str, e: solidcraft_smlib::Error| KernelError::smlib(format!("SMLib transform: {what}"), e);
     let (handle, order) = crate::native::smlib_body_ordered(body)?;
-    let moved = handle.tagged(0).map_err(|e| failed("tag", &e))?.transformed(m).map_err(|e| failed("operation", &e))?;
+    let moved = handle.tagged(0).map_err(|e| failed("tag", e))?.transformed(m).map_err(|e| failed("operation", e))?;
     let (result, result_order) = crate::native::body_from_smlib_ordered(&moved)?;
     let history = match (order, result_order) {
         (Some(o), Some(r)) => moved.history().ok().and_then(|h| h.history(&[o], &r).ok()),

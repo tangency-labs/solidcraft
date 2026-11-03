@@ -422,6 +422,17 @@ pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kerne
     run_on(call, &[], f)
 }
 
+thread_local! {
+    /// How many solidcore calls this thread is inside: a panic now is caught ([`run_on`]).
+    static IN_CALL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Is this thread inside a solidcore call, whose panic [`run_on`] catches? (Crash reports mark such
+/// a panic recovered.)
+pub(crate) fn in_call() -> bool {
+    IN_CALL.with(std::cell::Cell::get) > 0
+}
+
 /// [`run`] for a call that reads the bodies `inputs`: should it fail while a dump folder is set,
 /// they are left there ([`dump::failed`]).
 pub(crate) fn run_on<T: dump::Answer>(
@@ -434,7 +445,17 @@ pub(crate) fn run_on<T: dump::Answer>(
     // A profiler span per call: where the kernel's time goes.
     let _span = solidcraft_profile::span("solidcore", call);
     dump::set_current(Some(call));
-    let r = match catch_unwind(AssertUnwindSafe(|| f(k))) {
+    struct Depth;
+    impl Drop for Depth {
+        fn drop(&mut self) {
+            IN_CALL.with(|d| d.set(d.get().saturating_sub(1)));
+        }
+    }
+    IN_CALL.with(|d| d.set(d.get() + 1));
+    let depth = Depth;
+    let caught = catch_unwind(AssertUnwindSafe(|| f(k)));
+    drop(depth);
+    let r = match caught {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(Error::Solidcore(format!("{call}: {e}"))),
         Err(p) => {

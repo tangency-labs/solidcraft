@@ -231,6 +231,22 @@ pub fn current_call() -> Option<String> {
     core::dump::current()
 }
 
+/// Is this thread inside a solidcore call? A panic there is caught and becomes
+/// [`Error::Internal`]; crash reports mark it recovered.
+pub fn in_call() -> bool {
+    core::in_call()
+}
+
+/// A panic inside a solidcore call, which the call catches as it catches any
+/// ([`Error::Internal`], the kernel replaced by a fresh one): the crash-report check
+/// (`diagnostics.crash_test`'s kernel mode). The crate's one deliberate panic.
+#[allow(clippy::panic)]
+pub fn crash_test() -> Result<()> {
+    core::run("crash test", |_| -> std::result::Result<(), solidcore::SolidError> {
+        std::panic::panic_any(String::from("crash test: an internal error in the kernel"))
+    })
+}
+
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,

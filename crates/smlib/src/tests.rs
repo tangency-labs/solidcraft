@@ -79,7 +79,7 @@ fn calls_from_many_threads_are_serialised() {
 static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 12] = [
+const NO_KERNEL: [&str; 13] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -92,11 +92,13 @@ const NO_KERNEL: [&str; 12] = [
     "blends",
     "word",
     "words",
+    "in_call",
 ];
 
-const ANSWERING: [&str; 62] = [
+const ANSWERING: [&str; 63] = [
     "set_dump_dir",
     "current_call",
+    "crash_test",
     "make_box",
     "read",
     "write",

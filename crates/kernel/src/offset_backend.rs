@@ -22,8 +22,8 @@ use crate::history::{Change, EdgeOrigin, FaceOrigin, History};
 use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
 use crate::{KernelError, Result, record};
 
-fn failed(op: &str, what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib {op}: {what}: {e}"))
+fn failed(op: &str, what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib {op}: {what}"), e)
 }
 
 /// The error for SMLib's refusal of `op`, in the words of the operation; `wall` is its wall's

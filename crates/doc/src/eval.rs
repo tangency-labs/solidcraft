@@ -1030,6 +1030,10 @@ pub struct FeatureResult {
     pub id: u64,
     pub name: String,
     pub error: Option<String>,
+    /// `error` is the kernel's internal error (a panic it caught, [`kernel::KernelError::Internal`]),
+    /// not the feature's failure: the command that made the feature reports it as one.
+    #[serde(skip)]
+    pub internal: bool,
     pub warning: Option<String>,
     /// An Import feature's warnings by kind and part, with what came in of the file's parts
     /// (`warning` is the first of them as the kernel words them).
@@ -2085,6 +2089,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: None,
+                    internal: false,
                     warning: None,
                     import_report: None,
                     repair: None,
@@ -2118,6 +2123,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: Some(e),
+                    internal: false,
                     warning: None,
                     import_report: None,
                     repair: None,
@@ -2156,6 +2162,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error: c.error,
+                    internal: false,
                     warning: c.warning,
                     import_report: c.import_report,
                     repair: c.repair,
@@ -2224,7 +2231,11 @@ impl Model {
                 None => kernel::guard(&f.name, || {
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
-                    r.map_err(|e| kernel::KernelError::Failed(e.in_feature(&f.name).to_string()))?;
+                    r.map_err(|e| match e {
+                        // A panic the kernel caught stays one.
+                        crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
+                        e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                    })?;
                     // The checks the feature's steps left to its end: the bodies it keeps.
                     if deferred { check_kept(&state, &next) } else { Ok(()) }
                 }),
@@ -2244,6 +2255,7 @@ impl Model {
                 note_join_apart(&state, &next, f, &mut warning);
             }
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
             let error = match r {
                 Ok(()) => {
                     // Copies are named after their sources through the instance transforms.
@@ -2287,7 +2299,8 @@ impl Model {
                 }
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
-            if !self.no_cache && !watched.cancelled() {
+            // A panic is no result to reuse: the kernel was replaced after it.
+            if !self.no_cache && !watched.cancelled() && !internal {
                 let e = CachedEval {
                     error: error.clone(),
                     warning: warning.clone(),
@@ -2309,6 +2322,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error,
+                internal,
                 warning,
                 import_report,
                 repair,

@@ -919,7 +919,7 @@ pub fn fair_faces(body: &Body, faces: &[usize], opts: &FairOptions) -> Result<(B
     if changed.is_empty() {
         return Ok((body.clone(), report));
     }
-    let smlib = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("fair: SMLib: {e}")))?;
+    let smlib = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::smlib("fair: SMLib", e))?;
     let (result, order) = crate::native::body_from_smlib_ordered(&smlib)?;
     // The topology is the body's own, so SMLib's order is the body's: each face kept or
     // modified, each edge kept. Where SMLib's order is not the record's the history is not known.

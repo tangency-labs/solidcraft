@@ -256,6 +256,48 @@ pub enum KernelError {
 
 pub type Result<T> = std::result::Result<T, KernelError>;
 
+/// Why a kernel step failed: a message, or an error of the solidcore wrapper, which may be a
+/// panic the wrapper caught ([`solidcraft_smlib::Error::Internal`]).
+pub(crate) trait Cause: std::fmt::Display {
+    /// The panic's message, when the cause is one.
+    fn panic(&self) -> Option<&str> {
+        None
+    }
+}
+
+impl Cause for solidcraft_smlib::Error {
+    fn panic(&self) -> Option<&str> {
+        match self {
+            solidcraft_smlib::Error::Internal(m) => Some(m),
+            _ => None,
+        }
+    }
+}
+
+impl Cause for str {}
+impl Cause for String {}
+impl Cause for solidcraft_smlib::CheckReport {}
+impl Cause for solidcraft_smlib::export::ExportError {}
+impl Cause for solidcraft_geom::brep::history::Failed {}
+impl Cause for solidcraft_geom::brep::pcurve::Error {}
+impl<T: Cause + ?Sized> Cause for &T {
+    fn panic(&self) -> Option<&str> {
+        (**self).panic()
+    }
+}
+
+impl KernelError {
+    /// A kernel step's failure, `context` before its cause: a panic the solidcore wrapper caught
+    /// (its kernel replaced by a fresh one) stays an internal error ([`KernelError::Internal`]),
+    /// so the engine reports it as one; any other cause is the operation's failure.
+    pub(crate) fn smlib(context: impl std::fmt::Display, e: impl Cause) -> KernelError {
+        match e.panic() {
+            Some(m) => KernelError::Internal(format!("{context}: {m}")),
+            None => KernelError::Failed(format!("{context}: {e}")),
+        }
+    }
+}
+
 /// The native kernel call running right now (SMLib), for crash reports.
 pub fn native_call_in_flight() -> Option<String> {
     solidcraft_smlib::current_call()
@@ -268,7 +310,13 @@ thread_local! {
 /// Is this thread inside [`guard`]? (A panic now will be caught and turned into an error; the
 /// engine's crash reports mark it recovered.)
 pub fn guarded() -> bool {
-    GUARDED.with(std::cell::Cell::get) > 0
+    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call()
+}
+
+/// A panic inside a solidcore call, caught there and reported as the kernel's internal error
+/// ([`KernelError::Internal`]): the crash-report check (`diagnostics.crash_test`'s kernel mode).
+pub fn crash_test() -> Result<()> {
+    solidcraft_smlib::crash_test().map_err(|e| KernelError::smlib("crash test", e))
 }
 
 /// Run third-party kernel code, converting a panic into an error.

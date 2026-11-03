@@ -118,8 +118,8 @@ mod sheets {
     use super::*;
     use crate::prism_curve::{Run, projected};
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib planar regions: {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib planar regions: {what}"), e)
     }
 
     /// `regions` (in the plane's own coordinates) as one sheet on z = 0. SMLib's face builder

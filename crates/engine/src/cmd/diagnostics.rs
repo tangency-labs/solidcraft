@@ -131,9 +131,7 @@ fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
     match str_(p, "mode") {
         Some("panic") => std::panic::panic_any(String::from("crash test: an internal error in a command")),
         Some("kernel") => {
-            solidcraft_kernel::guard("crash test", || -> solidcraft_kernel::Result<()> {
-                std::panic::panic_any(String::from("an internal error in the kernel"))
-            })?;
+            solidcraft_kernel::crash_test()?;
             Err(EngineError::Other("crash test: the kernel error was not caught".into()))
         }
         Some("abort") => std::process::abort(),
