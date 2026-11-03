@@ -32,7 +32,9 @@
          through an update: removing them first made Windows drop a Start menu or taskbar pin on
          every update (#9366). This relies on the component rules: a component keeps its GUID and
          its files keep their names and folder; a file that moves or is renamed gets a new
-         component. -->
+         component. The Start menu shortcut is part of the SolidcraftApp component and is not
+         advertised, so removing the old product leaves it in place (an advertised shortcut
+         belongs to the old product and could be removed with it). -->
     <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
         DowngradeErrorMessage="A newer version of SolidCraft is already installed." />
     <!-- With the old files still in place during the install, the default rules ("o": replace
@@ -42,7 +44,11 @@
     <Property Id="REINSTALLMODE" Value="amus" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <!-- Advertised shortcuts to an .exe need an .exe icon identifier (ICE50). -->
+    <!-- The Start menu shortcut is not advertised: it points at [INSTALLFOLDER]solidcraft.exe, so
+         its Start menu app ID comes from that path and stays the same across updates. An
+         advertised shortcut points into C:\Windows\Installer\{ProductCode}, which changes with
+         every build, so Windows dropped its pin on each update (#9366). The shortcut keeps this
+         icon, whose identifier ends in .exe as ICE50 requires for a shortcut to an .exe. -->
     <Icon Id="SolidcraftIcon.exe" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="SolidcraftIcon.exe" />
     <Property Id="ARPURLINFOABOUT" Value="https://docs.solidcraft.io/" />
@@ -95,7 +101,7 @@
       <Component Id="SolidcraftApp" Guid="A379D509-D776-4B34-A3A4-71FBF5724971">
         <File Id="SolidcraftExe" Source="$(var.BinDir)\solidcraft.exe" KeyPath="yes">
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft"
-              Description="SolidCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+              Description="SolidCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="no"
               Icon="SolidcraftIcon.exe" IconIndex="0" />
         </File>
 
