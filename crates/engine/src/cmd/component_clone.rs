@@ -190,7 +190,7 @@ fn graph(doc: &Document, root: u64) -> Result<Vec<u64>> {
 pub(super) struct Source<'a> {
     pub doc: &'a Document,
     pub model: &'a solidcraft_doc::Model,
-    pub pending_moves: &'a BTreeMap<u64, Mat>,
+    pub pending_moves: std::borrow::Cow<'a, BTreeMap<u64, Mat>>,
     /// Another design than the target: the copy can't point at anything outside it (it is
     /// refused, saying what), and the user parameters it uses come along.
     pub other_design: bool,
@@ -199,12 +199,12 @@ pub(super) struct Source<'a> {
 impl<'a> Source<'a> {
     /// The session's own design.
     pub fn of(s: &'a Session) -> Source<'a> {
-        Source { doc: &s.doc, model: &s.model, pending_moves: &s.pending_moves, other_design: false }
+        Source { doc: &s.doc, model: &s.model, pending_moves: s.uncaptured_moves(), other_design: false }
     }
 
     /// What was copied in another design.
     pub fn copied(copy: &'a crate::ForeignCopy) -> Source<'a> {
-        Source { doc: &copy.doc, model: &copy.model, pending_moves: &copy.pending_moves, other_design: true }
+        Source { doc: &copy.doc, model: &copy.model, pending_moves: std::borrow::Cow::Borrowed(&copy.pending_moves), other_design: true }
     }
 }
 
@@ -561,7 +561,6 @@ pub(super) fn build(
                 }
                 if let Some(name) = &face.name {
                     face.point = solidcraft_doc::naming::point_on_face(&state, name, face.point)
-                        .map(|(point, _)| point)
                         .ok_or_else(|| bad(CMD, "source frozen face appearance lost its identity"))?;
                 }
                 let source_body = state.body(&face.body).ok_or_else(|| bad(CMD, "source frozen face appearance lost its body"))?;
@@ -756,8 +755,8 @@ pub(super) fn build(
         let mut material_matches = true;
         let tol_a = (a.size() * 1e-3).max(1e-3).max(a.size() * 1e-6);
         let tol_b = (b.size() * 1e-3).max(1e-3).max(b.size() * 1e-6);
-        let mesh_a = a.display_mesh(tol_a)?;
-        let mesh_b = b.display_mesh(tol_b)?;
+        let mesh_a = a.mesh(&solidcraft_kernel::MeshTolerance::chord(tol_a))?;
+        let mesh_b = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol_b))?;
         // Precharge all 27 candidates, six possible replacements, their triangle
         // distances and the three containment rays before any proof traversal.
         proof_work = proof_work.saturating_add(mesh_a.triangles.len().saturating_add(mesh_b.triangles.len()).saturating_mul(27 * 7 * 4));

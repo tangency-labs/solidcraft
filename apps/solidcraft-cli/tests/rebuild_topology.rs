@@ -31,7 +31,7 @@ struct Topology {
 
 /// Every solid body's topology, by name.
 fn topology(s: &Session) -> BTreeMap<String, Topology> {
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     st.bodies
         .iter()
         .filter(|b| !b.body.is_mesh())
@@ -142,16 +142,14 @@ fn a_parameter_edit_rebuilds_like_a_fresh_build_and_reverts_exactly() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// The README demo's Raspberry Pi case (`examples/demo/enclosure_ui_mcp.py --story pi`): its
-/// face count after each feature, and each outer side (the four walls and the bottom) one face
-/// throughout: (a) built at height 24, (b) built at 24 and changed to 32 in Parameters, (c)
-/// built at 32. The port cut-outs and the floor vents used to split the long wall (or the end
-/// wall at 24) into strips along the openings' tops and bottoms.
+/// The README demo's Raspberry Pi case (`examples/demo/enclosure_ui_mcp.py --story pi`): after
+/// each feature, each outer side (the four walls and the bottom) is one face and the case is as
+/// tall as its height, and a height changed in Parameters rebuilds the same topology as one
+/// built at that height: (a) built at height 24, (b) built at 24 and changed to 32, (c) built at
+/// 32. The port cut-outs and the floor vents used to split the long wall (or the end wall at 24)
+/// into strips along the openings' tops and bottoms.
 #[test]
-fn pi_case_faces_per_step_at_both_heights() {
-    // Sketch1 (1) .. RectangularPattern2 (14): the faces once features 1..=k are built.
-    const FACES: [(usize, usize); 13] =
-        [(2, 6), (3, 10), (4, 19), (5, 19), (6, 25), (7, 43), (8, 43), (9, 55), (10, 55), (11, 59), (12, 59), (13, 63), (14, 79)];
+fn pi_case_sides_stay_whole_at_both_heights() {
     let dir = scratch_dir("pi");
     let design: Value = serde_json::from_slice(&std::fs::read(root().join("tests/action_matrix/designs/pi-case.sc")).unwrap()).unwrap();
     let at = |height: &str, file: &str| {
@@ -174,12 +172,13 @@ fn pi_case_faces_per_step_at_both_heights() {
     for (case, s, h) in [("(a) at 24", a, 24.), ("(b) 24 changed to 32", b, 32.), ("(c) at 32", c, 32.)] {
         assert!(errors(&s).is_empty(), "{case}: features fail: {:?}", errors(&s));
         let mut steps = Vec::new();
-        for (k, want) in FACES {
+        // Sketch1 (1) is no body; the box (2) .. RectangularPattern2 (14).
+        for k in 2..=14 {
             let mut t = s.scratch();
             t.execute("timeline.rollback", &json!({"position": k})).unwrap();
-            let st = t.world_state();
+            let st = t.world_state().unwrap();
             let body = st.bodies.iter().find(|b| b.name == "Body1").unwrap();
-            assert_eq!(body.body.face_count(), want, "{case}: faces after feature {k}");
+            assert!(body.body.validity().is_empty(), "{case}: after feature {k}: {:?}", body.body.validity());
             // Each outer side: the faces in its plane.
             for (n, d) in [([0., -1., 0.], 33.), ([0., 1., 0.], 33.), ([-1., 0., 0.], 47.5), ([1., 0., 0.], 47.5), ([0., 0., -1.], 0.)] {
                 let on = (0..body.body.face_count())

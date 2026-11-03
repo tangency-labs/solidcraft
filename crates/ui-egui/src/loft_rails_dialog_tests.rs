@@ -209,7 +209,7 @@ fn loft_profiles_from_one_sketch_stay_apart() {
     let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].1["sections"], expected);
     ok(&mut h);
-    assert_eq!(h.app.session.world_state().bodies.len(), 1, "{:?}", h.app.session.log);
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1, "{:?}", h.app.session.log);
     let name = h.app.session.doc.features.last().unwrap().name.clone();
     h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
     h.frames(8);

@@ -314,7 +314,7 @@ fn sketch_on_a_turned_occurrence() -> (Document, Model, u64, u64, FaceAnchor, Pl
     let state = model.state();
     let raw = state.bodies.first().unwrap();
     let index = raw.body.face_sources().unwrap().iter().position(|s| matches!(s, Some(kernel::FaceSource::Box { axis: 2, high: true, .. }))).unwrap();
-    let world = world_state(&doc, &state);
+    let world = world_state(&doc, &state).unwrap();
     let shown = world.bodies.first().unwrap();
     let picked = shown.body.face_plane(index).unwrap();
     let anchor = doc.capture_face_anchor(raw, index, &picked, &path, 0, &[]).unwrap();
@@ -692,9 +692,9 @@ fn placed_bodies_taken_as_before_keep_their_measure() {
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 8.0).unwrap(), 1));
     let mut cache = PlacedBodies::default();
-    let before = world_state_reusing(&doc, &state, &mut cache);
+    let before = world_state_reusing(&doc, &state, &mut cache).unwrap();
     let centroid = before.bodies[0].measure().unwrap().centroid;
-    let again = world_state_reusing(&doc, &state, &mut cache);
+    let again = world_state_reusing(&doc, &state, &mut cache).unwrap();
     assert_eq!(counted(|| assert_eq!(again.bodies[0].measure().unwrap().centroid, centroid)).measures, 0);
 }
 
@@ -1061,11 +1061,13 @@ fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copie
                 radius: 3.0,
                 pitch: 1.0,
                 internal: true,
-                handedness: Default::default(),
                 axis_point: Vec3::new(1.0, 1.0, 0.0),
                 axis: solidcraft_geom::UnitVec3::Z,
                 start: 0.0,
                 end: 4.0,
+                form: Default::default(),
+                hand: Default::default(),
+                starts: 1,
             });
         }
     }
@@ -1079,7 +1081,7 @@ fn placing_parts_looks_each_sketch_and_tap_up_once() {
     let searches = |sketches: usize, taps: usize| {
         let (doc, state) = placed_parts(4, 2, sketches, taps, 3);
         let mut world = ModelState::default();
-        let n = searched(|| world = world_state(&doc, &state));
+        let n = searched(|| world = world_state(&doc, &state).unwrap());
         assert_eq!(world.bodies.len(), 4 * 2 * 3);
         assert_eq!(world.sketches.len(), 4 * sketches);
         assert_eq!(world.threads.len(), 4 * taps * 3);
@@ -1093,7 +1095,7 @@ fn a_placed_tap_follows_its_body_offset() {
     let (mut doc, state) = placed_parts(1, 1, 0, 1, 1);
     let comp = doc.components[0].id;
     doc.body_offsets.insert("B0_0".into(), rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0));
-    let world = world_state(&doc, &state);
+    let world = world_state(&doc, &state).unwrap();
     let tap = world.threads.first().unwrap();
     let expected =
         apply_point(&mat_mul(&doc.component_transform(comp), &rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0)), Vec3::new(1.0, 1.0, 0.0));
@@ -1180,17 +1182,19 @@ fn a_cut_leaves_bodies_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Near") < 60_000.0 - 800.0, "and it is cut");
 }
 
-/// A cut still goes through the boolean wherever its tool reaches a body or comes close: on a
-/// face, along a line, a hair beside it, into a dome above its edge circle. (Bodies its tool
-/// cannot reach are left out of it: `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
+/// A cut still goes through the boolean wherever its tool reaches a body: on a face, along a
+/// line, into a dome above its edge circle. The boxes are exact, so a tool clear of a body by
+/// more than their tolerances leaves it out. (Bodies its tool cannot reach are left out of it:
+/// `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
 #[test]
 fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
-    // A cylinder whose side is tangent to the face x = 50, one a hair clear of it, one 0.1 mm in.
-    for (x, cuts) in [(53.0, false), (53.0005, false), (52.9, true)] {
+    // A cylinder whose side is tangent to the face x = 50, one 0.5 µm clear of it (far past the
+    // bodies' tolerances, so left out), one 0.1 mm in.
+    for (x, cuts, boolean) in [(53.0, false, 1), (53.0005, false, 0), (52.9, true, 1)] {
         let mut doc = Document::new("graze");
         block(&mut doc, "A", Vec3::ZERO, [50.0, 40.0, 30.0]);
         let work = cut_work(&mut doc, cutter(Vec3::new(x, 20.0, 0.0), 3.0, 30.0));
-        assert_eq!(work.cut, 1, "the tool at x = {x} goes through the boolean");
+        assert_eq!(work.cut, boolean, "the tool at x = {x} goes through the boolean {boolean} time(s)");
         let v = volume(&work.model, "A");
         assert_eq!(v < 60_000.0 - 1.0, cuts, "the tool at x = {x} cuts material: {v}");
         assert!(!cuts || work.kept.is_empty(), "a body cut is a new body");
@@ -1259,7 +1263,22 @@ fn marking_work(doc: &mut Document, kind: FeatureKind) -> (Counts, Vec<ThreadInf
 
 /// A cosmetic tap marking at `p`.
 fn marking(p: Vec3) -> FeatureKind {
-    FeatureKind::Thread { face: FacePick(p), designation: Some("M6".into()), length: None, modeled: false, handedness: ThreadHandedness::Right }
+    FeatureKind::Thread {
+        face: FacePick(p),
+        designation: Some("M6".into()),
+        length: None,
+        modeled: false,
+        from: None,
+        up_to: None,
+        form: Default::default(),
+        hand: crate::thread_forms::ThreadHand::Right,
+        starts: 1,
+        ease_out: None,
+        tip: Default::default(),
+        chamfer_angle: None,
+        chamfer_depth: None,
+        steep_flank: Default::default(),
+    }
 }
 
 /// A tap marking looks for its cylinder in the bodies near it only: each body searched was
@@ -1294,7 +1313,9 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         points: None,
         thread: Some("M6".into()),
         thread_depth: None,
-        handedness: ThreadHandedness::Right,
+        hand: crate::thread_forms::ThreadHand::Right,
+        modeled: false,
+        ease_out: None,
         to: None,
         references: Vec::new(),
     };
@@ -1409,7 +1430,9 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         points: None,
         thread: Some("M6".into()),
         thread_depth: None,
-        handedness: ThreadHandedness::Right,
+        hand: crate::thread_forms::ThreadHand::Right,
+        modeled: false,
+        ease_out: None,
         to: None,
         references: Vec::new(),
     };

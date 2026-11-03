@@ -175,12 +175,16 @@ fn to_polyline(p: Vec3, e: &[Vec3]) -> f64 {
     e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min)
 }
 
-/// Reference edge `k` (its ends, and its index in the mesh), found by `name`, else by the edge
-/// nearest `p`: one that runs through `p` for a fresh pick, within a quarter of the body for a
-/// stored one. It must be straight.
+/// Reference edge `k` (its ends, and its index in the mesh), found by `name` (a name that finds
+/// no edge fails, asking for the edge to be picked again), else by the edge nearest `p`: one
+/// that runs through `p` for a fresh pick, within a quarter of the body for a stored one. It
+/// must be straight.
 fn find_edge(b: &ModelBody, m: &Mesh, k: usize, p: Vec3, name: Option<&str>, exact: bool) -> Result<(Vec3, Vec3, usize)> {
     let size = b.body.size().max(1e-9);
-    let by_name = name.filter(|n| !n.is_empty()).and_then(|n| crate::naming::locate_edge(b, n, p).ok()).map(|hit| hit.edge);
+    let by_name = match name.filter(|n| !n.is_empty()) {
+        Some(n) => Some(crate::naming::locate_edge(b, n, p).map_err(|_| DocError::reselect(n))?.edge),
+        None => None,
+    };
     let i = match by_name {
         Some(i) => i,
         None => {

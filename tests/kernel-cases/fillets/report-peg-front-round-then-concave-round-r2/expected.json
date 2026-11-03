@@ -1,0 +1,24 @@
+{
+ "what": "the peg's front top edge rounded r2, then the concave arc where its top meets the cylinder r2: the second round's tangent chain runs on down the first round's end on the cylinder, to the point where that end is tangent to the front face and the round must fade to nothing; reported from the app (2026-10-30, test-peg part)",
+ "source": "invariants",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; the front top edge (y = 0, z = 10) rounded r2, then the concave arc r2 (tangent chain on, as by default); the planes of the front face y = 0, the back y = 16, the bottom, the left end and the cylinder's top bound the whole body (the cylinder's wall runs tangent into the front and back faces), and every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, (0, 0, 0) .. (48, 16, 20); graded to 4e-5, the blends' approximation tolerance: a corner patch or an end that stands out of the front face fails; every seam a round makes with its faces, and those of a corner patch, G1",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   48,
+   16,
+   20
+  ]
+ },
+ "tolerance": {
+  "abs_mm": 4e-05
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

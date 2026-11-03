@@ -182,11 +182,15 @@ fn usable_camera(cam: &Camera) -> bool {
 }
 
 /// The camera a view command turns: the one given, else the session's, else the home view.
-fn given_camera(s: &Session, p: &Value) -> Option<Camera> {
-    match p.get("camera") {
+fn given_camera(s: &Session, p: &Value) -> Result<Option<Camera>> {
+    Ok(match p.get("camera") {
         Some(value) => camera_form(value),
-        None => Some(s.camera.unwrap_or_else(|| crate::view::home_camera(s))).filter(usable_camera),
-    }
+        None => Some(match s.camera {
+            Some(c) => c,
+            None => crate::view::home_camera(s)?,
+        })
+        .filter(usable_camera),
+    })
 }
 
 /// The reply of a view command that turned the camera to `camera`.
@@ -196,14 +200,14 @@ fn camera_reply(cmd: &str, camera: Camera) -> Result<Value> {
 
 fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let view = standard_view(cmd).ok_or_else(|| bad(cmd, "not a standard view"))?;
-    let mut cam = given_camera(s, p).ok_or_else(|| bad(cmd, "invalid camera"))?;
+    let mut cam = given_camera(s, p)?.ok_or_else(|| bad(cmd, "invalid camera"))?;
     cam.set_view(view);
     s.camera = Some(cam);
     camera_reply(cmd, cam)
 }
 
 fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
-    let state = s.world_state();
+    let state = s.world_state().ok()?;
     s.selection.iter().find_map(|selection| match selection {
         Sel::Face { body, index, point } if point.is_finite() => {
             let plane = state.body(body)?.body.planar_face(*index)?;
@@ -234,7 +238,7 @@ fn status_details(s: &mut Session, p: &Value) -> Result<Value> {
 fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.normal_to";
     let (point, normal) = normal_target(s).ok_or_else(|| bad(cmd, "select a planar face or plane"))?;
-    let cam = given_camera(s, p)
+    let cam = given_camera(s, p)?
         .filter(|cam| cam.yaw.abs() <= 1e6 && cam.roll.abs() <= 1e6 && cam.pitch.abs() <= std::f64::consts::FRAC_PI_2)
         .ok_or_else(|| bad(cmd, "invalid camera"))?;
     // Promoted from viewport::look_at_selection: asking again from the normal side flips it.
@@ -644,7 +648,7 @@ mod tests {
     fn normal_to_selection_faces_each_planar_surface_without_editing_the_design() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let document = s.doc.to_json();
@@ -699,7 +703,7 @@ mod tests {
     fn normal_to_selection_rejects_curved_missing_and_invalid_inputs() {
         let mut s = Session::default();
         s.execute("solid.cylinder", &json!({"diameter":20,"height":30})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.1).unwrap();
         let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
@@ -730,7 +734,7 @@ mod tests {
         s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
         s.execute("occurrence.move", &json!({"occurrence":"Part:1","translate":[50,20,10],"axis":[1,2,3],"angle":"37 deg"})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let cam = Camera { roll: 1.4, ..Default::default() };

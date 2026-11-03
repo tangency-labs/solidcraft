@@ -18,7 +18,7 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
         let curves = session.model.state().sketch(sketch).unwrap().sketch.offset_boundary(&association).unwrap();
         run(&mut session, "sketch.finish", json!({}));
         run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":{"offset_boundaries":[association]},"distance":2,"operation":"new"}));
-        let before_volume = session.world_state().bodies.last().unwrap().mesh().measure().volume.abs();
+        let before_volume = session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs();
         run(&mut session, "sketch.edit", json!({"sketch":sketch}));
         let before = session.doc.to_json();
         let history = session.undo.len();
@@ -29,17 +29,17 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
             matches!(&session.doc.features.last().unwrap().kind, FeatureKind::Extrude { profiles: ProfileSel::Curves { loops }, .. } if loops == &vec![curves.clone()])
         );
         let frozen = session.doc.to_json();
-        assert!((session.world_state().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
+        assert!((session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
         run(&mut session, "edit.undo", json!({}));
         assert_eq!(session.doc.to_json(), before);
         run(&mut session, "edit.redo", json!({}));
         assert_eq!(session.doc.to_json(), frozen);
         run(&mut session, "parameters.change", json!({"name":radius,"expression":"2 mm"}));
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
-        assert!((session.world_state().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
+        assert!((session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
         let reopened = Session::new(solidcraft_doc::Document::from_json(&session.doc.to_json()).unwrap());
         assert!(reopened.model.results.iter().all(|result| result.error.is_none()));
-        assert!((reopened.world_state().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
+        assert!((reopened.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
     }
 }
 
@@ -76,7 +76,7 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
     assert!(matches!(&feature.kind, FeatureKind::Extrude { profiles: ProfileSel::OffsetBoundaries { associations }, .. } if associations.len() == 1));
     let check = |session: &Session| {
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let body = state.bodies.last().unwrap();
         // The exact inward parallel set is a sharp 73.2 by 63.2 rectangle.
         let mesh = body.mesh();

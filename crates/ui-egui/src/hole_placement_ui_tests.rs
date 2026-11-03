@@ -327,7 +327,7 @@ fn block_and_circle_on(sketch: Value, at: [f64; 2]) -> (Harness, Vec3) {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketches.first().unwrap();
     let centre = ss
         .sketch
@@ -390,7 +390,7 @@ fn face_places(h: &Harness) -> Vec<(String, Vec3)> {
 
 /// Whether the model holds material at `p`.
 fn solid_at(h: &Harness, p: Vec3) -> bool {
-    h.app.session.model.state().bodies.iter().any(|b| b.body.contains(p))
+    h.app.session.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside)
 }
 
 #[test]
@@ -451,11 +451,12 @@ fn a_single_hole_at_a_circle_centre_follows_the_circle() {
     h.step(&json!({"key": "Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
     let (id, _, _) = hole(&h);
-    let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
+    let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
     let circle = h
         .app
         .session
         .world_state()
+        .unwrap()
         .sketches
         .first()
         .unwrap()
@@ -471,7 +472,7 @@ fn a_single_hole_at_a_circle_centre_follows_the_circle() {
     h.app.run("sketch.move_point", json!({"point": format!("{circle}.center"), "to": [20, 9]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketches.first().unwrap();
     let moved = ss
         .sketch
@@ -602,7 +603,7 @@ fn block_with_lettering(circle: Option<f64>) -> (Harness, Vec3, Option<Vec3>) {
     h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
     h.app.run("sketch.text", json!({"text": "L", "at": [5, 5], "height": 10})).unwrap();
     let outline = |h: &Harness| {
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketches.first().unwrap();
         let sk = &ss.sketch;
         let text = |p: &&SPoint| p.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.kind == LinkKind::Text);
@@ -616,7 +617,7 @@ fn block_with_lettering(circle: Option<f64>) -> (Harness, Vec3, Option<Vec3>) {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let plane = st.sketches.first().unwrap().plane;
     assert_eq!(outline(&h).len(), 6, "the L's outline has six corners");
     (h, plane.to_world(corner), centre.map(|c| plane.to_world(c)))
@@ -765,7 +766,7 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": view}})).unwrap();
     h.settle();
-    let plane = h.app.session.world_state().sketches.first().unwrap().plane;
+    let plane = h.app.session.world_state().unwrap().sketches.first().unwrap().plane;
     let centre = plane.to_world(Vec2::new(at[0], at[1]));
     let mut points = Aabb3::EMPTY;
     local.iter().for_each(|p| points.add(plane.to_world(*p)));
@@ -773,7 +774,7 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
     h.step(&json!({"start": "solid.hole"})).unwrap();
     let ray = hits_at(&h, click);
     let Some(Hit::Face { body, index, .. }) = ray.iter().find(|x| matches!(x, Hit::Face { .. })) else { panic!("no face under {centre:?}: {ray:?}") };
-    let m = h.app.session.world_state().body(body).unwrap().mesh();
+    let m = h.app.session.world_state().unwrap().body(body).unwrap().mesh();
     let face: Vec<[Vec3; 3]> = m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| **f as usize == *index).filter_map(|(t, _)| m.tri(t)).collect();
     let near_points = |t: &[Vec3; 3]| {
         let mut b = Aabb3::EMPTY;
@@ -795,7 +796,9 @@ fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
     // not the face's or the body's; every point on the face is still counted.
     let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
     let (many, body, face, near) = (c.many, c.body_tris, c.face_tris, c.near_tris);
-    assert!(body >= 4 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
+    // The top cap is one of the cylinder's three faces (the planner meshes both caps alike), under
+    // a third of its triangles; the points lie on a small part of it.
+    assert!(body >= 3 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, 1), "{list}");
     assert_eq!(list["total"], json!(many + 1), "every point on the face is counted: {list}");
@@ -852,7 +855,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
     // text outline's points (`view::sketch_point_visible`), and no linked point while Show
     // Projected is off. An id names its first link; a point whose link is gone counts as shown.
     let (h, _, _) = block_with_lettering(None);
-    let mut sk = h.app.session.world_state().sketches.first().unwrap().sketch.clone();
+    let mut sk = h.app.session.world_state().unwrap().sketches.first().unwrap().sketch.clone();
     let text = sk.links.iter().find(|l| l.kind == LinkKind::Text).unwrap().clone();
     let edges = sk.links.iter().find(|l| l.kind != LinkKind::Text).unwrap().clone();
     // Later links reusing the ids, with the other kind: the first link of an id is the one.
@@ -879,8 +882,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
 }
 
 #[test]
-fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_defaults() {
-    use solidcraft_engine::doc::ThreadHandedness;
+fn combined_recessed_point_presets_keep_partial_depth_across_units_and_legacy_defaults() {
     for recessed in [1, 2] {
         let mut h = personal_preset_harness();
         if let Kind::Hole { diameter, kind, opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
@@ -890,14 +892,12 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
             opts.tip_angle = "118 deg".into();
             opts.tapped = true;
             opts.thread = "M8x1.2".into();
-            opts.handedness = ThreadHandedness::Left;
             opts.thread_full_depth = false;
             opts.thread_depth = "5".into();
         }
         save_preset(&mut h, "Combined point");
         let stored = serde_json::to_value(&h.app.preferences.hole_presets).unwrap();
         assert_eq!(stored[0]["angled_bottom"], true);
-        assert_eq!(stored[0]["thread_options"]["handedness"], "left");
         assert_eq!(stored[0]["thread_options"]["depth"], "5 mm");
         h.app.preferences.hole_presets = serde_json::from_value(stored.clone()).unwrap();
         h.app.session.doc_mut().units = "in".into();
@@ -905,18 +905,17 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
         if let Kind::Hole { kind, opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
             *kind = 0;
             opts.angled = false;
-            opts.handedness = ThreadHandedness::Right;
             opts.thread_full_depth = true;
         }
         let before = h.app.session.doc.to_json();
         choose_preset(&mut h, "Combined point");
         assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole {kind,opts,..}
-            if *kind==recessed && opts.angled && opts.tip_angle=="118 deg" && opts.handedness==ThreadHandedness::Left
+            if *kind==recessed && opts.angled && opts.tip_angle=="118 deg"
             && !opts.thread_full_depth && opts.thread_depth=="5 mm" && opts.thread=="M8x1.2"
             && opts.custom_thread.as_ref().is_none_or(|draft| draft.error.is_none())));
         assert_eq!(h.app.session.doc.to_json(), before, "automatic recall only changes the form");
         assert!((h.app.session.doc.eval("5 mm", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 5.0).abs() < 1e-9);
-        // Old recessed presets omit the additive fields: flat, Right and Full remain their defaults.
+        // Old recessed presets omit the additive fields: flat and Full remain their defaults.
         choose_preset(&mut h, "Select a preset");
         let mut legacy = stored.clone();
         legacy[0].as_object_mut().unwrap().remove("angled_bottom");
@@ -924,7 +923,7 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
         h.app.preferences.hole_presets = serde_json::from_value(legacy).unwrap();
         choose_preset(&mut h, "Combined point");
         assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole {kind,opts,..}
-            if *kind==recessed && !opts.angled && opts.handedness==ThreadHandedness::Right && opts.thread_full_depth));
+            if *kind==recessed && !opts.angled && opts.thread_full_depth));
         choose_preset(&mut h, "Select a preset");
         let mut future = stored;
         future[0]["thread_options"]["starts"] = json!(2);
@@ -997,7 +996,6 @@ fn hole_presets_dirty_overwrite_keeps_name_and_all_pointed_left_partial_paramete
         opts.angled = true;
         opts.tapped = true;
         opts.thread = "M8".into();
-        opts.handedness = solidcraft_engine::doc::ThreadHandedness::Left;
         opts.thread_full_depth = false;
         opts.thread_depth = "5 mm".into();
     }
@@ -1010,7 +1008,6 @@ fn hole_presets_dirty_overwrite_keeps_name_and_all_pointed_left_partial_paramete
     assert_eq!(saved[0]["name"], "Workshop");
     assert_eq!(saved[0]["depth"], "13 mm");
     assert_eq!(saved[0]["angled_bottom"], true);
-    assert_eq!(saved[0]["thread_options"]["handedness"], "left");
     assert_eq!(saved[0]["thread_options"]["depth"], "5 mm");
     assert!(!preset_dirty_save_enabled(&h));
     h.step(&json!({"expect":{"hidden_handles":["dialog:hole_presets.name"],"not_shown":"* Workshop"}})).unwrap();

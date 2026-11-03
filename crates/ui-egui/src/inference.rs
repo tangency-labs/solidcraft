@@ -241,7 +241,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some(i) = current() else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();
@@ -464,7 +464,7 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
     if tracking.sketch != active || !tracking.document.ptr_eq(&document) {
         *tracking = Tracking { sketch: active, document, ..Default::default() };
     }
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some((ss, cursor)) = active
         .and_then(|id| state.sketch(id))
         .zip(cursor)

@@ -1,0 +1,49 @@
+# examples/bracket: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Bracket: 13 faces, 33 edges
+Bracket face F2:bottom
+Bracket face F2:side:a
+Bracket face F2:side:b
+Bracket face F2:side:c
+Bracket face F2:side:d
+Bracket face F2:side:e
+Bracket face F2:side:f
+Bracket face F2:start
+Bracket face F3:blend:F2:side:b|F2:side:c
+Bracket face F5:side:c1#1
+Bracket face F5:side:c1#2
+Bracket face F5:side:c2#1
+Bracket face F5:side:c2#2
+Bracket edge F2:bottom|F2:side:a
+Bracket edge F2:bottom|F2:side:b
+Bracket edge F2:bottom|F2:side:c
+Bracket edge F2:bottom|F2:side:d
+Bracket edge F2:bottom|F2:side:e
+Bracket edge F2:bottom|F2:side:f
+Bracket edge F2:bottom|F3:blend:F2:side:b|F2:side:c
+Bracket edge F2:side:a|F2:side:b
+Bracket edge F2:side:a|F2:side:f
+Bracket edge F2:side:a|F2:start
+Bracket edge F2:side:a|F5:side:c1#1
+Bracket edge F2:side:a|F5:side:c1#2
+Bracket edge F2:side:a|F5:side:c2#1
+Bracket edge F2:side:a|F5:side:c2#2
+Bracket edge F2:side:b|F2:start
+Bracket edge F2:side:b|F3:blend:F2:side:b|F2:side:c
+Bracket edge F2:side:c|F2:side:d
+Bracket edge F2:side:c|F2:start
+Bracket edge F2:side:c|F3:blend:F2:side:b|F2:side:c
+Bracket edge F2:side:c|F5:side:c1#1
+Bracket edge F2:side:c|F5:side:c1#2
+Bracket edge F2:side:c|F5:side:c2#1
+Bracket edge F2:side:c|F5:side:c2#2
+Bracket edge F2:side:d|F2:side:e
+Bracket edge F2:side:d|F2:start
+Bracket edge F2:side:e|F2:side:f
+Bracket edge F2:side:e|F2:start
+Bracket edge F2:side:f|F2:start
+Bracket edge F2:start|F3:blend:F2:side:b|F2:side:c
+Bracket edge F5:side:c1#1|F5:side:c1#2~1 [geometric]
+Bracket edge F5:side:c1#1|F5:side:c1#2~2 [geometric]
+Bracket edge F5:side:c2#1|F5:side:c2#2~1 [geometric]
+Bracket edge F5:side:c2#1|F5:side:c2#2~2 [geometric]
+ref Fillet1 (3) edge 0 `F2:side:b|F2:side:c` -> Bracket edge F2:side:b|F2:side:c

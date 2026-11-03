@@ -1,0 +1,27 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Long",
+    "values": {
+     "W": "60 mm"
+    }
+   }
+  },
+  {
+   "command": "config.column",
+   "params": {
+    "param": "W",
+    "delete": true
+   }
+  },
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Long"
+   }
+  }
+ ]
+}

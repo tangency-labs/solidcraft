@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "plastic.lip on the bottom face of the shelled box: a face with one edge, no rim",
+ "source": "invariants",
+ "method": "a lip runs round the opening of a rim face (an inner and an outer edge); the closed bottom has only its outer edge, so it is refused and says what to pick",
+ "outcome": "refused",
+ "refusal": "pick the rim face of a shelled body"
+}

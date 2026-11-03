@@ -777,7 +777,7 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
             let mut occs: Vec<u64> = Vec::new();
             for x in inputs.first().map(|i| i.items.as_slice()).unwrap_or(&[]) {
                 if let solidcraft_engine::Sel::Body { name } = x
-                    && let Some(b) = app.session.world_state().body(name)
+                    && let Some(b) = crate::open_meshing::session_world(&app.session).body(name)
                 {
                     let comp = app.session.doc.model_body_component(b);
                     if let Some(o) = app.session.doc.occurrence_of(comp).map(|o| o.id)
@@ -1111,10 +1111,11 @@ mod tests {
         assert!(matches!(&target.certificate, Some(solidcraft_engine::doc::config::FaceCertificate::ExtrudeSide { curve, .. }) if curve == "outer"));
         let state = h.app.session.model.state();
         let body = state.body("Ring").unwrap();
+        // The outer circle, one closed curve, is one wall face.
         let indices = h.app.session.doc.configuration_face_indices(body, target).unwrap();
-        assert_eq!(indices.len(), 2);
+        assert_eq!(indices.len(), 1);
         let painted = h.app.session.doc.face_colors(body);
-        assert_eq!(painted.len(), 2);
+        assert_eq!(painted.len(), 1);
         assert!(painted.iter().all(|(index, _)| indices.contains(index)));
     }
 

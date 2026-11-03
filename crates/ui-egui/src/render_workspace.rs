@@ -2174,8 +2174,12 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
         app.session.visibility.hidden_bodies.hash(&mut visibility);
         app.session.visibility.hidden_occurrences.hash(&mut visibility);
         let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
-        let signature =
-            (app.session.revision, Arc::as_ptr(&app.session.world_state()) as usize, visibility.finish() ^ assign::preview_key(app), budget);
+        let signature = (
+            app.session.revision,
+            Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize,
+            visibility.finish() ^ assign::preview_key(app),
+            budget,
+        );
         let preview = assign::preview(app);
         let previous_key = app.render_workspace.key;
         app.render_workspace.prepare_preview(signature, || {
@@ -2242,6 +2246,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
                 let c = Tokens::get().body_selected;
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
+            hatch: Default::default(),
         });
         crate::blur::viewport(ui.painter(), rect, callback, rect, [background.viewport_top, background.viewport_bottom]);
         Ok(())

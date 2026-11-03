@@ -16,15 +16,15 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
     let checkpoint = session.checkpoint();
     let history = session.undo.len();
     let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
-    prepared.warm_meshes(|| true);
-    let world = prepared.computed.world_state();
+    prepared.warm_meshes(|| true).unwrap();
+    let world = prepared.computed.world_state().unwrap();
     let before = session.evaluations;
     session.accept_commands(prepared).unwrap();
     assert_eq!(session.evaluations, before);
     assert_eq!(session.path.as_deref(), Some("working.solidcraft"));
     assert!(Arc::ptr_eq(&saved, &session.saved));
     assert_eq!(session.undo.len(), history + 1);
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     session.restore_checkpoint(checkpoint).unwrap();
     assert_eq!(session.undo.len(), history);
     assert_eq!(session.doc.features.len(), 1);
@@ -65,14 +65,14 @@ fn revision_context_selection_and_replaced_document_reject_old_work() {
 fn editor_marker_restoration_reuses_the_pinned_model_with_an_empty_cache() {
     let mut session = Session::default();
     session.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
-    let world = session.world_state();
+    let world = session.world_state().unwrap();
     let original = session.scratch();
     session.execute("timeline.roll_to", &json!({"position":0})).unwrap();
     let source = session.scratch();
     *session.model.cache.lock().unwrap() = Default::default();
     let prepared = session.scratch().compute_editor_commands(&[], &source, original).unwrap();
     assert_eq!(prepared.computed.evaluations, 0, "restoring the marker must never evaluate the old suffix");
-    assert!(Arc::ptr_eq(&world, &prepared.computed.world_state()));
+    assert!(Arc::ptr_eq(&world, &prepared.computed.world_state().unwrap()));
     session.accept_commands(prepared).unwrap();
     assert_eq!(session.doc.marker, None);
 }

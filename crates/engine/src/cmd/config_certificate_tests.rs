@@ -15,12 +15,14 @@ fn paint(session: &mut Session, body: &str, point: Value) {
     run(session, "config.row", json!({"name":"Painted","values":{key:"ABS - Red"}}));
     run(session, "config.activate", json!({"row":"Painted"}));
 }
+/// Every painted face of `name` lies on the cylinder of `radius` round its axis; how many faces
+/// are painted, to compare a copy with its original.
 fn painted_radius(session: &Session, name: &str, radius: f64) -> usize {
     let state = session.model.state();
     let body =
         state.body(name).unwrap_or_else(|| panic!("missing {name}; bodies {:?}", state.bodies.iter().map(|body| &body.name).collect::<Vec<_>>()));
     let painted = session.doc.face_colors(body);
-    let mesh = body.body.tessellate(0.001).unwrap();
+    let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
     let inverse = solidcraft_doc::mat_inverse(&body.source_transform).unwrap();
     for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if painted.iter().any(|(index, _)| *index == *face as usize) {
@@ -30,7 +32,7 @@ fn painted_radius(session: &Session, name: &str, radius: f64) -> usize {
             }
         }
     }
-    assert!(!painted.is_empty());
+    assert!(!painted.is_empty(), "{name}: nothing painted");
     painted.len()
 }
 
@@ -49,22 +51,22 @@ fn certified_annulus_side_rows_follow_radius_edits_and_clone() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance":10,"profiles":[{"point":[9.5,0]}],"body_name":"Ring"}));
     paint(&mut s, "Ring", json!([10, 0, 5]));
-    assert_eq!(painted_radius(&s, "Ring", 10.), 2, "both constructed arc pieces share outer curve");
+    let pieces = painted_radius(&s, "Ring", 10.);
     let Column::FaceAppearance(target) = &s.doc.configs.columns[0] else { panic!() };
     assert_eq!(target.certificate, Some(FaceCertificate::ExtrudeSide { sketch, curve: "outer".into() }));
     run(&mut s, "parameters.change", json!({"name":dimensions[0],"expression":"12 mm"}));
     run(&mut s, "parameters.change", json!({"name":dimensions[1],"expression":"9.25 mm"}));
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Ring", 12.), 2);
+    assert_eq!(painted_radius(&s, "Ring", 12.), pieces);
     run(&mut s, "component.paste_new", json!({"component":part,"translate":[30,0,0]}));
     assert_eq!(s.doc.configs.columns.len(), 2);
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Ring (2)", 12.), 2);
+    assert_eq!(painted_radius(&s, "Ring (2)", 12.), pieces);
     let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     let mut reopened = Session::new(reopened);
     run(&mut reopened, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&reopened, "Ring", 12.), 2);
-    assert_eq!(painted_radius(&reopened, "Ring (2)", 12.), 2);
+    assert_eq!(painted_radius(&reopened, "Ring", 12.), pieces);
+    assert_eq!(painted_radius(&reopened, "Ring (2)", 12.), pieces);
     run(&mut reopened, "config.activate", json!({"row":"Default"}));
     assert!(reopened.doc.appearances.faces.is_empty());
 }
@@ -90,7 +92,7 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     let step = solidcraft_kernel::step_export(&[&cylinder], "legacy anchored cylinder").unwrap();
     let source = imported(&mut s, step, "Sleeve");
     run(&mut s, "material.assign", json!({"bodies":["Sleeve"],"material":"Steel"}));
-    let before_volume = s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let before_volume = s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let legacy_names = solidcraft_doc::naming::face_names(s.model.state().body("Sleeve").unwrap());
     assert!(legacy_names.iter().all(|name| name.starts_with(&format!("F{source}:face:"))));
     run(&mut s, "appearance.assign", json!({"faces":[{"body":"Sleeve","point":[6,0,20]}],"appearance":"ABS - Blue"}));
@@ -104,7 +106,7 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     run(&mut s, "solid.emboss", json!({"sketch":"Badge","profiles":"all","depth":1,"targets":["Sleeve"],"name":"Raised Badge"}));
     let anchored = s.doc.find_feature("Raised Badge").unwrap().clone();
     assert!(matches!(anchored.kind, FeatureKind::Emboss { face: None, .. }));
-    let volume = s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let volume = s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((volume - std::f64::consts::PI * 2000. - 16.).abs() < 0.1, "volume {volume}");
     assert!((volume - before_volume - 16.).abs() < 0.01, "addedvolume {} baseline {before_volume}", volume - before_volume);
     let paint = s.doc.appearances.faces.clone();
@@ -112,11 +114,14 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     legacy["format"] = json!("solidcraft/9");
     let reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
     // Saved before format 14, it keeps naming the pieces it makes in the kernel's shell order,
-    // and numbering the pieces of its faces as that build did (#3902).
-    let anchored = solidcraft_doc::Feature { shell_piece_order: true, kernel_piece_order: true, ..anchored };
+    // and numbering the pieces of its faces as that build did (#3902); saved before joins split
+    // off pieces that touch only along an edge or at a point, it keeps them in
+    // one body.
+    let anchored =
+        solidcraft_doc::Feature { shell_piece_order: true, kernel_piece_order: true, touching: solidcraft_doc::Touching::OneBody, ..anchored };
     assert_eq!(reopened.doc.feature(anchored.id).unwrap(), &anchored);
-    // Names saved before format 14 keep naming the face they named, marked so they are found as
-    // the build that saved them found them.
+    // Names saved before format 14 open with the legacy mark; the sketch is held by its anchor,
+    // not by its name.
     let mark = |name: &Option<String>| name.as_ref().map(|n| format!("{}{n}", solidcraft_doc::naming::LEGACY_MARK));
     let mut saved_plane = saved_plane;
     if let solidcraft_doc::PlaneRef::Face { name, .. } = &mut saved_plane {
@@ -138,7 +143,7 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     assert!(reopened.model.result(anchored.id).unwrap().error.is_none());
     let state = reopened.model.state();
     let body = state.body("Sleeve").unwrap();
-    assert!((body.body.tessellate_with(1e-4, true).unwrap().measure().volume - volume).abs() < 1e-8);
+    assert!((body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - volume).abs() < 1e-8);
     assert!(!reopened.doc.face_colors(body).is_empty());
 }
 
@@ -170,7 +175,7 @@ fn certified_side_refuses_reused_body_name_from_a_new_producer() {
 }
 
 #[test]
-fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
+fn legacy_v9_annulus_outer_side_emboss_asks_for_its_face_again() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":10,"id":"outer"}));
@@ -190,20 +195,25 @@ fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
     assert_eq!(feature.face_names, vec![name]);
     assert!(feature.face_names.iter().all(|name| names.contains(name)));
     let feature_id = feature.id;
-    let volume = s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let volume = s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((volume - std::f64::consts::PI * 380. - 21.).abs() < 0.2, "volume {volume}");
     let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     legacy["format"] = json!("solidcraft/9");
     // What a version 9 design stored for that pick: the centroid-family name of the outer wall
-    // piece holding the point. It keeps finding that piece, as it did when saved.
+    // piece holding the point, worked out from geometry. It names no face today (the outer wall
+    // is one face, named after its own curve): the emboss fails and asks for its face again,
+    // and the sleeve is built without it.
     for feature in legacy["features"].as_array_mut().unwrap() {
         if feature["id"] == json!(feature_id) {
             feature["face_names"] = json!(["F2:side:inner#4"]);
         }
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
-    assert!(reopened.model.result(feature_id).unwrap().error.is_none());
-    assert!((reopened.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume - volume).abs() < 1e-8);
+    let error = reopened.model.result(feature_id).unwrap().error.clone().unwrap();
+    assert_eq!(solidcraft_doc::reselect_parts(&error), Some(("Raised Badge", "?F2:side:inner#4")), "{error}");
+    let sleeve = reopened.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+    assert!((sleeve - std::f64::consts::PI * 380.).abs() < 0.2, "volume {sleeve}");
+    assert!(reopened.model.results.iter().filter(|r| r.id != feature_id).all(|r| r.error.is_none()), "{:?}", reopened.model.results);
 }
 
 #[test]
@@ -220,15 +230,15 @@ fn certified_side_transfer_preserves_geometry_and_unsupported_taper_refuses_atom
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,20,0],"angle":90,"axis":[0,0,1],"capture":false}));
     run(&mut s, "component.move_bodies", json!({"component":destination,"bodies":["Round"]}));
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Round", 10.), 2);
-    let before = s.world_state().body("Round").unwrap().mesh().bounds();
+    let pieces = painted_radius(&s, "Round", 10.);
+    let before = s.world_state().unwrap().body("Round").unwrap().mesh().bounds();
     let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     run(&mut s, "config.activate", json!({"row":"Painted"}));
-    assert_eq!(painted_radius(&s, "Round", 10.), 2);
+    assert_eq!(painted_radius(&s, "Round", 10.), pieces);
     assert!(
-        s.world_state().body("Round").unwrap().mesh().bounds().min.dist(before.min) < 1e-8,
+        s.world_state().unwrap().body("Round").unwrap().mesh().bounds().min.dist(before.min) < 1e-8,
         "before {before:?}, reopened {:?}",
-        s.world_state().body("Round").unwrap().mesh().bounds()
+        s.world_state().unwrap().body("Round").unwrap().mesh().bounds()
     );
     // A successful ordinary modifier has no exact untapered source certificate.
     let FeatureKind::Extrude { extent, .. } = &mut s.doc_mut().feature_mut(source).unwrap().kind else { panic!() };

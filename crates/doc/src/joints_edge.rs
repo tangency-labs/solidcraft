@@ -54,7 +54,7 @@ fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(u
     let planar = |f: usize| infos.iter().find(|x| x.index == f).and_then(|x| x.plane_normal.map(|n| (x.index, n, x.centroid, x.area)));
     let chosen = match name {
         Some(n) => {
-            let (f, _, _) = crate::naming::face_on_body(b, n, pick)
+            let (f, _) = crate::naming::face_on_body(b, n, pick)
                 .ok_or_else(|| DocError::Invalid(format!("joint origin: the face `{n}` no longer exists (edit the joint to pick again)")))?;
             if !beside.contains(&f) {
                 return Err(DocError::Invalid(format!("joint origin: the face `{n}` no longer meets its edge (edit the joint to pick again)")));
@@ -190,7 +190,7 @@ pub fn edge_snap(doc: &Document, st: &ModelState, comp: u64, pick: Vec3, on: Opt
         Some(p) => {
             let f = crate::naming::face_name_at_body(b, p)
                 .and_then(|n| crate::naming::face_on_body(b, &n, p))
-                .map(|(f, _, _)| f)
+                .map(|(f, _)| f)
                 .ok_or_else(|| DocError::Invalid("joint origin: `on` is not on a face of that body".into()))?;
             if !beside.contains(&f) {
                 return Err(DocError::Invalid("joint origin: `on` picks a face the edge doesn't bound".into()));

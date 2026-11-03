@@ -1,0 +1,147 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "R3",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "3 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "L"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      40
+     ],
+     [
+      0,
+      4
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     4,
+     4
+    ],
+    "start": [
+     0,
+     4
+    ],
+    "end": [
+     4,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      4,
+      0
+     ],
+     [
+      60,
+      0
+     ],
+     [
+      60,
+      2
+     ],
+     [
+      4,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     4,
+     4
+    ],
+    "start": [
+     4,
+     2
+    ],
+    "end": [
+     2,
+     4
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      2,
+      4
+     ],
+     [
+      2,
+      40
+     ],
+     [
+      0,
+      40
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "L",
+    "distance": 50,
+    "body_name": "Angle"
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Angle",
+    "face": [
+     30,
+     2,
+     25
+    ],
+    "rule": "R3",
+    "bends": [
+     [
+      1.1716,
+      1.1716,
+      25
+     ]
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

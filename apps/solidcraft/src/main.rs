@@ -895,6 +895,8 @@ fn main() -> eframe::Result {
     if let Err(e) = startup::relaunch_with_version_compat() {
         log::warn!("startup: OCLP check failed (continuing normally): {e}");
     }
+    // SOLIDCRAFT_PROFILE=1: the profiler records from the start (diagnostics.profile reads it).
+    solidcraft_engine::timing::profile_from_env();
     // Validate before legacy adoption, crash markers or any user preference read.
     let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
     if std::env::var_os("SOLIDCRAFT_SETTINGS_DIR").is_none() {

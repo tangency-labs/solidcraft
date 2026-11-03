@@ -76,7 +76,7 @@ fn step_index(step: LookStep) -> usize {
 }
 pub(super) fn targets(app: &SolveApp, step: LookStep) -> Targets {
     let mut targets = Targets::default();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     for selection in &app.session.selection {
         let body = match selection {
             Sel::Body { name } | Sel::Face { body: name, .. } => state.body(name),
@@ -391,7 +391,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
                     selected.items.get(index).filter(|_| !matches!(view.inspected, Some(LookStep::Component | LookStep::Material))).and_then(|item| {
                         match item {
                             Sel::Body { name } | Sel::Face { body: name, .. } => {
-                                app.session.world_state().body(name).and_then(|body| app.session.doc.model_display_look(body))
+                                crate::open_meshing::session_world(&app.session).body(name).and_then(|body| app.session.doc.model_display_look(body))
                             }
                             _ => None,
                         }

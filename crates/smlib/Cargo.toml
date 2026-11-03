@@ -1,0 +1,21 @@
+[package]
+name = "solidcraft-smlib"
+description = "SolidCraft: the B-rep kernel, solidcore (tangency-labs/solidcore, the Rust port of NVIDIA's SMLib, Apache-2.0), behind a safe wrapper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+log = { workspace = true }
+solidcraft-geom = { workspace = true }
+solidcraft-profile = { workspace = true }
+solidcore = { workspace = true }
+
+[dev-dependencies]
+solidcraft-profile = { workspace = true, features = ["enabled"] }
+flate2 = "1.1"
+serde_json = { workspace = true }

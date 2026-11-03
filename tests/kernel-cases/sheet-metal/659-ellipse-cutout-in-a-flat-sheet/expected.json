@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#659",
+  "tangency-labs/solidcraft#692"
+ ],
+ "what": "a 20 x 12 ellipse cut through a 100 x 60 x 2.5 sheet: it became 0.001 mm chords, one face each",
+ "source": "analytic",
+ "method": "semi-axes 10 and 6: area pi*10*6 = 60*pi; V = 100*60*2.5 - 60*pi*2.5 = 15000 - 150*pi",
+ "body_count": 1,
+ "volume_mm3": 14528.76110196153
+}
