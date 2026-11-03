@@ -246,12 +246,12 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// #2424's row with every fix on at 1e-6. WR-575 no longer adds `SmEdgeuse` #25/#26 here,
-/// but the flag-on check still reports `SmBSplineCurve` #15: WR-575 keeps the ellipse's
-/// NURB exact, so WR-680's exact UV trim is built for it, and that trim keeps a span
-/// 2e-9 long between the curve's knot and a cylinder segment joint (#2427).
+/// #2424's row with every fix on at 1e-6. WR-575 keeps the ellipse's NURB exact, so
+/// WR-680's exact UV trim is built for it, and the ellipse's knot falls within a pole
+/// (1.4e-7) of where it crosses a joint of the cylinder circle's segments: the trim must
+/// not keep the 2e-9-long span between them, which check test #15 reports as
+/// `SmBSplineCurve` #15 (tangency-labs/solidcore#2427).
 #[test]
-#[ignore = "WR-680's exact UV trim keeps a pole span (tangency-labs/solidcore#2427)"]
 fn wr575_every_fix_at_1e_6_adds_no_check_failure() {
     let failures = flag_row(1e-6, true, &report(false, true, 1));
     assert!(failures.is_empty(), "{failures:#?}");
