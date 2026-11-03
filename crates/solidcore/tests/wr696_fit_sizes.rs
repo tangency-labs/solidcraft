@@ -9,7 +9,9 @@
 //! Values: closed forms from the fork's capi tests (`ops_kernel.cpp` at 5e8c9c1), and the
 //! fork's own numbers from a local build of 5e8c9c1's `SMLib` and `SM_API` run the same way
 //! (`SetFilletParameters`, `CreateFilletCorners`, `DoFilleting`, `GetFitRadius`,
-//! `GetFitKind`).
+//! `GetFitKind`). The crease trim's refusal across a tangent edge (`NoteFitOnFace`, step 6's
+//! `TrimAtCreases`): the fork's capi `scenario_round_onto_a_tangent_round_refused` at 2cf8964,
+//! graded as there (no build of the fork compared).
 
 #![allow(
     clippy::unwrap_used,
@@ -23,11 +25,14 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
-use solidcore::math::Point3;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
-use solidcore::topology::EdgeId;
+use solidcore::topology::brep::p1::regions;
+use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel, SolidError};
 
 fn kernel(gn: bool) -> Kernel {
@@ -326,5 +331,80 @@ fn rounds_whose_corner_takes_their_edges_fit_at_the_edge_length() {
         FitKind::Radius,
         20.0 - 0.01,
         19.989999999999998,
+    );
+}
+
+fn volume_of(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-7, &attrs).unwrap()
+}
+
+fn lumps(b: &Brep) -> usize {
+    let infinite = b.infinite_region();
+    regions(b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|r| Some(*r) != infinite)
+        .count()
+}
+
+const BACK: Point3 = Point3::new(10.0, 10.0, 10.0);
+const FRONT: Point3 = Point3::new(10.0, 0.0, 10.0);
+
+/// A 20 x 10 x 10 block, its back top edge rounded R3 (`fillet_edges`, as the capi's
+/// `smlib_fillet`): its top is flat for 0 <= y <= 7, then runs on tangentially into the round.
+fn backed_block(k: &mut Kernel) -> Brep {
+    let mut b = create_box(k, Point3::ZERO, 20.0, 10.0, 10.0).unwrap();
+    let back = pick(k, &b, BACK);
+    fillet_edges(k, &mut b, &[back], 3.0, 1, 2, 0.0).unwrap();
+    b
+}
+
+/// The fork's `scenario_round_onto_a_tangent_round_refused` (capi `ops_kernel.cpp`, 2cf8964):
+/// the backed block's front top edge rounded R9. Its rail on the top (y = r) runs off the
+/// top's flat across the tangent edge (y = 7) onto the back round, which it would cut: the
+/// crease trim refuses it (`CreaseAcrossTangentEdge`) and notes where its rails stay on the
+/// top (`NoteFitOnFace`), 7 (open), less the fit margin. The fork grades it just under 7, by
+/// at most two margins; here the margin is the front edge's own. Built there, the two rounds
+/// take 20 (1 - pi/4) (9 + r^2) off the block (to 1e-6, as the fork), one solid.
+#[test]
+fn a_round_onto_a_tangent_round_fits_where_its_rail_stays_on_the_top() {
+    let mut k = kernel(true);
+    let mut b = backed_block(&mut k);
+    let front = pick(&k, &b, FRONT);
+    let margin = 1000.0 * edge::tolerance(&b, front).unwrap();
+    let err = fillet_edges(&mut k, &mut b, &[front], 9.0, 1, 2, 0.0).expect_err("refused");
+    let SolidError::FilletRefused { reason, fit, .. } = err else {
+        panic!("{err:?}");
+    };
+    eprintln!("reason {reason:?}, fit {fit:?}, margin {margin}");
+    assert_eq!(reason, Some(NoRoomReason::CreaseAcrossTangentEdge));
+    assert_eq!(fit.kind, FitKind::Radius);
+    assert_eq!(fit.edge, Some(front));
+    // the fork's `just_under(fit, 7.0)`
+    assert!(fit.size < 7.0 && fit.size > 7.0 - 0.02, "{}", fit.size);
+    let closed = 7.0 - margin;
+    assert!(
+        (fit.size - closed).abs() <= 1e-9 * closed,
+        "{} vs closed form {closed}",
+        fit.size
+    );
+
+    let mut k = kernel(true);
+    let mut b = backed_block(&mut k);
+    let front = pick(&k, &b, FRONT);
+    fillet_edges(&mut k, &mut b, &[front], fit.size, 1, 2, 0.0)
+        .unwrap_or_else(|e| panic!("at the fit {}: {e:?}", fit.size));
+    assert_eq!(lumps(&b), 1, "one solid");
+    let v = volume_of(&k, &mut b);
+    let want = 2000.0 - 20.0 * (1.0 - PI / 4.0) * (9.0 + fit.size * fit.size);
+    eprintln!("volume {v:.12}, want {want:.12}");
+    assert!(
+        (v - want).abs() <= 1e-6 * want,
+        "volume {v:.12}, want {want:.12}"
     );
 }
