@@ -842,8 +842,13 @@ impl Document {
         };
         let mut indices: Vec<usize> = names.faces.iter().enumerate().filter(|(_, face)| piece_of(face)).map(|(index, _)| index).collect();
         if indices.is_empty() {
-            indices =
-                names.info.iter().enumerate().filter(|(_, info)| info.aliases.iter().any(|alias| alias == name)).map(|(index, _)| index).collect();
+            indices = names
+                .info
+                .iter()
+                .enumerate()
+                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| other == name))
+                .map(|(index, _)| index)
+                .collect();
         }
         if indices.is_empty() {
             return Err(DocError::Unknown(format!("face `{name}` on `{}` no longer exists", body.name)));

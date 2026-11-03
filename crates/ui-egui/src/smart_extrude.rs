@@ -40,6 +40,9 @@ pub struct Smart {
     pub shown: Option<Vec<String>>,
     /// Picks off the profile plane become the To Object target (Preferences › Design).
     pub auto_to_object: bool,
+    /// The user clicked into the Profiles box: until another input is chosen, an off-plane pick
+    /// is one more profile, not the To Object target.
+    pub profiles_chosen: bool,
     /// The engine's automatic operation for the last parameters and design: a key over all it
     /// depends on, and its answer. It probes the bodies' triangles, too slow to ask every frame.
     pub auto: Option<(u64, Option<&'static str>)>,

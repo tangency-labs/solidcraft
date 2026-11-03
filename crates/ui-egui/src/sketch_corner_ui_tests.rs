@@ -177,7 +177,7 @@ fn clicked_extend_endpoint_reaches_exact_ellipse_and_preserves_support() {
     h.frames(2);
     h.step(&json!({"start":"sketch.extend"})).unwrap();
     h.step(&json!({"click":{"world":[5,3,0]}})).unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let end = ss.sketch.point(ss.sketch.resolve_point("l1.end").unwrap()).unwrap();
     assert!(end.dist(Vec2::new(12.0, 3.0)) < 1e-7, "clicked endpoint must extend: {end:?}, {:?}", h.app.status);
@@ -224,7 +224,7 @@ fn shift_clicks_on_two_curves_extend_both_to_where_they_meet() {
     shift_click(&mut h, &json!({"sketch": [12, 3]}));
     assert_eq!(h.app.session.undo.len(), undo + 1, "the second runs the two-curve extend, in one step");
 
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     for end in ["l1.end", "l2.end"] {
         let p = ss.sketch.point(ss.sketch.resolve_point(end).unwrap()).unwrap();
@@ -290,18 +290,32 @@ fn retype(h: &mut crate::scenario::Harness, handle: &str, text: &str) {
     h.frames(2);
 }
 
+/// Run frames until the preview of the typed size is in. It computes on its own thread, and
+/// its result (a failure shows its reason in the window, which moves the buttons) arrives on
+/// whichever frame the thread finishes. A test that reads the window or clicks a handle
+/// before then races that frame, and on a loaded machine loses.
+fn preview_in(h: &mut crate::scenario::Harness) {
+    let began = std::time::Instant::now();
+    while h.app.preview.busy && began.elapsed() < std::time::Duration::from_secs(60) {
+        h.frame();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.frames(2);
+}
+
 fn apply(h: &mut crate::scenario::Harness) {
     // Lay the window out once before reading its OK handle. An error line that wraps onto a
     // second row moves the button, and a click on the handle from the frame before then
     // lands above it and commits nothing.
     h.frames(2);
+    preview_in(h);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     h.frames(2);
 }
 
 /// Is there a point of the active sketch at `at`?
 fn has_point(h: &crate::scenario::Harness, at: Vec2) -> bool {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let Some(ss) = h.app.session.active_sketch.and_then(|sid| st.sketch(sid)) else { return false };
     ss.sketch.points.iter().any(|p| p.pos.dist(at) < 1e-6)
 }
@@ -340,7 +354,7 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         apply(&mut h);
         assert!(h.app.dialog.is_none(), "{command}: {:?}", h.app.status);
         assert_eq!(h.app.session.undo.len(), before.1 + 1, "{command} must be one undo entry");
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketch(sid).unwrap();
         assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
         assert!(ss.sketch.points[0].fixed);
@@ -355,7 +369,7 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         assert!((ss.profiles[0].area - expected).abs() < 1e-6, "{command}: {}", ss.profiles[0].area);
         drop(st);
         h.app.run("edit.undo", json!({})).unwrap();
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketch(sid).unwrap();
         assert_eq!(ss.sketch.curves.len(), 4);
         assert!((ss.profiles[0].area - 600.0).abs() < 1e-6);
@@ -412,7 +426,7 @@ fn fillet_window_reads_design_units_and_preserves_explicit_units_and_parameters(
             apply(&mut h);
             assert!(h.app.dialog.is_none(), "{units}, {text}, lines {lines}: {:?}", h.app.status);
             let check = |session: &solidcraft_engine::Session, expected: f64| {
-                let state = session.world_state();
+                let state = session.world_state().unwrap();
                 let ss = state.sketch(1).unwrap();
                 let arc = ss
                     .sketch
@@ -463,7 +477,7 @@ fn typed_chamfer_angle_other_than_45_degrees_reaches_the_command() {
     assert!(has_point(&h, Vec2::new(30.0, 0.0)), "10 mm along the first line");
     assert!(has_point(&h, Vec2::new(40.0, second)), "{second} mm along the second line, not 10 mm");
     assert!(!has_point(&h, Vec2::new(40.0, 10.0)), "45 degrees must no longer be forced");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!((ss.profiles[0].area - (1200.0 - 0.5 * 10.0 * second)).abs() < 1e-6, "{}", ss.profiles[0].area);
 }
@@ -559,7 +573,7 @@ fn a_refused_size_gives_way_to_one_that_fits() {
     let shown = |h: &mut crate::scenario::Harness, size: &str| {
         set_size(&mut h.app, size);
         h.settle();
-        h.frames(2);
+        preview_in(h);
         h.app.dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| h.app.preview.error.clone())
     };
     assert!(shown(&mut h, "4 m").is_some_and(|e| e.contains("too large")));
@@ -609,7 +623,7 @@ fn a_fillet_rounds_every_picked_corner_to_one_radius() {
     apply(&mut h);
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), undo + 1, "one radius, one undo entry");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(ss.sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count(), 3);
     assert!((ss.profiles[0].area - (1200.0 - 3.0 * 25.0 * (1.0 - std::f64::consts::PI / 4.0))).abs() < 1e-6, "{}", ss.profiles[0].area);
@@ -640,7 +654,7 @@ fn fully_constrained_center_rectangle_corners_can_be_picked_and_filleted() {
     let info = h.app.run("sketch.inspect", json!({})).unwrap();
     assert_eq!(info["dof"], 0, "{info}");
     assert_eq!(info["status"], "solved", "{info}");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(ss.sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count(), 4);
     assert!((ss.profiles[0].area - (1200.0 - 36.0 * (1.0 - std::f64::consts::PI / 4.0))).abs() < 1e-6);
@@ -665,7 +679,7 @@ fn ordinary_drawing_keeps_origin_snap_and_real_origin_corners_work() {
     set_size(&mut h.app, "5");
     apply(&mut h);
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
     assert!(ss.sketch.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
@@ -738,7 +752,7 @@ fn fillet_chamfer_corner_preview_draws_curves() {
 
     // Verify the sketch itself hasn't been modified yet.
     let sid = h.app.session.active_sketch.unwrap();
-    let sk = h.app.session.world_state().sketch(sid).unwrap().sketch.clone();
+    let sk = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 2, "fillet preview must not modify the sketch");
 
     // Now test chamfer too. Close the fillet dialog first.
@@ -752,7 +766,7 @@ fn fillet_chamfer_corner_preview_draws_curves() {
     // Show the chamfer line and both shortened sides too.
     h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
 
-    let sk = h.app.session.world_state().sketch(sid).unwrap().sketch.clone();
+    let sk = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 2, "chamfer preview must not modify the sketch");
 }
 
@@ -969,7 +983,7 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
     for cmd in ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
         h.app.start(cmd);
         for id in [&line, &spline, &linked, &"side".to_owned()] {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sketch).unwrap().sketch;
             let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();
@@ -1007,7 +1021,7 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
         apply(&mut h);
         assert!(h.app.dialog.is_none(), "reverse {reverse}: {:?}", h.app.status);
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert!(ss.report.ok());
         assert_eq!(ss.sketch.curves.len(), 3);

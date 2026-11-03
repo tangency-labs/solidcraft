@@ -27,10 +27,15 @@ pub(super) enum Ink {
     Border,
     ControlBorder,
     Control,
+    /// Legacy SVG role for conflicting sketch geometry and the conflict-state glyph.
     Note,
     NoteFill,
+    /// Legacy SVG ink: lettering uses accent foreground; strokes use model highlights.
     White,
+    /// Legacy SVG ink: hatch strokes use figure lines; filled silhouettes use model shadows.
     Black,
+    Highlight,
+    Shadow,
     /// Colour vision sample colours: Z axis blue, projected, X axis, bend up and bend down.
     Cv0,
     Cv1,
@@ -155,6 +160,8 @@ const MAX_POINTS: usize = 512;
 struct Ctx<'a> {
     t: &'a Tokens,
     sample: Option<&'a ThemeSample>,
+    /// Only the Appearance samples interpret the legacy SVG colour roles semantically.
+    colour_vision: Option<usize>,
     origin: Pos2,
     scale: f32,
 }
@@ -162,7 +169,23 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     fn ink(&self, ink: Ink, a: f32) -> Color32 {
         let t = self.t;
-        let c = match ink {
+        let semantic = match (self.colour_vision, ink) {
+            (Some(0), Ink::Cv0) => Some(t.sketch_locked),
+            (Some(1), Ink::Cv1) => Some(t.sketch_projected),
+            (Some(2), Ink::Cv2 | Ink::AxisX) => Some(t.axis_x),
+            (Some(2), Ink::Cv0 | Ink::AxisY) => Some(t.axis_y),
+            (Some(2), Ink::AxisZ) => Some(t.axis_z),
+            (Some(3), Ink::Cv1) => Some(t.bend_up),
+            (Some(3), Ink::Cv3) => Some(t.bend_down),
+            (Some(4), Ink::Cv3) => Some(crate::theme::srgb(t.analysis.draft[0])),
+            (Some(4), Ink::Cv1) => Some(crate::theme::srgb(t.analysis.draft[1])),
+            (Some(4), Ink::Cv4) => Some(crate::theme::srgb(t.analysis.draft[2])),
+            (Some(4), Ink::Black) => Some(crate::theme::srgb(t.analysis.draft[2].map(|c| c * 0.6))),
+            (Some(5), Ink::Cv2) => Some(t.error),
+            (Some(5), Ink::NoteFill) => Some(t.timeline_item_error),
+            _ => None,
+        };
+        let c = semantic.unwrap_or_else(|| match ink {
             Ink::Ground => t.figure_ground,
             Ink::Line => t.figure_line,
             Ink::Top => t.figure_face_top,
@@ -181,17 +204,19 @@ impl Ctx<'_> {
             Ink::Border => t.dialog_border,
             Ink::ControlBorder => t.control_border,
             Ink::Control => t.control_fill,
-            Ink::Note => t.pref_note,
+            Ink::Note => t.figure_conflict,
             Ink::NoteFill => t.pref_note_fill,
             Ink::White => t.figure_white,
             Ink::Black => t.figure_black,
+            Ink::Highlight => t.figure_highlight,
+            Ink::Shadow => t.figure_shadow,
             Ink::Cv0 => t.axis_z,
             Ink::Cv1 => t.sketch_projected,
             Ink::Cv2 => t.axis_x,
             Ink::Cv3 => t.bend_up,
             Ink::Cv4 => t.bend_down,
             Ink::Slot(n) => self.sample.and_then(|s| s.slots.get(n as usize).copied()).unwrap_or(Color32::TRANSPARENT),
-        };
+        });
         if a >= 1.0 { c } else { c.gamma_multiply(a.clamp(0.0, 1.0)) }
     }
 
@@ -200,12 +225,43 @@ impl Ctx<'_> {
     }
 
     fn stroke(&self, line: &L) -> Stroke {
-        Stroke::new((line.w * self.scale).clamp(0.0, 64.0), self.ink(line.ink, line.a))
+        let ink = match line.ink {
+            Ink::White => Ink::Highlight,
+            ink => ink,
+        };
+        Stroke::new((line.w * self.scale).clamp(0.0, 64.0), self.ink(ink, line.a))
     }
 }
 
 /// Paints `figure` into `rect`, scaled to fit and centred, with `Tokens::get()` colours.
 pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&ThemeSample>, clip: Option<&[[f32; 2]]>) {
+    paint_with_tokens(p, rect, figure, sample, clip, &Tokens::get(), None);
+}
+
+/// Reuse the six canonical figures with the semantic palette being previewed, without global state.
+pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tokens) {
+    use super::preferences_figure_data as figures;
+    let figure = match index {
+        0 => &figures::COLOUR_VISION_FIXED,
+        1 => &figures::COLOUR_VISION_PROJECTED,
+        2 => &figures::COLOUR_VISION_AXES,
+        3 => &figures::COLOUR_VISION_BENDS,
+        4 => &figures::COLOUR_VISION_DRAFT,
+        5 => &figures::COLOUR_VISION_FAILED,
+        _ => return,
+    };
+    paint_with_tokens(p, rect, figure, None, None, t, Some(index));
+}
+
+fn paint_with_tokens(
+    p: &Painter,
+    rect: Rect,
+    figure: &Figure,
+    sample: Option<&ThemeSample>,
+    clip: Option<&[[f32; 2]]>,
+    t: &Tokens,
+    colour_vision: Option<usize>,
+) {
     let size = rect.size();
     if !rect.min.is_finite() || !size.is_finite() || size.x < 1.0 || size.y < 1.0 || size.x > MAX_SIDE || size.y > MAX_SIDE {
         return;
@@ -216,8 +272,7 @@ pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&Th
     }
     let scale = (size.x / fw).min(size.y / fh);
     let fitted = Rect::from_center_size(rect.center(), vec2(fw * scale, fh * scale));
-    let t = Tokens::get();
-    let ctx = Ctx { t: &t, sample, origin: fitted.min, scale };
+    let ctx = Ctx { t, sample, colour_vision, origin: fitted.min, scale };
     let p = p.with_clip_rect(fitted.intersect(p.clip_rect()));
     let outer: Option<Vec<Pos2>> = clip.map(|c| c.iter().map(|&q| ctx.at(q)).collect());
     // Nested clips are inside one another in every figure, so the innermost one is the clip.
@@ -278,7 +333,7 @@ fn draw(p: &Painter, ctx: &Ctx, op: &Op, clip: Option<&[Pos2]>) {
         Op::Glow { c, a } => {
             let centre = ctx.at([c[0], c[1]]);
             let radius = vec2(c[2] * ctx.scale, c[3] * ctx.scale);
-            glow(p, centre, radius, ctx.ink(Ink::Black, *a));
+            glow(p, centre, radius, ctx.ink(Ink::Shadow, *a));
         }
         Op::Text { at, size, anchor, ink, a, s, .. } => {
             if clip.is_some() {
@@ -326,7 +381,11 @@ fn poly(p: &Painter, ctx: &Ctx, pts: &[Pos2], closed: bool, fill: &Option<P>, gr
             let span = (y1 - y0).max(1e-3);
             fill_polygon(p, shape, |q| top.lerp_to_gamma(bottom, ((q.y - y0) / span).clamp(0.0, 1.0)));
         } else if let Some(f) = fill {
-            let c = ctx.ink(f.ink, f.a);
+            let ink = match f.ink {
+                Ink::Black => Ink::Shadow,
+                ink => ink,
+            };
+            let c = ctx.ink(ink, f.a);
             fill_polygon(p, shape, |_| c);
         }
     }

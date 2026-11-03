@@ -27,6 +27,18 @@ pub(crate) fn hint_field(ui: &mut Ui, value: &mut String, hint: &str) -> bool {
     editor(ui, value, hint, true).0
 }
 
+/// [`hint_field`] for a value the form checks before it runs: `flagged`, it is outlined in the
+/// warning colour (the caller says why in words under it, [`super::warning_caption`]). Returns
+/// accepted Enter and the editor's response. Tokens: `same as field, warning`.
+pub(crate) fn checked_field(ui: &mut Ui, value: &mut String, hint: &str, flagged: bool) -> (bool, Response) {
+    let (enter, _, response) = editor(ui, value, hint, true);
+    if flagged {
+        let t = Tokens::get();
+        ui.painter().rect_stroke(response.rect, t.control_radius, egui::Stroke::new(1.5, t.warning), egui::StrokeKind::Inside);
+    }
+    (enter, response)
+}
+
 /// The whole numbers a count field may hold, and how its text evaluates (parameters and
 /// expressions included). `eval` returns None for text that is not a value.
 pub(crate) struct Count<'a> {
@@ -122,6 +134,13 @@ pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, 
     (enter, changed)
 }
 
+/// [`text_field`] with a tooltip; returns (Enter, changed). Tokens: `same as field`.
+pub(crate) fn text_field_tip(ui: &mut Ui, value: &mut String, hint: &str, tip: &str) -> (bool, bool) {
+    let (enter, changed, response) = editor(ui, value, hint, false);
+    response.on_hover_text(tip);
+    (enter, changed)
+}
+
 /// Expression field for a single-value popup which keeps ownership of keyboard focus.
 /// Tokens: field tokens. Preserves the legacy Edit Dimension focus behavior.
 pub(crate) fn focused_field(ui: &mut Ui, value: &mut String) -> bool {
@@ -207,51 +226,53 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
-    let response = combo
-        .show_ui(ui, |ui| {
-            let search = ui.add(
-                text_input(egui::TextEdit::singleline(filter))
-                    .id_salt(format!("{id}_search"))
-                    .hint_text(crate::i18n::tr_label("Search"))
-                    .desired_width(f32::INFINITY),
-            );
-            // Preferences types into its own search only while no field has the keyboard.
-            if search.has_focus() {
-                crate::prefs_search::note_key_sink(ui.ctx());
+    let popup = combo.show_ui(ui, |ui| {
+        let search = ui.add(
+            text_input(egui::TextEdit::singleline(filter))
+                .id_salt(format!("{id}_search"))
+                .hint_text(crate::i18n::tr_label("Search"))
+                .desired_width(f32::INFINITY),
+        );
+        // Preferences types into its own search only while no field has the keyboard.
+        if search.has_focus() {
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
+        scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
+        if let Some(custom) = custom {
+            let response = ui.selectable_label(false, custom);
+            scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
+            if response.clicked() {
+                chosen = Some(filter.trim().to_owned());
+                ui.close();
             }
-            scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
-            if let Some(custom) = custom {
-                let response = ui.selectable_label(false, custom);
-                scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-                if response.clicked() {
-                    chosen = Some(filter.trim().to_owned());
-                    ui.close();
+            return;
+        }
+        let query = filter.to_lowercase();
+        egui::ScrollArea::vertical()
+            .id_salt(format!("{id}_list"))
+            .max_height(Tokens::get().space_24 * 10.0)
+            .min_scrolled_height(Tokens::get().space_24 * 10.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
+                    let response = ui.selectable_label(current == option.label, option.label);
+                    if let Some(handle) = option.handle {
+                        scenario::publish_handle(handle, response.rect.center());
+                    }
+                    if response.clicked() {
+                        chosen = Some(option.value.to_owned());
+                        ui.close();
+                    }
                 }
-                return;
-            }
-            let query = filter.to_lowercase();
-            egui::ScrollArea::vertical()
-                .id_salt(format!("{id}_list"))
-                .max_height(Tokens::get().space_24 * 10.0)
-                .min_scrolled_height(Tokens::get().space_24 * 10.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                        let response = ui.selectable_label(current == option.label, option.label);
-                        if let Some(handle) = option.handle {
-                            scenario::publish_handle(handle, response.rect.center());
-                        }
-                        if response.clicked() {
-                            chosen = Some(option.value.to_owned());
-                            ui.close();
-                        }
-                    }
-                    if let Some(pending) = pending {
-                        ui.label(pending);
-                    }
-                });
-        })
-        .response;
+                if let Some(pending) = pending {
+                    ui.label(pending);
+                }
+            });
+    });
+    let response = popup.response;
+    if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        response.request_focus();
+    }
     publish(ui, &response, egui::WidgetType::ComboBox);
     chosen
 }

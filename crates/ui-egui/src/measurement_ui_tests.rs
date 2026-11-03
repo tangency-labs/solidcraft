@@ -31,7 +31,7 @@ fn measure_starts_with_selected_vertices_edges_and_faces() {
                 .map(|point| match kind {
                     "vertex" => json!({"type":kind,"body":"Box","point":point}),
                     _ => {
-                        let st = h.app.session.world_state();
+                        let st = crate::open_meshing::session_world(&h.app.session);
                         let mesh = st.body("Box").unwrap().mesh();
                         let point = solidcraft_engine::geom::Vec3::from(point);
                         let index = if kind == "edge" {
@@ -158,6 +158,7 @@ fn a_datum_plane_and_a_point_measure_their_distance() {
 #[test]
 fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
     h.app.home.open = false;
     h.app.set_origin_shown(false);
     h.app.ui.show_browser = false;

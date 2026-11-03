@@ -1,10 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
-//! A wall swept along a spiral has a flat top and bottom that are B-spline faces. They have to be
-//! planes for the coplanar handling of a boolean to see them: a join of two such walls ran into
-//! the general intersection with faces that coincide, and failed. With planes, the walls are prisms
-//! and a join of two is decided in 2D (`prism.rs`).
+//! A wall swept along a spiral has a flat top and bottom that are B-spline faces: a join of two
+//! such walls, whose tops and bottoms coincide.
 
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::TAU;
 
 use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
@@ -46,43 +44,6 @@ fn two_walls(turn: f64, stations: usize) -> (Body, Body) {
     (spiral_wall(60.0, 0.0, turn, stations), spiral_wall(71.0, 0.26, turn, stations))
 }
 
-/// Faces that lie on a `Plane` surface (the face-type counts of `measure` also count flat splines).
-fn plane_faces(b: &Body) -> usize {
-    b.solid.face_iter().filter(|f| matches!(f.surface(), truck_modeling::Surface::Plane(_))).count()
-}
-
-fn volume(b: &Body) -> f64 {
-    b.tessellate_with(1e-3, true).unwrap().measure().volume
-}
-
-#[test]
-fn the_flat_faces_of_a_swept_wall_become_planes() {
-    let wall = spiral_wall(60.0, 0.0, FRAC_PI_2, 8);
-    // Two end caps are planes already; the top and bottom are flat B-splines like the two sides.
-    assert_eq!(plane_faces(&wall), 2);
-    let flat = crate::planar_faces::planarized(&wall).expect("the top and the bottom are flat");
-    assert_eq!(plane_faces(&flat), 4);
-    assert_eq!(flat.face_count(), wall.face_count());
-    assert!(flat.validity().is_empty(), "{:?}", flat.validity());
-    let (before, after) = (volume(&wall), volume(&flat));
-    assert!((before - after).abs() < 1e-3 * before, "{before} vs {after}");
-    // Nothing flat is left to change, and a box has nothing to begin with.
-    assert!(crate::planar_faces::planarized(&flat).is_none());
-    assert!(crate::planar_faces::planarized(&box_solid(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0)).unwrap()).is_none());
-}
-
-#[test]
-fn walls_that_share_a_top_and_a_bottom_coincide_only_once_those_are_planes() {
-    let (a, b) = two_walls(FRAC_PI_2, 8);
-    assert!(crate::coplanar::coincident_planes(&a, &b).is_empty());
-    let (pa, pb) = (crate::planar_faces::planarized(&a).unwrap(), crate::planar_faces::planarized(&b).unwrap());
-    let planes = crate::coplanar::coincident_planes(&pa, &pb);
-    assert_eq!(planes.len(), 2, "{planes:?}");
-    let mut heights: Vec<f64> = planes.iter().map(|(n, d, _)| d * n.z).collect();
-    heights.sort_by(f64::total_cmp);
-    assert!(heights[0].abs() < 1e-6 && (heights[1] - HEIGHT).abs() < 1e-6, "{heights:?}");
-}
-
 /// The plan area of the union of the walls (each given as `(radius, start)`), by sampling every
 /// 0.4 mm: a point is in a wall if it is within half its thickness of the wall's centreline and
 /// not beyond either end (flat ends).
@@ -122,18 +83,16 @@ fn free_form_faces(b: &Body) -> usize {
 
 fn join_checked(a: &Body, b: &Body, walls: &[(f64, f64)], turn: f64) {
     let joined = boolean(a, b, BoolOp::Union).unwrap().unwrap();
-    assert_eq!(joined.solid.boundaries().len(), 1);
+    assert_eq!(joined.shell_count(), 1);
     assert!(joined.validity().is_empty(), "{:?}", joined.validity());
     // Decided in 2D: the walls come back as arcs, not as splines.
     assert_eq!(free_form_faces(&joined), 0);
     let want = HEIGHT * union_plan_area(walls, turn);
-    let got = joined.tessellate_with(1e-2, true).unwrap().measure().volume;
+    let got = joined.mesh(&crate::MeshTolerance::chord(1e-2)).unwrap().measure().volume;
     assert!((got - want).abs() < 5e-3 * want, "{got} vs {want}");
 }
 
-/// The general intersection fails on these two walls (`no result`: their tops and bottoms coincide,
-/// and as B-splines the coincident-face handling does not see them). With flat faces made planes
-/// they are prisms, and the join is decided in 2D, with the walls fitted by arcs within a micron.
+/// Two walls whose tops and bottoms coincide: the join is one solid with the walls as arcs.
 #[test]
 fn a_join_of_swept_walls_is_decided_in_2d() {
     let turn = 0.6;

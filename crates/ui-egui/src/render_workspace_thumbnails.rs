@@ -105,7 +105,7 @@ pub(super) fn refresh(app: &mut SolveApp, ctx: &egui::Context) {
     let mut scene = std::collections::hash_map::DefaultHasher::new();
     app.session.visibility.hidden_bodies.hash(&mut scene);
     app.session.visibility.hidden_occurrences.hash(&mut scene);
-    (std::sync::Arc::as_ptr(&app.session.world_state()) as usize).hash(&mut scene);
+    (std::sync::Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize).hash(&mut scene);
     let scene = scene.finish();
     let mut keys = Vec::new();
     for name in std::iter::once(&app.render_workspace.view.name)

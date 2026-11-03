@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2893"
+ ],
+ "what": "the top rim of a cylinder r10 x 20 chamfered 12 across the top and 3 down the wall: refused",
+ "source": "analytic",
+ "method": "12 across a top of radius 10 runs past the axis: no chamfer of the rim between the top and the wall has those sizes, so the right answer is a refusal saying why",
+ "outcome": "refused",
+ "refusal": "larger than"
+}

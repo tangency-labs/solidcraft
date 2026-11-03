@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a plane through a box's bottom-front edge square to XY",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edge y 0, z 0 runs along X; holding it and square to XY: normal X x Z = -Y: y = 0",
+ "construction": {
+  "P": {
+   "plane": {
+    "through": [
+     7,
+     0,
+     3
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   }
+  }
+ }
+}

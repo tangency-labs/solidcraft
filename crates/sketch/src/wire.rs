@@ -62,53 +62,80 @@ pub struct Wire {
     /// are its three defining points (start, through, end) and whose `pts` are its samples.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<WireArc>,
+    /// A linked curve's exact geometry where its source has one (an included edge or sketch
+    /// curve, an intersection curve): record curves end to end along `pts`, in `space`
+    /// coordinates. Empty for a curve known only as its points (projected onto a face, iso
+    /// curves). Set when the link is resolved, with `pts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact: Vec<WireCurve>,
+}
+
+/// One exact piece of a 3D sketch curve ([`Wire::exact`]): a record curve on its interval.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WireCurve {
+    pub curve: solidcraft_geom::brep::Curve,
+    pub interval: [f64; 2],
+}
+
+impl WireCurve {
+    /// The piece carried by the rigid motion `point` of points and `vector` of directions (a
+    /// placement). `None` for an intersection curve, whose surfaces are not carried here.
+    pub fn mapped(&self, point: &impl Fn(Vec3) -> Vec3, vector: &impl Fn(Vec3) -> Vec3) -> Option<WireCurve> {
+        use solidcraft_geom::brep::{Curve, Frame};
+        let a = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
+        let b = |v: Vec3| [v.x, v.y, v.z];
+        let p = |q: [f64; 3]| b(point(a(q)));
+        let frame = |f: &Frame| Frame { origin: p(f.origin), x_axis: b(vector(a(f.x_axis))), y_axis: b(vector(a(f.y_axis))) };
+        let curve = match &self.curve {
+            Curve::Line { start, end } => Curve::Line { start: p(*start), end: p(*end) },
+            Curve::Circle { frame: f, radius } => Curve::Circle { frame: frame(f), radius: *radius },
+            Curve::Ellipse { frame: f, radii } => Curve::Ellipse { frame: frame(f), radii: *radii },
+            Curve::Polyline { points } => Curve::Polyline { points: points.iter().map(|q| p(*q)).collect() },
+            Curve::Spline { knots, points } => Curve::Spline { knots: knots.clone(), points: points.iter().map(|q| p(*q)).collect() },
+            Curve::RationalSpline { knots, homogeneous } => Curve::RationalSpline {
+                knots: knots.clone(),
+                homogeneous: homogeneous
+                    .iter()
+                    .map(|h| {
+                        let q = point(a([h[0], h[1], h[2]]) * (1.0 / h[3]));
+                        [q.x * h[3], q.y * h[3], q.z * h[3], h[3]]
+                    })
+                    .collect(),
+            },
+            Curve::SurfaceIntersection { .. } => return None,
+        };
+        Some(WireCurve { curve, interval: self.interval })
+    }
+}
+
+impl Wire {
+    /// The wire carried by the rigid motion `point` of points and `vector` of directions: its
+    /// points, fit points and exact curves (dropped where one cannot be carried, leaving the
+    /// points).
+    pub fn map(&mut self, point: impl Fn(Vec3) -> Vec3, vector: impl Fn(Vec3) -> Vec3) {
+        for q in self.pts.iter_mut().chain(&mut self.fit) {
+            *q = point(*q);
+        }
+        if let Some(arc) = &mut self.arc {
+            let normal = vector(arc.normal);
+            arc.center = point(arc.center);
+            arc.start = point(arc.start);
+            arc.end = point(arc.end);
+            arc.normal = normal.normalized().unwrap_or(arc.normal);
+            arc.radius = arc.center.dist(arc.start);
+        }
+        self.exact = self.exact.iter().map(|c| c.mapped(&point, &vector)).collect::<Option<_>>().unwrap_or_default();
+    }
 }
 
 /// Most fit points of a drawn 3D curve.
 pub const MAX_FIT_POINTS: usize = 500;
 
-/// Samples per span of a drawn 3D spline.
-const SPAN_SAMPLES: usize = 24;
-
-/// The polyline of a drawn 3D curve through `fit`: the point itself, the line, or a centripetal
-/// Catmull–Rom spline through the points (smooth, no overshoot loops).
+/// The polyline of a drawn 3D curve through `fit`: the point itself, the line, or the centripetal
+/// Catmull–Rom spline through the points (smooth, no overshoot loops), sampled
+/// ([`solidcraft_geom::catmull_rom`] has the curve itself, exactly).
 pub fn fit_polyline(fit: &[Vec3]) -> Vec<Vec3> {
-    if fit.len() <= 2 {
-        return fit.to_vec();
-    }
-    let n = fit.len();
-    // A curve that ends where it starts is smooth through that point (its neighbours wrap).
-    let closed = n > 3 && fit[0].dist(fit[n - 1]) < 1e-9;
-    let at = |i: isize| -> Vec3 {
-        match usize::try_from(i) {
-            Ok(i) if i < n => fit[i],
-            Ok(_) if closed => fit[1],
-            Err(_) if closed => fit[n - 2],
-            // Mirrored end tangents.
-            Ok(_) => fit[n - 1] * 2.0 - fit[n - 2],
-            Err(_) => fit[0] * 2.0 - fit[1],
-        }
-    };
-    let mut out = vec![fit[0]];
-    for k in 0..n - 1 {
-        let k = k as isize;
-        let (p0, p1, p2, p3) = (at(k - 1), at(k), at(k + 1), at(k + 2));
-        let tj = |a: Vec3, b: Vec3| a.dist(b).sqrt().max(1e-9);
-        let t0 = 0.0;
-        let t1 = t0 + tj(p0, p1);
-        let t2 = t1 + tj(p1, p2);
-        let t3 = t2 + tj(p2, p3);
-        for s in 1..=SPAN_SAMPLES {
-            let t = t1 + (t2 - t1) * s as f64 / SPAN_SAMPLES as f64;
-            let a1 = p0 * ((t1 - t) / (t1 - t0)) + p1 * ((t - t0) / (t1 - t0));
-            let a2 = p1 * ((t2 - t) / (t2 - t1)) + p2 * ((t - t1) / (t2 - t1));
-            let a3 = p2 * ((t3 - t) / (t3 - t2)) + p3 * ((t - t2) / (t3 - t2));
-            let b1 = a1 * ((t2 - t) / (t2 - t0)) + a2 * ((t - t0) / (t2 - t0));
-            let b2 = a2 * ((t3 - t) / (t3 - t1)) + a3 * ((t - t1) / (t3 - t1));
-            out.push(b1 * ((t2 - t) / (t2 - t1)) + b2 * ((t - t1) / (t2 - t1)));
-        }
-    }
-    out
+    solidcraft_geom::catmull_rom::samples(fit)
 }
 
 /// Chord-height tolerance (mm) when sampling a drawn 3D arc into `pts`.
@@ -314,7 +341,30 @@ impl Sketch {
                 Some(o) => o.clone(),
                 None => self.fresh("w")?,
             };
-            self.wires.push(Wire { id: wid, pts, space: WireSpace::Component, link: Some(id.to_string()), fit: Vec::new(), arc: None });
+            self.wires.push(Wire {
+                id: wid,
+                pts,
+                space: WireSpace::Component,
+                link: Some(id.to_string()),
+                fit: Vec::new(),
+                arc: None,
+                exact: Vec::new(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Give a link's wires their exact curves ([`Wire::exact`]), one list per wire in the order
+    /// [`Self::set_link_wires`] took them (an empty list: known only as points).
+    pub fn set_link_wire_curves(&mut self, id: &str, exact: &[Vec<WireCurve>]) -> Result<()> {
+        let wires = self.link_wires(id);
+        if wires.len() != exact.len() {
+            return Err(SketchError::Invalid(format!("link {id} has {} 3D curves, not {}", wires.len(), exact.len())));
+        }
+        for (i, curves) in wires.into_iter().zip(exact) {
+            if let Some(w) = self.wires.get_mut(i) {
+                w.exact = curves.clone();
+            }
         }
         Ok(())
     }
@@ -329,7 +379,7 @@ impl Sketch {
         let pts = drawn_polyline(fit)?;
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh(if fit.len() == 1 { "q" } else { "w" })?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None, exact: Vec::new() });
         Ok(id)
     }
 
@@ -349,7 +399,7 @@ impl Sketch {
         let pts = arc_polyline(&arc, ARC_TOL);
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh("w")?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc) });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc), exact: Vec::new() });
         Ok(id)
     }
 
@@ -469,7 +519,12 @@ mod tests {
         let n = pts.len();
         let (start, end) = (dir(pts[0], pts[1]), dir(pts[n - 2], pts[n - 1]));
         let mid = |i: usize| dir(pts[i - 1], pts[i]).dot(dir(pts[i], pts[i + 1]));
-        assert!(start.dot(end) >= mid(SPAN_SAMPLES) - 1e-9, "turn at the close {}, at a fit point {}", start.dot(end), mid(SPAN_SAMPLES));
+        assert!(
+            start.dot(end) >= mid(solidcraft_geom::catmull_rom::SPAN_SAMPLES) - 1e-9,
+            "turn at the close {}, at a fit point {}",
+            start.dot(end),
+            mid(solidcraft_geom::catmull_rom::SPAN_SAMPLES)
+        );
         let open = fit_polyline(&ring[..12]);
         assert_eq!(open.first(), ring.first());
         assert_eq!(open.last(), ring.get(11));

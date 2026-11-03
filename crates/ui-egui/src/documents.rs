@@ -41,7 +41,6 @@ pub struct DocSlot {
     pub(crate) autosave: Option<solidcraft_engine::recovery::Autosaver>,
     pub(crate) big_operation: bool,
     cam: Camera,
-    pre_sketch_marker: Option<Option<usize>>,
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
     pre_sketch_component: Option<crate::PreSketchComponent>,
@@ -135,7 +134,6 @@ impl DocSlot {
             autosave: None,
             big_operation: false,
             cam: Camera::default(),
-            pre_sketch_marker: None,
             pending_feature_edit: None,
             pre_sketch_cam: None,
             pre_sketch_component: None,
@@ -241,7 +239,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         autosave: app.autosave.as_mut().and_then(|a| std::mem::replace(&mut a.active, slot.autosave)),
         big_operation: std::mem::replace(&mut app.big_operation, slot.big_operation),
         cam: std::mem::replace(&mut app.cam, slot.cam),
-        pre_sketch_marker: std::mem::replace(&mut app.pre_sketch_marker, slot.pre_sketch_marker),
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
@@ -260,6 +257,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.tree.picked_components.clear();
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    app.session.set_validation(out.session.validation());
+    // So does the host's pre-command check: every tab is held to it.
+    app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
@@ -1889,6 +1889,30 @@ mod tests {
         adopt(&mut a, Session::default());
         assert_eq!(a.docs.count(), 1);
         assert!(!a.session.auto_project, "a design adopted over a blank one");
+    }
+
+    /// The host's pre-command check holds in every tab: new ones, the one switched to, a design
+    /// adopted over a blank one and after the last tab closes.
+    #[test]
+    fn the_command_check_follows_the_host_across_tabs() {
+        let mut a = app();
+        a.session.set_command_check(Some(std::sync::Arc::new(
+            |id: &str, _: &Value, _: &Session| {
+                if id == "solid.box" { Err("no boxes".to_string()) } else { Ok(()) }
+            },
+        )));
+        assert_eq!(a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})), Err("no boxes".to_string()));
+        a.run("solid.cylinder", json!({"radius": 5, "height": 10})).unwrap();
+        new_design(&mut a);
+        assert_eq!(a.docs.count(), 2);
+        assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "a new tab");
+        switch(&mut a, 0);
+        assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "the tab switched to");
+        close(&mut a, 1, true);
+        close(&mut a, 0, true);
+        assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "after the last tab closes");
+        adopt(&mut a, Session::default());
+        assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "a design adopted over a blank one");
     }
 
     /// Hide Origin by Default hides the Origin of designs that don't keep its eye; a design that

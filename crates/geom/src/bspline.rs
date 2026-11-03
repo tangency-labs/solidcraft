@@ -15,8 +15,10 @@ use std::ops::{Add, AddAssign, Mul, Sub};
 
 use crate::Vec3;
 
-/// Highest polynomial degree accepted in either direction.
-pub const MAX_SPLINE_DEGREE: usize = 7;
+/// Highest polynomial degree accepted in either direction: the B-rep record's own bound
+/// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of
+/// degree 9 (five conditions at each end).
+pub const MAX_SPLINE_DEGREE: usize = 16;
 /// Most knots accepted in one knot vector.
 pub const MAX_KNOTS: usize = 1 << 14;
 /// Most control points accepted in one tensor surface.
@@ -161,6 +163,22 @@ pub fn local_basis(knots: &[f64], u: f64, side: Side, n: usize) -> Vec<f64> {
     out
 }
 
+/// The `degree + 1` basis functions of a B-spline with `knots` and `count` control points alive
+/// at `t`, with their derivatives up to `order`: the index of the first of them and, for each,
+/// its value and derivatives (element `k` the `k`-th). Each comes from its own local knots
+/// ([`local_basis`]), on the span used at `t` (the last non-empty span starting at or before it,
+/// the domain's last span at its end, from the left).
+pub fn basis_derivatives(knots: &[f64], degree: usize, count: usize, t: f64, order: usize) -> Option<(usize, Vec<Vec<f64>>)> {
+    if degree == 0 || count <= degree || knots.len() != count + degree + 1 || !t.is_finite() {
+        return None;
+    }
+    let span = crate::tess::span_of(knots, degree, count, t);
+    let side = if t >= *knots.get(count)? { Side::Left } else { Side::Right };
+    let first = span.checked_sub(degree)?;
+    let ders = (first..=span).map(|i| Some(local_basis(knots.get(i..=i + degree + 1)?, t, side, order))).collect::<Option<Vec<_>>>()?;
+    Some((first, ders))
+}
+
 /// [`local_basis`] into a fixed array (no allocation): element `k` is the `k`-th derivative,
 /// for `k ≤ min(n, MAX_SPLINE_DEGREE)`, the rest zero.
 pub(crate) fn local_basis_array(knots: &[f64], u: f64, side: Side, n: usize) -> [f64; MAX_SPLINE_DEGREE + 1] {
@@ -287,16 +305,24 @@ pub fn basis_bezier(knots: &[f64], a: f64, b: f64) -> SplineResult<Vec<f64>> {
     Ok(out)
 }
 
+/// Ulps of the domain's magnitude a parameter may lie past a spline's domain end and still be
+/// that end ([`find_span`]): the rounding of an affine step, `a + (b − a)·s`, a few ulps at most.
+pub const DOMAIN_ROUNDING: f64 = 8.0;
+
 /// The span index `k` with `knots[k] ≤ u < knots[k+1]` among the valid spans `p ≤ k < n`
-/// (`n` control points), the last span closed at the domain end (NURBS Book A2.1).
+/// (`n` control points), the last span closed at the domain end (NURBS Book A2.1). A parameter
+/// past an end of the domain by floating-point rounding only ([`DOMAIN_ROUNDING`]) is at that
+/// end: `a + (b − a)·1`, the last of a range's even steps, may round one step past `b`.
 pub fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     if n <= p || knots.len() != n + p + 1 || !u.is_finite() {
         return None;
     }
     let (lo, hi) = (*knots.get(p)?, *knots.get(n)?);
-    if u < lo || u > hi {
+    let slack = DOMAIN_ROUNDING * f64::EPSILON * lo.abs().max(hi.abs()).max(1.0);
+    if u < lo - slack || u > hi + slack {
         return None;
     }
+    let u = u.clamp(lo, hi);
     // The last non-empty span in [p, n−1] that starts at or before u: by bisection (the knots
     // are sorted), and at the domain end the last non-empty span.
     let mut k = if u >= hi {
@@ -341,6 +367,46 @@ pub fn insert_knot(p: usize, knots: &[f64], ctrl: &[HPoint], u: f64) -> SplineRe
     let mut nk = knots.to_vec();
     nk.insert(k + 1, u);
     Ok((nk, q))
+}
+
+/// The piece of a B-spline (degree `p`, knots, homogeneous control points) on `[a, b]`, a
+/// sub-interval of its domain, as a clamped B-spline of its own whose domain is exactly
+/// `[a, b]`: the same points at the same parameters. Exact up to rounding: Boehm insertion of
+/// `a` and `b` until each has multiplicity `p` (NURBS Book §5.3, curve splitting), then the
+/// knots and control points between them.
+pub fn segment(p: usize, knots: &[f64], ctrl: &[HPoint], a: f64, b: f64) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+    let n = ctrl.len();
+    if n <= p || knots.len() != n + p + 1 {
+        return invalid("knot and control point counts do not match the degree");
+    }
+    let (lo, hi) = (knots.get(p).copied().unwrap_or(f64::NAN), knots.get(n).copied().unwrap_or(f64::NAN));
+    if !(lo <= a && a < b && b <= hi) {
+        return invalid(format!("[{a}, {b}] is not a piece of the domain [{lo}, {hi}]"));
+    }
+    let (mut k, mut c) = (knots.to_vec(), ctrl.to_vec());
+    for t in [a, b] {
+        // At most p insertions each.
+        for _ in 0..p {
+            if k.iter().filter(|&&x| x == t).count() >= p {
+                break;
+            }
+            (k, c) = insert_knot(p, &k, &c, t)?;
+        }
+    }
+    // The curve at a (from the right) is control point j0 − p, j0 the last knot equal to a;
+    // at b (from the left) control point j1 − 1, j1 the first knot equal to b.
+    let j0 = k.iter().rposition(|&x| x == a).filter(|&j| j >= p).ok_or_else(|| SplineError::Invalid("segment start".into()))?;
+    let j1 = k.iter().position(|&x| x == b).filter(|&j| j > j0).ok_or_else(|| SplineError::Invalid("segment end".into()))?;
+    let points = c.get(j0 - p..j1).ok_or_else(|| SplineError::Invalid("segment control points".into()))?.to_vec();
+    let inner = k.get(j0 + 1..j1).ok_or_else(|| SplineError::Invalid("segment knots".into()))?;
+    let mut out = Vec::with_capacity(inner.len() + 2 * p + 2);
+    out.extend(std::iter::repeat_n(a, p + 1));
+    out.extend_from_slice(inner);
+    out.extend(std::iter::repeat_n(b, p + 1));
+    if out.len() != points.len() + p + 1 {
+        return invalid("segment counts");
+    }
+    Ok((out, points))
 }
 
 /// The binomial coefficient `(n k)` (zero for `k > n`).
@@ -715,6 +781,48 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_parameter_a_rounding_past_the_domain_end_is_the_end() {
+        // Poppy Humanoid's interval: the last even step, t0 + (t1 − t0)·1, rounds one ulp past t1.
+        let (t0, t1) = (0.013209624271103393f64, 1.2985843833752286f64);
+        let past = t0 + (t1 - t0) * 1.0;
+        assert!(past > t1);
+        let knots = [t0, t0, t0, t1, t1, t1];
+        assert_eq!(find_span(&knots, 2, 3, past), find_span(&knots, 2, 3, t1));
+        assert_eq!(find_span(&knots, 2, 3, t0 - f64::EPSILON), find_span(&knots, 2, 3, t0));
+        // A parameter outside the domain by more than rounding is still none.
+        assert_eq!(find_span(&knots, 2, 3, t1 + 1e-9), None);
+    }
+
+    #[test]
+    fn a_segment_is_the_same_curve_on_its_interval() {
+        use crate::brep::{Curve, eval::CurveEval};
+        let p = 3;
+        let mut rng = Lcg(11);
+        let ctrl: Vec<HPoint> = (0..KNOTS.len() - p - 1)
+            .map(|_| HPoint::weighted(Vec3::new(rng.unit() * 10.0, rng.unit() * 10.0, rng.unit() * 10.0), 0.5 + rng.unit()))
+            .collect();
+        let record =
+            |k: &[f64], c: &[HPoint]| Curve::RationalSpline { knots: k.to_vec(), homogeneous: c.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() };
+        let whole = CurveEval::new(&record(&KNOTS, &ctrl)).unwrap();
+        // Inside one span, across knots (a double one included), from or to a domain end, and
+        // from one existing knot to another.
+        for (a, b) in [(0.1, 0.2), (0.12, 0.95), (0.0, 0.42), (0.3, 1.0), (0.3, 0.5), (0.0, 1.0)] {
+            let (k, c) = segment(p, &KNOTS, &ctrl, a, b).unwrap();
+            assert_eq!((k.first(), k.last()), (Some(&a), Some(&b)), "[{a}, {b}]: clamped on the interval");
+            assert_eq!(k.len(), c.len() + p + 1);
+            let piece = CurveEval::new(&record(&k, &c)).unwrap();
+            for x in samples() {
+                let t = a + (b - a) * x;
+                let (q, r) = (whole.point(t).unwrap(), piece.point(t).unwrap());
+                assert!(q.dist(r) < 1e-12, "[{a}, {b}] at {t}: {q:?} vs {r:?}");
+            }
+        }
+        assert!(segment(p, &KNOTS, &ctrl, 0.5, 0.5).is_err());
+        assert!(segment(p, &KNOTS, &ctrl, -0.1, 0.5).is_err());
+        assert!(segment(p, &KNOTS, &ctrl, 0.2, f64::NAN).is_err());
+    }
+
+    #[test]
     fn single_function_knot_insertion_is_exact() {
         let mut rng = Lcg(7);
         for _ in 0..200 {
@@ -951,6 +1059,103 @@ impl<const N: usize> CurveN<N> {
             }
         }
         Some((x, dx))
+    }
+
+    /// The speed in space (the length of the first three coordinates' derivative) at `t`.
+    fn speed(&self, t: f64) -> Option<f64> {
+        let (_, d) = self.eval(t)?;
+        Some(d.iter().take(3).map(|x| x * x).sum::<f64>().sqrt())
+    }
+
+    /// The length in space (the first three coordinates) from `a` to `b`: 8-point Gauss–Legendre.
+    fn length_between(&self, a: f64, b: f64) -> Option<f64> {
+        let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+        GAUSS_8.iter().try_fold(0.0, |sum, (x, w)| Some(sum + w * half * self.speed(mid + half * x)?))
+    }
+}
+
+/// Nodes and weights of the 8-point Gauss–Legendre rule on [-1, 1].
+pub const GAUSS_8: [(f64, f64); 8] = [
+    (-0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
+    (-0.796_666_477_413_626_7, 0.222_381_034_453_374_47),
+    (-0.525_532_409_916_329, 0.313_706_645_877_887_3),
+    (-0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.525_532_409_916_329, 0.313_706_645_877_887_3),
+    (0.796_666_477_413_626_7, 0.222_381_034_453_374_47),
+    (0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
+];
+
+/// Pieces of each knot span that [`ArcLength`] integrates over.
+const ARC_PIECES_PER_SPAN: usize = 8;
+
+/// Length in space along a [`CurveN`] (its first three coordinates), for points evenly spaced
+/// by length: each knot span split into [`ARC_PIECES_PER_SPAN`] pieces, each integrated with
+/// 8-point Gauss–Legendre (a polynomial curve's speed is smooth within a span, so this is exact
+/// to rounding for the cubics it is used on).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArcLength {
+    /// Each piece's start and end parameter and the length before it.
+    pieces: Vec<[f64; 3]>,
+    total: f64,
+}
+
+impl ArcLength {
+    /// The table of `c` (`None` for a curve that does not evaluate or has no finite length).
+    pub fn of<const N: usize>(c: &CurveN<N>) -> Option<ArcLength> {
+        let (p, n) = (c.degree, c.ctrl.len());
+        if n <= p || c.knots.len() != n + p + 1 || n > MAX_KNOTS {
+            return None;
+        }
+        let mut pieces = Vec::new();
+        let mut total = 0.0;
+        for w in c.knots.get(p..=n)?.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if !(b > a) {
+                continue;
+            }
+            for i in 0..ARC_PIECES_PER_SPAN {
+                let (s, e) = (a + (b - a) * i as f64 / ARC_PIECES_PER_SPAN as f64, a + (b - a) * (i + 1) as f64 / ARC_PIECES_PER_SPAN as f64);
+                pieces.push([s, e, total]);
+                total += c.length_between(s, e)?;
+            }
+        }
+        (total.is_finite() && !pieces.is_empty()).then_some(ArcLength { pieces, total })
+    }
+
+    /// The whole length.
+    pub fn total(&self) -> f64 {
+        self.total
+    }
+
+    /// The parameter of `c` (the curve the table is of) at length `s` along it (clamped to the
+    /// curve): Newton's method within the piece holding it, kept inside that piece by bisection.
+    pub fn param_at<const N: usize>(&self, c: &CurveN<N>, s: f64) -> Option<f64> {
+        if !s.is_finite() {
+            return None;
+        }
+        let s = s.clamp(0.0, self.total);
+        let k = self.pieces.partition_point(|q| q[2] <= s).saturating_sub(1);
+        let [a, b, before] = *self.pieces.get(k)?;
+        let tol = 1e-13 * (1.0 + self.total);
+        let (mut lo, mut hi) = (a, b);
+        let piece = self.pieces.get(k + 1).map_or(self.total, |q| q[2]) - before;
+        let mut u = if piece > 0.0 { a + (b - a) * ((s - before) / piece).clamp(0.0, 1.0) } else { a };
+        for _ in 0..60 {
+            let f = before + c.length_between(a, u)? - s;
+            if f.abs() <= tol {
+                break;
+            }
+            if f > 0.0 {
+                hi = u;
+            } else {
+                lo = u;
+            }
+            let v = c.speed(u)?;
+            let next = if v > 0.0 { u - f / v } else { f64::NAN };
+            u = if next.is_finite() && next > lo && next < hi { next } else { 0.5 * (lo + hi) };
+        }
+        Some(u)
     }
 }
 

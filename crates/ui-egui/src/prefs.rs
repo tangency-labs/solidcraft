@@ -456,8 +456,7 @@ fn page_path(index: usize) -> String {
 
 fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     let typed = drive_search(ui, app);
-    let (field, _) =
-        ui_kit::search_actions_row(ui, egui::Id::new("prefs_search"), &mut app.prefs_window.filter, crate::i18n::tr("prefs.search"), &[]);
+    let field = ui_kit::preferences_search_field(ui, egui::Id::new("prefs_search"), &mut app.prefs_window.filter, crate::i18n::tr("prefs.search"));
     if typed {
         place_search_cursor(ui.ctx(), egui::Id::new("prefs_search"), app.prefs_window.filter.chars().count());
     }
@@ -468,7 +467,6 @@ fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     settle_search(app);
     crate::prefs_search::set_reveal(ui.ctx(), app.prefs_window.reveal.clone());
     crate::prefs_search::set_force_scroll(ui.ctx(), !app.prefs_window.filter.trim().is_empty());
-    ui.add_space(Tokens::get().space_8);
 }
 
 /// Keys for the search field. Shortcut capture keeps the key for itself.
@@ -625,6 +623,19 @@ pub enum HistorySketches {
     InOrder,
     /// A sketch a feature is built from is listed one level in, under that feature.
     UnderFeature,
+}
+
+/// How a section hatches the faces it cuts (Preferences: "Section hatch").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionHatch {
+    /// Each body in its own hatch (`solidcraft_render::hatch`): 45 or 135 degrees in one of the
+    /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
+    /// know reads as (`lenient`).
+    #[default]
+    ByPart,
+    /// Every cut face in the cap colour at 45 degrees (how it was before by part).
+    One,
 }
 
 /// What the interface calls the origin planes (Preferences › Interface). Only the names shown
@@ -1095,6 +1106,9 @@ preference_settings! {
     dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
+    /// A section hatches each cut body its own way (the default), or every one alike, in the cap
+    /// colour at 45 degrees, as before.
+    section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
     grid_follows_view: bool = false => check("Grid follows the view", "Side views show the grid on the upright plane facing them instead of the ground");
@@ -1123,6 +1137,9 @@ preference_settings! {
     supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("ui.supersampling_adaptive");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
     show_frame_rate: bool = false, PAGE_GRAPHICS => check_id("ui.frame_rate");
+    /// Record where the time goes (SMLib's calls, kernel operations, features, commands, imports)
+    /// for `diagnostics.profile` (docs/perf.md). Off by default: nothing is recorded.
+    profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
@@ -1144,6 +1161,10 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
+    /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
+    /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
+    validation: solidcraft_engine::kernel::Validation = solidcraft_engine::kernel::Validation::EachFeature, PAGE_DESIGN;
     /// A command's value (Extrude's Distance, Fillet's Radius…) in a box beside its handle in the
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
@@ -1307,6 +1328,9 @@ preference_settings! {
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_LAYOUT => check_id("prefs.browser_eye_left");
+    /// Every component placement in the browser starts open, as before #9274, instead of closed
+    /// until the user opens it. Off by default.
+    browser_components_open: bool = false, PAGE_LAYOUT => check_id("prefs.browser_components_open");
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -1338,8 +1362,9 @@ preference_settings! {
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
-    /// switches the extent to To Object (off: picks only add profiles, as before).
-    extrude_auto_to_object: bool = false, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
+    /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
+    /// Profiles box makes the next picks profiles again.
+    extrude_auto_to_object: bool = true, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -1508,6 +1533,10 @@ preference_settings! {
     /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
     /// #10215). Off (the default): the sketch belongs to the active component, as before.
     sketch_face_activates_part: bool = false, PAGE_SKETCH => check_id("prefs.sketch_face_activates_part");
+    /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
+    /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
+    /// runs its command, and one that builds a feature finishes the sketch first (#2815).
+    sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
@@ -1603,6 +1632,9 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The Profile operations preference the profiler last followed: applied when it changes,
+    /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
+    applied_profile: Option<bool>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
     /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
@@ -1908,68 +1940,94 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut chosen: Option<String> = None;
     let mut action: Option<&str> = None;
     let mut import_tile = None;
-    ui_kit::theme_rail(
-        ui,
-        |ui| {
-            for (id, label) in &choices {
-                let palette = match id.as_str() {
-                    "light" | "system" => Tokens::light(),
-                    "dark" => Tokens::dark(),
-                    _ => crate::theme_files::find(id, &app.preferences.custom_themes)
-                        .map(|f| resolved_theme(&app.preferences, f))
-                        .unwrap_or_else(Tokens::dark),
-                };
-                let custom = app.preferences.custom_themes.iter().any(|t| t.id == *id);
-                let note = app.tr(if id == "system" {
-                    "prefs.follows_os"
-                } else if custom {
-                    "prefs.imported_file"
-                } else {
-                    "prefs.built_in"
-                });
-                let response = ui_kit::option_card(
-                    ui,
+    let t = Tokens::get();
+    let width = t.space_24 * 3.0 + t.space_16;
+    let height = t.space_24 * 4.0;
+    let dark_sample = ui_kit::ThemeSample::from_tokens(&Tokens::dark());
+    let carousel_id = "appearance_themes";
+    // Reveal the active theme after a programmatic selection or import too.
+    let selection_key = ui.make_persistent_id((carousel_id, "selection"));
+    let carousel_key = ui.make_persistent_id(carousel_id);
+    ui.data_mut(|data| {
+        if data.get_temp::<String>(selection_key).as_deref() != Some(app.preferences.theme.as_str()) {
+            let index = choices.iter().position(|(id, _)| id == &app.preferences.theme).unwrap_or(0);
+            data.insert_temp(carousel_key, index.saturating_sub(1));
+            data.insert_temp(selection_key, app.preferences.theme.clone());
+        }
+    });
+    let mut item = |ui: &mut egui::Ui, index: usize| {
+        if let Some((id, label)) = choices.get(index) {
+            let palette = match id.as_str() {
+                "light" | "system" => Tokens::light(),
+                "dark" => Tokens::dark(),
+                _ => crate::theme_files::find(id, &app.preferences.custom_themes)
+                    .map(|f| resolved_theme(&app.preferences, f))
+                    .unwrap_or_else(Tokens::dark),
+            };
+            let custom = app.preferences.custom_themes.iter().any(|t| t.id == *id);
+            let note = app.tr(if id == "system" {
+                "prefs.follows_os"
+            } else if custom {
+                "prefs.imported_file"
+            } else {
+                "prefs.built_in"
+            });
+            let options = crate::theme_files::find(id, &app.preferences.custom_themes)
+                .is_some_and(|file| !crate::theme_options::offered(file, crate::theme_options::PROVIDERS).is_empty());
+            if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label, note]) {
+                return;
+            }
+            let sample = ui_kit::ThemeSample::from_tokens(&palette);
+            let response = ui_kit::picture_card(
+                ui,
+                &ui_kit::Card {
                     label,
-                    Some(note),
-                    !following && app.preferences.theme == *id,
-                    true,
-                    ui_kit::PreferenceFigure::Theme { palette: palette.into(), system: id == "system" },
-                );
-                if crate::theme_files::find(id, &app.preferences.custom_themes)
-                    .is_some_and(|file| !crate::theme_options::offered(file, crate::theme_options::PROVIDERS).is_empty())
-                {
-                    ui_kit::theme_options_badge(ui, response.rect, app.tr("prefs.theme_options_badge"));
-                    crate::scenario::publish_rect(&format!("prefs:theme_options_badge:{id}"), response.rect);
-                }
-                crate::scenario::publish_target(&format!("prefs:theme_tile:{id}"), response.rect);
-                crate::scenario::publish_target(&format!("prefs:theme:{id}"), response.rect);
-                if !following && app.preferences.theme == *id {
-                    crate::scenario::publish_target("prefs:theme", response.rect);
-                }
-                if response.clicked() {
-                    chosen = Some(id.clone());
-                }
-                ui_kit::Menu::context(&response, |ui| {
-                    ui_kit::Menu::show(ui, Tokens::get().form_card_width, |ui| {
-                        if ui_kit::MenuItem::new("theme_export", app.tr_label("Export…"), "export").show(ui).clicked() {
-                            tile_action = Some(("export", id.clone()));
+                    sub: Some(note),
+                    selected: !following && app.preferences.theme == *id,
+                    enabled: true,
+                    options: options.then(|| app.tr("prefs.theme_options_badge")),
+                    check: false,
+                    aspect: 124.0 / 76.0,
+                    figure: &|p, rect| {
+                        if id == "system" {
+                            ui_kit::paint_theme_system(p, rect, &sample, &dark_sample);
+                        } else {
+                            ui_kit::paint_theme_thumbnail(p, rect, &sample);
+                        }
+                    },
+                },
+                width.min(ui.available_width()),
+            );
+            if options {
+                crate::scenario::publish_rect(&format!("prefs:theme_options_badge:{id}"), response.rect);
+            }
+            crate::scenario::publish_target(&format!("prefs:theme_tile:{id}"), response.rect);
+            crate::scenario::publish_target(&format!("prefs:theme:{id}"), response.rect);
+            if !following && app.preferences.theme == *id {
+                crate::scenario::publish_target("prefs:theme", response.rect);
+            }
+            if response.clicked() {
+                chosen = Some(id.clone());
+            }
+            ui_kit::Menu::context(&response, |ui| {
+                ui_kit::Menu::show(ui, Tokens::get().form_card_width, |ui| {
+                    if ui_kit::MenuItem::new("theme_export", app.tr_label("Export…"), "export").show(ui).clicked() {
+                        tile_action = Some(("export", id.clone()));
+                        ui.close();
+                    }
+                    if custom {
+                        let mut remove = ui_kit::MenuItem::new("theme_remove", app.tr_label("Remove"), "delete");
+                        remove.danger = true;
+                        if remove.show(ui).clicked() {
+                            tile_action = Some(("remove", id.clone()));
                             ui.close();
                         }
-                        if custom {
-                            let mut remove = ui_kit::MenuItem::new("theme_remove", app.tr_label("Remove"), "delete");
-                            remove.danger = true;
-                            if remove.show(ui).clicked() {
-                                tile_action = Some(("remove", id.clone()));
-                                ui.close();
-                            }
-                        }
-                    });
+                    }
                 });
-            }
-        },
-        |ui| {
-            let tile = ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file_or_paste"))
-                .on_hover_text(app.tr("prefs.theme_import_hint"));
+            });
+        } else {
+            let tile =
+                ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file")).on_hover_text(app.tr("prefs.theme_import_hint"));
             import_tile = Some(tile.rect);
             if tile.clicked() {
                 action = Some("import");
@@ -1984,8 +2042,24 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             });
-        },
-    );
+        }
+    };
+    if crate::prefs_search::suppress_chrome(ui) {
+        for index in 0..=choices.len() {
+            item(ui, index);
+        }
+    } else {
+        ui_kit::carousel(ui, carousel_id, choices.len() + 1, width, height, &mut item);
+        for (label, handle, help) in [
+            ("prefs.carousel_previous", "prefs:theme_previous", "prefs.appearance.previous_themes"),
+            ("prefs.carousel_next", "prefs:theme_next", "prefs.appearance.next_themes"),
+        ] {
+            if let Some(rect) = crate::scenario::rect_of(&format!("prefs:carousel:{}", crate::i18n::tr(label))) {
+                crate::scenario::publish_target(handle, rect);
+                ui.interact(rect, ui.make_persistent_id((handle, "help")), egui::Sense::hover()).on_hover_text(app.tr(help));
+            }
+        }
+    }
     app.prefs_window.import_tile = import_tile;
     if let Some((kind, id)) = tile_action {
         action = Some(kind);
@@ -1995,6 +2069,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Choosing a theme stops following a file (#7573).
         stop_following(app);
         select_theme(app, &id);
+        ui.data_mut(|data| data.insert_temp(selection_key, id));
     }
     match action {
         Some("import") => app.pick_open_for(&["json"], |app, path| {
@@ -2043,28 +2118,30 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let launch = app.prefs_window.follow.launch.is_some();
     let error = app.prefs_window.follow.error().map(str::to_string);
     let (mut choose, mut stop) = (false, false);
-    // The setting's name is longer than the label column: it leads the row's own line.
-    ui_kit::row(ui, "", |ui| {
-        // On a narrow page the buttons drop to a second line rather than widening the page.
-        let narrow = ui.available_width() < Tokens::get().form_card_width;
-        ui.horizontal_wrapped(|ui| {
-            ui_kit::text(ui, app.tr("prefs.theme_follow"), ui_kit::Text::Inline);
-            if narrow {
-                ui.end_row();
+    ui.horizontal_wrapped(|ui| {
+        ui.add_enabled_ui(FOLLOW_AVAILABLE, |ui| {
+            let mut on = !path.is_empty();
+            let check = ui_kit::checkbox(ui, app.tr("prefs.theme_follow"), &mut on);
+            crate::scenario::publish_target("prefs:theme_follow_toggle", check.rect);
+            if check.changed() {
+                if on {
+                    choose = true;
+                } else {
+                    stop = true;
+                }
             }
-            let choose_button = ui_kit::button(ui, app.tr_label("Choose…"), ui_kit::Button::Small);
-            crate::scenario::publish_target("prefs:theme_follow", choose_button.rect);
-            choose = choose_button.clicked();
-            let stop_button = ui_kit::button(ui, app.tr("prefs.theme_follow_stop"), ui_kit::Button::Enabled(!path.is_empty()));
-            stop = stop_button.clicked();
-            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string());
-            let shown = name.unwrap_or_else(|| app.tr("prefs.theme_follow_off").to_string());
-            ui_kit::text(ui, &shown, ui_kit::Text::Inline).on_hover_text(&path);
+            ui_kit::help_icon(ui, app.tr("prefs.appearance.follow_help"));
+            let button = ui_kit::button(ui, app.tr_label("Choose…"), ui_kit::Button::Small);
+            crate::scenario::publish_target("prefs:theme_follow", button.rect);
+            choose |= button.clicked();
         });
+        ui_kit::settings_state_badge(ui, app.tr("prefs.appearance.desktop_only"), ui_kit::SettingsBadgeTone::Neutral);
+        if !path.is_empty() {
+            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            ui_kit::settings_inline_note(ui, &name);
+            ui_kit::help_icon(ui, app.tr(if launch { "prefs.theme_follow_launch" } else { "prefs.theme_follow_note" })).on_hover_text(&path);
+        }
     });
-    if !path.is_empty() {
-        ui_kit::text(ui, app.tr(if launch { "prefs.theme_follow_launch" } else { "prefs.theme_follow_note" }), ui_kit::Text::Hint("theme_follow"));
-    }
     if let Some(error) = error.filter(|_| !path.is_empty()) {
         ui_kit::text(ui, &crate::i18n::format("prefs.theme_follow_error", &[("error", &error)]), ui_kit::Text::Error("theme_follow"));
     }
@@ -2084,7 +2161,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The interface font (#1290): the built-in font first, then the installed families, with a
 /// search box. The choice applies at once, like the other preferences.
 fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let builtin = app.tr_label("Built-in").to_string();
+    let builtin = crate::i18n::format("sketch_text.builtin_font", &[("family", "IBM Plex Sans")]);
     let current = if app.preferences.ui_font.trim().is_empty() { builtin.clone() } else { app.preferences.ui_font.clone() };
     let families = crate::sketch_text::families(ui.ctx());
     let mut values = vec![(String::new(), builtin.clone(), "prefs:font_builtin".to_string())];
@@ -2092,17 +2169,21 @@ fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         values.extend(families.iter().map(|family| (family.clone(), family.clone(), format!("prefs:font:{family}"))));
     }
     let options: Vec<_> = values.iter().map(|(value, label, handle)| ui_kit::SearchOption { value, label, handle: Some(handle) }).collect();
-    let chosen = ui_kit::searchable_dropdown(
-        ui,
-        "pref_ui_font",
-        &current,
-        &mut app.prefs_window.font_filter,
-        &options,
-        None,
-        families.is_none().then(|| crate::i18n::tr_label("Listing the installed fonts…")),
-    );
-    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:widget:{}", crate::i18n::tr("prefs.font"))) {
-        crate::scenario::publish_handle("prefs:ui_font", rect.center());
+    let chosen = ui_kit::named_control(ui, app.tr_label("Interface font"), |ui| {
+        ui_kit::searchable_dropdown(
+            ui,
+            "pref_ui_font",
+            &current,
+            &mut app.prefs_window.font_filter,
+            &options,
+            None,
+            families.is_none().then(|| crate::i18n::tr_label("Listing the installed fonts…")),
+        )
+    });
+    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:widget:{}", crate::i18n::tr_label("Interface font"))) {
+        crate::scenario::publish_target("prefs:ui_font", rect);
+        crate::scenario::publish_target(&format!("dialog:{}", app.tr("prefs.font")), rect);
+        crate::scenario::publish_rect(&format!("dialog:widget:{}", app.tr("prefs.font")), rect);
     }
     if let Some(name) = chosen {
         if name.is_empty() || crate::fonts::ui_font(&name).is_some() {
@@ -2215,6 +2296,17 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     apply_network(&app.preferences);
+    // The features computed from now on are checked as the preference says.
+    app.session.set_validation(app.preferences.validation);
+    // The profiler records while the preference is on (switched when it changes; at start-up only
+    // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
+    let profile = app.preferences.profile_operations;
+    if app.prefs_window.applied_profile != Some(profile) {
+        if profile || app.prefs_window.applied_profile.is_some() {
+            solidcraft_engine::profile::set_enabled(profile);
+        }
+        app.prefs_window.applied_profile = Some(profile);
+    }
     apply_file_limits(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
@@ -2552,6 +2644,7 @@ fn unfold(ctx: &egui::Context) {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::settings_profiles::rename_popup(app, ctx);
     // File › Keyboard Shortcuts and Help › Keyboard Shortcuts open this dialog at that page.
     if app.keymap.open {
         app.keymap.open = false;
@@ -2590,11 +2683,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = ui_kit::Window::new(egui::Id::new("sc_prefs"), "settings", app.tr("ui.preferences"))
         .cards(10.0 / 3.0)
         .page_rows(24.0)
+        .page_header_in_titlebar()
         .page_padding(egui::Margin {
-            left: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
-            right: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
-            top: Tokens::get().space_6 as i8,
-            bottom: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
+            left: (Tokens::get().space_24 - Tokens::get().space_2) as i8,
+            right: (Tokens::get().space_24 - Tokens::get().space_2) as i8,
+            top: (Tokens::get().space_16 + Tokens::get().space_2) as i8,
+            bottom: Tokens::get().space_10 as i8,
         })
         .fields()
         .actions("OK", "Cancel", Some("Apply"))
@@ -2608,12 +2702,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app,
         search_header,
         clear_search,
-        Some((Tokens::get().control_height * 3.0, crate::settings_profiles::sidebar)),
+        Some((Tokens::get().space_24 * 2.0, crate::settings_profiles::sidebar)),
         |ui| {
-            if ui_kit::button(ui, crate::i18n::tr("ui.restore_defaults"), ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
-                .clicked()
-            {
+            let defaults = ui_kit::button(ui, crate::i18n::tr("prefs.restore_page_defaults"), ui_kit::Button::Ghost)
+                .on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"));
+            crate::scenario::publish_target("prefs:defaults", defaults.rect);
+            if defaults.clicked() {
                 button = Some("defaults");
             }
         },
@@ -3768,7 +3862,7 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let (mut values, _) = effective_theme_options(&app.preferences, file);
     let before = values.clone();
-    let reset = ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+    let reset = ui_kit::settings_card(ui, |ui| ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values)).inner;
     let changes: BTreeMap<_, _> = values.into_iter().filter(|(id, value)| before.get(id) != Some(value)).collect();
     if reset || !changes.is_empty() {
         let update = if reset { json!({}) } else { json!(changes) };
@@ -4072,6 +4166,11 @@ fn prepare_preferences(
     {
         return Err("`viewport_theme` must be theme, light or dark".into());
     }
+    if let Some(v) = p.get("validation")
+        && v.as_str().and_then(solidcraft_engine::kernel::Validation::parse).is_none()
+    {
+        return Err("`validation` must be each_step, each_feature or off".into());
+    }
     if let Some(value) = p.get("navigation_bar") {
         crate::navigation_bar::validate(value)?;
     }
@@ -4238,11 +4337,59 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
         h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
         h.frames(20);
     }
-    panic!("preference {handle} was not revealed");
+    panic!(
+        "preference {handle} was not revealed: theme={} language={} section={} filter={:?} screen={:?} window={:?} body={:?} target_rect={:?} target_point={:?}",
+        h.app.preferences.theme,
+        h.app.preferences.language,
+        h.app.prefs_window.section,
+        h.app.prefs_window.filter,
+        h.ctx.content_rect(),
+        crate::scenario::rect_of("prefs:window"),
+        crate::scenario::rect_of("dialog:page_body"),
+        crate::scenario::rect_of(handle),
+        crate::scenario::handle_at(handle)
+    );
 }
 
 #[cfg(test)]
 mod tests {
+    /// Profile operations switches the profiler when it changes, and only then: an agent's
+    /// diagnostics.profile in between is not undone next frame.
+    #[test]
+    fn the_profile_preference_switches_the_profiler_when_it_changes() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        h.call("ui.prefs", json!({"profile_operations": true}));
+        h.frames(2);
+        assert!(solidcraft_engine::profile::enabled());
+        h.app.session.execute("diagnostics.profile", &json!({"enabled": false})).unwrap();
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled(), "the command's choice stands");
+        h.call("ui.prefs", json!({"profile_operations": false}));
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled());
+    }
+
+    /// Preferences saved with a setting this version no longer has still load, every other
+    /// setting kept: the removed key is ignored like any unknown one.
+    #[test]
+    fn saved_preferences_with_a_removed_setting_still_load() {
+        use serde_json::json;
+        for (removed, value) in [
+            ("geometry_kernel", json!("smlib")),
+            ("geometry_kernel", json!("solidcore")),
+            ("metric_tap_drill_major_less_pitch", json!(true)),
+            ("surface_extrude_symmetric_per_side", json!(true)),
+        ] {
+            let saved = json!({"length_decimals": 4, removed: value});
+            let p = serde_json::from_value::<super::Prefs>(saved.clone()).unwrap();
+            assert_eq!(p.length_decimals, 4, "{removed}");
+            assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
+            assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
+        }
+    }
+
     /// #10254: the invert toggle is off by default, persists, and the Navigation page's
     /// Defaults resets it.
     #[test]
@@ -4485,10 +4632,15 @@ mod tests {
     fn navigation_bar_appearance_segments_stay_inside_the_page_at_narrow_widths() {
         for width in [1600, 880, 640, 600, 480] {
             let mut h = crate::scenario::Harness::new();
+            h.app.preferences.language = "en".into();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":width,"height":1100}));
             h.call("ui.prefs", json!({"open":"Interface/Navigation bar", "navigation_bar":{"slots":["fit","visual_style","display","spin"]}}));
             h.frames(20);
+            let header = crate::scenario::rect_of("dialog:header").unwrap();
+            let search = crate::scenario::rect_of("prefs:search:frame").unwrap();
+            assert!(header.contains_rect(search), "titlebar search stays inside the window at {width}");
+            assert!(search.width() <= 230.0 && search.width() >= 100.0, "usable bounded search at {width}");
             for (key, label, labels) in [
                 ("position", "Position", &["Left", "Center", "Right"][..]),
                 ("size", "Size", &["Compact", "Regular"][..]),
@@ -4650,7 +4802,7 @@ mod tests {
                     let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                     let window = crate::scenario::rect_of("prefs:window").unwrap();
                     let t = crate::theme::Tokens::get();
-                    let inset = t.space_16 + t.space_4 + crate::ui_kit::navigation_popup_frame().stroke.width;
+                    let inset = t.space_24 - t.space_2 + crate::ui_kit::navigation_popup_frame().stroke.width;
                     assert!((body.right() - (window.right() - inset)).abs() < 0.5, "{width}: {page}");
                     for key in sections {
                         let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
@@ -5823,12 +5975,13 @@ mod tests {
             ("view_confirm_corner", json!(true), PAGE_LAYOUT),
             ("status_bar", json!(true), PAGE_LAYOUT),
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
+            ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
-            ("extrude_auto_to_object", json!(true), PAGE_TOOLS),
+            ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
@@ -5981,6 +6134,7 @@ mod tests {
         ];
         let mut found = vec![Vec::new(); cases.len()];
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
         h.app.home.open = false;
         for page in 0..PAGES.len() {
             open_at(&mut h.app, page);
@@ -6069,10 +6223,10 @@ mod tests {
         use serde_json::json;
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let mut row = hole_preset_row("Fixture");
-        row["thread_options"] = json!({"handedness":"left","full_length":false,"depth":"4 mm"});
+        row["thread_options"] = json!({"full_length":false,"depth":"4 mm"});
         super::set(&mut app, &json!({"hole_presets":[row]})).unwrap();
         let expected = serde_json::to_value(&app.preferences.hole_presets).unwrap();
-        assert_eq!(expected[0]["thread_options"]["handedness"], "left");
+        assert_eq!(expected[0]["thread_options"]["depth"], "4 mm");
         for page in 0..super::PAGES.len() {
             super::reset_preferences(&mut app.preferences, page);
         }
@@ -6379,7 +6533,7 @@ mod tests {
             let (t, white) = (Tokens::get(), egui::Color32::WHITE);
             assert_eq!((t.viewport_top, t.viewport_bottom, Tokens::view().viewport_top), (white, white, white), "{theme}");
             assert_eq!(t.panel, Tokens::themed(view_dark, ColorVision::Off).panel, "{theme}: the window");
-            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default());
+            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap();
             let white = solidcraft_engine::render::Rgb(255, 255, 255);
             assert_eq!(scene.background, Some((white, white)), "{theme}: a picture of the view");
         }
@@ -6467,7 +6621,15 @@ mod tests {
         h.app.home.open = false;
         h.call("ui.prefs", json!({"theme": "dark", "open": "Interface"}));
         h.frames(2);
-        super::reveal_preference(&mut h, "dialog:Import…");
+        // The Import card is the last one in the theme carousel: page it into view.
+        for _ in 0..40 {
+            if h.app.prefs_window.import_tile.is_some() {
+                break;
+            }
+            h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.prefs_window.import_tile.is_some(), "the Import card is reachable in the theme carousel");
         let (root, out) = (h.dir.join("root"), h.dir.join("out"));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&out).unwrap();
@@ -6565,6 +6727,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn appearance_sections_and_carousel_use_real_data_and_stay_in_the_page() {
+        for base in ["light", "dark"] {
+            for screen in [740, 1600] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.call("ui.resize", json!({"width":screen,"height":1100}));
+                h.call("ui.prefs", json!({"theme":base,"language":"en","open":"Appearance"}));
+                h.frames(4);
+                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let mut previous: Option<f32> = None;
+                for key in ["theme", "viewport_logo", "scale", "colour_vision"] {
+                    let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
+                    assert!(section.left() >= page.left() - 1.0 && section.right() <= page.right() + 1.0);
+                    if let Some(bottom) = previous {
+                        assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{base} width={screen}: {key}");
+                    }
+                    previous = Some(crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap().bottom());
+                }
+                let choices = theme_choices(&h.app);
+                let count = format!("{} themes", choices.len());
+                let mut painted_count = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            painted_count |= text.galley.job.text == count;
+                        }
+                    });
+                }
+                assert!(painted_count, "count comes from actual themes");
+                for _ in 0..choices.len() + 1 {
+                    h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
+                    h.frames(2);
+                }
+                let mut found = std::collections::BTreeSet::new();
+                for _ in 0..choices.len() + 1 {
+                    for (id, _) in &choices {
+                        if let Some(rect) = crate::scenario::rect_of(&format!("prefs:theme:{id}")) {
+                            assert!(page.expand(1.0).contains_rect(rect), "{base} width={screen}: {id} {rect:?}");
+                            assert!((rect.width() - 88.0).abs() <= 1.0);
+                            found.insert(id.clone());
+                        }
+                    }
+                    if let Some(import) = h.app.prefs_window.import_tile {
+                        assert!(page.expand(1.0).contains_rect(import));
+                        break;
+                    }
+                    h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+                    h.frames(2);
+                }
+                assert_eq!(found, choices.into_iter().map(|(id, _)| id).collect());
+                assert!(h.app.prefs_window.import_tile.is_some(), "Import is the last carousel card");
+                assert_eq!(h.app.preferences.theme, base, "scrolling does not select a theme");
+                assert_eq!(h.app.preferences.ui_scale, 1.0);
+                assert_eq!(h.app.preferences.viewport_background, None);
+                assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Theme);
+                assert!(!h.app.preferences.logo_accent);
+                assert!(h.app.preferences.theme_follow.is_empty() && h.app.preferences.ui_font.is_empty());
+                assert_eq!(h.app.preferences.color_vision, crate::theme::ColorVision::Off);
+                h.call("ui.prefs", json!({"button":"cancel"}));
+            }
+        }
+    }
+
+    #[test]
+    fn appearance_controls_edit_real_fields_and_cancel_restores_them() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"language":"en"}));
+        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.frames(3);
+        assert_eq!(h.app.prefs_window.section, PAGE_APPEARANCE, "legacy alias remains supported");
+        let before = h.app.preferences.clone();
+        for (handle, expected) in
+            [("prefs:viewport_theme:light", crate::theme::ViewportTheme::Light), ("prefs:viewport_theme:dark", crate::theme::ViewportTheme::Dark)]
+        {
+            super::reveal_preference(&mut h, handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.viewport_theme, expected);
+        }
+        super::reveal_preference(&mut h, "dialog:Background:Color");
+        h.step(&json!({"click":{"handle":"dialog:Background:Color"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background, Some([255, 255, 255]));
+        super::reveal_preference(&mut h, "prefs:viewport_background_hex");
+        h.step(&json!({"click":{"handle":"prefs:viewport_background_hex"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"#123456"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background, Some([0x12, 0x34, 0x56]));
+        super::reveal_preference(&mut h, "prefs:viewport_background_picker");
+        h.step(&json!({"click":{"handle":"prefs:viewport_background_picker"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("color:popover").is_some(), "the standard picker opens beside the hex editor");
+        h.step(&json!({"click":{"handle":"color:spin:R:up"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background, Some([0x13, 0x34, 0x56]), "picker edits the same RGB as hex");
+        h.step(&json!({"click":{"handle":"prefs:viewport_background_hex"}})).unwrap();
+        h.frames(2);
+        assert!(h.widget("#133456").is_some(), "a picker edit refreshes the inline hex field");
+        super::reveal_preference(&mut h, "dialog:Logo:Accent");
+        h.step(&json!({"click":{"handle":"dialog:Logo:Accent"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.preferences.logo_accent);
+        for (percent, scale) in [(75, 0.75), (100, 1.0), (110, 1.1), (125, 1.25), (150, 1.5), (200, 2.0)] {
+            let handle = format!("prefs:scale_preset:{percent}");
+            // Rescaling may leave the presets above the current vertical scroll position.
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":5000}));
+            h.frames(20);
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(4);
+            assert!((h.app.preferences.ui_scale - scale).abs() < 0.001);
+        }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences, before);
+    }
+
     fn theme_options_fixture(base: &str, count: usize) -> serde_json::Value {
         let fixtures: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-options.json")).unwrap();
         fixtures[format!("{base}-{count}")].clone()
@@ -6577,10 +6861,23 @@ mod tests {
                 let mut h = crate::scenario::Harness::new();
                 h.app.home.open = false;
                 h.call("ui.resize", json!({"width":1600,"height":1100}));
-                let out = h.call("ui.prefs", json!({"theme_import":theme_options_fixture(base, count),"open":"Interface"}));
+                let fixture = theme_options_fixture(base, count);
+                // The 12-cell fixture also declares a composite child, counted in the header.
+                let option_count = fixture["options"].as_array().expect("fixture option definitions").len();
+                let out = h.call("ui.prefs", json!({"theme_import":fixture,"open":"Interface"}));
                 assert!(out["error"].is_null(), "{out}");
                 h.frames(3);
                 assert_eq!(crate::scenario::rect_of("prefs:theme_options_header").is_some(), count > 0, "{base} {count}");
+                let caption = if option_count == 1 { "1 option".to_owned() } else { format!("{option_count} options") };
+                let mut painted_count = 0;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            painted_count += usize::from(text.galley.job.text == caption);
+                        }
+                    });
+                }
+                assert_eq!(painted_count, usize::from(count > 0), "{base}: the real option count paints the exact singular/plural caption once");
                 let id = format!("options-{base}-{count}");
                 assert_eq!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_some(), count > 0);
                 assert_eq!(crate::scenario::handle_at("prefs:theme_options_more").is_some(), count == 12);
@@ -6593,14 +6890,14 @@ mod tests {
                 );
                 assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_none());
                 if count == 0 {
-                    let strip = crate::scenario::rect_of("dialog:hint:tab_accent").unwrap();
+                    let viewport = crate::scenario::rect_of("prefs:section:viewport_logo").unwrap();
                     let mut unknown = theme_options_fixture(base, count);
                     unknown["options"] = json!([{"id":"blur","type":"range","default":0}]);
                     h.call("ui.prefs", json!({"theme_import":unknown}));
                     h.frames(2);
                     assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
                     assert!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_none());
-                    assert_eq!(crate::scenario::rect_of("dialog:hint:tab_accent").unwrap(), strip, "unknown providers add no gap or notice");
+                    assert_eq!(crate::scenario::rect_of("prefs:section:viewport_logo").unwrap(), viewport, "unknown providers add no gap or notice");
                 }
                 if count == 12 {
                     assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_none());
@@ -7415,6 +7712,61 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:ok").is_some());
     }
 
+    #[test]
+    fn appearance_popups_own_escape_restore_focus_and_leave_cancel_to_the_next_escape() {
+        for font in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"language":"en","theme":"dark"}));
+            let before = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"Appearance"}));
+            h.frames(3);
+            reveal_preference(&mut h, "prefs:viewport_theme:light");
+            h.step(&json!({"click":{"handle":"prefs:viewport_theme:light"}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Light);
+            let (target, popup) = if font {
+                ("prefs:ui_font", "dialog:Interface font search")
+            } else {
+                reveal_preference(&mut h, "dialog:Background:Color");
+                h.step(&json!({"click":{"handle":"dialog:Background:Color"}})).unwrap();
+                h.frames(2);
+                ("prefs:viewport_background_picker", "color:popover")
+            };
+            reveal_preference(&mut h, target);
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let rect = crate::scenario::rect_of(target).unwrap();
+            assert!(body.contains_rect(rect), "{target} is visible before clicking");
+            let edited = h.app.preferences.clone();
+            assert_ne!(edited, before);
+            h.step(&json!({"click":{"handle":target}})).unwrap();
+            h.frames(2);
+            assert!(crate::scenario::handle_at(popup).is_some() || crate::scenario::rect_of(popup).is_some(), "{target} opens its real popup");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.section == PAGE_APPEARANCE);
+            assert!(h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited, "dismissing {target} retains live changes");
+            assert!(crate::scenario::handle_at(popup).is_none() && crate::scenario::rect_of(popup).is_none());
+            // No pointer input: the actual combo/swatch must have regained keyboard focus.
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(
+                crate::scenario::handle_at(popup).is_some() || crate::scenario::rect_of(popup).is_some(),
+                "{target} reopens from its restored focus"
+            );
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.prefs_window.open && h.app.prefs_window.snapshot.is_none());
+            assert_eq!(h.app.preferences, before, "Escape with no popup cancels and restores the original snapshot");
+        }
+    }
+
     /// Letters typed in the font list's own Search box narrow the list. Preferences' search takes
     /// typing only when no text field has the keyboard, so it must not take these.
     #[test]
@@ -7426,9 +7778,12 @@ mod tests {
         h.step(&json!({"text": "font"})).expect("search");
         h.frames(3);
         let combo = crate::scenario::handle_at("prefs:ui_font").expect("the search finds the font row");
+        let body = crate::scenario::rect_of("prefs:page_body").expect("the Preferences page body");
+        let picker = crate::scenario::rect_of("prefs:ui_font").expect("the font picker bounds");
+        assert!(body.contains_rect(picker) && picker.contains(combo), "the font picker is inside the visible page before clicking");
         h.call("ui.click", json!({"x":combo.x,"y":combo.y}));
         h.frames(2);
-        let search = format!("dialog:{} search", crate::i18n::tr("prefs.font"));
+        let search = format!("dialog:{} search", crate::i18n::tr_label("Interface font"));
         let field = crate::scenario::handle_at(&search).expect("the font list is open");
         h.call("ui.click", json!({"x":field.x,"y":field.y}));
         h.frames(2);
@@ -7481,6 +7836,30 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    /// The validation mode is once per feature by default; set by name or by the command, the
+    /// two stay one setting, the session computes under it, and Restore Defaults on Design brings
+    /// each_feature back. A saved unknown mode reads as the default.
+    #[test]
+    fn validation_defaults_to_each_feature_and_follows_the_command() {
+        use serde_json::json;
+        use solidcraft_engine::kernel::Validation;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
+        assert_eq!(super::lenient(&json!({"validation": "sometimes"})).validation, Validation::EachFeature);
+        assert!(super::set(&mut app, &json!({"validation": "never"})).unwrap_err().contains("each_step, each_feature or off"));
+        let out = super::set(&mut app, &json!({"validation": "each_step"})).unwrap();
+        assert_eq!(out["validation"], "each_step");
+        assert_eq!(super::lenient(&out).validation, Validation::EachStep);
+        // A command runs under the preference.
+        app.run("diagnostics.validation", json!({})).unwrap();
+        assert_eq!(app.session.validation(), Validation::EachStep);
+        // The command sets the preference too.
+        app.run("diagnostics.validation", json!({"mode": "off"})).unwrap();
+        assert_eq!((app.preferences.validation, app.session.validation()), (Validation::Off, Validation::Off));
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
     }
 
     #[test]
@@ -7610,6 +7989,216 @@ mod tests {
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(super::file_limits(&h.app.preferences), FileLimits::DEFAULT);
         h.call("ui.prefs", json!({"button": "cancel"}));
+    }
+
+    #[test]
+    fn general_files_controls_edit_real_limits_and_hosts_in_both_themes() {
+        for theme in ["light", "dark"] {
+            for width in [1468, 480] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.call("ui.resize", json!({"width":width, "height":1100}));
+                let configured = h.call(
+                    "ui.prefs",
+                    json!({"language":"en", "theme":theme, "network_locations":true, "network_hosts":["files.example", "nas.example"]}),
+                );
+                assert!(configured["error"].is_null(), "{theme} {width}: setting up Preferences failed: {configured}");
+                let opened = h.call("ui.prefs", json!({"open":"General"}));
+                assert!(opened["error"].is_null(), "{theme} {width}: opening General failed: {opened}");
+                let initial_body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                for target in [
+                    "dialog:widget:Profile name",
+                    "prefs:profile:save",
+                    "prefs:profile:import",
+                    "prefs:profiles:held:row",
+                    "prefs:profiles:computer:row",
+                ] {
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    assert!(initial_body.contains_rect(rect), "{theme} {width}: {target} {rect:?} leaves {initial_body:?}");
+                }
+                if width == 480 {
+                    let name = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
+                    let save = crate::scenario::rect_of("prefs:profile:save").unwrap();
+                    let import = crate::scenario::rect_of("prefs:profile:import").unwrap();
+                    assert!(save.top() >= name.bottom(), "narrow Save wraps after the independent name entry");
+                    assert!((save.top() - import.top()).abs() < 0.5);
+                }
+                let painted = |h: &crate::scenario::Harness, label: &str| {
+                    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                    h.shapes
+                        .iter()
+                        .find_map(|shape| {
+                            if let egui::Shape::Text(text) = &shape.shape
+                                && text.galley.job.text == label
+                            {
+                                let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                                if body.contains_rect(rect) && shape.clip_rect.contains_rect(rect) {
+                                    return Some(rect);
+                                }
+                            }
+                            None
+                        })
+                        .unwrap_or_else(|| panic!("{theme} {width}: {label} is not fully painted in the page"))
+                };
+                // Reveal the live dropdown, not the full-width layout row's allocation rectangle.
+                super::reveal_preference(&mut h, "dialog:widget:Interface language");
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let language = painted(&h, "Interface language");
+                assert!((language.left() - body.left()).abs() < 0.75);
+                assert!((crate::scenario::rect_of("dialog:control:Interface language").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+                super::reveal_preference(&mut h, "prefs:autosave_minutes");
+                let autosave = painted(&h, "Autosave every");
+                let autosave_help = crate::scenario::rect_of("dialog:row_help:Autosave every").unwrap();
+                assert!((autosave.left() - body.left()).abs() < 0.75, "the painted autosave label shares the language label's left edge");
+                assert!((autosave_help.left() - autosave.right() - 4.0).abs() < 1.0, "help follows the actual text, not the whole label column");
+                assert!((crate::scenario::rect_of("prefs:autosave_minutes").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+                super::reveal_preference(&mut h, "prefs:autosave_timeline");
+                let timeline = crate::scenario::rect_of("prefs:autosave_timeline").unwrap();
+                let autosave_control = crate::scenario::rect_of("prefs:autosave_minutes").unwrap();
+                assert!((timeline.left() - autosave_control.left()).abs() < 0.5);
+                assert!((timeline.width() - 260.0_f32.min(body.right() - autosave_control.left())).abs() < 0.5);
+                assert!(body.contains_rect(timeline));
+                super::reveal_preference(&mut h, "prefs:max_step_file_mb");
+                super::reveal_preference(&mut h, "dialog:row:Largest file to open");
+                let field = crate::scenario::rect_of("prefs:max_step_file_mb").unwrap();
+                let design = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
+                assert!(
+                    (field.width() - 72.0).abs() < 0.5 && (design.width() - 72.0).abs() < 0.5,
+                    "{theme}: both compound file editors retain their width"
+                );
+                let step_group = crate::scenario::rect_of("dialog:row:Largest file to open: STEP and import").unwrap();
+                let design_group = crate::scenario::rect_of("dialog:row:Largest file to open: Design").unwrap();
+                let step_caption = painted(&h, "STEP and import");
+                let design_caption = painted(&h, "Design");
+                let largest = painted(&h, "Largest file to open");
+                assert!((step_caption.left() - field.left()).abs() < 0.75 && (design_caption.left() - design.left()).abs() < 0.75);
+                assert!((largest.left() - body.left()).abs() < 0.75);
+                assert!((largest.top() - step_caption.top() - 6.0).abs() <= 1.0, "the left label stays in its top-aligned 28 px cell");
+                assert!(step_group.width() >= 90.0 && step_group.width() < 130.0, "{theme}: the subgroup follows its field, unit and caption");
+                if width == 1468 {
+                    assert!((step_caption.top() - design_caption.top()).abs() < 0.5, "{theme}: the actual painted captions share a top baseline");
+                    assert!(
+                        (field.top() - design.top()).abs() < 0.5 && field.right() < design.left(),
+                        "{theme}: independent editors share one visual row"
+                    );
+                    assert!((design_group.left() - step_group.right() - 20.0).abs() < 0.5, "{theme}: compact pair gap");
+                } else {
+                    assert!(design_group.top() > step_group.bottom(), "{theme}: the pair wraps at narrow widths");
+                    assert!((design_group.left() - step_group.left()).abs() < 0.5);
+                }
+                let group = crate::scenario::rect_of("dialog:row:Largest file to open").unwrap();
+                assert!(group.contains_rect(field) && group.contains_rect(design));
+                assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(group));
+                h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
+                h.step(&json!({"key":"A", "cmd":true})).unwrap();
+                h.step(&json!({"text":"4096"})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!(h.app.preferences.max_step_file_mb, 4096);
+                super::reveal_preference(&mut h, "prefs:max_design_file_mb");
+                let field = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
+                h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
+                h.step(&json!({"key":"A", "cmd":true})).unwrap();
+                h.step(&json!({"text":"2048"})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!(h.app.preferences.max_design_file_mb, 2048);
+                assert_eq!(super::file_limits(&h.app.preferences).step, 4096 * solidcraft_engine::io::limits::MB);
+                let before = h.app.preferences.clone();
+                for bad in [json!({"max_step_file_mb":16385}), json!({"max_design_file_mb":255})] {
+                    assert!(h.call("ui.prefs", bad)["error"].is_string());
+                    assert_eq!(h.app.preferences, before, "invalid file limits fail atomically");
+                }
+                super::reveal_preference(&mut h, "prefs:network_host:files.example:remove");
+                h.step(&json!({"click":{"handle":"prefs:network_host:files.example:remove"}})).unwrap();
+                assert_eq!(h.app.preferences.network_hosts, ["nas.example"]);
+                h.step(&json!({"widget":"Allow network locations in designs"})).unwrap();
+                h.frames(3);
+                assert!(!h.app.preferences.network_locations);
+                assert_eq!(h.app.preferences.network_hosts, ["nas.example"], "hiding the chips retains the hosts");
+                assert!(crate::scenario::rect_of("prefs:network_host:nas.example:remove").is_none());
+                super::reveal_preference(&mut h, "prefs:print_face_highlight");
+                let highlight = painted(&h, "Print face highlight");
+                let highlight_help = crate::scenario::rect_of("dialog:row_help:Print face highlight").unwrap();
+                assert!((highlight.left() - body.left()).abs() < 0.75, "the painted highlight label shares the language/autosave left edge");
+                assert!((highlight_help.left() - highlight.right() - 4.0).abs() < 1.0);
+                assert!((crate::scenario::rect_of("prefs:print_face_highlight").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+                let track = crate::scenario::rect_of("dialog:slider_track:Print face highlight").unwrap();
+                // The published rectangle includes the circular handle's endpoint insets.
+                let input_range = track.x_range().shrink(track.height() / 2.5);
+                h.step(&json!({"click":[egui::lerp(input_range, 0.75), track.center().y]})).unwrap();
+                assert!(
+                    (h.app.preferences.print_face_highlight - 0.75).abs() < 0.06,
+                    "{theme} {width}: highlight={} track={track:?} input_range={input_range:?}",
+                    h.app.preferences.print_face_highlight
+                );
+                super::reveal_preference(&mut h, "prefs:check_now");
+                assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_now").unwrap()));
+                assert!(h.app.prefs_window.open);
+                h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+                assert_eq!((h.app.preferences.max_step_file_mb, h.app.preferences.max_design_file_mb), (DEFAULT_STEP_MB, DEFAULT_DESIGN_MB));
+                assert_eq!(h.app.preferences.network_hosts, ["files.example", "nas.example"]);
+                assert!(h.app.preferences.network_locations);
+                assert_eq!(h.app.preferences.print_face_highlight, 0.2);
+            }
+        }
+    }
+
+    #[test]
+    fn general_autosave_rows_apply_cancel_and_defaults_keep_the_effective_interval() {
+        use std::time::Duration;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.step(&json!({"autosave":true})).unwrap();
+        h.app.autosave_minutes = 7.0;
+        super::set_autosave(&mut h.app);
+        h.app.preferences.language = "en".into();
+        h.app.preferences.nav = "tinkercad".into();
+        h.app.preferences.reopen_designs = false;
+        h.app.run("settings.profile.save", json!({"name":"Working"})).unwrap();
+        let profiles = h.app.settings_profiles.list.clone();
+        h.call("ui.prefs", json!({"open":"General"}));
+        super::reveal_preference(&mut h, "prefs:autosave_minutes");
+        super::reveal_preference(&mut h, "prefs:autosave_timeline");
+        let number = crate::scenario::rect_of("prefs:autosave_minutes").unwrap();
+        let timeline = crate::scenario::rect_of("prefs:autosave_timeline").unwrap();
+        assert!((timeline.width() - 260.0).abs() < 0.5, "the timeline stays bounded in the control column");
+        assert!((timeline.left() - number.left()).abs() < 0.5);
+        assert!(timeline.top() >= number.bottom());
+        assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(timeline));
+        h.step(&json!({"click":{"handle":"prefs:autosave_minutes"}, "double":true})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"2.5"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 2.5);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
+        assert_eq!(saved_prefs(&h.app)["autosave_minutes"], 7.0, "an unapplied value is not persisted");
+        h.step(&json!({"click":{"handle":"prefs:apply"}})).unwrap();
+        assert_eq!(saved_prefs(&h.app)["autosave_minutes"], 2.5);
+        super::reveal_preference(&mut h, "prefs:autosave_minutes");
+        h.step(&json!({"click":{"handle":"prefs:autosave_minutes"}, "double":true})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"0"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 0.0);
+        assert!(h.app.autosave.as_ref().unwrap().interval > Duration::from_secs(365 * 24 * 60 * 60));
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 2.5);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
+        h.call("ui.prefs", json!({"open":"General"}));
+        assert!(h.widget(h.app.tr("prefs.restore_page_defaults")).is_some(), "the translated Preferences caption is visible");
+        assert!(h.widget(h.app.tr("ui.restore_defaults")).is_none(), "the generic caption is absent from Preferences");
+        h.step(&json!({"widget":"Restore page defaults"})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 5.0);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(300));
+        assert_eq!(h.app.preferences.language, crate::i18n::SYSTEM);
+        assert!(h.app.preferences.reopen_designs);
+        assert_eq!(h.app.preferences.nav, "tinkercad", "General's reset leaves other pages alone");
+        assert_eq!(h.app.settings_profiles.list, profiles);
+        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Working"));
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(h.app.preferences.language, "en");
+        assert!(!h.app.preferences.reopen_designs);
+        assert_eq!(h.app.autosave_minutes, 2.5);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
     }
 
     #[test]
@@ -7896,35 +8485,36 @@ mod tests {
             .collect()
     }
 
-    /// The Interface page's tab colour strip names each tab as the ribbon does, in every language.
+    /// The shipped ribbon uses the same localized tab names as workspace metadata.
     #[test]
-    fn tab_accent_strip_names_the_tabs_as_the_ribbon_does() {
-        use crate::workspace::tab_name;
-        fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
-            match shape {
-                egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
-                _ => {}
-            }
-        }
-        let h = crate::scenario::Harness::new();
+    fn ribbon_names_the_tabs_as_workspace_metadata_does() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":2400,"height":1000}));
         for (lang, want) in [
             ("en", ["Model", "Surface", "Mesh", "Form", "Sheet Metal", "Render"]),
             ("de", ["Modell", "Fläche", "Mesh", "Form", "Blech", "Rendern"]),
             ("fr", ["Modèle", "Surface", "Maillage", "Forme", "Tôlerie", "Rendu"]),
         ] {
+            h.app.preferences.language = lang.into();
+            h.frames(3);
             let _scope = crate::i18n::scope(lang);
-            let got = ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"].map(tab_name);
-            assert_eq!(got, want, "{lang}");
-            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 200.0));
-            let mut out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
-                crate::ui_kit::scope(ui, crate::ui_kit::tab_accent_strip);
-            });
-            out.textures_delta.clear();
+            for (id, name) in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"].into_iter().zip(want) {
+                assert_eq!(crate::workspace::tab_name(id), name, "{lang}");
+                assert_eq!(crate::toolbar::ribbon_label(&h.app, id), name, "{lang}");
+            }
             let mut painted = Vec::new();
-            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
-            for name in want {
-                assert!(painted.iter().any(|p| p == name), "{lang}: the strip paints {painted:?}, not {name}");
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        painted.push(text.galley.job.text.clone());
+                    }
+                });
+            }
+            for id in crate::workspace::visible_tabs(&h.app) {
+                let name = crate::toolbar::ribbon_label(&h.app, id);
+                assert!(crate::scenario::handle_at(&format!("tab:{id}")).is_some(), "{lang}: real ribbon tab {id}");
+                assert!(painted.contains(&name), "{lang}: the ribbon paints {painted:?}, not {name}");
             }
         }
     }
@@ -9017,7 +9607,7 @@ mod tests {
         app.open_path(&path);
         let offered = app.stand_up.clone().unwrap_or_default();
         assert_eq!(offered.len(), 1, "the file's body is offered");
-        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session);
+        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session).unwrap();
         assert!((size(&app).max.y - size(&app).min.y - 40.0).abs() < 1e-6);
         control(&mut app, &json!({"stand_up": true})).unwrap();
         let b = size(&app);
@@ -9106,7 +9696,7 @@ mod tests {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let proj = crate::viewport::projection(&app, rect);
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let m = st.bodies[0].mesh();
         // A spot a fifth of the way along a visible edge, well away from its middle on screen.
         let found = m.edges.iter().filter(|e| e.len() >= 2).find_map(|e| {

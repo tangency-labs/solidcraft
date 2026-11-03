@@ -61,7 +61,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
-        "solid.thread" => &[("face", Pick)],
+        "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
@@ -149,13 +149,12 @@ fn pt(p: Vec3) -> Value {
 /// The frame of the body a world point lies on (the nearest), or of the named body, with the
 /// bodies whose faces meet there: the first is the body under the point, and more than one
 /// means the pick is ambiguous.
-fn frame_at(s: &Session, f: &Frames, p: Vec3, body: Option<&str>) -> Option<(Mat, Vec<String>)> {
+fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3, body: Option<&str>) -> Option<(Mat, Vec<String>)> {
     if let Some(b) = body
         && let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| w == b)
     {
         return Some((*m, vec![own.clone()]));
     }
-    let world = s.world_state();
     let mut best: Option<(f64, Mat, Vec<String>)> = None;
     for wb in &world.bodies {
         let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| *w == wb.name) else { continue };
@@ -201,7 +200,10 @@ fn tri_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
 }
 
 struct Mapper<'a> {
+    /// The session the body frames are read from (only when a pick needs them).
     s: &'a Session,
+    /// The placed model the picks are on.
+    world: &'a solidcraft_doc::ModelState,
     f: Frames,
     /// The frame of the command's first pick (its directions turn with it).
     first: Option<Mat>,
@@ -213,7 +215,7 @@ struct Mapper<'a> {
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         let p = vec3(v)?;
-        let under = if self.here { None } else { frame_at(self.s, &self.f, p, body) };
+        let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         let out = self.local_point(&m, p);
@@ -300,6 +302,10 @@ impl Mapper<'_> {
     }
 
     fn plane(&mut self, v: &Value) -> Option<Value> {
+        // A point where a plane may be given (a thread's `up_to`): a pick.
+        if v.is_array() {
+            return self.pick(v, None);
+        }
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
@@ -422,14 +428,21 @@ impl Drop for Nested {
     }
 }
 
-/// `params` with world picks mapped into component frames (`None`: nothing to change).
-pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+/// `params` with world picks mapped into component frames (`None`: nothing to change). A model
+/// that cannot be placed is the error.
+pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
+    // A command with no world picks has nothing to map, and may not need the bodies placed.
+    let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
+    if !picks || !placed(s) {
+        return Ok(None);
+    }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
     // it by frame and maps each part itself (`split_move`).
-    if id == "solid.move" && split_move(s, params).is_some() {
-        return None;
+    if id == "solid.move" && split_move(s, params)?.is_some() {
+        return Ok(None);
     }
-    map_params(s, id, params)
+    let world = s.world_state()?;
+    Ok(map_local(s, &world, id, params))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
@@ -440,13 +453,14 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
 /// same place, as its pivot is a point). `None`: the bodies share one frame, or are moved as
 /// placements (`placements_moved`), or the move is not the outermost command (run by another,
 /// such as Edit Feature, its parameters are already in component frames). `to_local` leaves the
-/// parameters of a split move in the world, and `solid.move` asks for the parts.
-pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
+/// parameters of a split move in the world, and `solid.move` asks for the parts. A model that
+/// cannot be placed is the error.
+pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Vec<Value>>> {
     let outermost_move = DEPTH.with(std::cell::Cell::get) == 1 && OUTER_MOVE.with(std::cell::Cell::get);
     if !outermost_move || !placed(s) || placements_moved(s, params).is_some() {
-        return None;
+        return Ok(None);
     }
-    let names = params.get("bodies")?.as_array()?;
+    let Some(names) = params.get("bodies").and_then(Value::as_array) else { return Ok(None) };
     let turns = params.get("axis").is_some() || params.get("angle").is_some();
     let alike = |a: &Mat, b: &Mat| {
         let columns = if turns { 4 } else { 3 };
@@ -456,16 +470,17 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
     let mut groups: Vec<(Mat, Vec<Value>)> = Vec::new();
     for name in names {
         // An unknown body is the command's to refuse.
-        let b = name.as_str()?;
-        let m = frames.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m)?;
+        let Some(b) = name.as_str() else { return Ok(None) };
+        let Some(m) = frames.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m) else { return Ok(None) };
         match groups.iter_mut().find(|(g, _)| alike(g, &m)) {
             Some((_, bodies)) => bodies.push(name.clone()),
             None => groups.push((m, vec![name.clone()])),
         }
     }
     if groups.len() < 2 {
-        return None;
+        return Ok(None);
     }
+    let world = s.world_state()?;
     let given = params.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
     let moves = groups
         .into_iter()
@@ -477,26 +492,27 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
             if let Some(name) = given.filter(|_| k > 0) {
                 p["name"] = Value::String(format!("{name} ({})", k + 1));
             }
-            map_params(s, "solid.move", &p).unwrap_or(p)
+            map_local(s, &world, "solid.move", &p).unwrap_or(p)
         })
         .collect();
-    Some(moves)
+    Ok(Some(moves))
 }
 
-/// [`to_local`] for one command.
-fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
+/// [`to_local`] on the placed model `world`.
+fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: &Value) -> Option<Value> {
     if id == "library.apply" {
         // Library targets are the same world selections as appearance.assign,
         // nested one level down. Convert at the outer boundary exactly once;
         // run_nested subsequently receives the component-local picks and names.
-        let targets = map_params(s, "appearance.assign", params.get("targets")?)?;
+        let targets = map_local(s, world, "appearance.assign", params.get("targets")?)?;
         let mut out = params.clone();
         out["targets"] = targets;
         return Some(out);
     }
     // Several placements of one part moved together are moved as placements, in the world
-    // (`placements_moved`): their names and vectors stay as given.
-    if id == "solid.move" && placements_moved(s, params).is_some() {
+    // (`placements_moved`), and components copied (`occurrences`) likewise: their names and vectors
+    // stay as given. Bodies listed with them are mapped by `copy_components`.
+    if id == "solid.move" && (params.get("occurrences").is_some() || placements_moved(s, params).is_some()) {
         return None;
     }
     if id == "timeline.redefine" {
@@ -510,7 +526,7 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
         if let solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } = &feature.kind {
             context.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
         }
-        let mut inner = map_params(&context, cmd, params.get("params")?)?;
+        let mut inner = map_local(&context, world, cmd, params.get("params")?)?;
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
         if cmd == "solid.revolve"
@@ -569,7 +585,7 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
         return Some(out);
     }
     let keys = table(id);
-    if keys.is_empty() || !placed(s) {
+    if keys.is_empty() {
         return None;
     }
     let obj = params.as_object()?;
@@ -594,7 +610,7 @@ fn map_params(s: &Session, id: &str, params: &Value) -> Option<Value> {
         obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
     }
     let obj = &obj;
-    let mut m = Mapper { s, f: command_frames, first, changed: false, here: false };
+    let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     // Picks first: their frame turns the directions.

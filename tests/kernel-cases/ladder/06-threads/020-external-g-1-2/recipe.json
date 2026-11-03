@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10.4775,
+    "height": 10.885714285714286,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     10.4775,
+     0,
+     5.442857142857143
+    ],
+    "modeled": true,
+    "form": "bspp",
+    "designation": "G 1/2"
+   }
+  }
+ ]
+}

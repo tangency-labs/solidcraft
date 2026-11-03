@@ -338,7 +338,7 @@ fn the_walls_of_an_open_thin_extrude_take_sketches_that_follow_their_thickness()
 
 /// A point inside each flat, vertical face of the first body: (what it is, point).
 fn flat_side_faces(s: &Session) -> Vec<(String, [f64; 3])> {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let mut out = Vec::new();
     let Some(body) = world.bodies.first() else { return out };
     let mesh = body.mesh();
@@ -369,12 +369,17 @@ fn the_round_sides_of_a_thin_ring_are_named_by_the_circle_they_run_beside() {
     run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Outline", "thin": true, "thickness": 2, "distance": 5, "name": "Ring"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let names = solidcraft_doc::naming::face_names(world.bodies.first().unwrap());
-    // Each round side is two half cylinders, told apart by their numbers.
+    // Each round side is one cylinder, closed along its seam, so its name needs no number.
     let walls: Vec<_> = names.iter().filter(|name| name.contains(":wall:")).collect();
-    assert_eq!(walls.len(), 4, "{names:?}");
-    for side in ["left", "right"] {
-        assert_eq!(walls.iter().filter(|name| name.contains(&format!(":wall:c1:{side}#"))).count(), 2, "{walls:?}");
+    assert_eq!(walls.len(), 2, "{names:?}");
+    // The wall is 2 thick about the circle (radius 9 to 11). The circle runs counter-clockwise,
+    // so its left is the inner side; each name is found again at a point on its own wall.
+    for (side, radius) in [("left", 9.0), ("right", 11.0)] {
+        let name = format!("F2:wall:c1:{side}");
+        assert!(walls.contains(&&name), "{walls:?}");
+        let at = solidcraft_geom::Vec3::new(0.0, radius, 2.5);
+        assert_eq!(solidcraft_doc::naming::face_names_at(&s.model.state(), &[at]), vec![name.clone()]);
     }
 }

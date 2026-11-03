@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5126"
+ ],
+ "what": "a join of the 20 level-2 Menger sponges (45 mm, 5 mm cubes) of a level-3 sponge, touching face to face with the same hole pattern on both faces of each contact: truck failed depending on the tools' order ('coincident faces were left in place', 'shell not oriented and closed')",
+ "source": "analytic",
+ "method": "each level-2 sponge is a 45 mm cube less its 3 central 15 mm tunnels and the 24 5 mm tunnels of its sub-cubes: 45^3 * (20/27)^2 = 50000. The 20 sponges of level 3 touch only face to face, so the join is one body of 20 * 50000 = 1000000 (= 135^3 * (20/27)^3). The tools are listed round the bottom ring first, then the rest, as in the failing session",
+ "body_count": 1,
+ "volume_mm3": 1000000.0,
+ "timeout_s": 1200
+}

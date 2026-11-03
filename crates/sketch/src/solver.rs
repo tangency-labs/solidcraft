@@ -273,9 +273,9 @@ impl State<'_> {
                 };
                 crate::curves::ellipse_polyline(self.p(*ci), self.p(*m), r)
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
                 let p = self.spline_points(pts, *periodic);
-                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic)
+                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
             }
             Some(CurveKind::Conic { a, b, apex, rho }) => crate::curves::conic_polyline(self.p(*a), self.p(*apex), self.p(*b), *rho),
             _ => Vec::new(),
@@ -308,12 +308,14 @@ impl State<'_> {
                 let y = delta.cross(u) / (a * r);
                 return (x.hypot(y) - 1.0) * a.min(r);
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return q.dist(p.first().copied().unwrap_or_default());
                 }
-                if *control {
+                if let Some(nurbs) = nurbs {
+                    nurbs.segs(&p, *degree).unwrap_or_default()
+                } else if *control {
                     let k = (*degree as usize).min(solidcraft_geom::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
                     crate::curves::bspline_beziers(&p, k).iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
                 } else {
@@ -408,10 +410,10 @@ impl State<'_> {
                 let (cc, r) = self.round(c);
                 (cc - self.p(p)) / (r * r).max(1e-24)
             }
-            CurveKind::Spline { pts, control, degree, periodic } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
                 let q = self.spline_points(pts, *periodic);
                 let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
-                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, t), at_end)
+                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
             }
             CurveKind::Conic { a, b, apex, rho } => {
                 let (pa, pb, px) = (self.p(*a), self.p(*b), self.p(*apex));
@@ -502,11 +504,16 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         Horizontal { l } => {
             let (a, b) = s.line(l);
-            out.push(b.y - a.y);
+            let scale = if s.sk.curves.get(l).is_some_and(|c| c.infinite) { (b - a).len().max(1e-12) } else { 1.0 };
+            // An infinite line's defining points may be very close together. Its visible
+            // direction must remain horizontal even when their separation is below the
+            // distance tolerance, so measure direction rather than endpoint distance.
+            out.push((b.y - a.y) / scale);
         }
         Vertical { l } => {
             let (a, b) = s.line(l);
-            out.push(b.x - a.x);
+            let scale = if s.sk.curves.get(l).is_some_and(|c| c.infinite) { (b - a).len().max(1e-12) } else { 1.0 };
+            out.push((b.x - a.x) / scale);
         }
         HorizontalPoints { p, q } => out.push(s.p(q).y - s.p(p).y),
         VerticalPoints { p, q } => out.push(s.p(q).x - s.p(p).x),
@@ -1048,7 +1055,7 @@ fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f6
         for &v in vars {
             let Some(x0) = x.get(v).copied() else { continue };
             let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
-            let h = 1e-7 * x0.abs().max(1.0);
+            let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
             }
@@ -1100,7 +1107,7 @@ fn local_system(
             let Some(c) = col.get(v).copied().filter(|c| *c < ncols) else { continue };
             let Some(x0) = x.get(v).copied() else { continue };
             let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
-            let h = 1e-7 * x0.abs().max(1.0);
+            let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
             }
@@ -1122,6 +1129,32 @@ fn local_system(
         row += rows;
     }
     (r, j, owner)
+}
+
+/// An infinite line's direction derivative must be sampled within its defining span. The
+/// usual coordinate-sized step can cross its other end and measure a half-turn instead
+/// of the local slope when the saved defining points are very close (#11001).
+fn direction_difference_step(s: &State<'_>, block: &Block<'_>, variable: usize, value: f64) -> f64 {
+    let mut step = 1e-7 * value.abs().max(1.0);
+    let Block::User(_, kind) = block else { return step };
+    let lines = match **kind {
+        ConstraintKind::Angle { a, b, .. } => [Some(a), Some(b)],
+        ConstraintKind::LineAngle { l, .. } => [Some(l), None],
+        ConstraintKind::Horizontal { l } | ConstraintKind::Vertical { l } if s.sk.curves.get(l).is_some_and(|c| c.infinite) => [Some(l), None],
+        _ => return step,
+    };
+    for l in lines.into_iter().flatten() {
+        let Some(CurveKind::Line { a, b }) = s.sk.curves.get(l).filter(|c| c.infinite).map(|c| &c.kind) else { continue };
+        let depends = [a, b].into_iter().any(|&p| s.lay.pvar.get(p).copied().flatten().is_some_and(|v| variable == v || variable == v + 1));
+        if depends {
+            let length = (s.p(*b) - s.p(*a)).len();
+            if length > 0.0 {
+                step = step.min(length * 1e-3);
+            }
+        }
+    }
+    // Keep both samples representable when the sketch is far from its origin.
+    step.max(value.abs() * f64::EPSILON * 8.0)
 }
 
 fn max_abs(v: &[f64]) -> f64 {
@@ -1565,7 +1598,7 @@ fn accumulate(sk: &Sketch, lay: &Layout, b: &Block, unit: &[usize], x: &mut [f64
     let (mut plus, mut minus) = (Vec::new(), Vec::new());
     for (&v, dk) in unit.iter().zip(&mut d) {
         let Some(x0) = x.get(v).copied() else { continue };
-        let h = 1e-7 * x0.abs().max(1.0);
+        let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
         for (at, out) in [(x0 + h, &mut plus), (x0 - h, &mut minus)] {
             if let Some(xv) = x.get_mut(v) {
                 *xv = at;
@@ -3084,7 +3117,7 @@ fn solve_inner(
             }
         }
         for curve in &sk.curves {
-            if let CurveKind::Spline { pts, control, degree, periodic: true } = &curve.kind {
+            if let CurveKind::Spline { pts, control, degree, periodic: true, .. } = &curve.kind {
                 let points = pts.iter().map(|i| positions.get(*i).copied()).collect::<Option<Vec<_>>>();
                 if *control || *degree != 3 || points.as_ref().is_none_or(|p| crate::periodic::validate_periodic_points(p).is_err()) {
                     valid = false;

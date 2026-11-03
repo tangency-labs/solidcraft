@@ -79,7 +79,10 @@ launch and writes it, as one line of hex, to a file only the user can read:
 | Windows | `%LOCALAPPDATA%\SolidCraft\control\PORT.token` |
 
 On Unix the folder is `0700` and the file `0600`; on Windows the file's inherited permissions are
-replaced by a single entry for the user. `SOLIDCRAFT_CONTROL_DIR` moves the folder. The file is
+replaced by a single entry for the user. `SOLIDCRAFT_CONTROL_DIR` moves the folder. If Windows
+doesn't finish restricting the file within five seconds, the default folder (private to the user)
+keeps it, but a custom folder gets no token file, and clients then need
+`SOLIDCRAFT_CONTROL_TOKEN`. The file is
 removed when the app exits, unless another launch has written its own token there since, and the
 next launch writes a new token. The token file's path is
 printed to stderr at start-up. Beside it, `<port>.pid` holds the app's process id (and, on Linux,
@@ -96,7 +99,9 @@ The first request on a connection must carry the token as a top-level `"token"` 
 (`{"id": 1, "method": "ui.inspect", "params": {}, "token": "…"}`); later requests on the same
 connection may leave it out. A first line without the right token is answered with
 `{"ok": false, "error": "unauthorized: …"}` and the connection is closed, without running
-anything. Tokens are compared in constant time.
+anything. Tokens are compared in constant time. A connection that hasn't sent that first request
+within five seconds is closed without a reply, and blank lines don't extend the time. So connect
+when you have something to send; once authenticated, a connection may stay idle.
 
 `solidcraft-cli mcp --connect 127.0.0.1:PORT` reads the token file for that port by itself
 (`--token T` or `SOLIDCRAFT_CONTROL_TOKEN` give one explicitly). For a test harness, or a
@@ -463,13 +468,14 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
+- `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
-- `extrude_auto_to_object` (default false: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object; it applies to Extrude dialogs opened afterwards)
+- `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
 - `hidden_toolbar_tabs` (default `[]`: all existing tabs, including Sheet Metal and Weldments, stay visible; lists tabs to hide, each once, e.g. `["SURFACE", "SHEET METAL"]`; hidden tabs stay hidden regardless of the design's features; [ribbon layout](ribbon-layout.md))

@@ -236,7 +236,7 @@ fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(
             (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap().dist(sk.point(sk.resolve_point("l1.end").unwrap()).unwrap()) - 30.).abs()
@@ -310,7 +310,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         place(&mut h, &picks, [10., 5.]);
         type_value(&mut h, "30 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.point(sk.resolve_point("l1.start").unwrap()).unwrap().len() < 1e-8, "fixed origin remains fixed");
         assert!((sk.point(sk.resolve_point("l1.end").unwrap()).unwrap().x - 30.).abs() < 1e-6);
@@ -334,7 +334,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         place(&mut h, &picks, at);
         type_value(&mut h, "12 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         // The sketch's first dimension scales it (#1365): 20 × 10 becomes 24 × 12.
         assert!((solved.profiles[0].area - 288.).abs() < 1e-5, "the first dimension scales the rectangle: {}", solved.profiles[0].area);
@@ -366,7 +366,7 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
     h.app.run("occurrence.move", json!({"occurrence":second,"translate":[25,32,40],"axis":[1,0,0],"angle":"35 deg","capture":false})).unwrap();
     h.call("ui.view", json!({"view":"top"}));
     h.app.cam.distance = 90.;
-    let plane = h.app.session.world_state().sketch(sid).unwrap().plane;
+    let plane = h.app.session.world_state().unwrap().sketch(sid).unwrap().plane;
     h.app.cam.target = plane.to_world(Vec2::new(10., 0.));
     h.settle();
     let baseline = h.app.session.doc.to_json();
@@ -447,7 +447,7 @@ fn dimension_to_fillet_virtual_sharp_keeps_the_arc_and_fixed_origin() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
     let sk = &solved.sketch;
@@ -495,23 +495,23 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
     h.settle();
     type_value(&mut h, "1.3456");
     h.step(&json!({"key":"Enter"})).unwrap();
-    let edited = h.app.session.world_state();
+    let edited = h.app.session.world_state().unwrap();
     let edited = &edited.sketch(sketch).unwrap().sketch;
     assert!(edited.constraints.iter().any(|c| c.kind.value().is_some_and(|v| (v - 1.3456 * 25.4).abs() < 1e-6)));
     h.app.run("edit.undo", json!({})).unwrap();
-    let before = h.app.session.world_state().sketch(sketch).unwrap().sketch.clone();
+    let before = h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch.clone();
     let c = before.constraints.iter().find(|c| c.param.is_some()).unwrap();
     let p = h.app.session.doc.param(c.param.as_deref().unwrap()).unwrap();
     assert_eq!(crate::dim_view::label(&c.kind, Some(&p.expr), false, "in", 2), "1.2345 in");
     assert!((c.kind.value().unwrap() - 31.3563).abs() < 1e-6);
     h.app.run("document.units", json!({"units":"mm"})).unwrap();
-    assert_eq!(h.app.session.world_state().sketch(sketch).unwrap().sketch, before);
+    assert_eq!(h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch, before);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.units, "in");
     let doc = solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap();
     let reopened = solidcraft_engine::Session::new(doc);
     assert_eq!(reopened.doc.units, "in");
-    assert_eq!(reopened.world_state().sketch(sketch).unwrap().sketch, before);
+    assert_eq!(reopened.world_state().unwrap().sketch(sketch).unwrap().sketch, before);
     crate::dim_view::cancel();
 }
 
@@ -529,7 +529,7 @@ fn placing_a_two_point_dimension_picks_horizontal_vertical_or_aligned() {
         type_value(&mut h, "10 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
         let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
@@ -564,7 +564,7 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert_eq!(h.app.session.doc.params.len(), params, "a driven dimension adds no parameter");
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
     let dims: Vec<_> = solved.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).collect();
@@ -588,7 +588,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     h.settle();
     let sketch = h.app.session.active_sketch.unwrap();
     let dim = |h: &Harness| {
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sketch).unwrap().sketch;
         sk.constraints
             .iter()
@@ -641,7 +641,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     assert!(!driving.driven && driving.param.as_deref() == Some(name.as_str()), "{driving:?}");
     let value = driving.kind.value().unwrap();
     assert!((value - 30.0).abs() < 1e-6 && (measured - 30.0).abs() > 1.0, "{measured} → {value}");
-    assert!(h.app.session.world_state().sketch(sketch).unwrap().report.ok());
+    assert!(crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().report.ok());
 
     // One undo step puts the driven dimension back.
     assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -687,7 +687,7 @@ fn keys(h: &mut Harness, text: &str) {
 }
 
 fn solved(h: &Harness) -> solidcraft_engine::sketch::Sketch {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.clone()
 }
 
@@ -959,7 +959,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert!(solved.report.ok());
         let sk = &solved.sketch;
@@ -985,7 +985,7 @@ fn midpoint_face_sketch() -> Harness {
     h.app.finish_sketch();
     h.app.run("solid.extrude", json!({"distance":10})).unwrap();
     h.app.run("sketch.create", json!({"plane":{"face":[0,5,10]}})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let plane = ss.plane;
     assert!(ss.sketch.curves.iter().any(|c| c.link.is_some()));
@@ -1063,7 +1063,7 @@ fn midpoint_pairs_dimension_sketch_and_projected_model_edges() {
         if crate::dim_view::editing() {
             h.step(&json!({"key":"Enter"})).unwrap();
         }
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let c = sk.constraints.iter().rev().find(|c| c.kind.is_dimension()).expect("two MID picks commit a distance");
         let ConstraintKind::Distance { p, q, .. } = c.kind else { panic!("expected midpoint distance for {projected:?}: {:?}", c.kind) };
@@ -1118,7 +1118,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
             }
             let mut h = midpoint_face_sketch();
             if held_y {
-                let state = h.app.session.world_state();
+                let state = crate::open_meshing::session_world(&h.app.session);
                 let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
                 let short = ss.sketch.curves.iter().find(|c| c.link.is_none()).unwrap().id.clone();
                 let bottom = ss
@@ -1140,7 +1140,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 h.settle();
             }
             if reused {
-                let state = h.app.session.world_state();
+                let state = crate::open_meshing::session_world(&h.app.session);
                 let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
                 let mid_ref = |point: [f64; 2]| {
                     ss.sketch
@@ -1191,7 +1191,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
             if crate::dim_view::editing() {
                 h.step(&json!({"key":"Enter"})).unwrap();
             }
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             let c = sk.constraints.iter().rev().find(|c| c.kind.is_dimension()).unwrap();
             assert!(if horizontal { matches!(c.kind, ConstraintKind::DistanceX { .. }) } else { matches!(c.kind, ConstraintKind::DistanceY { .. }) });
@@ -1239,6 +1239,7 @@ fn model_text(h: &Harness, param: &str) -> [f32; 2] {
         .app
         .session
         .world_state()
+        .unwrap()
         .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
         .unwrap()
         .sketch
@@ -1250,7 +1251,7 @@ fn model_text(h: &Harness, param: &str) -> [f32; 2] {
 
 /// The extruded plate's width and depth (x, y), rounded to 0.001 mm.
 fn plate_max(h: &Harness) -> [f64; 2] {
-    let b = h.app.session.world_state().body("Plate").unwrap().mesh().bounds();
+    let b = h.app.session.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     [((b.max.x - b.min.x) * 1000.0).round() / 1000.0, ((b.max.y - b.min.y) * 1000.0).round() / 1000.0]
 }
 
@@ -1316,7 +1317,7 @@ fn a_driven_shown_dimension_is_read_only() {
     h.app.run("sketch.dimension", json!({"entities":["l3"],"driven":true,"text_at":[10,14]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.settle();
-    let id = h.app.session.world_state().sketch(sketch).unwrap().sketch.constraints.iter().find(|c| c.driven).unwrap().id.clone();
+    let id = h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch.constraints.iter().find(|c| c.driven).unwrap().id.clone();
     let (_, _, p) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).unwrap();
     let doc = h.app.session.doc.to_json();
     h.step(&json!({"click":[p.x, p.y],"double":true})).unwrap();
@@ -1325,15 +1326,17 @@ fn a_driven_shown_dimension_is_read_only() {
     assert_eq!(h.app.session.doc.to_json(), doc);
 }
 
-/// The value applies like any other change: the fillet it breaks reports its error on the
-/// timeline, and Undo brings back the value and the fillet.
+/// The value applies like any other change: the shell it breaks reports its error on the
+/// timeline, and Undo brings back the value and the shell. The plate's 10 width taken to 3 leaves
+/// no room inside two 2 thick walls. (A round wider than its face no longer breaks: a convex
+/// round runs over the face's far edge, cut as if the face went on.)
 #[test]
 fn a_shown_dimension_that_breaks_a_later_feature_reports_it_and_undoes() {
     let (mut h, _) = shown_dimensions();
-    h.app.run("solid.fillet", json!({"edges":[[10,10,5]],"radius":4,"name":"Round"})).unwrap();
+    h.app.run("solid.shell", json!({"faces":[[10,1,5]],"thickness":2,"name":"Hollow"})).unwrap();
     h.settle();
-    let round = h.app.session.doc.features.iter().find(|f| f.name == "Round").unwrap().id;
-    let failed = |h: &Harness| h.app.session.model.result(round).is_some_and(|r| r.error.is_some());
+    let hollow = h.app.session.doc.features.iter().find(|f| f.name == "Hollow").unwrap().id;
+    let failed = |h: &Harness| h.app.session.model.result(hollow).is_some_and(|r| r.error.is_some());
     assert!(!failed(&h));
     let before = h.app.session.doc.to_json();
     let at = model_text(&h, "d2");
@@ -1342,12 +1345,12 @@ fn a_shown_dimension_that_breaks_a_later_feature_reports_it_and_undoes() {
     h.step(&json!({"key":"Enter"})).unwrap();
     h.settle();
     assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "3");
-    assert!(failed(&h), "the fillet no longer fits and says so");
+    assert!(failed(&h), "the shell no longer has room and says so");
     assert_eq!(h.app.session.active_sketch, None);
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert!(!failed(&h), "undo brings the fillet back");
+    assert!(!failed(&h), "undo brings the shell back");
 }
 
 /// Editing an existing dimension to `name = value` names its own parameter (#4071): `d1`

@@ -11,7 +11,7 @@ fn moved_block(h: &mut Harness) {
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("solid.extrude", json!({"distance": 5})).unwrap();
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("solid.move", json!({"bodies": [body], "translate": [500, 0, 0]})).unwrap();
     h.app.preferences.look_at_anim = false;
     h.settle();
@@ -124,7 +124,7 @@ fn middle_double_click_preference_fit_or_off() {
     assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (yaw, pitch), "Fit keeps the orientation");
     assert!(h.app.cam.target.dist(Vec3::new(505.0, 5.0, 2.5)) < 5.0, "{:?}", h.app.cam.target);
     // Fit frames everything shown, not the selection.
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
     let fitted = h.app.cam;
     h.app.cam.pan(60.0, 0.0, 500.0);

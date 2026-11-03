@@ -251,7 +251,7 @@ fn counterbore_floors_and_their_pattern_copies_take_a_sketch() {
 fn flat_faces(s: &Session) -> Vec<(usize, solidcraft_geom::Vec3)> {
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     (0..body.face_count())
         .filter(|index| body.planar_face(*index).is_some())
         .filter_map(|index| {

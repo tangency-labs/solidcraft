@@ -16,7 +16,7 @@ use crate::bspline::{Dir, HPoint, NurbsSurface, Side, SplineError, SplineResult,
 /// Most loop points a fill takes.
 pub const MAX_LOOP_POINTS: usize = 8192;
 /// Most spans of the height field in each direction.
-pub const MAX_FILL_SPANS: usize = 32;
+pub const MAX_FILL_SPANS: usize = 64;
 /// How full a patch's middle may be made (`crown`): 0 the least-bending fill, positive fuller,
 /// negative flatter, in fractions of the loop's size. Outside this range the value is refused.
 pub const MIN_CROWN: f64 = -0.9;
@@ -89,7 +89,7 @@ pub struct LoopFill {
 ///   is free to turn at the rim (it is not the surface that made the rim). It does not depend
 ///   on the grid's directions. `λ = 10⁻⁷ ·` (fitted points) `/` (control points): just enough
 ///   to fix the inside, small enough not to pull the surface off the loop.
-/// - Grids of 4, 8, 16, 32 spans across the box's longer side are tried, with as many across
+/// - Grids of 4, 8, 16, 32, 64 spans across the box's longer side are tried, with as many across
 ///   the shorter side as keep the cells about square; a grid whose cells are under twice the
 ///   fitted points' largest step in a direction (cells between points would be left to the
 ///   energy alone) waits for denser sampling. The first grid within `tol` of every sampled
@@ -166,10 +166,25 @@ enum Fit {
     Exhausted(f64),
 }
 
-/// One round of [`fill_loop`]: fit the points `fit`, check every point of `all` (the loop in
-/// order, `fit` among them).
-fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fit> {
+/// The plane a loop's height field stands on (see [`fill_loop`]): through the fitted points'
+/// centroid `o`, normal `n` by Newell's method turned so that its largest component is positive,
+/// first axis `x` towards the fitted point farthest from the centroid in the plane, `y = n × x`;
+/// and whether the points run counter-clockwise about `n`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LoopFrame {
+    pub(crate) o: Vec3,
+    pub(crate) x: Vec3,
+    pub(crate) y: Vec3,
+    pub(crate) n: Vec3,
+    pub(crate) counter_clockwise: bool,
+}
+
+/// The [`LoopFrame`] of the loop of points `fit`.
+pub(crate) fn loop_frame(fit: &[Vec3]) -> SplineResult<LoopFrame> {
     let m = fit.len();
+    if m < 3 {
+        return invalid("a loop needs three points");
+    }
     let o = fit.iter().fold(Vec3::ZERO, |a, p| a + *p) / m as f64;
     let at = |k: usize| fit.get(k % m).copied().unwrap_or(Vec3::ZERO);
     let area = (0..m).fold(Vec3::ZERO, |a, k| a + (at(k) - o).cross(at(k + 1) - o));
@@ -206,6 +221,14 @@ fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fi
     let far = far.map(flat).unwrap_or(Vec3::ZERO);
     let x = far.normalized().ok_or_else(|| SplineError::Invalid("the loop has no extent in its plane".into()))?;
     let y = n.cross(x);
+    Ok(LoopFrame { o, x, y, n, counter_clockwise })
+}
+
+/// One round of [`fill_loop`]: fit the points `fit`, check every point of `all` (the loop in
+/// order, `fit` among them).
+fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fit> {
+    let m = fit.len();
+    let LoopFrame { o, x, y, n, counter_clockwise } = loop_frame(fit)?;
     let project = |pts: &[Vec3]| -> (Vec<[f64; 2]>, Vec<f64>) {
         (pts.iter().map(|p| [(*p - o).dot(x), (*p - o).dot(y)]).collect(), pts.iter().map(|p| (*p - o).dot(n)).collect())
     };
@@ -284,8 +307,11 @@ fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fi
 /// is. A control point whose support rectangle keeps clear of the loop takes the bump's blossom
 /// coefficients, so the surface between the perturbed points is the bubble exactly and the
 /// surface over the loop is not moved at all (those points' basis functions are zero all along
-/// it). A fitted net is often too coarse to hold one; it is then refined by knot insertion, which
-/// leaves the surface itself as it is, until it does. Returns the crowned surface, how many
+/// it). A fitted net is often too coarse for that; it is then refined by knot insertion, which
+/// leaves the surface itself as it is, until every point whose basis function is not zero at the
+/// box's middle takes the bump (where the middle is inside the loop), so the middle rises by the
+/// bubble's full `crown · size` there, as documented, not by the share of it a coarse net's few
+/// clear points carry. Returns the crowned surface, how many
 /// control points took the bump, and the farthest the bump moved the surface at a sampled loop
 /// point (0).
 fn crown_fill(surface: NurbsSurface, uv: &[[f64; 2]], crown: f64, normal: Vec3) -> SplineResult<(NurbsSurface, usize, f64)> {
@@ -314,7 +340,7 @@ pub(crate) fn crown_fill_along(
     let gap = loop_gap(uv);
     let mut base = surface;
     loop {
-        if let Some((crowned, points)) = crown_net(&base, uv, gap, crown, along)? {
+        if let Some((crowned, points)) = crown_net(&base, uv, gap, crown, along)?.filter(|c| c.2).map(|(c, n, _)| (c, n)) {
             let mut drift = 0.0f64;
             for q in uv {
                 if let (Ok(a), Ok(b)) = (base.eval(q[0], q[1]), crowned.eval(q[0], q[1])) {
@@ -342,14 +368,15 @@ pub(crate) fn crown_fill_along(
 /// The crown's bump in the net `base`: a control point whose support rectangle keeps clear of the
 /// loop takes `crown · size · B(ξ, η)`, `B` the bubble's blossom at the point's knots (so the
 /// surface between the perturbed points is exactly the bubble, not a fit of it) and `size` the
-/// box's diagonal. `None` when the net has no such point.
+/// box's diagonal. `None` when the net has no such point; with it, whether every point
+/// supporting the box's middle took the bump (or the middle is outside the loop).
 fn crown_net(
     base: &NurbsSurface,
     uv: &[[f64; 2]],
     gap: [f64; 2],
     crown: f64,
     along: &dyn Fn([f64; 2]) -> Option<Vec3>,
-) -> SplineResult<Option<(NurbsSurface, usize)>> {
+) -> SplineResult<Option<(NurbsSurface, usize, bool)>> {
     let [cu, cv] = base.count();
     let degree = base.degree();
     let knots = base.knots();
@@ -368,10 +395,16 @@ fn crown_net(
     let (Some(knots_u), Some(knots_v)) = (knots.first(), knots.get(1)) else { return invalid("the surface has no knot vectors") };
     let mut ctrl = base.homogeneous().to_vec();
     let mut points = 0usize;
+    let middle = [0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1])];
+    // The points whose basis is not zero at the middle, and those of them that took the bump.
+    let (mut at_middle, mut raised_middle) = (0usize, 0usize);
+    let holds = |span: [f64; 2], x: f64| span[0] < x && x < span[1];
     for j in 0..cv {
         let Some((v_span, v_knots)) = support(knots_v, degree[1], j) else { continue };
         for i in 0..cu {
             let Some((u_span, u_knots)) = support(knots_u, degree[0], i) else { continue };
+            let supports = holds(u_span, middle[0]) && holds(v_span, middle[1]);
+            at_middle += usize::from(supports);
             if !clear_of_loop(u_span, v_span, uv, gap) {
                 continue;
             }
@@ -383,12 +416,14 @@ fn crown_net(
             let Some(p) = h.project() else { continue };
             *slot = HPoint::weighted(p + normal * bump, h.w);
             points += 1;
+            raised_middle += usize::from(supports);
         }
     }
     if points == 0 {
         return Ok(None);
     }
-    Ok(Some((NurbsSurface::from_homogeneous(degree, knots.clone(), ctrl)?, points)))
+    let middle_held = raised_middle == at_middle || !inside_loop(middle, uv);
+    Ok(Some((NurbsSurface::from_homogeneous(degree, knots.clone(), ctrl)?, points, middle_held)))
 }
 
 /// The same surface with a knot inserted in the middle of every span of direction `d` (0 = u):
@@ -495,7 +530,7 @@ fn segment_meets_rect(p: [f64; 2], q: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> b
 }
 
 /// Refuse a loop that does not bound a height field over its plane (see [`fill_loop`]).
-fn check_projectable(points: &[Vec3], uv: &[[f64; 2]]) -> SplineResult<()> {
+pub(crate) fn check_projectable(points: &[Vec3], uv: &[[f64; 2]]) -> SplineResult<()> {
     let m = uv.len();
     let q = |k: usize| uv.get(k % m).copied().unwrap_or([0.0; 2]);
     let p = |k: usize| points.get(k % m).copied().unwrap_or(Vec3::ZERO);
@@ -707,7 +742,7 @@ impl Grid {
 
     /// The surface of the net `heights` over the plane `o`, `x`, `y`, `n`: control point `(i, j)`
     /// at the knot averages `(ξᵢ, ηⱼ)` in the plane, `heights[j·count[0] + i]` along `n`.
-    fn surface(&self, heights: &[f64], o: Vec3, x: Vec3, y: Vec3, n: Vec3) -> SplineResult<NurbsSurface> {
+    pub(crate) fn surface(&self, heights: &[f64], o: Vec3, x: Vec3, y: Vec3, n: Vec3) -> SplineResult<NurbsSurface> {
         let [cu, cv] = self.count;
         let mut ctrl = Vec::with_capacity(cu * cv);
         for j in 0..cv {
@@ -755,7 +790,7 @@ impl Band {
     }
     /// Solve `A·x = b` by banded Cholesky factorisation `A = Uᵀ·U`; an error when `A` is not
     /// positive definite.
-    fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
+    pub(crate) fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
         self.factor()?.substitute(b)
     }
 

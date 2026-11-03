@@ -78,7 +78,7 @@ fn sketch_dialog_patterns_update_counts_and_place_an_unsnapped_centre() {
     h.frames(3);
     preview(&mut h, 7);
     step(&mut h, json!({"click":{"handle":"dialog:OK"}}));
-    assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), 10);
+    assert_eq!(h.app.session.world_state().unwrap().sketch(1).unwrap().sketch.curves.len(), 10);
     step(&mut h, json!({"start":"sketch.pattern.circular"}));
     pick(&mut h, [-22.5, 10.0], false);
     step(&mut h, json!({"call":"ui.dialogInput","params":{"index":1}}));
@@ -90,7 +90,7 @@ fn sketch_dialog_patterns_update_counts_and_place_an_unsnapped_centre() {
     h.frames(3);
     preview(&mut h, 3);
     step(&mut h, json!({"click":{"handle":"dialog:OK"}}));
-    assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), 13);
+    assert_eq!(h.app.session.world_state().unwrap().sketch(1).unwrap().sketch.curves.len(), 13);
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn sketch_dialog_offset_precise_distance_flip_and_editable_dimension() {
     step(&mut h, json!({"click":{"handle":"dialog:OK"}}));
     let param = h.app.session.doc.params.iter().find(|p| p.name.starts_with('d')).unwrap().name.clone();
     step(&mut h, json!({"call":"engine.execute","params":{"command":"parameters.change","params":{"name":param,"expression":"3 mm"}}}));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(1).unwrap().sketch;
     assert_eq!(sk.offsets[0].distance, -3.0);
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::OffsetDistance { .. })));
@@ -184,7 +184,7 @@ fn sketch_modify_inputs_refuse_other_sketches_without_changing_hole_points() {
 #[test]
 fn sketch_preselected_points_toggle_once_and_empty_shift_box_keeps_reference() {
     let mut h = fixture();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let point = state.sketch(1).unwrap().sketch.points[1].id.clone();
     h.app.session.selection = vec![Sel::SketchPoint { id: point.clone() }];
     h.app.start("sketch.mirror");
@@ -225,7 +225,7 @@ fn sketch_modify_previews_use_the_active_occurrences_world_placement() {
         let built = crate::preview::compute(&h.app.session, &[(command.into(), params.clone())], colors).unwrap();
         let mut scratch = h.app.session.scratch();
         scratch.execute(command, &params).unwrap();
-        let state = scratch.world_state();
+        let state = scratch.world_state().unwrap();
         let expected = state.sketch(sid).unwrap().plane;
         assert!(expected.origin.len() > 50.0, "the fixture must exercise a moved occurrence");
         assert_eq!(built.sketches.len(), 1);
@@ -238,7 +238,7 @@ fn sketch_modify_previews_use_the_active_occurrences_world_placement() {
 #[test]
 fn sketch_corner_preselected_point_uses_the_same_identity_as_corner_picking() {
     let mut h = fixture();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(1).unwrap().sketch;
     let index = sk.resolve_point("l1.end").unwrap();
     let point = sk.points[index].id.clone();
@@ -262,7 +262,7 @@ fn sketch_modify_keeps_custom_point_ids_that_contain_colons() {
     for (command, params) in commands {
         h.app.run(&command, params).unwrap();
     }
-    assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), 8);
+    assert_eq!(h.app.session.world_state().unwrap().sketch(1).unwrap().sketch.curves.len(), 8);
 }
 
 fn tracking_fixture() -> Harness {
@@ -404,7 +404,7 @@ fn two_recent_midpoints_snap_where_their_guides_meet() {
     step(&mut h, json!({"click":{"sketch":[0.4,3.3]}}));
     let placed = h.app.tool.as_ref().unwrap().pts[0].0;
     assert!(placed.dist(cross) < 1e-6, "{placed:?}");
-    let curves = h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
+    let curves = crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
     assert_eq!(curves, 5, "the snap adds no construction geometry");
     h.call("ui.prefs", json!({"sketch_tracking_guides":false}));
     h.frames(2);
@@ -484,7 +484,7 @@ fn lining_up_fixture(points: &[(&str, Value)]) -> Harness {
 /// constraints tie it to.
 fn point_and_alignments(h: &Harness, at: [f64; 2]) -> Option<(String, Vec<(&'static str, String)>)> {
     use solidcraft_engine::sketch::ConstraintKind::{HorizontalPoints, VerticalPoints};
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(h.app.session.active_sketch?)?.sketch;
     let at = solidcraft_engine::geom::Vec2::new(at[0], at[1]);
     let i = sk.points.iter().position(|p| p.pos.dist(at) < 1e-9)?;
@@ -562,7 +562,7 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
     step(&mut h, json!({"key":"Escape"}));
     let (_, tied) = point_and_alignments(&h, [20.37, 0.0]).expect("the end is level with the start and plumb with the point");
     assert_eq!(tied, [("Vertical", above)]);
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert!(
         sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Horizontal { .. })),

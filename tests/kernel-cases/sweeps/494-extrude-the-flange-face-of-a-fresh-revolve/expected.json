@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#726",
+  "tangency-labs/solidcraft#494",
+  "tangency-labs/solidcraft#2114"
+ ],
+ "what": "the flange top annulus of a freshly revolved hub (z = 6, r 18..30) picked by a point and extruded 5 mm (the pick found a third of the face: \"the selected planar face no longer exists\")",
+ "source": "analytic",
+ "method": "hub = revolve of (8,0) (30,0) (30,6) (18,6) (18,22) (8,22) about Z: V = pi [(30^2 - 8^2) 6 + (18^2 - 8^2) 16] = 28826.6. Extruding the whole annulus z = 6, r 18..30 outward (upward) 5 mm adds pi (30^2 - 18^2) 5 = 9047.8 (the new ring sits on the flange and touches the hub wall r = 18).",
+ "body_count": 1,
+ "volume_mm3": 37875.04103167855
+}

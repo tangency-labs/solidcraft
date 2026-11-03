@@ -100,10 +100,10 @@ fn offset_guard_live_child_follows_radius_then_retirement_is_honest() {
         }
         Ok(_) => {
             assert!(s.model.results.iter().any(|r| r.error.is_some()), "retired parent must not keep a stale successful child");
-            assert!(s.world_state().body("Child").is_none());
+            assert!(s.world_state().unwrap().body("Child").is_none());
             let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
             assert!(reopened.model.results.iter().any(|r| r.error.is_some()));
-            assert!(reopened.world_state().body("Child").is_none());
+            assert!(reopened.world_state().unwrap().body("Child").is_none());
         }
     }
 }
@@ -174,7 +174,7 @@ fn offset_guard_complete_delete_keeps_dangling_profile_loadable_without_circle_r
     let check = |s: &Session| {
         assert!(solved(s, sketch).curve_index("Unrelated").is_some());
         assert!(s.model.results.iter().find(|r| r.id == s.doc.find_feature("OffsetBody").unwrap().id).unwrap().error.is_some());
-        assert!(s.world_state().body("Selected").is_none(), "dangling selection must never adopt the unrelated circle");
+        assert!(s.world_state().unwrap().body("Selected").is_none(), "dangling selection must never adopt the unrelated circle");
     };
     check(&s);
     let reopened = Session::new(Document::from_json(&saved).unwrap());

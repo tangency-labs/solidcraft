@@ -20,13 +20,13 @@ use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History
 const SAMPLES: usize = 24;
 
 /// A face's triangles with their unit normals, and its box.
-struct FaceTris {
-    tris: Vec<([Vec3; 3], Vec3)>,
-    bounds: Aabb3,
-    area: f64,
+pub(crate) struct FaceTris {
+    pub(crate) tris: Vec<([Vec3; 3], Vec3)>,
+    pub(crate) bounds: Aabb3,
+    pub(crate) area: f64,
 }
 
-fn face_tris(m: &Mesh) -> Vec<FaceTris> {
+pub(crate) fn face_tris(m: &Mesh) -> Vec<FaceTris> {
     let n = m.tri_face.iter().copied().max().map(|x| x as usize + 1).unwrap_or(0);
     let mut out: Vec<FaceTris> = (0..n).map(|_| FaceTris { tris: Vec::new(), bounds: Aabb3::EMPTY, area: 0.0 }).collect();
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -40,7 +40,7 @@ fn face_tris(m: &Mesh) -> Vec<FaceTris> {
     out
 }
 
-fn closest_on_tri(p: Vec3, [a, b, c]: [Vec3; 3]) -> Vec3 {
+pub(crate) fn closest_on_tri(p: Vec3, [a, b, c]: [Vec3; 3]) -> Vec3 {
     let (ab, ac, ap) = (b - a, c - a, p - a);
     let (d1, d2) = (ab.dot(ap), ac.dot(ap));
     if d1 <= 0.0 && d2 <= 0.0 {
@@ -96,11 +96,11 @@ pub fn trace(result: &Body, inputs: &[&Body]) -> Result<History> {
     let size = inputs.iter().map(|b| b.size()).fold(result.size(), f64::max).max(1e-9);
     let mesh_tol = size * 2e-4;
     let tol = mesh_tol * 2.0;
-    let rm = result.tessellate(mesh_tol)?;
+    let rm = result.mesh(&crate::MeshTolerance::chord(mesh_tol))?;
     let rfaces = face_tris(&rm);
     let mut imeshes = Vec::with_capacity(inputs.len());
     for b in inputs {
-        imeshes.push(b.tessellate(mesh_tol)?);
+        imeshes.push(b.mesh(&crate::MeshTolerance::chord(mesh_tol))?);
     }
     let ifaces: Vec<Vec<FaceTris>> = imeshes.iter().map(face_tris).collect();
     // Each result face: the input faces most of its samples lie on.
@@ -186,7 +186,7 @@ fn nearest_segment(segs: &[Seg2], pts: &[Vec2]) -> Option<usize> {
 /// caps on the start and end planes, sides by the profile segment they sweep.
 pub fn extrude_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
-    let m = tool.tessellate(size * 2e-4)?;
+    let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
     let faces = face_tris(&m);
     let n = plane.normal();
     let segs = segments(regions);
@@ -216,7 +216,7 @@ pub fn extrude_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Resul
 /// by the profile segment it turns.
 pub fn revolve_origins(tool: &Body, plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
-    let m = tool.tessellate(size * 2e-4)?;
+    let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
     let faces = face_tris(&m);
     let segs = segments(regions);
     let o = plane.to_world(axis_origin);
@@ -261,8 +261,8 @@ pub fn revolve_origins(tool: &Body, plane: &Plane, regions: &[Region2], axis_ori
 /// edge indices in `input`'s mesh order): each blend face comes from the edge it lies along.
 pub fn blend_origins(result: &Body, input: &Body, edges: &[usize], prov: &mut History) -> Result<()> {
     let size = input.size().max(1e-9);
-    let rm = result.tessellate(size * 2e-4)?;
-    let im = input.tessellate(size * 2e-4)?;
+    let rm = result.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
+    let im = input.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
     let rfaces = face_tris(&rm);
     for (fi, fp) in prov.faces.iter_mut().enumerate() {
         if fp.change != Change::Generated {
@@ -288,8 +288,8 @@ pub fn blend_origins(result: &Body, input: &Body, edges: &[usize], prov: &mut Hi
 pub fn offset_origins(result: &Body, input: &Body, thickness: f64, prov: &mut History) -> Result<()> {
     let size = input.size().max(1e-9);
     let tol = size * 4e-4;
-    let rm = result.tessellate(size * 2e-4)?;
-    let im = input.tessellate(size * 2e-4)?;
+    let rm = result.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
+    let im = input.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
     let rfaces = face_tris(&rm);
     let ifaces = face_tris(&im);
     for (fi, fp) in prov.faces.iter_mut().enumerate() {
@@ -309,10 +309,13 @@ pub fn offset_origins(result: &Body, input: &Body, thickness: f64, prov: &mut Hi
 
 /// Origins of any swept tool's faces (sweep, loft, pipe; extrude and revolve too) from where
 /// they start: the face lying in the profile's plane is the start cap, a face with an edge in
-/// that plane sweeps the profile segment under the edge, and the rest are end caps.
+/// that plane sweeps the profile segment under the edge, and the rest are end caps. That holds
+/// for a tool whose every wall runs the whole path; one swept piece by piece along its path
+/// (SMLib's sweep along lines and arcs, mitred at each corner) has walls starting further on,
+/// which only the tool's own history names ([`sweep_origins`]).
 pub fn swept_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
-    let m = tool.tessellate(size * 2e-4)?;
+    let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
     let faces = face_tris(&m);
     let segs = segments(regions);
     let flat = |p: Vec3| plane.height(p).abs() <= size * 1e-6;
@@ -339,32 +342,20 @@ pub fn swept_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<
     Ok(out)
 }
 
-/// Origins of a [`crate::sweep_path`] tool's faces. Its walls come in profile order (once for
-/// smooth walls, once per station for ruled ones) followed by the start and end caps; checked
-/// against the start cap lying in the profile's plane, else found as [`swept_origins`] does.
+/// Origins of a [`crate::sweep_path`] tool's faces: the ones the sweep recorded as it built them
+/// ([`Body::history`]: the start and end caps, each wall from the profile segment it sweeps,
+/// along every piece of the path), the first of each face's; a face the tool names no origin
+/// for (or a tool without a history) found as [`swept_origins`] does.
 pub fn sweep_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
-    let n = tool.face_count();
-    let k = segments(regions).len();
-    let size = tool.size().max(1e-9);
-    if k > 0 && n >= 2 && (n - 2).is_multiple_of(k) {
-        let m = tool.tessellate(size * 2e-4)?;
-        let faces = face_tris(&m);
-        let start_flat = faces.get(n - 2).is_some_and(|f| f.tris.iter().all(|(t, _)| t.iter().all(|p| plane.height(*p).abs() <= size * 1e-6)));
-        if start_flat {
-            return Ok((0..n)
-                .map(|i| {
-                    if i + 2 == n {
-                        FaceOrigin::Cap { end: false }
-                    } else if i + 1 == n {
-                        FaceOrigin::Cap { end: true }
-                    } else {
-                        FaceOrigin::Profile { segment: i % k }
-                    }
-                })
-                .collect());
-        }
+    let recorded: Vec<Option<FaceOrigin>> = match tool.history() {
+        Some(h) if h.faces.len() == tool.face_count() => h.faces.iter().map(|f| f.origins.first().copied()).collect(),
+        _ => vec![None; tool.face_count()],
+    };
+    if recorded.iter().all(Option::is_some) {
+        return Ok(recorded.into_iter().flatten().collect());
     }
-    swept_origins(tool, plane, regions)
+    let found = swept_origins(tool, plane, regions)?;
+    Ok(recorded.into_iter().zip(found).map(|(r, f)| r.unwrap_or(f)).collect())
 }
 
 /// Replace origins on operand `operand` (a tool made by the operation) with that tool's own
@@ -391,7 +382,7 @@ mod tests {
     use crate::{BoolOp, boolean, box_solid, cylinder};
 
     fn face_at(b: &crate::Body, p: Vec3) -> usize {
-        let m = b.tessellate(1e-3).unwrap();
+        let m = b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
         let mut best = (f64::INFINITY, 0);
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
             let q = m.tri(t).unwrap();
@@ -437,7 +428,7 @@ mod tests {
             assert_eq!(p.faces[top].origins.len(), 2);
         }
         // Edges: the plate's untouched vertical edges come from the plate's edges.
-        let m = cut.tessellate(1e-3).unwrap();
+        let m = cut.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
         let p = trace(&cut, &[&a, &pin]).unwrap();
         let corner = (0..m.edges.len()).find(|i| m.edges[*i].iter().all(|q| q.x.abs() < 1e-9 && q.y.abs() < 1e-9)).unwrap();
         assert!(matches!(p.edges[corner].origins[..], [super::EdgeOrigin::Edge { operand: 0, .. }]));
@@ -479,7 +470,7 @@ mod tests {
         assert_eq!(ro[face_at(&rt, Vec3::new(15.0, 15.0, 0.0))], FaceOrigin::Cap { end: false });
         // A fillet: the blend face comes from the edge it replaced.
         let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-        let bm = b.tessellate(1e-3).unwrap();
+        let bm = b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
         let e = (0..bm.edges.len()).find(|i| bm.edges[*i].iter().all(|q| (q.y - 30.0).abs() < 1e-9 && (q.z - 20.0).abs() < 1e-9)).unwrap();
         let f = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
         let mut p: History = trace(&f, &[&b]).unwrap();

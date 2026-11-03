@@ -37,41 +37,6 @@ pub(crate) fn winds(loops: &[Loop], d: usize, per: f64) -> bool {
     loops.iter().any(|l| drift(l, d, per).abs() > per * 0.5)
 }
 
-/// A loop through a pole of the closed direction `d` (a cone's apex or a sphere's pole on the
-/// boundary): the parameter along `d` is free there, so the step into or out of the pole may be
-/// any length. Unwrapped to the nearest copy at every step, a sector wider than half a turn, or
-/// a cone face written as its rim, the seam up to the apex and the seam back (as STEP files
-/// write a pointed end, a screw's tip), seems to wind around the surface, and the face cannot
-/// be cut along a seam it does not have. The step out of the pole is made the one that closes
-/// the loop. A loop that closes already, has no pole or passes more than one stays as it is.
-pub(crate) fn close_through_pole(s: &EvalSurface, l: &mut Loop, d: usize, per: f64) {
-    let w = drift(l, d, per);
-    let n = l.uv.len();
-    if w.abs() <= per * 0.5 || n < 3 || l.pts.len() != n {
-        return;
-    }
-    let pole: Vec<bool> = l.uv.iter().map(|q| super::uv::degenerate(s, *q, d)).collect();
-    let Some(k) = pole.iter().position(|p| *p) else { return };
-    // The node the loop leaves the pole for: the loop is turned to end there, so the step that
-    // closes it is an ordinary one, and the step from the pole takes what is left. A loop
-    // through a pole twice is left alone.
-    let Some(out) = (1..n).map(|i| (k + i) % n).find(|&i| !pole.get(i).copied().unwrap_or(true)) else { return };
-    if pole.iter().enumerate().any(|(i, p)| *p && (i + n - out) % n < (k + n - out) % n) {
-        return;
-    }
-    let start = (out + 1) % n;
-    l.uv.rotate_left(start);
-    l.pts.rotate_left(start);
-    // Unwrapped again from the new start; the last node, where the loop leaves the pole, is
-    // taken next to the first instead of next to the pole.
-    for i in 1..n {
-        let near = if i + 1 == n { l.uv.first() } else { l.uv.get(i - 1) }.map(|q| q[d]);
-        if let (Some(near), Some(q)) = (near, l.uv.get_mut(i)) {
-            q[d] = super::uv::unwrap(q[d], near, Some(per));
-        }
-    }
-}
-
 /// A point where the boundary crosses a cut line: its place along the line, its 3D point, and
 /// whether the face lies above it (towards larger parameters across the line) or below.
 #[derive(Clone, Copy, Debug)]
@@ -383,66 +348,4 @@ fn seam_nodes(s: &EvalSurface, swap: bool, x: f64, y0: f64, y1: f64, rules: &Rul
     }
     let inner = ys.get(1..ys.len() - 1)?;
     Some(inner.iter().map(|&y| (y, s.eval(uv(y)[0], uv(y)[1]).0)).collect())
-}
-
-/// Whether a face of `solid` lies on a B-spline surface that joins itself (a lofted tube).
-/// Truck meshes a face in its surface's parameters and treats only a revolved surface's
-/// rotation as periodic, so a face that runs across such a join comes out folded over itself or
-/// with a hole in it. The reference mesh of such a body is made from the display plan,
-/// which knows the join is periodic.
-pub(crate) fn closes_on_itself(solid: &crate::body::Solid) -> bool {
-    solid.face_iter().any(|f| matches!(super::surface::eval_surface(&f.surface()), Some(EvalSurface::Nurbs { closed, .. }) if closed[0] || closed[1]))
-}
-
-/// Whether a face of `solid` lies on a surface of revolution and has a boundary loop turning
-/// more than once around its axis (a helical trim). Truck's mesher cannot mesh such a face (its
-/// triangles cut across the solid), so the reference mesh is made from the display plan instead.
-pub(crate) fn turns_more_than_once(solid: &crate::body::Solid) -> bool {
-    use truck_meshalgo::prelude::*;
-    use truck_modeling as mt;
-    let tau = std::f64::consts::TAU;
-    for face in solid.face_iter() {
-        let mt::Surface::RevolutedCurve(proc) = face.surface() else { continue };
-        let rev = proc.entity();
-        let m = *proc.transform();
-        let o = crate::body::from_p3(m.transform_point(rev.origin()));
-        let a = m.transform_vector(rev.axis());
-        let Some(k) = Vec3::new(a.x, a.y, a.z).normalized() else { continue };
-        let e1 = k.cross(if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().unwrap_or(Vec3::X);
-        let e2 = k.cross(e1);
-        let angle = |p: mt::Point3| {
-            let d = crate::body::from_p3(p) - o;
-            d.dot(e2).atan2(d.dot(e1))
-        };
-        for wire in face.boundaries() {
-            let (mut total, mut lo, mut hi) = (0.0f64, 0.0f64, 0.0f64);
-            let mut prev: Option<f64> = None;
-            for e in wire.edge_iter() {
-                let c = e.oriented_curve();
-                let (t0, t1) = c.range_tuple();
-                // Samples dense enough that no step turns half way round.
-                let mut n = 16usize;
-                let steps = loop {
-                    let xs: Vec<f64> = (0..=n).map(|i| angle(c.subs(t0 + (t1 - t0) * i as f64 / n as f64))).collect();
-                    let ok = xs.windows(2).all(|w| ((w[1] - w[0] + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI).abs() < 1.0);
-                    if ok || n >= 4096 {
-                        break xs;
-                    }
-                    n *= 4;
-                };
-                for x in steps {
-                    if let Some(p) = prev {
-                        total += (x - p + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI;
-                        lo = lo.min(total);
-                        hi = hi.max(total);
-                    }
-                    prev = Some(x);
-                }
-            }
-            if hi - lo > tau * 1.01 {
-                return true;
-            }
-        }
-    }
-    false
 }

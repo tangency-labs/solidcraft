@@ -27,13 +27,14 @@ fn block_with_ball_cut() -> Body {
 
 /// The ball's rim on the back face dips to 0.04 mm above the bottom: a 0.5 mm chamfer of it
 /// would run off the back face, and what was built grew the part (by 0.65 mm³, more with other
-/// edge orders). On a convex edge a chamfer takes material away, so it is refused.
+/// edge orders). On a convex edge a chamfer takes material away, so it is refused, as too large
+/// (SMLib's NO_ROOM).
 #[test]
 fn a_chamfer_that_would_grow_the_part_on_a_convex_edge_is_refused() {
     let body = block_with_ball_cut();
     let rim = Vec3::new(3.1526309873924174, 22.5, 0.04277569594852188);
     let e = chamfer(&body, &[rim], 0.5).expect_err("refused");
-    assert!(matches!(e, KernelError::TooLarge(_)) && e.to_string().contains("convex"), "{e}");
+    assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
 }
 
 /// Curved convex edges that a chamfer does take material from still build: a hole's rim in a

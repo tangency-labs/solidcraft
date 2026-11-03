@@ -90,6 +90,7 @@ const MOVES: &[&str] = &[
 
 #[derive(Clone, Debug)]
 pub enum Asm {
+    FromBodies,
     NewComponent {
         name: String,
         activate: bool,
@@ -130,6 +131,32 @@ pub enum Asm {
 /// The snap under the cursor, remembered for the selection it was found for.
 pub type Hover = Option<(Sel, Option<SnapPt>)>;
 
+/// A search off the window thread: where it leaves its reply, and what it searched.
+#[derive(Clone, Debug)]
+pub struct Search {
+    reply: std::sync::Arc<std::sync::Mutex<Option<Result<Value, String>>>>,
+    searched: Searched,
+}
+
+/// The design and the joint (the commands OK would run for it) a search was for.
+#[derive(Clone, Debug)]
+pub struct Searched {
+    design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    joint: Vec<(String, Value)>,
+}
+
+impl Searched {
+    fn now(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Searched, String> {
+        Ok(Searched { design: std::sync::Arc::downgrade(&app.session.doc), joint: edit_commands(app, f, inputs)? })
+    }
+
+    /// Whether the design and the dialog's joint are still the ones searched.
+    fn current(&self, app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> bool {
+        self.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc))
+            && edit_commands(app, f, inputs).is_ok_and(|now| now == self.joint)
+    }
+}
+
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
@@ -149,6 +176,14 @@ pub struct JointForm {
     pub offset: [String; 3],
     /// Per joint value: limited, minimum, maximum.
     pub limits: Vec<(bool, String, String)>,
+    /// Find Limits: the search under way (`joint.find_limits`'s reply lands here).
+    pub search: Option<Search>,
+    /// What Find Limits found for each value (a line under its rows).
+    pub found: Vec<String>,
+    /// What the last search said about them all: parts already in each other, or why it failed.
+    pub found_note: Option<String>,
+    /// The design and the joint (as the dialog had it) the found limits are for.
+    pub searched: Option<Searched>,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
@@ -167,6 +202,10 @@ impl JointForm {
             angle_shown: "0 deg".into(),
             offset: std::array::from_fn(|_| crate::length_input::default(doc, "0")),
             limits: Vec::new(),
+            search: None,
+            found: Vec::new(),
+            found_note: None,
+            searched: None,
             animate: false,
             phase: 0.0,
             hover: None,
@@ -196,6 +235,7 @@ impl JointForm {
 impl Asm {
     pub fn title(&self) -> &'static str {
         match self {
+            Asm::FromBodies => "cmd.component_from_bodies",
             Asm::NewComponent { .. } => "NEW COMPONENT",
             Asm::Joint(j) if j.editing.is_some() => "EDIT JOINT",
             Asm::Joint(j) if j.as_built => "AS-BUILT JOINT",
@@ -224,6 +264,7 @@ impl Asm {
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let s = &app.session;
     let (asm, inputs) = match id {
+        "component.from_bodies" => (Asm::FromBodies, vec![SelInput::new("Bodies", BODIES, true)]),
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
         "joint.create" => (Asm::Joint(Box::new(JointForm::new(false, &app.session.doc))), side_inputs()),
         "joint.as_built" => (
@@ -356,7 +397,7 @@ fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let at =
         if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
     let p = solidcraft_engine::doc::apply_point(&at, pick);
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
     let named = match (face, edge) {
         (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
@@ -401,7 +442,7 @@ fn named_edge(b: &solidcraft_engine::doc::ModelBody, name: &str, p: Vec3) -> Opt
     let index = match names.iter().position(|n| n == name) {
         Some(i) => i,
         None => {
-            let (at, _) = solidcraft_engine::doc::naming::find_edge(b, name, p).ok()?;
+            let at = solidcraft_engine::doc::naming::find_edge(b, name, p).ok()?;
             (0..m.edges.len())
                 .min_by(|x, y| edge_dist(&m, *x, at).unwrap_or(f64::INFINITY).total_cmp(&edge_dist(&m, *y, at).unwrap_or(f64::INFINITY)))?
         }
@@ -490,7 +531,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
 /// are placed; occurrence 0 is the root, holding the bodies outside every occurrence.
 pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     let model = s.model.state();
-    let world = s.world_state();
+    let world = crate::open_meshing::session_world(s);
     let mut bb = Aabb3::default();
     for (name, _, path, _) in s.doc.body_frames(&model) {
         let on = occs.iter().any(|o| if *o == 0 { path.is_empty() } else { path.contains(o) });
@@ -528,7 +569,7 @@ pub struct SnapPt {
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     // The world name tells the instance: a further occurrence of a component is not its first.
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
         return Some(0);
@@ -587,7 +628,7 @@ fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
 
 /// The snap a picked item stands for (world coordinates, as the viewport shows them).
 pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let (body, mut snap) = match sel {
         Sel::Face { body, index, point } => {
             let b = st.body(body)?;
@@ -669,6 +710,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     let mut enter = false;
     let problem = joint_problem(app, k, inputs);
     match k {
+        Asm::FromBodies => {
+            ui.add(egui::Label::new(app.tr("ui.components_from_bodies_hint")).wrap());
+            if crate::ui_kit::button(ui, app.tr("ui.select_all"), crate::ui_kit::Button::Normal).clicked()
+                && let Some(input) = inputs.first_mut()
+            {
+                // Transfers take definition names, rather than the names of repeated placements.
+                input.items = app.session.model.state().bodies.iter().map(|body| Sel::Body { name: body.name.clone() }).collect();
+                *active = 0;
+            }
+        }
         Asm::NewComponent { name, activate } => {
             enter |= text_row(ui, "Name", name, crate::i18n::tr_label("Component1")).0;
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
@@ -695,7 +746,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             form_row(ui, "Motion", |ui| {
                 ui.label("");
             });
+            let was = f.kind;
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            if f.kind != was {
+                // What Find Limits found was for the other type's values.
+                (f.search, f.found_note, f.searched) = (None, None, None);
+                f.found.clear();
+            }
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
@@ -721,6 +778,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     }
                 });
                 crate::ui_kit::section(ui, "joint_limits", "Limits", false, |ui| {
+                    let found = f.found.clone();
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {
                         let name = kind.dofs().get(i).copied().unwrap_or("value");
                         form_row(ui, &format!("{} limits", capital(name)), |ui| {
@@ -730,6 +788,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                             enter |= expr_row(ui, "  Minimum", lo);
                             enter |= expr_row(ui, "  Maximum", hi);
                         }
+                        if let Some(note) = found.get(i).filter(|n| !n.is_empty()) {
+                            ui.vertical(|ui| {
+                                for line in note.lines() {
+                                    ui.add(egui::Label::new(RichText::new(line).size(t.font_small).color(t.text_dim)).wrap());
+                                }
+                            });
+                        }
+                    }
+                    if let Some(id) = f.editing {
+                        find_limits_row(app, ui, f, id, inputs);
                     }
                 });
             } else {
@@ -918,6 +986,192 @@ fn capital(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
+/// The Limits section's Find Limits row: the button, or the search under way with Cancel; and
+/// what the last search said about all the values.
+fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id: u64, inputs: &[SelInput]) {
+    let t = Tokens::get();
+    if let Some(search) = &f.search {
+        // A poisoned lock: the search's thread panicked.
+        let reply = search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(crate::i18n::tr("joint.find_limits_failed").to_string())));
+        match reply {
+            Some(reply) => {
+                // Found for a design changed since (by a script, the control channel, undo), or
+                // a joint the dialog has changed since (its sides, flip, angle or offset): dropped.
+                let searched = search.searched.clone();
+                f.search = None;
+                if searched.current(app, f, inputs) {
+                    f.searched = Some(searched);
+                    fill_limits(&app.session.doc, f, reply);
+                } else {
+                    f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+                }
+                // The rows above were drawn before this: once more, with what was found.
+                ui.ctx().request_repaint();
+            }
+            None => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
+        }
+    }
+    // What it found stops applying once the joint or the design changes: its notes go, and the
+    // dialog says so (the values filled in stay, to keep or edit).
+    if f.search.is_none()
+        && let Some(searched) = &f.searched
+        && !searched.current(app, f, inputs)
+    {
+        f.searched = None;
+        f.found.clear();
+        f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+    }
+    form_row(ui, "", |ui| {
+        if f.search.is_some() {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(t.font_small));
+                ui.label(RichText::new(crate::i18n::tr("joint.finding_limits")).color(t.text_dim));
+                if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                    // Its thread finishes within its work budget; the reply is left unread.
+                    f.search = None;
+                }
+            });
+        } else if crate::ui_kit::button(ui, crate::i18n::tr("joint.find_limits"), crate::ui_kit::Button::Normal)
+            .on_hover_text(crate::i18n::tr("joint.find_limits_hint"))
+            .clicked()
+        {
+            find_limits(app, f, id, inputs);
+        }
+    });
+    if let Some(note) = &f.found_note {
+        ui.vertical(|ui| {
+            ui.add(egui::Label::new(RichText::new(note).color(t.warning)).wrap());
+        });
+    }
+}
+
+/// The commands OK would run for the joint as the dialog has it (its sides as picked in
+/// `inputs`), but its limits (what Find Limits fills in).
+fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
+    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
+}
+
+/// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
+/// alignment, as OK would leave them), then `joint.find_limits` on it. Off the window thread
+/// when the app runs commands there, else at once.
+fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64, inputs: &[SelInput]) {
+    (f.found_note, f.search, f.searched) = (None, None, None);
+    f.found.clear();
+    let searched = match Searched::now(app, f, inputs) {
+        Ok(s) => s,
+        Err(e) => {
+            f.found_note = Some(e);
+            return;
+        }
+    };
+    // A joint OK would refuse (an expression that doesn't read) says so at once, before any search.
+    let mut probe = app.session.scratch();
+    if let Some(e) = searched.joint.iter().find_map(|(id, p)| probe.execute(id, p).err()) {
+        f.found_note = Some(e.to_string());
+        return;
+    }
+    let mut commands = searched.joint.clone();
+    commands.push(("joint.find_limits".into(), json!({ "joint": id })));
+    // The search's reply, or the first command that failed.
+    fn reply<E: std::fmt::Display>(replies: Vec<Result<Value, E>>) -> Result<Value, String> {
+        let mut last = Err(String::new());
+        for r in replies {
+            last = Ok(r.map_err(|e| e.to_string())?);
+        }
+        last
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.apply_off_thread.is_some() {
+        let search = Search { reply: Default::default(), searched: searched.clone() };
+        let (ahead, out, list) = (app.session.ahead(), search.reply.clone(), commands.clone());
+        let spawned = std::thread::Builder::new().name("find limits".into()).spawn(move || {
+            let r = reply(ahead.replies(&list));
+            if let Ok(mut slot) = out.lock() {
+                *slot = Some(r);
+            }
+        });
+        if spawned.is_ok() {
+            f.search = Some(search);
+            return;
+        }
+    }
+    f.searched = Some(searched);
+    fill_limits(&app.session.doc, f, reply(app.session.ahead().replies(&commands)));
+}
+
+/// Fill the limits rows from `joint.find_limits`'s reply: each side found, rounded inward (a
+/// tenth of a degree, a hundredth of the design's length unit), and its row ticked once both
+/// are; a side with nothing to meet keeps what it had. A line under each row says what stopped
+/// each side.
+fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply: Result<Value, String>) {
+    let r = match reply {
+        Ok(r) => r,
+        Err(e) => {
+            (f.found_note, f.searched) = (Some(e), None);
+            return;
+        }
+    };
+    let kind = f.joint_kind();
+    let unit = crate::length_input::unit(doc).to_string();
+    let scale = solidcraft_engine::doc::expr::unit_info(&unit).map(|(_, scale)| scale).filter(|s| *s > 0.0).unwrap_or(1.0);
+    f.found = vec![String::new(); f.limits.len()];
+    for v in r["values"].as_array().into_iter().flatten() {
+        let Some(i) = v["index"].as_u64().and_then(|i| usize::try_from(i).ok()) else { continue };
+        let (Some(row), Some(note)) = (f.limits.get_mut(i), f.found.get_mut(i)) else { continue };
+        let angle = kind.is_angle(i);
+        // A side as the dialog shows it: rounded toward the joint's value, so it stays clear; as
+        // found where rounding would pass the joint's value (a stop nearer than the rounding).
+        let (min, max) = (v["min"].as_f64().filter(|x| x.is_finite()), v["max"].as_f64().filter(|x| x.is_finite()));
+        let now = v["value"].as_f64().filter(|x| x.is_finite());
+        let step = if angle { 0.1 } else { 0.01 * scale };
+        let lo = min.map(|x| Some((x / step - 1e-6).ceil() * step).filter(|r| now.is_none_or(|c| *r <= c)).unwrap_or(x));
+        let hi = max.map(|x| Some((x / step + 1e-6).floor() * step).filter(|r| now.is_none_or(|c| *r >= c)).unwrap_or(x));
+        let (lo, hi) = if lo.zip(hi).is_some_and(|(lo, hi)| lo > hi) { (min, max) } else { (lo, hi) };
+        let shown = |x: f64| {
+            if angle { (num(x, "deg"), format!("{}°", crate::dialogs_coupling::trim(x))) } else { (num(x / scale, &unit), num(x / scale, &unit)) }
+        };
+        let (min, max) = (lo.map(shown), hi.map(shown));
+        let mut lines = Vec::new();
+        for (label, found, by) in [("Minimum", &min, &v["min_by"]), ("Maximum", &max, &v["max_by"])] {
+            let which = crate::i18n::tr_label(label);
+            let value = found.as_ref().map(|(_, shown)| shown.as_str()).unwrap_or_default();
+            lines.push(match by.as_str() {
+                Some("loop") => crate::i18n::format("joint.limit_loop", &[("side", which), ("value", value)]),
+                Some("limit") => crate::i18n::format("joint.limit_limit", &[("side", which), ("value", value)]),
+                Some("turn") => crate::i18n::format("joint.limit_turn", &[("side", which), ("value", value)]),
+                Some(_) => {
+                    // Down to a tenth, so it never claims more than was searched.
+                    let range = (v["range"].as_f64().filter(|x| x.is_finite()).unwrap_or(0.0) / scale * 10.0).floor() / 10.0;
+                    crate::i18n::format("joint.limit_range", &[("side", which), ("range", &num(range, &unit))])
+                }
+                None => {
+                    let (a, b) = (by["a"].as_str().unwrap_or_default(), by["b"].as_str().unwrap_or_default());
+                    crate::i18n::format("joint.limit_contact", &[("side", which), ("value", value), ("a", a), ("b", b)])
+                }
+            });
+        }
+        *note = lines.join("\n");
+        // A side with nothing to meet has no limit to fill in: the row keeps what it had.
+        row.0 |= min.is_some() && max.is_some();
+        if let Some((lo, _)) = min {
+            row.1 = lo;
+        }
+        if let Some((hi, _)) = max {
+            row.2 = hi;
+        }
+    }
+    let overlapping: Vec<String> = r["overlapping_at_start"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|o| format!("{} / {}", o["a"].as_str().unwrap_or_default(), o["b"].as_str().unwrap_or_default()))
+        .collect();
+    if !overlapping.is_empty() {
+        f.found_note = Some(crate::i18n::format("joint.limits_overlapping", &[("pairs", &overlapping.join(", "))]));
+    }
+}
+
 /// Run the check (overlaps, pairs closer than the clearance, each body's nearest neighbour) and
 /// find the overlapping volumes (world placement) to show in red.
 fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, Vec<Mesh>) {
@@ -935,12 +1189,12 @@ fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, 
         Ok(v) => v,
         Err(e) => return (json!({ "error": e }), Vec::new()),
     };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mut meshes = Vec::new();
     for hit in r["overlaps"].as_array().into_iter().flatten() {
         let (Some(a), Some(b)) = (hit["a"].as_str().and_then(|n| st.body(n)), hit["b"].as_str().and_then(|n| st.body(n))) else { continue };
         if let Ok(Some(o)) = solidcraft_engine::kernel::boolean(&a.body, &b.body, solidcraft_engine::kernel::BoolOp::Intersect)
-            && let Ok(m) = o.tessellate((o.size() * 2e-3).max(1e-3))
+            && let Ok(m) = o.mesh(&solidcraft_engine::kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3)))
         {
             meshes.push(m);
         }
@@ -1073,6 +1327,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
     };
     let cmd = |id: &str, p: Value| vec![(id.to_string(), p)];
     Ok(match k {
+        Asm::FromBodies => {
+            let bodies = sel_items(inputs, 0).body_names();
+            if bodies.is_empty() {
+                return Err(crate::i18n::tr("ui.components_from_bodies_required").into());
+            }
+            cmd("component.from_bodies", json!({ "bodies": bodies }))
+        }
         Asm::NewComponent { name, activate } => {
             let bodies: Vec<String> = sel_items(inputs, 0).body_names();
             if bodies.is_empty() {

@@ -1,0 +1,68 @@
+# oracle/11-circular-pattern-flange: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Flange: 18 faces, 48 edges
+Flange face F2:side:c_in#1
+Flange face F2:side:c_in#2
+Flange face F2:side:c_out#1
+Flange face F2:side:c_out#2
+Flange face F2:start
+Flange face F2:top
+Flange face F4:side:c1#1
+Flange face F4:side:c1#2
+Flange face F4:side:c1@F5.1#1
+Flange face F4:side:c1@F5.1#2
+Flange face F4:side:c1@F5.2#1
+Flange face F4:side:c1@F5.2#2
+Flange face F4:side:c1@F5.3#1
+Flange face F4:side:c1@F5.3#2
+Flange face F4:side:c1@F5.4#1
+Flange face F4:side:c1@F5.4#2
+Flange face F4:side:c1@F5.5#1
+Flange face F4:side:c1@F5.5#2
+Flange edge F2:side:c_in#1|F2:side:c_in#2~1 [geometric]
+Flange edge F2:side:c_in#1|F2:side:c_in#2~2 [geometric]
+Flange edge F2:side:c_in#1|F2:start
+Flange edge F2:side:c_in#1|F2:top
+Flange edge F2:side:c_in#2|F2:start
+Flange edge F2:side:c_in#2|F2:top
+Flange edge F2:side:c_out#1|F2:side:c_out#2~1 [geometric]
+Flange edge F2:side:c_out#1|F2:side:c_out#2~2 [geometric]
+Flange edge F2:side:c_out#1|F2:start
+Flange edge F2:side:c_out#1|F2:top
+Flange edge F2:side:c_out#2|F2:start
+Flange edge F2:side:c_out#2|F2:top
+Flange edge F2:start|F4:side:c1#1
+Flange edge F2:start|F4:side:c1#2
+Flange edge F2:start|F4:side:c1@F5.1#1
+Flange edge F2:start|F4:side:c1@F5.1#2
+Flange edge F2:start|F4:side:c1@F5.2#1
+Flange edge F2:start|F4:side:c1@F5.2#2
+Flange edge F2:start|F4:side:c1@F5.3#1
+Flange edge F2:start|F4:side:c1@F5.3#2
+Flange edge F2:start|F4:side:c1@F5.4#1
+Flange edge F2:start|F4:side:c1@F5.4#2
+Flange edge F2:start|F4:side:c1@F5.5#1
+Flange edge F2:start|F4:side:c1@F5.5#2
+Flange edge F2:top|F4:side:c1#1
+Flange edge F2:top|F4:side:c1#2
+Flange edge F2:top|F4:side:c1@F5.1#1
+Flange edge F2:top|F4:side:c1@F5.1#2
+Flange edge F2:top|F4:side:c1@F5.2#1
+Flange edge F2:top|F4:side:c1@F5.2#2
+Flange edge F2:top|F4:side:c1@F5.3#1
+Flange edge F2:top|F4:side:c1@F5.3#2
+Flange edge F2:top|F4:side:c1@F5.4#1
+Flange edge F2:top|F4:side:c1@F5.4#2
+Flange edge F2:top|F4:side:c1@F5.5#1
+Flange edge F2:top|F4:side:c1@F5.5#2
+Flange edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Flange edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Flange edge F4:side:c1@F5.1#1|F4:side:c1@F5.1#2~1 [geometric]
+Flange edge F4:side:c1@F5.1#1|F4:side:c1@F5.1#2~2 [geometric]
+Flange edge F4:side:c1@F5.2#1|F4:side:c1@F5.2#2~1 [geometric]
+Flange edge F4:side:c1@F5.2#1|F4:side:c1@F5.2#2~2 [geometric]
+Flange edge F4:side:c1@F5.3#1|F4:side:c1@F5.3#2~1 [geometric]
+Flange edge F4:side:c1@F5.3#1|F4:side:c1@F5.3#2~2 [geometric]
+Flange edge F4:side:c1@F5.4#1|F4:side:c1@F5.4#2~1 [geometric]
+Flange edge F4:side:c1@F5.4#1|F4:side:c1@F5.4#2~2 [geometric]
+Flange edge F4:side:c1@F5.5#1|F4:side:c1@F5.5#2~1 [geometric]
+Flange edge F4:side:c1@F5.5#1|F4:side:c1@F5.5#2~2 [geometric]

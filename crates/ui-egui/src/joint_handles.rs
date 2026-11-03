@@ -142,7 +142,7 @@ impl Mode {
             .filter(|(_, _, _, path, _)| path.last() == Some(&self.occurrence))
             .map(|(name, ..)| name)
             .collect();
-        let world = app.session.world_state();
+        let world = crate::open_meshing::session_world(&app.session);
         self.radii = self
             .axes
             .iter()
@@ -710,7 +710,7 @@ mod tests {
         let joint =
             h.app.run("joint.create", json!({"type":kind,"a":a,"b":b,"flip":true,"angle":0,"name":"Guide"})).unwrap()["joint"].as_u64().unwrap();
         let component = h.app.session.doc.find_component("Arm").unwrap();
-        let world = h.app.session.world_state();
+        let world = crate::open_meshing::session_world(&h.app.session);
         let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
         h.app.session.selection = vec![Sel::Face { body, index: 0, point: Vec3::new(30., 0., 10.) }];
         h.call("ui.view", json!({"view":"top"}));
@@ -1023,8 +1023,9 @@ mod tests {
         let invalid = crate::prefs::lenient(&json!({"joint_rotation_coarse":0,"joint_rotation_fine":-3}));
         assert_eq!((invalid.joint_rotation_coarse, invalid.joint_rotation_fine), (10., 0.1));
     }
-    /// Two boards held by two planar joints whose planes cross (#10331): the second joint can't
-    /// close its loop, so Move names it instead of saying the part has no movable axis.
+    /// Two boards held by two planar joints whose faces can never meet (the yellow front against
+    /// the red top, #10331): the second joint can't close its loop, so Move names it instead of
+    /// saying the part has no movable axis.
     #[test]
     fn blocked_move_names_a_conflicting_joint_of_the_part() {
         let mut h = Harness::new();
@@ -1038,12 +1039,12 @@ mod tests {
         h.app.run("occurrence.ground", json!({"occurrence":"Yellow:1","grounded":true})).unwrap();
         let planar = |name: &str, a: [i32; 3], b: [i32; 3]| json!({"type":"planar","a":{"occurrence":"Yellow","face":a},"b":{"occurrence":"Red","face":b},"name":name});
         h.app.run("joint.create", planar("Top", [200, 50, 20], [200, 350, 0])).unwrap();
-        h.app.run("joint.create", planar("Front", [200, 0, 10], [200, 0, 30])).unwrap();
+        h.app.run("joint.create", planar("Front", [200, 0, 10], [200, 50, 40])).unwrap();
         let solved = joints::solve(&h.app.session.doc, &h.app.session.model.state());
         let conflicting: Vec<_> = solved.conflicts.iter().map(|(_, name, _)| name.as_str()).collect();
         assert!(!conflicting.is_empty(), "the scenario must conflict: {:?}", solved.conflicts);
         let component = h.app.session.doc.find_component("Red").unwrap();
-        let world = h.app.session.world_state();
+        let world = h.app.session.world_state().unwrap();
         let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
         h.app.session.selection = vec![Sel::Body { name: body }];
         h.frames(3);

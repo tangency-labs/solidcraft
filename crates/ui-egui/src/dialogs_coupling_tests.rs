@@ -77,7 +77,7 @@ fn discs() -> SolveApp {
 /// A pick of the round wall a point of the exact geometry lies on (the facets of the wall's mesh
 /// cut inside it, so the nearest face of any body).
 fn wall(app: &SolveApp, p: Vec3) -> Sel {
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         let m = b.mesh();
@@ -103,8 +103,9 @@ fn picked_gear_faces_choose_their_joints_and_radii() {
     let mut app = discs();
     app.start("joint.gear");
     let mut d = app.dialog.take().unwrap();
-    // G2 first, G1 second: the joints follow the picks, whatever the dialog started on.
-    for (i, p) in [Vec3::new(50.0, 0.0, 2.5), Vec3::new(10.0, 0.0, 2.5)].into_iter().enumerate() {
+    // G2 first, G1 second: the joints follow the picks, whatever the dialog started on. The
+    // discs touch at x = 10, on both walls, so G1 is picked on its far side.
+    for (i, p) in [Vec3::new(50.0, 0.0, 2.5), Vec3::new(-10.0, 0.0, 2.5)].into_iter().enumerate() {
         d.active = i;
         let pick = wall(&app, p);
         d.pick(&app.session, pick);
