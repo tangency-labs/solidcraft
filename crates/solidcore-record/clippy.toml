@@ -1,0 +1,41 @@
+# solidcore-record computes no geometric quantity (docs/layers.md §1, §4). Clippy reads the
+# nearest clippy.toml, so this repeats the workspace's settings and adds the record's ban.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+doc-valid-idents = ["SMLib", "NLib", "NVIDIA", "SolidCraft", "OpenUSD", ".."]
+disallowed-methods = [
+    { path = "f64::sqrt", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::cbrt", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::hypot", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::sin", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::cos", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::tan", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::sin_cos", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::asin", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::acos", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::atan", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::atan2", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::powi", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::powf", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::exp", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::ln", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f64::mul_add", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::sqrt", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::cbrt", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::hypot", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::sin", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::cos", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::tan", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::sin_cos", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::asin", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::acos", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::atan", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::atan2", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::powi", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::powf", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::exp", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::ln", reason = "the record computes no geometry (docs/layers.md §4)" },
+    { path = "f32::mul_add", reason = "the record computes no geometry (docs/layers.md §4)" },
+]
