@@ -6,6 +6,7 @@
 //! fork fixed in its own sources; each one turned on here says which fork commit it matches.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -409,15 +410,43 @@ pub(crate) fn fixes() -> UpstreamFixes {
 #[cfg(test)]
 const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
 
+/// How far apart two kernels' procedural blend serials start. A body keeps the serials of the
+/// kernel that made it and may be used on any other, whose memo of solved stations is keyed by
+/// serial alone: the ranges keep one definition's stations from answering for another's.
+pub(crate) const BLEND_SERIALS_PER_KERNEL: u64 = 1 << 40;
+
+/// A new kernel. Each takes the next range of blend serials, the first starting at 0.
 fn fresh() -> Kernel {
+    static MADE: AtomicU64 = AtomicU64::new(0);
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes();
+    k.blend_last_serial.set(MADE.fetch_add(1, Ordering::Relaxed).wrapping_mul(BLEND_SERIALS_PER_KERNEL));
     k
 }
 
-pub(crate) static KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
+/// Most kernels kept for later calls; those over it are dropped when their call ends.
+const MOST_IDLE: usize = 8;
 
-/// Runs `f` on the process's kernel. A panic in solidcore is caught: the kernel, which it may have
+/// The kernels no call is using, the last used on top. The lock is only held to take or put back
+/// a kernel, never during a call: a call that runs long (or never returns) holds up nothing but
+/// its own body, so one design's long operation never delays another's. Calls one after another
+/// all get the same kernel, as a single kernel would serve them; one that starts while another
+/// runs gets one of its own (solidcore keeps no global state, and a body's identities are valid
+/// only in the kernel that issued them, so any kernel takes any body).
+static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
+
+fn take_kernel() -> Kernel {
+    IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop().unwrap_or_else(fresh)
+}
+
+fn put_kernel(k: Kernel) {
+    let mut idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner);
+    if idle.len() < MOST_IDLE {
+        idle.push(k);
+    }
+}
+
+/// Runs `f` on a kernel of its own. A panic in solidcore is caught: the kernel, which it may have
 /// left half-updated, is replaced by a fresh one and the call fails with [`Error::Internal`].
 pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>) -> Result<T> {
     run_on(call, &[], f)
@@ -441,11 +470,10 @@ pub(crate) fn run_on<T: dump::Answer>(
     inputs: dump::Inputs<'_>,
     f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
-    let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
-    let k = guard.get_or_insert_with(fresh);
+    let mut k = take_kernel();
     // A profiler span per call: where the kernel's time goes.
     let _span = solidcraft_profile::span("solidcore", call);
-    dump::set_current(Some(call));
+    let in_flight = dump::in_flight(call);
     struct Depth;
     impl Drop for Depth {
         fn drop(&mut self) {
@@ -454,27 +482,28 @@ pub(crate) fn run_on<T: dump::Answer>(
     }
     IN_CALL.with(|d| d.set(d.get() + 1));
     let depth = Depth;
-    let caught = catch_unwind(AssertUnwindSafe(|| f(k)));
+    let caught = catch_unwind(AssertUnwindSafe(|| f(&mut k)));
     drop(depth);
     let r = match caught {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(Error::Solidcore(format!("{call}: {e}"))),
         Err(p) => {
-            *guard = Some(fresh());
+            k = fresh();
             let why = p.downcast_ref::<&str>().map(|s| (*s).to_owned()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
             log::warn!(target: "smlib", "solidcore panicked in {call}: {why}");
             Err(Error::Internal(format!("{call}: {why}")))
         }
     };
-    dump::set_current(None);
+    drop(in_flight);
     let why = match &r {
         Ok(v) => v.refusal(),
         Err(e) => Some(e.to_string()),
     };
     if let Some(why) = why {
         // The kernel the call ran on, or the fresh one that replaced it after a panic.
-        dump::failed(guard.get_or_insert_with(fresh), call, &why, inputs);
+        dump::failed(&k, call, &why, inputs);
     }
+    put_kernel(k);
     r
 }
 
@@ -491,7 +520,7 @@ pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std
     }
 }
 
-/// Runs `f` on the kernel and `body`, locking the kernel first.
+/// Runs `f` on a kernel and `body`, its lock held for the call.
 pub(crate) fn with_body<T: dump::Answer>(
     call: &'static str,
     body: &Body,

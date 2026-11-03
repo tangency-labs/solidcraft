@@ -639,11 +639,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (
                     app.tr("prefs.general.held"),
                     &[
-                        ("prefs.structure.appearance", "settings_palette"),
-                        ("prefs.structure.layout", "settings_monitor"),
-                        ("ui.navigation", "settings_mouse"),
-                        ("prefs.structure.sketch", "select_sketch"),
-                        ("prefs.shortcuts", "settings_keyboard"),
+                        ("prefs.structure.appearance", "prefs_appearance"),
+                        ("prefs.structure.layout", "prefs_layout"),
+                        ("ui.navigation", "prefs_navigation"),
+                        ("prefs.structure.sketch", "prefs_sketch"),
+                        ("prefs.shortcuts", "prefs_shortcuts"),
                         ("ui.language", "settings"),
                     ][..],
                     true,
