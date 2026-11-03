@@ -26,6 +26,8 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use std::borrow::Cow;
+
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::Line;
@@ -37,11 +39,12 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
-use crate::nurbs::math::{CPoint, NOZ};
+use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::surface::implicit::{curve_on_quadrics, QuadricEquation};
 
 const OP: &str = "curve::from_parameters::from_parameters";
 const OP_TRIM: &str = "curve::from_parameters::uv_trim";
+const OP_BACK: &str = "curve::from_parameters::record_of";
 
 /// A conic's angle within this many degrees of a quarter turn is that quarter turn
 /// (`SnapSMLibAngularBoundaryDeg`): the kernel's conics and their faces meet on the quarter
@@ -187,24 +190,39 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
 /// A pcurve's numbers as the kernel's UV trim of an edge over `interval` (the edge's interval
 /// in the kernel's parameter): the record's pcurve runs along the edge over the edge's own
 /// interval in the record, and the kernel's trim runs along the edge over the edge's kernel
-/// interval, so its knots are mapped affinely from the pcurve's domain onto `interval`.
+/// interval, so its knots are mapped affinely from the pcurve's domain onto `interval` (copied
+/// as they are where the two are the same). Its points are scaled by `scale` in u and v: a
+/// plane face's kernel parameters are the record's times its axes' lengths (`[1, 1]`
+/// elsewhere, copied).
 ///
 /// # Errors
 ///
 /// `InvalidInput` for a spline whose knots do not fit its points or a pcurve or interval of no
 /// length; those of the constructors.
-pub fn uv_trim(c: &Record2, interval: &Extent1d) -> Result<Curve> {
+pub fn uv_trim(c: &Record2, interval: &Extent1d, scale: [f64; 2]) -> Result<Curve> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP_TRIM, reason);
+    let [su, sv] = scale;
+    let same = su == 1.0 && sv == 1.0;
+    let at = |x: f64, y: f64| if same { (x, y) } else { (su * x, sv * y) };
     let (knots, rows): (&[f64], Vec<[f64; 4]>) = match c {
         Record2::Spline { knots, points } => (
             knots,
-            points.iter().map(|p| [p[0], p[1], NOZ, 1.0]).collect(),
+            points
+                .iter()
+                .map(|p| {
+                    let (x, y) = at(p[0], p[1]);
+                    [x, y, NOZ, 1.0]
+                })
+                .collect(),
         ),
         Record2::RationalSpline { knots, homogeneous } => (
             knots,
             homogeneous
                 .iter()
-                .map(|h| [h[0], h[1], NOZ, h[2]])
+                .map(|h| {
+                    let (x, y) = at(h[0], h[1]);
+                    [x, y, NOZ, h[2]]
+                })
                 .collect(),
         ),
     };
@@ -220,9 +238,276 @@ pub fn uv_trim(c: &Record2, interval: &Extent1d) -> Result<Curve> {
     if !(s_hi > s_lo) {
         return Err(bad("the pcurve's domain has no length"));
     }
-    let scale = (hi - lo) / (s_hi - s_lo);
-    let mapped: Vec<f64> = knots.iter().map(|s| lo + (s - s_lo) * scale).collect();
+    let mapped: Vec<f64> = if (s_lo, s_hi) == (lo, hi) {
+        knots.to_vec()
+    } else {
+        let by = (hi - lo) / (s_hi - s_lo);
+        knots.iter().map(|s| lo + (s - s_lo) * by).collect()
+    };
     Ok(Curve::from(spline(&mapped, &rows, 2, OP_TRIM)?))
+}
+
+/// The intersection tolerance of an entity whose zone tolerance is `zone`: twice it, the
+/// inverse of [`zone_tolerance`].
+#[must_use]
+pub fn intersection_tolerance(zone: f64) -> f64 {
+    2.0 * zone
+}
+
+/// An edge's curve as the record holds it: what it is (`curve`), the NURBS form its parameter
+/// is on when that differs from `curve`'s own (`nurbs`), and the edge's interval in the
+/// record's parameter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordCurve {
+    /// What the edge is: a line, circle or ellipse label, or the spline itself.
+    pub curve: Record,
+    /// The NURBS form of a circle or ellipse, the parameter `interval` and the pcurves are on.
+    pub nurbs: Option<Record>,
+    /// The edge's interval in the record's parameter.
+    pub interval: [f64; 2],
+}
+
+/// The record of the kernel's edge curve `c` over `interval` (its kernel parameter), the
+/// inverse of [`from_parameters`] and [`conic_on_form`]:
+///
+/// - **Line:** the line through the curve's points at the interval's ends, over `[0, 1]`. A
+///   kernel line is affine in its parameter (its point plus the parameter times its vector),
+///   so this is the same line, the record's parameter an affine image of the kernel's.
+/// - **Circle, ellipse:** the label on the conic's own frame (copied, not rebuilt by a cross
+///   product), its y axis reversed where the conic's NURBS runs against its angle (its own
+///   `inside_out`, no sampling), with that NURBS as its form, over the kernel's interval.
+///   Exact class at bound 0: returned only once the form is proved on the label's plane and
+///   sphere or elliptic cylinder ([`curve_on_quadrics`]).
+/// - **B-spline, hyperbola, parabola:** its NURBS as a spline or rational spline, homogeneous
+///   points copied, over the kernel's interval; an interval past the knots by the rounding of
+///   the kernel's parameter (10⁻¹² of its size) ends on them.
+///
+/// # Errors
+///
+/// `InvalidInput` for an interval not finite and increasing, a curve without its NURBS, or a
+/// conic's form not proved on its label; `Unsupported` for a curve with no B-spline form (an
+/// offset, projected or surface curve), which the record cannot carry exactly.
+pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCurve> {
+    use crate::curve::curve::CurveKind;
+    let bad = |reason: &'static str| SolidError::invalid_input(OP_BACK, reason);
+    let (lo, hi) = (interval.min(), interval.max());
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(bad("the interval is not finite and increasing"));
+    }
+    match c.kind() {
+        CurveKind::Line(_) => {
+            let (a, b) = (c.evaluate_point(k, lo)?, c.evaluate_point(k, hi)?);
+            return Ok(RecordCurve {
+                curve: Record::Line {
+                    start: [a.x, a.y, a.z],
+                    end: [b.x, b.y, b.z],
+                },
+                nurbs: None,
+                interval: [0.0, 1.0],
+            });
+        }
+        CurveKind::Ellipse(e) => {
+            let can = e.canonical();
+            let (o, x, y0) = can.position.canonical();
+            let y = if can.inside_out { -y0 } else { y0 };
+            let circle = e.is_circle_class();
+            let (rx, ry) = (
+                can.radius_x,
+                if circle { can.radius_x } else { can.radius_y },
+            );
+            let made;
+            let nurbs = if e.base().gw_nurb().is_some() {
+                e.base()
+            } else {
+                let mut copy = e.clone();
+                copy.make_nurb(k)?;
+                made = copy;
+                made.base()
+            };
+            if !curve_on_quadrics(nurbs, &quadrics(o, x, y, rx, ry, circle))? {
+                return Err(bad("a conic's NURBS is off its own frame and radii"));
+            }
+            let frame = Frame {
+                origin: [o.x, o.y, o.z],
+                x_axis: [x.x, x.y, x.z],
+                y_axis: [y.x, y.y, y.z],
+            };
+            let curve = if circle {
+                Record::Circle { frame, radius: rx }
+            } else {
+                Record::Ellipse {
+                    frame,
+                    radii: [rx, ry],
+                }
+            };
+            return Ok(RecordCurve {
+                curve,
+                nurbs: Some(spline_record(nurbs)?),
+                interval: [lo, hi],
+            });
+        }
+        _ => (),
+    }
+    let base = b_spline_part(k, c)?.ok_or(SolidError::Unsupported {
+        operation: OP_BACK,
+        reason: "an edge curve with no B-spline form has no exact record",
+    })?;
+    let knots = base.natural_interval();
+    let slack = 1e-12 * (1.0 + lo.abs().max(hi.abs()));
+    let onto = |t: f64| {
+        if t < knots.min() && t >= knots.min() - slack {
+            knots.min()
+        } else if t > knots.max() && t <= knots.max() + slack {
+            knots.max()
+        } else {
+            t
+        }
+    };
+    Ok(RecordCurve {
+        curve: spline_record(&base)?,
+        nurbs: None,
+        interval: [onto(lo), onto(hi)],
+    })
+}
+
+/// The B-spline a curve is (every kernel line, conic and spline is one, its NURB made on a
+/// copy where it has none yet); `None` for the curves that are not.
+fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
+    use crate::curve::curve::CurveKind;
+    Ok(Some(match c.kind() {
+        CurveKind::BSpline(b) => Cow::Borrowed(b),
+        CurveKind::Line(l) => l.base_with_nurb()?,
+        CurveKind::Ellipse(e) if e.base().gw_nurb().is_none() => {
+            let mut made = e.clone();
+            made.make_nurb(k)?;
+            Cow::Owned(made.base().clone_exact())
+        }
+        CurveKind::Ellipse(e) => Cow::Borrowed(e.base()),
+        CurveKind::Hyperbola(h) if h.base().gw_nurb().is_none() => {
+            let mut made = h.clone();
+            made.make_nurb(None)?;
+            Cow::Owned(made.base().clone_exact())
+        }
+        CurveKind::Hyperbola(h) => Cow::Borrowed(h.base()),
+        CurveKind::Parabola(p) if p.base().gw_nurb().is_none() => {
+            let mut made = p.clone();
+            made.make_nurb(None)?;
+            Cow::Owned(made.base().clone_exact())
+        }
+        CurveKind::Parabola(p) => Cow::Borrowed(p.base()),
+        _ => return Ok(None),
+    }))
+}
+
+/// A B-spline curve's NURBS as the record's spline (every weight 1) or rational spline
+/// (homogeneous points copied as NLib holds them).
+fn spline_record(c: &BSplineCurve) -> Result<Record> {
+    let nurb = c
+        .gw_nurb()
+        .ok_or_else(|| SolidError::invalid_input(OP_BACK, "a B-spline without its NURB"))?;
+    let knots = nurb.knots().to_vec();
+    let polynomial = nurb.cpts().iter().all(|p| p.w == NOW || p.w == 1.0);
+    Ok(if polynomial {
+        Record::Spline {
+            knots,
+            points: nurb.cpts().iter().map(|p| [p.x, p.y, p.z]).collect(),
+        }
+    } else {
+        Record::RationalSpline {
+            knots,
+            homogeneous: nurb
+                .cpts()
+                .iter()
+                .map(|p| {
+                    let w = if p.w == NOW { 1.0 } else { p.w };
+                    [p.x, p.y, p.z, w]
+                })
+                .collect(),
+        }
+    })
+}
+
+/// The record's pcurve of the kernel's UV trim `trim`, the inverse of [`uv_trim`]: the trim
+/// runs along its edge over `from` (the edge's kernel interval), the pcurve over `to` (the
+/// edge's record interval), so the knots are mapped affinely from one onto the other (copied
+/// as they are where the two are the same, the knots at the trim's ends set to `to`'s where
+/// they are `from`'s); the points are scaled by `scale` in u and v (the record's parameters
+/// of a plane face, distances along its unit axes, are its kernel parameters times its
+/// scales; `[1, 1]` elsewhere, copied).
+///
+/// # Errors
+///
+/// `InvalidInput` for a trim that is no 2D B-spline or has no NURB, or an interval of no
+/// length.
+pub fn record_trim(
+    k: &Kernel,
+    trim: &Curve,
+    from: &Extent1d,
+    to: [f64; 2],
+    scale: [f64; 2],
+) -> Result<Record2> {
+    let bad = |reason: &'static str| SolidError::invalid_input(OP_BACK, reason);
+    let b = b_spline_part(k, trim)?.ok_or_else(|| bad("a UV trim with no B-spline form"))?;
+    let nurb = b
+        .gw_nurb()
+        .ok_or_else(|| bad("a UV trim without its NURB"))?;
+    let (f0, f1) = (from.min(), from.max());
+    let [t0, t1] = to;
+    if !(f1 > f0 && t1 > t0) {
+        return Err(bad("an interval has no length"));
+    }
+    let knots: Vec<f64> = if (f0, f1) == (t0, t1) {
+        nurb.knots().to_vec()
+    } else {
+        let s = (t1 - t0) / (f1 - f0);
+        nurb.knots()
+            .iter()
+            .map(|&t| {
+                if t == f0 {
+                    t0
+                } else if t == f1 {
+                    t1
+                } else {
+                    t0 + (t - f0) * s
+                }
+            })
+            .collect()
+    };
+    let [su, sv] = scale;
+    let same = su == 1.0 && sv == 1.0;
+    let polynomial = nurb.cpts().iter().all(|p| p.w == NOW || p.w == 1.0);
+    Ok(if polynomial {
+        Record2::Spline {
+            knots,
+            points: nurb
+                .cpts()
+                .iter()
+                .map(|p| {
+                    if same {
+                        [p.x, p.y]
+                    } else {
+                        [su * p.x, sv * p.y]
+                    }
+                })
+                .collect(),
+        }
+    } else {
+        Record2::RationalSpline {
+            knots,
+            homogeneous: nurb
+                .cpts()
+                .iter()
+                .map(|p| {
+                    let w = if p.w == NOW { 1.0 } else { p.w };
+                    if same {
+                        [p.x, p.y, w]
+                    } else {
+                        [su * p.x, sv * p.y, w]
+                    }
+                })
+                .collect(),
+        }
+    })
 }
 
 fn p3(a: [f64; 3]) -> Point3 {

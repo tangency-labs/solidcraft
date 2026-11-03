@@ -44,9 +44,13 @@ pub struct FaceSurface {
     pub uv_domain: Extent2d,
     /// Whether the record's pcurves are in these parameters, so that they are the face's UV
     /// trims: true where the face's parameters are a NURBS's the record holds (a spline, a NURBS
-    /// form, a ball patch's net), false where the kernel's parameters are its own (an analytic
-    /// label's, a revolution's exact form), whose trims the kernel builds from the edges.
+    /// form, a ball patch's net) or a plane's (scaled by [`FaceSurface::scale`]), false where
+    /// the kernel's parameters are its own (an analytic label's, a revolution's exact form),
+    /// whose trims the kernel builds from the edges.
     pub trims: bool,
+    /// The kernel's (u, v) of the record's, `[su u, sv v]`: a plane's parameters run along its
+    /// axes made unit, so they are the record's times the axes' lengths; `[1, 1]` elsewhere.
+    pub scale: [f64; 2],
 }
 
 /// The surface of a record face: `label`, parameterised on `nurbs` when given, over `domain`
@@ -83,6 +87,7 @@ pub fn face_surface(
                     surface: recognised(k, net, &REVOLVED)?,
                     uv_domain,
                     trims: false,
+                    scale: [1.0, 1.0],
                 })
             }
             Record::RationalSpline { .. } => {
@@ -96,6 +101,7 @@ pub fn face_surface(
                     surface,
                     uv_domain,
                     trims: true,
+                    scale: [1.0, 1.0],
                 })
             }
             Record::Spline { .. } => {
@@ -104,14 +110,22 @@ pub fn face_surface(
                     surface,
                     uv_domain,
                     trims: true,
+                    scale: [1.0, 1.0],
                 })
             }
+            Record::Plane { u_axis, v_axis, .. } => plane(k, label, domain, *u_axis, *v_axis, None),
+            Record::PlaneThrough {
+                origin,
+                u_point,
+                v_point,
+            } => plane(k, label, domain, *u_point, *v_point, Some(*origin)),
             _ => {
                 let (surface, uv_domain) = from_parameters(k, label, domain)?;
                 Ok(FaceSurface {
                     surface,
                     uv_domain,
                     trims: false,
+                    scale: [1.0, 1.0],
                 })
             }
         };
@@ -132,6 +146,30 @@ pub fn face_surface(
         surface,
         uv_domain,
         trims: true,
+        scale: [1.0, 1.0],
+    })
+}
+
+/// A plane label's surface ([`from_parameters`]), its record pcurves its trims scaled by its
+/// axes' lengths: the axes `du`, `dv`, or `u_point - origin`, `v_point - origin` for a plane
+/// through three points.
+fn plane(
+    k: &Kernel,
+    label: &Record,
+    domain: [[f64; 2]; 2],
+    du: [f64; 3],
+    dv: [f64; 3],
+    through: Option<[f64; 3]>,
+) -> Result<FaceSurface> {
+    let (surface, uv_domain) = from_parameters(k, label, domain)?;
+    let o = through.unwrap_or([0.0; 3]);
+    let length =
+        |a: [f64; 3]| (Point3::new(a[0], a[1], a[2]) - Point3::new(o[0], o[1], o[2])).length();
+    Ok(FaceSurface {
+        surface,
+        uv_domain,
+        trims: true,
+        scale: [length(du), length(dv)],
     })
 }
 
@@ -190,6 +228,231 @@ fn recognised(k: &Kernel, net: BSplineSurface, kinds: &[SupportKind]) -> Result<
 /// The analytic surface of `kind` the NURBS form `net` is, proved and holding it.
 fn on_form(k: &Kernel, kind: SupportKind, net: BSplineSurface) -> Result<Surface> {
     AnalyticSupport::derive(k, kind, &net)?.build(k, net)
+}
+
+const OP_BACK: &str = "surface::face_surface::record_face";
+
+/// A kernel face's surface as the record holds it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordFace {
+    /// What the face is: an analytic or ball-patch label, or the spline itself.
+    pub surface: Record,
+    /// The NURBS form the face's parameters are on, when it differs from `surface`'s own.
+    pub nurbs: Option<Record>,
+    /// The face's parameter box in the record's parameters.
+    pub domain: [[f64; 2]; 2],
+    /// The record's (u, v) of the kernel's: `[su u, sv v]` (a plane's distances along its unit
+    /// axes; `[1, 1]` elsewhere, where the record's parameters are the kernel's NURBS's).
+    pub scale: [f64; 2],
+    /// The record's natural normal (∂S/∂u × ∂S/∂v of the record's parameters) is the
+    /// kernel's, the side the face's loops are kept relative to; false where it is the
+    /// other side (a plane whose scales have opposite signs), so the loops turn over.
+    pub agrees: bool,
+}
+
+/// The record of the kernel's face surface `s` over `uv_domain` (the face's box in the
+/// kernel's parameters), the inverse of [`face_surface`]:
+///
+/// - **Plane:** its placement's origin and unit axes, copied (no cross product), its box
+///   and pcurves its kernel parameters times its scales: the kernel's plane is
+///   `origin + su u x + sv v y` in its NURBS parameters, so the record's parameters are an
+///   exact image of the kernel's, and their normals agree when `su sv > 0`.
+/// - **Cylinder, cone, sphere, torus:** the label of its own kind, its numbers those the
+///   kernel derives from its NURBS form ([`AnalyticSupport::derive`], as [`face_surface`]
+///   reads the record back, so a round trip keeps them), frame copied (no cross product),
+///   angles in radians, with that NURBS as its form, over the kernel's box. Exact class at
+///   bound 0: proved on the form ([`AnalyticSupport::build`]: `lies_on` and the form's own
+///   parametrisation). The record has
+///   no cone of half angle under 10⁻¹² nor a torus whose tube reaches its axis: those go as
+///   their NURBS, which is the face exactly.
+/// - **Ball patch:** its sphere's label on its net, certified on it
+///   ([`BallPatch::create_certified`]).
+/// - **B-spline, revolution, extrusion, procedural blend:** its NURBS (a procedural blend's
+///   net, until the record has its kind).
+///
+/// The box ends on the NURBS's natural domain where it overshoots it by the rounding of the
+/// kernel's parameters (10⁻¹² of its size: a sphere's latitudes, a cone's apex).
+///
+/// # Errors
+///
+/// `InvalidInput` for a plane with a zero or non-finite scale, a label not proved on its form,
+/// or a ball patch's net off its sphere; `Unsupported` for a surface with no NURBS form (an
+/// offset, a curve-bounded or STEP surface), which the record cannot carry exactly.
+pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<RecordFace> {
+    use crate::blend::fillet_section::station::as_b_spline;
+    use crate::surface::implicit::AnalyticSupport as A;
+    let bad = |reason: &'static str| SolidError::invalid_input(OP_BACK, reason);
+    let box_ = [
+        [uv_domain.u_min(), uv_domain.u_max()],
+        [uv_domain.v_min(), uv_domain.v_max()],
+    ];
+    if let SurfaceKind::Plane(p) = s.kind_with_nurb(k)? {
+        A::check(k, s)?;
+        let (o, x, y) = p.position().canonical();
+        let sc = p.uv_scale();
+        if !(sc.x.is_finite() && sc.y.is_finite() && sc.x != 0.0 && sc.y != 0.0) {
+            return Err(bad("a plane's scale is zero or not finite"));
+        }
+        let scaled = |[a, b]: [f64; 2], by: f64| {
+            let (a, b) = (a * by, b * by);
+            if a <= b {
+                [a, b]
+            } else {
+                [b, a]
+            }
+        };
+        return Ok(RecordFace {
+            surface: Record::Plane {
+                origin: [o.x, o.y, o.z],
+                u_axis: [x.x, x.y, x.z],
+                v_axis: [y.x, y.y, y.z],
+            },
+            nurbs: None,
+            domain: [scaled(box_[0], sc.x), scaled(box_[1], sc.y)],
+            scale: [sc.x, sc.y],
+            agrees: (sc.x > 0.0) == (sc.y > 0.0),
+        });
+    }
+    let label = match s.kind_with_nurb(k)? {
+        SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
+            let frame = |p: &crate::geom::axis2_placement::Axis2Placement| {
+                let (o, x, y) = p.canonical();
+                crate::eval::Frame {
+                    origin: [o.x, o.y, o.z],
+                    x_axis: [x.x, x.y, x.z],
+                    y_axis: [y.x, y.y, y.z],
+                }
+            };
+            // The label as the kernel reads the form back ([`face_surface`] derives the
+            // same), proved on it: `lies_on` and the form's own parametrisation.
+            let kind = match A::of(s) {
+                Some(A::Cylinder { .. }) => SupportKind::Cylinder,
+                Some(A::Cone { .. }) => SupportKind::Cone,
+                Some(A::Sphere { .. }) => SupportKind::Sphere,
+                Some(A::Torus { .. }) => SupportKind::Torus,
+                _ => return Err(bad("an analytic surface of no analytic kind")),
+            };
+            let form = as_b_spline(k, s)?.ok_or_else(|| bad("the surface has no NURBS form"))?;
+            let derived = A::derive(k, kind, &form)?;
+            derived.build(k, form.into_owned())?;
+            match derived {
+                A::Cylinder { placement, radius } => Some(Record::Cylinder {
+                    frame: frame(&placement),
+                    radius,
+                }),
+                A::Cone {
+                    placement,
+                    base_radius,
+                    semi_angle_deg,
+                } => {
+                    let half_angle = semi_angle_deg.to_radians();
+                    (half_angle.abs() >= 1e-12).then(|| Record::Cone {
+                        frame: frame(&placement),
+                        radius_at_origin: base_radius,
+                        half_angle,
+                    })
+                }
+                A::Sphere { placement, radius } => Some(Record::Sphere {
+                    frame: frame(&placement),
+                    radius,
+                }),
+                A::Torus {
+                    placement,
+                    major_radius,
+                    minor_radius,
+                } => (major_radius > minor_radius).then(|| Record::Torus {
+                    frame: frame(&placement),
+                    major_radius,
+                    minor_radius,
+                    tube_start: 0.0,
+                }),
+                A::Plane { .. } => return Err(bad("a plane read as another kind")),
+            }
+        }
+        SurfaceKind::BallPatch(bp) => {
+            BallPatch::create_certified(bp.net(), bp.centre(), bp.radius())?;
+            let c = bp.centre();
+            Some(Record::BallPatch {
+                center: [c.x, c.y, c.z],
+                radius: bp.radius(),
+            })
+        }
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
+        | SurfaceKind::ProceduralBlend(_) => None,
+        _ => {
+            return Err(SolidError::Unsupported {
+                operation: OP_BACK,
+                reason: "a face surface with no NURBS form has no exact record",
+            })
+        }
+    };
+    let form = as_b_spline(k, s)?.ok_or_else(|| bad("the surface has no NURBS form"))?;
+    let nurbs = spline_record(&form)?;
+    let natural = form.natural_uv_domain();
+    let onto = |[a, b]: [f64; 2], lo: f64, hi: f64| {
+        let slack = 1e-12 * (1.0 + a.abs().max(b.abs()));
+        let snap = |t: f64| {
+            if t < lo && t >= lo - slack {
+                lo
+            } else if t > hi && t <= hi + slack {
+                hi
+            } else {
+                t
+            }
+        };
+        [snap(a), snap(b)]
+    };
+    let domain = [
+        onto(box_[0], natural.u_min(), natural.u_max()),
+        onto(box_[1], natural.v_min(), natural.v_max()),
+    ];
+    let (surface, nurbs) = match label {
+        Some(l) => (l, Some(nurbs)),
+        None => (nurbs, None),
+    };
+    Ok(RecordFace {
+        surface,
+        nurbs,
+        domain,
+        scale: [1.0, 1.0],
+        agrees: true,
+    })
+}
+
+/// A B-spline surface's NURBS as the record's spline (every weight 1) or rational spline
+/// (homogeneous points copied as NLib holds them), rows along u.
+fn spline_record(s: &BSplineSurface) -> Result<Record> {
+    use crate::nurbs::math::NOW;
+    let nurb = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::invalid_input(OP_BACK, "a B-spline without its NURB"))?;
+    let (u_knots, v_knots) = (nurb.u_knots().to_vec(), nurb.v_knots().to_vec());
+    let polynomial = nurb.rows().flatten().all(|p| p.w == NOW || p.w == 1.0);
+    Ok(if polynomial {
+        Record::Spline {
+            u_knots,
+            v_knots,
+            points: nurb
+                .rows()
+                .map(|r| r.iter().map(|p| [p.x, p.y, p.z]).collect())
+                .collect(),
+        }
+    } else {
+        Record::RationalSpline {
+            u_knots,
+            v_knots,
+            homogeneous: nurb
+                .rows()
+                .map(|r| {
+                    r.iter()
+                        .map(|p| [p.x, p.y, p.z, if p.w == NOW { 1.0 } else { p.w }])
+                        .collect()
+                })
+                .collect(),
+        }
+    })
 }
 
 #[cfg(test)]

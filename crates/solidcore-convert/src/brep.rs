@@ -407,7 +407,8 @@ fn data(k: &Kernel, rec: &r::Brep) -> R<BrepData> {
                                 .get(u.edge as usize)
                                 .ok_or(Unsupported::Invalid("edge"))?;
                             ud.uv_curve = int(d.uv_curves.len())?;
-                            let trim = curves::uv_trim(&crate::curve2(&u.pcurve), interval)?;
+                            let trim =
+                                curves::uv_trim(&crate::curve2(&u.pcurve), interval, made.scale)?;
                             d.uv_curves.push(Keyed {
                                 key: key(),
                                 object: trim,

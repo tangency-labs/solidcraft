@@ -181,3 +181,73 @@ fn a_ball_patch_is_certified_on_its_sphere() {
     )
     .is_err());
 }
+
+/// A cylinder face goes to the record as its label (the kernel's reading of its form) on that
+/// form, over its box, and comes back to the same record; the form labelled a sphere is refused
+/// on the way back.
+#[test]
+fn an_analytic_face_goes_back_as_its_label_on_its_form() {
+    let k = k();
+    let label = Record::Cylinder {
+        frame: frame(),
+        radius: 3.0,
+    };
+    let (net, d) = form::surface(&label, [[0.0, PI], [0.0, 2.0]]).unwrap();
+    let f = face_surface(&k, &label, Some(&net), d).unwrap();
+    let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+    // the kernel's reading of the form: the radius to its rounding
+    assert!(
+        matches!(r.surface, Record::Cylinder { radius, .. } if (radius - 3.0).abs() <= 1e-14),
+        "{:?}",
+        r.surface
+    );
+    assert_eq!(r.nurbs.as_ref(), Some(&net));
+    assert_eq!((r.scale, r.agrees), ([1.0, 1.0], true));
+    let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain).unwrap();
+    assert_eq!(record_face(&k, &back.surface, &back.uv_domain).unwrap(), r);
+    let sphere = Record::Sphere {
+        frame: frame(),
+        radius: 3.0,
+    };
+    assert!(face_surface(&k, &sphere, r.nurbs.as_ref(), r.domain).is_err());
+}
+
+/// A plane goes to the record on its placement, its box its kernel box times its scales; a
+/// plane whose scales have opposite signs is turned over against the record's normal.
+#[test]
+fn a_plane_goes_back_on_its_axes_with_its_scales() {
+    use crate::geom::vector2d::Vec2;
+    use crate::geom::vector3d::Vec3;
+    use crate::surface::plane::Plane;
+    let k = k();
+    let label = Record::Plane {
+        origin: [1.0, 2.0, 3.0],
+        u_axis: [2.0, 0.0, 0.0],
+        v_axis: [0.0, 1.0, 0.0],
+    };
+    let f = face_surface(&k, &label, None, [[0.0, 1.0], [0.0, 3.0]]).unwrap();
+    assert_eq!(f.scale, [2.0, 1.0]);
+    let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+    assert_eq!(
+        r.surface,
+        Record::Plane {
+            origin: [1.0, 2.0, 3.0],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+        }
+    );
+    assert_eq!((r.domain, r.agrees), ([[0.0, 2.0], [0.0, 3.0]], true));
+    let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+    let flipped = Plane::new(
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec2::new(-2.0, 1.0),
+        &dom,
+    );
+    let r = record_face(&k, &Surface::from(flipped), &dom).unwrap();
+    assert_eq!(
+        (r.scale, r.domain, r.agrees),
+        ([-2.0, 1.0], [[-2.0, 0.0], [0.0, 1.0]], false)
+    );
+}

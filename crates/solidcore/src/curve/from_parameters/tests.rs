@@ -223,11 +223,140 @@ fn a_trim_runs_over_its_edges_kernel_interval() {
         knots: vec![1.0, 1.0, 3.0, 3.0],
         points: vec![[0.0, 0.0], [2.0, 4.0]],
     };
-    let t = uv_trim(&c, &Extent1d::from_raw(0.0, 90.0)).unwrap();
+    let t = uv_trim(&c, &Extent1d::from_raw(0.0, 90.0), [1.0, 1.0]).unwrap();
     let crate::curve::curve::CurveKind::BSpline(b) = t.kind() else {
         panic!("not a B-spline")
     };
     assert_eq!(b.gw_nurb().unwrap().knots(), &[0.0, 0.0, 90.0, 90.0]);
     let p = at(&k, &t, 45.0);
     assert_eq!((p.x, p.y), (1.0, 2.0));
+}
+
+/// A kernel line goes to the record by its points at its interval's ends, over [0, 1]: the
+/// same line, its parameter an affine image of the kernel's, and back again unchanged.
+#[test]
+fn a_line_goes_back_by_its_two_end_points() {
+    let k = k();
+    let line = Curve::from(Line::create_canonical(
+        Point3::new(1.0, 2.0, 3.0),
+        Vec3::new(2.0, 0.0, 0.0),
+    ));
+    let r = record_of(&k, &line, &Extent1d::from_raw(0.5, 2.0)).unwrap();
+    assert_eq!(
+        r.curve,
+        Record::Line {
+            start: [2.0, 2.0, 3.0],
+            end: [5.0, 2.0, 3.0],
+        }
+    );
+    assert_eq!((&r.nurbs, r.interval), (&None, [0.0, 1.0]));
+    let back = from_parameters(&k, &r.curve, r.interval).unwrap();
+    assert_eq!(record_of(&k, &back.curve, &back.interval).unwrap(), r);
+}
+
+/// A circle goes to the record as its label on its own frame with its NURBS as its form, proved
+/// on each other (bound 0), and comes back through conic_on_form to the same record. A circle
+/// whose NURBS runs against its angle reverses the frame's y; a NURBS moved off its circle is
+/// refused.
+#[test]
+fn a_circle_goes_back_as_its_label_on_its_form() {
+    let k = k();
+    let circle = Record::Circle {
+        frame: frame([1.0, 2.0, 0.0]),
+        radius: 2.0,
+    };
+    let c = conic_on_form(&k, &circle, &quarter_form([1.0, 2.0, 0.0], 2.0)).unwrap();
+    let crate::curve::curve::CurveKind::Ellipse(e) = c.kind() else {
+        panic!("not a conic")
+    };
+    let ivl = e.base().natural_interval();
+    let r = record_of(&k, &c, &ivl).unwrap();
+    assert_eq!(r.curve, circle);
+    assert_eq!(r.nurbs, Some(quarter_form([1.0, 2.0, 0.0], 2.0)));
+    assert_eq!(r.interval, [ivl.min(), ivl.max()]);
+    let again = conic_on_form(&k, &r.curve, r.nurbs.as_ref().unwrap()).unwrap();
+    assert_eq!(record_of(&k, &again, &ivl).unwrap(), r);
+
+    // the same quarter, its NURBS running clockwise about the frame's z
+    let opts = EllipseOptions {
+        dim: 3,
+        nurb: None,
+        inside_out: true,
+    };
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    let y = Vec3::new(0.0, 1.0, 0.0);
+    let turned = Ellipse::new_circle(
+        &k,
+        Point3::new(1.0, 2.0, 0.0),
+        x,
+        y,
+        Extent1d::from_raw(0.0, 90.0),
+        2.0,
+        &opts,
+    )
+    .unwrap();
+    let turned = Curve::from(turned);
+    let crate::curve::curve::CurveKind::Ellipse(e) = turned.kind() else {
+        panic!("not a conic")
+    };
+    let r = record_of(&k, &turned, &e.base().natural_interval()).unwrap();
+    let Record::Circle { frame: f, .. } = &r.curve else {
+        panic!("{:?}", r.curve)
+    };
+    assert_eq!(f.y_axis, [-0.0, -1.0, -0.0]);
+    conic_on_form(&k, &r.curve, r.nurbs.as_ref().unwrap()).unwrap();
+
+    // a NURBS 1e-9 off the circle's plane
+    let Record::RationalSpline { knots, homogeneous } = quarter_form([1.0, 2.0, 1e-9], 2.0) else {
+        unreachable!()
+    };
+    let moved = spline(&knots, &homogeneous, 3, OP).unwrap();
+    let opts = EllipseOptions {
+        dim: 3,
+        nurb: Some(&moved),
+        inside_out: false,
+    };
+    let off = Ellipse::new_circle(
+        &k,
+        Point3::new(1.0, 2.0, 0.0),
+        x,
+        y,
+        Extent1d::from_raw(0.0, 90.0),
+        2.0,
+        &opts,
+    )
+    .unwrap();
+    let off = Curve::from(off);
+    assert!(record_of(&k, &off, &moved.natural_interval()).is_err());
+}
+
+/// A trim's record keeps its knots where the edge's record interval is its kernel one, maps
+/// them onto [0, 1] for a line's, and scales its points by a plane's scales; uv_trim takes it
+/// back to the same trim.
+#[test]
+fn a_trim_goes_back_onto_its_edges_record_interval() {
+    let k = k();
+    let c = Record2::Spline {
+        knots: vec![0.0, 0.0, 4.0, 4.0],
+        points: vec![[0.0, 0.0], [2.0, 4.0]],
+    };
+    let kernel = Extent1d::from_raw(0.0, 4.0);
+    let t = uv_trim(&c, &kernel, [1.0, 1.0]).unwrap();
+    assert_eq!(
+        record_trim(&k, &t, &kernel, [0.0, 4.0], [1.0, 1.0]).unwrap(),
+        c
+    );
+    let on_line = record_trim(&k, &t, &kernel, [0.0, 1.0], [2.0, 0.5]).unwrap();
+    assert_eq!(
+        on_line,
+        Record2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0], [4.0, 2.0]],
+        }
+    );
+    let back = uv_trim(&on_line, &kernel, [0.5, 2.0]).unwrap();
+    assert_eq!(
+        record_trim(&k, &back, &kernel, [0.0, 4.0], [1.0, 1.0]).unwrap(),
+        c
+    );
 }
