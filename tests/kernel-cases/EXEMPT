@@ -307,7 +307,6 @@ timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
-timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
 view.ambient_occlusion            the view: camera, layout, display
