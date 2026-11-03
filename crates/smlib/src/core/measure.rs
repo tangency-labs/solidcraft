@@ -30,7 +30,7 @@ use crate::{Error, Result};
 const OP: &str = "smlib_measure";
 
 /// The accuracy the C API passes on: finite, clamped to [1e-8, 1e-1].
-fn accuracy(relative_accuracy: f64) -> Result<f64> {
+pub(super) fn accuracy(relative_accuracy: f64) -> Result<f64> {
     if !relative_accuracy.is_finite() {
         return Err(Error::Argument);
     }

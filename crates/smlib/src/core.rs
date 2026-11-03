@@ -533,11 +533,10 @@ pub(crate) fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64)
     run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::new)
 }
 
-/// The enclosed volume (`SmApiBrepComputeVolume`).
+/// The enclosed volume (`SmApiBrepComputeVolume`), its accuracy clamped as [`mass_properties`]
+/// clamps it.
 pub(crate) fn volume(body: &Body, relative_accuracy: f64) -> Result<f64> {
-    if !relative_accuracy.is_finite() {
-        return Err(Error::Argument);
-    }
+    let relative_accuracy = measure::accuracy(relative_accuracy)?;
     with_body("brep_volume", body, |k, b| {
         let store = AttributeStore::default();
         let attrs = PropertyAttributes { store: &store, key_of: &|_| ObjectKey(0) };
