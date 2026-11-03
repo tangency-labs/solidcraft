@@ -288,6 +288,29 @@ fn a_body_cut_in_pieces_twice_gets_pieces_of_their_own_names() {
     assert!(names.contains(&"Bar (2)".to_string()), "{names:?}");
 }
 
+/// The pieces a cut leaves of a body are made of what the body was: each takes its physical
+/// material and appearance. Before, a piece past the first came out with neither.
+#[test]
+fn pieces_cut_off_a_body_keep_its_material_and_appearance() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 5, "height": 5, "body_name": "Bar"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Bar"], "material": "Steel"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Bar"], "color": "#d01c1c"}));
+    run(&mut s, "solid.box", json!({"corner": [19, -1, -1], "length": 2, "width": 7, "height": 7, "body_name": "Gap"}));
+    let r = run(&mut s, "solid.combine", json!({"target": "Bar", "tools": ["Gap"], "operation": "cut"}));
+    let pieces: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(pieces.len(), 2, "{pieces:?} {r}");
+    let look = s.doc.appearances.bodies.get("Bar").cloned();
+    assert!(look.is_some());
+    for piece in &pieces {
+        assert_eq!(s.doc.materials.get(piece).map(String::as_str), Some("Steel"), "{piece}");
+        assert_eq!(s.doc.appearances.bodies.get(piece), look.as_ref(), "{piece}");
+    }
+    // Undone, the cut takes the pieces' material and look with it.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(pieces.iter().filter(|p| *p != "Bar").all(|p| !s.doc.materials.contains_key(p) && !s.doc.appearances.bodies.contains_key(p)));
+}
+
 /// A join that bridges two bodies makes them one body, not an overlap of the first and the second.
 #[test]
 fn extrude_a_face_where_another_body_lies_flush_on_it() {
