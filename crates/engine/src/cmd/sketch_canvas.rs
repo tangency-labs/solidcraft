@@ -229,4 +229,60 @@ mod tests {
         let r = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
         assert!(r["canvas"].is_u64());
     }
+
+    #[test]
+    fn calibrate_maths_and_validation() {
+        let mut s = Session::default();
+        let r = s.execute("canvas.insert", &json!({"data": png(200, 100), "plane": "XY", "width": 100})).unwrap();
+        let id = r["canvas"].as_u64().unwrap();
+        let orig_c = s.doc.canvases[0].clone();
+
+        // 1. Valid calibration with non-origin anchor Point A:
+        // A is at (10, 20), B is at (40, 60). Distance measured = 50.
+        // True desired distance = 100. Scale k = 2.0.
+        let cal = s.execute("canvas.calibrate", &json!({
+            "canvas": id,
+            "a": [10.0, 20.0],
+            "b": [40.0, 60.0],
+            "distance": 100.0
+        })).unwrap();
+        assert_eq!(cal["scale"].as_f64().unwrap(), 2.0);
+        assert_eq!(cal["width"].as_f64().unwrap(), 200.0);
+        assert_eq!(s.doc.canvases[0].width, 200.0);
+
+        // Point A position on image must stay fixed: center' = A + (center - A) * k
+        let expected_center_x = 10.0 + (orig_c.center.x - 10.0) * 2.0;
+        let expected_center_y = 20.0 + (orig_c.center.y - 20.0) * 2.0;
+        assert!((s.doc.canvases[0].center.x - expected_center_x).abs() < 1e-9);
+        assert!((s.doc.canvases[0].center.y - expected_center_y).abs() < 1e-9);
+
+        // 2. Reject identical points (zero distance):
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [5.0, 5.0], "b": [5.0, 5.0], "distance": 50.0
+        })).is_err());
+
+        // 3. Reject non-positive distance:
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 0.0
+        })).is_err());
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": -10.0
+        })).is_err());
+
+        // 4. Reject NaN / infinite coordinates:
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [f64::NAN, 0.0], "b": [10.0, 0.0], "distance": 50.0
+        })).is_err());
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, f64::INFINITY], "distance": 50.0
+        })).is_err());
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": f64::INFINITY
+        })).is_err());
+
+        // 5. Reject extreme out-of-range sizes:
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 1e8
+        })).is_err());
+    }
 }

@@ -402,4 +402,53 @@ mod tests {
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
         }
     }
+
+    /// Direct viewport manipulation: gizmo handles, corner-scaling, drag, and flip buttons.
+    #[test]
+    fn edit_canvas_viewport_gizmo_scale_and_flip_handles() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+
+        // Open Edit Canvas
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, false));
+        h.frames(6);
+
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+
+        // 1. Verify all edit handles exist (center cross, 4 corners, rotation, opacity, 2 flip buttons)
+        let handles = super::edit_handles(&c, &plane, &proj);
+        assert_eq!(handles.len(), 9, "expected 9 edit handles: center, 4 corners, rotate, opacity, flip_h, flip_v");
+
+        // Verify kinds: 0 (center), 1 (corners x 4), 2 (rotate), 3 (opacity), 4 (flip_h), 5 (flip_v)
+        let kinds: Vec<u8> = handles.iter().map(|(k, _)| *k).collect();
+        assert_eq!(kinds, vec![0, 1, 1, 1, 1, 2, 3, 4, 5]);
+
+        // Pointer ownership over handles
+        let center_screen = handles[0].1;
+        assert!(super::owns_pointer(&h.app, &proj, center_screen), "pointer over center handle must own pointer");
+
+        // 2. Click Flip Horizontal button (kind 4)
+        let flip_h_screen = handles.iter().find(|(k, _)| *k == 4).unwrap().1;
+        assert!(!h.app.session.doc.canvases[0].flip);
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), true, true));
+        assert!(h.app.session.doc.canvases[0].flip, "horizontal flip handle must toggle flip to true");
+
+        // Click again to flip back
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), true, true));
+        assert!(!h.app.session.doc.canvases[0].flip, "second horizontal flip click must toggle flip back to false");
+
+        // 3. Click Flip Vertical button (kind 5): toggles flip and adds 180 degrees
+        let flip_v_screen = handles.iter().find(|(k, _)| *k == 5).unwrap().1;
+        let orig_angle = h.app.session.doc.canvases[0].angle;
+        assert!(super::drag(&mut h.app, &proj, Some(flip_v_screen), true, true));
+        let flipped_c = &h.app.session.doc.canvases[0];
+        assert!(flipped_c.flip, "vertical flip must toggle flip");
+        let angle_diff = (flipped_c.angle - (orig_angle + std::f64::consts::PI)).abs();
+        assert!(angle_diff < 1e-6 || (angle_diff - 2.0 * std::f64::consts::PI).abs() < 1e-6, "vertical flip must add 180 degrees");
+    }
 }
