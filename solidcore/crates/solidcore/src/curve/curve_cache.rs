@@ -42,6 +42,10 @@
 //! - **Handle space.** `CurveCache::retag` (not upstream) copies a cache into
 //!   another handle space; the memo of `curve.curve_p5` (`make_curve_cache`) keeps one
 //!   handle-free cache per curve value and hands each caller such a copy.
+//! - **Continuity storage.** Handle-free continuity labels are shared across
+//!   clones and handle conversions. Tessellation appends through copy-on-write,
+//!   so writing one cache leaves the others unchanged. Empty lists have no shared
+//!   allocation.
 //! - **Memory managers.** `m_sBezMgr` / `m_sParentMgr` are `Vec`s; the NLib Bezier
 //!   blocks (`sSegmentBeziersMgr`, `sBezStack`, the working Bezier) are owned
 //!   [`Nurb`] values and a `Vec` used as the split stack (same push/pop order). The
@@ -91,6 +95,8 @@
 //! - **Not ported.** `GetTessellation`, `GetStart`, `GetEnd`, `GetDegree`,
 //!   `GetBrep`, `GetBSplineCurve`, `GetMemoryUsed`, `SetComputeAuxTreeData`, `Dump`
 //!   and `Draw` belong to other units or are debug output.
+
+use std::sync::Arc;
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{at, Curve, CurveKind, FindCurveDistanceExtrema};
@@ -309,7 +315,7 @@ pub struct CurveCache<O> {
     /// `m_pTree`.
     tree: Option<Tree<O>>,
     /// `m_pContinuities`: continuity at every knot of the curve (full trees only).
-    continuities: Vec<ContinuityType>,
+    continuities: Option<Arc<Vec<ContinuityType>>>,
     /// `m_bTriedToCreateAnalytical`.
     tried_analytic: bool,
     /// `m_pAnalyticalCurve`.
@@ -356,7 +362,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             curve_handle: None,
             interval,
             tree: None,
-            continuities: Vec::new(),
+            continuities: None,
             tried_analytic: false,
             analytic: None,
             spans: Vec::new(),
@@ -453,7 +459,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// tessellations (`GetContinuitiesArray`).
     #[must_use]
     pub fn continuities(&self) -> &[ContinuityType] {
-        &self.continuities
+        self.continuities.as_deref().map_or(&[], Vec::as_slice)
     }
 
     /// The leaf spans in curve order (`m_sBezMgr`).
@@ -523,7 +529,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
     /// The continuity of the knot `index` (`(*m_pContinuities)[index]`).
     fn continuity(&self, index: usize) -> Result<ContinuityType> {
-        self.continuities
+        self.continuities()
             .get(index)
             .copied()
             .ok_or_else(|| invalid(OP_TESS, "continuity index out of range"))
@@ -652,7 +658,12 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         // When not simplifying the decomposition-tree
         if self.opts.make_full_tree {
             let (_, conts) = self.curve.calculate_continuities(k, CONTINUITY_ANGLE)?;
-            self.continuities.extend(conts);
+            if !conts.is_empty() {
+                match &mut self.continuities {
+                    Some(current) => Arc::make_mut(current).extend(conts),
+                    None => self.continuities = Some(Arc::new(conts)),
+                }
+            }
         }
 
         // 1. build a Bezier span for each unique-knot span
