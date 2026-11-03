@@ -8,7 +8,8 @@
     clippy::type_complexity,
     clippy::single_match_else,
     clippy::redundant_closure_for_method_calls,
-    clippy::redundant_closure
+    clippy::redundant_closure,
+    clippy::panic
 )] // a test's fixtures
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};

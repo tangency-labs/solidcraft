@@ -46,20 +46,16 @@ use solidcore_record::brep as r;
 
 use super::{Order, Unsupported, R};
 
-fn bad(what: &'static str) -> Unsupported {
-    Unsupported::Invalid(what)
-}
-
 fn index(i: usize) -> R<u32> {
-    u32::try_from(i).map_err(|_| bad("index"))
+    u32::try_from(i).map_err(|_| Unsupported::Invalid("index"))
 }
 
 fn at<T>(v: &[T], i: usize) -> R<&T> {
-    v.get(i).ok_or(bad("index past its list"))
+    v.get(i).ok_or(Unsupported::Invalid("index past its list"))
 }
 
 fn data_index(x: u64) -> R<usize> {
-    usize::try_from(x).map_err(|_| bad("data index"))
+    usize::try_from(x).map_err(|_| Unsupported::Invalid("data index"))
 }
 
 /// One face before renumbering: its record geometry, loops relative to the record's normal as
@@ -128,7 +124,9 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         || edge_ids.len() != bd.edges.len()
         || vertex_ids.len() != bd.vertices.len()
     {
-        return Err(bad("the kernel's data lists differ from its body's"));
+        return Err(Unsupported::Invalid(
+            "the kernel's data lists differ from its body's",
+        ));
     }
     if bd.edgeuses.iter().any(|u| u.eu_type != 0) {
         return Err(Unsupported::NotYet("wire edges"));
@@ -139,7 +137,8 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
     let mut edges = Vec::new();
     let mut kernel_intervals = Vec::new();
     for (i, ed) in bd.edges.iter().enumerate() {
-        let curve = edge::curve(b, *at(&edge_ids, i)?)?.ok_or(bad("an edge without a curve"))?;
+        let curve = edge::curve(b, *at(&edge_ids, i)?)?
+            .ok_or(Unsupported::Invalid("an edge without a curve"))?;
         let made = record_of(k, curve, &ed.interval)?;
         let vertex = |v: u64| -> R<u32> {
             let v = data_index(v)?;
@@ -163,7 +162,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .face(f)?
             .surface
             .as_ref()
-            .ok_or(bad("a face without a surface"))?;
+            .ok_or(Unsupported::Invalid("a face without a surface"))?;
         let made = record_face(k, surface, &fd.uv_domain)?;
         let mut face = Face {
             surface: crate::record_surface(made.surface),
@@ -178,7 +177,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             let ld = at(&bd.loops, data_index(fd.start_loop.saturating_add(l))?)?;
             if ld.loop_type == 1 {
                 if ld.vertex == NO_OBJECT || ld.vertex == UNDEF_ULONG {
-                    return Err(bad("a vertex loop without its vertex"));
+                    return Err(Unsupported::Invalid("a vertex loop without its vertex"));
                 }
                 let v = data_index(ld.vertex)?;
                 at(&vertex_ids, v)?;
@@ -188,7 +187,9 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
                 continue;
             }
             if ld.loop_type != 0 || ld.num_eu == 0 {
-                return Err(bad("a loop that is neither an edge loop nor a vertex loop"));
+                return Err(Unsupported::Invalid(
+                    "a loop that is neither an edge loop nor a vertex loop",
+                ));
             }
             let (mut uses, mut recs, mut pcs) = (Vec::new(), Vec::new(), Vec::new());
             for j in 0..ld.num_eu {
@@ -197,7 +198,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
                 let e = data_index(ud.edge)?;
                 let edge = at(&edges, e)?;
                 if ud.uv_curve == NO_OBJECT {
-                    return Err(bad("an edgeuse without its UV trim"));
+                    return Err(Unsupported::Invalid("an edgeuse without its UV trim"));
                 }
                 let trim = &at(&bd.uv_curves, data_index(ud.uv_curve)?)?.object;
                 let from: &Extent1d = at(&kernel_intervals, e)?;
@@ -214,7 +215,9 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             for l in &mut face.loops {
                 if let Loop::Edges(uses) = l {
                     uses.reverse();
-                    uses.iter_mut().for_each(|u| u.1 = !u.1);
+                    for u in uses.iter_mut() {
+                        u.1 = !u.1;
+                    }
                 }
             }
             face.records.iter_mut().for_each(|r| r.reverse());
@@ -232,7 +235,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         let end = start
             .checked_add(data_index(rd.num_shells)?)
             .filter(|e| *e <= n_shells)
-            .ok_or(bad("region shells"))?;
+            .ok_or(Unsupported::Invalid("region shells"))?;
         for s in start..end {
             if let Some(slot) = region_of.get_mut(s) {
                 *slot = ri;
@@ -241,7 +244,9 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         region_shells.push(start..end);
     }
     if region_shells.first().map(|s| s.start) != Some(0) {
-        return Err(bad("the kernel's data has no infinite region first"));
+        return Err(Unsupported::Invalid(
+            "the kernel's data has no infinite region first",
+        ));
     }
     let void: Vec<bool> = bd.regions.iter().map(|g| g.is_void != 0).collect();
     let material = |r: usize| r > 0 && void.get(r) == Some(&false);
@@ -254,7 +259,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         let end = start
             .checked_add(data_index(sd.num_faceuses)?)
             .filter(|e| *e <= bd.faceuses.len())
-            .ok_or(bad("shell faceuses"))?;
+            .ok_or(Unsupported::Invalid("shell faceuses"))?;
         shell_faceuses.push(start..end);
     }
     let faceuse = |fu: usize| -> R<(usize, bool)> {
@@ -267,7 +272,10 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
     for (s, uses) in shell_faceuses.iter().enumerate() {
         for fu in uses.clone() {
             let (f, same) = faceuse(fu)?;
-            face_uses.get_mut(f).ok_or(bad("face"))?.push((s, same));
+            face_uses
+                .get_mut(f)
+                .ok_or(Unsupported::Invalid("face"))?
+                .push((s, same));
         }
     }
     // Each record shell is one closed boundary of material: the faces of one runtime shell on
@@ -300,21 +308,23 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
                         }
                     }
                 }
-                _ => return Err(bad("a face without its two uses")),
+                _ => return Err(Unsupported::Invalid("a face without its two uses")),
             };
             let agrees = at(&faces, f)?.agrees;
-            let slot = match groups.iter().position(|g| g.side == key) {
-                Some(slot) => slot,
-                None => {
-                    groups.push(Group {
-                        side: key,
-                        empty: Vec::new(),
-                        faces: Vec::new(),
-                    });
-                    groups.len().checked_sub(1).ok_or(bad("shell"))?
-                }
+            let slot = if let Some(slot) = groups.iter().position(|g| g.side == key) {
+                slot
+            } else {
+                groups.push(Group {
+                    side: key,
+                    empty: Vec::new(),
+                    faces: Vec::new(),
+                });
+                groups
+                    .len()
+                    .checked_sub(1)
+                    .ok_or(Unsupported::Invalid("shell"))?
             };
-            let group = groups.get_mut(slot).ok_or(bad("shell"))?;
+            let group = groups.get_mut(slot).ok_or(Unsupported::Invalid("shell"))?;
             if !group.empty.contains(&s) {
                 group.empty.push(s);
             }
@@ -448,7 +458,9 @@ fn tolerances(b: &Brep, edge_ids: &[EdgeId], vertex_ids: &[solidcore::VertexId])
         .copied()
         .fold(intersection_tolerance(body_zone), f64::min);
     if !(body.is_finite() && body > 0.0) {
-        return Err(bad("the body's tolerance is not finite and positive"));
+        return Err(Unsupported::Invalid(
+            "the body's tolerance is not finite and positive",
+        ));
     }
     Ok(Tolerances {
         body,
@@ -474,6 +486,14 @@ struct Group {
     faces: Vec<(u32, bool)>,
 }
 
+/// The root of `r`'s set in the union-find `root`.
+fn find(root: &[usize], mut r: usize) -> usize {
+    while let Some(&up) = root.get(r).filter(|up| **up != r) {
+        r = up;
+    }
+    r
+}
+
 /// The record's regions, each listing its record shells (`groups` by index), outer first.
 ///
 /// A material region is the kernel's own. An empty one is too, except where solids touch
@@ -491,16 +511,15 @@ fn record_regions(
     material: impl Fn(usize) -> bool,
 ) -> R<Vec<r::Region>> {
     let n = region_shells.len();
-    let region = |s: usize| region_of.get(s).copied().ok_or(bad("shell region"));
+    let region = |s: usize| {
+        region_of
+            .get(s)
+            .copied()
+            .ok_or(Unsupported::Invalid("shell region"))
+    };
     // The empty regions each solid's boundary faces, joined (each set's root its lowest
     // region).
     let mut root: Vec<usize> = (0..n).collect();
-    fn find(root: &[usize], mut r: usize) -> usize {
-        while let Some(&up) = root.get(r).filter(|up| **up != r) {
-            r = up;
-        }
-        r
-    }
     for g in groups {
         let mut it = g.empty.iter();
         let Some(&first) = it.next() else { continue };
@@ -640,12 +659,12 @@ fn radial(bd: &BrepData, material_same: Vec<Option<bool>>) -> R<Radial> {
         } else {
             x.checked_neg()
                 .and_then(|y| y.checked_sub(1))
-                .ok_or(bad("radial index"))?
+                .ok_or(Unsupported::Invalid("radial index"))?
         };
         usize::try_from(i)
             .ok()
             .filter(|i| *i < n)
-            .ok_or(bad("radial index"))
+            .ok_or(Unsupported::Invalid("radial index"))
     };
     let (mut next, mut top_entry) = (Vec::new(), Vec::new());
     for (j, eu) in bd.edgeuses.iter().enumerate() {
@@ -657,10 +676,14 @@ fn radial(bd: &BrepData, material_same: Vec<Option<bool>>) -> R<Radial> {
     }
     let mut reached = vec![false; n];
     for (u, &m) in next.iter().enumerate() {
-        let slot = reached.get_mut(m).ok_or(bad("next radial edgeuse"))?;
+        let slot = reached
+            .get_mut(m)
+            .ok_or(Unsupported::Invalid("next radial edgeuse"))?;
         let edge_of = |i: usize| bd.edgeuses.get(i).map(|e| e.edge);
         if *slot || edge_of(u) != edge_of(m) {
-            return Err(bad("a radial list that is not a cycle round its edge"));
+            return Err(Unsupported::Invalid(
+                "a radial list that is not a cycle round its edge",
+            ));
         }
         *slot = true;
     }
@@ -704,7 +727,9 @@ fn canonical(
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
     for shell in &shells {
         for &(f, forward) in shell {
-            let slot = face_new.get_mut(f as usize).ok_or(bad("face"))?;
+            let slot = face_new
+                .get_mut(f as usize)
+                .ok_or(Unsupported::Invalid("face"))?;
             if slot.is_none() {
                 *slot = Some(index(face_order.len())?);
                 face_order.push(f);
@@ -713,13 +738,13 @@ fn canonical(
         }
     }
     if face_order.len() != faces.len() {
-        return Err(bad("a face no shell uses"));
+        return Err(Unsupported::Invalid("a face no shell uses"));
     }
     let mut edge_new: Vec<Option<u32>> = vec![None; edges.len()];
     let mut edge_order = Vec::new();
     let mut edge_uses: Vec<Vec<r::EdgeUseRef>> = Vec::new();
     for (fi, (&f, &forward)) in face_order.iter().zip(&direction).enumerate() {
-        let face = faces.get(f as usize).ok_or(bad("face"))?;
+        let face = faces.get(f as usize).ok_or(Unsupported::Invalid("face"))?;
         for (li, l) in face.loops.iter().enumerate() {
             let Loop::Edges(uses) = l else { continue };
             let n = uses.len();
@@ -727,19 +752,20 @@ fn canonical(
                 let p = if forward {
                     k
                 } else {
-                    n.checked_sub(1 + k).ok_or(bad("loop"))?
+                    n.checked_sub(1 + k).ok_or(Unsupported::Invalid("loop"))?
                 };
-                let &(e, fwd) = uses.get(p).ok_or(bad("loop"))?;
-                let slot = edge_new.get_mut(e as usize).ok_or(bad("edge"))?;
-                let id = match slot {
-                    Some(id) => *id,
-                    None => {
-                        let id = index(edge_order.len())?;
-                        *slot = Some(id);
-                        edge_order.push(e);
-                        edge_uses.push(Vec::new());
-                        id
-                    }
+                let &(e, fwd) = uses.get(p).ok_or(Unsupported::Invalid("loop"))?;
+                let slot = edge_new
+                    .get_mut(e as usize)
+                    .ok_or(Unsupported::Invalid("edge"))?;
+                let id = if let Some(id) = slot {
+                    *id
+                } else {
+                    let id = index(edge_order.len())?;
+                    *slot = Some(id);
+                    edge_order.push(e);
+                    edge_uses.push(Vec::new());
+                    id
                 };
                 let use_ref = r::EdgeUseRef {
                     face: index(fi)?,
@@ -749,7 +775,7 @@ fn canonical(
                 };
                 edge_uses
                     .get_mut(id as usize)
-                    .ok_or(bad("edge"))?
+                    .ok_or(Unsupported::Invalid("edge"))?
                     .push(use_ref);
             }
         }
@@ -763,25 +789,29 @@ fn canonical(
     let mut vertex_new: Vec<Option<u32>> = vec![None; n_vertices];
     let mut vertex_order = Vec::new();
     let mut visit = |v: u32| -> R<u32> {
-        let slot = vertex_new.get_mut(v as usize).ok_or(bad("vertex"))?;
-        Ok(match slot {
-            Some(id) => *id,
-            None => {
-                let id = index(vertex_order.len())?;
-                *slot = Some(id);
-                vertex_order.push(v);
-                id
-            }
+        let slot = vertex_new
+            .get_mut(v as usize)
+            .ok_or(Unsupported::Invalid("vertex"))?;
+        Ok(if let Some(id) = slot {
+            *id
+        } else {
+            let id = index(vertex_order.len())?;
+            *slot = Some(id);
+            vertex_order.push(v);
+            id
         })
     };
     let mut edge_vertices = Vec::new();
     for &e in &edge_order {
-        let [a, z] = edges.get(e as usize).ok_or(bad("edge"))?.vertices;
+        let [a, z] = edges
+            .get(e as usize)
+            .ok_or(Unsupported::Invalid("edge"))?
+            .vertices;
         edge_vertices.push([visit(a)?, visit(z)?]);
     }
     let mut loop_vertices: HashMap<(usize, usize), u32> = HashMap::new();
     for (fi, &f) in face_order.iter().enumerate() {
-        let face = faces.get(f as usize).ok_or(bad("face"))?;
+        let face = faces.get(f as usize).ok_or(Unsupported::Invalid("face"))?;
         for (li, l) in face.loops.iter().enumerate() {
             if let Loop::Vertex(v) = l {
                 loop_vertices.insert((fi, li), visit(*v)?);
@@ -796,12 +826,12 @@ fn canonical(
             .get(e as usize)
             .copied()
             .flatten()
-            .ok_or(bad("edge"))
+            .ok_or(Unsupported::Invalid("edge"))
     };
 
     let mut edge_records = Vec::new();
     for ((&e, vertices), uses) in edge_order.iter().zip(edge_vertices).zip(edge_uses) {
-        let edge = edges.get(e as usize).ok_or(bad("edge"))?;
+        let edge = edges.get(e as usize).ok_or(Unsupported::Invalid("edge"))?;
         let source = *at(&edge_source, e as usize)?;
         edge_records.push(r::Edge {
             nurbs: edge.nurbs.clone(),
@@ -814,16 +844,18 @@ fn canonical(
     }
     let mut face_records = Vec::new();
     for (fi, &f) in face_order.iter().enumerate() {
-        let face = faces.get(f as usize).ok_or(bad("face"))?;
+        let face = faces.get(f as usize).ok_or(Unsupported::Invalid("face"))?;
         let mut loops = Vec::new();
         for (li, (l, pcs)) in face.loops.iter().zip(&face.pcurves).enumerate() {
             loops.push(match l {
                 Loop::Vertex(_) => r::Loop::Vertex {
-                    vertex: *loop_vertices.get(&(fi, li)).ok_or(bad("vertex loop"))?,
+                    vertex: *loop_vertices
+                        .get(&(fi, li))
+                        .ok_or(Unsupported::Invalid("vertex loop"))?,
                 },
                 Loop::Edges(uses) => {
                     if pcs.len() != uses.len() {
-                        return Err(bad("pcurves"));
+                        return Err(Unsupported::Invalid("pcurves"));
                     }
                     let mut out = Vec::new();
                     for (&(e, forward), pcurve) in uses.iter().zip(pcs) {
@@ -862,7 +894,7 @@ fn canonical(
                     .get(f as usize)
                     .copied()
                     .flatten()
-                    .ok_or(bad("face"))?,
+                    .ok_or(Unsupported::Invalid("face"))?,
                 forward,
             });
         }
@@ -909,7 +941,9 @@ fn split_shared(
     let mut shell_of = vec![None; faces.len()];
     for (s, shell) in shells.iter().enumerate() {
         for &(f, _) in shell {
-            *shell_of.get_mut(f as usize).ok_or(bad("face"))? = Some(s);
+            *shell_of
+                .get_mut(f as usize)
+                .ok_or(Unsupported::Invalid("face"))? = Some(s);
         }
     }
     let mut edge_source: Vec<usize> = (0..edges.len()).collect();
@@ -923,22 +957,26 @@ fn split_shared(
         for l in &mut face.loops {
             let Loop::Edges(uses) = l else { continue };
             for (e, _) in uses.iter_mut() {
-                let slot = edge_shell.get_mut(*e as usize).ok_or(bad("edge"))?;
+                let slot = edge_shell
+                    .get_mut(*e as usize)
+                    .ok_or(Unsupported::Invalid("edge"))?;
                 match slot {
                     None => *slot = Some(s),
                     Some(owner) if *owner == s => {}
                     Some(_) => {
-                        let copy = match copies.get(&(*e, s)) {
-                            Some(c) => *c,
-                            None => {
-                                let c = index(edges.len())?;
-                                let original = edges.get(*e as usize).ok_or(bad("edge"))?.clone();
-                                edges.push(original);
-                                edge_source.push(*e as usize);
-                                edge_shell.push(Some(s));
-                                copies.insert((*e, s), c);
-                                c
-                            }
+                        let copy = if let Some(c) = copies.get(&(*e, s)) {
+                            *c
+                        } else {
+                            let c = index(edges.len())?;
+                            let original = edges
+                                .get(*e as usize)
+                                .ok_or(Unsupported::Invalid("edge"))?
+                                .clone();
+                            edges.push(original);
+                            edge_source.push(*e as usize);
+                            edge_shell.push(Some(s));
+                            copies.insert((*e, s), c);
+                            c
                         };
                         *e = copy;
                     }
@@ -951,20 +989,21 @@ fn split_shared(
     let mut vertex_shell: Vec<Option<usize>> = vec![None; n_vertices];
     let mut vertex_copies: HashMap<(u32, usize), u32> = HashMap::new();
     let mut place = |v: &mut u32, s: usize| -> R<()> {
-        let slot = vertex_shell.get_mut(*v as usize).ok_or(bad("vertex"))?;
+        let slot = vertex_shell
+            .get_mut(*v as usize)
+            .ok_or(Unsupported::Invalid("vertex"))?;
         match slot {
             None => *slot = Some(s),
             Some(owner) if *owner == s => {}
             Some(_) => {
-                let copy = match vertex_copies.get(&(*v, s)) {
-                    Some(c) => *c,
-                    None => {
-                        let c = index(vertex_source.len())?;
-                        vertex_source.push(*v as usize);
-                        vertex_shell.push(Some(s));
-                        vertex_copies.insert((*v, s), c);
-                        c
-                    }
+                let copy = if let Some(c) = vertex_copies.get(&(*v, s)) {
+                    *c
+                } else {
+                    let c = index(vertex_source.len())?;
+                    vertex_source.push(*v as usize);
+                    vertex_shell.push(Some(s));
+                    vertex_copies.insert((*v, s), c);
+                    c
                 };
                 *v = copy;
             }
@@ -1013,12 +1052,15 @@ fn split_touching(
         for (li, (l, records)) in face.loops.iter().zip(&face.records).enumerate() {
             let Loop::Edges(uses) = l else { continue };
             if records.len() != uses.len() {
-                return Err(bad("loop records"));
+                return Err(Unsupported::Invalid("loop records"));
             }
             for (p, (&(e, _), &rec)) in uses.iter().zip(records).enumerate() {
-                records_of.get_mut(e as usize).ok_or(bad("edge"))?.push(rec);
+                records_of
+                    .get_mut(e as usize)
+                    .ok_or(Unsupported::Invalid("edge"))?
+                    .push(rec);
                 if place.insert(rec, (f, li, p)).is_some() {
-                    return Err(bad("an edgeuse in two loops"));
+                    return Err(Unsupported::Invalid("an edgeuse in two loops"));
                 }
             }
         }
@@ -1026,7 +1068,12 @@ fn split_touching(
     let crowded: Vec<usize> = (0..edges.len())
         .filter(|e| records_of.get(*e).is_some_and(|r| r.len() > 2))
         .collect();
-    let face_of = |rec: usize| place.get(&rec).map(|p| p.0).ok_or(bad("edgeuse"));
+    let face_of = |rec: usize| {
+        place
+            .get(&rec)
+            .map(|p| p.0)
+            .ok_or(Unsupported::Invalid("edgeuse"))
+    };
     let material_same = |rec: usize| -> R<bool> {
         radial
             .material_same
@@ -1040,7 +1087,7 @@ fn split_touching(
             .top_entry
             .get(rec)
             .copied()
-            .ok_or(bad("radial entry"))
+            .ok_or(Unsupported::Invalid("radial entry"))
     };
     // Whether the sector the traversal leaves a use into, and the one it enters a use from,
     // is material: it leaves from the side it did not enter.
@@ -1049,7 +1096,7 @@ fn split_touching(
 
     for e in crowded {
         let mine = records_of.get(e).cloned().unwrap_or_default();
-        let start = *mine.first().ok_or(bad("edge"))?;
+        let start = *mine.first().ok_or(Unsupported::Invalid("edge"))?;
         // The edge's radial list from one of its uses, keeping this edge's.
         let mut cycle = Vec::new();
         let mut rec = start;
@@ -1063,13 +1110,15 @@ fn split_touching(
             }
         }
         if rec != start || cycle.len() != mine.len() {
-            return Err(bad(
+            return Err(Unsupported::Invalid(
                 "a radial list that does not go once round its edge's uses",
             ));
         }
         let k = cycle.len();
         let around = |i: usize| -> R<usize> {
-            let j = i.checked_rem(k).ok_or(bad("radial list"))?;
+            let j = i
+                .checked_rem(k)
+                .ok_or(Unsupported::Invalid("radial list"))?;
             at(&cycle, j).copied()
         };
         // Sectors alternate material and space, each seen alike from the uses on its sides.
@@ -1107,13 +1156,16 @@ fn split_touching(
                 e
             } else {
                 let made = edges.len();
-                let original = edges.get(e).ok_or(bad("edge"))?.clone();
+                let original = edges.get(e).ok_or(Unsupported::Invalid("edge"))?.clone();
                 edges.push(original);
                 edge_source.push(*at(edge_source, e)?);
                 made
             };
             for rec in [a, c] {
-                let (f, li, p) = place.get(&rec).copied().ok_or(bad("edgeuse"))?;
+                let (f, li, p) = place
+                    .get(&rec)
+                    .copied()
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
                 let slot = faces
                     .get_mut(f)
                     .and_then(|face| face.loops.get_mut(li))
@@ -1124,7 +1176,7 @@ fn split_touching(
                             None
                         }
                     })
-                    .ok_or(bad("edgeuse"))?;
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
                 slot.0 = index(copy)?;
             }
         }

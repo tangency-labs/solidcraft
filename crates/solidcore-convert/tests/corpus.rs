@@ -71,13 +71,13 @@ struct Tally {
 
 /// One body: in as SolidCraft read it, then round. A refusal going in is the kernel's or the
 /// record's (not this test's); going out, it must be a typed refusal, and is listed.
-fn one(name: &str, record: &Record, trusted: bool, fixes: UpstreamFixes, t: &mut Tally) {
+fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mut Tally) {
     t.bodies += 1;
     if std::env::var_os("CORPUS_TRACE").is_some() {
         eprintln!("{name}");
     }
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes = fixes;
+    k.fixes = *fixes;
     let mut b = match to_kernel(&mut k, record, trusted) {
         Ok((b, _)) => b,
         Err(e) => {
@@ -180,7 +180,7 @@ fn a_sample_of_the_corpus_bodies_goes_round_unchanged() {
                 &name,
                 &record,
                 how["trusted"].as_bool().unwrap(),
-                fixes,
+                &fixes,
                 &mut t,
             );
         }
