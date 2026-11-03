@@ -1,8 +1,9 @@
 //! Copy and Paste from the keyboard and the context menu (#1480).
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -368,7 +369,7 @@ fn contribution_occurrence_move_panel_belongs_to_its_document() {
 
 #[test]
 fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
     h.app = contribution_saved_part(&file);
@@ -411,7 +412,8 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
 
 #[test]
 fn contribution_paste_pointer_uses_parent_coordinates_and_safe_fallbacks() {
-    use solidcraft_engine::{doc, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc;
     let mut h = crate::scenario::Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Parent","grounded":false})).unwrap();
     h.app
@@ -690,13 +692,13 @@ fn design_with_cube(name: &str) -> solidcraft_engine::Session {
 #[test]
 fn copied_bodies_paste_into_another_design_as_imported_bodies() {
     let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
-    let was = app.session.world_state().body("Cube").unwrap().mesh().bounds();
+    let was = crate::open_meshing::session_world(&app.session).body("Cube").unwrap().mesh().bounds();
     select(&mut app, json!({"type": "body", "name": "Cube"}));
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, design_with_cube("Frame")).unwrap();
     assert!(super::can_paste(&app) && super::pasting_bodies(&app));
     assert!(super::paste(&mut app, None));
-    let is = app.session.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    let is = crate::open_meshing::session_world(&app.session).body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let feature = app.session.doc.find_feature("Import1").expect("one Import feature");
     assert!(matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Import { .. }));
@@ -880,7 +882,7 @@ fn a_second_placements_body_copies_but_is_not_cut() {
     select(&mut app, json!({"type": "body", "name": seen}));
     assert!(super::copy(&mut app));
     assert!(super::paste(&mut app, None), "{:?}", app.status);
-    let world = app.session.world_state();
+    let world = app.session.world_state().unwrap();
     let (there, copy) = (world.body(&seen).unwrap().mesh().bounds(), world.body("Cube (2)").expect("the copy").mesh().bounds());
     assert!(there.min.dist(copy.min) < 1e-6 && there.max.dist(copy.max) < 1e-6, "{there:?} vs {copy:?}");
 }

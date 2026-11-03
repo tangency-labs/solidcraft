@@ -36,7 +36,7 @@ pub(crate) fn search_actions_row(
             let filter_width = (width.max(minimum) - action_width).max(0.0);
             let response = ui
                 .allocate_ui_with_layout(vec2(filter_width, t.control_height), egui::Layout::left_to_right(Align::Center), |ui| {
-                    search_with_icon(ui, id, value, hint)
+                    search_with_icon(ui, id, value, hint, false)
                 })
                 .inner;
             let mut action = None;
@@ -59,9 +59,14 @@ pub(crate) fn search_actions_row(
 }
 
 /// Native text editing with the same token frame and leading magnifier as command search.
-fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+pub(crate) fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    search_with_icon(ui, id, value, hint, true)
+}
+
+fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, titlebar: bool) -> Response {
     let t = Tokens::get();
-    let (r, frame) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), t.control_height), Sense::click());
+    let height = if titlebar { t.form_close_size } else { t.control_height };
+    let (r, frame) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), height), Sense::click());
     let focused = ui.memory(|m| m.has_focus(id));
     ui.painter().rect(
         r,
@@ -70,10 +75,20 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
         if focused { Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) },
         egui::StrokeKind::Inside,
     );
-    let icon = Rect::from_center_size(pos2(r.left() + t.space_8 + t.space_16 * 0.5, r.center().y), vec2(t.space_16, t.space_16));
+    let side = if titlebar { t.space_14 } else { t.space_16 };
+    let icon = Rect::from_center_size(pos2(r.left() + t.space_8 + side * 0.5, r.center().y), vec2(side, side));
     icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     let show_clear = !value.is_empty();
-    let clear_side = if show_clear { t.control_height } else { 0.0 };
+    let clear_side = if show_clear {
+        height
+    } else if titlebar {
+        super::CommandSearch::key(ui, r.right_center() - vec2(t.space_6, 0.0), "Ctrl F") + t.space_12
+    } else {
+        0.0
+    };
+    if titlebar {
+        crate::scenario::publish_rect("prefs:search:frame", r);
+    }
     let editor =
         Rect::from_min_max(pos2((icon.right() + t.space_6).min(r.right()), r.top()), pos2((r.right() - clear_side).max(icon.right()), r.bottom()));
     let response = ui
@@ -96,7 +111,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
         .inner;
     let mut cleared = false;
     if show_clear {
-        let clear_rect = Rect::from_center_size(pos2(r.right() - t.control_height * 0.5, r.center().y), vec2(t.control_height, t.control_height));
+        let clear_rect = Rect::from_center_size(pos2(r.right() - height * 0.5, r.center().y), vec2(height, height));
         let clear = ui.push_id(id.with("clear"), |ui| super::quiet_icon_button_at(ui, clear_rect, "close", "Clear")).inner;
         if id == egui::Id::new("prefs_search") {
             crate::scenario::publish_handle("prefs:search:clear", clear_rect.center());

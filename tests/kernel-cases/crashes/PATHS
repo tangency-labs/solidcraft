@@ -1,0 +1,21 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Crashes and hangs inside kernel operations: fillets, lofts, patterns, delete face, snap fits,
+# export, measurement and document inspection.
+crates/doc/src/plastic.rs
+crates/engine/src/cmd/delete.rs
+crates/engine/src/cmd/file.rs
+crates/engine/src/cmd/inspect.rs
+crates/engine/src/cmd/measure_sel.rs
+crates/engine/src/cmd/plastic.rs
+crates/kernel/src/blend*.rs
+crates/kernel/src/corner_g2.rs
+crates/kernel/src/delete_face.rs
+crates/kernel/src/fill.rs
+crates/kernel/src/lip.rs
+crates/kernel/src/loft_blend.rs
+crates/kernel/src/loft_rails.rs
+crates/kernel/src/step.rs
+crates/kernel/src/step_out.rs
+crates/step/**

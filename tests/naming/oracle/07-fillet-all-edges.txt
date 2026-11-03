@@ -1,0 +1,88 @@
+# oracle/07-fillet-all-edges: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Box: 26 faces, 48 edges
+Box face F2:side:l1
+Box face F2:side:l2
+Box face F2:side:l3
+Box face F2:side:l4
+Box face F2:start
+Box face F2:top
+Box face F3:blend:F2:side:l1|F2:side:l2#[F2:side:l1,F2:side:l2,F3:blend:F2:side:l2|F2:start]
+Box face F3:blend:F2:side:l1|F2:side:l2#[F3:blend:F2:side:l1|F2:top,F3:blend:F2:side:l2|F2:top]
+Box face F3:blend:F2:side:l1|F2:side:l4
+Box face F3:blend:F2:side:l1|F2:start
+Box face F3:blend:F2:side:l1|F2:top#[F2:side:l1,F2:top,F3:blend:F2:side:l1|F2:side:l2]
+Box face F3:blend:F2:side:l1|F2:top#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l4|F2:top]
+Box face F3:blend:F2:side:l2|F2:side:l3#[F2:side:l2,F2:side:l3,F3:blend:F2:side:l3|F2:start]
+Box face F3:blend:F2:side:l2|F2:side:l3#[F3:blend:F2:side:l2|F2:top,F3:blend:F2:side:l3|F2:top]
+Box face F3:blend:F2:side:l2|F2:start#[F2:side:l2,F2:start,F3:blend:F2:side:l3|F2:start]
+Box face F3:blend:F2:side:l2|F2:start#[F3:blend:F2:side:l1|F2:side:l2,F3:blend:F2:side:l1|F2:start]
+Box face F3:blend:F2:side:l2|F2:top
+Box face F3:blend:F2:side:l3|F2:side:l4#[F2:side:l3,F2:side:l4,F3:blend:F2:side:l4|F2:start]
+Box face F3:blend:F2:side:l3|F2:side:l4#[F3:blend:F2:side:l3|F2:top,F3:blend:F2:side:l4|F2:top]
+Box face F3:blend:F2:side:l3|F2:start#[F2:side:l3,F2:start,F3:blend:F2:side:l4|F2:start]
+Box face F3:blend:F2:side:l3|F2:start#[F3:blend:F2:side:l2|F2:side:l3,F3:blend:F2:side:l2|F2:start]
+Box face F3:blend:F2:side:l3|F2:top
+Box face F3:blend:F2:side:l4|F2:start#[F2:side:l4,F2:start]
+Box face F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l1|F2:start]
+Box face F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l3|F2:side:l4,F3:blend:F2:side:l3|F2:start]
+Box face F3:blend:F2:side:l4|F2:top
+Box edge F2:side:l1|F3:blend:F2:side:l1|F2:side:l2#[F2:side:l1,F2:side:l2,F3:blend:F2:side:l2|F2:start]
+Box edge F2:side:l1|F3:blend:F2:side:l1|F2:side:l4
+Box edge F2:side:l1|F3:blend:F2:side:l1|F2:start
+Box edge F2:side:l1|F3:blend:F2:side:l1|F2:top#[F2:side:l1,F2:top,F3:blend:F2:side:l1|F2:side:l2]
+Box edge F2:side:l2|F3:blend:F2:side:l1|F2:side:l2#[F2:side:l1,F2:side:l2,F3:blend:F2:side:l2|F2:start]
+Box edge F2:side:l2|F3:blend:F2:side:l2|F2:side:l3#[F2:side:l2,F2:side:l3,F3:blend:F2:side:l3|F2:start]
+Box edge F2:side:l2|F3:blend:F2:side:l2|F2:start#[F2:side:l2,F2:start,F3:blend:F2:side:l3|F2:start]
+Box edge F2:side:l2|F3:blend:F2:side:l2|F2:top
+Box edge F2:side:l3|F3:blend:F2:side:l2|F2:side:l3#[F2:side:l2,F2:side:l3,F3:blend:F2:side:l3|F2:start]
+Box edge F2:side:l3|F3:blend:F2:side:l3|F2:side:l4#[F2:side:l3,F2:side:l4,F3:blend:F2:side:l4|F2:start]
+Box edge F2:side:l3|F3:blend:F2:side:l3|F2:start#[F2:side:l3,F2:start,F3:blend:F2:side:l4|F2:start]
+Box edge F2:side:l3|F3:blend:F2:side:l3|F2:top
+Box edge F2:side:l4|F3:blend:F2:side:l1|F2:side:l4
+Box edge F2:side:l4|F3:blend:F2:side:l3|F2:side:l4#[F2:side:l3,F2:side:l4,F3:blend:F2:side:l4|F2:start]
+Box edge F2:side:l4|F3:blend:F2:side:l4|F2:start#[F2:side:l4,F2:start]
+Box edge F2:side:l4|F3:blend:F2:side:l4|F2:top
+Box edge F2:start|F3:blend:F2:side:l1|F2:start
+Box edge F2:start|F3:blend:F2:side:l2|F2:start#[F2:side:l2,F2:start,F3:blend:F2:side:l3|F2:start]
+Box edge F2:start|F3:blend:F2:side:l3|F2:start#[F2:side:l3,F2:start,F3:blend:F2:side:l4|F2:start]
+Box edge F2:start|F3:blend:F2:side:l4|F2:start#[F2:side:l4,F2:start]
+Box edge F2:top|F3:blend:F2:side:l1|F2:top#[F2:side:l1,F2:top,F3:blend:F2:side:l1|F2:side:l2]
+Box edge F2:top|F3:blend:F2:side:l2|F2:top
+Box edge F2:top|F3:blend:F2:side:l3|F2:top
+Box edge F2:top|F3:blend:F2:side:l4|F2:top
+Box edge F3:blend:F2:side:l1|F2:side:l2#[F2:side:l1,F2:side:l2,F3:blend:F2:side:l2|F2:start]|F3:blend:F2:side:l1|F2:side:l2#[F3:blend:F2:side:l1|F2:top,F3:blend:F2:side:l2|F2:top]
+Box edge F3:blend:F2:side:l1|F2:side:l2#[F2:side:l1,F2:side:l2,F3:blend:F2:side:l2|F2:start]|F3:blend:F2:side:l2|F2:start#[F3:blend:F2:side:l1|F2:side:l2,F3:blend:F2:side:l1|F2:start]
+Box edge F3:blend:F2:side:l1|F2:side:l2#[F3:blend:F2:side:l1|F2:top,F3:blend:F2:side:l2|F2:top]|F3:blend:F2:side:l1|F2:top#[F2:side:l1,F2:top,F3:blend:F2:side:l1|F2:side:l2]
+Box edge F3:blend:F2:side:l1|F2:side:l2#[F3:blend:F2:side:l1|F2:top,F3:blend:F2:side:l2|F2:top]|F3:blend:F2:side:l2|F2:top
+Box edge F3:blend:F2:side:l1|F2:side:l4|F3:blend:F2:side:l1|F2:top#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l4|F2:top]
+Box edge F3:blend:F2:side:l1|F2:side:l4|F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l1|F2:start]
+Box edge F3:blend:F2:side:l1|F2:start|F3:blend:F2:side:l2|F2:start#[F3:blend:F2:side:l1|F2:side:l2,F3:blend:F2:side:l1|F2:start]
+Box edge F3:blend:F2:side:l1|F2:start|F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l1|F2:start]
+Box edge F3:blend:F2:side:l1|F2:top#[F2:side:l1,F2:top,F3:blend:F2:side:l1|F2:side:l2]|F3:blend:F2:side:l1|F2:top#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l4|F2:top]
+Box edge F3:blend:F2:side:l1|F2:top#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l4|F2:top]|F3:blend:F2:side:l4|F2:top
+Box edge F3:blend:F2:side:l2|F2:side:l3#[F2:side:l2,F2:side:l3,F3:blend:F2:side:l3|F2:start]|F3:blend:F2:side:l2|F2:side:l3#[F3:blend:F2:side:l2|F2:top,F3:blend:F2:side:l3|F2:top]
+Box edge F3:blend:F2:side:l2|F2:side:l3#[F2:side:l2,F2:side:l3,F3:blend:F2:side:l3|F2:start]|F3:blend:F2:side:l3|F2:start#[F3:blend:F2:side:l2|F2:side:l3,F3:blend:F2:side:l2|F2:start]
+Box edge F3:blend:F2:side:l2|F2:side:l3#[F3:blend:F2:side:l2|F2:top,F3:blend:F2:side:l3|F2:top]|F3:blend:F2:side:l2|F2:top
+Box edge F3:blend:F2:side:l2|F2:side:l3#[F3:blend:F2:side:l2|F2:top,F3:blend:F2:side:l3|F2:top]|F3:blend:F2:side:l3|F2:top
+Box edge F3:blend:F2:side:l2|F2:start#[F2:side:l2,F2:start,F3:blend:F2:side:l3|F2:start]|F3:blend:F2:side:l2|F2:start#[F3:blend:F2:side:l1|F2:side:l2,F3:blend:F2:side:l1|F2:start]
+Box edge F3:blend:F2:side:l2|F2:start#[F2:side:l2,F2:start,F3:blend:F2:side:l3|F2:start]|F3:blend:F2:side:l3|F2:start#[F3:blend:F2:side:l2|F2:side:l3,F3:blend:F2:side:l2|F2:start]
+Box edge F3:blend:F2:side:l3|F2:side:l4#[F2:side:l3,F2:side:l4,F3:blend:F2:side:l4|F2:start]|F3:blend:F2:side:l3|F2:side:l4#[F3:blend:F2:side:l3|F2:top,F3:blend:F2:side:l4|F2:top]
+Box edge F3:blend:F2:side:l3|F2:side:l4#[F2:side:l3,F2:side:l4,F3:blend:F2:side:l4|F2:start]|F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l3|F2:side:l4,F3:blend:F2:side:l3|F2:start]
+Box edge F3:blend:F2:side:l3|F2:side:l4#[F3:blend:F2:side:l3|F2:top,F3:blend:F2:side:l4|F2:top]|F3:blend:F2:side:l3|F2:top
+Box edge F3:blend:F2:side:l3|F2:side:l4#[F3:blend:F2:side:l3|F2:top,F3:blend:F2:side:l4|F2:top]|F3:blend:F2:side:l4|F2:top
+Box edge F3:blend:F2:side:l3|F2:start#[F2:side:l3,F2:start,F3:blend:F2:side:l4|F2:start]|F3:blend:F2:side:l3|F2:start#[F3:blend:F2:side:l2|F2:side:l3,F3:blend:F2:side:l2|F2:start]
+Box edge F3:blend:F2:side:l3|F2:start#[F2:side:l3,F2:start,F3:blend:F2:side:l4|F2:start]|F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l3|F2:side:l4,F3:blend:F2:side:l3|F2:start]
+Box edge F3:blend:F2:side:l4|F2:start#[F2:side:l4,F2:start]|F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l1|F2:side:l4,F3:blend:F2:side:l1|F2:start]
+Box edge F3:blend:F2:side:l4|F2:start#[F2:side:l4,F2:start]|F3:blend:F2:side:l4|F2:start#[F3:blend:F2:side:l3|F2:side:l4,F3:blend:F2:side:l3|F2:start]
+ref Fillet1 (3) edge 0 `F2:side:l3|F2:start` -> Box edge F2:side:l3|F2:start
+ref Fillet1 (3) edge 1 `F2:side:l3|F2:side:l4` -> Box edge F2:side:l3|F2:side:l4
+ref Fillet1 (3) edge 2 `F2:side:l3|F2:top` -> Box edge F2:side:l3|F2:top
+ref Fillet1 (3) edge 3 `F2:side:l2|F2:side:l3` -> Box edge F2:side:l2|F2:side:l3
+ref Fillet1 (3) edge 4 `F2:side:l2|F2:start` -> Box edge F2:side:l2|F2:start
+ref Fillet1 (3) edge 5 `F2:side:l2|F2:top` -> Box edge F2:side:l2|F2:top
+ref Fillet1 (3) edge 6 `F2:side:l1|F2:side:l2` -> Box edge F2:side:l1|F2:side:l2
+ref Fillet1 (3) edge 7 `F2:side:l1|F2:start` -> Box edge F2:side:l1|F2:start
+ref Fillet1 (3) edge 8 `F2:side:l1|F2:top` -> Box edge F2:side:l1|F2:top
+ref Fillet1 (3) edge 9 `F2:side:l1|F2:side:l4` -> Box edge F2:side:l1|F2:side:l4
+ref Fillet1 (3) edge 10 `F2:side:l4|F2:start` -> Box edge F2:side:l4|F2:start
+ref Fillet1 (3) edge 11 `F2:side:l4|F2:top` -> Box edge F2:side:l4|F2:top

@@ -3,17 +3,18 @@
 //! belong to their feature's component unless moved; occurrences place components (instances
 //! share contents, "paste new" copies them) and can be grounded and moved.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
-use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::component::{
-    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, OccurrenceAlignParams,
-    OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams,
+    MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -21,6 +22,7 @@ use crate::{Result, Session};
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
+const MOVE_SKETCHES_TO_PARTS_CONTRACT: TypedContract<MoveSketchesToPartsParams> = TypedContract::new();
 const REPARENT_ITEMS_CONTRACT: TypedContract<ReparentItemsParams> = TypedContract::new();
 
 #[path = "component_align.rs"]
@@ -41,9 +43,15 @@ pub(super) mod properties;
 mod reparent;
 #[path = "component_reparent_items.rs"]
 mod reparent_items;
+#[path = "component_sketches_to_parts.rs"]
+mod sketches_to_parts;
 #[path = "component_transfer.rs"]
 mod transfer;
 
+#[cfg(test)]
+#[path = "component_history_tests.rs"]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod history_tests;
 #[cfg(test)]
 #[path = "occurrence_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -53,6 +61,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
         .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
+    CommandSpec::new("component.show_history", "Show Component History", show_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
     CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
@@ -122,7 +136,21 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches)
         .icon("move")
-        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world)"),
+        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+    CommandSpec::new(
+        "component.move_sketches.to_parts",
+        "Move Sketches to Their Parts",
+        crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
+    )
+    .icon("move")
+    .contract(&MOVE_SKETCHES_TO_PARTS_CONTRACT)
+    .output(output_schema_for::<MoveSketchesToPartsResult>)
+    .params(
+        "sketches?: [ids or names] (default: every sketch in the design) → moved, stayed, sketches [{sketch, name, component, part}], \
+         kept [{sketch, name, code, reason}]. Each sketch whose plane is an exactly attached face of a part's body goes to that part, as \
+         component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
+         plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
+    ),
     CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
         .icon("move")
         .contract(&MOVE_FEATURES_CONTRACT)
@@ -209,17 +237,7 @@ fn move_vector(p: &Value, key: &str, default: Vec3, coordinate: bool, cmd: &str)
 }
 
 pub(super) fn valid_position(m: &Mat) -> bool {
-    let column = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
-    let (x, y, z) = (column(0), column(1), column(2));
-    m.iter().flatten().all(|x| x.is_finite())
-        && m[3][..3].iter().all(|x| x.abs() <= 1e9)
-        && [x, y, z].iter().all(|axis| (axis.dot(*axis) - 1.0).abs() < 1e-6)
-        && x.dot(y).abs() < 1e-6
-        && x.dot(z).abs() < 1e-6
-        && y.dot(z).abs() < 1e-6
-        && x.cross(y).dot(z) > 0.0
-        && [m[0][3], m[1][3], m[2][3]].iter().all(|x| x.abs() < 1e-9)
-        && (m[3][3] - 1.0).abs() < 1e-9
+    solidcraft_doc::is_placement(m)
 }
 
 pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
@@ -520,6 +538,7 @@ fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`sketches` must list sketches"));
     }
     for id in &ids {
+        sketches_to_parts::reauthor(s, *id, to, cmd)?;
         if let Some(f) = s.doc_mut().feature_mut(*id) {
             f.component = to;
         }
@@ -551,8 +570,8 @@ pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let m = if bool_(p, "in_place") == Some(true) {
         placing::in_place(s, &occurrence_path(s, p, src.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?
     } else {
-        let base = s.pending_moves.get(&src.id).unwrap_or(&src.transform);
-        solidcraft_doc::mat_mul(&translation(t), base)
+        let base = s.uncaptured_moves().get(&src.id).copied().unwrap_or(src.transform);
+        solidcraft_doc::mat_mul(&translation(t), &base)
     };
     if !valid_position(&m) {
         return Err(bad(cmd, "copy transform exceeds supported numeric range"));
@@ -590,7 +609,7 @@ fn paste_new(s: &mut Session, p: &Value) -> Result<Value> {
     let transform = match occ.as_ref().filter(|_| bool_(p, "in_place") == Some(true)) {
         Some(o) => placing::in_place(s, &occurrence_path(s, p, o.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?,
         None => {
-            let base = occ.as_ref().map(|o| s.pending_moves.get(&o.id).copied().unwrap_or(o.transform)).unwrap_or(solidcraft_doc::IDENTITY);
+            let base = occ.as_ref().map(|o| s.uncaptured_moves().get(&o.id).copied().unwrap_or(o.transform)).unwrap_or(solidcraft_doc::IDENTITY);
             solidcraft_doc::mat_mul(&translation(t), &base)
         }
     };
@@ -681,7 +700,7 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
     let delta = if space == "world" {
-        let placement = s.occurrence_placement(path.as_deref().unwrap_or(&[]))?;
+        let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
         let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
         solidcraft_doc::mat_mul(&solidcraft_doc::mat_mul(&inverse, &delta), &placement.parent_world)
     } else {
@@ -700,7 +719,7 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         }
         base
     } else {
-        s.pending_moves.get(&id).copied().unwrap_or(o.transform)
+        s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
     if !valid_position(&next) {
@@ -732,7 +751,9 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
-    let moves = std::mem::take(&mut s.pending_moves);
+    // The exploded view is shown, never captured: it stays shown, the design keeps its placements.
+    let moves = s.uncaptured_moves().into_owned();
+    s.pending_moves.retain(|id, _| !moves.contains_key(id));
     let n = moves.len();
     for (id, m) in moves {
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
@@ -788,4 +809,22 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     c.identification_color = Some(next);
     s.colored_components = Some(());
     Ok(json!({"component": id, "color": next}))
+}
+
+/// Mark a component's features out of the History bar, or back in (#10393). The features still
+/// rebuild; only the History bar leaves them out.
+fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value> {
+    let cmd = if hidden { "component.hide_history" } else { "component.show_history" };
+    let id = component(s, p, "component", cmd)?;
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.history_hidden = hidden;
+    Ok(json!({"component": id, "history_hidden": hidden}))
+}
+
+fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, true)
+}
+
+fn show_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, false)
 }

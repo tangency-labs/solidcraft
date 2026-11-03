@@ -137,6 +137,7 @@ fn handshake_and_tools_list() {
         "set_parameter",
         "check_parameters",
         "screenshot",
+        "compare_picture",
         "export",
         "undo",
         "redo",
@@ -809,6 +810,13 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(r["result"]["isError"], true);
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("solid.extrude"));
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    // `names_only` passes through, directly and as a batch step.
+    let n = tool(&mut s, "measure", json!({"names_only": true}));
+    assert_eq!(n["body_count"], 2, "{n}");
+    assert!(n["bodies"][0]["name"].is_string() && n["bodies"][0].get("volume_mm3").is_none(), "{n}");
+    assert_eq!(tool(&mut s, "measure", json!({"names_only": true, "summary": true})), n, "summary has nothing to narrow in a names list");
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "measure", "params": {"names_only": true, "summary": true}}]}));
+    assert!(r.to_string().contains("\"definition\""), "{r}");
 }
 
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
@@ -826,6 +834,23 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
+}
+
+/// A step with its parameters under another key (`args`) refuses the batch before its first
+/// step, naming the key, instead of running the command without them.
+#[test]
+fn batch_refuses_a_step_with_an_unknown_key() {
+    let mut s = server();
+    let steps = json!([
+        {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+        {"command": "sketch.create", "args": {"plane": "XY"}},
+    ]);
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
 /// #5822: with `coalesce_parameters` a batch of parameter edits, one per step, rebuilds the
@@ -988,12 +1013,15 @@ fn a_batch_with_a_matching_expect_reports_the_expectation_met() {
     let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
     let r = tool(&mut s, "batch", json!({"commands": [box40]}));
     assert!(r.get("expectation").is_none(), "{r}");
-    // `expect` is the tool's argument, not a step key: a step carrying one runs as any step with
-    // a stray key does, and nothing is checked.
+    // `expect` is the tool's argument, not a step key: a step carrying one is refused, as any step
+    // with a stray key is, saying where `expect` goes, instead of running with nothing checked.
     let sphere = json!({"command": "solid.sphere", "params": {"radius": 5, "center": [100, 0, 0]}, "expect": {"bodies": 7}});
-    let r = tool(&mut s, "batch", json!({"commands": [sphere]}));
-    assert_eq!(r["completed"], 1, "{r}");
-    assert!(r.get("expectation").is_none() && r["results"][0].get("expectation").is_none(), "{r}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [sphere]}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(0)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("`expect` is the batch's argument")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1, "the sphere did not run");
 }
 
 /// A volume the design does not match flags the reply as an error that names the mismatch
@@ -1244,6 +1272,77 @@ fn tool_unknown_command_errors_explain_packed_params() {
     assert!(body["failed"]["error"].as_str().unwrap().contains("command ids have no parameters; pass them in `params`"), "{body}");
 }
 
+/// #10678: through direct `execute`, an unknown command id that is exactly a registered
+/// MCP tool name gets the namespace hint instead of unrelated closest-command suggestions.
+#[test]
+fn tool_name_command_ids_get_namespace_hint_via_execute() {
+    let mut s = server();
+    for id in ["execute", "list_commands", "describe_command", "screenshot"] {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {}}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(&format!("unknown command `{id}`")), "{text}");
+        assert!(text.contains(&format!("`{id}` is an MCP tool, not an engine command id")), "{text}");
+        assert!(text.contains("tools/list") && text.contains("list_commands"), "{text}");
+        assert!(!text.contains("closest:"), "{text}");
+    }
+}
+
+/// #10678: the direct `describe_command` hint inspects the requested `id`, not the outer
+/// `engine.describe` command `exec` sees.
+#[test]
+fn tool_name_command_ids_get_namespace_hint_via_describe_command() {
+    let mut s = server();
+    for id in ["execute", "list_commands"] {
+        let r = raw_tool(&mut s, "describe_command", json!({"id": id}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(&format!("unknown command `{id}`")), "{text}");
+        assert!(text.contains(&format!("`{id}` is an MCP tool, not an engine command id")), "{text}");
+        assert!(!text.contains("engine.describe"), "{text}");
+    }
+    // Control: a valid engine command id still describes itself.
+    let r = raw_tool(&mut s, "describe_command", json!({"id": "solid.box"}));
+    assert_ne!(r["result"]["isError"], true, "{r}");
+}
+
+/// #10678: an engine-id typo keeps its closest-command suggestions; the tool-name hint is
+/// only for exact registered tool names.
+#[test]
+fn engine_command_id_typo_still_gets_closest_suggestions() {
+    let mut s = server();
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.bxo"}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("closest: `solid.box`"), "{text}");
+    assert!(!text.contains("MCP tool"), "{text}");
+}
+
+/// #10678: a genuinely unknown id keeps the ordinary unknown-command error on both paths.
+#[test]
+fn genuinely_unknown_command_id_keeps_the_ordinary_error() {
+    let mut s = server();
+    for (name, args) in [("execute", json!({"command": "madeup.thing"})), ("describe_command", json!({"id": "madeup.thing"}))] {
+        let r = raw_tool(&mut s, name, args);
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("unknown command `madeup.thing`"), "{text}");
+        assert!(!text.contains("MCP tool"), "{text}");
+    }
+}
+
+/// #10678: a valid engine command id that overlaps a tool name resolves as a command —
+/// the engine accepts it before any tool-name hint could apply.
+#[test]
+fn valid_engine_command_id_overlapping_a_tool_name_resolves_as_command() {
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(json!({})) };
+    let r = crate::tools::call_tool(&mut b, "execute", &json!({"command": "measure"}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("measure"), "{r}");
+    let r = crate::tools::call_tool(&mut b, "describe_command", &json!({"id": "measure"}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+}
+
 fn hostile_values() -> Vec<Value> {
     vec![
         Value::Null,
@@ -1369,6 +1468,46 @@ fn legacy_design_files_and_resource_uris() {
     tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
     assert!(old.is_file() && new.is_file(), "save as leaves the old file");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `compare_picture` (#1486): the overlay comes back as an image block and the numbers as text.
+#[test]
+fn compare_picture_returns_the_overlay_as_an_image() {
+    use image::ImageEncoder as _;
+    use std::io::Cursor;
+    // A scoped server, like `solidcraft-cli mcp`: the reference must be inside the folders.
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-compare-{}", std::process::id()));
+    let recovery = base.join("recovery");
+    std::fs::create_dir_all(&recovery).unwrap();
+    let scope = crate::agent_scope_with(Some(recovery.clone()), []);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(scope));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 30}}));
+    // A white rectangle on grey with the box's front-view proportions (20 x 30 mm).
+    let (w, h) = (200u32, 300u32);
+    let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([200, 200, 200, 255]));
+    for y in 20..280 {
+        for x in 20..180 {
+            img.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+        }
+    }
+    let mut png = Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgba8).unwrap();
+    let path = recovery.join("target.png");
+    std::fs::write(&path, png.into_inner()).unwrap();
+
+    let r = raw_tool(&mut s, "compare_picture", json!({"reference": path.to_string_lossy(), "view": "front"}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    let content = r["result"]["content"].as_array().unwrap().clone();
+    assert_eq!(content[0]["type"], "image", "{content:?}");
+    assert_eq!(content[0]["mimeType"], "image/png");
+    assert!(content[0]["data"].as_str().unwrap().starts_with("iVBORw0KGgo"), "not a PNG");
+    let info: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert!(info["overlap"].as_f64().unwrap() > 0.9, "{info}");
+    assert!(info.get("overlay_png").is_none(), "the base64 blob belongs in the image block only");
+    // A reference outside the server's folders is refused through the existing path rules.
+    let outside = raw_tool(&mut s, "compare_picture", json!({"reference": "/etc/hostname"}));
+    assert_eq!(outside["result"]["isError"], json!(true), "{outside}");
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The default folders (#205): the recovery folder works out of the box, `screenshot` without a
@@ -1613,6 +1752,39 @@ fn a_bridged_request_carries_the_agents_folders() {
     assert_eq!(got["command"], "file.new");
     assert_eq!(got["sent_token"], "0123456789abcdef0123456789abcdef");
     echo.join().unwrap();
+}
+
+/// A server started before its first tool call keeps no connection waiting (the app closes one
+/// that shows no token in time), and a call on a connection the app has closed meanwhile goes out
+/// on a new one without an error.
+#[test]
+fn a_bridge_holds_no_idle_connection_and_survives_one_closed_before_its_first_call() {
+    use std::io::{BufRead, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (mut probe, _) = listener.accept().unwrap();
+        probe.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+        assert_eq!(probe.read(&mut [0u8; 1]).unwrap(), 0, "the probe closes at once and sends nothing");
+        // The connection the second bridge makes first: closed unanswered, as a timed-out one is.
+        drop(listener.accept().unwrap());
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            writeln!(&stream, "{}", json!({"id": req["id"], "ok": true, "result": {"method": req["method"]}})).unwrap();
+        }
+    });
+    let token = "0123456789abcdef0123456789abcdef";
+    let mut early = crate::Remote::new(&addr, Some(token));
+    early.try_connect().unwrap();
+    let mut idle = crate::Remote::connect_with_token(&addr, Some(token)).unwrap();
+    let got = crate::Backend::call(&mut early, "ui.view", json!({})).unwrap();
+    assert_eq!(got["method"], "ui.view", "{got}");
+    let got = crate::Backend::call(&mut idle, "ui.view", json!({})).unwrap();
+    assert_eq!(got["method"], "ui.view", "{got}");
+    app.join().unwrap();
 }
 
 /// #7181, bridged: once the agent has saved a design through the app, that file's folder goes

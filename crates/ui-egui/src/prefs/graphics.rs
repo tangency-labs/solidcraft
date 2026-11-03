@@ -169,6 +169,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let response = ui_kit::checkbox(ui, app.tr("ui.cosmetic_thread_markings"), &mut app.preferences.cosmetic_threads)
             .on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
         crate::scenario::publish_handle("prefs:cosmetic_threads", response.rect.center());
+        ui_kit::row(ui, app.tr("prefs.section_hatch"), |ui| {
+            let styles = [crate::prefs::SectionHatch::One, crate::prefs::SectionHatch::ByPart];
+            let mut selected = styles.iter().position(|s| *s == app.preferences.section_hatch).unwrap_or(1);
+            if ui_kit::segmented(ui, &mut selected, &[app.tr("prefs.section_hatch_one"), app.tr("prefs.section_hatch_by_part")], Default::default())
+                && let Some(style) = styles.get(selected)
+            {
+                app.preferences.section_hatch = *style;
+            }
+        });
         ui.columns(2, |columns| {
             if let Some(left) = columns.get_mut(0) {
                 ui_kit::checkbox(left, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
@@ -179,8 +188,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
                         .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 });
+                setting::profile_operations(app, left).on_hover_text(app.tr("prefs.profile_operations_note"));
                 crate::prefs::view_angles_checkbox(app, left);
                 setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
+                let tint_new = setting::preview_tint_new_faces(app, left).on_hover_text(app.tr("prefs.preview_tint_new_faces_help"));
+                crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
+                let cut_tint = setting::cut_preview_tint(app, left).on_hover_text(app.tr("prefs.cut_preview_tint_help"));
+                crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
                 setting::sketch_halo(app, left);
                 setting::vertex_markers(app, left);
             }
@@ -189,12 +203,29 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 right.add_enabled_ui(app.ui.show_grid, |ui| {
                     setting::grid_follows_view(app, ui);
                 });
-                let response = setting::measure_axis_distances(app, right);
-                crate::scenario::publish_rect("prefs:measure_axis_distances", response.rect);
-                response.on_hover_text(app.tr("settings.measure_axis_distances_help"));
             }
         });
         ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::quick_measure(app, ui).on_hover_text(app.tr("prefs.quick_measure_note"));
+                crate::scenario::publish_target("prefs:quick_measure", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_analysis_status(app, ui).on_hover_text(app.tr("prefs.viewport_analysis_status_help"));
+                crate::scenario::publish_target("prefs:viewport_analysis_status", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_section_status(app, ui).on_hover_text(app.tr("prefs.viewport_section_status_help"));
+                crate::scenario::publish_target("prefs:viewport_section_status", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_status_details(app, ui).on_hover_text(app.tr("prefs.viewport_status_details_help"));
+                crate::scenario::publish_target("prefs:viewport_status_details", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_status_summary(app, ui).on_hover_text(app.tr("prefs.viewport_status_summary_help"));
+                crate::scenario::publish_target("prefs:viewport_status_summary", check.rect);
+            });
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
                 let mut selected = usize::from(app.ui.visual_style.min(3));
                 ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);

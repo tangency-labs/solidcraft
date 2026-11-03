@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 h30 shelled 1 mm, open at the top",
+ "source": "analytic",
+ "method": "cavity r9 x 29",
+ "body_count": 1,
+ "volume_mm3": 2045.176817487,
+ "faces": 5
+}

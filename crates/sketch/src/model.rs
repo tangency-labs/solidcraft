@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Seg2, Vec2, Vec3};
+use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 
 use crate::union_find::{find, union};
 
@@ -8,6 +10,8 @@ pub const MAX_POINTS: usize = 20_000;
 pub const MAX_CONSTRAINTS: usize = 40_000;
 /// Curves need points, so this follows the point cap.
 pub const MAX_CURVES: usize = MAX_POINTS;
+// [`SketchError::TooLarge`]'s message names this number; keep them matched (#10874).
+const _: () = assert!(MAX_POINTS == 20_000);
 
 /// Largest coordinate or dimension value (mm) a sketch accepts.
 pub const MAX_COORD: f64 = 1e9;
@@ -37,7 +41,12 @@ pub enum SketchError {
     Duplicate(String),
     #[error("invalid value: {0}")]
     Invalid(String),
-    #[error("sketch is too large")]
+    /// Cap hit on points, curves or constraints ([`MAX_POINTS`], [`MAX_CURVES`],
+    /// [`MAX_CONSTRAINTS`]). Insert SVG/DXF of a dense drawing (a floorplan) often hits this;
+    /// scale alone does not reduce how many curves the file has (#10874).
+    #[error(
+        "sketch is too large (at most 20000 points or curves); simplify the drawing or split it across sketches — changing scale does not reduce how many curves it has"
+    )]
     TooLarge,
 }
 
@@ -104,6 +113,10 @@ pub enum CurveKind {
         /// Explicit cyclic C2 fit interpolation; absent retains natural endpoints.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         periodic: bool,
+        /// A control spline's own knots and weights (a projected free-form edge as the exact
+        /// curve it is); none: the clamped uniform B-spline over its points, all weights 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nurbs: Option<crate::Nurbs>,
     },
     /// Conic from `a` to `b` shaped by the `apex` point and `rho` in (0, 1) (0.5 parabola,
     /// less elliptical, more hyperbolic).
@@ -827,9 +840,13 @@ impl Sketch {
     }
 
     pub fn point_index(&self, id: &str) -> Option<usize> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
         self.points.iter().position(|p| p.id == id)
     }
     pub fn curve_index(&self, id: &str) -> Option<usize> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
         self.curves.iter().position(|c| c.id == id)
     }
     pub fn point(&self, i: usize) -> Option<Vec2> {
@@ -1481,7 +1498,7 @@ impl Sketch {
                 _ => Vec::new(),
             },
             CurveKind::Circle { c, r } => match self.point(c) {
-                Some(c) => solidcraft_geom::Loop2::circle(c, r).segs,
+                Some(c) => solidcore_record::Loop2::circle(c, r).segs,
                 None => Vec::new(),
             },
             CurveKind::Arc { c, a, b } => match (self.point(c), self.point(a), self.point(b)) {
@@ -1500,8 +1517,9 @@ impl Sketch {
     }
 
     /// Exact boundary segments of a free-form curve: ellipses as four conics, conics, fit
-    /// splines and control splines up to `MAX_BEZIER_DEGREE` as Béziers. None for other curves
-    /// (and for higher-degree splines, which stay polylines).
+    /// splines and control splines up to `MAX_BEZIER_DEGREE` as Béziers (one a knot span for a
+    /// spline with its own knots, conics for a rational quadratic one). None for other curves
+    /// (and for higher-degree or other rational splines, which stay polylines).
     pub fn exact_segs(&self, ci: usize) -> Option<Vec<Seg2>> {
         let cu = self.curves.get(ci)?;
         let pt = |i: &usize| self.point(*i);
@@ -1528,7 +1546,11 @@ impl Sketch {
                     crate::curves::fit_beziers_mode(&p, *periodic).ok()?.into_iter().map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 }).collect(),
                 )
             }
-            CurveKind::Spline { pts, control: true, degree, .. } if (*degree as usize) <= solidcraft_geom::MAX_BEZIER_DEGREE => {
+            CurveKind::Spline { pts, control: true, degree, nurbs: Some(nurbs), .. } => {
+                let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                nurbs.segs(&p, *degree)
+            }
+            CurveKind::Spline { pts, control: true, degree, nurbs: None, .. } if (*degree as usize) <= solidcore_record::MAX_BEZIER_DEGREE => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 let k = (*degree as usize).min(p.len().saturating_sub(1)).max(1);
                 Some(crate::curves::bspline_beziers(&p, k).iter().filter_map(|c| solidcraft_geom::bezier(c)).collect())
@@ -1540,7 +1562,7 @@ impl Sketch {
     /// The exact [`Seg2`] pieces of a curve of any kind, in the curve's own direction of travel:
     /// lines, circles and arcs from their analytic form, free-form curves through
     /// [`Sketch::exact_segs`]. Empty for a curve with no exact pieces (a spline above
-    /// `solidcraft_geom::MAX_BEZIER_DEGREE`).
+    /// `solidcore_record::MAX_BEZIER_DEGREE`).
     pub fn exact_pieces(&self, ci: usize) -> Vec<Seg2> {
         match self.exact_segs(ci) {
             Some(segs) => segs,
@@ -1558,9 +1580,9 @@ impl Sketch {
                 (Some(c), Some(m)) => crate::curves::ellipse_polyline(c, m, *r),
                 _ => Vec::new(),
             },
-            CurveKind::Spline { pts, control, degree, periodic } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
                 let p: Option<Vec<Vec2>> = pts.iter().map(pt).collect();
-                p.map(|p| crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic)).unwrap_or_default()
+                p.map(|p| crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())).unwrap_or_default()
             }
             CurveKind::Conic { a, b, apex, rho } => match (pt(a), pt(apex), pt(b)) {
                 (Some(a), Some(x), Some(b)) => crate::curves::conic_polyline(a, x, b, *rho),
@@ -1596,11 +1618,18 @@ impl Sketch {
                 }
                 "e"
             }
-            CurveKind::Spline { pts, control, degree, periodic } => {
-                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(degree) {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
+                if let Some(nurbs) = nurbs {
+                    if !*control || *periodic {
+                        return Err(SketchError::Invalid("only an open control spline has its own knots".into()));
+                    }
+                    nurbs.check(pts.len(), *degree)?;
+                }
+                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(degree)
+                {
                     return Err(SketchError::Invalid(format!(
                         "a spline needs 2 to 500 points and degree 1 to {}",
-                        solidcraft_geom::MAX_BEZIER_DEGREE
+                        solidcore_record::MAX_BEZIER_DEGREE
                     )));
                 }
                 if *periodic {
@@ -1684,7 +1713,7 @@ impl Sketch {
     /// Points held together only through points about to go stay together: two rectangles'
     /// corners made coincident with one arc end are tied to each other when a trim takes that
     /// end away, instead of coming apart where they still meet.
-    fn keep_ties_through(&mut self, gone: &[usize]) {
+    pub(crate) fn keep_ties_through(&mut self, gone: &[usize]) {
         if gone.is_empty() {
             return;
         }
@@ -1721,7 +1750,7 @@ impl Sketch {
         }
     }
 
-    fn point_used_by_curve(&self, p: usize) -> bool {
+    pub(crate) fn point_used_by_curve(&self, p: usize) -> bool {
         self.curves.iter().any(|c| c.kind.uses(p))
     }
 
@@ -1831,9 +1860,29 @@ impl Sketch {
         }
     }
 
-    /// Axis-aligned bounds of all geometry (for views).
+    /// Axis-aligned bounds of all geometry (for views). An arc's are exact: its polyline's points
+    /// need not reach the circle's extremes (a whole circle is one arc, whose chords start at its
+    /// start angle), so the quarter points it sweeps through are added.
     pub fn bounds(&self) -> Option<(Vec2, Vec2)> {
-        let b: Aabb2 = (0..self.curves.len()).flat_map(|i| self.segs(i)).flat_map(|s| s.polyline(0.5)).collect();
+        let extremes = |s: &Seg2| -> Vec<Vec2> {
+            let Seg2::Arc { center, radius, start, sweep } = *s else { return Vec::new() };
+            let (lo, hi) = if sweep >= 0.0 { (start, start + sweep) } else { (start + sweep, start) };
+            let quarter = std::f64::consts::FRAC_PI_2;
+            let first = (lo / quarter).ceil() as i64;
+            let last = (hi / quarter).floor() as i64;
+            if !(lo.is_finite() && hi.is_finite()) || last - first > 4 {
+                return Vec::new();
+            }
+            (first..=last).map(|k| center + Vec2::from_angle(k as f64 * quarter) * radius).collect()
+        };
+        let b: Aabb2 = (0..self.curves.len())
+            .flat_map(|i| self.segs(i))
+            .flat_map(|s| {
+                let mut pts = s.polyline(0.5);
+                pts.extend(extremes(&s));
+                pts
+            })
+            .collect();
         (!b.is_empty()).then_some((b.min, b.max))
     }
 }

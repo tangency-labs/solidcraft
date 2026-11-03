@@ -28,7 +28,6 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+O",
     "Ctrl+W",
     "Ctrl+Comma",
-    "Ctrl+Shift+A",
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
@@ -380,14 +379,14 @@ pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
 /// other tabs), or everywhere (commands on no tab: undo, views, files).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+pub(crate) enum Scope {
     Render,
     Sketch,
     Model,
     Everywhere,
 }
 
-fn scope(id: &str) -> Scope {
+pub(crate) fn scope(id: &str) -> Scope {
     if id.starts_with("render.") || matches!(id, "appearance.paint" | "appearance.pick_up") {
         return Scope::Render;
     }
@@ -406,8 +405,17 @@ fn clash(a: &str, b: &str) -> bool {
     x == y || x == Scope::Everywhere || y == Scope::Everywhere
 }
 
+/// Whether a command's key runs in a sketch and in the model alike when the two keep their keys
+/// apart: one of no tab, and inspecting, views and files wherever their buttons sit (Measure's I).
+fn runs_everywhere(id: &str) -> bool {
+    scope(id) == Scope::Everywhere || ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p))
+}
+
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
-/// while a sketch is open, a model command otherwise) before any other.
+/// while a sketch is open, a model command otherwise) before any other. With Preferences ›
+/// Shortcuts › Keep model keys out of sketches on, only one of that mode or one that works
+/// everywhere: a model command's key pressed in a sketch (E, F) runs nothing, nor a sketch
+/// tool's in the model.
 pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let here = if crate::render_workspace::active(app) {
         Scope::Render
@@ -424,7 +432,12 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
-    enabled.iter().find(|id| scope(id) == here).or(enabled.first()).copied()
+    let mine = enabled.iter().find(|id| scope(id) == here);
+    if app.preferences.sketch_keys_only && here != Scope::Render {
+        mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
+    } else {
+        mine.or(enabled.first()).copied()
+    }
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create
@@ -636,6 +649,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 action = Some((String::new(), chosen));
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
+            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
+                .on_hover_text(app.tr("ui.sketch_keys_only_tip"));
         }
         // The list Help and Home open looks like the Shortcuts page of Preferences: say it can't
         // be changed here, and lead to the page where it can (#7409).
@@ -871,6 +886,92 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assistant_shortcut_can_be_rebound_cleared_saved_and_reset() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.assistant").as_deref(), Some("Ctrl+Shift+A"));
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the old key no longer opens Assistant");
+        let held_key = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::J,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+        };
+        h.frame_with(vec![held_key(true, false)]);
+        assert!(h.app.agent_chat.open, "the custom key opens Assistant");
+        h.frame_with(vec![held_key(true, true)]);
+        assert!(h.app.agent_chat.open, "holding the key does not repeatedly toggle");
+        h.frame_with(vec![held_key(false, false)]);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the custom key also hides Assistant");
+        let saved = h.app.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "ui.assistant"), ["Ctrl+Shift+J"]);
+        assert!(bind(&mut h.app, "solid.box", "Ctrl+Shift+J", false).is_err(), "conflicts are reported");
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "clearing disables the shortcut");
+        reset(&mut h.app, Some("ui.assistant"));
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open, "reset restores the original shortcut");
+    }
+
+    #[test]
+    fn a_released_unbound_assistant_chord_does_not_start_a_plain_letter_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.frames(2);
+        let modifiers = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers },
+            egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+        ]);
+        assert!(!h.app.agent_chat.open, "the old chord is unbound");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "Ctrl+Shift+A must not become plain A (Appearance) after release");
+    }
+
+    #[test]
+    fn assistant_shortcut_respects_text_focus_ai_switch_and_capture() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.app.preferences.ai_features = false;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open);
+        h.app.preferences.ai_features = true;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true, "alt":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "extra modifiers do not match");
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open);
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_agent_chat_input")));
+        h.frames(2);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "a chord can hide Assistant from its input field");
+        bind(&mut h.app, "ui.assistant", "J", true).unwrap();
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "a bare letter in a text field remains text");
+        h.call("ui.palette", json!({"open":false}));
+        h.frames(2);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.capturing = Some("solid.box".into());
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "recording a shortcut must not activate it");
+        assert!(crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+    }
 
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())

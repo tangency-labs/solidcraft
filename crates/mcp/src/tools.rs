@@ -147,7 +147,7 @@ pub fn tool_definitions() -> Vec<Value> {
              (as list_commands lists them). A step may also name one of these tools with that tool's arguments as params, \
              and runs the engine command it stands for: set_parameter (parameters.change; `value` or `expression`), \
              list_commands (engine.commands, with `filter`), describe_command (engine.describe), execute ({command, params}), \
-             measure (inspect.measure), \
+             measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
              rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
@@ -206,6 +206,7 @@ pub fn tool_definitions() -> Vec<Value> {
             obj(
                 json!({
                     "body": string("Body name (default: all bodies)"),
+                    "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
                 }),
@@ -303,6 +304,34 @@ pub fn tool_definitions() -> Vec<Value> {
                     "axes": {"type": "boolean", "description": "false: leave the origin's three axes out of the render (see `grid`). Axes hidden with browser.visibility stay hidden"},
                 }),
                 &[],
+            ),
+            Effect::Files,
+        ),
+        tool(
+            "compare_picture",
+            "Compare with a reference picture",
+            "Compare the model's outline with the part in a reference picture — a concept render, a product photo, one view off a design board. \
+             The model's outline is `inspect.silhouette` from `view` (default front), `camera` and `bodies`; the picture's part is found by growing \
+             the background in from the border, so a backdrop's gradual shading stays background. The compare is outline only: holes are not \
+             compared — both the picture's and the model's holes are filled. `reference` is a PNG or JPEG inside the server's \
+             folders. `crop_px` / `crop_fraction` take one view off a board: [x, y, w, h] in pixels or as fractions 0..1 of the picture; \
+             `part_fills_crop: true` says the crop box is the part itself, for a crop that tightly frames it. `fit` names \
+             the dimension the scale comes from (\"width\", \"height\", \"both\"; default \"width\") — one uniform scale, never stretched per axis; \
+             \"both\" scales by width and reports `aspect_mismatch` when the shapes differ. Returns as text the overlap (0..1) and the model's top, \
+             bottom, left and right edges against the picture's in mm at nine stations (positive where the model reaches past the picture), and as \
+             an image the overlay PNG: model red, picture blue.",
+            obj(
+                json!({
+                    "reference": string("PNG or JPEG to match, inside the server's folders"),
+                    "view": string("Standard view (front, top, right, iso, ...) the picture is seen from (default front)"),
+                    "camera": {"type": "object", "description": "Look from this camera instead: {target: [x,y,z], yaw, pitch, distance, fov?} (radians, mm; as view.apply). A photo taken in perspective gets an fov"},
+                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
+                    "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
+                    "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
+                    "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
+                }),
+                &["reference"],
             ),
             Effect::Files,
         ),
@@ -496,6 +525,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
         "screenshot" => return screenshot(b, a),
+        "compare_picture" => return compare_picture(b, a),
         "batch" => return batch(b, a),
         "check_parameters" => return check_parameters(b, a),
         "execute" => return execute(b, a),
@@ -728,6 +758,11 @@ fn command_error(command: &str, error: String) -> String {
         return error;
     }
     let id = command.split(['{', '(']).next().unwrap_or(command).trim();
+    // An id that is exactly a registered tool name confuses the two namespaces: name the
+    // distinction and its recovery instead of offering unrelated closest-command suggestions.
+    if id == command.trim() && is_tool_name(id) {
+        return tool_name_error(id);
+    }
     let packed = id != command.trim();
     let normalize = |s: &str| s.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect::<String>();
     let normalized = normalize(id);
@@ -761,6 +796,29 @@ fn command_error(command: &str, error: String) -> String {
     message
 }
 
+/// Whether `name` is exactly a registered MCP tool name, read from the tool definitions
+/// themselves so the two namespaces can never drift apart.
+fn is_tool_name(name: &str) -> bool {
+    tool_definitions().iter().any(|t| t["name"].as_str() == Some(name))
+}
+
+/// The reply when a rejected command id is exactly a tool name: the recovery belongs to the
+/// tool namespace, not to a typo's closest-command suggestions.
+fn tool_name_error(id: &str) -> String {
+    format!(
+        "unknown command `{id}`: `{id}` is an MCP tool, not an engine command id. Use MCP tools/list for its tool schema, or list_commands for engine command ids."
+    )
+}
+
+/// A `describe_command` rejection of an id that is exactly a tool name gets the namespace
+/// hint; every other error is left exactly as the engine said it.
+fn describe_error(id: &str, error: String) -> String {
+    if error.starts_with(&format!("unknown command `{id}`")) && is_tool_name(id) {
+        return tool_name_error(id);
+    }
+    error
+}
+
 fn command_distance(a: &str, b: &str) -> usize {
     let mut row: Vec<usize> = (1..=b.len()).collect();
     for (i, ca) in a.bytes().enumerate() {
@@ -784,6 +842,21 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
+fn measure_params(a: &Map<String, Value>) -> Value {
+    let mut p = pick(a, &["names_only"]);
+    if let Some(body) = str_arg(a, "body") {
+        p["bodies"] = json!([body]);
+    }
+    p
+}
+
+/// `summary` narrows measured bodies; a `names_only` list has nothing to narrow.
+fn measure_summary_wanted(a: &Map<String, Value>) -> bool {
+    let flag = |k: &str| a.get(k).and_then(Value::as_bool).unwrap_or(false);
+    flag("summary") && !flag("names_only")
+}
+
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
     match name {
         "list_commands" => {
@@ -792,7 +865,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         }
         "describe_command" => {
             let id = str_arg(a, "id").ok_or("`id` is required")?;
-            exec(b, "engine.describe", json!({"command": id}))
+            // The engine rejects the requested id inside its own error, so the tool-name
+            // hint must inspect the `id`, not the outer `engine.describe` command `exec` sees.
+            exec(b, "engine.describe", json!({"command": id})).map_err(|e| describe_error(id, e))
         }
         "execute" => {
             let id = str_arg(a, "command").ok_or("`command` is required")?;
@@ -824,12 +899,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             if let Some(items) = a.get("items") {
                 return exec(b, "inspect.measure", json!({ "items": items }));
             }
-            let p = match str_arg(a, "body") {
-                Some(body) => json!({"bodies": [body]}),
-                None => json!({}),
-            };
-            let m = exec(b, "inspect.measure", p)?;
-            Ok(if a.get("summary").and_then(Value::as_bool).unwrap_or(false) { measure_summary(m) } else { m })
+            let m = exec(b, "inspect.measure", measure_params(a))?;
+            Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
         }
         "body_topology" => {
             let p = pick(a, &["body"]);
@@ -918,6 +989,15 @@ impl Narrow {
 /// `command` means the step is an engine command already.
 fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
     let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
+    // Any other key would be dropped and the command run without its parameters, failing (if at
+    // all) with an error about a parameter that seems to be there: `args` for `params`.
+    if let Some(k) = step.as_object().into_iter().flat_map(Map::keys).find(|k| !matches!(k.as_str(), "command" | "id" | "params")) {
+        if k == "expect" {
+            return Err("unknown key `expect` in a step: `expect` is the batch's argument, checked after the last step".into());
+        }
+        let k: String = k.chars().take(64).collect();
+        return Err(format!("unknown key `{k}` in a step: a step is {{command, params}}, its parameters go in `params`"));
+    }
     let empty = Map::new();
     let params = step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}));
     let a = params.as_object().unwrap_or(&empty);
@@ -939,12 +1019,16 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         }
         "measure" => match a.get("items") {
             Some(items) => mapped("inspect.measure", json!({"items": items})),
-            None => {
-                let p = str_arg(a, "body").map_or(json!({}), |body| json!({"bodies": [body]}));
-                let summary = a.get("summary").and_then(Value::as_bool).unwrap_or(false);
-                Ok(("inspect.measure".into(), p, summary.then_some(Narrow::MeasureSummary)))
-            }
+            None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
+        "compare_picture" => {
+            // A batch step gets the numbers; the overlay PNG would be a base64 blob in text.
+            let mut p = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+            if let Some(obj) = p.as_object_mut() {
+                obj.entry("overlay".to_string()).or_insert(json!(false));
+            }
+            mapped("inspect.compare_picture", p)
+        }
         "inspect_design" => mapped("document.inspect", json!({"measure": a.get("measure").and_then(Value::as_bool).unwrap_or(true)})),
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
@@ -973,6 +1057,7 @@ const TOOL_STEPS: &[&str] = &[
     "batch",
     "body_topology",
     "check_parameters",
+    "compare_picture",
     "crash_reports",
     "describe_command",
     "execute",
@@ -1726,6 +1811,28 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
             {"type": "image", "data": base64(&png), "mimeType": "image/png"},
             {"type": "text", "text": info.to_string()},
         ]}),
+        Err(e) => text_result(&Value::String(e), true),
+    }
+}
+
+/// `compare_picture`: run the engine comparison and hand the overlay PNG back as an MCP
+/// image block, the numbers as text — an agent sees the picture, not a base64 blob.
+fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+    params["overlay"] = json!(true);
+    match exec(b, "inspect.compare_picture", params) {
+        Ok(v) => {
+            let overlay = v.get("overlay_png").and_then(Value::as_str).unwrap_or_default().to_string();
+            let mut info = v;
+            if let Some(obj) = info.as_object_mut() {
+                obj.remove("overlay_png");
+            }
+            let mut content = vec![json!({"type": "text", "text": info.to_string()})];
+            if !overlay.is_empty() {
+                content.insert(0, json!({"type": "image", "data": overlay, "mimeType": "image/png"}));
+            }
+            json!({"content": content})
+        }
         Err(e) => text_result(&Value::String(e), true),
     }
 }

@@ -8,7 +8,8 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb2, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch::edit;

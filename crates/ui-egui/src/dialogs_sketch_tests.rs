@@ -11,6 +11,35 @@ fn fixture() -> Harness {
     h
 }
 
+// ---------------------------------------------------------------------------
+// #10181
+// ---------------------------------------------------------------------------
+
+/// #10181: the Project panel left open by a sketch that ends offers its context error
+/// ("`sketch.project` is not available right now: no sketch is being edited") as something to
+/// report: the dialog draws a "Create Issue…" button for a refusal that only says the sketch
+/// is gone, which is guidance, not a failure.
+#[test]
+fn a_context_error_offers_no_create_issue_button_10181() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcore_record::Vec3::new(20.0, 15.0, 20.0) }];
+    h.app.start("sketch.project");
+    h.frames(4);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SketchProject { .. })), "the Project panel opens for the live sketch");
+    // The sketch ends while the Project panel is still open.
+    h.app.finish_sketch();
+    h.frames(4);
+    if h.app.dialog.is_some() {
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+    }
+    let error = h.app.dialog.as_ref().and_then(|d| d.error.clone());
+    assert!(scenario::handle_at("dialog:create_issue").is_none(), "the Project panel offers its context error as something to report: {error:?}");
+}
+
 fn picked(h: &Harness, command: &str) -> Dialog {
     let mut d = Dialog::for_command(&h.app, command).unwrap();
     let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
@@ -80,7 +109,7 @@ macro_rules! form_case {
 }
 
 form_case!(scale, "sketch.scale", ["Factor"]);
-form_case!(offset, "sketch.offset", ["Direction", "Distance"]);
+form_case!(offset, "sketch.offset", ["Direction", "Distance", "Instances"]);
 form_case!(mirror, "sketch.mirror", []);
 form_case!(move_copy, "sketch.move", ["Position", "Angle"]);
 form_case!(rectangular_pattern, "sketch.pattern.rectangular", ["Quantity", "Spacing", "Alignment", "Quantity 2", "Spacing 2", "Alignment 2"]);
@@ -186,7 +215,7 @@ fn create_sketch_uses_card_and_still_starts_immediately_on_plane_pick() {
 }
 
 #[test]
-fn intersect_dialog_filters_faces_or_whole_bodies_and_controls_projection_link() {
+fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_link() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
@@ -199,13 +228,14 @@ fn intersect_dialog_filters_faces_or_whole_bodies_and_controls_projection_link()
     assert_eq!(d.inputs[0].accept, super::BODIES);
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Post".into() }]);
     assert!(scenario::rect_of("dialog:row:ui.sketch_intersect_geometry").is_some());
-    assert!(scenario::handle_at("dialog:Selection Filter:Faces").is_some());
-    assert!(scenario::handle_at("dialog:Selection Filter:Bodies").is_some());
+    assert!(scenario::handle_at("dialog:Selection Filter").is_some());
     assert!(scenario::rect_of("dialog:row:Projection Link").is_some());
 
-    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Faces"}})).unwrap();
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].accept, super::FACES);
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Geometry"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].accept, super::INTERSECT_GEOMETRY);
     assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:Selection Filter:Bodies"}})).unwrap();
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].accept, super::BODIES);
     h.step(&json!({"click":{"handle":"dialog:Projection Link"}})).unwrap();
@@ -217,6 +247,45 @@ fn intersect_dialog_filters_faces_or_whole_bodies_and_controls_projection_link()
     }
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
+    // A model edge is cut with the plane too (#10484).
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 10.0) }];
+    let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false}))]);
+}
+
+/// Intersect takes the lines of another sketch (#10484): a rectangle on XY, a sketch on a plane
+/// across it, and a click on one of the rectangle's sides gives the point where it crosses.
+#[test]
+fn intersect_dialog_takes_a_line_of_another_sketch() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let rectangle = h.app.session.doc.features.last().unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"YZ","offset":20})).unwrap();
+    h.app.run("view.home", json!({})).unwrap();
+    h.app.start("sketch.intersect");
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("Intersect opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchIntersect { bodies: false, .. }));
+    assert_eq!(d.inputs[0].accept, super::INTERSECT_GEOMETRY);
+
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let [Sel::ExternalSketchCurve { sketch, id }] = d.inputs[0].items.as_slice() else { panic!("the side is picked: {:?}", d.inputs[0].items) };
+    assert_eq!(*sketch, rectangle);
+    let cmds = apply_commands(&h.app, d).unwrap();
+    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true}))]);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    let state = h.app.session.world_state().unwrap();
+    let sk = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    let link = &sk.sketch.links[0].id;
+    let at: Vec<_> = sk.sketch.link_points(link).iter().filter_map(|p| sk.sketch.point(*p)).map(|p| sk.plane.to_world(p)).collect();
+    assert_eq!(at.len(), 1, "{at:?}");
+    assert!(at[0].dist(solidcore_record::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
 }
 
 #[test]
@@ -255,7 +324,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     h.settle();
     assert!(h.app.dialog.is_none());
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sketch = &state.sketch(sketch).unwrap().sketch;
     assert!(sketch.links.is_empty());
     assert!(!sketch.curves.is_empty());
@@ -555,7 +624,7 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     h.step(&json!({"key": "Enter"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
     for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
@@ -566,7 +635,7 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     assert!((hi.0 - 55.0).abs() < 1.5 && (hi.1 - 40.0).abs() < 1.5, "the far corner went to (55, 40): {hi:?}");
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
     assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");

@@ -2,13 +2,17 @@
 //! degrees and its projection, shown while View ▸ View angles is on (`view.angle_readout`). A
 //! click on it opens a small card to type exact angles; its Apply runs `view.apply`.
 //!
+//! Each axis in the card also has a zero button that turns that angle to 0° at once, and a lock
+//! (#4581): a locked angle stays put while orbiting, turning with the arrow keys or using a 3D
+//! mouse, so a symmetrical view can hold its yaw and roll at 0° while only the pitch is adjusted.
+//!
 //! The angles are the camera's own (`Camera::view_angles`), about the up axis: yaw is the heading
 //! of the line of sight (Front 0°, Left 90°, Right −90°, Back 180°), pitch the eye's elevation
 //! (Top 90°, Bottom −90°), and a positive roll turns the model clockwise on screen.
 
 use egui::{Align2, FontId, Rect, Sense, pos2, vec2};
 use serde_json::json;
-use solidcraft_engine::render::ViewAngles;
+use solidcraft_engine::render::{Camera, ViewAngles};
 
 use crate::SolveApp;
 use crate::fonts::RichTextExt as _;
@@ -56,8 +60,56 @@ pub(crate) fn lines(app: &SolveApp) -> (String, String) {
     (angles, crate::i18n::tr(projection).to_string())
 }
 
+/// Whether the angle of `axis` (`"yaw"`, `"pitch"` or `"roll"`) is locked in the card (#4581).
+pub(crate) fn locked_angle(app: &SolveApp, axis: &str) -> bool {
+    match axis {
+        "yaw" => app.ui.view_angles_lock_yaw,
+        "pitch" => app.ui.view_angles_lock_pitch,
+        _ => app.ui.view_angles_lock_roll,
+    }
+}
+
+fn set_lock(app: &mut SolveApp, axis: &str, locked: bool) {
+    match axis {
+        "yaw" => app.ui.view_angles_lock_yaw = locked,
+        "pitch" => app.ui.view_angles_lock_pitch = locked,
+        _ => app.ui.view_angles_lock_roll = locked,
+    }
+}
+
+/// A camera `to` that a mouse or key motion just produced, with every locked angle kept at its
+/// value on `from`: orbiting, arrow turns and 3D-mouse motion never move a locked axis (#4581).
+pub(crate) fn keep_locked(app: &SolveApp, from: Camera, to: Camera) -> Camera {
+    if !(locked_angle(app, "yaw") || locked_angle(app, "pitch") || locked_angle(app, "roll")) {
+        return to;
+    }
+    let mut angles = to.view_angles();
+    let held = from.view_angles();
+    if locked_angle(app, "yaw") {
+        angles.yaw = held.yaw;
+    }
+    if locked_angle(app, "pitch") {
+        angles.pitch = held.pitch;
+    }
+    if locked_angle(app, "roll") {
+        angles.roll = held.roll;
+    }
+    to.with_view_angles(angles).unwrap_or(to)
+}
+
 /// Turn the view to typed angles through `view.apply`, keeping its target, distance and projection.
-pub(crate) fn apply(app: &mut SolveApp, angles: ViewAngles) {
+/// A locked axis keeps the angle the view has now, whatever the card holds for it.
+pub(crate) fn apply(app: &mut SolveApp, mut angles: ViewAngles) {
+    let held = app.cam.view_angles();
+    if locked_angle(app, "yaw") {
+        angles.yaw = held.yaw;
+    }
+    if locked_angle(app, "pitch") {
+        angles.pitch = held.pitch;
+    }
+    if locked_angle(app, "roll") {
+        angles.roll = held.roll;
+    }
     let Some(cam) = app.cam.with_view_angles(angles) else { return };
     let camera = json!({"target": cam.target, "yaw": cam.yaw, "pitch": cam.pitch, "roll": cam.roll, "distance": cam.distance, "fov": cam.fov});
     if app.run("view.apply", json!({ "camera": camera })).is_ok() {
@@ -116,12 +168,45 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let mut applied = false;
     let card = area.show(ui.ctx(), |ui| {
         Container::popup_frame(ui.style()).show(ui, |ui| {
-            ui.set_width(200.0);
+            ui.set_width(260.0);
             ui.label(egui::RichText::new(crate::i18n::tr("ui.view_angles")).semibold().color(t.text).size(t.font_caption));
-            for (id, value) in
-                [("ui.view_angles_pitch", &mut typed.pitch), ("ui.view_angles_yaw", &mut typed.yaw), ("ui.view_angles_roll", &mut typed.roll)]
-            {
-                ui_kit::row(ui, crate::i18n::tr(id), |ui| ui_kit::angle_field(ui, value));
+            for (id, axis) in [("ui.view_angles_pitch", "pitch"), ("ui.view_angles_yaw", "yaw"), ("ui.view_angles_roll", "roll")] {
+                let locked = locked_angle(app, axis);
+                let axis_name = crate::i18n::tr(id);
+                let mut value = match axis {
+                    "pitch" => typed.pitch,
+                    "yaw" => typed.yaw,
+                    _ => typed.roll,
+                };
+                let zeroed = ui_kit::row(ui, axis_name, |ui| {
+                    let mut zeroed = false;
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(!locked, |ui| ui_kit::angle_field(ui, &mut value));
+                        let zero = ui_kit::button(ui, "0°", ui_kit::Button::Enabled(!locked))
+                            .on_hover_text(crate::i18n::format("ui.view_angles_zero", &[("axis", axis_name)]));
+                        zeroed = zero.clicked();
+                        crate::scenario::publish_target(&format!("view_angles:zero:{axis}"), zero.rect);
+                        let mut lock = locked;
+                        let help = if locked { "ui.view_angles_unlock" } else { "ui.view_angles_lock" };
+                        let checkbox = ui_kit::checkbox(ui, "", &mut lock).on_hover_text(crate::i18n::format(help, &[("axis", axis_name)]));
+                        crate::scenario::publish_target(&format!("view_angles:lock:{axis}"), checkbox.rect);
+                        if lock != locked {
+                            set_lock(app, axis, lock);
+                        }
+                    });
+                    zeroed
+                });
+                if zeroed {
+                    value = 0.0;
+                }
+                match axis {
+                    "pitch" => typed.pitch = value,
+                    "yaw" => typed.yaw = value,
+                    _ => typed.roll = value,
+                }
+                if zeroed {
+                    apply(app, typed);
+                }
             }
             ui_kit::text(ui, crate::i18n::tr("ui.view_angles_convention"), ui_kit::Text::Hint("view_angles"));
             applied = ui_kit::primary_button(ui, "Apply").clicked();

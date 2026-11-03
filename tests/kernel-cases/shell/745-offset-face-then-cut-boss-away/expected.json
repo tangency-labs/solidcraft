@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#745",
+  "tangency-labs/solidcraft#3893"
+ ],
+ "what": "the same end offset, then the boss and the box beyond x=24 cut away, which leaves an analytic body",
+ "source": "analytic",
+ "method": "after the end moves to x=-1 and the cut removes everything at x>=24 (the spline boss lies at x 25..37.x, inside the cut): a box x -1..24, 20 wide, 10 tall: V=25*20*10=5000; 6 faces",
+ "body_count": 1,
+ "volume_mm3": 5000,
+ "faces": 6
+}

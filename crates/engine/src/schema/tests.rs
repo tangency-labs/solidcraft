@@ -774,7 +774,7 @@ fn face_and_edge_refs_match_the_pick_readers() {
     assert!(parse::<EdgeRef>(json!({"body": "A", "index": 1.0})).is_none());
     assert_eq!(edge_schema["anyOf"][2]["properties"]["index"]["type"], "integer");
     assert_eq!(parse::<EdgeRef>(json!({"body": "A", "index": 4})), Some(EdgeRef::Index { body: "A".into(), index: 4 }));
-    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcraft_geom::Vec3::new(1.0, 2.0, 3.0))));
+    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcore_record::Vec3::new(1.0, 2.0, 3.0))));
 }
 
 /// The pick lists take 1 to 1000 picks, as `face_points` and `edge_points` do, and so do their
@@ -907,7 +907,8 @@ fn shared_types_keep_the_handlers_messages() {
     for (id, p, probe) in [
         ("solid.shell", json!({"thickness": 1, "faces": 5}), json!({"faces": 5})),
         ("solid.shell", json!({"thickness": 1, "faces": null}), json!({"faces": null})),
-        ("solid.shell", json!({"thickness": 1, "faces": []}), json!({"faces": []})),
+        // `solid.shell` takes no faces (a closed hollow body); the draft refuses them.
+        ("solid.draft", json!({"angle": 1, "faces": []}), json!({"faces": []})),
         ("solid.shell", json!({"thickness": 1, "faces": [true]}), json!({"faces": [true]})),
         ("solid.shell", json!({"thickness": 1, "faces": [""]}), json!({"faces": [""]})),
         ("solid.fillet", json!({"radius": 1, "edges": {}}), json!({"edges": {}})),
@@ -1129,4 +1130,39 @@ fn plane_names_match_check_plane_name() {
         assert_eq!(parse::<PlaneName>(json!(name)).is_none(), refused.is_some(), "{name:?}");
     }
     assert!(parse::<PlaneName>(json!(5)).is_none());
+}
+
+#[test]
+fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
+    use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+    use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
+    let mut s = crate::Session::default();
+    let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    s.param_check = ParamCheck::Strict;
+    let before = s.doc.to_json();
+    for marker in [json!(-1), json!(3), json!(1.5), json!(true), json!([])] {
+        assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": marker})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.active_sketch, None);
+    }
+    for exit in ["sketch.finish", "sketch.cancel"] {
+        let r = run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+        let schema = output_schema_for::<EditResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        for params in [json!({"restore_marker": "yes"}), json!({"unknown": true})] {
+            assert!(s.execute(exit, &params).is_err());
+            assert_eq!(s.active_sketch, Some(id));
+            assert_eq!(s.doc.marker, Some(1));
+        }
+        let r = run(&mut s, exit, json!({}));
+        let schema = if exit == "sketch.finish" { output_schema_for::<FinishResult>() } else { output_schema_for::<CancelResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        assert_eq!(s.doc.to_json(), before);
+    }
 }

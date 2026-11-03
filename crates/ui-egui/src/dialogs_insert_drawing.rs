@@ -104,8 +104,8 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
-    fn lines(h: &Harness) -> Vec<(solidcraft_engine::geom::Vec2, solidcraft_engine::geom::Vec2)> {
-        let st = h.app.session.world_state();
+    fn lines(h: &Harness) -> Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> {
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         (0..sk.curves.len())
             .filter_map(|i| match sk.shape(i) {

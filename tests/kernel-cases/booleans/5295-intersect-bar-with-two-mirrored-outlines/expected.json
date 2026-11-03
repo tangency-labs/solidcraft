@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5295"
+ ],
+ "what": "a bar intersected in one extrude with two mirrored outlines (slanted on their inner sides): truck deleted the body with only a warning; each outline alone worked",
+ "source": "analytic",
+ "method": "each outline is a trapezoid (20 and 14 wide, 20 high: 340) through the bar's 20 mm: two bodies of 340*20, V = 13600",
+ "body_count": 2,
+ "volume_mm3": 13600.0
+}

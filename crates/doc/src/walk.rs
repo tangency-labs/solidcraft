@@ -5,7 +5,7 @@
 //! traits here carry the walks through the types the fields have: options, lists, arrays, planes
 //! and construction definitions.
 
-pub(crate) use solidcraft_geom::Vec3;
+pub(crate) use solidcore_record::Vec3;
 
 pub(crate) use crate::ProfileSel;
 use crate::construct::{AxisDef, GeoRef, PointDef};
@@ -50,6 +50,7 @@ impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
 impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
+impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
@@ -62,6 +63,10 @@ impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
+impl Walk for crate::thread_forms::ThreadForm {}
+impl Walk for crate::thread_forms::ThreadHand {}
+impl Walk for crate::thread_forms::ThreadTip {}
+impl Walk for crate::thread_forms::SteepFlank {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {
@@ -335,6 +340,7 @@ impl Walk for PlaneRef {
                     p = base;
                 }
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
+                PlaneRef::Tangent { angle: Some(angle), .. } => return f(("Angle", angle, Kind::Angle, ExprRole::Input)),
                 // A plane seen from behind keeps its base's expressions (a sketch made with
                 // `flip` on an offset plane did not follow the offset's parameter).
                 PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } => p = base,
@@ -361,6 +367,7 @@ impl Walk for PlaneRef {
                     p = base;
                 }
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
+                PlaneRef::Tangent { angle: Some(angle), .. } => return f(("Angle", angle, Kind::Angle, ExprRole::Input)),
                 // A plane seen from behind keeps its base's expressions (a sketch made with
                 // `flip` on an offset plane did not follow the offset's parameter).
                 PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } => p = base,
@@ -406,7 +413,7 @@ impl PlaneRef {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
-            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
+            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::AxisPoint { axis: a, point: b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs(f, depth + 1);
                 b.walk_feature_refs(f, depth + 1);
             }
@@ -415,7 +422,13 @@ impl PlaneRef {
                 b.walk_feature_refs(f, depth + 1);
                 c.walk_feature_refs(f, depth + 1);
             }
-            Self::Tangent { face, .. } | Self::AlongPath { path: face, .. } => face.walk_feature_refs(f, depth + 1),
+            Self::Tangent { face, reference, .. } => {
+                face.walk_feature_refs(f, depth + 1);
+                if let Some(r) = reference {
+                    r.walk_feature_refs(f, depth + 1);
+                }
+            }
+            Self::AlongPath { path, .. } => path.walk_feature_refs(f, depth + 1),
             Self::Origin { .. } | Self::Custom { .. } | Self::Placed { .. } | Self::Face { .. } => {}
         }
     }
@@ -437,7 +450,7 @@ impl PlaneRef {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }
-            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
+            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::AxisPoint { axis: a, point: b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs_mut(f, depth + 1);
                 b.walk_feature_refs_mut(f, depth + 1);
             }
@@ -446,7 +459,13 @@ impl PlaneRef {
                 b.walk_feature_refs_mut(f, depth + 1);
                 c.walk_feature_refs_mut(f, depth + 1);
             }
-            Self::Tangent { face, .. } | Self::AlongPath { path: face, .. } => face.walk_feature_refs_mut(f, depth + 1),
+            Self::Tangent { face, reference, .. } => {
+                face.walk_feature_refs_mut(f, depth + 1);
+                if let Some(r) = reference {
+                    r.walk_feature_refs_mut(f, depth + 1);
+                }
+            }
+            Self::AlongPath { path, .. } => path.walk_feature_refs_mut(f, depth + 1),
             Self::Origin { .. } | Self::Custom { .. } | Self::Placed { .. } | Self::Face { .. } => {}
         }
     }

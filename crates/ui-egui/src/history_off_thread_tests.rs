@@ -209,6 +209,43 @@ fn a_marker_moved_again_replaces_the_move_still_waiting() {
     assert_eq!(marker(&h), None, "where the drag ended: the end of the history");
 }
 
+/// The "Computing" toast has a Cancel (#8266): it gives up on a marker move that takes too long, and
+/// on the moves waiting behind it, and the design stays as it was.
+#[test]
+fn cancel_on_the_computing_toast_gives_up_on_the_move() {
+    let mut h = block_boss_hole();
+    // A move that does not finish, with another waiting behind it.
+    let (job, _keep) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
+    h.app.deferred = Some(job);
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+    h.frames(2);
+    let toast = crate::scenario::rect_of("toast:computing").expect("the computing toast");
+    let cancel = crate::scenario::handle_at("toast:computing:cancel").expect("its Cancel");
+    assert!(toast.contains(cancel), "{cancel:?} in {toast:?}");
+    assert!(h.widget("Cancel").is_some(), "Cancel has an accessible name");
+    h.step(&json!({"click": {"handle": "toast:computing:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty(), "nothing computes or waits");
+    assert!(h.app.computing_since().is_none());
+    assert!(crate::scenario::rect_of("toast:computing").is_none(), "the toast is gone");
+    assert_eq!(marker(&h), None, "the marker stays where it was");
+    // And the history moves again afterwards.
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    until_settled(&mut h);
+    assert_eq!(marker(&h), Some(1));
+}
+
+/// A feature edit applying has the dialog's own Cancel, so its toast has none.
+#[test]
+fn the_computing_toast_has_no_cancel_for_what_cannot_be_given_up() {
+    let mut h = block_boss_hole();
+    assert!(!h.app.can_cancel_computing(), "nothing computes");
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    assert!(h.app.can_cancel_computing(), "a move can be given up");
+    until_settled(&mut h);
+    assert!(!h.app.can_cancel_computing());
+}
+
 #[test]
 fn undo_computes_off_the_window_thread() {
     let mut h = block_boss_hole();
@@ -276,6 +313,47 @@ fn switching_sketches_keeps_the_original_marker_with_background_rebuilds() {
             assert_eq!(marker(&h), original_marker, "restore the marker from before either edit");
             assert_eq!(h.app.session.model.state().bodies.len(), bodies, "all later bodies return");
         }
+    }
+}
+
+#[test]
+fn finishing_a_sketch_in_the_background_restores_the_design_and_its_undo_snapshot() {
+    let (mut h, sketches) = sketches_with_later_bodies();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_sketch(sketches[0]);
+    h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+    h.app.finish_sketch();
+    assert!(h.app.deferred.is_some());
+    until_settled(&mut h);
+    assert_eq!(marker(&h), None);
+    assert_eq!(h.app.session.active_sketch, None);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.active_sketch, None);
+}
+
+#[test]
+fn a_pending_sketch_exit_cannot_close_the_next_editor() {
+    for cancel in [false, true] {
+        let (mut h, sketches) = sketches_with_later_bodies();
+        let curves = h.app.session.doc.sketch(sketches[0]).unwrap().curves.len();
+        h.app.edit_sketch(sketches[0]);
+        h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+        if cancel {
+            h.app.cancel_sketch();
+        } else {
+            h.app.finish_sketch();
+        }
+        assert!(h.app.deferred.is_some());
+        h.app.edit_sketch(sketches[1]);
+        until_settled(&mut h);
+        assert_eq!(h.app.session.active_sketch, Some(sketches[1]));
+        assert_eq!(marker(&h), Some(3));
+        assert_eq!(h.app.session.doc.sketch(sketches[0]).unwrap().curves.len(), curves + usize::from(!cancel));
+        h.app.finish_sketch();
+        until_settled(&mut h);
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(marker(&h), None);
     }
 }
 
@@ -922,6 +1000,40 @@ fn delete_on_the_selection_checks_off_the_window_thread() {
     assert!((volume(&mut h) - block_with_hole()).abs() < 1.0);
 }
 
+/// #9917: with the history rolled back, the check builds the features after the marker off the
+/// window thread and keeps them; the confirmation carries them to the delete, which runs with
+/// them instead of building that history again on the window thread.
+#[test]
+fn a_confirmed_delete_runs_with_what_its_check_kept() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let sk = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let side = h.app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true})).unwrap()["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 5, "name": "Plate"})).unwrap();
+    for i in 0..3 {
+        h.app.run("solid.cylinder", json!({"base": [12 + 6 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"})).unwrap();
+    }
+    h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+    h.app.run("sketch.edit", json!({"sketch": sk})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    crate::delete::request(&mut h.app, json!({"items": [{"type": "sketch_curve", "id": side}]}));
+    assert!(h.app.computing_since().is_some(), "checking");
+    until_settled(&mut h);
+    let pending = h.app.menu.confirm.clone().expect("what the delete breaks after the marker is confirmed first");
+    assert!(pending.report["would_fail"].as_array().is_some_and(|a| !a.is_empty()), "{}", pending.report);
+    let kept = pending.kept.expect("the check's results go with the confirmation");
+    let built = kept.len();
+    assert!(built > 0, "the check kept the features after the marker it built");
+    assert!(crate::delete::confirm(&mut h.app, true));
+    let curves = |h: &Harness| h.app.session.model.state().sketch(sk).map(|s| s.sketch.curves.len()).unwrap_or(0);
+    assert_eq!(curves(&h), 3, "deleted");
+    assert_eq!(kept.len(), built, "the delete built nothing the check had not kept");
+}
+
 /// A design changed while its delete is checked is checked again before anything is deleted, and
 /// a second Delete meanwhile is left out.
 #[test]
@@ -979,7 +1091,7 @@ fn a_body_renamed_in_the_browser_keeps_the_pattern_after_it() {
     let before = mesh(&h);
     // What Enter does, without the frames after it that would see the rename in.
     let rename = h.app.menu.rename.take().unwrap();
-    crate::context_menu::commit_rename(&mut h.app, &rename);
+    let _ = crate::context_menu::commit_rename(&mut h.app, &rename);
     assert!(h.app.computing_since().is_some(), "computing");
     assert_eq!(names(&h), ["Body1"], "the design is as it was while it computes");
     until_settled(&mut h);

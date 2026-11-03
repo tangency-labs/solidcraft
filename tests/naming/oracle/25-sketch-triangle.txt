@@ -1,0 +1,16 @@
+# oracle/25-sketch-triangle: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Triangle: 5 faces, 9 edges
+Triangle face F2:side:l1
+Triangle face F2:side:l2
+Triangle face F2:side:l3
+Triangle face F2:start
+Triangle face F2:top
+Triangle edge F2:side:l1|F2:side:l2
+Triangle edge F2:side:l1|F2:side:l3
+Triangle edge F2:side:l1|F2:start
+Triangle edge F2:side:l1|F2:top
+Triangle edge F2:side:l2|F2:side:l3
+Triangle edge F2:side:l2|F2:start
+Triangle edge F2:side:l2|F2:top
+Triangle edge F2:side:l3|F2:start
+Triangle edge F2:side:l3|F2:top

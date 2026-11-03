@@ -54,8 +54,10 @@ pub use threemf::{
 };
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
-use solidcraft_geom::{MassProperties, Mesh, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{MassProperties, Mesh};
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";
@@ -234,6 +236,7 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
 
 /// [`step_import_feature`], with the bodies named after `names`.
 pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
+    let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES and the cadmpeg formats
     // are restated as STEP (the feature keeps that STEP text).
@@ -289,6 +292,7 @@ pub struct MeshFeature {
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    let _span = solidcraft_profile::span("import", "mesh_import_feature");
     if is_gltf_path(file) {
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
@@ -418,12 +422,17 @@ pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
 
 /// [`export_mesh`] at `quality` (never finer than 1 µm).
 pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
-    Ok(b.tessellate((b.size() * quality.share()).max(1e-3))?)
+    Ok(b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * quality.share()).max(1e-3)))?)
 }
 
-/// Distance within which an exported mesh's vertices are welded (STL and 3MF alike).
+/// Distance within which an exported mesh's vertices are welded (STL, 3MF and OBJ alike).
 fn weld_eps(b: &solidcraft_kernel::Body) -> f64 {
-    (b.size() * 1e-6).max(1e-7)
+    weld_distance(b.size())
+}
+
+/// [`weld_eps`] for a body of characteristic size (bounding box diagonal) `size`.
+fn weld_distance(size: f64) -> f64 {
+    (size * 1e-6).max(1e-7)
 }
 
 /// Unit-density [`MassProperties`] of a body from its welded [`export_mesh`], the mesh URDF links
@@ -538,49 +547,81 @@ pub fn obj_files(bodies: &[ObjBody<'_>], mtl_name: &str) -> ObjFiles {
     ObjFiles { obj, mtl }
 }
 
-/// The mesh of a body: its vertices and normals, each written once per distinct value, and the
-/// faces that use them. Returns the text and the bases the next body carries on from.
+/// The mesh of a body, welded as STL and 3MF are ([`weld`]: vertices closer than
+/// [`weld_distance`] merged, and sides split where another face's vertex lies on them), so
+/// neighbouring faces share their edge points and the file opens again as a closed solid
+/// (#9074). Each corner keeps the normal it had ([`corner_normals`]), so edges between faces
+/// stay sharp. Vertices and normals are each written once per distinct value. Returns the text
+/// and the bases the next body carries on from.
 fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) {
     use std::collections::HashMap;
-    let mut s = String::new();
-    // `+ 0.0` turns -0 into 0, so both merge.
-    let key = |x: f64, y: f64, z: f64| [x + 0.0, y + 0.0, z + 0.0].map(f64::to_bits);
-    let mut vmap: HashMap<[u64; 3], usize> = HashMap::new();
-    let mut nmap: HashMap<[u64; 3], usize> = HashMap::new();
-    let vi: Vec<usize> = mesh
-        .positions
-        .iter()
-        .map(|p| {
-            let next = vmap.len();
-            *vmap.entry(key(p.x, p.y, p.z)).or_insert_with(|| {
-                s += &format!("v {} {} {}\n", p.x, p.y, p.z);
-                next
-            })
-        })
-        .collect();
-    let ni: Vec<usize> = mesh
-        .normals
-        .iter()
-        .map(|n| {
-            let next = nmap.len();
-            *nmap.entry(key(n.x, n.y, n.z)).or_insert_with(|| {
-                s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
-                next
-            })
-        })
-        .collect();
-    for t in &mesh.triangles {
-        let (Some(a), Some(b), Some(c)) = (vi.get(t[0] as usize), vi.get(t[1] as usize), vi.get(t[2] as usize)) else { continue };
-        let (a, b, c) = (a + vbase, b + vbase, c + vbase);
-        match (ni.get(t[0] as usize), ni.get(t[1] as usize), ni.get(t[2] as usize)) {
-            (Some(na), Some(nb), Some(nc)) => {
-                let (na, nb, nc) = (na + nbase, nb + nbase, nc + nbase);
-                s += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
-            }
-            _ => s += &format!("f {a} {b} {c}\n"),
-        }
+    let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+    for p in &mesh.positions {
+        bounds.add(*p);
     }
-    (s, vbase + vmap.len(), nbase + nmap.len())
+    let eps = weld_distance(bounds.diagonal());
+    // Each welded triangle is tagged with the triangle it came from, for its normals.
+    let source: Vec<u32> = (0..mesh.triangles.len()).map(|k| u32::try_from(k).unwrap_or(u32::MAX)).collect();
+    let (positions, triangles, from) = threemf::weld_tagged(&mesh.positions, &mesh.triangles, &source, eps);
+    let mut s = String::new();
+    for p in &positions {
+        s += &format!("v {} {} {}\n", p.x, p.y, p.z);
+    }
+    // `+ 0.0` turns -0 into 0, so both merge.
+    let key = |n: Vec3| [n.x + 0.0, n.y + 0.0, n.z + 0.0].map(f64::to_bits);
+    let mut nmap: HashMap<[u64; 3], usize> = HashMap::new();
+    let mut faces = String::new();
+    for (t, k) in triangles.iter().zip(&from) {
+        let (a, b, c) = (t[0] as usize + vbase, t[1] as usize + vbase, t[2] as usize + vbase);
+        let at = t.map(|i| positions.get(i as usize).copied());
+        let normals = match (mesh.triangles.get(*k as usize), at) {
+            (Some(o), [Some(pa), Some(pb), Some(pc)]) => corner_normals(mesh, *o, [pa, pb, pc], eps),
+            _ => None,
+        };
+        let Some(normals) = normals else {
+            faces += &format!("f {a} {b} {c}\n");
+            continue;
+        };
+        let [na, nb, nc] = normals.map(|n| {
+            let next = nmap.len();
+            nbase
+                + *nmap.entry(key(n)).or_insert_with(|| {
+                    s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
+                    next
+                })
+        });
+        faces += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
+    }
+    s += &faces;
+    (s, vbase + positions.len(), nbase + nmap.len())
+}
+
+/// The normals at the corners `at` of a welded piece of triangle `t` of `mesh` (the whole
+/// triangle, or a piece of it split where another face's vertex lies on a side): a corner
+/// within `eps` of one of `t`'s own corners takes that corner's normal; a point a side was split
+/// at takes the normal between the side's ends. `None` when the mesh has no normals there.
+fn corner_normals(mesh: &Mesh, t: [u32; 3], at: [Vec3; 3], eps: f64) -> Option<[Vec3; 3]> {
+    let p = t.map(|i| mesh.positions.get(i as usize).copied());
+    let n = t.map(|i| mesh.normals.get(i as usize).copied());
+    let ([Some(p0), Some(p1), Some(p2)], [Some(n0), Some(n1), Some(n2)]) = (p, n) else { return None };
+    let (p, n) = ([p0, p1, p2], [n0, n1, n2]);
+    Some(at.map(|q| p.iter().zip(n).find(|(c, _)| c.dist(q) <= eps).map_or_else(|| normal_at(p, n, q), |(_, n)| n)))
+}
+
+/// The normal at `q` on the triangle with corners `p` and corner normals `n`: the corners'
+/// normals weighted by where `q` lies (barycentric), of unit length. The first corner's when
+/// the triangle has no area.
+fn normal_at(p: [Vec3; 3], n: [Vec3; 3], q: Vec3) -> Vec3 {
+    let [p0, p1, p2] = p;
+    let [n0, n1, n2] = n;
+    let (e1, e2, d) = (p1 - p0, p2 - p0, q - p0);
+    let (d11, d12, d22, d1, d2) = (e1.dot(e1), e1.dot(e2), e2.dot(e2), d.dot(e1), d.dot(e2));
+    let den = d11 * d22 - d12 * d12;
+    if !(den.abs() > 0.0) {
+        return n0;
+    }
+    let (v, w) = ((d22 * d1 - d12 * d2) / den, (d11 * d2 - d12 * d1) / den);
+    (n0 * (1.0 - v - w) + n1 * v + n2 * w).normalized().unwrap_or(n0)
 }
 
 /// The material of each body: its name, safe to write in a material library and unique among
@@ -694,6 +735,7 @@ pub fn export_with_quality(
     meta: &Metadata,
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "export_with_quality");
     export_with_parts(state, bodies, &[], format, name, meta, quality)
 }
 
@@ -789,6 +831,7 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
 /// part, built where the file placed it) is taken into its component's frame by that offset,
 /// as the world placement does, so the occurrences above it place it only once.
 pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "step_assembly");
     use solidcraft_kernel::{ExportBody, ExportProduct};
     let mut index: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     index.insert(0, 0);
@@ -821,6 +864,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
 
 /// Read a design file's bytes.
 pub fn read_design(bytes: &[u8]) -> Result<Document> {
+    let _span = solidcraft_profile::span("io", "read_design");
     limits::check(limits::Kind::Design, bytes.len() as u64).map_err(|e| IoError::Invalid(format!("design {e}")))?;
     if is_design_container(bytes) {
         return design::read(bytes);
@@ -913,8 +957,8 @@ pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Vec3;
     use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
-    use solidcraft_geom::Vec3;
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");
@@ -1010,8 +1054,12 @@ mod tests {
         assert!(o.contains("o Body1") && o.contains("\nf "));
     }
 
-    /// OBJ shares a face's vertices (a cube: 8 positions, 6 normals, not 36 of each) and keeps
-    /// the body name as written, spaces included.
+    /// OBJ shares the vertices faces meet at and keeps the body name as written, spaces included.
+    /// The 10 × 20 × 30 box meshes as the planner's grids, no side longer than a fifth of its
+    /// extent (the 37.4 mm diagonal): its edges in 2, 3 and 5 pieces, so its faces are grids of
+    /// 2 × 3, 2 × 5 and 3 × 5 cells, 2 · (6 + 10 + 15) · 2 = 124 triangles. Welded, their
+    /// corners are the 3 · 4 · 6 = 72 nodes of the box's lattice less the 1 · 2 · 4 inside it: 64
+    /// positions (unwelded, 372), and one normal per face.
     #[test]
     fn obj_export_is_welded_and_keeps_names() {
         let (_, m) = model();
@@ -1022,10 +1070,10 @@ mod tests {
         let o = String::from_utf8(export(&st, &[], Format::Obj, "t").unwrap()).unwrap();
         let count = |p: &str| o.lines().filter(|l| l.starts_with(p)).count();
         assert!(o.contains("\no Red Block\n"), "{o}");
-        assert_eq!((count("v "), count("vn "), count("f ")), (8, 6, 12), "{o}");
+        assert_eq!((count("v "), count("vn "), count("f ")), (64, 6, 124), "{o}");
         let ids: Vec<usize> =
             o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
-        assert!(ids.iter().all(|i| (1..=8).contains(i) || (1..=6).contains(i)));
+        assert!(ids.iter().all(|i| (1..=64).contains(i)));
     }
 
     /// The OBJ export carries the colours of the bodies: the mesh file names the material
@@ -1225,9 +1273,8 @@ mod tests {
             .sum()
     }
 
-    /// Build → export 3MF → import → the same volume as the STL export, closed meshes, names.
-    #[test]
-    fn threemf_round_trip() {
+    /// A filleted box, a cylinder and a torus: bodies whose faces are curved and meshed apart.
+    fn curved_bodies() -> Model {
         let mut doc = Document::new("t");
         doc.add_feature(
             FeatureKind::Box {
@@ -1248,6 +1295,8 @@ mod tests {
                 style: Default::default(),
                 fit: Default::default(),
                 corner: Default::default(),
+                setbacks: Vec::new(),
+                tangent_chain: true,
             },
             None,
         )
@@ -1276,6 +1325,40 @@ mod tests {
         .unwrap();
         let mut m = Model::new();
         m.evaluate(&doc);
+        m
+    }
+
+    /// OBJ is welded as STL and 3MF are: a filleted box, a cylinder and a torus written as OBJ
+    /// open again closed, with their STL export's volume, every face keeping its normals
+    /// (#9074). Before, each face wrote its edge points again, a few ulps apart, and the file
+    /// opened as an open mesh with no volume.
+    #[test]
+    fn obj_round_trip_of_curved_bodies_is_closed() {
+        let m = curved_bodies();
+        let st = m.state();
+        let bytes = export(&st, &[], Format::Obj, "t").unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.lines().filter(|l| l.starts_with("f ")).all(|l| l.matches("//").count() == 3), "every corner has a normal");
+        let f = mesh_import_feature(&bytes, "parts.obj").unwrap();
+        let mut d2 = Document::new("m");
+        let id = d2.add_feature(f.kind, Some(&f.name)).unwrap();
+        let mut m2 = Model::new();
+        m2.evaluate(&d2);
+        assert!(m2.result(id).unwrap().error.is_none());
+        let st2 = m2.state();
+        assert_eq!(st2.bodies.len(), 3);
+        for (a, b) in st.bodies.iter().zip(&st2.bodies) {
+            assert!(b.body.is_mesh() && b.body.is_closed_mesh(), "{} is not watertight", a.name);
+            let v_stl = stl_volume(&export(&st, std::slice::from_ref(&a.name), Format::StlBinary, "t").unwrap());
+            let v = solidcraft_kernel::measure(&b.body).unwrap().volume;
+            assert!((v - v_stl).abs() <= 1e-6 * v_stl.abs(), "{}: {v} vs {v_stl}", a.name);
+        }
+    }
+
+    /// Build → export 3MF → import → the same volume as the STL export, closed meshes, names.
+    #[test]
+    fn threemf_round_trip() {
+        let m = curved_bodies();
         let st = m.state();
         assert_eq!(st.bodies.len(), 3);
         let bytes = export(&st, &[], Format::ThreeMf, "t").unwrap();
@@ -1334,6 +1417,8 @@ mod tests {
                 style: Default::default(),
                 fit: Default::default(),
                 corner: Default::default(),
+                setbacks: Vec::new(),
+                tangent_chain: true,
             },
             None,
         )

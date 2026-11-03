@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "cylinder R6 tilted 0 degrees joined into a plate, its root edge rounded 1.5",
+ "source": "invariants",
+ "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}
