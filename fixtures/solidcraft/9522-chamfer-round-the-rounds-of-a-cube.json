@@ -1,0 +1,497 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/9522",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the report's (its chamfer picks give the square and the loop) with a cube's height, reproduced on 0.29.0 with solidcraft-cli",
+ "summary": "A chamfer as wide as the rounds it runs round came out with rounded corners on SolidCraft's truck kernel (#9522). The report rounded four parallel edges of a cube 5 mm, then chamfered the edges perpendicular to them 5 mm, and at the corners where the two meet both stayed visible, where only the chamfer should (0.27.1). The report's eight chamfer picks give the geometry: a 30 x 30 square about the origin and the chamfered loop at z = 0 (lines through (+-15, 0, 0) and (0, +-15, 0), arcs through (+-13.536, +-13.536, 0)), so the rounds are R5 on the four vertical edges; the height is not given and the cases take a cube, 30 tall. Replayed with solidcraft-cli 0.29.0 (truck): a 30 x 30 rectangle about the origin extruded 30, fillet 5 on the four vertical edges, then a chamfer on the bottom loop with the report's eight picks. Chamfers 2.5, 3, 4, 4.9, 4.99 and 4.999 build with four cone faces and their closed-form volume (within the meshed volume's 0.4 mm^3); chamfers 4.9999 and 5 build with four sphere faces instead, a round's ball at each corner, and 114.9 and 119.73 mm^3 too much volume (at 5: 25214.12 against 25094.40); 5.1 is refused ('the blend is larger than a corner radius; the largest size that fits is 5 mm'). Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992) and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). The kernel side of the report's size is tangency-labs/solidcore#420 (a chamfer round a loop with corner rounds as wide as it, its cones closing to a point, failed with status 1001), fixed by `fillet_chamfer_cone_on_arc` (WR-421, the linear section revolved into a cone), which the chamfer cases turn on, as SolidCraft's SMLib backend does. Geometry: the box x, y -15..15, z 0..30, its four vertical edges filleted R5 (picked at mid-height), then the bottom loop chamfered d (the report's eight picks, in its order). The chamfer step is solidcore's linear-section blend, whose rolling ball of radius d touches the bottom face and the side face or round: on a line edge both legs are d, and on an arc edge of radius 5 the section runs from radius 5 - d on the bottom face to height d on the round: a cone about the round's axis with its apex 5 - d below the bottom face, so at d = 5 the apex is on the bottom face, at one of its corners (the face is then a 20 x 20 square). Volumes: the rounded cube (30^2 - (4 - pi)*5^2)*30 less the chamfer, by the coarea formula int_0^d (d - s)*(80 + 2*pi*(5 - s)) ds = 40*d^2 + pi*d^2*(5 - d/3) (the bottom face's inward offset by s has perimeter 80 + 2*pi*(5 - s) and the chamfer's height there is d - s; on the arcs these are Pappus's cone sections). Each was checked by quadrature of that integral and by a randomised QMC (scrambled Sobol) over the CSG, the rounded square prism less the points below the chamfer, within two of its standard errors. Tolerance 0.1 % of the rounds and the chamfer, as in 5747-cove-round-a-boss-in-a-joined-slab.json; the truck result at 5 is 63 tolerances off.",
+ "cases": [
+  {
+   "name": "rounded_cube",
+   "note": "Control: the cube with its four vertical edges rounded R5, no chamfer.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 26356.194490192345,
+     "tol": 0.6438055098076552,
+     "formula": "(30*30 - (4 - pi)*5^2)*30 (the cube less the four R5 rounds of its vertical edges) (tol: 0.1 % of the rounds)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_3_round_the_rounds",
+   "note": "Chamfer 3 on the bottom loop (four lines and four arcs, the report's eight picks in its order): each arc's chamfer is a cone about its round's axis that meets the bottom face in an arc of radius 2, its apex on the axis 2 mm below the bottom face. On SolidCraft 0.29.0 (truck) this builds, with four cone faces.",
+   "fixes": [
+    "fillet_chamfer_cone_on_arc"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rounded",
+     "edges": [
+      [
+       -13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       -15.0,
+       0.0,
+       0.0
+      ],
+      [
+       -13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       15.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       15.0,
+       0.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       -15.0,
+       0.0
+      ]
+     ],
+     "distance": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 25883.09715466311,
+     "tol": 1.1169028453368879,
+     "formula": "(30*30 - (4 - pi)*5^2)*30 (the cube less the four R5 rounds of its vertical edges) - 4*10*3^2 - pi*3^2*(5 - 3/3) (the chamfer along the bottom loop, by the coarea formula: int_0^3 (3 - s)*(80 + 2*pi*(5 - s)) ds, the perimeter of the bottom face's inward offset by s times the chamfer's height 3 - s there; on the four arcs these are Pappus's cone sections, the triangle of legs 3 with its centroid 5 - 3/3 from the rounds' axes) (tol: 0.1 % of the rounds and the chamfer)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_4_9_round_the_rounds",
+   "note": "Chamfer 4.9 on the bottom loop: the cones meet the bottom face in arcs of radius 0.1, their apexes 0.1 mm below it. On SolidCraft 0.29.0 (truck) this builds, with four cone faces.",
+   "fixes": [
+    "fillet_chamfer_cone_on_arc"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rounded",
+     "edges": [
+      [
+       -13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       -15.0,
+       0.0,
+       0.0
+      ],
+      [
+       -13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       15.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       15.0,
+       0.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       -15.0,
+       0.0
+      ]
+     ],
+     "distance": 4.9
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 25141.84803682962,
+     "tol": 1.8581519631703813,
+     "formula": "(30*30 - (4 - pi)*5^2)*30 (the cube less the four R5 rounds of its vertical edges) - 4*10*4.9^2 - pi*4.9^2*(5 - 4.9/3) (the chamfer along the bottom loop, by the coarea formula: int_0^4.9 (4.9 - s)*(80 + 2*pi*(5 - s)) ds, the perimeter of the bottom face's inward offset by s times the chamfer's height 4.9 - s there; on the four arcs these are Pappus's cone sections, the triangle of legs 4.9 with its centroid 5 - 4.9/3 from the rounds' axes) (tol: 0.1 % of the rounds and the chamfer)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_4_99_just_short_of_the_rounds",
+   "note": "Chamfer 4.99 on the bottom loop: the cones meet the bottom face in arcs of radius 0.01, their apexes 0.01 mm below it. On SolidCraft 0.29.0 (truck) this builds, with four cone faces.",
+   "fixes": [
+    "fillet_chamfer_cone_on_arc"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rounded",
+     "edges": [
+      [
+       -13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       -15.0,
+       0.0,
+       0.0
+      ],
+      [
+       -13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       15.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       15.0,
+       0.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       -15.0,
+       0.0
+      ]
+     ],
+     "distance": 4.99
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 25099.176499509394,
+     "tol": 1.900823500490605,
+     "formula": "(30*30 - (4 - pi)*5^2)*30 (the cube less the four R5 rounds of its vertical edges) - 4*10*4.99^2 - pi*4.99^2*(5 - 4.99/3) (the chamfer along the bottom loop, by the coarea formula: int_0^4.99 (4.99 - s)*(80 + 2*pi*(5 - s)) ds, the perimeter of the bottom face's inward offset by s times the chamfer's height 4.99 - s there; on the four arcs these are Pappus's cone sections, the triangle of legs 4.99 with its centroid 5 - 4.99/3 from the rounds' axes) (tol: 0.1 % of the rounds and the chamfer)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_5_as_wide_as_the_rounds",
+   "note": "The report's case: chamfer 5 on the bottom loop, as wide as the R5 rounds, so each arc's chamfer is a cone whose apex is on its round's axis, at a corner of the bottom face (now a 20 x 20 square). On SolidCraft 0.29.0 (truck) the four arcs' chamfers came out as spheres (a round's ball at each corner) and the volume 119.73 mm^3 too large (25214.12).",
+   "fixes": [
+    "fillet_chamfer_cone_on_arc"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rounded",
+     "edges": [
+      [
+       -13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       -15.0,
+       0.0,
+       0.0
+      ],
+      [
+       -13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       15.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       15.0,
+       0.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       -15.0,
+       0.0
+      ]
+     ],
+     "distance": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 25094.395102393195,
+     "tol": 1.9056048976068045,
+     "formula": "(30*30 - (4 - pi)*5^2)*30 (the cube less the four R5 rounds of its vertical edges) - 4*10*5^2 - pi*5^2*(5 - 5/3) (the chamfer along the bottom loop, by the coarea formula: int_0^5 (5 - s)*(80 + 2*pi*(5 - s)) ds, the perimeter of the bottom face's inward offset by s times the chamfer's height 5 - s there; on the four arcs these are Pappus's cone sections, the triangle of legs 5 with its centroid 5 - 5/3 from the rounds' axes) (tol: 0.1 % of the rounds and the chamfer)"
+    }
+   }
+  }
+ ]
+}
