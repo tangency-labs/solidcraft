@@ -4,7 +4,8 @@
 //! level, see [`planner`]), and checks the result with [`verify`] before
 //! returning it.
 
-use solidcraft_geom::{Region2, Vec3};
+use solidcore_record::{Region2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::check::verify;
 use crate::offset::{Shape, offset_regions};
@@ -164,7 +165,7 @@ fn prepare_stock(regions: &[Region2], stock: f64, tolerance: f64) -> Result<Vec<
             islands.extend(offset_regions(&[Region2 { outer: hole.clone(), holes: Vec::new() }], -stock, tolerance)?);
         }
         for outer in outers {
-            let inside: Vec<solidcraft_geom::Loop2> =
+            let inside: Vec<solidcore_record::Loop2> =
                 islands.iter().filter(|island| island.polyline(0.05).first().is_some_and(|p| outer.contains(*p))).cloned().collect();
             out.push(Region2 { outer, holes: inside });
         }

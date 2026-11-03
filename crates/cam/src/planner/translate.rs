@@ -19,7 +19,8 @@
 
 use raygeo::ops::container::Ops;
 use raygeo::ops::{MoveCmd, OpCategory};
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::offset::Shape;
 use crate::params::Cut;

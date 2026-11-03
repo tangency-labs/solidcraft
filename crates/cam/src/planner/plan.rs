@@ -11,7 +11,8 @@ use raygeo::ops::assembly::profile::{ProfileKind, ProfileRampSpec, ProfileSpec};
 use raygeo::ops::container::Ops;
 use raygeo::ops::part::part::Part;
 use raygeo::ops::types::CutDirection;
-use solidcraft_geom::{Region2, Vec3};
+use solidcore_record::{Region2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::Result;
 use crate::params::{ContourParams, Side};

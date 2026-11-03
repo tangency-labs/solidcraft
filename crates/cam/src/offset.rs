@@ -5,7 +5,8 @@
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use crate::piece::{Piece, turn};
 use crate::{CamError, Result, invalid};

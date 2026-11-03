@@ -4,6 +4,7 @@
 //! expressions evaluated when posting.
 
 use serde_json::{Value, json};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_cam::{
     AdaptiveParams, ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, adaptive, contour, emit,
     pocket, readback,
@@ -16,7 +17,7 @@ use solidcraft_doc::cam::{
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::project::resolve_face_indices;
 use solidcraft_doc::{Expr, FeatureKind, select_profiles};
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkGeom, LinkKind};
 
 use super::CommandSpec;

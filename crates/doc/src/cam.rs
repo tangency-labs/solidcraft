@@ -6,8 +6,9 @@
 //! values, mapped onto `solidcraft-cam` only at post time.
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_cam::{Post, Tool};
-use solidcraft_geom::{Loop2, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::{DocError, Expr, ProfileSel, Result};
 

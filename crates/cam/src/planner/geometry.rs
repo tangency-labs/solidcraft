@@ -5,7 +5,8 @@
 //! else in the crate.
 
 use raygeo::geo::types::{Point, Polygon};
-use solidcraft_geom::{Loop2, Region2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 /// Appends one closed loop to `g` at Z 0 (the engine lifts every move to
 /// the pass height itself). Lines and arcs stay exact; other curves become
@@ -15,7 +16,7 @@ fn append_loop(g: &mut raygeo::geo::geometry::Geometry, lp: &Loop2, tolerance: f
     let mut first = true;
     for seg in &lp.segs {
         match *seg {
-            solidcraft_geom::Seg2::Line { a, b } => {
+            solidcore_record::Seg2::Line { a, b } => {
                 if first {
                     g.move_to(a.x, a.y, 0.0);
                     first = false;
@@ -23,7 +24,7 @@ fn append_loop(g: &mut raygeo::geo::geometry::Geometry, lp: &Loop2, tolerance: f
                 g.line_to(b.x, b.y, 0.0);
                 current = b;
             }
-            solidcraft_geom::Seg2::Arc { center, radius, start, sweep } => {
+            solidcore_record::Seg2::Arc { center, radius, start, sweep } => {
                 let a = center + Vec2::from_angle(start) * radius;
                 let b = center + Vec2::from_angle(start + sweep) * radius;
                 if first {

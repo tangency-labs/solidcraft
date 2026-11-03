@@ -1,6 +1,7 @@
 //! Safety rules every toolpath must keep, checked before a path leaves an operation.
 
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::params::Heights;
 use crate::path::{MAX_MOVES, Move, Toolpath};
