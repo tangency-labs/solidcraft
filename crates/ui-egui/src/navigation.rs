@@ -861,18 +861,25 @@ const WRAP_MARGIN: f32 = 4.0;
 /// (`viewport::axis_view_orbit`) too: the cursor moves to the other side of the view, so the drag
 /// can go on round the model, or across it, as far as the user likes instead of stopping where
 /// the screen ends. One move at a time; the next waits until the pointer has reported the jump
-/// ([`unwrapped_delta`]). Where the cursor can't be moved (Wayland, the browser) the request does
-/// nothing, the jump never arrives and the drag stops at the edge. A synthetic drag (control
-/// channel, scripts) has no real cursor to move. With `orbit_cursor_wrap` off in the preferences
-/// every drag stops at the edge of the screen.
+/// ([`unwrapped_delta`]). Where the cursor can't be moved (Wayland, the browser) nothing is asked
+/// and the drag stops at the edge. A synthetic drag (control channel, scripts) has no real cursor
+/// to move. With `orbit_cursor_wrap` off in the preferences every drag stops at the edge of the
+/// screen ([`cursor_movable`]).
 pub(crate) fn wrap_cursor(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
-    if !app.preferences.orbit_cursor_wrap || app.viewport.cursor_wrap.is_some() || app.synthetic_press {
+    if !cursor_movable(app) || app.viewport.cursor_wrap.is_some() {
         return;
     }
     let Some(at) = ui.input(|i| i.pointer.latest_pos()) else { return };
     let Some(to) = wrapped(rect, at) else { return };
     ui.ctx().send_viewport_cmd(egui::ViewportCommand::CursorPosition(to));
     app.viewport.cursor_wrap = Some(to - at);
+}
+
+/// Whether a drag may move the real cursor ([`wrap_cursor`], and the navigator's hidden cursor
+/// coming back where its drag began): `orbit_cursor_wrap` is on, the press is a real one, and the
+/// window system lets an application move the cursor (not Wayland, not the browser).
+pub(crate) fn cursor_movable(app: &SolveApp) -> bool {
+    app.preferences.orbit_cursor_wrap && !app.synthetic_press && !cfg!(target_arch = "wasm32") && app.services.window_system != Some("wayland")
 }
 
 /// Where a pointer at `at`, at or past the edge of `rect`, continues on the opposite side; `None`

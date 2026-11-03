@@ -63,7 +63,7 @@
   An orbit or pan drag that reaches the edge of the view carries on: the cursor reappears at the
   opposite edge, so you can keep turning round the model, or keep panning across it, without
   letting go (not on Wayland or in the browser). A drag on the axis view or cube carries on the same
-  way. **Preferences › Navigation › Wrap the cursor while orbiting or panning** turns all of this off.
+  way, with the cursor hidden until you let go, when it comes back where the drag began. **Preferences › Navigation › Wrap the cursor while orbiting or panning** turns all of this off.
 
   Enable **Preferences → Navigation → Free orbit** to rotate the mouse and 3D mouse continuously
   through both poles, preserving roll. During an orbit drag, Shift snaps the view direction and
@@ -97,7 +97,8 @@
   The axis view shows the world's X/Y/Z directions in SolidCraft's colors. Click a signed
   axis tip to look along that axis; click the aligned tip again to look from the opposite side.
   Drag the axis view to orbit around the view centre, with Shift for snapping; at the edge of the
-  view the cursor wraps to the other side and the drag goes on. Top and bottom
+  view the cursor wraps to the other side and the drag goes on. The cursor is hidden while you
+  drag and comes back over the axis view when you let go. Top and bottom
   keep the nearest quarter-turn heading. The house, the navigation bar's Home button and a middle-button double-click in the view go
   home, framing what is shown now (Navigation › **Middle double-click** can make it Fit, which
   keeps the orientation, or turn it off).

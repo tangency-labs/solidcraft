@@ -179,6 +179,9 @@ pub struct ViewportState {
     /// A drag (an orbit or pan in the view, or on the navigator) moved the cursor to the view's
     /// other side: the jump, until the pointer reports it (see [`crate::navigation::wrap_cursor`]).
     pub(crate) cursor_wrap: Option<egui::Vec2>,
+    /// A drag on the navigator hid the cursor: where it began, for the cursor to come back to on
+    /// release (see `axis_view_orbit`).
+    pub(crate) cursor_return: Option<Pos2>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
@@ -6406,8 +6409,10 @@ fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {
 }
 
 /// Dragging anywhere on the axis gizmo orbits about the view centre, and goes on past the edge
-/// of the view: the cursor wraps to the other side, as in an orbit drag on the view. A stationary
-/// press on a tip chooses its view. Floating windows own their input over the gizmo.
+/// of the view: the cursor wraps to the other side, as in an orbit drag on the view. Where the
+/// cursor can be moved it is hidden while the drag turns the view and comes back on release
+/// where the drag began. A stationary press on a tip chooses its view. Floating windows own their
+/// input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let (pressed, down, decided, origin, pos, shift) = ui.input(|i| {
         let p = &i.pointer;
@@ -6428,9 +6433,19 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         app.viewport.orbit_free = None;
         // A cursor move this drag asked for and never got (Wayland) must not correct a later drag.
         app.viewport.cursor_wrap = None;
+        if let Some(back) = app.viewport.cursor_return.take() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CursorPosition(back));
+        }
+    }
+    if app.viewport.axis_drag.is_none() {
+        // A drag something else ended (a dialog, a report) leaves the cursor where it is.
+        app.viewport.cursor_return = None;
     }
     let Some(last) = app.viewport.axis_drag.filter(|_| decided) else { return false };
-    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    if app.viewport.cursor_return.is_none() && crate::navigation::cursor_movable(app) {
+        app.viewport.cursor_return = origin;
+    }
+    ui.ctx().set_cursor_icon(navigator_drag_cursor(app));
     if let Some(p) = pos {
         app.cancel_view_animation();
         // The frame that reports a cursor wrap turns the view only by the hand's motion.
@@ -6442,6 +6457,12 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         ui.ctx().request_repaint();
     }
     true
+}
+
+/// The cursor while a drag on the navigator turns the view: hidden while it will come back where
+/// the drag began, a grabbing hand otherwise.
+fn navigator_drag_cursor(app: &SolveApp) -> egui::CursorIcon {
+    if app.viewport.cursor_return.is_some() { egui::CursorIcon::None } else { egui::CursorIcon::Grabbing }
 }
 
 pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
@@ -6506,12 +6527,12 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     // The home button sits in its own small round chip.
     painter.circle(home.center(), 12.0, t.overlay.gamma_multiply(if hr.hovered() { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
     icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
-    // Cursors: a grabbing hand while orbiting, an open hand over the circle, a pointer on the home
-    // chip (the axis ends keep their pointing hand).
-    if hr.hovered() {
+    // Cursors: a grabbing hand (or none) while orbiting, an open hand over the circle, a pointer on
+    // the home chip (the axis ends keep their pointing hand).
+    if orbiting {
+        ui.ctx().set_cursor_icon(navigator_drag_cursor(app));
+    } else if hr.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    } else if orbiting {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     } else if in_circle && hovered.is_none() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
@@ -10541,8 +10562,9 @@ mod tests {
     /// A drag on the navigator that reaches the edge of the view keeps turning like an orbit in
     /// the view: the cursor moves to the other side, and the frame that reports the jump turns the
     /// view only by the hand's motion, with the view's own navigation running first in the frame
-    /// as in the app. Events from before the move don't ask for a second one. With
-    /// `orbit_cursor_wrap` off the cursor is never moved.
+    /// as in the app. Events from before the move don't ask for a second one. The cursor is hidden
+    /// while the drag turns the view and comes back where the drag began on release. With
+    /// `orbit_cursor_wrap` off, or on Wayland, the cursor is never moved or hidden.
     #[test]
     fn a_navigator_drag_at_the_edge_moves_the_cursor_across_and_keeps_turning() {
         use egui::{Event, Modifiers, PointerButton, ViewportCommand, pos2, vec2};
@@ -10553,6 +10575,8 @@ mod tests {
         crate::fonts::setup_bundled_fonts(&ctx);
         let view = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         let mut time = 0.0;
+        // The cursor the last frame showed.
+        let cursor = std::cell::Cell::new(egui::CursorIcon::Default);
         let mut frame = |app: &mut SolveApp, events: Vec<Event>| {
             time += 1.0 / 60.0;
             let raw = egui::RawInput { screen_rect: Some(view), time: Some(time), focused: true, events, ..Default::default() };
@@ -10565,6 +10589,7 @@ mod tests {
                 axis_view(app, ui, rect);
             });
             out.textures_delta.clear();
+            cursor.set(out.platform_output.cursor_icon);
             let commands = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
             commands.into_iter().filter_map(|c| if let ViewportCommand::CursorPosition(p) = c { Some(p) } else { None }).collect::<Vec<_>>()
         };
@@ -10585,6 +10610,7 @@ mod tests {
             assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, at.y))]).is_empty(), "no move inside the view ({x})");
             step = turn(before, app.cam.yaw);
             assert!(step.abs() > 1e-4, "the drag turns the view ({x})");
+            assert_eq!(cursor.get(), egui::CursorIcon::None, "the cursor is hidden while the drag turns the view ({x})");
         }
         // Past the right edge: the cursor goes to the left edge, and the view turns on as usual.
         let before = app.cam.yaw;
@@ -10606,19 +10632,32 @@ mod tests {
         x += 20.0;
         frame(&mut app, vec![Event::PointerMoved(pos2(x, at.y))]);
         assert!((turn(before, app.cam.yaw) - step).abs() < step.abs() * 0.01, "and keeps turning the same way");
-        frame(&mut app, vec![Event::PointerButton { pos: pos2(x, at.y), button, pressed: false, modifiers: mods }]);
-        frame(&mut app, vec![]);
+        // The release brings the cursor back where the drag began.
+        assert_eq!(frame(&mut app, vec![Event::PointerButton { pos: pos2(x, at.y), button, pressed: false, modifiers: mods }]), vec![at]);
+        assert_ne!(cursor.get(), egui::CursorIcon::None);
+        assert!(frame(&mut app, vec![Event::PointerMoved(at)]).is_empty());
         assert!(app.viewport.axis_drag.is_none(), "release clears the axis gesture");
-        assert_eq!(app.viewport.cursor_wrap, None);
+        assert_eq!((app.viewport.cursor_wrap, app.viewport.cursor_return), (None, None));
         // With the preference off, the same drag reaches the edge and the cursor stays there.
         app.preferences.orbit_cursor_wrap = false;
         frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
         assert!(app.viewport.axis_drag.is_some());
         for dx in [20.0, 40.0, 60.0, 66.0, 100.0] {
             assert!(frame(&mut app, vec![Event::PointerMoved(pos2(at.x + dx, at.y))]).is_empty(), "no cursor move with wrapping off ({dx})");
+            assert_eq!(cursor.get(), egui::CursorIcon::Grabbing, "the cursor stays in sight ({dx})");
         }
         assert_eq!(app.viewport.cursor_wrap, None);
-        frame(&mut app, vec![Event::PointerButton { pos: pos2(at.x + 100.0, at.y), button, pressed: false, modifiers: mods }]);
+        assert!(frame(&mut app, vec![Event::PointerButton { pos: pos2(at.x + 100.0, at.y), button, pressed: false, modifiers: mods }]).is_empty());
+        // On Wayland the cursor can't be moved: it stays in sight and in place, as with the preference off.
+        app.preferences.orbit_cursor_wrap = true;
+        app.services.window_system = Some("wayland");
+        frame(&mut app, vec![Event::PointerMoved(at)]);
+        frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
+        for dx in [20.0, 40.0, 60.0, 66.0, 100.0] {
+            assert!(frame(&mut app, vec![Event::PointerMoved(pos2(at.x + dx, at.y))]).is_empty(), "no cursor move on Wayland ({dx})");
+            assert_eq!(cursor.get(), egui::CursorIcon::Grabbing, "the cursor stays in sight on Wayland ({dx})");
+        }
+        assert!(frame(&mut app, vec![Event::PointerButton { pos: pos2(at.x + 100.0, at.y), button, pressed: false, modifiers: mods }]).is_empty());
     }
 
     #[test]
