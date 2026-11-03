@@ -573,6 +573,18 @@ mod tests {
         assert!((v - 6000.0).abs() < 6000.0 * 1e-9, "{v}");
     }
 
+    /// An accuracy finer than 1e-8 or not positive is 1e-8, as `mass_properties` takes it: a
+    /// sphere's volume at 0, -1 and 1e-15 is its volume at 1e-8, on its closed form.
+    #[test]
+    fn a_volume_accuracy_out_of_range_is_clamped() {
+        let ball = make_sphere([1.0, 2.0, 3.0], 5.0).unwrap();
+        let at = volume(&ball, 1e-8).unwrap();
+        assert!((at - 4.0 / 3.0 * std::f64::consts::PI * 125.0).abs() < 1e-6, "{at}");
+        for acc in [0.0, -1.0, 1e-15] {
+            assert_eq!(volume(&ball, acc).ok(), Some(at), "accuracy {acc}");
+        }
+    }
+
     #[test]
     fn hostile_numbers_are_refused() {
         assert!(make_box([f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
