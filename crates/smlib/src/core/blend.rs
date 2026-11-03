@@ -290,10 +290,10 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// [`Error::Unported`] naming it.
 fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
     let info = s.error_info();
-    let fit = match &e {
-        SolidError::FilletRefused { fit, .. } => Some(*fit),
-        _ if info.code == FilletErrorType::NoRoom as i32 => s.fit_size(),
-        _ => None,
+    let (fit, reason) = match &e {
+        SolidError::FilletRefused { fit, reason, .. } => (Some(*fit), reason.or(info.no_room_reason())),
+        _ if info.code == FilletErrorType::NoRoom as i32 => (s.fit_size(), info.no_room_reason()),
+        _ => (None, None),
     };
     if e.is_unported() || matches!(e, SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS) {
         (status(e), None)
@@ -308,10 +308,34 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, 
             FitKind::Scale => crate::FitKind::Scale,
             FitKind::Chord => crate::FitKind::Chord,
         };
-        (Error::TooLarge { size: fit.size, kind, at: None }, fit.edge)
+        (Error::TooLarge { size: fit.size, kind, at: None, why: reason.and_then(room_reason) }, fit.edge)
     } else {
         (blend_failure_unsized(info, e, corner), None)
     }
+}
+
+/// solidcore's reason for a blend too large, as SolidCraft words it; `None` for the reasons it
+/// does not name (the cliff overflow's own refusals).
+fn room_reason(r: NoRoomReason) -> Option<crate::RoomReason> {
+    use crate::RoomReason as R;
+    Some(match r {
+        NoRoomReason::BallDoesNotFit => R::BallDoesNotFit,
+        NoRoomReason::RailLeavesFace
+        | NoRoomReason::ConcaveOverflow
+        | NoRoomReason::OverflowWithConcaveBlend
+        | NoRoomReason::OverflowWithRollover
+        | NoRoomReason::OverflowWithGlobalMerge => R::RailLeavesFace,
+        NoRoomReason::FaceConsumed => R::FaceConsumed,
+        NoRoomReason::BandsOverlap => R::BandsOverlap,
+        NoRoomReason::BallsFold => R::BallsFold,
+        NoRoomReason::OffsetFolds => R::OffsetFolds,
+        NoRoomReason::CutsThePart => R::CutsThePart,
+        NoRoomReason::BreaksThrough => R::BreaksThrough,
+        NoRoomReason::OffsetCollapses => R::OffsetCollapses,
+        NoRoomReason::CornersTakeWholeEdge => R::CornersTakeWholeEdge,
+        NoRoomReason::RoundIntoMaterial | NoRoomReason::RailRunsPastFaceIntoMaterial => R::RunsIntoMaterial,
+        _ => return None,
+    })
 }
 
 /// [`blend_failure`] where solidcore gives no size.
@@ -334,7 +358,7 @@ fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: 
 /// Where the edge or its point can't be read the size stays as it is, with no point (a chamfer's
 /// size then is not a distance, so it is left a plain refusal).
 fn sized_on(k: &Kernel, b: &mut Brep, edge: Option<EdgeId>, section: Section<'_>, e: Error) -> solidcore::Result<Error> {
-    let Error::TooLarge { size, kind, .. } = e else { return Ok(e) };
+    let Error::TooLarge { size, kind, why, .. } = e else { return Ok(e) };
     let Some(edge) = edge else {
         return Ok(if matches!(section, Section::Chamfer(_)) && kind == crate::FitKind::Radius { Error::NoRoom } else { e });
     };
@@ -348,11 +372,11 @@ fn sized_on(k: &Kernel, b: &mut Brep, edge: Option<EdgeId>, section: Section<'_>
     if matches!(section, Section::Chamfer(_)) && kind == crate::FitKind::Radius {
         // The ball's radius is linear in the chamfer's distance along an edge.
         return Ok(match chamfer_radius(k, b, edge, 1.0)? {
-            Some(per_mm) => Error::TooLarge { size: size / per_mm, kind: crate::FitKind::Distance, at },
+            Some(per_mm) => Error::TooLarge { size: size / per_mm, kind: crate::FitKind::Distance, at, why },
             None => Error::NoRoom,
         });
     }
-    Ok(Error::TooLarge { size, kind, at })
+    Ok(Error::TooLarge { size, kind, at, why })
 }
 
 /// `round_edges`' `overflow_first` argument: with it the session stops, nothing built, when blends

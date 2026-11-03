@@ -18,6 +18,7 @@
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
+use solidcore::offset::construction::ShellRefusal;
 use solidcore::geom::attribute::{Attribute, Behavior, ids};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::Shape;
@@ -55,10 +56,13 @@ const OFFSET_WALLS_TOUCH: i32 = 1042;
 
 /// `status` (smlib_shim.h): an offset whose walls touch is [`Error::WallsTouch`]; a vertex moved
 /// past an edge's other end (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4) is
-/// `SMLIB_ERR_UNSUPPORTED`; any other status as the blends pass it on.
+/// `SMLIB_ERR_UNSUPPORTED`; a wall whose face's offset folds, which solidcore's one construction
+/// refuses (`fixes.shell_one_construction`, solidcore#2367), is [`Error::WallFolds`] with the
+/// largest wall it names; any other status as the blends pass it on.
 fn status(e: SolidError) -> Error {
     match e {
         SolidError::Upstream { code: OFFSET_WALLS_TOUCH, .. } => Error::WallsTouch,
+        SolidError::ShellRefused { refusal: ShellRefusal::Fold, size, .. } => Error::WallFolds { largest: size },
         e if e.is_offset_edge_vanishes() => Error::Unsupported,
         e => blend_status(e),
     }

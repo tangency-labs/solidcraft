@@ -39,6 +39,11 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
                  use a thinner or thicker wall, or move the feature"
             ))
         }
+        // solidcore's one construction: a face curves tighter than the wall is thick.
+        SmError::WallFolds { largest } => {
+            let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
+            KernelError::Invalid(format!("{op}: the wall is thicker than a face curves, so the face's offset would fold{largest}"))
+        }
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),

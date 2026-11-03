@@ -342,14 +342,14 @@ fn a_blend_too_large_is_refused_with_the_largest_size_that_fits() {
     let uprights = [[14.0, 0.0, 5.0], [28.0, 0.0, 5.0], [14.0, 6.0, 5.0], [28.0, 6.0, 5.0]];
     for r in [3.001, 3.5] {
         let e = timed("fit_199", move || blend(&bar.core(), Blend::Round, &uprights, &[r], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
-        let Error::TooLarge { size, kind, at: Some(at) } = e else { panic!("{r}: {e:?}") };
+        let Error::TooLarge { size, kind, at: Some(at), .. } = e else { panic!("{r}: {e:?}") };
         assert!((size - 3.0).abs() < 1e-9 && kind == crate::FitKind::Radius, "{r}: {size} {kind:?}");
         assert!(uprights.iter().any(|p| (0..3).all(|i| (p[i] - at[i]).abs() < 1e-9)), "{r}: {at:?}");
     }
     let rib = Shape::Box([0.0; 3], [40.0, 4.0, 20.0]);
     let top = [[20.0, 0.0, 20.0], [20.0, 4.0, 20.0]];
     let e = timed("fit_1080", move || blend(&rib.core(), Blend::Chamfer, &top, &[3.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
-    let Error::TooLarge { size, kind, at: Some(_) } = e else { panic!("{e:?}") };
+    let Error::TooLarge { size, kind, at: Some(_), .. } = e else { panic!("{e:?}") };
     assert!((size - 2.0).abs() < 1e-12 && kind == crate::FitKind::Distance, "{size} {kind:?}");
 }
 
@@ -363,7 +363,7 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
     let r = timed("cliff_refused", move || {
         blend(&Shape::Box([0.0; 3], [20.0; 3]).core(), Blend::Round, &corner, &[20.0; 3], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err()
     });
-    let Error::TooLarge { size, kind: crate::FitKind::Radius, at: Some(_) } = r else { panic!("{r:?}") };
+    let Error::TooLarge { size, kind: crate::FitKind::Radius, at: Some(_), .. } = r else { panic!("{r:?}") };
     assert!((size - 19.99).abs() < 1e-9, "{size}");
     timed("cliff_fit", move || {
         blend(&Shape::Box([0.0; 3], [20.0; 3]).core(), Blend::Round, &corner, &[size; 3], TOL, &[], &[], Corners::Filled).unwrap()
