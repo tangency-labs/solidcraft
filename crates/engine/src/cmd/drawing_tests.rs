@@ -24,10 +24,10 @@ fn tolerances(made: &Value) -> Value {
     cells.iter().find(|cell| cell["name"] == "general_tolerances").unwrap()["text"].clone()
 }
 
-/// A drawing starts from the template named, else ISO A3 with its border only, which
-/// `drawing.template.list` marks; it keeps the template's projection unless given one. An unknown
-/// template is refused with nothing changed, and undo takes the drawing away whole. The built-in
-/// block is added by name, its general tolerances empty for a part and an assembly alike.
+/// A drawing starts from the template named, else ISO A3, which `drawing.template.list` marks; it
+/// keeps the template's projection unless given one. An unknown template is refused with nothing
+/// changed, and undo takes the drawing away whole. Every built-in has the built-in title block, its
+/// general tolerances empty for a part and an assembly alike.
 #[test]
 fn a_drawing_starts_from_a_template() {
     let mut s = design();
@@ -40,7 +40,7 @@ fn a_drawing_starts_from_a_template() {
     let sheet = &made["sheets"][0];
     assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")));
     assert_eq!((&made["projection"], &made["language"]), (&json!("first"), &json!("de")));
-    assert_eq!(open_one(&s).sheets[0].title_block, None, "the border only");
+    assert_eq!(open_one(&s).sheets[0].title_block, Some(solidcraft_geom::title_block::default_block()), "the built-in block");
     let (undo, before) = (s.undo.len(), s.doc.drawings.clone());
     for old in ["iso-b2", "iso-a3-part"] {
         assert!(refused(&mut s, "drawing.create", json!({"template": old})).contains(&format!("no template `{old}`")), "{old}");
@@ -50,7 +50,6 @@ fn a_drawing_starts_from_a_template() {
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.drawings.is_empty(), "undo takes the drawing away whole");
     run(&mut s, "drawing.create", json!({}));
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
     assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(""));
     run(&mut s, "drawing.close", json!({}));
     // A design with components: the same template, and the same empty tolerances.
@@ -61,8 +60,7 @@ fn a_drawing_starts_from_a_template() {
     assert_eq!(marked.map(|t| t["name"].clone()), Some(json!(template::DEFAULT)));
     let made = run(&mut s, "drawing.create", json!({}));
     assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(""));
+    assert_eq!(tolerances(&made), json!(""));
 }
 
 /// A template applied to the drawing open: a dry run answers what would change and changes nothing;
@@ -99,18 +97,21 @@ fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
 }
 
 /// A drawing saved as a template file starts new drawings and restyles others, with nothing of its
-/// model; a later save changes no drawing made from it. Only a .json path is taken, and only inside
+/// model: a copy of the built-in with a company's changes is a template of its own. A later save
+/// changes no drawing made from it. Only a .json path is taken, and only inside
 /// the folders an agent may use while a scope is active.
 #[test]
 fn a_template_file_saves_and_starts_drawings() {
     let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
     let folder = Folder::new("drawing-template");
     let path = folder.path("company-a3.json");
-    run(
-        &mut s,
-        "drawing.sheet.set",
-        json!({"sheet": "Sheet 1", "title_block": "built-in", "title_block_overrides": {"general_tolerances": "ISO 2768-m"}}),
-    );
+    // The company's name written into the built-in block, and its general tolerances typed over it.
+    let mut block = solidcraft_geom::title_block::default_block();
+    let owner = block.cells.iter_mut().find(|cell| cell.name == "legal_owner").unwrap();
+    let solidcraft_geom::title_block::CellKind::Text(owner) = &mut owner.kind else { panic!("the legal owner cell shows text") };
+    owner.content = solidcraft_geom::cell::Content(vec![solidcraft_geom::cell::Part::Text("Acme Ltd".into())]);
+    let changes = json!({"sheet": "Sheet 1", "title_block": block, "title_block_overrides": {"general_tolerances": "ISO 2768-m"}});
+    run(&mut s, "drawing.sheet.set", changes);
     let saved = run(&mut s, "drawing.template.save", json!({"path": path}));
     assert_eq!(saved["bytes"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
     let first = open_one(&s);
@@ -120,6 +121,9 @@ fn a_template_file_saves_and_starts_drawings() {
     assert!(from_file.views.is_empty() && from_file.sheets[0].id != first.sheets[0].id, "{made}");
     assert_eq!((from_file.sheets[0].sheet, &from_file.sheets[0].title_block), (first.sheets[0].sheet, &first.sheets[0].title_block));
     assert_eq!(from_file.sheets[0].title_block_overrides, first.sheets[0].title_block_overrides);
+    let cells = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["title_block_cells"].clone();
+    let shown = |name: &str| cells.as_array().unwrap().iter().find(|cell| cell["name"] == name).unwrap()["text"].clone();
+    assert_eq!((shown("legal_owner"), shown("general_tolerances")), (json!("Acme Ltd"), json!("ISO 2768-m")), "the company's copy");
     // A later save of another format changes no drawing made from the file.
     run(&mut s, "drawing.template.apply", json!({"template": "iso-a4"}));
     run(&mut s, "drawing.template.save", json!({"path": path}));
@@ -164,8 +168,8 @@ fn names(s: &Session) -> Vec<&str> {
     s.doc.drawings.iter().map(|d| d.name.as_str()).collect()
 }
 
-/// A drawing of the design: one A3 sheet with the ISO border and no title block, the design its
-/// one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
+/// A drawing of the design: one A3 sheet with the ISO border and the built-in title block, the design
+/// its one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
 #[test]
 fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let mut s = design();
@@ -182,7 +186,9 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let d = open_one(&s);
     assert_eq!(made["id"], json!(ids::encode(d.id)));
     assert!(d.sheets[0].border.is_some(), "the ISO border");
-    assert_eq!((&d.sheets[0].title_block, &sheet["title_block"]), (&None, &Value::Null), "the border only");
+    let built_in = template::built_in(template::DEFAULT).unwrap().unwrap();
+    assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the built-in block");
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");

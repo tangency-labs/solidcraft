@@ -190,7 +190,7 @@ fn the_providers_scene_follows_the_placements() {
     run(&mut s, "drawing.create", json!({}));
     let sheet = s.drawing("test").unwrap().sheets[0].id;
     let before = crate::drawing_scene::extract(&mut s, sheet).unwrap();
-    assert_eq!(kinds(&before.scene), [ObjectKind::DrawingBorder]);
+    assert_eq!(kinds(&before.scene), [ObjectKind::DrawingBorder, ObjectKind::TitleBlock]);
 
     place(&mut s, &folder, &red_blue(), sheet, [410.0, 287.0, 430.0, 307.0]);
     let placed = crate::drawing_scene::extract(&mut s, sheet).unwrap();
@@ -199,7 +199,7 @@ fn the_providers_scene_follows_the_placements() {
     };
     assert_eq!(border(&placed), border(&before));
     assert_ne!(placed.generation, before.generation);
-    assert_eq!(kinds(&placed.scene), [ObjectKind::DrawingBorder, ObjectKind::SheetImage]);
+    assert_eq!(kinds(&placed.scene), [ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::TitleBlock]);
     let d = s.drawing("test").unwrap().clone();
     assert_eq!(*placed.scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene);
     let same = crate::drawing_scene::extract(&mut s, sheet).unwrap();
@@ -207,5 +207,5 @@ fn the_providers_scene_follows_the_placements() {
 
     run(&mut s, "edit.undo", json!({}));
     let undone = crate::drawing_scene::extract(&mut s, sheet).unwrap();
-    assert_eq!(kinds(&undone.scene), [ObjectKind::DrawingBorder]);
+    assert_eq!(kinds(&undone.scene), [ObjectKind::DrawingBorder, ObjectKind::TitleBlock]);
 }

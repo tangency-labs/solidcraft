@@ -11,9 +11,9 @@
 //! block, and moves nothing on it.
 //!
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, each
-//! one sheet with the ISO border and nothing more. A title block, tables and text are added to a
-//! drawing, and a template saved from it keeps them; the built-in block
-//! ([`default_block`](solidcraft_geom::title_block::default_block)) is one a sheet can take. A
+//! one sheet with the ISO border and the built-in title block
+//! ([`default_block`](title_block::default_block)). A drawing saved as a template replaces or
+//! changes them: a copy of a built-in with a company's changes is a template like any other. A
 //! later built-in never changes a drawing made from an earlier one: a drawing keeps copies, never
 //! names.
 
@@ -23,14 +23,14 @@ use std::sync::Arc;
 use solidcraft_geom::cell::Part;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
 use solidcraft_geom::revision::RevisionRecord;
-use solidcraft_geom::title_block::CellKind;
+use solidcraft_geom::title_block::{self, CellKind};
 
 use super::Drawing;
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 use crate::{DocError, Result};
 
-/// The built-in templates, by name: each ISO size, with its border only.
+/// The built-in templates, by name: each ISO size, with the ISO border and the built-in title block.
 pub const BUILT_INS: &[&str] = &["iso-a4", "iso-a3", "iso-a2", "iso-a1", "iso-a0"];
 /// Where every built-in's ids come from, so one built-in is always the same bytes.
 const BUILT_IN_SEED: u64 = 3875;
@@ -174,10 +174,13 @@ pub fn built_in(name: &str) -> Option<Result<Drawing>> {
     Some(made(&title, drawing_sheet::Sheet::standard(size, orientation)))
 }
 
-/// One sheet of `paper` with the ISO border.
+/// One sheet of `paper` with the ISO border and the built-in title block.
 fn made(title: &str, paper: drawing_sheet::Sheet) -> Result<Drawing> {
     let mut id_source = IdSource::seeded(BUILT_IN_SEED);
-    let d = Drawing::new(title, "en", "Sheet 1", paper, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source)?;
+    let mut d = Drawing::new(title, "en", "Sheet 1", paper, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source)?;
+    if let Some(first) = d.sheets.first_mut() {
+        Arc::make_mut(first).title_block = Some(title_block::default_block());
+    }
     check(&d)?;
     Ok(d)
 }
