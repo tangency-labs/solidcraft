@@ -2250,6 +2250,56 @@ fn an_ellipse_comes_with_its_axes_as_construction_lines() {
     assert!(refused.is_err_and(|e| e.to_string().contains("true or false")));
 }
 
+/// An ellipse with its axes, the minor one (or the major one) then deleted: the ids of the
+/// ellipse and of the axis left.
+fn ellipse_with_one_axis(s: &mut Session, keep_major: bool) -> (String, String) {
+    let e = ids(&run(s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}))["curves"])[0].clone();
+    let sk = sketch(s);
+    let mut lines: Vec<(f64, String)> = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            CurveKind::Line { a, b } => Some((sk.point(a).unwrap().dist(sk.point(b).unwrap()), c.id.clone())),
+            _ => None,
+        })
+        .collect();
+    lines.sort_by(|x, y| y.0.total_cmp(&x.0));
+    let (kept, gone) = if keep_major { (&lines[0].1, &lines[1].1) } else { (&lines[1].1, &lines[0].1) };
+    run(s, "sketch.delete", json!({"entities": [gone]}));
+    (e, kept.clone())
+}
+
+/// With one of its axes deleted, dragging the other still moves the ellipse with it, sizes kept.
+#[test]
+fn an_ellipse_s_remaining_axis_drags_it_along() {
+    for (keep_major, from) in [(true, Vec2::new(-12.0, 0.0)), (false, Vec2::new(0.0, 4.0))] {
+        let mut s = new_sketch();
+        let (_, axis) = ellipse_with_one_axis(&mut s, keep_major);
+        run(&mut s, "sketch.drag", json!({"entity": &axis, "from": [from.x, from.y], "to": [from.x + 4.0, from.y + 6.0]}));
+        run(&mut s, "sketch.drag_end", json!({}));
+        let sk = sketch(&s);
+        let Some(CurveKind::Ellipse { c, m, r }) = sk.curves.iter().map(|x| x.kind.clone()).find(|k| matches!(k, CurveKind::Ellipse { .. })) else {
+            panic!("the ellipse: {:?}", sk.curves)
+        };
+        let (at, a) = (sk.point(c).unwrap(), sk.point(c).unwrap().dist(sk.point(m).unwrap()));
+        assert!(at.dist(Vec2::new(4.0, 6.0)) < 1e-6 && close(a, 20.0) && close(r, 8.0), "major kept {keep_major}: centre {at:?}, half-axes {a} {r}");
+    }
+}
+
+/// With one of its axes deleted, a double-click on the ellipse or the other axis selects both.
+#[test]
+fn an_ellipse_and_its_remaining_axis_are_one_chain() {
+    let mut s = new_sketch();
+    let (e, major) = ellipse_with_one_axis(&mut s, true);
+    let mut both = vec![e.clone(), major.clone()];
+    both.sort();
+    for id in [&e, &major] {
+        let mut chain = ids(&run(&mut s, "sketch.chain", json!({"curve": id}))["curves"]);
+        chain.sort();
+        assert_eq!(chain, both, "double-click on {id}");
+    }
+}
+
 /// #1026: a construction diagonal ending at a rectangle's corner is not one of the corner's
 /// sides. The corner is rounded, and the diagonal keeps its end on the virtual sharp corner.
 #[test]

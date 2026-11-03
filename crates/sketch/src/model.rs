@@ -1353,7 +1353,13 @@ impl Sketch {
         }
         let ends: Vec<Vec<usize>> =
             self.curves.iter().map(|c| c.kind.ends().map(|(a, b)| vec![find(&mut root, a), find(&mut root, b)]).unwrap_or_default()).collect();
-        let ellipses: Vec<(usize, EllipseAxes)> = (0..self.curves.len()).filter_map(|e| Some((e, self.ellipse_axes(e)?))).collect();
+        // Each ellipse with whichever of its axes are left (one may have been deleted).
+        let ellipses: Vec<Vec<usize>> = (0..self.curves.len())
+            .filter_map(|e| {
+                let (major, minor) = self.ellipse_axis_lines(e)?;
+                Some(std::iter::once(e).chain(major.map(|(l, _)| l)).chain(minor.map(|(l, ..)| l)).collect())
+            })
+            .collect();
         let mut seen = vec![false; self.curves.len()];
         let mut stack = vec![ci];
         let mut out = Vec::new();
@@ -1371,9 +1377,9 @@ impl Sketch {
                     stack.push(j);
                 }
             }
-            for (e, axes) in &ellipses {
-                if [*e, axes.major, axes.minor].contains(&i) {
-                    stack.extend([*e, axes.major, axes.minor]);
+            for group in &ellipses {
+                if group.contains(&i) {
+                    stack.extend(group);
                 }
             }
         }

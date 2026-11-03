@@ -791,12 +791,15 @@ fn plan(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> Option<(Path, Hold)> {
                     // takes the ellipse and the other axis along, keeping their sizes, as a
                     // rectangle's diagonal does through the corners it shares with the edges.
                     let mut ids = k.point_ids();
-                    if let Some((e, axes)) =
-                        (0..sk.curves.len()).find_map(|e| sk.ellipse_axes(e).filter(|axes| axes.major == c || axes.minor == c).map(|axes| (e, axes)))
-                        && let Some(kind) = sk.curves.get(e).map(|x| &x.kind)
+                    // Whichever axes are left: one may have been deleted.
+                    if let Some((e, major, minor)) = (0..sk.curves.len()).find_map(|e| {
+                        let (major, minor) = sk.ellipse_axis_lines(e)?;
+                        (major.is_some_and(|(l, _)| l == c) || minor.is_some_and(|(l, ..)| l == c)).then_some((e, major, minor))
+                    }) && let Some(kind) = sk.curves.get(e).map(|x| &x.kind)
                     {
                         ids.extend(kind.point_ids());
-                        ids.extend(axes.ends);
+                        ids.extend(major.map(|(_, q)| q));
+                        ids.extend(minor.into_iter().flat_map(|(_, n1, n2)| [n1, n2]));
                         hold.radii.push(e);
                     }
                     ids.sort_unstable();
