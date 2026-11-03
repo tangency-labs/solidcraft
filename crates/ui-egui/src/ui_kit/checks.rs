@@ -64,8 +64,13 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_label);
-    let galley = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink);
     let gap = if label.is_empty() { 0.0 } else { t.space_6 };
+    let wrap = ui.style().wrap_mode == Some(egui::TextWrapMode::Wrap);
+    let galley = if wrap {
+        ui.painter().layout(label.to_owned(), font.clone(), t.form_ink, (ui.available_width() - t.space_14 - gap).max(0.0))
+    } else {
+        ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink)
+    };
     let width = (t.space_14 + gap + galley.size().x).max(ui.spacing().interact_size.y).min(super::metrics::dimension(ui.available_width()));
     let height = ui.spacing().interact_size.y.max(t.space_14).max(galley.size().y);
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
@@ -78,7 +83,13 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     let square = box_at(ui, pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
     paint_box(ui, square, &response, *value, mixed && !response.changed());
     let text_rect = Rect::from_min_max(pos2((square.right() + gap).min(rect.right()), rect.top()), rect.max);
-    super::text::paint_text(ui, text_rect, label, font, t.form_ink, false);
+    if wrap {
+        let ppp = ui.ctx().pixels_per_point().max(0.5);
+        let at = pos2((text_rect.left() * ppp).round() / ppp, ((text_rect.center().y - galley.size().y / 2.0) * ppp).round() / ppp);
+        ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(at, galley, t.form_ink);
+    } else {
+        super::text::paint_text(ui, text_rect, label, font, t.form_ink, false);
+    }
     response.widget_info(|| {
         let accessible = if label.is_empty() { crate::i18n::tr_label(super::row_label(ui)) } else { label };
         let mut info = egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, accessible);
