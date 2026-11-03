@@ -9,6 +9,11 @@
 //! `scenario_round_cutting_a_bridge_refused`, `scenario_chamfer_cutting_a_bridge_refused`),
 //! and the fork's own numbers from a local build of 5e8c9c1's `SMLib` and `SM_API` run the
 //! same way (`SetFilletParameters`, `CreateFilletCorners`, `DoFilleting`, `GetFitRadius`).
+//!
+//! A smaller round or chamfer past the top's back rim, whose front rail crosses the slot's
+//! opening, leaves the bridge a strip and builds one piece: closed forms from the fork's
+//! c1905d0 (`scenario_round_past_the_rim_over_an_opening`,
+//! `scenario_chamfer_past_the_rim_over_an_opening`), to the fork's tolerances.
 
 #![allow(
     clippy::unwrap_used,
@@ -20,10 +25,14 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::topology::brep::p1::regions;
+use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
 
@@ -138,6 +147,68 @@ fn a_chamfer_through_a_bridge_is_refused_naming_the_setback_that_keeps_it_whole(
     assert!(
         (fit - 4.9900000000036382).abs() <= 1e-12 * fit,
         "{fit} vs fork"
+    );
+}
+
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-7, &attrs).unwrap()
+}
+
+/// Blends the bridged block's top front edge by `r` (`xsect` as [`blend`]): built, a
+/// manifold solid in one piece (the outside and one solid region), its volume.
+fn built_volume(r: f64, xsect: u32) -> f64 {
+    let mut k = kernel(true);
+    let mut b = bridged_block(&mut k);
+    if let Err(refusal) = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), r, xsect) {
+        panic!("r {r} refused: {}", refusal.comment);
+    }
+    assert!(
+        is_manifold_solid(&b).unwrap(),
+        "r {r}: not a manifold solid"
+    );
+    assert_eq!(regions(&b, None).unwrap().len(), 2, "r {r}: not one piece");
+    volume(&k, &mut b)
+}
+
+/// Rounded r6, wider than the 4 deep top: its contact line on the top lies past the back
+/// and the one on the front, at z = 4, crosses the slot's opening; the bridge keeps a strip.
+/// The round takes `y < d(z) = 6 - sqrt(36 - (z - 4)^2)`, at most the depth 4 (reached at
+/// `z = 4 + sqrt 32`): with `G(t) = 6 t - (t/2) sqrt(36 - t^2) - 18 asin(t/6)` the full
+/// section loses `G(sqrt 32) + 4 (6 - sqrt 32)` and the bridge's that less `G(5)` (its
+/// z < 9 is the slot), over 16 and 4 of the length (fork c1905d0,
+/// `scenario_round_past_the_rim_over_an_opening`, to 1e-7).
+#[test]
+fn a_round_past_the_rim_over_the_opening_keeps_the_bridge() {
+    let g = |t: f64| 6.0 * t - 0.5 * t * (36.0 - t * t).sqrt() - 18.0 * (t / 6.0).asin();
+    let q = 32.0_f64.sqrt();
+    let full = g(q) + 4.0 * (6.0 - q);
+    let bridge = full - g(5.0);
+    let closed = 656.0 - (16.0 * full + 4.0 * bridge);
+    let v = built_volume(6.0, 1);
+    eprintln!("round r6: {v:.12} vs {closed:.12}");
+    assert!(
+        (v - closed).abs() <= 1e-7 * closed,
+        "{v} vs closed form {closed}"
+    );
+}
+
+/// Chamfered 4.5, past the 4 deep top too (a chamfer past a rim builds): the plane
+/// `y + (10 - z) = 4.5` takes the triangle of legs 4.5 less its 0.5 past the back, 10, off
+/// the full section, and `Int_0^1 min(4.5 - t, 4) dt = 3.875` off the bridge's:
+/// `656 - 160 - 15.5 = 480.5` (fork c1905d0, `scenario_chamfer_past_the_rim_over_an_opening`,
+/// to 1e-9).
+#[test]
+fn a_chamfer_past_the_rim_over_the_opening_keeps_the_bridge() {
+    let v = built_volume(4.5, 0);
+    eprintln!("chamfer 4.5: {v:.12} vs 480.5");
+    assert!(
+        (v - 480.5).abs() <= 1e-9 * 480.5,
+        "{v} vs closed form 480.5"
     );
 }
 
