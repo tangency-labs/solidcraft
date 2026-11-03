@@ -2399,9 +2399,9 @@ impl CanvasPanel {
 }
 
 /// Does the open dialog's active input take bodies (Combine's target and tools, #4452;
-/// Move/Copy's bodies, #4771)? Then a body clicked in the Browser goes there, as a click
-/// on it in the view does, rather than replacing the selection: overlapping bodies are
-/// often only told apart in the Browser.
+/// Move/Copy's bodies, #4771; Shell's Faces/Body for a closed hollow, #794)? Then a body
+/// clicked in the Browser goes there, as a click on it in the view does, rather than
+/// replacing the selection: overlapping bodies are often only told apart in the Browser.
 fn dialog_takes_body(app: &SolveApp) -> bool {
     app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::BODIES != 0)
 }

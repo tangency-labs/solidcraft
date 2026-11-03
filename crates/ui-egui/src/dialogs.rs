@@ -112,7 +112,8 @@ const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Kind {
-        Shell("solid.shell", "SHELL", [("Faces/Body", FACES, true)],
+        // Faces to remove, or a body for a closed hollow with none (#794).
+        Shell("solid.shell", "SHELL", [("Faces/Body", FACES | BODIES, true)],
             FeatureKind::Shell { thickness, .. }) {
             thickness: String = "2 mm".into() => shown_expr(thickness, ValueKind::Length),
         } => json!({"thickness": thickness});
@@ -1468,6 +1469,11 @@ impl Dialog {
             return None;
         }
         let picks = sels(self, 0);
+        // A body alone is a closed hollow: no faces to chain, so the chip and highlights use the
+        // body pick itself (#794). Returning an empty face list would show "0 selected".
+        if picks.iter().all(|p| !matches!(p, Sel::Face { .. })) {
+            return None;
+        }
         if let Ok(cache) = self.shell_chain.try_borrow()
             && let Some(chain) = cache.as_ref()
             && chain.revision == s.revision
@@ -2591,6 +2597,9 @@ fn hint(inp: &SelInput) -> &'static str {
         "click sketch points"
     } else if inp.label == "Components" {
         "click components"
+    } else if inp.label == "Faces/Body" {
+        // Shell (#794): faces open the hollow; a body alone seals a closed void inside.
+        "click faces to remove, or a body in the Browser for a closed hollow"
     } else if a & BODIES != 0 {
         "click bodies"
     } else {
@@ -4998,15 +5007,33 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
         }
         Kind::Shell { .. } => {
-            need(0, "faces to remove")?;
-            let mut p = json!({"faces": face_points(0)});
-            // The picked faces' body: a point alone may name a flush face of another body (#4555).
-            let mut bodies = sels(d, 0).iter().filter_map(|s| if let Sel::Face { body, .. } = s { Some(body) } else { None });
-            if let Some(first) = bodies.next()
-                && bodies.all(|b| b == first)
-            {
-                p["body"] = json!(first);
-            }
+            let picks = sels(d, 0);
+            let face_sels: Vec<_> = picks.iter().filter(|s| matches!(s, Sel::Face { .. })).collect();
+            let body_names: Vec<_> = picks.iter().filter_map(|s| if let Sel::Body { name } = s { Some(name.as_str()) } else { None }).collect();
+            // A body alone (no faces): a closed hollow (#794, #4009). Faces still open the shell.
+            let p = if face_sels.is_empty() {
+                need(0, "faces to remove, or a body for a closed hollow")?;
+                match body_names.as_slice() {
+                    [name] => json!({"faces": [], "body": name}),
+                    [] => return Err("select faces to remove, or a body for a closed hollow".into()),
+                    _ => return Err("select one body for a closed hollow".into()),
+                }
+            } else {
+                let mut p = json!({"faces": face_points(0)});
+                // The picked faces' body: a point alone may name a flush face of another body (#4555).
+                // A Browser body pick with faces scopes them when they all sit on that body.
+                if let [name] = body_names.as_slice() {
+                    p["body"] = json!(name);
+                } else {
+                    let mut bodies = face_sels.iter().filter_map(|s| if let Sel::Face { body, .. } = s { Some(body.as_str()) } else { None });
+                    if let Some(first) = bodies.next()
+                        && bodies.all(|b| b == first)
+                    {
+                        p["body"] = json!(first);
+                    }
+                }
+                p
+            };
             ("solid.shell", p)
         }
         Kind::Draft { .. } => {
@@ -6404,7 +6431,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.chain_applied = false;
             d
         }
-        FeatureKind::Shell { faces, direction, tangent_chain, .. } => {
+        FeatureKind::Shell { faces, direction, tangent_chain, body, .. } => {
             let mut d = start("solid.shell")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             d.extra.insert("tangent_chain".into(), json!(tangent_chain));
@@ -6412,13 +6439,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 d.extra.insert("direction".into(), json!(direction));
             }
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = faces
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, p)| {
-                        f.face_names.get(i).and_then(|name| named_refill(s, f.kind.face_body(), name, p.0, false)).or_else(|| face_sel(s, p.0))
-                    })
-                    .collect();
+                // A closed hollow stores no faces and the body it hollows (#794).
+                if faces.is_empty() {
+                    if let Some(name) = body {
+                        inp.items = vec![Sel::Body { name: name.to_string() }];
+                    }
+                } else {
+                    inp.items = faces
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| {
+                            f.face_names.get(i).and_then(|name| named_refill(s, f.kind.face_body(), name, p.0, false)).or_else(|| face_sel(s, p.0))
+                        })
+                        .collect();
+                }
             }
             d
         }
@@ -7734,7 +7768,7 @@ mod extrude_mixed_pick_tests {
 
 #[cfg(test)]
 mod shell_body_tests {
-    //! The Shell dialog says whose face it removes (#4555).
+    //! The Shell dialog says whose face it removes (#4555), and takes a body from the Browser (#794).
 
     use super::*;
     use crate::scenario::Harness;
@@ -7759,6 +7793,47 @@ mod shell_body_tests {
         let (cmd, p) = commands.first().unwrap();
         assert_eq!(cmd, "solid.shell");
         assert_eq!(p["body"], json!(upper), "{p}");
+    }
+
+    /// #794: a body clicked in the Browser fills Faces/Body, and OK builds a closed hollow
+    /// (`faces: []` with that body) instead of leaving the field on Select.
+    #[test]
+    fn a_body_clicked_in_the_browser_fills_shell_for_a_closed_hollow() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20,"corner":[0,0,0]})).unwrap();
+        let name = crate::open_meshing::session_world(&h.app.session).bodies[0].name.to_string();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.frames(2);
+        let before = h.app.dialog.as_ref().expect("Shell is open");
+        assert!(before.inputs[0].items.is_empty(), "Faces/Body starts empty");
+        assert!(before.inputs[0].accept & BODIES != 0, "Shell accepts bodies");
+        h.step(&json!({"click":{"browser": name}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("Shell stays open");
+        assert_eq!(d.inputs[0].items, vec![Sel::Body { name: name.clone() }], "the Browser body fills Faces/Body");
+        assert_eq!(d.shell_faces(&h.app.session), None, "a body alone does not expand to an empty face chain");
+        assert_eq!(d.highlighted(&h.app.session), vec![Sel::Body { name: name.clone() }], "the body stays highlighted");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(cmd, "solid.shell");
+        assert_eq!(p["faces"], json!([]), "no faces: a closed hollow");
+        assert_eq!(p["body"], json!(name), "{p}");
+    }
+
+    /// A body selected before Shell starts is taken the same way as a Browser click (#794).
+    #[test]
+    fn a_preselected_body_fills_shell_for_a_closed_hollow() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":12.5})).unwrap();
+        let name = crate::open_meshing::session_world(&h.app.session).bodies[0].name.to_string();
+        h.app.run("select.set", json!({"items":[{"type":"body","name": name}]})).unwrap();
+        h.app.start("solid.shell");
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("Shell opens");
+        assert_eq!(d.inputs[0].items, vec![Sel::Body { name: name.clone() }]);
+        let (_, p) = dialog_commands(&h.app, d).unwrap().into_iter().next().unwrap();
+        assert_eq!(p["faces"], json!([]));
+        assert_eq!(p["body"], json!(name));
     }
 }
 
