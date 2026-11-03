@@ -1,0 +1,32 @@
+{
+  "en": {
+    "ui.fillet_turn": "Turns",
+    "ui.fillet_turn_mitre": "Mitre",
+    "ui.fillet_turn_swept": "Swept",
+    "ui.fillet_turn_tip": "Where two rounds turn round a sharp corner edge between them, such as the rounds along a boss's base at its upright edges.\nMitre: the rounds run on until they meet in a mitre.\nSwept: the rounds stop at the corner edge and turn round it, the corner a torus tangent to both. Only for rounds of one radius round a straight, convex corner edge."
+  },
+  "de": {
+    "ui.fillet_turn": "Wendungen",
+    "ui.fillet_turn_mitre": "Gehrung",
+    "ui.fillet_turn_swept": "Geschwenkt",
+    "ui.fillet_turn_tip": "Wo zwei Rundungen um eine scharfe Eckkante zwischen ihnen herumlaufen, etwa die Rundungen am Fuß eines Zapfens an seinen senkrechten Kanten.\nGehrung: Die Rundungen laufen weiter, bis sie sich in einer Gehrung treffen.\nGeschwenkt: Die Rundungen enden an der Eckkante und schwenken um sie herum; die Ecke ist ein Torus, tangential zu beiden. Nur für Rundungen mit einem Radius um eine gerade, konvexe Eckkante."
+  },
+  "ja": {
+    "ui.fillet_turn": "曲がり角",
+    "ui.fillet_turn_mitre": "留め継ぎ",
+    "ui.fillet_turn_swept": "回転",
+    "ui.fillet_turn_tip": "2 つのフィレットが間にある鋭いコーナーエッジを回り込む所（ボスの根元のフィレットが立ち上がりエッジを回る所など）。\n留め継ぎ: フィレットは延びて留め継ぎで出会います。\n回転: フィレットはコーナーエッジで止まり、その周りを回ります。コーナーは両方に接するトーラスです。同じ半径のフィレットが、まっすぐな凸のコーナーエッジを回る場合のみ。"
+  },
+  "ko": {
+    "ui.fillet_turn": "꺾임",
+    "ui.fillet_turn_mitre": "마이터",
+    "ui.fillet_turn_swept": "회전",
+    "ui.fillet_turn_tip": "두 라운드가 사이의 날카로운 코너 모서리를 돌아가는 곳(보스 밑동의 라운드가 세로 모서리를 도는 곳 등).\n마이터: 라운드가 계속 이어져 마이터로 만납니다.\n회전: 라운드가 코너 모서리에서 멈추고 그 둘레를 돕니다. 코너는 둘 모두에 접하는 토러스입니다. 반지름이 같은 라운드가 곧고 볼록한 코너 모서리를 돌 때만."
+  },
+  "zh": {
+    "ui.fillet_turn": "转角",
+    "ui.fillet_turn_mitre": "斜接",
+    "ui.fillet_turn_swept": "旋转",
+    "ui.fillet_turn_tip": "两个圆角绕过它们之间尖锐的角边处，例如凸台根部的圆角绕过其竖直边。\n斜接：圆角继续延伸，直到以斜接相遇。\n旋转：圆角止于角边并绕它旋转，转角是与两者相切的圆环面。仅用于同一半径的圆角绕过笔直的凸角边时。"
+  }
+}
