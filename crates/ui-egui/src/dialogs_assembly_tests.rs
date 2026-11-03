@@ -1337,3 +1337,21 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     find_limits(&app, f, id, &d.inputs);
     assert!(f.found_note.is_some() && f.found.is_empty(), "{:?}", f.found_note);
 }
+
+/// Compute in Interference intersects and meshes each overlap on the kernel's workers. On the
+/// window thread (a 1 MiB stack on Windows) the kernel ran out of stack and the app closed
+/// (#11483); here the dialog's own thread has 64 KiB.
+#[test]
+fn interference_meshes_each_overlap_on_the_kernels_stack() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 10)], |id, p| s.execute(id, &p).unwrap());
+    let r = s.execute("inspect.clearance", &json!({"clearance": 0, "nearest": 1})).unwrap();
+    assert_eq!(r["overlaps"].as_array().map(Vec::len), Some(1), "{r}");
+    let st = s.world_state().unwrap();
+    let meshes = std::thread::Builder::new().stack_size(64 << 10).spawn(move || overlap_meshes(&st, &r)).unwrap().join().unwrap();
+    // A's 0..20 and B's 10..30 along X share 10..20.
+    let b = meshes.first().map(Mesh::bounds).expect("the shared volume");
+    assert_eq!(meshes.len(), 1);
+    let near = |p: Vec3, q: [f64; 3]| (p.x - q[0]).abs() < 1e-6 && (p.y - q[1]).abs() < 1e-6 && (p.z - q[2]).abs() < 1e-6;
+    assert!(near(b.min, [10.0, 0.0, 0.0]) && near(b.max, [20.0, 20.0, 10.0]), "{b:?}");
+}

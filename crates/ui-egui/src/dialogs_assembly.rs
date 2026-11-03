@@ -1189,17 +1189,24 @@ fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, 
         Ok(v) => v,
         Err(e) => return (json!({ "error": e }), Vec::new()),
     };
-    let st = crate::open_meshing::session_world(&app.session);
-    let mut meshes = Vec::new();
-    for hit in r["overlaps"].as_array().into_iter().flatten() {
-        let (Some(a), Some(b)) = (hit["a"].as_str().and_then(|n| st.body(n)), hit["b"].as_str().and_then(|n| st.body(n))) else { continue };
-        if let Ok(Some(o)) = solidcraft_engine::kernel::boolean(&a.body, &b.body, solidcraft_engine::kernel::BoolOp::Intersect)
-            && let Ok(m) = o.mesh(&solidcraft_engine::kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3)))
-        {
-            meshes.push(m);
-        }
-    }
+    let meshes = overlap_meshes(&crate::open_meshing::session_world(&app.session), &r);
     (r, meshes)
+}
+
+/// The volume each pair in an `inspect.clearance` reply's `overlaps` shares, meshed in world
+/// placement. Each pair runs on a kernel worker with the kernel's stack: on the window thread
+/// (1 MiB on Windows) the kernel's recursion ran out of stack and the app closed (#11483).
+fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mesh> {
+    use solidcraft_engine::kernel;
+    let pairs: Vec<_> =
+        r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
+    kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
+        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
+    })
+    .into_iter()
+    .filter_map(|m| m.ok().flatten())
+    .collect()
 }
 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
