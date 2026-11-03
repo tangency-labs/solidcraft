@@ -16,6 +16,7 @@
 //! | [`Curve::eval_tangent`]                 | `N_CrvEvalTangent`              |
 //! | [`Curve::eval_frenet_frame`], [`FrenetFrame`] | `N_CrvEvalFrenetFrame`    |
 //! | [`Curve::transform`]                    | `N_CrvTransform`                |
+//! | [`Curve::swap_xy`]                      | (not upstream, WR-728)          |
 //! | [`Curve::min_max_weights_and_pts`], [`MinMaxWeights`] | `N_CrvGetMinMaxWeightsAndPts` |
 //! | [`line_from_pt_and_vector`]             | `N_CrvLineFromPtAndVector`      |
 //! | [`Curve::scale`]                        | `N_CrvScale`                    |
@@ -549,6 +550,20 @@ impl Curve {
             *pw = pw.transform(rma)?;
         }
         Ok(())
+    }
+
+    /// Swaps every control point's `x` and `y`, the mirror about the plane `x = y`
+    /// without rounding; a 2D curve is made 3D first, as [`Curve::transform`] makes it
+    /// (not upstream, WR-728: `SmFace::SwapUV` mirrors its UV trims through a rounded
+    /// `N_CrvTransform` matrix). The swap is linear, so it applies to the weighted
+    /// coordinates as they are.
+    pub fn swap_xy(&mut self) {
+        if !self.is_3d() {
+            self.to_3d();
+        }
+        for pw in self.cpts_mut() {
+            core::mem::swap(&mut pw.x, &mut pw.y);
+        }
     }
 
     /// Smallest and largest weight and smallest distance of a Euclidean control point
