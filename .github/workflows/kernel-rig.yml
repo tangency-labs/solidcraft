@@ -33,6 +33,7 @@ on:
       - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The solidcore pin (the plan runs every area only when its lines change).
@@ -55,6 +56,7 @@ on:
       - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The solidcore pin (the plan runs every area only when its lines change).

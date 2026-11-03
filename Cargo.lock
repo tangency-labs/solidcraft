@@ -4134,6 +4134,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-develop"
+version = "0.40.0-rc.1"
+dependencies = [
+ "serde",
+ "solidcore-record",
+ "solidcraft-geom",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-doc"
 version = "0.40.0-rc.1"
 dependencies = [
@@ -4143,6 +4153,7 @@ dependencies = [
  "sha2 0.10.9",
  "solidcore-record",
  "solidcraft-derive",
+ "solidcraft-develop",
  "solidcraft-geom",
  "solidcraft-kernel",
  "solidcraft-profile",
@@ -4163,6 +4174,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "solidcore-record",
+ "solidcraft-develop",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",

@@ -109,7 +109,7 @@ fn convert_to_sheet_metal_takes_the_plates_face_by_name() {
     let mut s = Session::default();
     plate_with_hole(&mut s, 100.0, 60.0, 2.5);
     let (top, _) = top_and_hole_names(&mut s);
-    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": top}));
+    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": top}));
     let flat = run(&mut s, "sheet.flat_pattern", json!({}));
     for (i, want) in [100.0, 60.0, 2.5].into_iter().enumerate() {
         assert!((flat["flat_size_mm"][i].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-6, "{flat}");

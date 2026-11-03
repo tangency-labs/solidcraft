@@ -542,7 +542,7 @@ fn contour_flange_hem_and_tray() {
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
     run(&mut s, "sheet.hem", json!({"edges": [[50, 0, 20]], "length": 8}));
-    assert!(rel(volume(&mut s), 21334.723) < 1e-4, "{}", volume(&mut s));
+    assert!(rel(volume(&mut s), 21332.046) < 1e-4, "{}", volume(&mut s));
     let b = flat(&mut s)["bends"].clone();
     assert!(b.as_array().is_some_and(|a| a.iter().any(|x| (x["angle_deg"].as_f64().unwrap_or(0.0) - 180.0).abs() < 1e-9)), "{b}");
     // A tray: four flanges at once stop at each other's bends.
@@ -789,20 +789,25 @@ fn unfold_cut_refold_and_convert() {
     // Convert a plate.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 2.5, "body_name": "Plate"}));
-    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, 2.5]}));
+    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, 2.5]}));
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
     assert!(rel(volume(&mut s), 18972.622) < 1e-4, "{}", volume(&mut s));
-    // A rod picked on its end is a round plate as thick as the rod is long (as a 20 x 20 x 30 bar
-    // is a square one); a block thicker at one end is no plate.
+    // Thickening takes the faces picked (#6748): a rod picked on its end is a disc of the rule's
+    // thickness, not a plate as thick as the rod is long; a block thicker at one end, picked on
+    // its thin face, is that face's sheet at the plate's own thickness.
     let mut t = Session::default();
     run(&mut t, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Rod"}));
-    run(&mut t, "sheet.convert", json!({"body": "Rod", "face": [0, 0, 30]}));
+    run(&mut t, "sheet.convert", json!({"mode": "thicken", "body": "Rod", "face": [0, 0, 30]}));
     let f = flat(&mut t);
-    assert!(rel(f["thickness"].as_f64().unwrap_or(0.0), 30.0) < 1e-9 && rel(f["flat_size_mm"][0].as_f64().unwrap_or(0.0), 20.0) < 1e-4, "{f}");
+    assert!(rel(f["thickness"].as_f64().unwrap_or(0.0), 2.5) < 1e-9 && rel(f["flat_size_mm"][0].as_f64().unwrap_or(0.0), 20.0) < 1e-4, "{f}");
     let mut t = Session::default();
     run(&mut t, "solid.box", json!({"length": 100, "width": 60, "height": 2.5, "body_name": "Block"}));
     run(&mut t, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 60, "height": 10, "operation": "join"}));
-    assert!(t.execute("sheet.convert", &json!({"body": "Block", "face": [50, 30, 2.5]})).is_err());
+    run(&mut t, "sheet.convert", json!({"mode": "thicken", "body": "Block", "face": [50, 30, 2.5]}));
+    let f = flat(&mut t);
+    assert!(rel(f["thickness"].as_f64().unwrap_or(0.0), 2.5) < 1e-9, "{f}");
+    let size = (f["flat_size_mm"][0].as_f64().unwrap_or(0.0), f["flat_size_mm"][1].as_f64().unwrap_or(0.0));
+    assert!(rel(size.0.max(size.1), 80.0) < 1e-9 && rel(size.0.min(size.1), 60.0) < 1e-9, "{f}");
 }
 
 /// A pattern of a cut made in the flat is a set of cuts in the flat, kept like the cut itself: in
@@ -3175,7 +3180,7 @@ fn bar_with_leg(s: &mut Session, converted: bool) {
     run(s, "sketch.finish", json!({}));
     if converted {
         run(s, "solid.extrude", json!({"sketch": "Bar", "distance": 2, "body_name": "Plate"}));
-        run(s, "sheet.convert", json!({"body": "Plate", "face": [80, 15, 2]}));
+        run(s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [80, 15, 2]}));
     } else {
         run(s, "sheet.flange", json!({"sketch": "Bar"}));
     }
@@ -6372,7 +6377,7 @@ fn a_primitive_cut_passes_over_a_sheet_clear_of_it_by_its_exact_box() {
     let mut s = Session::default();
     for (name, x) in [("Left", 0.0), ("Right", 100.2)] {
         run(&mut s, "solid.box", json!({"corner": [x, 0, 0], "length": 100, "width": 60, "height": 2.5, "body_name": name}));
-        run(&mut s, "sheet.convert", json!({"body": name, "face": [x + 50.0, 30, 2.5]}));
+        run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": name, "face": [x + 50.0, 30, 2.5]}));
     }
     let body = |s: &Session, name: &str| s.model.state().bodies.iter().find(|b| b.name == name).map(|b| b.body.clone()).unwrap();
     let left = body(&s, "Left");
@@ -6380,7 +6385,9 @@ fn a_primitive_cut_passes_over_a_sheet_clear_of_it_by_its_exact_box() {
     // 0.2 mm from the Left sheet's end: within the display mesh's tolerance of it, clear of its exact box.
     run(&mut s, "solid.cylinder", json!({"base": [102.9, 30, -1], "radius": 2.5, "height": 5, "operation": "cut"}));
     assert!(body(&s, "Left").same(&left), "the sheet clear of the cut is passed over");
-    let holes = |s: &Session, name: &str| s.model.state().sheets.iter().find(|sh| sh.body == name).map(|sh| sh.holes.len());
+    let holes = |s: &Session, name: &str| {
+        s.model.state().surface_sheets.iter().find(|sk| sk.body == name).map(|sk| sk.sheet.panels.iter().map(|p| p.region.holes.len()).sum::<usize>())
+    };
     assert_eq!(holes(&s, "Left"), Some(0));
     assert_eq!(holes(&s, "Right"), Some(1));
     assert!((right_volume - body_volume(&mut s, "Right") - PI * 6.25 * 2.5).abs() < 1e-3);

@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-develop = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-profile = { workspace = true }

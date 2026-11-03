@@ -35,6 +35,7 @@
   {
    "command": "sheet.convert",
    "params": {
+    "mode": "thicken",
     "body": "Tray",
     "face": [
      50,
