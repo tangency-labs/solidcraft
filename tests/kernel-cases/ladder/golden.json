@@ -1048,9 +1048,9 @@
       "measured": {
         "area_mm2": 1418.5867563903955,
         "body_count": 1,
-        "edges": 486,
+        "edges": 606,
         "faces": 204,
-        "vertices": 324,
+        "vertices": 404,
         "volume_mm3": 1804.923985826013
       },
       "seconds": 15.346490394,
@@ -2001,5 +2001,5 @@
       "status": "pass"
     }
   },
-  "reason": "recorded on solidcore, the only kernel since the C++ SMLib kernel was removed (the golden before was C++ SMLib v1.1.0-alpha, a18bbe5): 07-fillets/012 passes (the variable round no longer gains the End at the smooth vertex: 8 faces, 18 edges, 12 vertices, 47755.12 mm3); 07-fillets/021 has 24 edges and 15 vertices (no End cap edge); 07-fillets/013 removes 47325.53 mm3; 06-threads/018 makes 486 edges and 324 vertices every run, so it is no longer marked unstable"
+  "reason": "recorded at solidcore 8ddce9016: 06-threads/018 makes 606 edges and 404 vertices (486 and 324 at 97ed188db), its 204 faces, area and volume the same to 1e-11; every other case as before. Before: recorded on solidcore, the only kernel since the C++ SMLib kernel was removed (the golden before was C++ SMLib v1.1.0-alpha, a18bbe5): 07-fillets/012 passes (the variable round no longer gains the End at the smooth vertex: 8 faces, 18 edges, 12 vertices, 47755.12 mm3); 07-fillets/021 has 24 edges and 15 vertices (no End cap edge); 07-fillets/013 removes 47325.53 mm3; 06-threads/018 makes 486 edges and 324 vertices every run, so it is no longer marked unstable"
 }
