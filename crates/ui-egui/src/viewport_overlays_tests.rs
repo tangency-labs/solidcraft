@@ -46,9 +46,13 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     let mut h = Harness::new();
     h.app.run("inspect.section", json!({"plane":{"origin":[12,-9,7],"normal":[-3,4,-2]},"offset":"-5 mm","flip":true,"hatch":false})).unwrap();
     let original = h.app.session.section.unwrap();
-    let effect = h.app.session.status_items().remove(0);
-    let params = crate::viewport_details::edit_params(&h.app, &effect, "hatch", &V::Check(true)).unwrap();
-    h.app.run("inspect.section", params).unwrap();
+    let card = |h: &Harness, id: &str, value: &V| {
+        let effect = h.app.session.status_items().remove(0);
+        crate::viewport_details::edit_command(&h.app, &effect, id, value).unwrap()
+    };
+    let (command, params) = card(&h, "hatch", &V::Check(true));
+    assert_eq!(command, "inspect.section.edit");
+    h.app.run(&command, params).unwrap();
     let changed = h.app.session.section.unwrap();
     assert!((original.0 - changed.0).len() < 1e-9 && (original.1 - changed.1).len() < 1e-9);
     assert!(h.app.session.section_hatch);
@@ -59,22 +63,64 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
         _ => panic!("actual flip checkbox"),
     };
     assert!(!current_flip, "the first-positive canonical normal already agrees with this actual flipped negative input");
-    let params = crate::viewport_details::edit_params(&h.app, &effect, "flip", &V::Check(!current_flip)).unwrap();
-    assert_eq!(params["hatch"], true);
-    h.app.run("inspect.section", params).unwrap();
+    let (command, params) = card(&h, "flip", &V::Check(!current_flip));
+    h.app.run(&command, params).unwrap();
     let flipped = h.app.session.section.unwrap();
     assert!((original.0 - flipped.0).len() < 1e-9);
     assert!((original.1 + flipped.1).len() < 1e-9);
+    assert!(h.app.session.section_hatch, "flip keeps the hatch");
     h.app.session.doc_mut().units = "in".into();
-    let effect = h.app.session.status_items().remove(0);
-    let params =
-        crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into(), decimals: 2 }).unwrap();
-    assert_eq!(params["offset"], "-25.4 mm");
-    assert_eq!(params["hatch"], true);
-    assert_eq!(params["flip"], !current_flip);
-    h.app.run("inspect.section", params).unwrap();
-    assert!((h.app.session.section.unwrap().1 - flipped.1).len() < 1e-9);
+    // The card's distance is along the first-positive normal (3, -4, 2)/√29.
+    let along = |o: &solidcore_record::Vec3| (3.0 * o.x - 4.0 * o.y + 2.0 * o.z) / 29f64.sqrt();
+    let before = along(&flipped.0);
+    let (command, params) = card(&h, "offset", &V::Length { value: before + 25.4, units: "in".into(), decimals: 2 });
+    h.app.run(&command, params).unwrap();
+    let moved = h.app.session.section.unwrap();
+    assert!((along(&moved.0) - before - 25.4).abs() < 1e-9, "the cut moves by what the card says");
+    assert!((moved.1 - flipped.1).len() < 1e-9);
+    assert!(h.app.session.section_hatch);
     assert_eq!(h.app.session.doc.section_analyses.items.len(), 1, "the card changes the section shown, it never adds one (#3977)");
+}
+
+/// A card edit of a section on a construction plane or a face keeps it on that plane or face, so
+/// it goes on following the model, and a distance expression a hatch or flip edit does not touch
+/// is kept (#3977).
+#[test]
+fn details_section_edits_keep_a_construction_plane_or_face() {
+    use crate::ui_kit::DetailValue as V;
+    use solidcraft_engine::doc::section_analysis::SectionPlane;
+    let mut h = Harness::new();
+    h.app.run("parameters.change", json!({"name":"h","expression":"20 mm"})).unwrap();
+    h.app.run("parameters.change", json!({"name":"d","expression":"4 mm"})).unwrap();
+    h.app.run("parameters.change", json!({"name":"k","expression":"1 mm"})).unwrap();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":"h"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"d","name":"Cut"})).unwrap();
+    for (plane, follow, z) in [(json!("Cut"), ("d", "9 mm"), 9.0), (json!({"face":[20,15,20]}), ("h", "30 mm"), 30.0)] {
+        h.app.run("inspect.section", json!({"plane":plane,"offset":"k","hatch":false})).unwrap();
+        let made = h.app.session.doc.section_analyses.visible().cloned().unwrap();
+        assert!(matches!(made.plane, SectionPlane::Construction { .. } | SectionPlane::Face { .. }), "{:?}", made.plane);
+        for (id, value) in [("hatch", V::Check(true)), ("flip", V::Check(true))] {
+            let effect = h.app.session.status_items().remove(0);
+            let (command, params) = crate::viewport_details::edit_command(&h.app, &effect, id, &value).unwrap();
+            h.app.run(&command, params).unwrap();
+            let sec = h.app.session.doc.section_analyses.visible().cloned().unwrap();
+            assert_eq!((&sec.plane, sec.offset.as_str()), (&made.plane, "k"), "{id} keeps the plane and the distance expression");
+        }
+        let sec = h.app.session.doc.section_analyses.visible().cloned().unwrap();
+        assert!(sec.hatch && sec.flip);
+        // The distance typed in the card moves the cut by that much, on the same plane.
+        let cut = h.app.session.section.unwrap();
+        let effect = h.app.session.status_items().remove(0);
+        let (command, params) =
+            crate::viewport_details::edit_command(&h.app, &effect, "offset", &V::Length { value: cut.0.z + 2.0, units: "mm".into(), decimals: 3 })
+                .unwrap();
+        h.app.run(&command, params).unwrap();
+        assert!((h.app.session.section.unwrap().0.z - cut.0.z - 2.0).abs() < 1e-9);
+        assert_eq!(h.app.session.doc.section_analyses.visible().unwrap().plane, made.plane);
+        // The model changes: the cut follows its plane or face (3 mm above it now).
+        h.app.run("parameters.change", json!({"name":follow.0,"expression":follow.1})).unwrap();
+        assert!((h.app.session.section.unwrap().0.z - z - 3.0).abs() < 1e-9, "{:?}", h.app.session.section);
+    }
 }
 
 #[test]
@@ -223,8 +269,9 @@ fn details_section_edits_keep_the_origin_plane() {
         h.app.run("inspect.section", json!({"plane":plane,"at":"25.4 mm"})).unwrap();
         let effect = h.app.session.status_items().remove(0);
         let units = h.app.session.doc.units.clone();
-        let params = crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: 1.5 * 25.4, units, decimals: 3 }).unwrap();
-        h.app.run("inspect.section", params).unwrap();
+        let (command, params) =
+            crate::viewport_details::edit_command(&h.app, &effect, "offset", &V::Length { value: 1.5 * 25.4, units, decimals: 3 }).unwrap();
+        h.app.run(&command, params).unwrap();
         let sec = h.app.session.doc.section_analyses.visible().cloned().unwrap();
         assert_eq!(sec.plane, SectionPlane::Origin { name: plane.into() }, "{plane}: the section stays on its plane");
         assert_eq!(sec.offset.trim_start_matches('-'), "38.1 mm", "{plane}: {}", sec.offset);
@@ -235,8 +282,8 @@ fn details_section_edits_keep_the_origin_plane() {
             V::Check(value) => value,
             _ => panic!("actual flip checkbox"),
         };
-        let params = crate::viewport_details::edit_params(&h.app, &effect, "flip", &V::Check(!flip)).unwrap();
-        h.app.run("inspect.section", params).unwrap();
+        let (command, params) = crate::viewport_details::edit_command(&h.app, &effect, "flip", &V::Check(!flip)).unwrap();
+        h.app.run(&command, params).unwrap();
         let flipped = h.app.session.doc.section_analyses.visible().cloned().unwrap();
         assert_eq!(flipped.plane, sec.plane);
         assert_eq!(flipped.offset, sec.offset);
