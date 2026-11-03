@@ -388,6 +388,12 @@ pub struct InspectResult {
     pub dimensions: Vec<String>,
     /// Its balloons' ids, in id order.
     pub balloons: Vec<String>,
+    /// Its manual centre marks, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_marks: Vec<String>,
+    /// Its manual centre lines, in id order; absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_lines: Vec<String>,
     pub choices: ChoicesResult,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -754,7 +760,7 @@ pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[Objec
     let segment = generator.subschema_for::<PathSegResult>();
     let stroke = json!({
         "type": "object",
-        "properties": {"kind": {"const": "stroke"}, "path": {"type": "array", "items": segment}, "closed": {"type": "boolean"}, "width_mm": {"type": "number", "exclusiveMinimum": 0}},
+        "properties": {"kind": {"const": "stroke"}, "path": {"type": "array", "items": segment}, "closed": {"type": "boolean"}, "width_mm": {"type": "number", "exclusiveMinimum": 0}, "pattern": {"type": "object", "properties": {"lengths_mm": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}}, "phase_mm": {"type": "number", "minimum": 0}}, "required": ["lengths_mm", "phase_mm"], "additionalProperties": false}},
         "required": ["kind", "path", "closed", "width_mm"],
         "additionalProperties": false
     });

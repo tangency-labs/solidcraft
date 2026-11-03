@@ -28,7 +28,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&STATUS_CONTRACT)
     .output(output_schema_for::<DrawingStatusResult>)
-    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?}], waiting: how many views are out of date}. current: drawn, from the model and with the settings the view has now. Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
+    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?}], waiting: how many views are out of date}. current: drawn, from the model and with the settings the view has now. Balloons, centre marks and centre lines are read by their inspect commands. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
     CommandSpec::new(CMD, "Draw Sheet", crate::checked!("drawing.scene", scene))
     .icon("export")
     .in_drawing()
@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<SheetSceneResult>)
-    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity}]}]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its visible lines only for now), then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border and each view sit on paper}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why. Read-only; no model is evaluated.")];
+    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|title_block|centre_mark|centre_line, items: [{kind: stroke, path, closed, width_mm, pattern?} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity}]}]} in paint order: the drawing border (object: the sheet), images by id (object and source: the placement), views by id (object: the view; lines and any picture), title block lines (object: the sheet), then manual centre marks and lines by id, views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where each drawable object sits on paper}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why. Read-only; no model is evaluated.")];
 
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;

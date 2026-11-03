@@ -37,7 +37,7 @@ fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -892,4 +892,289 @@ fn status_says_where_each_dimension_stands() {
     assert_eq!(lost["status"], json!("lost"), "{reply}");
     assert!(!lost["why"].as_str().unwrap().is_empty(), "{reply}");
     assert!(s.execute("drawing.status", &json!({"sheet": "x"})).is_err());
+}
+
+#[test]
+fn manual_centre_mark_is_shared_by_one_shot_and_cached_scenes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 6, "height": 52, "base": [40, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"], "name": "Hole"}),
+    );
+    let state = s.model.state();
+    let mesh = state.body("Block").unwrap().mesh();
+    let centre = solidcraft_geom::Vec3::new(40.0, 0.0, 10.0);
+    let edge = mesh.edges.iter().position(|line| !line.is_empty() && line.iter().all(|p| (p.dist(centre) - 6.0).abs() < 1e-6)).unwrap();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let added =
+        run(&mut s, "drawing.center_mark.add", json!({"view": ids::encode(front), "edge": {"body": "Block", "index": edge}, "overshoot_mm": 2.0}));
+    let mark = added["mark"].as_str().unwrap().to_owned();
+    let mark_id = ids::decode(&mark).unwrap();
+    let group = |scene: &Scene| scene.groups.iter().find(|g| g.kind == ObjectKind::CentreMark && g.object == mark_id).unwrap().clone();
+    let once = built(&s, sheet).scene;
+    let cached = settled(&mut s, sheet).scene;
+    assert_eq!(group(&once), group(&cached));
+    let original = group(&once);
+    let folder = crate::tests::Folder::new("manual-centre-mark");
+    let path = folder.path("mark.solidcraft");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "file.save", json!({"path":path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":path}));
+    run(&mut reopened, "drawing.open", json!({"drawing":drawing}));
+    assert_eq!(run(&mut reopened, "drawing.center_mark.inspect", json!({"mark":mark}))["status"], "ok");
+    assert_eq!(group(&settled(&mut reopened, sheet).scene), original);
+    assert_eq!(original.items.len(), 2);
+    for item in &original.items {
+        let Item::Stroke { path, pattern, .. } = item else { panic!("expected a stroke") };
+        assert!((path[0].length() - 10.0).abs() < 1e-6);
+        let pattern = pattern.as_ref().unwrap();
+        let middle = (pattern.phase_mm + path[0].length() / 2.0).rem_euclid(pattern.lengths_mm.iter().sum());
+        assert!((middle - 1.8).abs() < 1e-6);
+    }
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert!(exported["svg"].as_str().unwrap().contains("stroke-dasharray="));
+    let drawing_id = ids::encode(s.open_drawing.unwrap());
+    let item = json!({"type":"drawing", "drawing":drawing_id, "object":mark});
+    assert_eq!(run(&mut s, "select.set", json!({"items":[item]}))["selected"], 1);
+    let removed = run(&mut s, "selection.delete", json!({"items":[item]}));
+    assert_eq!(removed["centre_marks"], json!([mark]));
+    assert!(s.execute("drawing.center_mark.inspect", &json!({"mark":mark})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.center_mark.inspect", json!({"mark":mark}))["status"], "ok");
+    run(&mut s, "drawing.center_mark.edit", json!({"mark": mark, "overshoot_mm": 4.0}));
+    let edited = extract(&mut s, sheet).unwrap().scene;
+    for item in &group(&edited).items {
+        let Item::Stroke { path, .. } = item else { panic!("expected a stroke") };
+        assert!((path[0].length() - 14.0).abs() < 1e-6);
+    }
+    assert_eq!(group(&built(&s, sheet).scene), group(&edited));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(group(&extract(&mut s, sheet).unwrap().scene), original);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [200.0, 150.0]}, "scale": "1:1"}}));
+    let moved = settled(&mut s, sheet).scene;
+    assert_eq!(group(&built(&s, sheet).scene), group(&moved));
+    let (old_lo, old_hi, _) = reach(&original);
+    let (new_lo, new_hi, _) = reach(&group(&moved));
+    let old_centre = (old_lo + old_hi) * 0.5;
+    let new_centre = (new_lo + new_hi) * 0.5;
+    let expected = Vec2::new(200.0, 150.0) + (old_centre - Vec2::new(150.0, 150.0)) * 2.0;
+    assert!(new_centre.dist(expected) < 1e-6);
+    for item in &group(&moved).items {
+        let Item::Stroke { path, .. } = item else { panic!("expected a stroke") };
+        assert!((path[0].length() - 16.0).abs() < 1e-6);
+    }
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": "Hole"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(run(&mut s, "drawing.center_mark.inspect", json!({"mark": mark}))["status"], "lost");
+    assert!(!settled(&mut s, sheet).scene.groups.iter().any(|g| g.kind == ObjectKind::CentreMark && g.object == mark_id));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(group(&built(&s, sheet).scene), group(&settled(&mut s, sheet).scene));
+}
+
+#[test]
+fn manual_centre_line_tracks_view_scale_and_cached_scene() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({
+            "view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0
+        }),
+    );
+    let line = added["line"].as_str().unwrap().to_owned();
+    let line_id = ids::decode(&line).unwrap();
+    let group = |scene: &Scene| scene.groups.iter().find(|g| g.kind == ObjectKind::CentreLine && g.object == line_id).unwrap().clone();
+    let initial = group(&built(&s, sheet).scene);
+    assert_eq!(group(&settled(&mut s, sheet).scene), initial);
+    let folder = crate::tests::Folder::new("manual-centre-line");
+    let path = folder.path("line.solidcraft");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "file.save", json!({"path":path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":path}));
+    run(&mut reopened, "drawing.open", json!({"drawing":drawing}));
+    assert_eq!(run(&mut reopened, "drawing.center_line.inspect", json!({"line":line}))["status"], "ok");
+    assert_eq!(group(&settled(&mut reopened, sheet).scene), initial);
+    assert!((reach(&initial).2 - 54.0).abs() < 1e-6);
+    let Item::Stroke { pattern, .. } = &initial.items[0] else { panic!("expected stroke") };
+    assert!(pattern.is_some());
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert!(exported["svg"].as_str().unwrap().contains("stroke-dasharray="));
+    run(&mut s, "drawing.center_line.edit", json!({"line": line, "overshoot_mm": 4.0}));
+    let edited = group(&extract(&mut s, sheet).unwrap().scene);
+    assert!((reach(&edited).2 - 58.0).abs() < 1e-6);
+    assert_eq!(group(&built(&s, sheet).scene), edited);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(group(&extract(&mut s, sheet).unwrap().scene), initial);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [200.0, 150.0]}, "scale": "1:1"}}));
+    let scaled = group(&settled(&mut s, sheet).scene);
+    assert!((reach(&scaled).2 - 104.0).abs() < 1e-6);
+    let (old_lo, old_hi, _) = reach(&initial);
+    let (new_lo, new_hi, _) = reach(&scaled);
+    let old_mid = (old_lo + old_hi) * 0.5;
+    let new_mid = (new_lo + new_hi) * 0.5;
+    let expected = Vec2::new(200.0, 150.0) + (old_mid - Vec2::new(150.0, 150.0)) * 2.0;
+    assert!(new_mid.dist(expected) < 1e-6);
+    assert_eq!(group(&built(&s, sheet).scene), scaled);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert!(reply["objects"].as_array().unwrap().iter().any(|object| object["object"] == line && object["kind"] == "centre_line"));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let item = json!({"type":"drawing", "drawing": drawing, "object": line});
+    assert_eq!(run(&mut s, "select.set", json!({"items":[item]}))["selected"], 1);
+    let removed = run(&mut s, "selection.delete", json!({"items":[item]}));
+    assert_eq!(removed["centre_lines"], json!([line]));
+    assert!(s.execute("drawing.center_line.inspect", &json!({"line":line})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line":line}))["status"], "ok");
+    let view_item = json!({"type":"drawing", "drawing": drawing, "object": ids::encode(front)});
+    let removed = run(&mut s, "selection.delete", json!({"items":[view_item], "contents":"delete"}));
+    assert_eq!(removed["centre_lines"], json!([line]));
+    assert!(s.execute("drawing.center_line.inspect", &json!({"line":line})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line":line}))["status"], "ok");
+}
+
+#[test]
+fn automatic_marks_share_manual_strokes_and_refresh_the_cached_scene() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    for x in [20, 40, 60, 80] {
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius":6,"height":52,"base":[x,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":format!("Hole{x}")}),
+        );
+    }
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    let set = "drawing.auto_center_mark.set";
+    run(&mut s, set, json!({"view":view,"enabled":true}));
+    let automatic =
+        |scene: &Scene| scene.groups.iter().filter(|g| g.kind == ObjectKind::CentreMark && g.object == front).cloned().collect::<Vec<_>>();
+    let once = built(&s, sheet).scene;
+    let initial = automatic(&once);
+    assert_eq!(initial.len(), 4);
+    assert_eq!(automatic(&settled(&mut s, sheet).scene), initial);
+    for group in &initial {
+        assert_eq!(group.items.len(), 2);
+        for item in &group.items {
+            let Item::Stroke { path, pattern, .. } = item else { panic!("expected stroke") };
+            assert!((path[0].length() - 10.0).abs() < 1e-6);
+            assert!(pattern.is_some());
+        }
+    }
+    assert_eq!(run(&mut s, set, json!({"view":view,"enabled":true}))["changed"], false);
+    assert_eq!(automatic(&extract(&mut s, sheet).unwrap().scene).len(), 4);
+    let manual = run(&mut s, "drawing.center_mark.add", json!({"view":view,"edge":[26,0,10],"overshoot_mm":2.0}));
+    let manual_id = ids::decode(manual["mark"].as_str().unwrap()).unwrap();
+    let both = built(&s, sheet).scene;
+    let manually_drawn = both.groups.iter().find(|g| g.object == manual_id && g.kind == ObjectKind::CentreMark).unwrap();
+    assert!(automatic(&both).iter().any(|g| g.items == manually_drawn.items));
+    let reply = run(&mut s, CMD, json!({"sheet":ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let selectable_marks: Vec<_> = reply["objects"].as_array().unwrap().iter().filter(|object| object["kind"] == "centre_mark").collect();
+    assert_eq!(selectable_marks.len(), 1);
+    assert_eq!(selectable_marks[0]["object"], ids::encode(manual_id));
+    run(&mut s, "drawing.auto_center_mark.exclude", json!({"view":view,"edge":[26,0,10]}));
+    let excluded = extract(&mut s, sheet).unwrap().scene;
+    assert_eq!(automatic(&excluded).len(), 3);
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&excluded));
+    assert!(excluded.groups.iter().any(|g| g.object == manual_id && g.kind == ObjectKind::CentreMark));
+    // Exercise the saved rule through the actual design-file lifecycle, not just record JSON.
+    let folder = crate::tests::Folder::new("auto-centre-marks");
+    let path = folder.path("marks.solidcraft");
+    let drawing_id = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "file.save", json!({"path":path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":path}));
+    run(&mut reopened, "drawing.open", json!({"drawing":drawing_id}));
+    assert_eq!(automatic(&settled(&mut reopened, sheet).scene), automatic(&excluded));
+    assert_eq!(run(&mut reopened, "drawing.auto_center_mark.inspect", json!({"view":view}))["exclusions"][0]["status"], "ok");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(automatic(&extract(&mut s, sheet).unwrap().scene).len(), 4);
+    run(&mut s, "drawing.view.edit", json!({"view":view,"set":{"place":{"at":[200.0,150.0]},"scale":"1:1"}}));
+    let scaled = settled(&mut s, sheet).scene;
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&scaled));
+    for group in automatic(&scaled) {
+        for item in &group.items {
+            let Item::Stroke { path, .. } = item else { panic!("expected stroke") };
+            assert!((path[0].length() - 16.0).abs() < 1e-6);
+        }
+    }
+    run(&mut s, "edit.undo", json!({}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":52,"base":[5,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole5"}));
+    run(&mut s, "drawing.open", json!({"drawing":drawing}));
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 5);
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&settled(&mut s, sheet).scene));
+    let exported = run(&mut s, "drawing.export", json!({"sheet":ids::encode(sheet)}));
+    assert!(exported["svg"].as_str().unwrap().contains("stroke-dasharray="));
+}
+
+#[test]
+fn automatic_marks_distinguish_placed_occurrences_and_exclusions() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name":"Part"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block","operation":"new"}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":52,"base":[40,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":first,"translate":[120,0,0]}))["occurrence"].as_u64().unwrap();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view":view,"enabled":true}));
+    let automatic =
+        |scene: &Scene| scene.groups.iter().filter(|g| g.kind == ObjectKind::CentreMark && g.object == front).cloned().collect::<Vec<_>>();
+    let all = automatic(&settled(&mut s, sheet).scene);
+    assert_eq!(all.len(), 2);
+    let first_center = (reach(&all[0]).0 + reach(&all[0]).1) * 0.5;
+    let second_center = (reach(&all[1]).0 + reach(&all[1]).1) * 0.5;
+    assert!((first_center.dist(second_center) - 60.0).abs() < 1e-6);
+    let exclusion = run(&mut s, "drawing.auto_center_mark.exclude", json!({"view":view,"edge":{"point":[46,0,10],"path":[first]}}));
+    assert_eq!(exclusion["exclusions"][0]["reference"]["path"], json!([first]));
+    assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 1);
+    assert_eq!(automatic(&built(&s, sheet).scene), automatic(&settled(&mut s, sheet).scene));
+    run(&mut s, "drawing.auto_center_mark.exclude", json!({"view":view,"edge":{"point":[166,0,10],"path":[second]}}));
+    assert!(automatic(&settled(&mut s, sheet).scene).is_empty());
+}
+
+#[test]
+fn automatic_mark_considers_a_hole_occluded_by_another_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":52,"base":[40,-1,10],"axis":"Y","operation":"cut","targets":["Block"],"name":"Hole"}));
+    run(&mut s, "solid.box", json!({"corner":[0,-10,0],"length":100,"width":5,"height":20,"body_name":"Cover","operation":"new"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    run(&mut s, "drawing.auto_center_mark.set", json!({"view":ids::encode(front),"enabled":true}));
+    let scene = settled(&mut s, sheet).scene;
+    let marks: Vec<_> = scene.groups.iter().filter(|g| g.kind == ObjectKind::CentreMark && g.object == front).collect();
+    assert_eq!(marks.len(), 1);
+    let (lo, hi, _) = reach(marks[0]);
+    let centre = (lo + hi) * 0.5;
+    let view = scene.groups.iter().find(|g| g.kind == ObjectKind::View && g.object == front).unwrap();
+    let visible_rim = view
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stroke { path, .. } => Some(path),
+            _ => None,
+        })
+        .flatten()
+        .flat_map(|segment| [segment.start(), segment.end()])
+        .any(|point| (point.dist(centre) - 3.0).abs() < 1e-4);
+    assert!(!visible_rim, "the cover should occlude the hole's visible lines");
+    assert_eq!(automatic_scene_groups(&built(&s, sheet).scene, front), automatic_scene_groups(&scene, front));
+}
+
+fn automatic_scene_groups(scene: &Scene, view: u64) -> Vec<Group> {
+    scene.groups.iter().filter(|group| group.kind == ObjectKind::CentreMark && group.object == view).cloned().collect()
 }

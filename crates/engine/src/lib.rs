@@ -129,7 +129,7 @@ pub enum Sel {
     Feature {
         id: u64,
     },
-    /// A view, dimension or balloon of the drawing open.
+    /// A selectable object of the drawing open.
     Drawing {
         #[serde(with = "solidcraft_doc::ids")]
         drawing: u64,

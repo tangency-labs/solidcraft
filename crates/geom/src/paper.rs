@@ -149,6 +149,10 @@ pub enum ObjectKind {
     SheetImage,
     /// A drawing view's lines.
     View,
+    /// A centre mark attached to a circular feature.
+    CentreMark,
+    /// A centre line joining two named model points.
+    CentreLine,
 }
 
 impl ObjectKind {
@@ -163,6 +167,8 @@ impl ObjectKind {
             ObjectKind::RevisionTable => "REVISION_TABLE",
             ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
+            ObjectKind::CentreMark => "CENTRE_MARK",
+            ObjectKind::CentreLine => "CENTRE_LINE",
         }
     }
 }

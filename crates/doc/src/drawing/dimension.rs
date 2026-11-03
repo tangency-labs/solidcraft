@@ -310,7 +310,7 @@ fn check_face(face: &ModelFace) -> Result<()> {
     check_reference_name(&face.name)
 }
 
-fn check_point(point: &ModelPoint) -> Result<()> {
+pub(super) fn check_point(point: &ModelPoint) -> Result<()> {
     check_body(&point.body, point.origin_feature, &point.path)?;
     if point.centre {
         require(point.edges.len() == 1, || "a centre is of one named circle or arc".into())?;
@@ -727,7 +727,7 @@ impl<'a> Lookup<'a> {
     /// The circle or arc that `found` (one whole edge) is, as the view through `basis` sees it face
     /// on: its radius, and its centre and its start, middle and end in the design's frame. Read
     /// exactly from the body, in the view's plane through the edge, so the points are the edge's.
-    fn arc(&self, edge: &ModelEdge, found: &Edges, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4]), Status> {
+    pub(super) fn arc(&self, edge: &ModelEdge, found: &Edges, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4]), Status> {
         let face_on = || Status::Unmeasurable(format!("edge `{}` isn't a circle in this view (it isn't parallel to it)", edge.name));
         let (index, line) = found.pieces.first().ok_or_else(face_on)?;
         let through = Plane { origin: *line.first().ok_or_else(face_on)?, ..*basis };
@@ -756,7 +756,7 @@ impl<'a> Lookup<'a> {
 
     /// The point `point` names, in the design's frame: a corner, the one end all its named edges
     /// (or their pieces) share, or a centre.
-    fn corner(&mut self, point: &ModelPoint) -> std::result::Result<(Vec3, bool), Status> {
+    pub(super) fn corner(&mut self, point: &ModelPoint) -> std::result::Result<(Vec3, bool), Status> {
         if point.centre {
             return self.centre(point);
         }

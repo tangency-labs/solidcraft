@@ -23,6 +23,7 @@ use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::{Plane, Vec2};
 use solidcraft_render::VisualStyle;
 
+use super::dimension::{ModelEdge, check_edge};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{MAX_REFERENCE_SHOWN_PERCENT, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
 use crate::{DocError, Result, ids};
@@ -31,6 +32,8 @@ use crate::{DocError, Result, ids};
 pub const MAX_VIEWS: usize = 4096;
 /// The most views in a chain, from a base view down through the views projected from it.
 pub const MAX_VIEW_DEPTH: usize = 32;
+/// The most edge references excluded from automatic centre marks on one view.
+pub const MAX_MARK_EXCLUSIONS: usize = 10_000;
 
 /// One view of a drawing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,6 +54,18 @@ pub struct View {
     /// parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`], each view its own.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub reference_shown_percent: f64,
+    /// An opt-in rule for automatic centre marks, with persistent exclusions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_marks: Option<AutoMarks>,
+}
+
+/// Automatic centre marks on a view. Only the rule and exclusions are saved; the marks are derived.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutoMarks {
+    /// Persistent source edges excluded from this view. Lost references remain here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<ModelEdge>,
 }
 
 /// What a view draws, and from where.
@@ -211,6 +226,14 @@ impl Drawing {
         require(percent.is_finite() && (0.0..=MAX_REFERENCE_SHOWN_PERCENT).contains(&percent), || {
             format!("its reference_shown_percent is 0 to {MAX_REFERENCE_SHOWN_PERCENT}")
         })?;
+        if let Some(rule) = &view.centre_marks {
+            require(rule.exclude.len() <= MAX_MARK_EXCLUSIONS, || format!("a view has at most {MAX_MARK_EXCLUSIONS} centre mark exclusions"))?;
+            let mut seen = BTreeSet::new();
+            for edge in &rule.exclude {
+                check_edge(edge)?;
+                require(seen.insert((&edge.body, edge.origin_feature, &edge.path, &edge.name)), || "a centre mark exclusion is listed twice".into())?;
+            }
+        }
         let place = match view.place {
             ViewPlace::At([x, y]) => is_paper_coordinate(x) && is_paper_coordinate(y),
             ViewPlace::Aligned(along) => is_paper_coordinate(along),

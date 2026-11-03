@@ -667,6 +667,7 @@ fn inspect_lists_each_sheets_views_in_order() {
         place: ViewPlace::Aligned(50.0),
         settings: Default::default(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
     let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
@@ -725,7 +726,15 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
     let looking = ViewDirection::Looking(Looking { direction: [1.0, 1.0, -1.0], up: [0.0, 0.0, 1.0], origin: [0.0; 3] });
     let mut made = vec![d.allocate_id(&mut source).unwrap()];
     let kind = ViewKind::Base { source: drawn, view: looking };
-    d.add_views([Arc::new(View { id: made[0], sheet, kind, place: ViewPlace::At([100.0, 100.0]), settings: scale(), reference_shown_percent: 0.0 })]);
+    d.add_views([Arc::new(View {
+        id: made[0],
+        sheet,
+        kind,
+        place: ViewPlace::At([100.0, 100.0]),
+        settings: scale(),
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+    })]);
     for _ in 1..MAX_VIEW_DEPTH {
         let id = d.allocate_id(&mut source).unwrap();
         let parent = *made.last().unwrap();
@@ -737,6 +746,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
         })]);
         made.push(id);
     }
@@ -755,6 +765,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         place: ViewPlace::At([100.0, 100.0]),
         settings: scale(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
     };
     let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
     let mut many = d.clone();
