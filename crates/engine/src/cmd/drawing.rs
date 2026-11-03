@@ -18,6 +18,7 @@ use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::{Document, ids};
 use solidcraft_geom::cell::{Content, Projection};
 use solidcraft_geom::drawing_view::ProjectedSide;
+use solidcraft_geom::revision::Numbering;
 use solidcraft_geom::title_block::CellKind;
 
 use super::CommandSpec;
@@ -96,7 +97,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .in_drawing()
         .icon("settings")
         .doc_only()
-        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). One undo step."),
+        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
         "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
     ),
@@ -136,6 +137,14 @@ fn font<'a>(cmd: &str, p: &'a Value) -> Result<Option<&'a str>> {
         solidcraft_sketch::check_family(family).map_err(|e| bad(cmd, e.to_string()))?;
     }
     Ok(font.map(str::trim))
+}
+
+/// How `p` asks new revisions to be named. A start the record's rules refuse is refused with them.
+fn revision_numbering(cmd: &str, p: &Value) -> Result<Option<Numbering>> {
+    match p.get("revision_numbering") {
+        None => Ok(None),
+        Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`revision_numbering` is {start: 0 or 1}")),
+    }
 }
 
 /// An optional text parameter: absent, or a string.
@@ -399,6 +408,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
         "sheets": sheets,
         "revisions": {
+            "numbering": d.revisions.numbering,
             "rows": super::drawing_revision::rows(&d.revisions),
             "next": d.revisions.next_revision(None),
             "issued": super::drawing_revision::issued(&d.revisions),
@@ -459,6 +469,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(font) = font(cmd, p)? {
             d.font = font.to_string();
+        }
+        if let Some(numbering) = revision_numbering(cmd, p)? {
+            Arc::make_mut(&mut d.revisions).numbering = numbering;
         }
         Ok(())
     })?;

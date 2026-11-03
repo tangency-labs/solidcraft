@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::ids;
-use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, SkippedLetter};
+use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow};
 
 use super::CommandSpec;
 use crate::params::bad;
@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
-        .params("row: a row's id; set: {revision?, description?, designer?, checker?, date?: each as typed (a revision is one line); hidden?: left out of the revision table} → {row, rows, next, changed: [fields], warnings?: a revision in letters with a letter the lettering skips}. One undo step, none when nothing changes."),
+        .params("row: a row's id; set: {revision?, description?, designer?, checker?, date?: each as typed (a revision is one line); hidden?: left out of the revision table} → {row, rows, next, changed: [fields], warnings?: a change to an issued row, whose copy keeps what it read}. One undo step, none when nothing changes."),
     CommandSpec::new(DELETE, "Delete Revision", crate::checked!("drawing.revision.delete", delete))
         .icon("delete")
         .in_drawing()
@@ -64,12 +64,12 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RevisionAddParams = crate::schema::read(ADD, p)?;
     let id = s.drawing(ADD)?.clone().allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
-    let warnings = s.edit_drawing(ADD, |d| {
+    s.edit_drawing(ADD, |d| {
         let record = Arc::make_mut(&mut d.revisions);
         record.add(None, id).map_err(|e| bad(ADD, e.to_string()))?;
         apply(record, id, &request.set, ADD)
     })?;
-    answer(s, ADD, RevisionsResult { row: Some(ids::encode(id)), warnings, ..Default::default() })
+    answer(s, ADD, RevisionsResult { row: Some(ids::encode(id)), ..Default::default() })
 }
 
 fn revise(s: &mut Session, p: &Value) -> Result<Value> {
@@ -88,29 +88,31 @@ fn revise_against(s: &mut Session, p: &Value, version: Option<ModelVersion>) -> 
         None => Some(s.drawing(REVISE)?.clone().allocate_id(&mut s.ids).map_err(|e| bad(REVISE, e.to_string()))?),
     };
     let reported = version.as_ref().map(|v| VersionResult { path: v.path.clone(), change: v.change.clone() });
-    let (id, warnings) = s.edit_drawing(REVISE, |d| {
+    let id = s.edit_drawing(REVISE, |d| {
         let record = Arc::make_mut(&mut d.revisions);
-        let (id, warnings) = match (request.row, new) {
-            (Some(row), _) => (row.0, Vec::new()),
+        let id = match (request.row, new) {
+            (Some(row), _) => row.0,
             (None, Some(id)) => {
                 record.add(None, id).map_err(|e| bad(REVISE, e.to_string()))?;
-                (id, apply(record, id, &request.set.unwrap_or_default(), REVISE)?)
+                apply(record, id, &request.set.unwrap_or_default(), REVISE)?;
+                id
             }
             (None, None) => return Err(bad(REVISE, "no row to issue")),
         };
         record.issue(id, version).map_err(|e| bad(REVISE, e.to_string()))?;
-        Ok((id, warnings))
+        Ok(id)
     })?;
-    answer(s, REVISE, RevisionsResult { row: Some(ids::encode(id)), version: reported, warnings, ..Default::default() })
+    answer(s, REVISE, RevisionsResult { row: Some(ids::encode(id)), version: reported, ..Default::default() })
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RevisionEditParams = crate::schema::read(EDIT, p)?;
     let id = request.row.0;
     let before = row(s.drawing(EDIT)?.revisions.as_ref(), id, EDIT)?.clone();
-    let mut warnings = s.edit_drawing(EDIT, |d| apply(Arc::make_mut(&mut d.revisions), id, &request.set, EDIT))?;
+    s.edit_drawing(EDIT, |d| apply(Arc::make_mut(&mut d.revisions), id, &request.set, EDIT))?;
     let record = s.drawing(EDIT)?.revisions.clone();
     let after = row(&record, id, EDIT)?;
+    let mut warnings = Vec::new();
     if *after != before && record.is_issued(id) {
         warnings.push("its issued copy keeps what it read".to_string());
     }
@@ -129,9 +131,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     answer(s, DELETE, RevisionsResult { row: Some(ids::encode(id)), tags_lost: lost.into_iter().map(ids::encode).collect(), ..Default::default() })
 }
 
-/// Sets what `set` gives on row `id`: the warnings for a revision in letters with a letter the
-/// lettering skips.
-fn apply(record: &mut RevisionRecord, id: u64, set: &RowSet, cmd: &str) -> Result<Vec<String>> {
+/// Sets what `set` gives on row `id`.
+fn apply(record: &mut RevisionRecord, id: u64, set: &RowSet, cmd: &str) -> Result<()> {
     let texts = [
         (Field::Revision, &set.revision),
         (Field::Description, &set.description),
@@ -139,17 +140,14 @@ fn apply(record: &mut RevisionRecord, id: u64, set: &RowSet, cmd: &str) -> Resul
         (Field::Checker, &set.checker),
         (Field::Date, &set.date),
     ];
-    let mut warnings = Vec::new();
     for (field, text) in texts {
         let Some(text) = text else { continue };
-        if let Some(SkippedLetter(letter)) = record.set(id, field, text).map_err(|e| bad(cmd, e.to_string()))? {
-            warnings.push(format!("the revisions' lettering skips {letter}: kept as typed"));
-        }
+        record.set(id, field, text).map_err(|e| bad(cmd, e.to_string()))?;
     }
     if let Some(hidden) = set.hidden {
         record.hide(id, hidden).map_err(|e| bad(cmd, e.to_string()))?;
     }
-    Ok(warnings)
+    Ok(())
 }
 
 fn row<'a>(record: &'a RevisionRecord, id: u64, cmd: &str) -> Result<&'a RevisionRow> {

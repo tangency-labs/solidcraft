@@ -259,3 +259,31 @@ fn a_revision_names_the_version_it_was_issued_against() {
     assert_eq!((s.drawing("test").unwrap(), s.undo.len()), (&record, steps), "nothing changed");
     s.drawing("test").unwrap().validate().unwrap();
 }
+
+/// Revisions are numbered from 1 unless set to start at 0, never lettered: a revision typed with a
+/// letter is kept as typed and warned about by nothing, and letters are refused as a numbering.
+#[test]
+fn a_drawing_numbers_its_revisions() {
+    let mut s = drawing_session();
+    assert_eq!(listed(&mut s)["numbering"], json!({"start": 1}));
+    assert_eq!(listed(&mut s)["next"], json!("1"));
+    let set = |s: &mut Session, numbering: Value| s.execute("drawing.set", &json!({"revision_numbering": numbering}));
+    set(&mut s, json!({"start": 0})).unwrap();
+    let listed_now = listed(&mut s);
+    assert_eq!((&listed_now["numbering"], &listed_now["next"]), (&json!({"start": 0}), &json!("0")), "{listed_now}");
+    add(&mut s, json!({}));
+    let row = add(&mut s, json!({}));
+    assert_eq!(listed(&mut s)["next"], json!("2"));
+    let typed = run(&mut s, EDIT, json!({"row": row, "set": {"revision": "B"}}));
+    assert_eq!((&typed["rows"][1]["revision"], typed.get("warnings")), (&json!("B"), None), "{typed}");
+    assert_eq!(typed["next"], json!("1"), "the next follows the highest number");
+
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    for bad in [json!({"start": 2}), json!("letters"), json!({"numbers": {"start": 1}}), json!({}), json!(1), json!(null)] {
+        assert!(set(&mut s, bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!((s.drawing("test").unwrap(), s.undo.len()), (&record, steps));
+    // No change makes no step.
+    set(&mut s, json!({"start": 0})).unwrap();
+    assert_eq!(s.undo.len(), steps);
+}

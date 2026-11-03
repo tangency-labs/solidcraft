@@ -25,47 +25,31 @@ fn labels(record: &RevisionRecord) -> Vec<&str> {
     record.rows().iter().map(|r| r.revision.as_str()).collect()
 }
 
+/// Revisions are numbered, never lettered: 1, 2, 3, or from 0. A record in letters is refused.
 #[test]
-fn numbers_run_from_1_or_0_and_letters_skip_six() {
+fn revisions_are_numbered_from_1_or_0() {
     let mut record = RevisionRecord::default();
     for _ in 0..3 {
         add(&mut record, None).unwrap();
     }
     assert_eq!(labels(&record), ["1", "2", "3"]);
-    let mut zero = RevisionRecord { numbering: Numbering::Numbers { start: 0 }, ..RevisionRecord::default() };
+    let mut zero = RevisionRecord { numbering: Numbering { start: 0 }, ..RevisionRecord::default() };
     add(&mut zero, None).unwrap();
     add(&mut zero, None).unwrap();
     assert_eq!(labels(&zero), ["0", "1"]);
-    let mut lettered = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
-    for _ in 0..22 {
-        add(&mut lettered, None).unwrap();
-    }
-    assert_eq!(labels(&lettered).concat(), "ABCDEFGHJKLMNPRTUVWYAAAB", "I, O, Q, S, X and Z skipped, then AA");
-    // Past AY comes BA; past YY, AAA.
-    for (n, label) in [(0, "A"), (19, "Y"), (20, "AA"), (39, "AY"), (40, "BA"), (419, "YY"), (420, "AAA")] {
-        assert_eq!(letters(n), label);
-        assert_eq!(letters_index(label), Some(n), "{label}");
-    }
-    for not in ["", "I", "A1", "Ä"] {
-        assert_eq!(letters_index(not), None, "{not:?}");
-    }
+    let lettered = serde_json::from_value::<RevisionRecord>(json!({"numbering": "letters", "rows": []}));
+    assert!(lettered.is_err());
 }
 
-/// An issued revision is never given out again: a typed lower-case letter counts as its capital,
-/// the lettering counts on past eight letters, and past `u64` nothing is given out.
+/// An issued revision is never given out again: the next follows the highest number, typed or
+/// given, and past `u64` nothing is given out.
 #[test]
 fn the_next_revision_is_never_one_given_out_before() {
-    let mut lettered = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
-    let a = add(&mut lettered, None).unwrap();
-    assert_eq!(lettered.set(a, Field::Revision, "c").unwrap(), None);
-    add(&mut lettered, None).unwrap();
-    assert_eq!(labels(&lettered), ["c", "D"]);
-    lettered.set(a, Field::Revision, "YYYYYYYY").unwrap();
-    assert_eq!(lettered.next_revision(None).as_deref(), Some("AAAAAAAAA"));
-    lettered.set(a, Field::Revision, &letters(u64::MAX)).unwrap();
-    assert_eq!(letters_index(&letters(u64::MAX)), Some(u64::MAX));
-    assert_eq!(lettered.next_revision(None), None);
-    assert_eq!(add(&mut lettered, None).unwrap_err().0, "no revision follows the highest one");
+    let mut record = RevisionRecord::default();
+    let a = add(&mut record, None).unwrap();
+    record.set(a, Field::Revision, "7").unwrap();
+    add(&mut record, None).unwrap();
+    assert_eq!(labels(&record), ["7", "8"]);
     let mut numbered = RevisionRecord::default();
     let first = add(&mut numbered, None).unwrap();
     numbered.set(first, Field::Revision, &(u64::MAX - 1).to_string()).unwrap();
@@ -76,26 +60,23 @@ fn the_next_revision_is_never_one_given_out_before() {
 
 #[test]
 fn a_row_is_added_with_its_revision_only_and_typed_text_is_kept() {
-    let mut record = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
+    let mut record = RevisionRecord::default();
     let a = add(&mut record, None).unwrap();
     let row = &record.rows()[0];
     assert_eq!(
         (row.revision.as_str(), row.description.as_str(), row.designer.as_str(), row.checker.as_str(), row.date.as_str()),
-        ("A", "", "", "", "")
+        ("1", "", "", "", "")
     );
-    assert_eq!(record.set(a, Field::Description, "First issue\nfor tender").unwrap(), None);
-    assert_eq!(record.set(a, Field::Checker, "J. Smith").unwrap(), None, "a skipped letter outside the revision is no matter");
-    // A typed revision is kept; one with a skipped letter is warned about, and the next follows it.
-    assert_eq!(record.set(a, Field::Revision, "C").unwrap(), None);
-    let b = add(&mut record, None).unwrap();
-    assert_eq!(record.rows()[1].revision, "D");
-    assert_eq!(record.set(b, Field::Revision, "I").unwrap(), Some(SkippedLetter('I')));
-    assert_eq!(record.set(b, Field::Revision, "o").unwrap(), Some(SkippedLetter('o')));
-    assert_eq!(record.rows()[1].revision, "o");
-    // Numbers don't warn about letters, and typed text that isn't a number doesn't move the next one.
+    record.set(a, Field::Description, "First issue\nfor tender").unwrap();
+    record.set(a, Field::Checker, "J. Smith").unwrap();
+    // A typed revision is kept, and the next follows it.
+    record.set(a, Field::Revision, "3").unwrap();
+    add(&mut record, None).unwrap();
+    assert_eq!(record.rows()[1].revision, "4");
+    // Typed text that isn't a number is kept, and doesn't move the next one.
     let mut numbered = RevisionRecord::default();
     let first = add(&mut numbered, None).unwrap();
-    assert_eq!(numbered.set(first, Field::Revision, "Issue 1").unwrap(), None);
+    numbered.set(first, Field::Revision, "Issue 1").unwrap();
     add(&mut numbered, None).unwrap();
     assert_eq!(numbered.rows()[1].revision, "1");
     for (field, text, message) in [
@@ -211,7 +192,7 @@ fn a_record_per_sheet_numbers_each_sheet_apart() {
 
 #[test]
 fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
-    let mut record = RevisionRecord { numbering: Numbering::Letters, ..RevisionRecord::default() };
+    let mut record = RevisionRecord { numbering: Numbering { start: 0 }, ..RevisionRecord::default() };
     let a = add(&mut record, None).unwrap();
     let b = add(&mut record, None).unwrap();
     let version = |change: &str| ModelVersion { path: "parts/bracket.solidcraft".into(), change: change.into() };
@@ -234,7 +215,7 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
     // A tag still bound, beside the one that has lost its row and answers for it itself.
     add_tag(&mut record, b).unwrap();
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["numbering"], json!("letters"));
+    assert_eq!(json["numbering"], json!({"start": 0}));
     let id = json!(crate::ids::encode(a));
     assert_eq!(
         (&json["issued"][0]["id"], &json["tags"][0]["row"], &json["issued"][0]["sheet"]),
@@ -244,7 +225,7 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
     let back: RevisionRecord = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(back, record);
     back.validate().unwrap();
-    assert_eq!(serde_json::to_value(RevisionRecord::default()).unwrap()["numbering"], json!({"numbers": {"start": 1}}));
+    assert_eq!(serde_json::to_value(RevisionRecord::default()).unwrap()["numbering"], json!({"start": 1}));
     for path in ["", "/rows/0", "/issued/0", "/tags/0"] {
         let mut bad = json.clone();
         bad.pointer_mut(path).unwrap().as_object_mut().unwrap().insert("colour".into(), json!(1));
@@ -257,10 +238,7 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
     };
     let ids = "each row and tag has its own id";
     for (change, message) in [
-        (
-            &(|v: &mut serde_json::Value| v["numbering"] = json!({"numbers": {"start": 2}})) as &dyn Fn(&mut serde_json::Value),
-            "numbers start at 0 or 1",
-        ),
+        (&(|v: &mut serde_json::Value| v["numbering"] = json!({"start": 2})) as &dyn Fn(&mut serde_json::Value), "numbers start at 0 or 1"),
         (&|v| v["tags"][0]["id"] = v["rows"][0]["id"].clone(), ids),
         (&|v| v["rows"] = json!([v["rows"][0], v["rows"][0]]), ids),
         (&|v| v["rows"][0]["sheet"] = json!(crate::ids::encode(3)), "a row has a sheet when the record is kept per sheet, and only then"),
