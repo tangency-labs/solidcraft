@@ -32,7 +32,7 @@ A separate foreground window still owns its own Tab loop above a collapsed featu
 | Text/icon segments | Space | Select the focused choice without applying. |
 | Text/icon segments | Arrows | Select and focus an adjacent enabled choice; skip disabled choices and stay inside the group at its boundaries. |
 | Text/icon segments | Enter | Apply without selecting the focused choice. A focused G2 must not replace the already selected G1. |
-| Closed dropdown | Enter | Apply without opening the popup or changing its value. |
+| Closed feature-dialog dropdown | Enter | Apply without opening the popup or changing its value. |
 | Closed dropdown | Space | Open the popup. |
 | Closed indexed dropdown | Up/Down | Choose the previous/next option, keeping focus on the field. Stop at the ends. |
 | Open indexed dropdown | Open | Highlight the currently selected option. |

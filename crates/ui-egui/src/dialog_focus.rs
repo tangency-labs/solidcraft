@@ -192,6 +192,11 @@ fn prepare(ctx: &egui::Context, scope: Scope) {
         })
     });
     let Some(direction) = direction else { return };
+    let focused = ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id));
+    // A foreground editor such as profile rename owns its keys even when it uses an Area.
+    if focused.as_ref().is_some_and(|r| r.layer_id.order > scope.layer.order) {
+        return;
+    }
     let Some(direction) = direction else {
         // Cancel egui's automatic Ctrl+Shift+Tab traversal without consuming the shortcut.
         ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
@@ -199,7 +204,7 @@ fn prepare(ctx: &egui::Context, scope: Scope) {
     };
     let backwards = direction == egui::FocusDirection::Previous;
     ctx.data_mut(|d| d.insert_temp(traversal(scope.id), Traversal { backwards, pending: true }));
-    let inside = ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == scope.layer);
+    let inside = focused.is_some_and(|r| r.layer_id == scope.layer);
     ctx.input_mut(|i| {
         i.events.retain(|event| {
             !matches!(event,

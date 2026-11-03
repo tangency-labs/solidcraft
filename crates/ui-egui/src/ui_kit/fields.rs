@@ -1057,9 +1057,26 @@ pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
     dropdown_menu_width(ui, id, current, None, true, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// Feature forms use Enter to apply, while other windows keep the dropdown's native activation.
+pub(super) fn with_dropdown_enter_to_apply<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let ctx = ui.ctx().clone();
+    let id = egui::Id::new("dropdown_enter_to_apply");
+    let previous = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    ctx.data_mut(|d| d.insert_temp(id, true));
+    let result = add(ui);
+    ctx.data_mut(|d| d.insert_temp(id, previous));
+    result
+}
+
 /// A closed value dropdown leaves Enter for OK; an open popup owns its own keys.
 fn closed_dropdown_enter(ui: &Ui, id: egui::Id) {
-    if ui.is_enabled() && ui.memory(|m| m.has_focus(id)) && !egui::Popup::is_any_open(ui.ctx()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+    let applies = ui.data(|d| d.get_temp::<bool>(egui::Id::new("dropdown_enter_to_apply"))).unwrap_or(false);
+    if applies
+        && ui.is_enabled()
+        && ui.memory(|m| m.has_focus(id))
+        && !egui::Popup::is_any_open(ui.ctx())
+        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+    {
         ui.memory_mut(|m| m.surrender_focus(id));
     }
 }

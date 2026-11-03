@@ -395,7 +395,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
 | `steps` | A running operation's steps: ticked when done, a text-high spinner on the current one with how far it is, a ring for those to come | `font_label`, `control_height`, `form_ink/dim/primary`, `space_2/8` |
 
-Feature and manager dialogs and shared windows keep Tab/Shift+Tab within their controls, wrapping in egui's native order. Tab from a floating canvas value enters the active dialog. Tab/Shift+Tab dismiss an open dropdown and move to the next/previous parent control; expression completion gets first chance to consume its keys. Focused controls, including dropdowns and buttons, show a shared accent outline. Up/Down steps through a focused closed dropdown's choices; open indexed menus highlight the current choice, move a pending highlight with Up/Down (wrapping at the ends), and ignore Left/Right. Pointer-only title dragging and Close icons do not add Tab stops. Space toggles checkboxes or selects a segment; arrow keys select adjacent enabled segments. Enter applies the dialog without changing either value. Enter on a closed dropdown also applies without opening its menu; Space opens the menu; Space or Enter confirms and closes an indexed menu, while Escape dismisses without changing its value. See [keyboard behavior and the test matrix](dialog-keyboard-navigation.md).
+Feature and manager dialogs and shared windows keep Tab/Shift+Tab within their controls, wrapping in egui's native order. Tab from a floating canvas value enters the active dialog. Tab/Shift+Tab dismiss an open dropdown and move to the next/previous parent control; expression completion gets first chance to consume its keys. Focused controls, including dropdowns and buttons, show a shared accent outline. Up/Down steps through a focused closed dropdown's choices; open indexed menus highlight the current choice, move a pending highlight with Up/Down (wrapping at the ends), and ignore Left/Right. Pointer-only title dragging and Close icons do not add Tab stops. Space toggles checkboxes or selects a segment; arrow keys select adjacent enabled segments. Enter applies the dialog without changing either value. In feature dialogs, Enter on a closed dropdown also applies without opening its menu; Space opens the menu; Space or Enter confirms and closes an indexed menu, while Escape dismisses without changing its value. See [keyboard behavior and the test matrix](dialog-keyboard-navigation.md).
 
 Selection fields use `selection_field_with_sense` to join the dialog's Tab order. Pattern/Mirror use the auxiliary `*_with_sense` variants to keep clear/remove actions pointer-only. Section headings and quantity arrows stay out of Tab order; numerical editors select the number without its unit on keyboard focus.
 
@@ -996,9 +996,8 @@ shared token paint and hit targets. All are exercised in the kit gallery.
 
 The compact `settings_choice_row` variant reuses the shared settings radio-card painter
 for preset lists: 40 pt rows, right-aligned summaries and the active workspace accent.
-`progress_action` keeps a name, a status, a bounded progress track and a Cancel action on
-one row inside a Navigation card. Cancel and the status always show whole; a long name is
-cut first (ellipsis, full name on hover), then the track narrows. `Container::below_navigation_row` reserves that card
+`progress_action` keeps a status caption, bounded progress track and Cancel action on
+one row inside a Navigation card. `Container::below_navigation_row` reserves that card
 and its shared gap above an inline result toolbar.
 
 `number_pair` extends the shared value-pair row to bounded numeric fields (such as
@@ -1060,13 +1059,3 @@ in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rend
 `preference_widgets_and_figures_board_in_both_themes`.
 
 Assistant permission cards accept an optional `SettingsChoice.icon`; Do everything uses the existing warning artwork, including its exclamation mark.
-Selection fields default to pointer-only `Sense::CLICK`; icon buttons and list remove actions default to focusable `Sense::click()`. The `selection_field_with_sense`, `icon_button_at_with_sense`, and `list_row_with_sense` variants let Pattern/Mirror include selection fields in Tab order while excluding auxiliary remove actions, preserving the same visuals and accessibility labels.
-
-The compact `settings_choice_row` variant reuses the shared settings radio-card painter
-for preset lists: 40 pt rows, right-aligned summaries and the active workspace accent.
-`progress_action` keeps a status caption, bounded progress track and Cancel action on
-one row inside a Navigation card. `Container::below_navigation_row` reserves that card
-and its shared gap above an inline result toolbar.
-
-`number_pair` extends the shared value-pair row to bounded numeric fields (such as
-image width and height), preserving label alignment, clipping and number-field behavior.

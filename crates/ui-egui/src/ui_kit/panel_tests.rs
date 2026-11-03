@@ -2903,40 +2903,42 @@ fn dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants() 
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
             let (_, action) = Window::new(egui::Id::new("dropdown_enter"), "", "Test").show(ui.ctx(), true, |ui| {
-                row(ui, "Mode", |ui| {
-                    id.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
-                    let mut value = selected.get();
-                    match variant {
-                        0 => {
-                            dropdown(ui, "mode", &mut value, &["First", "Second"]);
+                super::super::fields::with_dropdown_enter_to_apply(ui, |ui| {
+                    row(ui, "Mode", |ui| {
+                        id.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
+                        let mut value = selected.get();
+                        match variant {
+                            0 => {
+                                dropdown(ui, "mode", &mut value, &["First", "Second"]);
+                            }
+                            1 => {
+                                dropdown_picked(ui, "mode", &mut value, &["First", "Second"]);
+                            }
+                            2 => {
+                                dropdown_menu(ui, "mode", "First", |ui| {
+                                    ui.selectable_value(&mut value, 0, "First");
+                                    ui.selectable_value(&mut value, 1, "Second");
+                                });
+                            }
+                            4 => {
+                                dropdown_previews(ui, "mode", &mut value, &["First", "Second"], |ui, _| {
+                                    ui.label("Preview");
+                                });
+                            }
+                            _ => {
+                                searchable_dropdown(
+                                    ui,
+                                    "mode",
+                                    "First",
+                                    &mut filter,
+                                    &[SearchOption { label: "First", value: "first", handle: None }],
+                                    None,
+                                    None,
+                                );
+                            }
                         }
-                        1 => {
-                            dropdown_picked(ui, "mode", &mut value, &["First", "Second"]);
-                        }
-                        2 => {
-                            dropdown_menu(ui, "mode", "First", |ui| {
-                                ui.selectable_value(&mut value, 0, "First");
-                                ui.selectable_value(&mut value, 1, "Second");
-                            });
-                        }
-                        4 => {
-                            dropdown_previews(ui, "mode", &mut value, &["First", "Second"], |ui, _| {
-                                ui.label("Preview");
-                            });
-                        }
-                        _ => {
-                            searchable_dropdown(
-                                ui,
-                                "mode",
-                                "First",
-                                &mut filter,
-                                &[SearchOption { label: "First", value: "first", handle: None }],
-                                None,
-                                None,
-                            );
-                        }
-                    }
-                    selected.set(value);
+                        selected.set(value);
+                    })
                 });
             });
             if action == Action::Ok {
