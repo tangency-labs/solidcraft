@@ -1183,6 +1183,195 @@ struct ForwardingAppServices {
     local: FakeLocalServices,
     trace: std::rc::Rc<std::cell::RefCell<ForwardingTrace>>,
 }
+
+fn panel_command_editor() -> serde_json::Value {
+    serde_json::json!({"kind":"fixture.editor","instance":"editor","destination":{"type":"new_section","section":"editor-section","index":0,
+        "location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}})
+}
+fn panel_command_editor_target() -> serde_json::Value {
+    serde_json::json!({"type":"instance","id":"editor"})
+}
+fn panel_command_native_move() -> serde_json::Value {
+    serde_json::json!({"target":panel_command_editor_target(),"destination":{"type":"new_section","section":"native","index":0,
+        "location":{"type":"window","host":"native-host","origin":{"x":10,"y":20},"return_to":{"zone":"left","index":0,"size":{"width":280,"height":240},"collapsed":false}},
+        "size":{"width":280,"height":240}}})
+}
+
+#[test]
+fn panel_commands_use_runtime_guards_and_keep_every_authoritative_state_on_preflight_failure() {
+    use commands::LayoutCatalogue;
+    let mut h = PanelMountHarness::new(true).unwrap();
+    h.command("panel.open", &panel_command_editor()).unwrap();
+    h.mount(capacity()).unwrap();
+    let key = editor_key(&h);
+    h.probe
+        .edit(&key, |state| {
+            state.draft = "unsaved command draft".into();
+            state.reject_cancel = true;
+        })
+        .unwrap();
+    let before = h.runtime.layout().inspect();
+    let catalogue = h.catalogue.state().clone();
+    let controllers = h.runtime.controller_count();
+    let local_keyboard = h.local.keyboard.clone();
+    let local_scopes = h.local.scopes.clone();
+    let releases = h.local.releases;
+    let requests = h.local.requests.len();
+    let hosts = h.native.hosts.clone();
+    assert_eq!(h.command("panel.close", &serde_json::json!({"target":panel_command_editor_target()})).unwrap_err().rule, Rule::Lifecycle);
+    h.native.fail_prepare = true;
+    assert_eq!(h.command("panel.popout", &panel_command_native_move()).unwrap_err().rule, Rule::Capability);
+    h.native.fail_prepare = false;
+    h.catalogue.fail_stage = true;
+    assert_eq!(
+        h.command("panel.collapse", &serde_json::json!({"target":panel_command_editor_target(),"collapsed":true})).unwrap_err().rule,
+        Rule::Capability
+    );
+    h.catalogue.fail_stage = false;
+    let steps = vec![
+        serde_json::json!({"command":"panel.close","params":{"target":panel_command_editor_target()}}),
+        serde_json::json!({"command":"panel.open","params":{"kind":"fixture.editor","instance":"editor"}}),
+    ];
+    assert_eq!(h.command_batch(&steps).unwrap_err().rule, Rule::Lifecycle);
+    assert_eq!(h.runtime.layout().inspect(), before);
+    assert_eq!(h.catalogue.state(), &catalogue);
+    assert_eq!(h.runtime.controller_count(), controllers);
+    assert_eq!(h.local.keyboard, local_keyboard);
+    assert_eq!(h.native.hosts, hosts);
+    assert_eq!(h.local.scopes, local_scopes);
+    assert_eq!(h.local.releases, releases);
+    assert_eq!(h.local.requests.len(), requests);
+    let editor = h.probe.state(&key).unwrap();
+    assert_eq!(editor.draft, "unsaved command draft");
+    assert!(editor.transaction_live);
+    assert_eq!(editor.cancels, 0);
+}
+
+#[test]
+fn panel_commands_replace_layouts_and_workspaces_on_retained_runtime_with_live_hidden_services() {
+    let mut h = PanelMountHarness::new(false).unwrap();
+    h.command("panel.open", &panel_command_editor()).unwrap();
+    h.tick().unwrap();
+    let key = editor_key(&h);
+    h.probe
+        .edit(&key, |s| {
+            s.draft = "retained across commands".into();
+            s.reject_cancel = true;
+        })
+        .unwrap();
+    h.command("layout.save", &serde_json::json!({"name":"Draft layout"})).unwrap();
+    let updates = h.probe.state(&key).unwrap().updates;
+    h.command("layout.reset", &serde_json::json!({})).unwrap();
+    h.tick().unwrap();
+    assert!(h.probe.state(&key).unwrap().updates > updates);
+    h.command("layout.apply", &serde_json::json!({"name":"Draft layout"})).unwrap();
+    h.command("layout.workspace.select", &serde_json::json!({"workspace":"fixture.other"})).unwrap();
+    let updates = h.probe.state(&key).unwrap().updates;
+    h.tick().unwrap();
+    assert!(h.probe.state(&key).unwrap().updates > updates);
+    h.command("layout.workspace.select", &serde_json::json!({"workspace":"fixture.workspace"})).unwrap();
+    h.tick().unwrap();
+    assert_eq!(h.runtime.controller_count(), 1);
+    let state = h.probe.state(&key).unwrap();
+    assert_eq!(state.draft, "retained across commands");
+    assert!(state.transaction_live);
+    assert_eq!(state.cancels, 0);
+    assert_eq!(h.commands.calls, 0, "layout never runs content/model commands");
+}
+
+#[test]
+fn panel_workspace_commands_reuse_each_workspaces_controller_and_background_draft() {
+    let mut h = PanelMountHarness::new(false).unwrap();
+    let mut input = panel_command_editor();
+    input["kind"] = serde_json::json!("fixture.log");
+    input["instance"] = serde_json::json!("log");
+    h.command("panel.open", &input).unwrap();
+    h.tick().unwrap();
+    let a = ControllerKey { instance: id("log"), owner: ContentOwner::Workspace(WorkspaceId::new("fixture.workspace").unwrap()) };
+    h.probe.edit(&a, |s| s.draft = "workspace A draft".into()).unwrap();
+    h.command("layout.save", &serde_json::json!({"name":"Shared instances"})).unwrap();
+    h.command("layout.workspace.select", &serde_json::json!({"workspace":"fixture.other"})).unwrap();
+    h.command("layout.apply", &serde_json::json!({"name":"Shared instances"})).unwrap();
+    h.tick().unwrap();
+    let b = ControllerKey { instance: id("log"), owner: ContentOwner::Workspace(WorkspaceId::new("fixture.other").unwrap()) };
+    h.probe.edit(&b, |s| s.draft = "workspace B draft".into()).unwrap();
+    let updates = h.probe.state(&a).unwrap().updates;
+    h.tick().unwrap();
+    assert!(h.probe.state(&a).unwrap().updates > updates);
+    h.command("layout.workspace.select", &serde_json::json!({"workspace":"fixture.workspace"})).unwrap();
+    h.tick().unwrap();
+    assert_eq!(h.probe.state(&a).unwrap().draft, "workspace A draft");
+    assert_eq!(h.probe.state(&b).unwrap().draft, "workspace B draft");
+    assert_eq!(h.runtime.controller_count(), 2);
+    h.command("layout.workspace.select", &serde_json::json!({"workspace":"fixture.other"})).unwrap();
+    h.tick().unwrap();
+    assert_eq!(h.probe.state(&b).unwrap().draft, "workspace B draft");
+    assert_eq!(h.runtime.controller_count(), 2);
+}
+
+#[test]
+fn panel_native_close_command_redocks_without_cancelling_or_replacing_editor() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    h.command("panel.open", &panel_command_editor()).unwrap();
+    h.tick().unwrap();
+    let key = editor_key(&h);
+    h.probe
+        .edit(&key, |s| {
+            s.reject_cancel = true;
+            s.draft = "native draft".into();
+        })
+        .unwrap();
+    h.command("panel.popout", &panel_command_native_move()).unwrap();
+    assert_eq!(h.native.hosts.len(), 1);
+    let reply = h.command("panel.native_close", &serde_json::json!({"target":{"type":"native_host","id":"native-host"}})).unwrap();
+    assert!(h.native.hosts.is_empty());
+    assert_eq!(reply["layout"]["sections"][0]["location"]["type"], "dock");
+    assert_eq!(h.probe.state(&key).unwrap().draft, "native draft");
+    assert_eq!(h.probe.state(&key).unwrap().cancels, 0);
+    assert_eq!(h.runtime.controller_count(), 1);
+}
+
+#[test]
+fn solve_app_panel_commands_use_injected_services_without_document_camera_or_cache_changes() {
+    let PanelMountHarness { runtime, probe, .. } = PanelMountHarness::new(false).unwrap();
+    let trace = std::rc::Rc::new(std::cell::RefCell::new(ForwardingTrace::default()));
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let revision = app.session.revision;
+    let doc = app.session.doc.clone();
+    let model = app.session.model.state();
+    let undo = app.session.undo.len();
+    let dirty = app.session.is_dirty();
+    let camera = app.cam;
+    app.enable_panel_runtime(
+        runtime,
+        Box::new(ForwardingAppServices {
+            models: FakeModels { editable: true },
+            commands: Default::default(),
+            local: Default::default(),
+            trace: trace.clone(),
+        }),
+    )
+    .unwrap();
+    let catalogue = fixture_command_catalogue(app.panel_runtime().unwrap().layout().registry()).unwrap();
+    app.panel_runtime_mut().unwrap().set_command_adapters(Box::new(catalogue), Box::new(FakeNativeAdapter::new(false))).unwrap();
+    app.run("panel.open", panel_command_editor()).unwrap();
+    let key = ControllerKey { instance: id("editor"), owner: ContentOwner::Document(DocumentId::new(app.session.document_id.clone()).unwrap()) };
+    probe.edit(&key, |s| s.draft = "app command draft".into()).unwrap();
+    app.run("layout.save", serde_json::json!({"name":"App saved"})).unwrap();
+    app.run("layout.reset", serde_json::json!({})).unwrap();
+    app.tick_panel_runtime().unwrap();
+    app.run("layout.apply", serde_json::json!({"name":"App saved"})).unwrap();
+    assert_eq!(app.run("panel.list", serde_json::json!({})).unwrap()["state"]["layout"]["instances"][0]["id"], "editor");
+    assert_eq!(probe.state(&key).unwrap().draft, "app command draft");
+    assert_eq!(probe.state(&key).unwrap().cancels, 0);
+    assert!(trace.borrow().service_borrows >= 6);
+    assert_eq!(app.session.revision, revision);
+    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.is_dirty(), dirty);
+    assert_eq!(app.cam, camera);
+    assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+}
 impl AppPanelServices for ForwardingAppServices {
     fn refresh_read_only(&mut self, _session: &solidcraft_engine::Session) -> PanelResult<()> {
         let mut trace = self.trace.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "trace borrowed"))?;
@@ -1200,7 +1389,7 @@ impl AppPanelServices for ForwardingAppServices {
 
 #[test]
 fn solve_app_forwards_dispatch_mount_content_switch_and_ticks_to_its_injected_provider() {
-    let PanelMountHarness { runtime, probe, mut native, .. } = PanelMountHarness::new(false).unwrap();
+    let PanelMountHarness { runtime, probe, .. } = PanelMountHarness::new(false).unwrap();
     let trace = std::rc::Rc::new(std::cell::RefCell::new(ForwardingTrace::default()));
     let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let revision = app.session.revision;
@@ -1218,13 +1407,10 @@ fn solve_app_forwards_dispatch_mount_content_switch_and_ticks_to_its_injected_pr
         }),
     )
     .unwrap();
-    app.dispatch_panel_layout(
-        transaction(vec![
-            fixture_open("fixture.editor", "editor", "editor-section", Zone::Left, 0).unwrap(),
-            fixture_open("fixture.log", "log", "log-section", Zone::Right, 1).unwrap(),
-        ]),
-        &mut native,
-    )
+    app.dispatch_panel_layout(transaction(vec![
+        fixture_open("fixture.editor", "editor", "editor-section", Zone::Left, 0).unwrap(),
+        fixture_open("fixture.log", "log", "log-section", Zone::Right, 1).unwrap(),
+    ]))
     .unwrap();
     app.tick_panel_runtime().unwrap();
     let key = ControllerKey { instance: id("editor"), owner: ContentOwner::Document(DocumentId::new(app.session.document_id.clone()).unwrap()) };
@@ -1238,18 +1424,18 @@ fn solve_app_forwards_dispatch_mount_content_switch_and_ticks_to_its_injected_pr
     assert_eq!(probe.state(&key).unwrap().applies, 1);
     let mut other = saved.clone();
     other.workspace = WorkspaceId::new("app-workspace-two").unwrap();
-    app.dispatch_panel_layout(
-        LayoutAction::Replace { expected_revision: Some(app.panel_runtime().unwrap().layout().inspect().revision), layout: other.clone() },
-        &mut native,
-    )
+    app.dispatch_panel_layout(LayoutAction::Replace {
+        expected_revision: Some(app.panel_runtime().unwrap().layout().inspect().revision),
+        layout: other.clone(),
+    })
     .unwrap();
     app.tick_panel_runtime().unwrap();
     assert_eq!(app.panel_runtime().unwrap().controller_count(), 3);
-    app.dispatch_panel_layout(LayoutAction::Replace { expected_revision: None, layout: Layout::empty(other.workspace) }, &mut native).unwrap();
+    app.dispatch_panel_layout(LayoutAction::Replace { expected_revision: None, layout: Layout::empty(other.workspace) }).unwrap();
     let updates = probe.state(&key).unwrap().updates;
     app.tick_panel_runtime().unwrap();
     assert!(probe.state(&key).unwrap().updates > updates);
-    app.dispatch_panel_layout(LayoutAction::Replace { expected_revision: None, layout: saved.clone() }, &mut native).unwrap();
+    app.dispatch_panel_layout(LayoutAction::Replace { expected_revision: None, layout: saved.clone() }).unwrap();
     app.tick_panel_runtime().unwrap();
     assert_eq!(probe.state(&key).unwrap().draft, "draft through app");
     assert!(probe.state(&key).unwrap().transaction_live);
@@ -1264,4 +1450,242 @@ fn solve_app_forwards_dispatch_mount_content_switch_and_ticks_to_its_injected_pr
     assert_eq!(app.session.is_dirty(), dirty);
     assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
     assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+}
+
+#[derive(Clone, Default)]
+struct CurrentContextModels(std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<DocumentId, bool>>>);
+impl PanelModels for CurrentContextModels {
+    fn read(&self, owner: &ContentOwner, key: &str) -> PanelResult<serde_json::Value> {
+        let ContentOwner::Document(document) = owner else {
+            return Err(error(Rule::Availability, "fixture needs document owner"));
+        };
+        if key != "fixture.editable" {
+            return Err(error(Rule::MissingTarget, "unknown fixture read"));
+        }
+        Ok(serde_json::json!(self.0.borrow().get(document).copied().unwrap_or(false)))
+    }
+}
+struct CurrentContextServices {
+    models: CurrentContextModels,
+    commands: FakeContentCommands,
+    local: FakeLocalServices,
+    refreshes: std::rc::Rc<std::cell::RefCell<Vec<(String, String)>>>,
+}
+impl AppPanelServices for CurrentContextServices {
+    fn refresh_read_only(&mut self, session: &solidcraft_engine::Session) -> PanelResult<()> {
+        let editable = session.doc.param("fixture_editable").is_some_and(|param| param.expr.trim() == "1");
+        self.models.0.borrow_mut().insert(DocumentId::new(session.document_id.clone())?, editable);
+        self.refreshes.borrow_mut().push((session.document_id.clone(), session.doc.name.clone()));
+        Ok(())
+    }
+    fn services(&mut self) -> ContentServices<'_> {
+        ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local }
+    }
+}
+fn current_context_app() -> (crate::SolveApp, FixtureProbe) {
+    let PanelMountHarness { runtime, probe, .. } = PanelMountHarness::new(false).unwrap();
+    let mut session = solidcraft_engine::Session::default();
+    session.execute("file.new", &serde_json::json!({"name":"Same name"})).unwrap();
+    session.document_id = "context-a".into();
+    session.execute("parameters.change", &serde_json::json!({"name":"fixture_editable","expression":1,"unit":""})).unwrap();
+    let mut app = crate::SolveApp::new(session, Default::default());
+    app.enable_panel_runtime(
+        runtime,
+        Box::new(CurrentContextServices {
+            models: CurrentContextModels::default(),
+            commands: Default::default(),
+            local: Default::default(),
+            refreshes: Default::default(),
+        }),
+    )
+    .unwrap();
+    (app, probe)
+}
+fn context_control(app: &mut crate::SolveApp, method: &str, params: serde_json::Value) -> serde_json::Value {
+    let (request, _) = crate::control::ControlRequest::new(method, params);
+    match crate::control::handle(app, &egui::Context::default(), &request) {
+        crate::control::Outcome::Done(value) => value,
+        _ => panic!("unexpected screenshot"),
+    }
+}
+
+#[test]
+fn application_command_query_and_failure_refresh_same_named_document_before_any_tick() {
+    let (mut app, probe) = current_context_app();
+    app.run("panel.open", panel_command_editor()).unwrap();
+    let a = ControllerKey { instance: id("editor"), owner: ContentOwner::Document(DocumentId::new("context-a").unwrap()) };
+    probe.edit(&a, |state| state.draft = "document A draft".into()).unwrap();
+    let mut b = solidcraft_engine::Session::default();
+    b.execute("file.new", &serde_json::json!({"name":"Same name"})).unwrap();
+    b.document_id = "context-b".into();
+    app.session.replace_design(b);
+    let document = app.session.doc.clone();
+    let model = app.session.model.state();
+    let camera = app.cam;
+    let before = (app.session.revision, app.session.undo.len(), app.session.is_dirty());
+    let query = app.run("panel.list", serde_json::json!({})).unwrap();
+    assert_eq!(query["state"]["availability"]["editor"]["state"], "unavailable");
+    let failure = app.run("panel.focus", serde_json::json!({"target":panel_command_editor_target()})).unwrap_err();
+    assert_eq!(commands::structured_error(&failure).unwrap()["rule"], "availability");
+    assert_eq!(app.panel_runtime().unwrap().environment().document, Some(DocumentId::new("context-b").unwrap()));
+    assert_eq!(probe.state(&a).unwrap().draft, "document A draft");
+    assert_eq!(probe.state(&a).unwrap().cancels, 0);
+    assert_eq!((app.session.revision, app.session.undo.len(), app.session.is_dirty()), before);
+    assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+    assert_eq!(app.cam, camera);
+}
+
+#[test]
+fn application_atomic_boundary_refreshes_same_document_context_for_query_and_mutation() {
+    let (mut app, _) = current_context_app();
+    app.run("panel.open", panel_command_editor()).unwrap();
+    app.run("parameters.change", serde_json::json!({"name":"fixture_editable","expression":0})).unwrap();
+    let query = app.run_panel_batch(&[serde_json::json!({"command":"panel.list","params":null})]).unwrap();
+    assert_eq!(query["results"][0]["state"]["availability"]["editor"]["state"], "unavailable");
+    let revision = app.session.revision;
+    let model = app.session.model.state();
+    assert_eq!(
+        app.run_panel_batch(&[serde_json::json!({"command":"panel.focus","params":{"target":panel_command_editor_target()}})]).unwrap_err().rule,
+        Rule::Availability
+    );
+    assert_eq!(app.session.revision, revision);
+    assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+    app.run("parameters.change", serde_json::json!({"name":"fixture_editable","expression":1})).unwrap();
+    let result = app
+        .run_panel_batch(&[
+            serde_json::json!({"command":"panel.focus","params":{"target":panel_command_editor_target()}}),
+            serde_json::json!({"command":"panel.list"}),
+        ])
+        .unwrap();
+    assert_eq!(result["results"][1]["state"]["availability"]["editor"]["state"], "available");
+}
+
+#[test]
+fn unsupported_atomic_intent_mixtures_refuse_before_context_or_controller_publication() {
+    let (mut app, probe) = current_context_app();
+    app.run("panel.open", panel_command_editor()).unwrap();
+    let key = ControllerKey { instance: id("editor"), owner: ContentOwner::Document(DocumentId::new("context-a").unwrap()) };
+    let before = app.panel_runtime().unwrap().layout().inspect();
+    let controllers = app.panel_runtime().unwrap().controller_count();
+    let retained = probe.state(&key).unwrap();
+    let mut next = solidcraft_engine::Session::default();
+    next.document_id = "context-b".into();
+    app.session.replace_design(next);
+    for commands in [
+        serde_json::json!([{ "command":"panel.close","params":{"target":panel_command_editor_target()} },{"command":"layout.reset"}]),
+        serde_json::json!([{"command":"layout.reset"},{ "command":"panel.close","params":{"target":panel_command_editor_target()} }]),
+    ] {
+        assert_eq!(app.run_panel_batch(commands.as_array().unwrap()).unwrap_err().rule, Rule::Capability);
+        assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+        assert_eq!(app.panel_runtime().unwrap().controller_count(), controllers);
+        assert_eq!(app.panel_runtime().unwrap().environment().document, Some(DocumentId::new("context-a").unwrap()));
+        assert_eq!(probe.state(&key).unwrap().last_state, retained.last_state);
+        assert_eq!(probe.state(&key).unwrap().cancels, retained.cancels);
+    }
+}
+
+#[test]
+fn sequential_application_routes_refresh_after_file_new_and_same_document_model_changes() {
+    for method in ["engine.script", "engine.batch"] {
+        let (mut app, probe) = current_context_app();
+        app.run("panel.open", panel_command_editor()).unwrap();
+        let a = ControllerKey { instance: id("editor"), owner: ContentOwner::Document(DocumentId::new("context-a").unwrap()) };
+        probe.edit(&a, |state| state.draft = "same instance, outgoing owner".into()).unwrap();
+        let reply = context_control(
+            &mut app,
+            method,
+            serde_json::json!({"rollback":false,"commands":[
+                {"command":"file.new","params":{"name":"Same name"}},
+                {"command":"panel.open","params":{"kind":"fixture.editor","instance":"editor"}},
+            ]}),
+        );
+        let reason = if method == "engine.batch" { &reply["result"]["failed"]["panel_error"] } else { &reply["panel_error"] };
+        assert_eq!(reason["rule"], "availability", "{reply}");
+        assert_ne!(app.session.document_id, "context-a");
+        assert_eq!(app.session.doc.name, "Same name");
+        assert_eq!(app.panel_runtime().unwrap().environment().document.as_ref().unwrap().0, app.session.document_id);
+        assert_eq!(probe.state(&a).unwrap().draft, "same instance, outgoing owner");
+        assert_eq!(probe.state(&a).unwrap().cancels, 0);
+        let success = context_control(
+            &mut app,
+            method,
+            serde_json::json!({"rollback":false,"commands":[
+                {"command":"parameters.change","params":{"name":"fixture_editable","expression":1,"unit":""}},
+                {"command":"panel.focus","params":{"target":panel_command_editor_target()}},
+            ]}),
+        );
+        assert_eq!(success["ok"], true, "{success}");
+        assert!(success["result"].get("failed").is_none(), "{success}");
+        let failure = context_control(
+            &mut app,
+            method,
+            serde_json::json!({"rollback":false,"commands":[
+                {"command":"parameters.change","params":{"name":"fixture_editable","expression":0}},
+                {"command":"panel.focus","params":{"target":panel_command_editor_target()}},
+            ]}),
+        );
+        let reason = if method == "engine.batch" { &failure["result"]["failed"]["panel_error"] } else { &failure["panel_error"] };
+        assert_eq!(reason["rule"], "availability", "{failure}");
+    }
+}
+
+#[derive(Clone)]
+struct SharedCommandNative(std::rc::Rc<std::cell::RefCell<FakeNativeAdapter>>);
+impl NativeHostAdapter for SharedCommandNative {
+    fn capabilities(&self) -> HostCapabilities {
+        self.0.borrow().capabilities()
+    }
+    fn prepare(&self, effects: &[HostEffect]) -> PanelResult<()> {
+        self.0.borrow().prepare(effects)
+    }
+    fn commit(&mut self, effects: &[HostEffect]) {
+        self.0.borrow_mut().commit(effects);
+    }
+}
+
+#[test]
+fn solve_app_gui_and_command_routes_share_native_owner_and_refuse_adapter_hot_swap() {
+    let PanelMountHarness { runtime, probe, .. } = PanelMountHarness::new(true).unwrap();
+    let catalogue = fixture_command_catalogue(runtime.layout().registry()).unwrap();
+    let native = std::rc::Rc::new(std::cell::RefCell::new(FakeNativeAdapter::new(true)));
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.enable_panel_runtime(runtime, Box::new(FakeAppPanelServices { models: FakeModels { editable: true }, ..Default::default() })).unwrap();
+    app.panel_runtime_mut().unwrap().set_command_adapters(Box::new(catalogue), Box::new(SharedCommandNative(native.clone()))).unwrap();
+    app.run("panel.open", panel_command_editor()).unwrap();
+    let key = ControllerKey { instance: id("editor"), owner: ContentOwner::Document(DocumentId::new(app.session.document_id.clone()).unwrap()) };
+    probe
+        .edit(&key, |state| {
+            state.draft = "native draft".into();
+            state.reject_cancel = true;
+        })
+        .unwrap();
+    let destination: Destination = serde_json::from_value(panel_command_native_move()["destination"].clone()).unwrap();
+    app.dispatch_panel_layout(transaction(vec![Mutation::Move { instance: id("editor"), destination }])).unwrap();
+    assert_eq!(native.borrow().hosts.len(), 1);
+    assert!(
+        app.panel_runtime_mut()
+            .unwrap()
+            .set_command_adapters(Box::<commands::InMemoryCatalogue>::default(), Box::new(FakeNativeAdapter::new(true)))
+            .is_err()
+    );
+    assert!(app.disable_panel_runtime().is_err());
+    assert_eq!(native.borrow().hosts.len(), 1);
+    app.run("panel.native_close", serde_json::json!({"target":{"type":"native_host","id":"native-host"}})).unwrap();
+    assert!(native.borrow().hosts.is_empty(), "command redocks the GUI-created host through its actual owner");
+    app.run("panel.popout", panel_command_native_move()).unwrap();
+    native.borrow_mut().fail_prepare = true;
+    let before = app.panel_runtime().unwrap().layout().inspect();
+    let hosts = native.borrow().hosts.clone();
+    assert_eq!(
+        app.dispatch_panel_layout(transaction(vec![Mutation::NativeClose { host: HostId::new("native-host").unwrap() }])).unwrap_err().rule,
+        Rule::Capability
+    );
+    assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+    assert_eq!(native.borrow().hosts, hosts);
+    native.borrow_mut().fail_prepare = false;
+    app.dispatch_panel_layout(transaction(vec![Mutation::NativeClose { host: HostId::new("native-host").unwrap() }])).unwrap();
+    assert!(native.borrow().hosts.is_empty(), "GUI redocks the command-created host through the same owner");
+    assert_eq!(probe.state(&key).unwrap().draft, "native draft");
+    assert_eq!(probe.state(&key).unwrap().cancels, 0);
 }

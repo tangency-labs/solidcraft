@@ -43,13 +43,29 @@ retained owners, not redirect old-document reads to the current document.
 `SolveApp::enable_panel_runtime` accepts a runtime and `AppPanelServices` explicitly.
 Its optional field defaults to `None`, remains on the app across document tabs,
 and is ticked from `SolveApp::logic` independently of presentation. Refresh receives
-only `&Session`. `disable_panel_runtime` preflights cleanup. Tick failures remain
+only `&Session`. `disable_panel_runtime` preflights cleanup and requires native
+sections to be redocked before dropping their adapter. Tick failures remain
 inspectable on `AppPanelRuntime::last_error`; they do not inject untranslated UI.
 This is an internal adapter seam, not a preference, environment switch or control
 method. `dispatch_panel_layout`, `mount_panels`, `panel_content_action` and
-`tick_panel_runtime` forward through the same injected provider. `AppPanelRuntime`
-also exposes these operations and `with_services` for scoped integration access;
-adapters do not need a shadow provider to borrow runtime and services together.
+`tick_panel_runtime` forward through the same injected provider. Application
+command, atomic-batch and GUI dispatch boundaries refresh the read-only provider
+and current document environment before inspection/projection. Availability is
+refreshed without ticking content, evaluating models or creating geometry; retained
+service failures still require a successful real update to recover. Sequential
+programmatic model/document changes are therefore visible to the next panel step
+without waiting for a frame tick.
+
+`AppPanelRuntime::set_command_adapters` installs one catalogue and one native
+adapter once, before native hosts exist. Both `SolveApp::dispatch_panel_layout(action)`
+and command routes use that stored adapter; there is no per-call native argument.
+`AppPanelRuntime::dispatch`, content actions and command/batch methods take the current `&Session`
+for read-only context refresh. Its runtime is private with a read-only `runtime()`
+accessor; service borrowing is internal, so consumers cannot replace the runtime or
+dispatch through another adapter through a mutable services callback. Standalone
+`PanelRuntime`/`RuntimeActionSink` fixtures retain their explicit fake-adapter seam.
+Changing the installed application adapter is refused rather than abandoning its
+created hosts. These are integration APIs, not a production native implementation.
 
 ## Actions and atomicity
 

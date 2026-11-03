@@ -184,11 +184,22 @@ pub struct RuntimeActionSink<'a, 'services> {
     pub services: &'a mut ContentServices<'services>,
 }
 impl ActionSink for RuntimeActionSink<'_, '_> {
+    fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+        self.runtime.layout.project(action)
+    }
     fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
-        self.runtime.dispatch(action, self.native, self.services)
+        let mut reply = self.runtime.dispatch(action, self.native, self.services)?;
+        let native = self.native.capabilities();
+        reply.capabilities.native_windows &= native.native_windows;
+        reply.capabilities.max_native_hosts = reply.capabilities.max_native_hosts.min(native.max_native_hosts);
+        Ok(reply)
     }
     fn inspect(&self) -> LayoutReply {
-        self.runtime.layout.inspect()
+        let mut reply = self.runtime.layout.inspect();
+        let native = self.native.capabilities();
+        reply.capabilities.native_windows &= native.native_windows;
+        reply.capabilities.max_native_hosts = reply.capabilities.max_native_hosts.min(native.max_native_hosts);
+        reply
     }
 }
 
@@ -356,6 +367,47 @@ impl PanelRuntime {
             );
         }
         Ok(staged)
+    }
+
+    /// Refresh command/query availability from the current read-only provider.
+    /// This does not tick content, evaluate models or invent presentation geometry.
+    /// A failed retained service stays failed until a real update recovers it.
+    pub fn refresh_context(&mut self, models: &dyn PanelModels, local: &mut dyn PanelLocalServices) -> PanelResult<()> {
+        self.require_live()?;
+        let staged = self.stage_controllers(self.layout.layout(), &self.environment)?;
+        let mut availability = AvailabilityMap::new();
+        for instance in &self.layout.layout().instances {
+            let state = match self.key(instance) {
+                Ok(key) => match self.controllers.get(&key).or_else(|| staged.get(&key)) {
+                    Some(retained) => {
+                        let state = retained.controller.availability(&key.owner, models);
+                        if matches!(&state,Availability::Unavailable { reason } if reason.is_empty() || reason.len() > 256) {
+                            return Err(error(Rule::Availability, "controller availability reason bound"));
+                        }
+                        if self.update_errors.iter().any(|failure| failure.controller.as_ref() == Some(&key)) {
+                            retained.availability.clone()
+                        } else {
+                            state
+                        }
+                    }
+                    None => Availability::Unavailable { reason: "content controller unavailable".into() },
+                },
+                Err(reason) => Availability::Unavailable { reason: reason.detail },
+            };
+            availability.insert(instance.id.clone(), state);
+        }
+        self.layout.set_availability(availability.clone())?;
+        self.controllers.extend(staged);
+        for instance in &self.layout.layout().instances {
+            if let Ok(key) = self.key(instance)
+                && let Some(retained) = self.controllers.get_mut(&key)
+                && let Some(state) = availability.get(&instance.id)
+            {
+                retained.availability = state.clone();
+            }
+        }
+        self.sync_states(None, local);
+        Ok(())
     }
 
     /// Independent tick: all retained services, then current-owner availability.

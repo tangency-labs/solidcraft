@@ -62,6 +62,28 @@ pub fn transaction(mutations: Vec<Mutation>) -> LayoutAction {
     LayoutAction::Apply { expected_revision: None, mutations }
 }
 
+/// Synthetic catalogue shared by command/control/MCP tests; never registered by
+/// application startup. Two descriptors may deliberately share one default.
+pub fn fixture_command_catalogue(registry: &PanelRegistry) -> PanelResult<commands::InMemoryCatalogue> {
+    let mut catalogue = commands::InMemoryCatalogue::default();
+    let empty = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace")?));
+    catalogue.register_builtin("Fixture default", &empty, registry)?;
+    for id in ["fixture.workspace", "fixture.other"] {
+        catalogue.register_workspace(commands::WorkspaceDescriptor {
+            id: WorkspaceId::new(id)?,
+            title_key: "ui.panel".into(),
+            default_preset: "Fixture default".into(),
+        })?;
+    }
+    Ok(catalogue)
+}
+
+pub fn fixture_command_backend() -> PanelResult<commands::InMemoryPanelBackend> {
+    let service = fixture_service(false)?;
+    let catalogue = fixture_command_catalogue(service.registry())?;
+    Ok(commands::InMemoryPanelBackend::new(service, catalogue))
+}
+
 #[derive(Default)]
 pub struct FakePersistence {
     /// Deliberately separate map demonstrates that layout writes own one key.

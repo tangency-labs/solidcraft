@@ -82,6 +82,10 @@ pub trait LayoutPersistence {
 
 pub fn encode(envelope: &LayoutEnvelope, registry: &PanelRegistry) -> PanelResult<Vec<u8>> {
     validate_envelope(envelope, registry)?;
+    encode_record(envelope)
+}
+
+fn encode_record(envelope: &LayoutEnvelope) -> PanelResult<Vec<u8>> {
     let mut writer = BoundedEnvelopeWriter { bytes: Vec::new() };
     serde_json::to_writer(&mut writer, envelope).map_err(|_| error(Rule::CollectionLimit, "cannot encode panel envelope within byte cap"))?;
     // Aggregated opaque entries must also fit the decoder's global node/depth
@@ -115,6 +119,10 @@ fn validate_envelope(envelope: &LayoutEnvelope, registry: &PanelRegistry) -> Pan
         return Err(error(Rule::Version, "unknown panel envelope version"));
     }
     validate(&envelope.layout, registry)?;
+    validate_envelope_metadata(envelope)
+}
+
+fn validate_envelope_metadata(envelope: &LayoutEnvelope) -> PanelResult<()> {
     if envelope.quarantine.len() + envelope.layout.instances.len() > MAX_INSTANCES {
         return Err(error(Rule::CollectionLimit, "quarantine instance cap"));
     }
@@ -349,6 +357,19 @@ fn record_section_projections(envelope: &mut LayoutEnvelope) {
     }
 }
 
+/// Stage live edits without losing dormant order, projected activation or opaque
+/// fields. The caller publishes only after its guarded layout dispatch succeeds.
+pub fn with_live_layout(envelope: &LayoutEnvelope, layout: Layout, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    encode(envelope, registry)?;
+    validate(&layout, registry)?;
+    let mut next = envelope.clone();
+    next.layout = layout;
+    refresh_section_memory(&mut next, None, &std::collections::BTreeSet::new())?;
+    record_section_projections(&mut next);
+    encode(&next, registry)?;
+    Ok(next)
+}
+
 /// Iterative traversal also bounds caller-constructed JSON, which did not pass
 /// through serde_json's parser/recursion limit.
 pub fn bounded_json(value: &serde_json::Value) -> PanelResult<()> {
@@ -391,7 +412,7 @@ pub fn bounded_json(value: &serde_json::Value) -> PanelResult<()> {
 /// registered again. Corrupt/future input returns a validated safe preset plus notice.
 pub fn decode(bytes: &[u8], registry: &PanelRegistry, fallback: &Layout) -> PanelResult<LoadOutcome> {
     validate(fallback, registry)?;
-    match decode_inner(bytes, registry, &fallback.workspace) {
+    match decode_inner(bytes, registry, &fallback.workspace, true) {
         Ok(envelope) => Ok(LoadOutcome { envelope, notice: None, rejected: None }),
         Err(reason) => Ok(LoadOutcome {
             envelope: LayoutEnvelope::new(fallback.clone()),
@@ -401,7 +422,57 @@ pub fn decode(bytes: &[u8], registry: &PanelRegistry, fallback: &Layout) -> Pane
     }
 }
 
-fn decode_inner(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId) -> PanelResult<LayoutEnvelope> {
+/// Validate an already-retained record exactly, without generating section order,
+/// projections or quarantine/restoration metadata. Missing registrations do not
+/// invalidate saved intent. Structure and every applicable known-kind constraint
+/// are still validated, but this retained layout is NOT permission to commit it
+/// to a live sink. Use `project_retained_record` to stage registry migration.
+pub fn decode_retained_record(bytes: &[u8], registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    if bytes.len() > MAX_ENVELOPE_BYTES {
+        return Err(error(Rule::CollectionLimit, "panel envelope exceeds byte cap"));
+    }
+    let raw: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| error(Rule::Schema, "invalid panel envelope JSON"))?;
+    bounded_json(&raw)?;
+    let envelope: LayoutEnvelope = serde_json::from_value(raw).map_err(|_| error(Rule::Schema, "invalid panel envelope shape"))?;
+    if envelope.format != ENVELOPE_FORMAT {
+        return Err(error(Rule::Schema, "unknown panel envelope format"));
+    }
+    if envelope.version != ENVELOPE_VERSION {
+        return Err(error(Rule::Version, "unknown panel envelope version"));
+    }
+    validate_retained_layout(&envelope.layout, registry)?;
+    validate_envelope_metadata(&envelope)?;
+    // The same canonical encodability budget as admission, without filling any
+    // metadata or requiring absent peers. The caller retains the ORIGINAL bytes.
+    encode_record(&envelope)?;
+    Ok(envelope)
+}
+
+/// Read a retained record in its workspace without consuming a reappearance
+/// obligation or materializing absent order/projection metadata.
+pub fn decode_retained(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId) -> PanelResult<LayoutEnvelope> {
+    valid_id(&workspace.0)?;
+    let envelope = decode_retained_record(bytes, registry)?;
+    if envelope.layout.workspace != *workspace {
+        return Err(error(Rule::Schema, "panel envelope workspace mismatch"));
+    }
+    Ok(envelope)
+}
+
+/// Stage a usable current-registry layout without consuming quarantined
+/// reappearance obligations. Newly absent kinds move to the foundation's
+/// lossless quarantine. Metadata expansion can fail at the existing caps; the
+/// original record remains available for retry and no live state is published.
+pub fn project_retained_record(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId) -> PanelResult<LayoutEnvelope> {
+    let envelope = decode_retained(bytes, registry, workspace)?;
+    if envelope.layout.instances.iter().any(|instance| registry.get(&instance.kind).is_err()) {
+        decode_inner(bytes, registry, workspace, false)
+    } else {
+        Ok(envelope)
+    }
+}
+
+fn decode_inner(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId, restore: bool) -> PanelResult<LayoutEnvelope> {
     if bytes.len() > MAX_ENVELOPE_BYTES {
         return Err(error(Rule::CollectionLimit, "panel envelope exceeds byte cap"));
     }
@@ -423,7 +494,8 @@ fn decode_inner(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId)
     {
         return Err(error(Rule::CollectionLimit, "panel collection limit"));
     }
-    validate_wire_structure(&envelope.layout)?;
+    validate_retained_layout(&envelope.layout, registry)?;
+    validate_envelope_metadata(&envelope)?;
     let unknown: Vec<_> = envelope.layout.instances.iter().filter(|p| registry.get(&p.kind).is_err()).cloned().collect();
     let capture: std::collections::BTreeSet<_> = envelope
         .layout
@@ -468,7 +540,9 @@ fn decode_inner(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId)
     // projection is produced by us, not an intervening user activation.
     record_section_projections(&mut envelope);
     validate_envelope(&envelope, registry)?;
-    restore_quarantine(&mut envelope, registry)?;
+    if restore {
+        restore_quarantine(&mut envelope, registry)?;
+    }
     // Success means the lossless transformed envelope is itself persistable,
     // including its aggregate byte/node/depth budget. Otherwise retain recovery.
     encode(&envelope, registry)?;
@@ -559,13 +633,68 @@ pub fn restore_quarantine_with_availability(
     Ok(())
 }
 
+/// Validate saved identities/ownership independently of optional peers, then use
+/// the ordinary validator for known members. The temporary known-only view is
+/// validation input only: it is never returned, encoded, or dispatched.
+fn validate_retained_layout(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
+    validate_wire_structure(layout)?;
+    if layout.instances.iter().all(|instance| registry.get(&instance.kind).is_ok()) {
+        return validate(layout, registry);
+    }
+    let mut edges = std::collections::BTreeSet::new();
+    for section in &layout.sections {
+        let zone = section.location.zone();
+        let first = edges.insert(zone);
+        for id in &section.tabs {
+            let instance = layout.instance(id)?;
+            if let Ok(spec) = registry.get(&instance.kind) {
+                // Filtering absent tabs/sections must not hide these constraints
+                // of a known member in the ORIGINAL full saved placement.
+                if section.tabs.len() > 1 && !spec.features.tabbable {
+                    return Err(error(Rule::FeatureDisabled, "panel cannot join tabs"));
+                }
+                if spec.edge_rule == EdgeRule::PinOuter && matches!(zone, Zone::Left | Zone::Right) && !first {
+                    return Err(error(Rule::PinOrder, "pinned section must be outermost"));
+                }
+            }
+        }
+    }
+    let mut known = layout.clone();
+    known.instances.retain(|instance| registry.get(&instance.kind).is_ok());
+    let ids: std::collections::BTreeSet<_> = known.instances.iter().map(|instance| instance.id.clone()).collect();
+    for section in &mut known.sections {
+        section.tabs.retain(|id| ids.contains(id));
+        if !section.tabs.contains(&section.active)
+            && let Some(first) = section.tabs.first()
+        {
+            section.active = first.clone();
+        }
+    }
+    known.sections.retain(|section| !section.tabs.is_empty());
+    validate(&known, registry)
+}
+
 fn validate_wire_structure(layout: &Layout) -> PanelResult<()> {
+    if layout.version != LAYOUT_VERSION {
+        return Err(error(Rule::Version, "unsupported layout version"));
+    }
+    valid_id(&layout.workspace.0)?;
+    if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS {
+        return Err(error(Rule::CollectionLimit, "layout collection limit"));
+    }
     let mut instances = std::collections::BTreeSet::new();
     let mut sections = std::collections::BTreeSet::new();
     let mut seen = std::collections::BTreeSet::new();
+    let mut hosts = std::collections::BTreeSet::new();
     for instance in &layout.instances {
         valid_id(&instance.id.0)?;
         valid_id(&instance.kind.0)?;
+        valid_id(&instance.memory.section.0)?;
+        instance.memory.location.validate()?;
+        instance.memory.size.validate()?;
+        if instance.memory.tab_index >= MAX_TABS || instance.memory.section_index > MAX_SECTIONS {
+            return Err(error(Rule::Bounds, "invalid placement memory"));
+        }
         if !instances.insert(&instance.id) {
             return Err(error(Rule::DuplicateId, "duplicate unknown/known instance"));
         }
@@ -576,6 +705,14 @@ fn validate_wire_structure(layout: &Layout) -> PanelResult<()> {
         section.size.validate()?;
         if !sections.insert(&section.id) {
             return Err(error(Rule::DuplicateId, "duplicate unknown/known section"));
+        }
+        if section.tabs.len() > MAX_TABS {
+            return Err(error(Rule::CollectionLimit, "section tab cap"));
+        }
+        if let SectionLocation::Window { host, .. } = &section.location
+            && !hosts.insert(host)
+        {
+            return Err(error(Rule::DuplicateId, "native host reused"));
         }
         if section.tabs.is_empty() || !section.tabs.contains(&section.active) {
             return Err(error(Rule::ExactlyOnce, "invalid unknown/known active tab"));

@@ -123,6 +123,11 @@ pub struct LayoutReply {
 pub trait ActionSink {
     fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply>;
     fn inspect(&self) -> LayoutReply;
+    /// Pure projection on the authoritative service. Adapters stage bounded
+    /// envelope/storage changes from this before guarded dispatch publishes.
+    fn project(&self, _action: LayoutAction) -> PanelResult<Layout> {
+        Err(error(Rule::Capability, "layout sink cannot stage commands"))
+    }
 }
 
 #[derive(Debug)]
@@ -391,6 +396,9 @@ pub fn validate_lifecycle_intents(mutations: &[Mutation]) -> PanelResult<()> {
 }
 
 impl ActionSink for LayoutService {
+    fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+        Ok(self.prepare(action)?.layout().clone())
+    }
     fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
         let prepared = self.prepare(action)?;
         self.commit(prepared)

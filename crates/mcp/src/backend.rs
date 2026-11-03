@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::control_pending;
+use solidcraft_engine::panels::ActionSink;
+use solidcraft_engine::panels::commands::LayoutCatalogue;
 use solidcraft_engine::render::StandardView;
 use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
@@ -559,6 +561,11 @@ impl Remote {
     /// `strict` refuses a call that breaks its command's contract without sending it, and `warn`
     /// sends it and adds the issues to the app's reply.
     fn execute_checked(&mut self, params: Value) -> Result<Value, String> {
+        if let Some(id) = step_command(&params).filter(|id| solidcraft_engine::panels::commands::is_command(id)) {
+            let empty = json!({});
+            solidcraft_engine::panels::commands::parse_command(id, params.get("params").filter(|p| !p.is_null()).unwrap_or(&empty))
+                .map_err(solidcraft_engine::panels::commands::error_text)?;
+        }
         if self.app_checks() {
             let params = self.at_level(params);
             let reply = self.call_once("engine.execute", params, true);
@@ -616,6 +623,7 @@ impl Backend for Remote {
             "control.pending" => self.pending_status(),
             "engine.execute" if self.param_check != ParamCheck::Off => self.execute_checked(params),
             "engine.batch" if self.param_check != ParamCheck::Off => self.batch_checked(params),
+            "engine.script" if self.param_check != ParamCheck::Off => self.call_once(method, self.at_level(params), true),
             _ => self.call_once(method, params, true),
         }
     }
@@ -644,6 +652,8 @@ pub struct Headless {
     pub session: Session,
     /// Orientation for renders; the camera is refitted to the model every time.
     pub view: StandardView,
+    /// Application layout persists across calls, outside Session/document undo.
+    pub panels: solidcraft_engine::panels::PanelResult<solidcraft_engine::panels::commands::InMemoryPanelBackend>,
 }
 
 impl Default for Headless {
@@ -662,16 +672,77 @@ impl Headless {
             }
             Err(e) => session.log.push(format!("image host unavailable: {e}")),
         }
-        Headless { session, view: StandardView::Iso }
+        Headless { session, view: StandardView::Iso, panels: solidcraft_engine::panels::commands::InMemoryPanelBackend::empty() }
     }
+    pub fn with_panels(mut self, panels: solidcraft_engine::panels::commands::InMemoryPanelBackend) -> Self {
+        self.panels = Ok(panels);
+        self
+    }
+    fn execute_command(&mut self, id: &str, params: &Value) -> Result<Value, String> {
+        use solidcraft_engine::panels::commands;
+        if commands::is_command(id) {
+            self.panels.as_mut().map_err(|reason| commands::error_text(reason.clone()))?.execute(id, params).map_err(commands::error_text)
+        } else {
+            self.session.execute(id, params).map_err(|e| e.to_string())
+        }
+    }
+    fn panel_sequence(&mut self, method: &str, p: &Value, steps: &[Value]) -> Result<Value, String> {
+        use solidcraft_engine::panels::{Rule, commands, error};
+        if steps.len() > 100_000 {
+            return Err("script too long".into());
+        }
+        if method == "engine.batch"
+            && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, self.session.param_check, &[])
+        {
+            return Ok(refusal.reply(steps.len()));
+        }
+        let panels = steps.iter().filter(|step| step_command(step).is_some_and(commands::is_command)).count();
+        if method == "engine.batch" && p.get("rollback").and_then(Value::as_bool).unwrap_or(true) {
+            if panels != steps.len() {
+                return Err(commands::error_text(error(
+                    Rule::Capability,
+                    "atomic mixed document/layout batches are unavailable; use rollback:false or separate transactions",
+                )));
+            }
+            return self.panels.as_mut().map_err(|reason| commands::error_text(reason.clone()))?.batch(steps).map_err(commands::error_text);
+        }
+        let mut results = Vec::new();
+        for (i, step) in steps.iter().enumerate() {
+            let empty = json!({});
+            let params = step.get("params").filter(|p| !p.is_null()).unwrap_or(&empty);
+            let result = step_command(step).ok_or_else(|| "missing command".to_string()).and_then(|id| self.execute_command(id, params));
+            match result {
+                Ok(result) => results.push(result),
+                Err(error) if method == "engine.batch" => return Ok(commands::sequential_failure(i, step_command(step), error, results)),
+                Err(error) => return Err(error),
+            }
+        }
+        if method == "engine.batch" { Ok(json!({"completed":results.len(),"results":results,"undone":0})) } else { Ok(json!(results)) }
+    }
+}
+
+fn step_command(step: &Value) -> Option<&str> {
+    step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)
 }
 
 fn dim(p: &Value, k: &str, default: f64) -> u32 {
     p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(default).clamp(16.0, 4096.0) as u32
 }
 
-impl Backend for Headless {
-    fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
+impl Headless {
+    fn call_at_current_level(&mut self, method: &str, p: Value) -> Result<Value, String> {
+        if matches!(method, "engine.execute" | "command") && step_command(&p).is_some_and(solidcraft_engine::panels::commands::is_command) {
+            let empty = json!({});
+            return self.execute_command(step_command(&p).unwrap_or_default(), p.get("params").filter(|p| !p.is_null()).unwrap_or(&empty));
+        }
+        if matches!(method, "engine.script" | "engine.batch")
+            && let Some(steps) = p
+                .as_array()
+                .or_else(|| p.get("commands").and_then(Value::as_array))
+                .filter(|steps| steps.iter().any(|step| step_command(step).is_some_and(solidcraft_engine::panels::commands::is_command)))
+        {
+            return self.panel_sequence(method, &p, steps);
+        }
         let s = &mut self.session;
         let str_p = |k: &str| p.get(k).and_then(Value::as_str);
         match method {
@@ -738,6 +809,19 @@ impl Backend for Headless {
             other => Err(format!("unknown method `{other}`")),
         }
     }
+}
+impl Backend for Headless {
+    fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
+        let own = self.session.param_check;
+        if matches!(method, "engine.execute" | "command" | "engine.batch" | "engine.script")
+            && let Some(value) = p.get("param_check")
+        {
+            self.session.param_check = value.as_str().and_then(ParamCheck::parse).ok_or("`param_check` must be off, warn or strict")?;
+        }
+        let reply = self.call_at_current_level(method, p);
+        self.session.param_check = own;
+        reply
+    }
     fn has_ui(&self) -> bool {
         false
     }
@@ -773,7 +857,10 @@ impl Auto {
 
     /// Switch to the app when the session is still empty and one is running.
     fn look_for_app(&mut self) {
-        let empty = self.headless.as_ref().is_some_and(|h| h.session.doc.features.is_empty());
+        let empty = self.headless.as_ref().is_some_and(|h| {
+            h.session.doc.features.is_empty()
+                && h.panels.as_ref().is_ok_and(|panels| panels.service.inspect().revision == 0 && panels.catalogue.state().user_count() == 0)
+        });
         if !empty {
             return;
         }

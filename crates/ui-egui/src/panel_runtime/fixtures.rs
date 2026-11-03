@@ -222,6 +222,23 @@ pub fn fixture_controller_binding(probe: &FixtureProbe, editor: bool, ownership:
 pub struct FakeModels {
     pub editable: bool,
 }
+
+/// Synthetic app provider for command/control fixtures, with the same retained
+/// model/command/local-service bindings as PanelMountHarness.
+#[derive(Default)]
+pub struct FakeAppPanelServices {
+    pub models: FakeModels,
+    pub commands: FakeContentCommands,
+    pub local: FakeLocalServices,
+}
+impl AppPanelServices for FakeAppPanelServices {
+    fn refresh_read_only(&mut self, _session: &solidcraft_engine::Session) -> PanelResult<()> {
+        Ok(())
+    }
+    fn services(&mut self) -> ContentServices<'_> {
+        ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local }
+    }
+}
 impl PanelModels for FakeModels {
     fn read(&self, _owner: &ContentOwner, key: &str) -> PanelResult<serde_json::Value> {
         match key {
@@ -452,8 +469,28 @@ pub struct PanelMountHarness {
     pub native: FakeNativeAdapter,
     pub host: FakePanelHost,
     pub persistence: FakePersistence,
+    pub catalogue: commands::InMemoryCatalogue,
 }
 impl PanelMountHarness {
+    pub fn command(&mut self, id: &str, params: &serde_json::Value) -> PanelResult<serde_json::Value> {
+        let registry = self.runtime.layout().registry().clone();
+        let mut services = ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local };
+        let mut sink = RuntimeActionSink { runtime: &mut self.runtime, native: &mut self.native, services: &mut services };
+        commands::execute(
+            id,
+            params,
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut self.catalogue, web: false },
+        )
+    }
+    pub fn command_batch(&mut self, steps: &[serde_json::Value]) -> PanelResult<serde_json::Value> {
+        let registry = self.runtime.layout().registry().clone();
+        let mut services = ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local };
+        let mut sink = RuntimeActionSink { runtime: &mut self.runtime, native: &mut self.native, services: &mut services };
+        commands::execute_batch(
+            steps,
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut self.catalogue, web: false },
+        )
+    }
     pub fn apply_layout(&mut self, layout: Layout, expected_revision: Option<u64>) -> PanelResult<LayoutReply> {
         self.runtime.dispatch(
             LayoutAction::Replace { expected_revision, layout },
@@ -469,6 +506,7 @@ impl PanelMountHarness {
     }
     fn configured(native: bool, bind: bool) -> PanelResult<Self> {
         let layout = fixture_service(native)?;
+        let catalogue = fixture_command_catalogue(layout.registry())?;
         let environment = RuntimeEnvironment {
             workspace: layout.layout().workspace.clone(),
             document: Some(DocumentId::new("fixture.document")?),
@@ -491,6 +529,7 @@ impl PanelMountHarness {
             native: FakeNativeAdapter::new(native),
             host: FakePanelHost::default(),
             persistence: FakePersistence::default(),
+            catalogue,
         })
     }
     pub fn dispatch(&mut self, mutations: Vec<Mutation>) -> PanelResult<LayoutReply> {

@@ -1163,6 +1163,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if solidcraft_engine::panels::commands::is_command(id) {
+            return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
+        }
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
@@ -1554,6 +1557,12 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
+        if solidcraft_engine::panels::commands::is_command(id) {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
         self.tree.clear_folder_pick();
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {

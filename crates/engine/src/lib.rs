@@ -66,6 +66,8 @@ pub const MAX_LINE: usize = 16 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    #[error("{text}", text = panels::commands::error_text(.0.clone()))]
+    Panel(#[from] panels::PanelError),
     #[error("unknown command `{0}`{hint}", hint = cmd::did_you_mean(.0))]
     UnknownCommand(String),
     #[error("`{0}` is not available right now: {1}")]
@@ -1610,6 +1612,12 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if panels::commands::is_command(spec.id) {
+            // Layout is application state. Even a missing capability must not
+            // clear live links, map picks, snapshot, evaluate or refresh a design.
+            panels::commands::parse_command(spec.id, params)?;
+            return Err(EngineError::Panel(panels::error(panels::Rule::Capability, "application layout backend was not injected")));
+        }
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();

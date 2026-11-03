@@ -271,6 +271,9 @@ fn batch_targets(steps: &[Value]) -> Vec<(Pos2, &'static str)> {
 /// The places a command's parameters pick, in the world: [x, y, z] points (faces, edges,
 /// vertices, positions), active-sketch [x, y] points, and a new sketch's plane.
 pub fn picks(app: &SolveApp, command: &str, params: &Value) -> Vec<Vec3> {
+    if solidcraft_engine::panels::commands::is_command(command) {
+        return Vec::new();
+    }
     let id = solidcraft_engine::find_command(command).map_or(command, |c| c.id);
     let mut out = Vec::new();
     if id == "sketch.create"
