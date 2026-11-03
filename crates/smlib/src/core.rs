@@ -419,11 +419,20 @@ pub(crate) static KERNEL: Mutex<Option<Kernel>> = Mutex::new(None);
 /// Runs `f` on the process's kernel. A panic in solidcore is caught: the kernel, which it may have
 /// left half-updated, is replaced by a fresh one and the call fails with [`Error::Internal`].
 pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>) -> Result<T> {
+    run_on(call, &[], f)
+}
+
+/// [`run`] for a call that reads the bodies `inputs`: should it fail while a dump folder is set,
+/// they are left there ([`dump::failed`]).
+pub(crate) fn run_on<T: dump::Answer>(
+    call: &'static str,
+    inputs: dump::Inputs<'_>,
+    f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>,
+) -> Result<T> {
     let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
     let k = guard.get_or_insert_with(fresh);
     // A profiler span per call: where the kernel's time goes.
     let _span = solidcraft_profile::span("solidcore", call);
-    dump::begin();
     dump::set_current(Some(call));
     let r = match catch_unwind(AssertUnwindSafe(|| f(k))) {
         Ok(Ok(v)) => Ok(v),
@@ -436,13 +445,13 @@ pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kerne
         }
     };
     dump::set_current(None);
-    match &r {
-        Ok(v) => {
-            if let Some(why) = v.refusal() {
-                dump::failed(call, &why);
-            }
-        }
-        Err(e) => dump::failed(call, &e.to_string()),
+    let why = match &r {
+        Ok(v) => v.refusal(),
+        Err(e) => Some(e.to_string()),
+    };
+    if let Some(why) = why {
+        // The kernel the call ran on, or the fresh one that replaced it after a panic.
+        dump::failed(guard.get_or_insert_with(fresh), call, &why, inputs);
     }
     r
 }
@@ -470,11 +479,7 @@ pub(crate) fn with_body<T: dump::Answer>(
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
-    run(call, |k| {
-        let mut b = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-        dump::input(k, "brep", &b);
-        f(k, &mut b)
-    })
+    run_on(call, &[("brep", body)], |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:

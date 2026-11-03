@@ -279,6 +279,29 @@ fn every_entry_point_answers() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// While a dump folder is set, a call that answers serialises none of its inputs, and one that
+/// fails serialises each once: the rig's timings, taken with a folder set, are the kernel's.
+#[test]
+fn only_a_failing_call_serialises_its_inputs() {
+    let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = std::env::temp_dir().join(format!("solidcraft-smlib-core-dump-lazy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    core::dump::set_dir(Some(dir.clone()));
+    let serialised = || core::dump::SERIALISED.with(std::cell::Cell::get);
+    let a = core::make_box([0.0; 3], [10.0; 3]).unwrap();
+    let b = core::make_box([5.0; 3], [10.0; 3]).unwrap();
+    let before = serialised();
+    let v = core::volume(&a, 1e-8);
+    let u = core::boolean::boolean(&a, &b, BooleanOp::Union);
+    let answered = serialised() - before;
+    let r: Result<()> = core::with_body("smlib_test_failure", &a, |_, _| Err(solidcore::SolidError::invalid_input("test", "refused")));
+    let failed = serialised() - before - answered;
+    core::dump::set_dir(None);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(v.is_ok() && matches!(u, Ok(Some(_))) && r.is_err());
+    assert_eq!((answered, failed), (0, 1));
+}
+
 /// A failing solidcore call leaves its inputs and what failed, and an answered one leaves nothing;
 /// the call in flight is named, and gone after. A folder is process-wide, so this test is the one
 /// that sets it.

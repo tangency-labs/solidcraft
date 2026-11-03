@@ -57,7 +57,7 @@ use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, LoopId, edge};
 
 use super::blend::{p3, status};
 use super::sweep::build_faces;
-use super::{Body, answer, run};
+use super::{Body, answer};
 use crate::trim::Continuation;
 use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;
@@ -295,12 +295,8 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
         return Err(Error::Internal("smlib_untrim_face: the body was left unfinished by an earlier panic".to_owned()));
     }
     let at = p3(point);
-    run("smlib_untrim_face", |k| {
-        let mut whole = {
-            let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-            super::dump::input(k, "brep", &g);
-            brep_copy(k, &g)?
-        };
+    super::run_on("smlib_untrim_face", &[("brep", body)], |k| {
+        let mut whole = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
         // The face to untrim, in a body of its own (its hole edges lamina there) or in the copy
         // of the whole body.
         let (mut w, f) = if in_place {
@@ -749,12 +745,8 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
     if sheet.0.is_poisoned() {
         return Err(Error::Internal("smlib_extend_sheet: the body was left unfinished by an earlier panic".to_owned()));
     }
-    run("smlib_extend_sheet", |k| {
-        let b = {
-            let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
-            super::dump::input(k, "sheet", &g);
-            brep_copy(k, &g)?
-        };
+    super::run_on("smlib_extend_sheet", &[("sheet", sheet)], |k| {
+        let b = brep_copy(k, &sheet.0.lock().unwrap_or_else(PoisonError::into_inner))?;
         let faces = brep_p1::faces(&b, None)?;
         let [f] = faces.as_slice() else { return Ok(Err(Error::Unsupported)) };
         let f = *f;

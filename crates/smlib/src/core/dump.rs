@@ -1,8 +1,9 @@
 //! What a failing solidcore call leaves behind, and which one is running: `smlib_set_dump_dir` and
-//! `smlib_current_call` for this kernel. While a folder is set, each call's B-rep inputs are
-//! written to memory before it runs (it may edit them) and to files only if it fails:
-//! `<n>-<call>.txt`, what failed, and `<n>-<call>-<input>.smb`, each input as a binary `.smb`, which
-//! `Brep::read` reads back.
+//! `smlib_current_call` for this kernel. While a folder is set, a call that fails leaves its B-rep
+//! inputs in it: `<n>-<call>.txt`, what failed, and `<n>-<call>-<input>.smb`, each input as a
+//! binary `.smb`, which `Brep::read` reads back. The inputs are the caller's bodies, which it keeps
+//! until the call's result is known ([`super::run_on`]); they are serialised only when the call
+//! fails, so a call that answers costs nothing more than it would with no folder.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -11,48 +12,46 @@ use std::sync::{Mutex, PoisonError};
 use solidcore::kernel::Kernel;
 use solidcore::topology::Brep;
 
+use super::Body;
 use crate::{Error, Result};
 
 static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-/// The inputs of the call running now, in the order it took them.
-static INPUTS: Mutex<Vec<(&'static str, std::result::Result<Vec<u8>, String>)>> = Mutex::new(Vec::new());
+
+/// A call's B-rep inputs, by the names its dump gives them, in the order it takes them.
+pub(crate) type Inputs<'a> = &'a [(&'static str, &'a Body)];
+
+#[cfg(test)]
+thread_local! {
+    /// How many inputs this thread's calls serialised, for the tests.
+    pub(crate) static SERIALISED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Where failing calls leave their inputs; `None` stops it.
 pub(crate) fn set_dir(dir: Option<PathBuf>) {
     *DIR.lock().unwrap_or_else(PoisonError::into_inner) = dir;
 }
 
-fn dumping() -> bool {
-    DIR.lock().unwrap_or_else(PoisonError::into_inner).is_some()
-}
-
-/// A new call, with no inputs yet.
-pub(super) fn begin() {
-    if dumping() {
-        INPUTS.lock().unwrap_or_else(PoisonError::into_inner).clear();
-    }
-}
-
-/// `b` is an input of the running call, by the name `what`.
-pub(crate) fn input(k: &Kernel, what: &'static str, b: &Brep) {
-    if dumping() {
-        let bytes = super::file::bytes(k, b, false).map_err(|e| e.to_string());
-        INPUTS.lock().unwrap_or_else(PoisonError::into_inner).push((what, bytes));
-    }
+/// `b` as a binary `.smb`.
+fn serialise(k: &Kernel, b: &Brep) -> std::result::Result<Vec<u8>, String> {
+    #[cfg(test)]
+    SERIALISED.with(|n| n.set(n.get() + 1));
+    super::file::bytes(k, b, false).map_err(|e| e.to_string())
 }
 
 fn safe(call: &str) -> String {
     call.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
 }
 
-/// The running call failed: its inputs go to the folder. Failing to write them fails nothing else.
-pub(super) fn failed(call: &str, why: &str) {
+/// The running call failed: its `inputs` go to the folder, as they are now (a call that edits a
+/// body in place, a query's caches, leaves it edited). Failing to write them fails nothing else.
+pub(super) fn failed(k: &Kernel, call: &str, why: &str, inputs: Inputs<'_>) {
     let Some(dir) = DIR.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
     let n = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let stem = format!("{n:06}-{}", safe(call));
     let mut text = format!("{call} -> {why}\nnumeric arguments are not recorded\n");
-    for (what, bytes) in INPUTS.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
+    for &(what, body) in inputs {
+        let bytes = serialise(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner));
         match bytes {
             Ok(b) => {
                 let name = format!("{stem}-{what}.smb");

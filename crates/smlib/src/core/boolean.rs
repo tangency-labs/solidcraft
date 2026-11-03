@@ -19,7 +19,7 @@ use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::{Brep, edge};
 
-use super::{Body, run};
+use super::{Body, run_on};
 use crate::{BooleanOp, Error, Result};
 
 /// What an operation's `SM_API` call gave, before it is a SolidCraft result: the capi's
@@ -86,16 +86,18 @@ fn finish(r: Brep, solid_in: bool, nonmanifold: bool) -> SolidResult<Done> {
 /// What a failing call's dump calls its first operands.
 const OPERANDS: [&str; 4] = ["a", "b", "c", "d"];
 
+/// `bodies` as a call's inputs, named as its dump names its operands.
+fn operands<'a>(bodies: &[&'a Body]) -> Vec<(&'static str, &'a Body)> {
+    bodies.iter().enumerate().map(|(n, &b)| (OPERANDS.get(n).copied().unwrap_or("operand"), b)).collect()
+}
+
 /// Copies of `bodies`, in order (a body given twice is copied twice, as the capi copies each
 /// operand), all made under the kernel's lock.
 fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
     // Under the kernel's lock (`run` holds it), as every body lock is: two never deadlock.
     let mut out = Vec::with_capacity(bodies.len());
-    for (n, b) in bodies.iter().enumerate() {
-        let g = b.0.lock().unwrap_or_else(PoisonError::into_inner);
-        super::dump::input(k, OPERANDS.get(n).copied().unwrap_or("operand"), &g);
-        let c = brep_copy(k, &g)?;
-        drop(g);
+    for b in bodies {
+        let c = brep_copy(k, &b.0.lock().unwrap_or_else(PoisonError::into_inner))?;
         out.push(c);
     }
     Ok(out)
@@ -141,7 +143,7 @@ fn usable(call: &'static str, bodies: &[&Body]) -> Result<()> {
 /// [`Error::NotSolid`] when solid operands give a body that is not closed.
 pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
     usable("SmApiBoolean", &[a, b])?;
-    let d = run("SmApiBoolean", |k| {
+    let d = run_on("SmApiBoolean", &operands(&[a, b]), |k| {
         let mut c = copies(k, &[a, b])?.into_iter();
         let (Some(ca), Some(cb)) = (c.next(), c.next()) else {
             return Err(SolidError::invalid_input("smlib_boolean", "no operand"));
@@ -161,7 +163,7 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
         return Err(Error::Argument);
     }
     usable("smlib_boolean_union_all", bodies)?;
-    let d = run("smlib_boolean_union_all", |k| {
+    let d = run_on("smlib_boolean_union_all", &operands(bodies), |k| {
         let mut level = copies(k, bodies)?;
         let solid_in = all_solid(&level)?;
         while level.len() > 1 {
@@ -188,7 +190,7 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
 /// `SmApiBoolean2d` succeeds without a result) or the result is empty.
 pub(crate) fn boolean2d(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
     usable("SmApiBoolean2d", &[a, b])?;
-    let d = run("SmApiBoolean2d", |k| {
+    let d = run_on("SmApiBoolean2d", &operands(&[a, b]), |k| {
         let mut c = copies(k, &[a, b])?.into_iter();
         let (Some(ca), Some(cb)) = (c.next(), c.next()) else {
             return Err(SolidError::invalid_input("smlib_boolean2d", "no operand"));
@@ -219,7 +221,7 @@ pub(crate) fn imprint(body: &Body, tool: &Body) -> Result<Option<Body>> {
         return Err(Error::Argument);
     }
     usable("SmApiBooleanWithOptions", &[body, tool])?;
-    let d = run("SmApiBooleanWithOptions", |k| {
+    let d = run_on("SmApiBooleanWithOptions", &operands(&[body, tool]), |k| {
         let mut c = copies(k, &[body, tool])?.into_iter();
         let (Some(a), Some(t)) = (c.next(), c.next()) else {
             return Err(SolidError::invalid_input("smlib_imprint", "no operand"));

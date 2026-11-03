@@ -53,7 +53,7 @@ use solidcore::topology::{Brep, EdgeId, FaceId};
 
 use super::blend::status;
 use super::sweep::build_faces;
-use super::{Body, run};
+use super::Body;
 use crate::ssi::Spec;
 use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;
@@ -318,10 +318,9 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
     if body.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_faces: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let r = run("smlib_split_faces", |k| {
+    let r = super::run_on("smlib_split_faces", &[("brep", body)], |k| {
         let mut a = {
             let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-            super::dump::input(k, "brep", &g);
             let count = brep_p1::faces(&g, None)?.len();
             let mut seen = std::collections::HashSet::new();
             if faces.iter().any(|&f| f >= count || !seen.insert(f)) {
@@ -465,10 +464,7 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
     if body.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let r = run("smlib_split_body", |k| {
-        super::dump::input(k, "brep", &body.0.lock().unwrap_or_else(PoisonError::into_inner));
-        both_sides(k, body, false, |k, flip| side(k, body, spec, flip))
-    })??;
+    let r = super::run_on("smlib_split_body", &[("brep", body)], |k| both_sides(k, body, false, |k, flip| side(k, body, spec, flip)))??;
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
 }
 
@@ -484,11 +480,9 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
     if body.0.is_poisoned() || sheet.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_body_by_sheet: a body was left unfinished by an earlier panic".to_owned()));
     }
-    let r = run("smlib_split_body_by_sheet", |k| {
-        super::dump::input(k, "brep", &body.0.lock().unwrap_or_else(PoisonError::into_inner));
+    let r = super::run_on("smlib_split_body_by_sheet", &[("brep", body), ("sheet", sheet)], |k| {
         {
             let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
-            super::dump::input(k, "sheet", &g);
             if !is_sheet(k, &g)? || face >= g.face_list().len() {
                 return Ok(Err(Error::Argument));
             }

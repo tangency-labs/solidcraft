@@ -52,7 +52,7 @@ use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
-use super::{Body, answer, run};
+use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
@@ -609,11 +609,8 @@ pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kerne
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
-    run(call, |k| {
-        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
-        super::dump::input(k, "brep", &g);
-        let c = brep_copy(k, &g)?;
-        drop(g);
+    super::run_on(call, &[("brep", body)], |k| {
+        let c = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
         f(k, c)
     })?
     .map(Body::new)
