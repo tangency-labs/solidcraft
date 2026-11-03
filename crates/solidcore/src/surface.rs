@@ -13,6 +13,7 @@ pub mod ball_patch;
 pub mod bend_volume;
 pub mod cone;
 pub mod curve_bounded_surface;
+pub mod face_surface;
 pub mod from_parameters;
 pub mod implicit;
 pub mod offset_surface;
