@@ -348,7 +348,7 @@ fn modelled_internal_threads_m3_to_m20() {
         run(&mut s, "solid.cylinder", json!({"base": [0, 0, -1], "radius": d1 / 2.0, "height": len + 2.0, "body_name": "Bore"}));
         run(&mut s, "solid.combine", json!({"target": "Nut", "tools": ["Bore"], "operation": "cut"}));
         let before = volume(&mut s, "Nut");
-        let th = run(&mut s, "solid.thread", json!({"face": [d1 / 2.0, 0, len / 2.0], "modeled": true}));
+        let th = run(&mut s, "solid.thread", json!({"face": [d1 / 2.0, 0, len / 2.0], "designation": format!("M{d}"), "modeled": true}));
         assert!(th["thread"].is_null(), "{th}");
         // Bolt-shaped space: P/8 flat at the major diameter, widening towards the bore.
         let want = per_turn(d1 / 2.0, d / 2.0, |r| p / 8.0 + 2.0 * (d / 2.0 - r) * slope) * len / p;
@@ -362,14 +362,16 @@ fn modelled_internal_threads_m3_to_m20() {
 /// that would cut next to nothing is refused, with the drill to use and the size that fits;
 /// a cosmetic one is still only a note.
 #[test]
-fn a_modelled_thread_that_would_cut_nothing_is_refused() {
+fn a_modelled_thread_that_would_cut_nothing_narrows_the_hole_instead() {
+    // #11609: the hole is narrowed to the thread's minor diameter, and the reply says so.
     let mut s = hex_nut(5.0);
-    let before = volume(&mut s, "Nut");
-    let e = s.execute("solid.thread", &json!({"face": [2.5, 0, 2], "designation": "M5", "modeled": true})).err().map(|e| e.to_string());
-    let e = e.unwrap_or_default();
-    assert!(e.contains("this 5 mm hole") && e.contains("drill 4.2 mm for M5") && e.contains("thread this hole M6"), "{e}");
-    assert!((volume(&mut s, "Nut") - before).abs() < 1e-9);
     run(&mut s, "solid.thread", json!({"face": [2.5, 0, 2], "designation": "M5"}));
+    let before = volume(&mut s, "Nut");
+    let made = run(&mut s, "solid.thread", json!({"face": [2.5, 0, 2], "designation": "M5", "modeled": true}));
+    let warning = s.model.result(made["feature"].as_u64().unwrap()).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains("narrowed the 5 mm hole to 4.1") && warning.contains("M5"), "{warning}");
+    assert_eq!(made["warning"], json!(warning), "the reply says so too");
+    assert!(volume(&mut s, "Nut") > before + 1.0);
 
     // A shaft no thicker than the thread's root (17.29 mm for M20) is refused the same way.
     let mut s = Session::default();
@@ -401,30 +403,30 @@ fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
 }
 
 /// The limit is a quarter of the basic depth 5H/8: a hole up to 4.78 mm for M5 (4.86 mm for
-/// M5x0.5) still takes a modelled thread, a wider one is refused with that pitch's drill.
+/// M5x0.5) is cut as drilled, a wider one is narrowed to the thread's minor diameter first.
 #[test]
 fn the_cut_nothing_limit_holds_for_coarse_and_fine_pitch() {
     for (m, hole, refused) in [
         ("M5", 4.5, None),
         ("M5", 4.75, None),
-        ("M5", 4.8, Some("drill 4.2 mm for M5, or thread this hole M6")),
+        ("M5", 4.8, Some("narrowed the 4.8 mm hole")),
         ("M5x0.5", 4.5, None),
         ("M5x0.5", 4.85, None),
-        ("M5x0.5", 4.9, Some("drill 4.5 mm for M5x0.5, or thread this hole M6")),
-        ("M5x0.5", 5.0, Some("drill 4.5 mm for M5x0.5, or thread this hole M6")),
+        ("M5x0.5", 4.9, Some("narrowed the 4.9 mm hole")),
+        ("M5x0.5", 5.0, Some("narrowed the 5 mm hole")),
     ] {
         let mut s = hex_nut(hole);
         let before = volume(&mut s, "Nut");
         let made = s.execute("solid.thread", &json!({"face": [hole / 2.0, 0, 2], "designation": m, "modeled": true}));
         let cut = before - volume(&mut s, "Nut");
-        match (refused, made) {
-            (None, Ok(_)) => assert!(cut > 0.05, "{m} in {hole} mm: removed {cut}"),
-            (Some(want), Err(e)) => {
-                let e = e.to_string();
-                assert!(e.contains(&format!("this {hole} mm hole")) && e.contains(want), "{m} in {hole} mm: {e}");
-                assert!(cut.abs() < 1e-9, "{m} in {hole} mm: removed {cut}");
+        let warning = made.ok().and_then(|v| v["feature"].as_u64()).and_then(|f| s.model.result(f)).and_then(|r| r.warning.clone());
+        match (refused, warning) {
+            (None, None) => assert!(cut > 0.05, "{m} in {hole} mm: removed {cut}"),
+            (Some(want), Some(w)) => {
+                assert!(w.contains(want) && w.contains(m), "{m} in {hole} mm: {w}");
+                assert!(cut < -0.05, "{m} in {hole} mm: the bore was filled in, removed {cut}");
             }
-            (want, got) => panic!("{m} in {hole} mm: want refused {want:?}, got {:?}", got.map(|_| ())),
+            (want, got) => panic!("{m} in {hole} mm: want narrowed {want:?}, got {got:?}"),
         }
     }
 }
@@ -1290,4 +1292,105 @@ fn a_tapped_hole_given_no_diameter_drills_the_tap_makers_drill() {
     assert_eq!(drilled(json!({"position":[10,10,10],"thread":"M8"})), "6.8 mm");
     assert_eq!(drilled(json!({"position":[25,10,10],"thread":"1/4-20 UNC"})), "5.1054 mm");
     assert_eq!(drilled(json!({"position":[33,10,10],"thread":"M8","diameter":"6.9 mm"})), "6.9 mm");
+}
+
+/// A block with a bore of `dia` cut through it by a sketch circle.
+fn block_with_bore(dia: f64) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 20, "body_name": "Blk"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "H"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": dia}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "H", "through_all": true, "direction": "positive", "operation": "cut"}));
+    s
+}
+
+/// #11609: a 12 mm hole took M14 (the size whose tap drill is 12 mm) and a modelled M12 in it was
+/// refused. Automatic sizing now takes the size with the hole's nominal diameter first; a hole
+/// near no nominal diameter is still matched by tap drill.
+#[test]
+fn a_hole_takes_the_size_of_its_nominal_diameter_first() {
+    for (dia, want) in [(12.0, "M12"), (12.1, "M12"), (10.0, "M10"), (8.0, "M8"), (14.0, "M14"), (10.2, "M12"), (13.0, "M14"), (11.0, "M12")] {
+        let mut s = block_with_bore(dia);
+        let th = run(&mut s, "solid.thread", json!({"face": [dia / 2.0, 0, 10]}));
+        assert_eq!(th["thread"]["designation"], json!(want), "a {dia} mm hole");
+    }
+    // A shaft is still its major diameter.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 30, "body_name": "Sh"}));
+    let th = run(&mut s, "solid.thread", json!({"face": [6, 0, 15]}));
+    assert_eq!(th["thread"]["designation"], json!("M12"));
+}
+
+/// #11609: M12 modelled in a 12 mm hole narrows the bore to the thread's minor diameter and cuts
+/// the thread there, and says so; the cosmetic M12 is the same size on the same bore.
+#[test]
+fn a_modelled_thread_in_a_hole_as_wide_as_it_narrows_the_bore() {
+    for (dia, d, p) in [(12.0, 12.0, 1.75), (14.0, 14.0, 2.0), (12.2, 12.0, 1.75), (13.0, 12.0, 1.75)] {
+        let mut s = block_with_bore(dia);
+        let before = volume(&mut s, "Blk");
+        let made = run(&mut s, "solid.thread", json!({"face": [dia / 2.0, 0, 10], "designation": format!("M{d}"), "modeled": true}));
+        let warning = s.model.result(made["feature"].as_u64().unwrap()).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warning.contains("narrowed the") && warning.contains(&format!("M{d}")), "{warning}");
+        // The bore is now the minor diameter's, so there is material where there was air, but
+        // less than a full sleeve (the groove cut into it).
+        let h = p * 3f64.sqrt() / 2.0;
+        let minor = d - 2.0 * 5.0 * h / 8.0;
+        let sleeve = PI * ((dia / 2.0).powi(2) - (minor / 2.0).powi(2)) * 20.0;
+        let added = volume(&mut s, "Blk") - before;
+        assert!(added > 0.2 * sleeve && added < sleeve, "M{d} in {dia}: added {added}, a full sleeve is {sleeve}");
+    }
+    // Automatic and modelled, and cosmetic, on the 12 mm bore.
+    let mut s = block_with_bore(12.0);
+    let th = run(&mut s, "solid.thread", json!({"face": [6, 0, 10], "designation": "M12"}));
+    assert_eq!(th["thread"]["designation"], json!("M12"));
+    let mut s = block_with_bore(12.0);
+    let made = run(&mut s, "solid.thread", json!({"face": [6, 0, 10], "modeled": true}));
+    assert!(s.model.result(made["feature"].as_u64().unwrap()).and_then(|r| r.warning.clone()).unwrap_or_default().contains("M12"));
+}
+
+/// A hole that already has the wall for the groove is not narrowed, and a size nowhere near the
+/// hole is refused with the size it does take.
+#[test]
+fn a_hole_with_wall_for_the_groove_is_left_as_drilled() {
+    let mut s = block_with_bore(10.2);
+    let made = run(&mut s, "solid.thread", json!({"face": [5.1, 0, 10], "designation": "M12", "modeled": true}));
+    assert!(s.model.result(made["feature"].as_u64().unwrap()).and_then(|r| r.warning.clone()).is_none());
+    let mut s = block_with_bore(20.0);
+    let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "designation": "M12", "modeled": true})).unwrap_err().to_string();
+    assert!(e.contains("does not fit a 20.00 mm hole") && e.contains("takes M20"), "{e}");
+}
+
+/// #11609: a design saved with an automatic thread keeps the size it had (a 12 mm hole stays
+/// M14), while the same thread made now takes M12.
+#[test]
+fn a_saved_automatic_thread_keeps_its_old_size() {
+    let mut s = block_with_bore(12.0);
+    run(&mut s, "solid.thread", json!({"face": [6, 0, 10]}));
+    let designations = |s: &Session| -> Vec<String> { s.model.state().threads.iter().map(|t| t.designation.clone()).collect() };
+    assert_eq!(designations(&s), ["M12"]);
+    // As the release before saved it: the last folded format, none of today's pending changes.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/49");
+    v.as_object_mut().unwrap().remove("format_pending");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    assert_eq!(designations(&reopened), ["M14"]);
+    let saved: Value = serde_json::from_str(&reopened.doc.to_json()).unwrap();
+    let thread = saved["features"].as_array().unwrap().iter().find(|f| f["type"] == json!("thread")).unwrap();
+    assert_eq!(thread["old_auto_size"], json!(true));
+}
+
+/// Editing a saved automatic thread (which keeps its old size) does not change its size.
+#[test]
+fn editing_a_saved_automatic_thread_keeps_its_old_size() {
+    let mut s = block_with_bore(12.0);
+    let made = run(&mut s, "solid.thread", json!({"face": [6, 0, 10]}));
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/49");
+    v.as_object_mut().unwrap().remove("format_pending");
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let designations = |s: &Session| -> Vec<String> { s.model.state().threads.iter().map(|t| t.designation.clone()).collect() };
+    assert_eq!(designations(&s), ["M14"]);
+    run(&mut s, "timeline.redefine", json!({"feature": made["feature"], "command": "solid.thread", "params": {"face": [6, 0, 10], "hand": "left"}}));
+    assert_eq!(designations(&s), ["M14"]);
 }

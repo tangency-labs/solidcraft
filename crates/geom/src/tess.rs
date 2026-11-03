@@ -481,7 +481,9 @@ fn nurbs_derivs(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
         return None;
     }
     let (su, sv) = (span_of(&knots[0], pu, nu, u), span_of(&knots[1], pv, nv, v));
-    let (bu, bv) = (basis_ders(&knots[0], su, pu, u)?, basis_ders(&knots[1], sv, pv, v)?);
+    let (mut bu, mut bv) = ([[0.0f64; W]; 2], [[0.0f64; W]; 2]);
+    basis_ders_into(&knots[0], su, pu, u, &mut bu)?;
+    basis_ders_into(&knots[1], sv, pv, v, &mut bv)?;
     let (mut s, mut s_u, mut s_v) = ([0.0; 4], [0.0; 4], [0.0; 4]);
     for (b, (nv0, nv1)) in bv[0].iter().zip(&bv[1]).take(pv + 1).enumerate() {
         for (a, (nu0, nu1)) in bu[0].iter().zip(&bu[1]).take(pu + 1).enumerate() {
@@ -518,12 +520,12 @@ pub(crate) fn span_of(knots: &[f64], p: usize, n: usize, t: f64) -> usize {
 
 /// The non-zero basis functions of degree `p` on span `span` (NURBS Book A2.2): element `j` is
 /// `N_{span−p+j}`.
-fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[f64; W]> {
+fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64, n: &mut [f64; W]) -> Option<()> {
     if p >= W {
         return None;
     }
     let kn = |i: usize| knots.get(i).copied();
-    let mut n = [0.0f64; W];
+    n.fill(0.0);
     n[0] = 1.0;
     for j in 1..=p {
         let mut saved = 0.0;
@@ -538,7 +540,7 @@ fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[f64; W]> 
         }
         n[j] = saved;
     }
-    Some(n)
+    Some(())
 }
 
 /// Non-zero basis functions of degree `p` on span `span` and their first derivatives
@@ -546,30 +548,41 @@ fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[f64; W]> 
 /// `N_{span−p+j}`, `ders[1][j]` its derivative. One-dimensional tables, as the GPU twin keeps
 /// them, so a high degree costs its own work only.
 pub(crate) fn basis_ders(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[[f64; W]; 2]> {
+    let mut ders = [[0.0f64; W]; 2];
+    basis_ders_into(knots, span, p, t, &mut ders)?;
+    Some(ders)
+}
+
+/// [`basis_ders`] into a table the caller keeps: surface evaluation runs this for every point,
+/// and moving the tables by value took about a quarter of the time of meshing a curved face.
+fn basis_ders_into(knots: &[f64], span: usize, p: usize, t: f64, ders: &mut [[f64; W]; 2]) -> Option<()> {
     if p == 0 || p >= W {
         return None;
     }
     let kn = |i: usize| knots.get(i).copied();
-    let lower = basis_funs(knots, span, p - 1, t)?;
-    let mut ders = [basis_funs(knots, span, p, t)?, [0.0f64; W]];
+    let [values, slopes] = ders;
+    // The degree p − 1 functions first, kept in the derivative row: walked from the top down, so
+    // each slot still holds them when it and the slot above it are read.
+    basis_funs(knots, span, p - 1, t, slopes)?;
+    basis_funs(knots, span, p, t, values)?;
     // N'_{i,p} = p·(N_{i,p−1}/(u_{i+p}−u_i) − N_{i+1,p−1}/(u_{i+p+1}−u_{i+1})), i = span − p + r.
-    for r in 0..=p {
+    for r in (0..=p).rev() {
         let mut d = 0.0;
         if r >= 1 {
             let den = kn(span + r)? - kn((span + r).checked_sub(p)?)?;
             if den != 0.0 {
-                d += lower[r - 1] / den;
+                d += slopes[r - 1] / den;
             }
         }
         if r < p {
             let den = kn(span + r + 1)? - kn((span + r + 1).checked_sub(p)?)?;
             if den != 0.0 {
-                d -= lower[r] / den;
+                d -= slopes[r] / den;
             }
         }
-        ders[1][r] = d * p as f64;
+        slopes[r] = d * p as f64;
     }
-    Some(ders)
+    Some(())
 }
 
 #[cfg(test)]

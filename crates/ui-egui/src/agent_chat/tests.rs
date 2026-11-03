@@ -2013,6 +2013,17 @@ fn the_card_of_a_running_endpoint_changes_the_chats_model() {
     script.report(models_reply("fast"));
     h.step(&json!({"call": "ui.prefs", "params": {"open": "AI"}})).unwrap();
     h.frames(4);
+    // The permission cards put endpoint controls below the fixed page's viewport.
+    for _ in 0..32 {
+        let at = handle_at("prefs:ai_model:api-1").unwrap();
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        if body.contains(at) {
+            break;
+        }
+        h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":if at.y < body.top() {100} else {-100}}));
+        h.frames(30);
+    }
+    assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains(handle_at("prefs:ai_model:api-1").unwrap()));
     h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
     h.frames(3);
     assert!(handle_at("prefs:ai_model:api-1:smart").is_some());

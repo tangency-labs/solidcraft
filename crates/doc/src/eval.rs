@@ -7018,7 +7018,7 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st),
+        FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st, warning),
         FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {
             let t = val(vals, thickness, Kind::Length)?;
             // No face opened (a closed hollow body) picks no body: the one there is, or the named one.
