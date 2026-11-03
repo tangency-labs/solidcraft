@@ -93,9 +93,21 @@ fn sweeps_lofts_and_screws() {
     let tooth = polygon(&[[4.0, 0.0, 0.0], [4.4, 0.0, 0.0], [4.4, 0.0, 0.4], [4.0, 0.0, 0.4]]);
     let b = Brep::screw_sweep(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, 1e-4).unwrap();
     assert_close(solid_volume(&b, "screw"), 0.16 * TAU * 4.2 * 3.0, 1e-4, "screw sweep");
+    let record = b.to_native().unwrap();
+    let flanks = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. })).count();
+    assert_eq!(flanks, 2, "each screw flank must remain one face across the cylinder seams");
     // The tooth moved out 1 mm over its three turns, linearly: A 2 pi (c turns + int offset dt).
     let b = Brep::screw_sweep_radial(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, &[(0.0, 0.0), (3.0, 1.0)], 1e-4).unwrap();
     assert_close(solid_volume(&b, "radial screw"), 0.16 * TAU * (4.2 * 3.0 + 1.5), 1e-4, "radial screw sweep");
+    assert_eq!(b.to_native().unwrap().faces.len(), 6, "a linear radial law needs four continuous walls and two caps");
+    // Two constant intervals around a sloping interval, with a partial last turn: keep the
+    // law's corners as face boundaries, while joining the half-turn pieces within each interval.
+    let law = [(0.0, 0.0), (0.65, 0.0), (1.9, 0.4), (3.2, 0.4)];
+    let b = Brep::screw_sweep_radial(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.2, &law, 1e-4).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let record = b.to_native().unwrap();
+    let splines = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. })).count();
+    assert_eq!(splines, 8, "two flanks across three law intervals and two sloping radial walls");
     assert_eq!(Brep::screw_sweep_radial(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, &[(2.0, 0.0), (1.0, 1.0)], 1e-4).err(), Some(Error::Argument));
 }
 
