@@ -41,6 +41,9 @@ use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, S
 use crate::params::bad;
 use crate::{EngineError, Result, Session};
 
+#[path = "drawing_scene_marks.rs"]
+mod marks;
+
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
 
@@ -144,7 +147,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let (scene, views, objects) = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let (mut scene, views, mut objects) = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    append_marks(&mut scene, &mut objects, marks::groups(s, drawing, &on)?)?;
     Ok(SheetScene { scene, views, objects })
 }
 
@@ -274,6 +278,17 @@ fn assemble<D: Borrow<Drawn>>(
     Ok((scene, states, objects))
 }
 
+/// Add annotations to both the paper scene and the picking/inspection bounds.
+fn append_marks(scene: &mut Scene, objects: &mut Vec<SheetObject>, groups: Vec<Group>) -> Result<()> {
+    for group in &groups {
+        let bounds_mm = group_bounds(group);
+        if !bounds_mm.is_empty() {
+            objects.push(SheetObject { object: group.object, kind: group.kind, bounds_mm, boundary_mm: None });
+        }
+    }
+    marks::append(scene, groups)
+}
+
 /// The box round what `group` draws, along its lines' paths and round its pictures. Text isn't
 /// measured here: nothing on a sheet draws any yet, and its outlines need its font.
 fn group_bounds(group: &Group) -> Aabb2 {
@@ -366,14 +381,16 @@ struct Entry {
 }
 
 /// What a scene is assembled from: the sheet's record, the drawing's projection (its title block's
-/// symbol), the images on the sheet, and each view on it with its entry's serial (0: not drawn yet)
-/// and its centre.
+/// symbol), the images on the sheet, each view on it with its entry's serial (0: not drawn yet)
+/// and its centre, and the saved centre annotations.
 #[derive(PartialEq)]
 struct Inputs {
     sheet: Sheet,
     projection: Projection,
     images: Vec<Group>,
     views: Vec<(u64, u64, Vec2)>,
+    marks: Vec<Arc<solidcraft_doc::drawing::centre_mark::CentreMark>>,
+    lines: Vec<Arc<solidcraft_doc::drawing::centre_line::CentreLine>>,
 }
 
 /// The last answer of [`extract`], for the sheet, drawing, world state and serial it was for: the
@@ -396,9 +413,12 @@ impl Cache {
     /// What sheet `record` of `d`, holding the views `on` ([`views_on`]), is assembled from now.
     fn inputs(&self, d: &Drawing, record: &Sheet, on: &[(u64, ResolvedView, Vec2)]) -> Inputs {
         let serial = |id: &u64| self.views.get(id).map_or(0, |e| e.serial);
+        let ids: BTreeSet<_> = on.iter().map(|(id, _, _)| *id).collect();
+        let marks = d.centre_marks.iter().filter(|mark| ids.contains(&mark.view)).cloned().collect();
+        let lines = d.centre_lines.iter().filter(|line| ids.contains(&line.view)).cloned().collect();
         let images = crate::drawing_pictures::groups(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, views }
+        Inputs { sheet: record.clone(), projection: d.projection, images, views, marks, lines }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -450,10 +470,9 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     forget_closed(s);
     let d = s.drawing(CMD)?.clone();
     let state = s.world_state();
-    let cache = &mut s.drawing_scenes;
-    if let Some(last) = &cache.last
+    if let Some(last) = &s.drawing_scenes.last
         && last.sheet == sheet
-        && last.serial == cache.serial
+        && last.serial == s.drawing_scenes.serial
         && Arc::ptr_eq(&last.drawing, &d)
         && Arc::ptr_eq(&last.state, &state)
     {
@@ -461,18 +480,23 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     }
     let record = sheet_of(&d, sheet)?;
     let on = views_on(&d, sheet)?;
+    let mark_groups = marks::groups(s, &d, &on)?;
+    let cache = &mut s.drawing_scenes;
     cache.drawing = Some(d.id);
     cache.sheet = Some(sheet);
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs => (last.answer.scene, last.answer.views, last.answer.objects, last.answer.generation),
+        Some(last) if last.inputs == inputs && ((inputs.marks.is_empty() && inputs.lines.is_empty()) || Arc::ptr_eq(&last.state, &state)) => {
+            (last.answer.scene, last.answer.views, last.answer.objects, last.answer.generation)
+        }
         _ => {
             // Views no longer in the drawing are forgotten: each holds a world state.
             let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
             cache.views.retain(|id, _| kept.contains(id));
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let (scene, views, objects) = assemble(record, d.projection, &inputs.images, drawn)?;
+            let (mut scene, views, mut objects) = assemble(record, d.projection, &inputs.images, drawn)?;
+            append_marks(&mut scene, &mut objects, mark_groups)?;
             (Arc::new(scene), views, objects.into(), GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };

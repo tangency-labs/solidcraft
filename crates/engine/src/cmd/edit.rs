@@ -1294,7 +1294,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             && !s.selectable_in_drawing(*drawing, *object)
         {
             let object = solidcraft_doc::ids::encode(*object);
-            return Err(bad("select.set", format!("the drawing open has no view, dimension or balloon {object}")));
+            return Err(bad("select.set", format!("the drawing open has no selectable object {object}")));
         }
         sel.push(one);
     }

@@ -25,6 +25,8 @@
 //!   ([`dimension`]).
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
 //! - **Images** on its sheets, each file kept once however many places it sits ([`image`]).
+//! - **Centre marks and lines** on views, attached to named model references ([`centre_mark`],
+//!   [`centre_line`]).
 //! - **Revisions**: one revision record for the whole drawing ([`RevisionRecord`]), its rows in the
 //!   order they were added, the newest last.
 //!
@@ -64,6 +66,8 @@ use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
 pub mod by_id;
+pub mod centre_line;
+pub mod centre_mark;
 pub mod dimension;
 pub mod fields;
 pub mod image;
@@ -72,6 +76,8 @@ pub mod view;
 
 use balloon::Balloon;
 use by_id::ById;
+use centre_line::CentreLine;
+use centre_mark::CentreMark;
 use dimension::Dimension;
 use image::{ImageFile, SheetImage};
 use view::View;
@@ -141,6 +147,12 @@ pub struct Drawing {
     /// Where they sit on the sheets.
     #[serde(default, skip_serializing_if = "ById::is_empty")]
     pub sheet_images: ById<SheetImage>,
+    /// Manually placed centre marks, by id, each attached to a view's model edge.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_marks: Vec<Arc<CentreMark>>,
+    /// Manual centre lines, by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub centre_lines: Vec<Arc<CentreLine>>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -256,12 +268,21 @@ pub struct OnSheet {
     pub balloons: Vec<u64>,
     /// The images placed on it.
     pub images: Vec<u64>,
+    /// The manual centre marks in its views.
+    pub centre_marks: Vec<u64>,
+    /// The manual centre lines in its views.
+    pub centre_lines: Vec<u64>,
 }
 
 impl OnSheet {
     /// Nothing is on the sheet.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty() && self.images.is_empty()
+        self.views.is_empty()
+            && self.dimensions.is_empty()
+            && self.balloons.is_empty()
+            && self.centre_marks.is_empty()
+            && self.centre_lines.is_empty()
+            && self.images.is_empty()
     }
 }
 
@@ -312,6 +333,8 @@ impl Drawing {
             balloons: ById::default(),
             images: ById::default(),
             sheet_images: ById::default(),
+            centre_marks: Vec::new(),
+            centre_lines: Vec::new(),
             revisions: Arc::default(),
         };
         drawing.validate()?;
@@ -341,6 +364,10 @@ impl Drawing {
         d.balloons.put_in_order();
         d.images.put_in_order();
         d.sheet_images.put_in_order();
+        let centre_marks = std::mem::take(&mut d.centre_marks);
+        d.add_centre_marks(centre_marks);
+        let centre_lines = std::mem::take(&mut d.centre_lines);
+        d.add_centre_lines(centre_lines);
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
@@ -375,14 +402,17 @@ impl Drawing {
         }
     }
 
-    /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.
+    /// Whether `id` names an object a sheet shows.
     pub fn has_object(&self, id: u64) -> bool {
-        self.view(id).is_some() || self.dimension(id).is_some() || self.balloons.by_id(id).is_some()
+        self.view(id).is_some()
+            || self.dimension(id).is_some()
+            || self.balloons.by_id(id).is_some()
+            || self.centre_mark(id).is_some()
+            || self.centre_line(id).is_some()
     }
 
-    /// What is on sheet `id`: its views and the dimensions and balloons in them, and the images placed on it.
-    /// Each later kind of record on a sheet adds its own here, and goes with the sheet
-    /// ([`Drawing::remove_sheet`]).
+    /// What is on sheet `id`: its views and their annotations, and its images. Each later kind of record on a
+    /// sheet adds its own here, and goes with the sheet ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
         // The views are listed by id, so the sheet's are too, and so are its images.
         let mut on = self.with_contents(self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect());
@@ -390,12 +420,13 @@ impl Drawing {
         on
     }
 
-    /// `views`, listed by id, with the dimensions and balloons in them. An image sits on a sheet, never in a
-    /// view, so there are none.
+    /// `views`, listed by id, with their annotations. Images sit on a sheet, so there are none.
     pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
-        OnSheet { views, dimensions, balloons, images: Vec::new() }
+        let centre_marks = self.centre_marks.iter().filter(|m| views.binary_search(&m.view).is_ok()).map(|m| m.id).collect();
+        let centre_lines = self.centre_lines.iter().filter(|line| views.binary_search(&line.view).is_ok()).map(|line| line.id).collect();
+        OnSheet { views, dimensions, balloons, centre_marks, centre_lines, images: Vec::new() }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -415,6 +446,8 @@ impl Drawing {
         self.views.retain(|v| objects.views.binary_search(&v.id).is_err());
         self.dimensions.retain(|d| objects.dimensions.binary_search(&d.id).is_err());
         self.balloons.retain(|b| objects.balloons.binary_search(&b.id).is_err());
+        self.centre_marks.retain(|mark| objects.centre_marks.binary_search(&mark.id).is_err());
+        self.centre_lines.retain(|line| objects.centre_lines.binary_search(&line.id).is_err());
         self.sheet_images.retain(|i| objects.images.binary_search(&i.id).is_err());
         self.drop_unused_images();
     }
@@ -430,6 +463,8 @@ impl Drawing {
             .chain(self.balloons.iter().map(|b| b.id))
             .chain(self.images.iter().map(|i| i.id))
             .chain(self.sheet_images.iter().map(|i| i.id))
+            .chain(self.centre_marks.iter().map(|m| m.id))
+            .chain(self.centre_lines.iter().map(|line| line.id))
             .chain(self.revisions.ids())
     }
 
@@ -462,6 +497,8 @@ impl Drawing {
         self.check_views()?;
         self.check_dimensions()?;
         self.check_balloons()?;
+        self.check_centre_marks()?;
+        self.check_centre_lines()?;
         self.check_images()
     }
 

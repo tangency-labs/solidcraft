@@ -22,8 +22,8 @@ pub struct SheetSceneParams {
 
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
-/// (object and source: the placement), then each view's strokes (object: the view), then the title
-/// block's (object: the sheet).
+/// (object and source: the placement), each view (object: the view), the title block (object: the
+/// sheet), then manual centre marks and lines by their own ids.
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -33,7 +33,18 @@ impl JsonSchema for SheetPaperScene {
         "SheetPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::TitleBlock], true)
+        paper_scene_schema(
+            generator,
+            &[
+                ObjectKind::DrawingBorder,
+                ObjectKind::SheetImage,
+                ObjectKind::View,
+                ObjectKind::TitleBlock,
+                ObjectKind::CentreMark,
+                ObjectKind::CentreLine,
+            ],
+            true,
+        )
     }
 }
 
