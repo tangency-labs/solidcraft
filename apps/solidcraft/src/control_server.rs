@@ -1223,10 +1223,11 @@ mod tests {
         let _first = TcpStream::connect(addr).unwrap();
         let mut late = TcpStream::connect(addr).unwrap();
         late.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        // A long one, as a batch is: the app reads all of it before it closes.
+        // A long one, as a batch is: the app reads all of it before it closes. Sent in one write, as
+        // the MCP server sends: written a token at a time it takes longer than the app waits.
         let steps = vec![json!({"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}); 4000];
         let request = json!({"id": 1, "method": "engine.batch", "params": {"commands": steps}, "token": "0123456789abcdef0123456789abcdef"});
-        writeln!(late, "{request}").unwrap();
+        late.write_all(format!("{request}\n").as_bytes()).unwrap();
         // Arrived before the app is done with the connection, and read by nobody else.
         std::thread::sleep(Duration::from_millis(200));
         let mut line = String::new();
