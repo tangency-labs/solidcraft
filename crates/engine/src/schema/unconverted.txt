@@ -308,7 +308,6 @@ solid.coil
 solid.combine
 solid.draft
 solid.emboss
-solid.fillet
 solid.hole
 solid.loft
 solid.mirror
