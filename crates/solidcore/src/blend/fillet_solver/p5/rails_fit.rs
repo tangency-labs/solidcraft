@@ -10,7 +10,11 @@
 //! when it both leaves and returns on or beyond the cross section at the same end of the
 //! filleted edge (#1580; a run past one end and back past the other, round the far side
 //! of a closed rail, is judged, #2175); `518566f` tries [`leaves_past_an_end`] only for
-//! the first and last runs and refuses such a round. The fork's later cliff-overflow construction (`SmFilletCliffOverflow.cpp`,
+//! the first and last runs and refuses such a round. A first or last run is also past an
+//! end where the filleted edge is closed and the run lies beyond the plane on which the
+//! corner at its vertex cuts the rail ([`past_closed_corner`], #2498): the fork takes the
+//! top rail of a teardrop's rim, which crosses the rim itself just past the tip, for a
+//! cliff overflow. The fork's later cliff-overflow construction (`SmFilletCliffOverflow.cpp`,
 //! which builds a convex blend over a cliff and subtracts what it removes) is not
 //! ported, so every blend that leaves its face between its ends is refused, as in
 //! `fc43974`. With the opt-in `Kernel::fixes.fillet_cliff_overflow` (WR-631, the fork's
@@ -226,6 +230,59 @@ fn leaves_past_an_end(
     Ok(beyond_end_section(solver, k, target, rail, rail_param)?.is_some())
 }
 
+/// Whether a first or last run of a rail off its face (`entering`: the first, which comes
+/// onto the face at `rail_param`; else the last, which leaves it there) lies past the
+/// corner where a closed filleted edge meets itself (not the fork's, tangency-labs/solidcore#2498).
+///
+/// Both ends of a closed edge are its one vertex V, and the corner there cuts each end's
+/// blend where it meets the other's, on the plane through V bisecting the edge's end
+/// tangents T0 (at its start) and T1 (at its end), of normal T0 + T1: the start's blend on
+/// its positive side, the end's on its negative side (for a G1 closure, the cross section
+/// at V). A rail runs from beyond that plane into its own blend's side, so a run lies past
+/// the corner when the rail, where it comes onto the face, is still to cross the plane
+/// ahead of it (or, where it leaves, has crossed it behind it). A rail of one end's blend
+/// that reaches the other end's stretch of the edge before the plane (a convex corner at
+/// V of interior angle a, the rail meeting the edge's other stretch r / sin a from V) leaves
+/// the face across the filleted edge itself, which `LeavesPastAnEnd` takes for a rail
+/// beside the edge: its face's loop has no side edge at V, and the edge point nearest
+/// where it leaves is that point of the edge, not an end.
+fn past_closed_corner(
+    solver: &FilletSolver,
+    k: &Kernel,
+    target: &Brep,
+    rail: &Curve,
+    rail_param: f64,
+    entering: bool,
+) -> Result<bool> {
+    let fil_eu = solver
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    if edge::start_vertex(target, fil_edge)? != edge::end_vertex(target, fil_edge)? {
+        return Ok(false);
+    }
+    let edge_curve = edge::curve(target, fil_edge)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let ivl = edge::interval(target, fil_edge)?;
+    let at_start = edge_curve.evaluate(k, ivl.min(), 1, false, true)?;
+    let at_end = edge_curve.evaluate(k, ivl.max(), 1, true, true)?;
+    let (Some(&vertex), Some(&t0), Some(&t1)) = (at_start.first(), at_start.get(1), at_end.get(1))
+    else {
+        return Err(SolidError::null_pointer(OP));
+    };
+    let normal = t0.unitize()? + t1.unitize()?;
+    let on_rail = rail.evaluate(k, rail_param, 1, !entering, true)?;
+    let (Some(&point), Some(&heading)) = (on_rail.first(), on_rail.get(1)) else {
+        return Err(SolidError::null_pointer(OP));
+    };
+    let side = (point - vertex).dot(normal);
+    let ahead = heading.dot(normal);
+    Ok(if entering {
+        side * ahead < 0.0
+    } else {
+        side * ahead > 0.0
+    })
+}
+
 /// The second test of `SmFilletSolver::LeavesPastAnEnd`: the end of the filleted edge (0
 /// its interval's start, 1 its end) on or beyond whose cross section the rail's point at
 /// `rail_param` lies (the edge point nearest it is that end, within the solver's 3D
@@ -396,7 +453,16 @@ impl FilletSolver {
                         leaves_past_an_end(solver.solver(), k, target, face, &curve, d, point)
                     };
                     if j == 0 || j_last + 1 == n {
-                        if past_end(leave, d_leave)? {
+                        if past_end(leave, d_leave)?
+                            || past_closed_corner(
+                                solver.solver(),
+                                k,
+                                target,
+                                &curve,
+                                d_leave,
+                                j == 0,
+                            )?
+                        {
                             continue;
                         }
                     } else if let Some(end) =

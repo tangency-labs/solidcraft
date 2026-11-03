@@ -358,3 +358,141 @@ fn a_tee_s_closed_saddle_is_a_closed_join() {
         out[0].0
     );
 }
+
+/// The teardrop's control points: one closed cubic B-spline from its tip (0, 0) round
+/// through (15.5, 0) and back, with knots 0, 1/3, 2/3, 1 (ends of multiplicity 4). Its two
+/// ends leave the tip along (1, -1) and (1, 1), at a right angle.
+const TEARDROP: [[f64; 2]; 6] = [
+    [0.0, 0.0],
+    [8.0, -8.0],
+    [16.0, -4.0],
+    [16.0, 4.0],
+    [8.0, 8.0],
+    [0.0, 0.0],
+];
+const TEARDROP_KNOTS: [f64; 10] = [0.0, 0.0, 0.0, 0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 1.0, 1.0, 1.0];
+
+/// The teardrop profile swept 10 up z with its caps: three faces, and each rim one closed
+/// edge meeting itself at a right angle at the tip, where the side face meets itself along
+/// its seam.
+fn teardrop_prism(k: &mut Kernel) -> Brep {
+    use solidcore::curve::curve::Curve;
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let control = TEARDROP.map(|[x, y]| Vec3::new(x, y, 0.0));
+    let profile = Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 3,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[4, 1, 1, 4],
+            knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    );
+    create_linear_sweep(k, &[Some(&profile)], Vec3::Z, 10.0, true).unwrap()
+}
+
+/// The teardrop's point and first derivative at `u`, by Cox-de Boor on its knots (written
+/// out here, so that the profile's area and length do not come from the kernel).
+fn teardrop_point(u: f64) -> ([f64; 2], [f64; 2]) {
+    let t = TEARDROP_KNOTS;
+    let span = (3..6).rev().find(|&i| u >= t[i]).unwrap_or(3);
+    // n[p][j]: the degree-p basis function N_{span-p+j, p} at u
+    let mut n = [[0.0; 4]; 4];
+    n[0][0] = 1.0;
+    for p in 1..=3 {
+        for j in 0..=p {
+            let i = span + j - p;
+            let mut v = 0.0;
+            if j >= 1 && t[i + p] > t[i] {
+                v += (u - t[i]) / (t[i + p] - t[i]) * n[p - 1][j - 1];
+            }
+            if j < p && t[i + p + 1] > t[i + 1] {
+                v += (t[i + p + 1] - u) / (t[i + p + 1] - t[i + 1]) * n[p - 1][j];
+            }
+            n[p][j] = v;
+        }
+    }
+    let (mut c, mut d) = ([0.0; 2], [0.0; 2]);
+    for (j, w) in n[3].iter().enumerate() {
+        let pole = TEARDROP[span + j - 3];
+        c[0] += w * pole[0];
+        c[1] += w * pole[1];
+    }
+    // C' = sum of N_{i+1, 2} 3 (P_{i+1} - P_i) / (t_{i+4} - t_{i+1})
+    for (j, w) in n[2].iter().take(3).enumerate() {
+        let i = span + j - 3;
+        let s = 3.0 / (t[i + 4] - t[i + 1]);
+        d[0] += w * s * (TEARDROP[i + 1][0] - TEARDROP[i][0]);
+        d[1] += w * s * (TEARDROP[i + 1][1] - TEARDROP[i][1]);
+    }
+    (c, d)
+}
+
+/// The teardrop's area (Green's theorem) and perimeter, by 5-point Gauss-Legendre on 192
+/// pieces (exact for the area: a cubic B-spline is a polynomial on each piece).
+fn teardrop_area_and_length() -> (f64, f64) {
+    let g = [
+        (0.0, 128.0 / 225.0),
+        (-0.538_469_310_105_683_1, 0.478_628_670_499_366_5),
+        (0.538_469_310_105_683_1, 0.478_628_670_499_366_5),
+        (-0.906_179_845_938_664, 0.236_926_885_056_189_1),
+        (0.906_179_845_938_664, 0.236_926_885_056_189_1),
+    ];
+    let pieces = 192;
+    let (mut area, mut length) = (0.0, 0.0);
+    for p in 0..pieces {
+        let a = f64::from(p) / f64::from(pieces);
+        let b = f64::from(p + 1) / f64::from(pieces);
+        for (x, w) in g {
+            let (c, d) = teardrop_point(0.5 * (a + b) + 0.5 * (b - a) * x);
+            let w = w * 0.5 * (b - a);
+            area += w * 0.5 * (c[0] * d[1] - c[1] * d[0]);
+            length += w * d[0].hypot(d[1]);
+        }
+    }
+    (area, length)
+}
+
+/// #2498: the teardrop prism's top rim, one closed convex edge meeting itself at a right
+/// angle at the tip, rounded r 0.5 and r 1 with every generic-blend flag on. The round runs
+/// round the rim and meets itself on the tip's bisecting plane, a mitre. So its horizontal
+/// section at depth t below z = 10 - r is the profile's inner parallel set at
+/// d = r - sqrt(r^2 - t^2) (the profile's least radius of curvature is 4.69, far above r),
+/// whose area is A - L d + d^2 ((pi + a) / 2 + cot(a / 2)) for a convex profile of area A
+/// and perimeter L with one corner of interior angle a (here pi / 2). Integrated over t, the
+/// round takes L r^2 (1 - pi/4) - (3 pi / 4 + 1) r^3 (5/3 - pi/2) off the prism's 10 A. The
+/// body has the prism's three faces and the round's two halves, which meet each other at
+/// the mitre and at the rim's far point. The volume lands 7.7e-7 (r 0.5) and 1.9e-7 (r 1)
+/// of itself under the closed form; a corner built other than as the mitre (a ball or a
+/// setback) moves it by some 0.3 r^3, 3.3e-5 of it at r 0.5. The top rails' runs past the
+/// tip, which cross the rim near it, were taken for a cliff overflow, and the trim at the
+/// creases then failed with "edge without primary edge use".
+#[test]
+fn a_closed_convex_rim_meeting_itself_at_an_angle_is_rounded() {
+    let (area, length) = teardrop_area_and_length();
+    let rim = [[15.5, 0.0, 10.0]];
+    for r in [0.5, 1.0] {
+        let want = 10.0 * area - length * r * r * (1.0 - PI / 4.0)
+            + (3.0 * PI / 4.0 + 1.0) * r.powi(3) * (5.0 / 3.0 - PI / 2.0);
+        let mut k = all_fixes(true);
+        let mut b = teardrop_prism(&mut k);
+        round(&mut k, &mut b, &rim, r);
+        let v = volume(&k, &mut b);
+        eprintln!(
+            "r {r}: volume {v:.15} want {want:.15} ({:.3e}), {} faces",
+            (v - want) / want,
+            faces(&b)
+        );
+        clean(&mut k, &mut b);
+        assert_eq!(faces(&b), 5);
+        assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+    }
+}
