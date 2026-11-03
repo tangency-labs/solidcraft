@@ -1,5 +1,6 @@
 //! Shared preference compositions and explanatory figures. Figures are cheap painter content,
 //! never additional application viewports; every colour and control metric comes from tokens.
+pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
 use crate::{
     scenario,

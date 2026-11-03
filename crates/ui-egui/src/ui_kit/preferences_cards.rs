@@ -118,7 +118,8 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     let width = dimension(width);
     let enabled = card.enabled && ui.is_enabled();
     let (rect, response) = ui.allocate_exact_size(vec2(width, card_height(&t, width, card)), if enabled { Sense::click() } else { Sense::hover() });
-    // Standalone cards and tiles are settings; compound rows own their search index.
+    // Labelled compound rows own their search index (settings_picture_choices, for example).
+    // Standalone cards and tiles are independently searchable settings.
     if super::layout::label(ui).is_empty() {
         crate::prefs_search::remember(ui, card.label, rect);
         crate::prefs_search::follow(ui, card.label, rect);
