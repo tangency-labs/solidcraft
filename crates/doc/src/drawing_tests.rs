@@ -254,6 +254,23 @@ fn the_language_is_a_bcp_47_tag_of_2_to_35_characters() {
     }
 }
 
+/// A drawing names its font by family: a file is refused when the drawing is read, as it is when a
+/// command sets it.
+#[test]
+fn a_font_file_in_a_drawing_is_refused_when_read() {
+    let base = file(&bare());
+    let why = |font: &str| {
+        let mut v = base.clone();
+        v["font"] = json!(font);
+        refusal(&v)
+    };
+    assert_eq!(why("IBM Plex Mono"), "read");
+    for path in ["C:/Fonts/arial.ttf", "/usr/share/fonts/a", "Futura.otf"] {
+        let e = why(path);
+        assert!(e.contains("the drawing's font") && e.contains("drawings name fonts by family"), "{path}: {e}");
+    }
+}
+
 /// A fixed unit is a length unit of the expression unit table, written as the table writes it.
 #[test]
 fn a_fixed_unit_is_a_length_unit_of_the_expression_table() {
