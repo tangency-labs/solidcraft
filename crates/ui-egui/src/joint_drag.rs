@@ -369,6 +369,30 @@ mod tests {
         assert!(h.app.viewport.layers.is_none() && crate::viewport::layers::frame(&mut h.app).is_empty(), "the release draws the design whole");
     }
 
+    /// #6325: a frame that moves one more occurrence, one placing no bodies, splits the drag again
+    /// into the same groups: their layers still bring a scene, not empty slots under a key of 0.
+    #[test]
+    fn a_split_again_into_the_same_groups_keeps_its_layers_filled() {
+        let (mut h, _, a, b) = hinged_arm();
+        run(&mut h, "component.create", json!({"name": "Tag"}));
+        run(&mut h, "component.activate", json!({"component": "root"}));
+        let doc = &h.app.session.doc;
+        let tag = doc.find_component("Tag").and_then(|c| doc.occurrence_of(c)).map(|o| (o.id, o.transform)).expect("the empty part placed");
+        h.app.viewport.gpu =
+            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.frames(2);
+        press_and_move(&mut h, a, b);
+        h.frames(1);
+        let filled =
+            |h: &mut Harness| crate::viewport::layers::frame(&mut h.app).first().map(|l| (l.key != 0, l.slot.lock().is_ok_and(|s| s.is_some())));
+        assert_eq!(filled(&mut h), Some((true, true)), "the arm's layer brings its scene");
+        let (id, mut moved) = tag;
+        moved[3][0] += 1.0;
+        h.app.session.drag_preview.as_mut().expect("a frame").moves.insert(id, moved);
+        h.frames(1);
+        assert_eq!(filled(&mut h), Some((true, true)), "split again, the arm's layer still brings its scene");
+    }
+
     /// With the undo history full, a drag still adds one step: it drops the oldest once, not one
     /// per frame.
     #[test]

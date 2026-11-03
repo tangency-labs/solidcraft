@@ -65,6 +65,9 @@ pub(crate) struct DragLayers {
     stale: bool,
     /// Names the split: the scenes built for it are the same while it stays.
     split: u64,
+    /// Counts the splits: each brings new groups, their scenes still to build, even into the same
+    /// `layer_of`.
+    splits: u64,
     /// The box round the still shown bodies.
     still_bounds: Aabb3,
     /// The still bodies' boxes, for the ground shadow.
@@ -161,6 +164,7 @@ impl DragLayers {
             layer_of,
             stale: false,
             split: 0,
+            splits: 0,
             still_bounds: Aabb3::EMPTY,
             still_boxes: Vec::new(),
             shadow: None,
@@ -227,9 +231,11 @@ impl DragLayers {
         let s = &app.session;
         self.stale = self.world.sketches.iter().any(|sk| solidcraft_engine::view::sketch_shown(s, sk.feature) && moves_with(sk.feature))
             || self.world.construct.iter().any(|c| s.construction_visible(&c.name) && moves_with(c.feature));
+        self.splits = self.splits.wrapping_add(1);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (Arc::as_ptr(&self.world) as usize).hash(&mut h);
         self.layer_of.hash(&mut h);
+        self.splits.hash(&mut h);
         self.split = h.finish();
         self.groups = groups;
     }
