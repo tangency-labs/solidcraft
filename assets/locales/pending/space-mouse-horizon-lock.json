@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "ui.3d_mouse_horizon_lock": "إبقاء الأفق مستويًا بماوس ثلاثي الأبعاد",
+    "ui.3d_mouse_horizon_lock_tip": "يدور المنظر حول المحور العمودي للعالم ولا يميل أبدًا، ويُعاد المنظر المائل إلى الاستواء تدريجيًا."
+  },
+  "de": {
+    "ui.3d_mouse_horizon_lock": "Horizont mit der 3D-Maus waagerecht halten",
+    "ui.3d_mouse_horizon_lock_tip": "Die Ansicht dreht sich um die senkrechte Achse der Welt und kippt nie zur Seite; eine geneigte Ansicht wird sanft aufgerichtet."
+  },
+  "en": {
+    "ui.3d_mouse_horizon_lock": "Keep the horizon level with the 3D mouse",
+    "ui.3d_mouse_horizon_lock_tip": "The view turns about the world's up axis and never rolls; a tilted view is eased level. Off: the cap's twist rolls the view."
+  },
+  "he": {
+    "ui.3d_mouse_horizon_lock": "שמירת האופק ישר עם עכבר תלת־ממד",
+    "ui.3d_mouse_horizon_lock_tip": "התצוגה מסתובבת סביב הציר האנכי של העולם ואינה מתגלגלת; תצוגה מוטה מיושרת בהדרגה."
+  },
+  "ja": {
+    "ui.3d_mouse_horizon_lock": "3Dマウスで水平線を保つ",
+    "ui.3d_mouse_horizon_lock_tip": "ビューは世界の上方向の軸まわりに回り、傾きません。傾いたビューはゆっくり水平に戻ります。"
+  },
+  "ko": {
+    "ui.3d_mouse_horizon_lock": "3D 마우스로 수평선 유지",
+    "ui.3d_mouse_horizon_lock_tip": "뷰는 세계의 위쪽 축을 중심으로 회전하며 기울어지지 않습니다. 기울어진 뷰는 서서히 수평으로 돌아옵니다."
+  },
+  "vi": {
+    "ui.3d_mouse_horizon_lock": "Giữ đường chân trời thẳng bằng chuột 3D",
+    "ui.3d_mouse_horizon_lock_tip": "Khung nhìn xoay quanh trục thẳng đứng của thế giới và không bao giờ nghiêng; khung nhìn đang nghiêng được từ từ đưa về thẳng."
+  },
+  "zh": {
+    "ui.3d_mouse_horizon_lock": "用 3D 鼠标保持地平线水平",
+    "ui.3d_mouse_horizon_lock_tip": "视图绕世界的向上轴旋转,不会滚转;倾斜的视图会逐渐回正。"
+  }
+}
