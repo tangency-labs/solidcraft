@@ -2262,12 +2262,23 @@ mod tests {
             assert_eq!(call("ui.render", json!({"path": at(&root, "a.png"), "width": 32, "height": 32}), true)["ok"], true);
         }
         assert_eq!(call("ui.screenshot", json!({"path": at(&root, "b.png")}), true)["ok"], true);
+        // Settings profiles are read and written by the app, not the engine, and stay inside too (#11362).
+        let profile = |id: &str, params: Value| json!({"command": id, "params": params});
+        let poc = json!({"format": "solidcraft-profile/1", "name": "scope-poc"});
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"profile": poc})), true)["ok"], true);
+        let inside = json!({"name": "scope-poc", "path": at(&root, "p.json")});
+        assert_eq!(call("engine.execute", profile("settings.profile.export", inside), true)["ok"], true);
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"path": at(&root, "p.json")})), true)["ok"], true);
+        std::fs::write(at(&base, "p.json"), poc.to_string()).unwrap();
         for (method, params) in [
             ("engine.execute", export(at(&out, "a.step"))),
             ("engine.execute", export(at(&root, "../out/a.step"))),
             ("engine.script", json!({"commands": [{"command": "file.export", "params": {"path": at(&out, "a.step")}}]})),
             ("ui.render", json!({"path": at(&out, "a.png"), "width": 32, "height": 32})),
             ("ui.screenshot", json!({"path": at(&out, "b.png")})),
+            ("engine.execute", profile("settings.profile.export", json!({"name": "scope-poc", "path": at(&out, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&base, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&out, "missing.json")}))),
         ] {
             let v = call(method, params, true);
             assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{method}: {v}");
