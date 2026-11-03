@@ -1,0 +1,28 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#10615"
+ ],
+ "what": "a pipe of diameter 8 along a 3D sketch line drawn from (0,10,5) to (100,10,9) and then held on the XY plane at both ends by On Plane",
+ "source": "analytic",
+ "method": "On Plane holds each end at z = 0; the 3D solve moves each point as little as it can, straight down: the line runs (0,10,0) to (100,10,0), 100 long. The pipe is a cylinder r = 4, L = 100: V = pi r^2 L, faces = side + 2 caps, centre (50,10,0), box (0,6,-4) to (100,14,4).",
+ "body_count": 1,
+ "volume_mm3": 5026.548245743669,
+ "faces": 3,
+ "center_of_mass": [
+  50.0,
+  10.0,
+  0.0
+ ],
+ "bbox": {
+  "min": [
+   0.0,
+   6.0,
+   -4.0
+  ],
+  "max": [
+   100.0,
+   14.0,
+   4.0
+  ]
+ }
+}
