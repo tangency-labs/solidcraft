@@ -10,6 +10,11 @@ use solidcraft_doc::{FeatureKind, FlangeEdge};
 use solidcraft_geom::{Aabb2, Ring, Vec2, Vec3};
 
 use super::CommandSpec;
+use crate::schema::features::FeatureResult;
+use crate::schema::sheet::BeadParams;
+use crate::schema::{TypedContract, output_schema_for};
+
+const BEAD_CONTRACT: TypedContract<BeadParams> = TypedContract::new();
 use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::{EngineError, Result, Session};
@@ -37,6 +42,14 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sheet.perforate", "Perforate", perforate).at("SHEET METAL", "CREATE").icon("perforate").params(
         "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs and bends; default: the diameter); pattern?: staggered (60°, default) | square; body? - a perforation field over the whole flat sheet: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
+    ),
+    CommandSpec::new("sheet.bead", "Bead", crate::checked!("sheet.bead", bead)).icon("rib").contract(&BEAD_CONTRACT).output(output_schema_for::<FeatureResult>).params(
+        "sketch? + curves: straight sketch lines on a face of a planar panel of a sheet made from surfaces (Convert or Thicken), one bead along each \
+         (its ends where the end ramps meet the face); depth, width: expr (on the side it stands out of, width between the flanks' virtual sharps); \
+         angle?: expr (flanks, default 45 deg) | crown_width?: expr; base_radius?, crown_radius?: expr (inner, default: the rule's bend radius); \
+         end_length?: expr (each end's ramp, default 3 x depth); margin?: expr (warns nearer than this to edges, cut-outs, bends and beads; \
+         default 3 x thickness); shape?: trapezoid; flip?: bool (out of the other face); body? - formed beads (stiffening ribs) that keep the \
+         sheet's thickness: in the folded solid, listed in the flat pattern (beads) and drawn in the DXF (FORM_UP / FORM_DOWN); the flat blank stays flat",
     ),
     CommandSpec::new("sheet.hem", "Hem", hem)
         .at("SHEET METAL", "CREATE")
@@ -94,7 +107,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
-             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
+             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth), PERFORATION, and FORM_UP and FORM_DOWN (a bead's dashed \
+             centreline and footprint, its note `BEAD UP D2 W10` on BEND_NOTES); inner contours come before the outline",
         ),
     CommandSpec::new("sheet.export_bend_table", "Export Bend Table", export_bend_table).icon("bendtable")
         .noundo()
@@ -464,6 +478,61 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(r)
 }
 
+/// `sheet.bead`: formed beads along straight sketch lines on a sheet made from surfaces.
+fn bead(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.bead";
+    let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+    let curves = string_list(p, "curves");
+    if curves.is_empty() || curves.len() > solidcraft_doc::MAX_BEADS {
+        return Err(bad(cmd, format!("`curves` must list the beads' centrelines (1…{})", solidcraft_doc::MAX_BEADS)));
+    }
+    let shape = str_(p, "shape").map(str::to_string);
+    if !matches!(shape.as_deref(), None | Some("trapezoid")) {
+        return Err(bad(cmd, "`shape` is \"trapezoid\" (the only cross-section so far)"));
+    }
+    let depth = req_expr(cmd, p, "depth")?;
+    check_expr(s, &depth, Kind::Length, cmd, "depth")?;
+    let width = req_expr(cmd, p, "width")?;
+    check_expr(s, &width, Kind::Length, cmd, "width")?;
+    let angle = expr(p, "angle");
+    if let Some(e) = &angle {
+        check_expr(s, e, Kind::Angle, cmd, "angle")?;
+    }
+    let mut lengths = Vec::new();
+    for key in ["crown_width", "base_radius", "crown_radius", "end_length", "margin"] {
+        let e = expr(p, key);
+        if let Some(x) = &e {
+            check_expr(s, x, Kind::Length, cmd, key)?;
+        }
+        lengths.push(e);
+    }
+    if angle.is_some() && lengths.first().is_some_and(Option::is_some) {
+        return Err(bad(cmd, "give the flanks' `angle` or the `crown_width`, not both"));
+    }
+    let mut it = lengths.into_iter();
+    let mut next = || it.next().flatten();
+    let (crown_width, base_radius, crown_radius, end_length, margin) = (next(), next(), next(), next(), next());
+    add_feature(
+        s,
+        p,
+        FeatureKind::SheetBead {
+            sketch: SketchId(sketch),
+            curves,
+            shape,
+            depth,
+            width,
+            angle,
+            crown_width,
+            base_radius,
+            crown_radius,
+            end_length,
+            margin,
+            flip: bool_(p, "flip").unwrap_or(false),
+            body: str_(p, "body").map(BodyName::from),
+        },
+    )
+}
+
 fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.path_flange";
     let edge = p.get("edge").and_then(vec3).ok_or_else(|| bad(cmd, "`edge` must be a point [x, y, z] on a sheet edge"))?;
@@ -714,9 +783,26 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         })
         .collect();
     let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness)).collect();
-    json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
+    let mut out = json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
         "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "unfolded": sk.unfolded,
-        "perforations": [], "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch})
+        "perforations": [], "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch});
+    // Formed beads: not in the outline (the blank is flat), pressed after cutting. Up out of the
+    // sheet's surface, the side the flat is drawn from.
+    let beads: Vec<Value> = sk
+        .beads
+        .iter()
+        .filter_map(|b| {
+            let (footprint, [a, e], crown_width, crown_length) = sk.bead_outline(b).ok()?;
+            Some(json!({"feature": b.feature, "direction": if b.far { "down" } else { "up" }, "start": pt(&a), "end": pt(&e),
+                "footprint": footprint.iter().map(pt).collect::<Vec<_>>(), "depth": b.depth, "width": b.width, "angle_deg": b.angle.to_degrees(),
+                "crown_width": crown_width, "crown_length": crown_length, "base_radius": b.base_radius, "crown_radius": b.crown_radius,
+                "end_length": b.end_length}))
+        })
+        .collect();
+    if !beads.is_empty() {
+        out["beads"] = Value::Array(beads);
+    }
+    out
 }
 
 fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
@@ -863,6 +949,8 @@ fn dxf_layer(name: &str) -> solidcraft_io::DxfLayer {
         "BEND_UP" => DxfLayer::new(name, 1).dashed(),
         "BEND_DOWN" => DxfLayer::new(name, 5).dashed(),
         "BEND_NOTES" => DxfLayer::new(name, 8),
+        "FORM_UP" => DxfLayer::new(name, 1).dashed(),
+        "FORM_DOWN" => DxfLayer::new(name, 5).dashed(),
         _ => DxfLayer::new(name, 3),
     }
 }
@@ -916,14 +1004,21 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         bends: sh.bends(),
         display: sh.angle_display,
         thickness: sh.t,
+        beads: Vec::new(),
     };
     drawing.dxf(o)
 }
 
-/// The DXF of a sheet made from surfaces (#6748): its flat and its bends.
+/// The DXF of a sheet made from surfaces (#6748): its flat, its bends and its beads.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
+    let mut beads = Vec::with_capacity(sk.beads.len());
+    for b in &sk.beads {
+        let (footprint, [a, e], ..) = sk.bead_outline(b)?;
+        // Up out of the sheet's surface, the side the flat is drawn from.
+        beads.push(FlatBead { a, b: e, footprint, up: !b.far, depth: b.depth, width: b.width });
+    }
     let drawing = FlatDrawing {
         regions: sk.regions.clone(),
         pockets: sk.pockets.clone(),
@@ -932,12 +1027,14 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         bends: sk.bend_infos(),
         display,
         thickness: sk.thickness,
+        beads,
     };
     drawing.dxf(o)
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
-/// loops are text, the perforation's holes, and the bends, their notes' angles read as `display`.
+/// loops are text, the perforation's holes, the bends, their notes' angles read as `display`,
+/// and the formed beads.
 struct FlatDrawing {
     regions: Vec<solidcraft_geom::Region2>,
     pockets: Vec<solidcraft_doc::sheet::SheetPocket>,
@@ -946,6 +1043,18 @@ struct FlatDrawing {
     bends: Vec<solidcraft_doc::sheet::BendInfo>,
     display: sheet::AngleDisplay,
     thickness: f64,
+    beads: Vec<FlatBead>,
+}
+
+/// A formed bead in the flat: its centreline from `a` to `b`, its footprint, whether it stands
+/// up (toward the side the flat is drawn from), and its depth and width.
+struct FlatBead {
+    a: Vec2,
+    b: Vec2,
+    footprint: [Vec2; 4],
+    up: bool,
+    depth: f64,
+    width: f64,
 }
 
 impl FlatDrawing {
@@ -1039,6 +1148,27 @@ impl FlatDrawing {
         }
         for (c, r) in &self.perforation {
             entities.push(DxfEntity { layer: "PERFORATION".into(), shape: DxfShape::Circle { c: *c, r: *r } });
+        }
+        // Formed beads: the centreline and the footprint, dashed, and a note `BEAD UP D2 W10`.
+        for b in &self.beads {
+            let layer = if b.up { "FORM_UP" } else { "FORM_DOWN" };
+            entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(b.a, b.b) });
+            for i in 0..4 {
+                entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(b.footprint[i], b.footprint[(i + 1) % 4]) });
+            }
+            if let Some(height) = o.bend_notes {
+                let along = (b.b - b.a).normalized().unwrap_or(Vec2::X);
+                let mut angle = along.angle().to_degrees();
+                if angle > 90.0 + 1e-9 {
+                    angle -= 180.0;
+                } else if angle <= -90.0 + 1e-9 {
+                    angle += 180.0;
+                }
+                let beside = Vec2::from_angle(angle.to_radians()).perp();
+                let text = format!("BEAD {} D{} W{}", if b.up { "UP" } else { "DOWN" }, compact(b.depth), compact(b.width));
+                let at = (b.a + b.b) * 0.5 + beside * (b.width / 2.0 + height);
+                entities.push(DxfEntity { layer: "BEND_NOTES".into(), shape: DxfShape::Text { at, height, angle_deg: angle, text } });
+            }
         }
         // One layer: every entity on layer 0, which every drawing has.
         if o.one_layer {

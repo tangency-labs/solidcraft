@@ -1660,7 +1660,7 @@ impl SurfaceConversion {
     pub fn solid(&self) -> Result<Body> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
-        crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &mut FlatWork::new())
+        crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &[], &mut FlatWork::new())
     }
 }
 
@@ -1728,6 +1728,9 @@ pub struct SurfaceSheet {
     /// The recesses in the flat, as pockets measured from its face on the sheet's surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pockets: Vec<crate::sheet::SheetPocket>,
+    /// The beads pressed into its planar panels (see `sheet_surface_bead`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beads: Vec<crate::SurfaceBead>,
 }
 
 /// A bend in a sheet's flat: its zone, its center line, how far it turns (radians), its inside
@@ -1768,6 +1771,7 @@ impl SurfaceSheet {
             notes: c.notes.clone(),
             recesses: Vec::new(),
             pockets: Vec::new(),
+            beads: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?);
         Ok((sheet, c.solid()?))
@@ -1794,7 +1798,8 @@ impl SurfaceSheet {
             return self.recessed(self.flat_solid()?, &frames);
         }
         let folded = fold_onto(&self.sheet, &dev, &self.places)?;
-        let body = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work)?;
+        let forms = crate::sheet_surface_bead::forms(self, &pieces, &folded)?;
+        let body = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &forms, &mut work)?;
         self.recessed(body, &folded.places)
     }
 

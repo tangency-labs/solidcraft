@@ -1766,6 +1766,8 @@ fn disc_in_box(r: f64, (u0, u1): (f64, f64), (v0, v1): (f64, f64)) -> f64 {
         .sum()
 }
 
+#[path = "sheet_surface_bead_tests.rs"]
+mod beads;
 #[path = "sheet_surface_cut_tests.rs"]
 mod cuts;
 #[path = "sheet_surface_convert_tests.rs"]

@@ -296,6 +296,17 @@ sheet_path
   inputs:
     Bend radius = path.radius (Length)
   expressions: path.radius
+sheet_bead
+  inputs:
+    Depth = bead.depth (Length)
+    Width = bead.width (Length)
+    Angle = bead.angle (Angle)
+    Crown width = bead.crown (Length)
+    Base radius = bead.rb (Length)
+    Crown radius = bead.rc (Length)
+    End length = bead.end (Length)
+    Margin = bead.margin (Length)
+  expressions: bead.depth, bead.width, bead.angle, bead.crown, bead.rb, bead.rc, bead.end, bead.margin
 sheet_unfold
 sheet_convert
 sheet_surface_convert

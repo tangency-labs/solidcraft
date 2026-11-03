@@ -151,6 +151,10 @@ sheet_path
   sketches: [1]
   remap_refs: sketch
   remap_bodies: body
+sheet_bead
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: body
 sheet_unfold
   remap_bodies: body
 sheet_convert

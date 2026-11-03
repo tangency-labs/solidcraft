@@ -811,6 +811,110 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
+        FeatureKind::SheetBead {
+            sketch,
+            curves,
+            shape,
+            depth,
+            width,
+            angle,
+            crown_width,
+            base_radius,
+            crown_radius,
+            end_length,
+            margin,
+            flip,
+            body,
+        } => {
+            if !matches!(shape.as_deref(), None | Some("trapezoid")) {
+                return Err(DocError::Invalid(format!(
+                    "not supported yet: a bead of shape {:?} (only \"trapezoid\")",
+                    shape.as_deref().unwrap_or_default()
+                )));
+            }
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            if curves.is_empty() || curves.len() > crate::sheet_surface_bead::MAX_BEADS {
+                return Err(DocError::Invalid(format!("a bead feature needs 1…{} centrelines", crate::sheet_surface_bead::MAX_BEADS)));
+            }
+            let mut lines = Vec::with_capacity(curves.len());
+            for id in curves {
+                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+                match ss.sketch.segs(ci).as_slice() {
+                    [Seg2::Line { a, b }] => lines.push((ss.plane.to_world(*a), ss.plane.to_world(*b))),
+                    _ => return Err(DocError::Invalid(format!("not supported yet: a bead along `{id}`, which is not a straight line"))),
+                }
+            }
+            // A bead is a form on a panel of a sheet made from surfaces: the named body's, or the
+            // newest whose planar panel the first centreline lies on.
+            let i = match (body, lines.first()) {
+                (Some(n), _) => st.surface_sheets.iter().position(|s| &s.body == n),
+                (None, Some((a, b))) => st.surface_sheets.iter().rposition(|s| s.bead_line(&ss.plane, *a, *b).is_ok()),
+                (None, None) => return Err(DocError::Invalid("a bead feature needs a centreline".into())),
+            }
+            .ok_or_else(|| {
+                DocError::Invalid("a bead's centreline must lie on a planar panel of a sheet made from surfaces (Convert or Thicken)".into())
+            })?;
+            let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sk.unfolded {
+                return Err(DocError::Invalid("refold the sheet before adding beads".into()));
+            }
+            let rv = doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?;
+            let t = sk.sheet.thickness;
+            let d = val(vals, depth, Kind::Length)?;
+            let w = val(vals, width, Kind::Length)?;
+            let a = match (angle, crown_width) {
+                (Some(_), Some(_)) => return Err(DocError::Invalid("a bead takes its flanks' angle or its crown width, not both".into())),
+                (Some(e), None) => val(vals, e, Kind::Angle)?,
+                (None, Some(e)) => {
+                    let c = val(vals, e, Kind::Length)?;
+                    if !(c >= 0.0 && c < w) {
+                        return Err(DocError::Invalid(format!("a bead's crown width ({c}) must be at least 0 and less than its width ({w})")));
+                    }
+                    (d / ((w - c) / 2.0)).atan()
+                }
+                (None, None) => std::f64::consts::FRAC_PI_4,
+            };
+            let or = |e: &Option<crate::Expr>, default: f64| -> Result<f64> {
+                match e {
+                    Some(e) => val(vals, e, Kind::Length),
+                    None => Ok(default),
+                }
+            };
+            let (rb, rc) = (or(base_radius, rv.bend_radius)?, or(crown_radius, rv.bend_radius)?);
+            let (el, m) = (or(end_length, 3.0 * d)?, or(margin, 3.0 * t)?);
+            if sk.beads.len().saturating_add(lines.len()) > crate::sheet_surface_bead::MAX_BEADS {
+                return Err(DocError::Invalid(format!("a sheet takes at most {} beads", crate::sheet_surface_bead::MAX_BEADS)));
+            }
+            let mut sk = sk.clone();
+            let mut notes = Vec::new();
+            for (pa, pb) in lines {
+                let (panel, qa, qb, far) = sk.bead_line(&ss.plane, pa, pb)?;
+                let bead = crate::SurfaceBead {
+                    feature: f.id,
+                    panel,
+                    a: qa,
+                    b: qb,
+                    // Out of the face it is sketched on; with `flip`, out of the other one.
+                    far: far != *flip,
+                    depth: d,
+                    width: w,
+                    angle: a,
+                    base_radius: rb,
+                    crown_radius: rc,
+                    end_length: el,
+                };
+                sk.check_new_bead(&bead, m, &mut notes)?;
+                sk.beads.push(bead);
+            }
+            notes.dedup();
+            if !notes.is_empty() {
+                append_warning(warning, notes.join("; "));
+            }
+            if let Some(slot) = st.surface_sheets.get_mut(i) {
+                *slot = sk;
+            }
+            rebuild_surface_sheet(st, i)
+        }
         FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
             let i = match body {

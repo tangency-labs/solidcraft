@@ -69,11 +69,14 @@ struct Cell {
     piece: Piece,
     outer: Vec<Seg2>,
     holes: Vec<Vec<Seg2>>,
+    /// Loops its faces leave open with no wall: a bead's footprint, closed by the bead's own
+    /// faces.
+    open: Vec<Vec<Seg2>>,
 }
 
 impl Cell {
     fn loops(&self) -> impl Iterator<Item = &Vec<Seg2>> {
-        std::iter::once(&self.outer).chain(&self.holes)
+        std::iter::once(&self.outer).chain(&self.holes).chain(&self.open)
     }
 }
 
@@ -85,10 +88,28 @@ struct Folded<'a> {
 }
 
 /// The folded solid of a developed sheet `t` thick: each of its flat's `pieces` (see
-/// [`crate::sheet_surface::pieces`]), carried into space by `fold`.
-pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Region2)], work: &mut FlatWork) -> Result<Body> {
+/// [`crate::sheet_surface::pieces`]), carried into space by `fold`, with its `forms` (beads):
+/// each one's footprint left open in its panel's cell and its own faces sewn in.
+pub(crate) fn solid(
+    dev: &Development,
+    fold: &Fold,
+    t: f64,
+    pieces: &[(Piece, Region2)],
+    forms: &[crate::sheet_surface_bead::Form],
+    work: &mut FlatWork,
+) -> Result<Body> {
     let f = Folded { dev, fold, t };
-    let cells = cells(pieces.to_vec(), work)?;
+    let mut cells = cells(pieces.to_vec(), work)?;
+    for form in forms {
+        let centre = form.open.iter().map(Seg2::start).fold(Vec2::ZERO, |a, b| a + b) * (1.0 / form.open.len().max(1) as f64);
+        let mine = |c: &Cell| {
+            c.piece == Piece::Panel(form.panel)
+                && Loop2 { segs: c.outer.clone() }.contains(centre)
+                && !c.holes.iter().any(|h| Loop2 { segs: h.clone() }.contains(centre))
+        };
+        let cell = cells.iter_mut().find(|c| mine(c)).ok_or_else(|| DocError::Invalid("a bead lies on no panel of its sheet".into()))?;
+        cell.open.push(form.open.clone());
+    }
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     // Shared with a neighbor: the same flat line the other way, landing in the same place
     // (flat neighbors from two pieces laid side by side do not).
@@ -133,8 +154,9 @@ pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Re
                 probe: Some((p, p - f.at(c.piece, center, inside)?)),
             });
         }
-        // Walls along runs no other cell shares.
-        for (run, [bottom, top]) in runs.iter().flatten().zip(edges.iter().flatten()) {
+        // Walls along runs no other cell shares; none round an open loop.
+        let walled = 1 + c.holes.len();
+        for (run, [bottom, top]) in runs.iter().take(walled).flatten().zip(edges.iter().take(walled).flatten()) {
             if let [e] = run.as_slice()
                 && shared(ci, c, e)?
             {
@@ -151,6 +173,7 @@ pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Re
             faces.push(FaceSpec { loops: vec![vec![bottom.clone(), up_b, top.reversed(), down_a]], surface, probe: Some((pm, outward)) });
         }
     }
+    faces.extend(forms.iter().flat_map(|form| form.faces.iter().cloned()));
     // Until the kernel sews faces that touch along an edge face to face (#1597): two walls on one
     // edge are refused as "ambiguous edge contact", so no edge may get a wall from both sides.
     Ok(kernel::sew_touching(&faces)?)
@@ -184,7 +207,12 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
         .into_iter()
         .filter_map(|(piece, r)| {
             let outer = clean(r.outer);
-            (!outer.is_empty()).then(|| Cell { piece, outer, holes: r.holes.into_iter().map(clean).filter(|h| !h.is_empty()).collect() })
+            (!outer.is_empty()).then(|| Cell {
+                piece,
+                outer,
+                holes: r.holes.into_iter().map(clean).filter(|h| !h.is_empty()).collect(),
+                open: Vec::new(),
+            })
         })
         .collect();
     let edges = raw.iter().map(|c| c.loops().map(Vec::len).sum::<usize>()).sum::<usize>();
@@ -219,7 +247,10 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
         }
         v
     };
-    Ok(raw.iter().map(|c| Cell { piece: c.piece, outer: split(&c.outer), holes: c.holes.iter().map(|h| split(h)).collect() }).collect())
+    Ok(raw
+        .iter()
+        .map(|c| Cell { piece: c.piece, outer: split(&c.outer), holes: c.holes.iter().map(|h| split(h)).collect(), open: Vec::new() })
+        .collect())
 }
 
 impl Folded<'_> {
