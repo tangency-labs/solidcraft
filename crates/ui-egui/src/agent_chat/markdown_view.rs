@@ -123,7 +123,10 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                     egui::Frame::NONE.fill(t.field).corner_radius(t.radius_sm).inner_margin(Margin::same(6)),
                     |ui| {
                         ui.set_width(ui.available_width());
-                        selectable(ui, egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text)).wrap());
+                        selectable(
+                            ui,
+                            egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text)).wrap(),
+                        );
                         if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
                             ui.ctx().copy_text(text.clone());
                         }

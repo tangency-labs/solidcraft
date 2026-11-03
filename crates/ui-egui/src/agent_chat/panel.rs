@@ -1681,26 +1681,30 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
 }
 
 /// A text selection dragged near or past the top or bottom of the conversation scrolls it, faster
-/// the further out, so a long answer can be selected in one drag (#11527). `ui`: the
-/// conversation's scroll area, once its content is drawn.
+/// the further out, so a long answer can be selected in one drag (#11527). Only a drag towards
+/// that edge does: a click, a double click or a held press on a line by the edge, or a drag from
+/// there into the conversation, scrolls nothing. `ui`: the conversation's scroll area, once its
+/// content is drawn.
 #[cfg(not(target_arch = "wasm32"))]
 fn scroll_while_selecting(ui: &egui::Ui) {
     // Scrolling starts this far inside the edge, and goes this many points a second for each
-    // point further out, up to four times as far out.
+    // point further out, up to four times as far out; once the pointer has moved more than
+    // `TOWARDS` that way since the press.
     const EDGE: f32 = 32.0;
     const SPEED: f32 = 16.0;
+    const TOWARDS: f32 = 8.0;
     let view = ui.clip_rect();
-    let pointer = ui.input(|i| i.pointer.press_origin().filter(|p| i.pointer.primary_down() && view.contains(*p)).and(i.pointer.latest_pos()));
-    let Some(at) = pointer else {
+    let pointer = ui.input(|i| i.pointer.press_origin().filter(|p| i.pointer.primary_down() && view.contains(*p)).zip(i.pointer.latest_pos()));
+    let Some((from, at)) = pointer else {
         return;
     };
     if !ui.ctx().plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection() {
         return;
     }
     let content = ui.min_rect();
-    let out = if at.y < view.top() + EDGE && content.top() < view.top() - 0.5 {
+    let out = if at.y < view.top() + EDGE && from.y - at.y > TOWARDS && content.top() < view.top() - 0.5 {
         at.y - (view.top() + EDGE)
-    } else if at.y > view.bottom() - EDGE && content.bottom() > view.bottom() + 0.5 {
+    } else if at.y > view.bottom() - EDGE && at.y - from.y > TOWARDS && content.bottom() > view.bottom() + 0.5 {
         at.y - (view.bottom() - EDGE)
     } else {
         return;
