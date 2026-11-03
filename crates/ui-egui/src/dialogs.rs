@@ -1893,24 +1893,39 @@ impl Dialog {
     /// chain holds it.
     pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, item: &Sel) {
         let shell_chain = i == 0 && self.shell_faces(s).is_some();
+        // A Fillet or Chamfer row its Tangent Chain brought goes with the picks whose chain holds
+        // it, as picking it again would; else ticking Tangent Chain again brings it back.
+        let fillet_chain = i == 0 && matches!(self.kind, Kind::Fillet { chain: true, .. }) && self.chain_applied;
         let state = s.world_state().ok();
+        let mut gone = if shell_chain { Vec::new() } else { crate::viewport::grouped_selection(s, item) };
+        gone.push(item.clone());
+        if fillet_chain {
+            let seeds: Vec<Sel> = self
+                .picked_edges
+                .iter()
+                .filter(|seed| fillet_edges(s, seed, true).iter().any(|x| gone.iter().any(|g| selection::same_item(x, g))))
+                .cloned()
+                .collect();
+            for seed in &seeds {
+                gone.extend(fillet_edges(s, seed, true));
+            }
+            gone.extend(seeds);
+        }
         let Some(inp) = self.inputs.get_mut(i) else { return };
-        if shell_chain {
-            let Sel::Face { body, index, .. } = item else { return };
-            inp.items.retain(|pick| {
-                let Sel::Face { body: b, point, .. } = pick else { return true };
-                b != body
-                    || !state
-                        .as_ref()
-                        .and_then(|st| st.body(b))
-                        .is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
-            });
-        } else {
-            let mut gone = crate::viewport::grouped_selection(s, item);
-            gone.push(item.clone());
-            inp.items.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
-            if i == 0 {
-                self.picked_edges.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
+        match (shell_chain, item, state.as_ref()) {
+            (true, Sel::Face { body, index, .. }, Some(st)) => {
+                let model = st.body(body);
+                inp.items.retain(|pick| {
+                    let Sel::Face { body: b, point, .. } = pick else { return true };
+                    b != body || !model.is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
+                });
+            }
+            // Without the model to find the chain in, the row goes on its own.
+            _ => {
+                inp.items.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
+                if i == 0 {
+                    self.picked_edges.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
+                }
             }
         }
         let empty = inp.items.is_empty();

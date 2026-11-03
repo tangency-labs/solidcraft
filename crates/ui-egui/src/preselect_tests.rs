@@ -3312,6 +3312,55 @@ fn one_picked_edge_is_removed_from_the_dialog_list() {
     assert_eq!(h.app.dialog.as_ref().unwrap().listed, None);
 }
 
+/// #3683: with Tangent Chain on, removing a row the chain brought takes out the pick that
+/// brought it and its whole chain, as picking that edge again would; ticking Tangent Chain off
+/// and on does not bring it back.
+#[test]
+fn removing_a_tangent_chain_row_removes_its_seed() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    // Round the four upright edges: the top rim is then one tangent loop of lines and arcs.
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 10], [40, 0, 10], [40, 30, 10], [0, 30, 10]], "radius": 5})).unwrap();
+    h.frames(2);
+    let rim = crate::dialogs::edge_sel(&h.app.session, Vec3::new(20.0, 0.0, 20.0)).unwrap();
+    let other = crate::dialogs::edge_sel(&h.app.session, Vec3::new(20.0, 0.0, 0.0)).unwrap();
+    h.app.session.selection = vec![rim.clone(), other.clone()];
+    h.app.start("solid.fillet");
+    h.frames(3);
+    if let Some(Kind::Fillet { chain, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *chain = true;
+    }
+    h.frames(2);
+    let items = |h: &crate::scenario::Harness| h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default();
+    let has = |h: &crate::scenario::Harness, x: &Sel| items(h).iter().any(|y| crate::selection::same_item(x, y));
+    assert!(items(&h).len() > 4 && has(&h, &rim) && has(&h, &other), "the rim's chain and the bottom loop's: {:?}", items(&h));
+    // A row of the rim's chain that is not the rim edge picked by hand.
+    let row = {
+        let d = h.app.dialog.as_ref().unwrap();
+        let rows = d.listed_items(&h.app.session, 0);
+        rows.iter()
+            .position(|x| {
+                let Sel::Edge { point, .. } = x else { return false };
+                (point.z - 20.0).abs() < 1e-6 && !crate::selection::same_item(x, &rim)
+            })
+            .expect("a chain row on the rim")
+    };
+    let label = open_list(&mut h, 0);
+    h.step(&json!({"click": {"handle": format!("dialog:list:{label}:{row}:remove")}})).unwrap();
+    h.frames(2);
+    let on_rim =
+        |h: &crate::scenario::Harness| items(h).iter().filter(|x| matches!(x, Sel::Edge { point, .. } if (point.z - 20.0).abs() < 1e-6)).count();
+    assert_eq!(on_rim(&h), 0, "the rim's whole chain went: {:?}", items(&h));
+    assert!(has(&h, &other), "the other pick's chain stays");
+    for on in [false, true] {
+        if let Some(Kind::Fillet { chain, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *chain = on;
+        }
+        h.frames(2);
+        assert_eq!(on_rim(&h), 0, "Tangent Chain {on} does not bring the rim back: {:?}", items(&h));
+    }
+}
+
 /// Open input `i`'s list of picked items in the open dialog (#3683).
 fn open_list(h: &mut crate::scenario::Harness, i: usize) -> &'static str {
     let label = h.app.dialog.as_ref().unwrap().inputs[i].label;
