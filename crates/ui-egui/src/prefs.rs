@@ -1234,23 +1234,23 @@ preference_settings! {
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, PAGE_LAYOUT;
     /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
-    persistent_ribbon_pressed: bool = true, PAGE_LAYOUT => check_id("prefs.persistent_ribbon_pressed");
+    persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
     viewport_analysis_status: bool = true, PAGE_GRAPHICS;
     viewport_section_status: bool = true, PAGE_GRAPHICS;
     viewport_status_details: bool = true, PAGE_GRAPHICS;
     viewport_status_summary: bool = true, PAGE_GRAPHICS;
     /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
     /// tools then start a sketch first (#7904).
-    sketch_tab_always: bool = false, PAGE_LAYOUT => check_id("prefs.sketch_tab_always");
+    sketch_tab_always: bool = false, PAGE_LAYOUT;
     /// Each design tab keeps its open dialog or tool, and its toolbar tab, while another design is
     /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
     /// them and shows the MODEL tab.
-    keep_work_on_tab_switch: bool = false, PAGE_LAYOUT => check_id("prefs.keep_work_on_tab_switch");
+    keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
-    ribbon_reveal: bool = false, PAGE_LAYOUT => check_id("prefs.ribbon_reveal");
+    ribbon_reveal: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -1263,7 +1263,7 @@ preference_settings! {
     ribbon_icon_grid: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
-    ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT => check_tr("ui.ribbon_menus_skip_pinned");
+    ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_APPEARANCE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -1271,10 +1271,10 @@ preference_settings! {
     ui_font: String = String::new(), PAGE_APPEARANCE;
     /// While a dialog or a sketch is open, OK and Cancel in the view's top right corner, with the
     /// axis view moved down below them (#6709). Off by default.
-    view_confirm_corner: bool = false, PAGE_LAYOUT => check_id("prefs.view_confirm_corner");
+    view_confirm_corner: bool = false, PAGE_LAYOUT;
     /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
     /// and the design's units (#7243). Off by default.
-    status_bar: bool = false, PAGE_LAYOUT => check_id("prefs.status_bar");
+    status_bar: bool = false, PAGE_LAYOUT;
     /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
     /// default.
     quick_measure: bool = false, PAGE_GRAPHICS;
@@ -1298,7 +1298,7 @@ preference_settings! {
     history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
-    history_play_button: bool = true, PAGE_LAYOUT => check_id("prefs.history_play_button");
+    history_play_button: bool = true, PAGE_LAYOUT;
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
     timeline_origin_bodies: bool = false, PAGE_LAYOUT;
@@ -1332,10 +1332,10 @@ preference_settings! {
     browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_LAYOUT;
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
-    browser_eye_left: bool = false, PAGE_LAYOUT => check_id("prefs.browser_eye_left");
+    browser_eye_left: bool = false, PAGE_LAYOUT;
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
-    browser_components_open: bool = false, PAGE_LAYOUT => check_id("prefs.browser_components_open");
+    browser_components_open: bool = false, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -4585,10 +4585,12 @@ mod tests {
         navbar_click(&mut h, "prefs:navbar:slot:visual_style");
         navbar_click(&mut h, "prefs:navbar:shows:0");
         assert_eq!(h.app.preferences.navigation_bar.menu_display("visual_style"), MenuDisplay::IconAndValue);
-        navbar_click(&mut h, "prefs:navbar:position:0");
+        navbar_click(&mut h, "prefs:navbar:anchor:0");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Left);
-        navbar_click(&mut h, "prefs:navbar:position:2");
+        assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Top);
+        navbar_click(&mut h, "prefs:navbar:anchor:5");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Right);
+        assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Bottom);
         navbar_click(&mut h, "prefs:navbar:size:0");
         assert_eq!(h.app.preferences.navigation_bar.size, Size::Compact);
         navbar_click(&mut h, "prefs:navbar:size:1");
@@ -4602,6 +4604,11 @@ mod tests {
         let before = h.app.preferences.navigation_bar.clone();
         navbar_click(&mut h, "prefs:navbar:preview_as:1");
         assert_eq!(h.app.preferences.navigation_bar, before, "canvas preview is transient");
+        navbar_click(&mut h, "prefs:navbar:add:zoom");
+        assert_eq!(h.app.preferences.navigation_bar.slots.last().map(String::as_str), Some("zoom"));
+        let shared = h.app.preferences.navigation_bar.clone();
+        navbar_click(&mut h, "prefs:navbar:preview_as:0");
+        assert_eq!(h.app.preferences.navigation_bar, shared, "Render edits persist in the shared Design preview");
         navbar_click(&mut h, "prefs:navbar:show");
         assert!(!h.app.ui.show_navigation_bar);
         navbar_click(&mut h, "prefs:navbar:show");
@@ -4621,11 +4628,16 @@ mod tests {
             let search = crate::scenario::rect_of("prefs:search:frame").unwrap();
             assert!(header.contains_rect(search), "titlebar search stays inside the window at {width}");
             assert!(search.width() <= 230.0 && search.width() >= 100.0, "usable bounded search at {width}");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            for index in 0..6 {
+                let cell = crate::scenario::rect_of(&format!("prefs:navbar:anchor:{index}")).unwrap();
+                assert!(cell.left() >= body.left() && cell.right() <= body.right() + 0.5, "anchor {index} at {width}: {cell:?} outside {body:?}");
+                assert!(cell.width() > 20.0 && cell.height() > 20.0, "anchor {index} stays a usable target at {width}");
+            }
             for (key, label, labels) in [
-                ("position", "Position", &["Left", "Center", "Right"][..]),
                 ("size", "Size", &["Compact", "Regular"][..]),
-                ("buttons", "Buttons", &["Icons", "Icons and labels"][..]),
-                ("idle", "When idle", &["Always visible", "Fade", "Hide until hovered"][..]),
+                ("buttons", "Buttons", &["Icons", "Icons + labels"][..]),
+                ("idle", "When idle", &["Always", "Fade", "Hover"][..]),
             ] {
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                 let row = crate::scenario::rect_of(&format!("prefs:navbar:{key}")).unwrap();
@@ -4633,20 +4645,8 @@ mod tests {
                 assert_eq!(row.height(), crate::ui_kit::row_height(), "standard control height");
                 let dropdown = crate::scenario::rect_of(&format!("dialog:segments:{label}")).is_none();
                 if !dropdown {
-                    let t = crate::theme::Tokens::get();
-                    let natural: f32 = labels
-                        .iter()
-                        .map(|option| {
-                            h.ctx
-                                .fonts_mut(|fonts| fonts.layout_no_wrap((*option).to_owned(), crate::fonts::semibold(t.font_label), t.form_ink))
-                                .size()
-                                .x
-                                .ceil()
-                                + t.space_16
-                        })
-                        .sum();
                     let control = crate::scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
-                    assert!((row.width() - natural.min(control.width())).abs() < 0.5, "{key} hugs its content at {width}");
+                    assert!((row.width() - control.width()).abs() < 0.5, "{key} fills its property column at {width}");
                 }
                 if dropdown {
                     // Standard Segments fall back to the kit dropdown when their labels cannot fit.
@@ -4733,15 +4733,27 @@ mod tests {
                     h.frames(3);
                 }
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                let card = crate::scenario::rect_of("prefs:navbar:inspector").unwrap();
-                assert!(
-                    (card.left() - body.left()).abs() < 0.5 && (card.right() - body.right()).abs() < 0.5,
-                    "{slot:?} at {width}: {card:?} vs {body:?}"
-                );
+                if slot.is_some() {
+                    let card = crate::scenario::rect_of("prefs:navbar:inspector").unwrap();
+                    assert!(
+                        (card.left() - body.left()).abs() < 0.5 && (card.right() - body.right()).abs() < 0.5,
+                        "{slot:?} at {width}: {card:?} vs {body:?}"
+                    );
+                } else {
+                    assert!(crate::scenario::rect_of("prefs:navbar:inspector").is_none(), "inspector belongs to a selected slot");
+                }
                 let status = crate::scenario::rect_of("prefs:navbar:status").unwrap();
                 let reset = crate::scenario::rect_of("prefs:navbar:reset").unwrap();
                 let show = crate::scenario::rect_of("prefs:navbar:show").unwrap();
-                assert_eq!(status.right(), body.right());
+                assert!(status.left() >= body.left() && status.right() <= body.right() + 0.5, "header actions stay inside the page");
+                let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
+                let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
+                assert!(status.bottom() <= stage.top(), "Show and Reset belong above the shared stage");
+                let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
+                assert!(stage.contains_rect(count), "the real slot count sits in the stage");
+                assert!(!count.intersects(bar), "the count never covers the bar");
+                let properties = crate::scenario::rect_of("dialog:row:Position").unwrap();
+                assert!(stage.bottom() <= properties.top(), "the stage stays before properties");
                 assert!(status.contains_rect(reset) && status.contains_rect(show));
                 assert!(show.right() <= reset.left());
                 assert_eq!(reset.center().y, show.center().y);
@@ -4803,24 +4815,42 @@ mod tests {
     }
 
     #[test]
-    fn navigation_bar_preview_stage_follows_position_live() {
-        use crate::navigation_bar::Position;
+    fn navigation_bar_preview_stage_follows_anchor_live() {
+        use crate::navigation_bar::{Edge, Position};
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":1100}));
         h.call("ui.prefs", json!({"open":"Interface/Navigation bar","navigation_bar":{"slots":["pan","fit","display"]}}));
-        for (index, position) in [(0, Position::Left), (1, Position::Centre), (2, Position::Right)] {
-            navbar_click(&mut h, &format!("prefs:navbar:position:{index}"));
+        for (index, edge, position) in [
+            (0, Edge::Top, Position::Left),
+            (1, Edge::Top, Position::Centre),
+            (2, Edge::Top, Position::Right),
+            (3, Edge::Bottom, Position::Left),
+            (4, Edge::Bottom, Position::Centre),
+            (5, Edge::Bottom, Position::Right),
+        ] {
+            navbar_click(&mut h, &format!("prefs:navbar:anchor:{index}"));
             h.frames(3);
             let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
             let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
-            assert_eq!(h.app.preferences.navigation_bar.position, position);
+            let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
+            assert_eq!((h.app.preferences.navigation_bar.edge, h.app.preferences.navigation_bar.position), (edge, position));
             assert_eq!(stage.height(), crate::ui_kit::NAV_STAGE_HEIGHT);
-            assert_eq!(bar.center().y, stage.center().y);
+            let inset = crate::ui_kit::NAV_BORDER + crate::ui_kit::NAV_STAGE_INSET;
+            match edge {
+                Edge::Top => {
+                    assert_eq!(bar.top(), stage.top() + inset);
+                    assert!(count.top() >= bar.bottom(), "the count sits below a top bar");
+                }
+                Edge::Bottom => {
+                    assert_eq!(bar.bottom(), stage.bottom() - inset);
+                    assert!(count.bottom() <= bar.top(), "the count sits above a bottom bar");
+                }
+            }
             match position {
-                Position::Left => assert_eq!(bar.left(), stage.left() + crate::ui_kit::NAV_BORDER + crate::ui_kit::NAV_STAGE_INSET),
+                Position::Left => assert_eq!(bar.left(), stage.left() + inset),
                 Position::Centre => assert_eq!(bar.center().x, stage.center().x),
-                Position::Right => assert_eq!(bar.right(), stage.right() - crate::ui_kit::NAV_BORDER - crate::ui_kit::NAV_STAGE_INSET),
+                Position::Right => assert_eq!(bar.right(), stage.right() - inset),
             }
         }
     }
@@ -8757,6 +8787,49 @@ mod tests {
     }
 
     #[test]
+    fn layout_cards_and_toolbar_chips_preserve_transactions_in_both_themes() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1200,"height":1100}));
+            h.call("ui.prefs", json!({"theme":theme,"quick_measure":true,"invert_curved_roll_arrows":true}));
+            h.call("ui.prefs", json!({"open":"Layout"}));
+            let before = h.app.preferences.clone();
+            let doc = h.app.session.doc.to_json();
+            for (key, left, under, browser) in
+                [("left", true, false, false), ("under_browser", true, true, false), ("browser", false, false, true), ("bottom", false, false, false)]
+            {
+                scroll_to_and_click(&mut h, &format!("prefs:history:{key}"));
+                assert_eq!(
+                    (h.app.preferences.timeline_left, h.app.preferences.timeline_under_browser, h.app.preferences.history_in_browser),
+                    (left, under, browser)
+                );
+            }
+            for (key, floating) in [("card", true), ("column", false), ("card", true)] {
+                scroll_to_and_click(&mut h, &format!("prefs:browser:{key}"));
+                assert_eq!(h.app.preferences.browser_float, floating);
+            }
+            for tab in crate::workspace::choosable_tabs() {
+                scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
+                assert!(!crate::workspace::tab_turned_on(&h.app, tab));
+                scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
+                assert!(crate::workspace::tab_turned_on(&h.app, tab));
+            }
+            assert_eq!(h.app.session.doc.to_json(), doc);
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, before, "Cancel restores every Layout edit");
+            h.call("ui.prefs", json!({"open":"Layout"}));
+            scroll_to_and_click(&mut h, "prefs:browser:card");
+            h.call("ui.prefs", json!({"button":"apply"}));
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert!(!h.app.preferences.browser_float);
+            assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert!(h.app.preferences.browser_float, "Cancel after Apply returns to the applied state");
+        }
+    }
+
+    #[test]
     fn history_preferences_widget_click_reveals_scrolled_content_and_keeps_folds_closed() {
         let steps: serde_json::Value = serde_json::from_str(include_str!("../tests/scenarios/history_sketches_under_feature.json")).unwrap();
         let steps = steps.as_array().unwrap();
@@ -8774,7 +8847,7 @@ mod tests {
         assert!(!page.contains(egui::pos2(at[0] as f32, at[1] as f32)), "the real control begins scrolled out of view");
         assert!((at[1] as f32) < page.top(), "scrolling to the bottom puts the target above the viewport");
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::InOrder);
-        h.step(&json!({"widget":"Under their feature", "near":"Sketches"})).unwrap();
+        h.step(&json!({"widget":"Under their feature", "near":"Sketches in History"})).unwrap();
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::UnderFeature);
         let at = h.widget("Under their feature").unwrap();
         assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains(egui::pos2(at[0] as f32, at[1] as f32)));

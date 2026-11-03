@@ -4,7 +4,7 @@
   {"expect": {"prefs": {"dialog": "General"}, "same_width": "prefs:window", "right_edge": {"inner": "prefs:ok", "outer": "prefs:actions", "tol": 1}, "spans": {"inner": "prefs:footer", "outer": "prefs:window", "axis": "x", "tol": 12}}},
   {"click": {"handle": "prefs:page:Appearance"}},
   {"expect": {"prefs": {"dialog": "Appearance"}, "same_width": "prefs:window", "right_edge": {"inner": "prefs:ok", "outer": "prefs:actions", "tol": 1}}},
-  {"widget": "Layout"},
+  {"click": {"handle": "prefs:page:Layout"}},
   {"expect": {"prefs": {"dialog": "Layout"}, "same_width": "prefs:window"}},
   {"widget": "Tools"},
   {"expect": {"prefs": {"dialog": "Tools"}, "same_width": "prefs:window"}},

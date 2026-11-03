@@ -520,7 +520,7 @@ const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false }),
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true }),
             )
         });
     }),
@@ -948,6 +948,12 @@ const ELEMENTS: &[Element] = &[
     element!("assistant_banner", |ui, _| {
         assistant_banner(ui, AssistantTone::Warning, |ui| {
             ui.label("Paused after the configured step limit.");
+        });
+    }),
+    element!("settings_tab_chip", |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            settings_tab_chip(ui, "MODEL", "Model", crate::workspace::tab_icon("MODEL"), true);
+            settings_tab_chip(ui, "SURFACE", "Surface", crate::workspace::tab_icon("SURFACE"), false);
         });
     }),
     element!("history_transport", |ui, _| {
