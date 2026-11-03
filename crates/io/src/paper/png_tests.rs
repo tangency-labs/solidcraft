@@ -242,8 +242,8 @@ fn bands_change_nothing_and_the_bytes_repeat() {
     }
 }
 
-/// Out of range resolutions, a curve the walk can't take yet, and more points than the cap are
-/// refused, never drawn some other way.
+/// Out of range resolutions, a curve the walk can't take yet, text (B2b) and more points than the
+/// cap are refused, never drawn some other way.
 #[test]
 fn what_cannot_be_drawn_is_refused() {
     let prepared_small = small();
@@ -261,6 +261,11 @@ fn what_cannot_be_drawn_is_refused() {
     );
     let e = paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).unwrap_err();
     assert!(e.to_string().contains("not supported yet"), "{e}");
+    let style = solidcraft_sketch::TextStyle::default();
+    let (runs, fonts) = solidcraft_sketch::paper_text("A", None, "", p(2.0, 2.0), 3.5, 0.0, &style).unwrap().unwrap();
+    let text = Scene { fonts, ..scene(p(20.0, 10.0), runs.into_iter().map(Item::Text).collect()) };
+    let e = paper_png(&text.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).unwrap_err();
+    assert!(e.to_string().contains("not supported yet: text in a sheet PNG"), "{e}");
     // 1,000 circles of 100 m at 2400 dpi, each about 19,000 points: over 2^24 in all. A small sheet,
     // so a cap that failed would cost seconds, not hours.
     let big = Loop2::circle(p(0.0, 0.0), 1e5);

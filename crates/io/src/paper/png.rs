@@ -127,6 +127,7 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
                 shapes.extend(builder.finish().map(Shape::EvenOdd));
             }
             GridItem::Picture(picture) => shapes.extend(grid.window(picture.rect).map(|window| Shape::Picture(*picture, window))),
+            GridItem::Text { .. } => return Err(IoError::Invalid("not supported yet: text in a sheet PNG (#4890 B2)".into())),
         }
     }
     let png_error = |e: png::EncodingError| IoError::Invalid(format!("the sheet PNG: {e}"));
