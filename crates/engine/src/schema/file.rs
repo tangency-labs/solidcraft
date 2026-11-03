@@ -1,6 +1,7 @@
 //! Contracts and result types for the commands in `cmd/file.rs`: so far the export command of
 //! each format (`file.export_step`, `file.export_stl`, `file.export_3mf`, `file.export_obj`,
-//! `file.export_urdf`), which take what `file.export` takes for that format, without `format`.
+//! `file.export_urdf`), which take what `file.export` takes for that format, without `format`,
+//! and STEP insertion (`file.insert_step`).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -133,3 +134,62 @@ pub struct UrdfExportResult {
 #[cfg(test)]
 #[path = "file_tests.rs"]
 mod tests;
+
+/// Insert CAD bodies in a new component; STEP files on disk retain a source link by default.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct InsertStepParams {
+    /// The STEP, IGES, FreeCAD or Rhino source file to insert.
+    pub path: String,
+    /// Feature and component name. Default: the source file's name.
+    pub name: Option<String>,
+    /// Source up axis, z or y (case insensitive). Default: z.
+    pub up: Option<String>,
+    /// Body naming policy: auto, solid, product or instance (case insensitive). Default: auto.
+    pub names: Option<String>,
+    /// Keep a disk source link (default true; ignored without a disk path on the web).
+    pub link: Option<bool>,
+    /// Rigid row-major placement, applied after the up-axis turn. Default: identity.
+    pub matrix: Option<StepMatrix>,
+    /// Rotation tolerance, above zero and at most 1e-3. Default: 1e-9; used with matrix.
+    pub tolerance: Option<f64>,
+}
+
+/// A rigid row-major 3x4 or 4x4 rotation and translation, flat or as rows.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum StepMatrix {
+    Flat12([f64; 12]),
+    Flat16([f64; 16]),
+    Rows3([[f64; 4]; 3]),
+    Rows4([[f64; 4]; 4]),
+}
+
+/// The imported feature, component, placements and warnings.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InsertStepResult {
+    pub path: String,
+    pub feature: u64,
+    pub name: String,
+    pub component: u64,
+    pub component_name: String,
+    pub occurrence: Option<u64>,
+    pub bodies: Vec<String>,
+    pub created_bodies: Vec<String>,
+    pub warnings: Vec<String>,
+    pub system: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exporter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exporter_up: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subcomponents: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rigid_joints: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stand_up: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transform: Option<[[f64; 4]; 4]>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

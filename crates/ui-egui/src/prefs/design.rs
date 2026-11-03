@@ -175,6 +175,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = setting::update_changed_links(app, ui);
             crate::scenario::publish_target("prefs:update_changed_links", response.rect);
             crate::scenario::publish_target("dialog:Update changed linked designs when a tab comes back", response.rect);
+            let response = setting::link_step_inserts(app, ui).on_hover_text(app.tr("settings.link_step_inserts_help"));
+            crate::scenario::publish_target("prefs:link_step_inserts", response.rect);
             ui.horizontal_wrapped(|ui| {
                 let response = setting::double_click_components(app, ui).backing_on_hover_text(app.tr("prefs.design_tools.double_click_help"));
                 crate::scenario::publish_target("prefs:double_click_components", response.rect);
