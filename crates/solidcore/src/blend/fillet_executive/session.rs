@@ -2966,6 +2966,14 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                 &mut note_open_end,
             )?;
             executive.open_ends.append(&mut open_ends);
+            let refusal = match refusal {
+                crate::blend::blend_corner::end::EndEdges::Built => None,
+                crate::blend::blend_corner::end::EndEdges::GlobalMerge => {
+                    executive.options.global_merge = true;
+                    None
+                }
+                crate::blend::blend_corner::end::EndEdges::Refused(refusal) => Some(refusal),
+            };
             if let Some(refusal) = refusal {
                 executive.error.note_error(
                     crate::blend::fillet_geom::p1::FilletErrorType::NoRoom,

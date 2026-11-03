@@ -21,6 +21,7 @@
 //! | [`end_awaits_rollover`], [`end_can_await_rollover`], [`end_past_tangent_edge`], `end_rolls_over`, `ends_in_tangent_edge` (private) | none (#2406: the End's rail rolls over a tangent edge first) |
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
+//! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
 //!
 //! Deviations: the fork's `NoteError(SM_FILERR_NO_ROOM, ...)` and `NoteFitRadius` before
 //! `SM_ERR` are returned ([`EndRefusal`]) for the executive's caller to note, which then
@@ -67,6 +68,36 @@ pub const ROLLS_INTO_SMOOTH_END: &str = "Fillet Error: the round's contact line 
 /// (`CreateEndPatchOfEnd`).
 pub const SMOOTH_END_CAP_FAILED: &str =
     "Fillet Corner Error: the cap of a round ending at a smooth vertex";
+
+/// What [`calc_end_edge_geom`] made of an End's edges.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EndEdges {
+    /// The End's edges are built (or left open, noted), for `CalcCornerEdgeGeom`.
+    Built,
+    /// Not the fork's: the end rib was deleted where the end face runs on tangentially past
+    /// the side edge's far end; the executive does a global merge (as WR-303's end rib).
+    GlobalMerge,
+    /// The End is refused.
+    Refused(EndRefusal),
+}
+
+impl EndEdges {
+    /// [`EndEdges::Refused`] for a refusal, else [`EndEdges::Built`].
+    #[must_use]
+    pub fn of(refusal: Option<EndRefusal>) -> Self {
+        refusal.map_or(Self::Built, Self::Refused)
+    }
+}
+
+/// The rail's face F: the fillet's face (of `fil_faces`) that the side edge (of
+/// `side_faces`) bounds.
+fn rail_face(fil_faces: [FaceId; 2], side_faces: [FaceId; 2]) -> FaceId {
+    if side_faces.contains(&fil_faces[0]) {
+        fil_faces[0]
+    } else {
+        fil_faces[1]
+    }
+}
 
 /// An End's refusal: the fork's `NoteError(SM_FILERR_NO_ROOM, comment)` and
 /// `NoteFitRadius(fit, edge)` before its `SM_ERR`.
@@ -301,6 +332,77 @@ fn radius_reaching_side_edge_end(
     )?;
     let past = !on && within;
     Ok((past, if past { fit } else { 0.0 }))
+}
+
+/// Not the fork's (#2364 review, SolidCraft #11360's `a_round_ending_in_an_earlier_round`,
+/// opt-in `fixes.fillet_blend_corner`): whether the End's face G (the side edge's face that
+/// is not the rail's face F) runs on tangentially past the side edge's far end P, so the rail
+/// running past P stays on F and ends on G's tangent continuation. That holds where P has
+/// exactly three edges: the side edge (F and G), an edge E2 that bounds F and a face H, and
+/// an edge E3 between G and H whose faces meet tangentially at P. There the End takes no
+/// single end face. The round meets G and H, which are one smooth surface, and the global
+/// merge cuts it there exactly. Rounding an edge into an earlier round does this where the
+/// earlier round runs tangentially onto the top face: before the blend corner's End the
+/// global merge built it (WR-303) to the volume of rounding both edges together.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without side edge, far vertex or edge use; those of the topology
+/// walks and the tangency test.
+fn end_face_runs_on_past_side_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+    side_eu: EdgeuseId,
+    rail_face: FaceId,
+) -> Result<bool> {
+    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
+    let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
+    if !side_faces.contains(&rail_face) {
+        return Ok(false);
+    }
+    let end_face = if side_faces[0] == rail_face {
+        side_faces[1]
+    } else {
+        side_faces[0]
+    };
+    if end_face == rail_face {
+        return Ok(false);
+    }
+    let far = if edge::start_vertex(target, side_edge)? == corner.vertex {
+        edge::end_vertex(target, side_edge)?
+    } else {
+        edge::start_vertex(target, side_edge)?
+    }
+    .ok_or_else(nul)?;
+    let edges = vertex::edges(target, far, None)?;
+    if edges.len() != 3 || !edges.contains(&side_edge) {
+        return Ok(false);
+    }
+    let mut on_rail_face = None;
+    let mut on_end_face = None;
+    for &e in &edges {
+        if e == side_edge {
+            continue;
+        }
+        let faces = edge::faces(target, e, None)?;
+        if faces.len() != 2 {
+            return Ok(false);
+        }
+        let other = |f: FaceId| faces.iter().copied().find(|&x| x != f);
+        if faces.contains(&rail_face) && !faces.contains(&end_face) {
+            on_rail_face = other(rail_face).map(|h| (e, h));
+        } else if faces.contains(&end_face) && !faces.contains(&rail_face) {
+            on_end_face = other(end_face).map(|h| (e, h));
+        }
+    }
+    let (Some((_, h)), Some((e3, h3))) = (on_rail_face, on_end_face) else {
+        return Ok(false);
+    };
+    if h != h3 || h == end_face || h == rail_face {
+        return Ok(false);
+    }
+    let eu = eu1::primary_edgeuse(target, e3)?.ok_or_else(nul)?;
+    check_tangential_edgeuse_at_vertex(k, target, eu, far, rad_to_deg(corner.tangency_tol_radians))
 }
 
 /// The fork's `SmBlendCorner::DescribeEndPastSideEdge` (41a39ec): the reason of a refusal
@@ -631,6 +733,14 @@ pub fn fit_of_end_past_side_edges(
         }
         let (past, fit) =
             radius_reaching_side_edge_end(k, target, corner, solvers, fil_eu, side_eu, other_face)?;
+        // Not the fork's: past an end face that runs on tangentially the global merge cuts
+        // the round (`end_face_runs_on_past_side_edge`), so the rail's run past is no reason
+        // to refuse.
+        let fil_faces = [face_of(target, fil_eu)?, radial_face(target, fil_eu)?];
+        let rail = rail_face(fil_faces, side_faces);
+        if past && end_face_runs_on_past_side_edge(k, target, corner, side_eu, rail)? {
+            continue;
+        }
         if past && found.is_none_or(|(least, _)| fit < least) {
             found = Some((fit, eu1::edge(target, fil_eu)?.ok_or_else(nul)?));
         }
@@ -1080,11 +1190,13 @@ pub fn calc_end_edge_geom(
     solvers: &dyn SweptSolvers,
     cliff_overflow: bool,
     note_open_end: &mut dyn FnMut(EdgeuseId, VertexId, FaceId, bool) -> Result<()>,
-) -> Result<Option<EndRefusal>> {
+) -> Result<EndEdges> {
     let end = corner.blend.map(|b| b.end).unwrap_or_default();
     if end == super::BlendEnd::AtSmooth {
         // the cap's edges on the side faces (they need only the vertices), then the end rib
-        return calc_end_cap_edges(k, target, pseudo, corner, solvers);
+        return Ok(EndEdges::of(calc_end_cap_edges(
+            k, target, pseudo, corner, solvers,
+        )?));
     }
     // A concave round's End of mixed convexity (its end rib, then the cap's two edges): a
     // rail that misses the side edge of the other convexity passes over it, and the round
@@ -1138,7 +1250,7 @@ pub fn calc_end_edge_geom(
             return refuse_end_overflowing_side_edge(
                 k, target, solvers, fil_eu, &chain, other_face,
             )
-            .map(Some);
+            .map(EndEdges::Refused);
         }
     }
     let end_rib = if corner.edges.len() == 1 {
@@ -1157,7 +1269,7 @@ pub fn calc_end_edge_geom(
         None => false,
     };
     if !(on_end_faces || rib_is_side) {
-        return Ok(None);
+        return Ok(EndEdges::Built);
     }
     let start_fv = if on_end_faces {
         corner.vertices.first().copied()
@@ -1263,11 +1375,11 @@ pub fn calc_end_edge_geom(
     }
     let both_miss = cliff_overflow && misses[0] && misses[1];
     let Some(miss_fv) = miss_fv else {
-        return Ok(None);
+        return Ok(EndEdges::Built);
     };
     let record = pseudo.fillet_vertex(miss_fv)?;
     if record.point_class() != PointClassType::Edgeuse {
-        return Ok(None);
+        return Ok(EndEdges::Built);
     }
     // The side edge the rail missed, and the fillet's side face it does not bound.
     let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {
@@ -1327,6 +1439,23 @@ pub fn calc_end_edge_geom(
         let rib = end_rib.ok_or_else(nul)?;
         pseudo.delete_wire_fillet_edge(k, rib)?;
         corner.edges.clear();
+    } else if !runs_on
+        && !both_miss
+        && end_face_runs_on_past_side_edge(
+            k,
+            target,
+            corner,
+            side_eu,
+            rail_face(fil_faces, side_faces),
+        )?
+    {
+        // Not the fork's: the end face runs on tangentially past the side edge's far end
+        // (`end_face_runs_on_past_side_edge`): the end rib is deleted and the global merge
+        // cuts the round where it meets the end face and its continuation, as WR-303's did.
+        let rib = end_rib.ok_or_else(nul)?;
+        pseudo.delete_wire_fillet_edge(k, rib)?;
+        corner.edges.clear();
+        return Ok(EndEdges::GlobalMerge);
     } else if !runs_on && !both_miss {
         // The rail runs past its side edge's far end P onto the faces beyond. Refused,
         // naming the radius at which the rail reaches P: the ball touching the rail's face
@@ -1334,9 +1463,9 @@ pub fn calc_end_edge_geom(
         // touches the fillet's other face G, the root of dist(centre(rho), G) = rho on
         // (0, r].
         return refuse_end_past_side_edge(k, target, corner, solvers, fil_eu, side_eu, other_face)
-            .map(Some);
+            .map(EndEdges::Refused);
     }
-    Ok(None)
+    Ok(EndEdges::Built)
 }
 
 /// The fork's `SmBlendCorner::CreateEndPatchOfEnd`'s branch for an End at a smooth vertex
