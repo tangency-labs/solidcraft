@@ -1556,19 +1556,31 @@ fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
 
 #[test]
 fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
-    // At 9 mm radius, 16 copies of a 3.5 mm hole overlap their neighbours: they are not apart,
+    // At 8.5 mm radius, 16 copies of a 3.5 mm hole overlap their neighbours: they are not apart,
     // and each is cut on its own, as before.
     let mut doc = Document::new("crowded");
-    disc_with_hole_pattern(&mut doc, 9.0, 16);
+    disc_with_hole_pattern(&mut doc, 8.5, 16);
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
     assert_eq!((work.cut_tools, work.miss_intersects), (15, 0), "{work:?}");
+    // At 9 mm they come within 0.012 mm of each other without touching: their exact shapes are
+    // apart, so they are cut in one go, and all 16 holes are cut.
+    let mut doc = Document::new("close");
+    disc_with_hole_pattern(&mut doc, 9.0, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (1, 0), "{work:?}");
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    let disc = std::f64::consts::PI * 2500.0 * 1.5;
+    let v = disc_volume(&model);
+    assert!((v - (disc - 16.0 * hole)).abs() < 1e-3 * hole, "{v}");
 }
 
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
-/// kernel grows them, meet, finer meshes show them 1.9 mm apart. The ring's faces counted as its
+/// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
 /// surfaces are, and the work.
 fn grooved_ring_faces() -> (usize, Counts) {
     let mut doc = Document::new("grooves");
@@ -1593,9 +1605,9 @@ fn grooved_ring_faces() -> (usize, Counts) {
 }
 
 #[test]
-fn copies_that_notch_the_same_round_face_are_cut_one_by_one() {
-    // Cut all in one go, the ten grooves left the bore in more faces than cutting them one after
-    // another does (48 against 38, #9007): copies that notch the same round face are cut in turn.
+fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_one() {
+    // The ten grooves notch the same round bore. Cut all in one go, they leave it in as many
+    // faces as cutting them one after another does (#9007).
     let (patterned, work) = grooved_ring_faces();
     let cut = |a: kernel::Body, b: &kernel::Body| kernel::boolean(&a, b, kernel::BoolOp::Cut).unwrap().unwrap();
     let ring =
@@ -1606,7 +1618,7 @@ fn copies_that_notch_the_same_round_face_are_cut_one_by_one() {
         cut(ring, &copy)
     });
     assert_eq!(patterned, kernel::measure(&one_by_one).unwrap().merged.faces);
-    assert_eq!(work.cut_tools, 9, "{work:?}");
+    assert_eq!(work.cut_tools, 1, "{work:?}");
 }
 
 #[test]
