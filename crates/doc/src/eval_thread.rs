@@ -173,8 +173,8 @@ impl FaceEnds<'_> {
     fn clear_of_end_plane(&self, side: usize) -> bool {
         let (p, e) = (self.pitch, self.pitch * 1e-3);
         let inside = if side == 0 { (self.cyl.start + e, self.cyl.start + p) } else { (self.cyl.end - p, self.cyl.end - e) };
-        // Well off the face's own cylinder, which a ring nearly on it would have to intersect.
-        kernel::material_in_ring(self.body, self.cyl, self.cyl.radius + 0.01 * p, self.cyl.radius + 0.25 * p, inside).is_ok_and(|hit| !hit)
+        // From just off the face itself, as `free`: only touching it is not in the groove's way.
+        kernel::material_in_ring(self.body, self.cyl, self.cyl.radius + e, self.cyl.radius + 0.25 * p, inside).is_ok_and(|hit| !hit)
     }
 }
 
@@ -727,8 +727,14 @@ fn trim_at_shoulders(mut tool: Body, axis: Vec3, ends: [End; 2], face: (f64, f64
         if end != End::Shoulder {
             continue;
         }
+        #[cfg(test)]
+        if tests::FAIL_TRIM.get() {
+            return Err(kernel::KernelError::Failed("trim refused for the test".into()).into());
+        }
         let plane = Plane::from_normal(axis + k * at, *k).ok_or_else(|| DocError::Invalid("thread axis".into()))?;
-        tool = kernel::half_space(&tool, &plane, keep_positive)?.0.ok_or_else(|| DocError::Invalid("the thread's groove misses its face".into()))?;
+        // An error of the cut, like the kernel's own: `cut` then falls back to the square stop.
+        let missed = || kernel::KernelError::Failed("the thread's groove misses its face".into());
+        tool = kernel::half_space(&tool, &plane, keep_positive)?.0.ok_or_else(missed)?;
     }
     Ok(tool)
 }
@@ -1001,4 +1007,52 @@ fn tip_cones(
         return Err(DocError::Invalid("a chamfered tip needs a free end of the thread (one with no material past it)".into()));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// Make [`trim_at_shoulders`] fail as the kernel would.
+        pub(super) static FAIL_TRIM: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Where the kernel can't make the trimmed cut, a thread at a shoulder that built with the
+    /// square stop still builds with it, and the feature says its last turn is left uncut.
+    #[test]
+    fn a_shoulder_cut_the_kernel_refuses_falls_back_to_the_square_stop_and_says_so() {
+        let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 6.0)).unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0), 5.0, 16.0).unwrap();
+        let body = kernel::boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let build = |fail: bool| {
+            let mut st = ModelState::default();
+            st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
+            let ask = ThreadAsk {
+                form: None,
+                designation: Some("M10"),
+                hand: ThreadHand::Right,
+                starts: 1,
+                steep: SteepFlank::default(),
+                extent: Extent::Full,
+                from: None,
+                modeled: true,
+                ease_out: (0.0, 0.0),
+                tapped: false,
+                old_auto_size: false,
+            };
+            let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask).unwrap();
+            FAIL_TRIM.set(fail);
+            let note = cut(&mut st, on, (ThreadTip::None, None, None));
+            FAIL_TRIM.set(false);
+            (note.unwrap(), kernel::measure(&st.bodies[0].body).unwrap().volume)
+        };
+        let (none, trimmed) = build(false);
+        assert_eq!(none, None);
+        let (note, square) = build(true);
+        assert!(note.is_some_and(|n| n.contains("M10") && n.contains("left uncut")));
+        // The square stop leaves about half a pitch's worth of groove uncut: well over a mm³.
+        assert!(square > trimmed + 1.0, "{square} vs {trimmed}");
+    }
 }
