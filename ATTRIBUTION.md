@@ -444,10 +444,6 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/icons/ui/design/svg/model/perforate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/pipe.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/silhouette.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/corner_join.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sheet_corner_butt.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sheet_corner_partial.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
-| assets/icons/ui/design/svg/model/sheet_corner_full.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/assistant.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/flat/agent_link.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/offset_two_sides.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
