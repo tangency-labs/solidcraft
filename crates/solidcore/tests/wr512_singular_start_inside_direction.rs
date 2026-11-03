@@ -50,6 +50,13 @@ const ARC: [f64; 3] = [48.045114044109852, -5.4635486396119797, 10.0];
 /// The pinned C++ with the fork's line: the part after both rounds.
 const BOTH_ROUNDS: f64 = 9531.3100142533;
 
+/// The fork's part after both rounds (tangency-labs/smlib@18e96f1, `SmApiFilletEdges` at
+/// `SmApiBrepComputeVolume` 1e-8): the arc round ends on the front round where both are
+/// tangent to the top face, a smooth vertex, which the fork's blend corner End builds
+/// (smlib#124, 41a39ec); the pinned C++ with only the WR-512 line stops short of it at
+/// [`BOTH_ROUNDS`]. Measured with the same plate, wall and picks as here: 9532.2987121741.
+const BOTH_ROUNDS_FORK: f64 = 9532.2987121741;
+
 /// The plate joined with the corner box less the cylinder, as the fork's capi test builds it.
 fn part(k: &mut Kernel) -> Brep {
     let corner = create_box(k, Point3::new(PLATE, -WALL, 0.0), WALL, WALL, 10.0).unwrap();
@@ -109,6 +116,11 @@ fn assert_refused(r: solidcore::Result<()>) {
 /// The arc round built one manifold solid that checks clean, of the C++ volume within `tol`
 /// relative.
 fn assert_built(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64) {
+    assert_built_to(k, b, r, tol, BOTH_ROUNDS);
+}
+
+/// [`assert_built`] against the volume `want`.
+fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64, want: f64) {
     r.unwrap();
     let infinite = b.infinite_region();
     let solids = regions(b, None)
@@ -121,16 +133,18 @@ fn assert_built(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64
     let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
     assert!(lines.is_empty(), "{lines:?}");
     let v = volume(k, b);
-    println!("volume {v:.10} (C++ with the fix: {BOTH_ROUNDS})");
+    println!("volume {v:.10} (reference: {want})");
     assert!(
-        (v - BOTH_ROUNDS).abs() <= tol * BOTH_ROUNDS,
-        "volume {v}, expected {BOTH_ROUNDS}"
+        (v - want).abs() <= tol * want,
+        "volume {v}, expected {want}"
     );
 }
 
-/// The kernel with every fix, and the WR-512 fix as given.
+/// The kernel with every fix but `fillet_blend_corner` (the fork's blend corner End, which
+/// builds this round by itself; see [`BOTH_ROUNDS_FORK`]), and the WR-512 fix as given.
 fn every_fix(wr512: bool) -> Kernel {
     let mut fixes = UpstreamFixes::all();
+    fixes.fillet_blend_corner = false;
     fixes.ssi_singular_start_inside_direction = wr512;
     Kernel {
         fixes,
@@ -156,7 +170,8 @@ fn the_flag_builds_the_arc_round() {
     assert_built(&mut k, &mut b, r, 1e-9);
 }
 
-/// Every other fix does not reach the start point: without WR-512 the round still fails.
+/// Every other fix (but the blend corner End, which the fork has) does not reach the start
+/// point: without WR-512 the round still fails.
 #[test]
 fn every_other_fix_still_refuses_the_arc_round() {
     let mut k = every_fix(false);
@@ -164,7 +179,23 @@ fn every_other_fix_still_refuses_the_arc_round() {
     assert_refused(r);
 }
 
-/// Every fix: the other fixes build the rounds' faces their own way (the definition rounds of
+/// Every fix with the blend corner End: the arc round ends at a smooth vertex and builds
+/// without the WR-512 line, to the fork's volume (smlib#124, [`BOTH_ROUNDS_FORK`]), to 1e-8.
+#[test]
+fn the_blend_corner_end_builds_the_arc_round_as_the_fork() {
+    for wr512 in [false, true] {
+        let mut fixes = UpstreamFixes::all();
+        fixes.ssi_singular_start_inside_direction = wr512;
+        let mut k = Kernel {
+            fixes,
+            ..Kernel::default()
+        };
+        let (mut b, r) = both_rounds(&mut k);
+        assert_built_to(&mut k, &mut b, r, 1e-8, BOTH_ROUNDS_FORK);
+    }
+}
+
+/// Every fix but the blend corner End: the other fixes build the rounds' faces their own way (the definition rounds of
 /// `fillet_gn_section_generator` and others), so the volume is held to 1e-8, the integration's
 /// accuracy. A round whose end came out a point, or a lost face, is off by far more: the arc
 /// round removes 24.74 mm^3, 2.6e-3 of the part.

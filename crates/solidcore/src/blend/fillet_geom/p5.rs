@@ -1182,7 +1182,14 @@ impl FilletBrep {
             // failure branch below
             let the_corner = corners.corner(corner)?;
             let (surface, surface2_id): (Option<Surface>, Option<ExecutiveErrorObject>) =
-                if the_corner.is_extended_surface_patch() {
+                if let Some(cap) = the_corner.end_cap.as_ref() {
+                    // SolidCraft change (the fork's 41a39ec): an End at a smooth vertex is
+                    // cut by its plane square to its edge there
+                    (
+                        Some(exact_surface(cap)?),
+                        Some(ExecutiveErrorObject::EndCap(e)),
+                    )
+                } else if the_corner.is_extended_surface_patch() {
                     let face = self
                         .fillet_edge(e)?
                         .original_face()

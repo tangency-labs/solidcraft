@@ -221,6 +221,9 @@ pub enum ExecutiveErrorObject {
     /// The temporary planar end-face surface constructed by `CalcFilletIntSideFace`
     /// when `!corner.is_extended_surface_patch()`.
     TempEndPlane(EdgeId),
+    /// The cap plane of an End at a smooth vertex (`GetEndCapSurface()`, the fork's
+    /// 41a39ec), whose corner's end rib is this edge.
+    EndCap(EdgeId),
 }
 
 /// The members of `SmFilletExecutive` read and written by the corner code (CO-PORTED from
@@ -250,6 +253,9 @@ pub struct FilletExecutiveData {
     pub vertex_corner_map: BTreeMap<VertexId, FilletCornerId>,
     /// `m_vFilletSolvers`: ordered active solver ids in the executive.
     pub fillet_solvers: Vec<FilletSolverId>,
+    /// `m_vEarlierPassFaces` (the fork's, tangency-labs/smlib@9822462): the faces an
+    /// earlier pass of the same blend made, for `EndAtSmoothVertex`.
+    pub earlier_pass_faces: Vec<FaceId>,
     /// Fillet geometries deleted by `~SmFilletSolver` during
     /// [`FilletExecutiveData::test_and_convert_big_rad_fillet`].
     pub deleted_geoms: Vec<FilletGeomId>,
@@ -716,6 +722,9 @@ pub struct FilletCorner {
     /// faces' surfaces and loops; smlib#82, WR-697): set by its topology on a blend corner
     /// that is a Mixed one.
     pub mixed: Option<crate::blend::blend_corner::mixed::MixedCorner>,
+    /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
+    /// square to its edge there (`GetEndCapSurface`), set by its topology.
+    pub end_cap: Option<Surface>,
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -1050,6 +1059,7 @@ impl FilletCorner {
             ball: None,
             setback: None,
             mixed: None,
+            end_cap: None,
         }
     }
 
@@ -1140,16 +1150,25 @@ impl FilletCorner {
         exec: &FilletExecutiveData,
         solvers: &[FilletSolver],
     ) -> Result<Option<Self>> {
-        Self::create_with_solver_lookup(k, b, vertex, solver_eus, |edge_use| {
-            exec.fillet_solver_of_edgeuse(edge_use)
-                .and_then(|id| usize::try_from(id.0).ok())
-                .and_then(|i| solvers.get(i))
-                .ok_or_else(|| invalid(OP_CREATE, "filleted edge use without fillet solver"))
-        })
+        Self::create_with_solver_lookup(
+            k,
+            b,
+            vertex,
+            solver_eus,
+            &exec.earlier_pass_faces,
+            |edge_use| {
+                exec.fillet_solver_of_edgeuse(edge_use)
+                    .and_then(|id| usize::try_from(id.0).ok())
+                    .and_then(|i| solvers.get(i))
+                    .ok_or_else(|| invalid(OP_CREATE, "filleted edge use without fillet solver"))
+            },
+        )
     }
 
     /// `SmFilletCorner::Create` using the executive's live solver objects.
     ///
+    /// `earlier_pass_faces` are the faces an earlier pass of the same blend made
+    /// (`EndAtSmoothVertex`'s `cpExec`, the fork's 9822462); empty without one.
     /// `solver_of` resolves each filleted edge use to its actual borrowed solver
     /// base. Lookups occur in `solver_eus` order after the topology walk, where the
     /// native factory reads tolerances and the surface generator. No solver is copied.
@@ -1163,6 +1182,7 @@ impl FilletCorner {
         b: &mut Brep,
         vertex: VertexId,
         solver_eus: &[EdgeuseId],
+        earlier_pass_faces: &[FaceId],
         solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
     ) -> Result<Option<Self>> {
         // get number of edgeuses connected to this vertex to be filleted
@@ -1351,6 +1371,24 @@ impl FilletCorner {
                             FilletCornerKind::Open,
                             BlendCornerEvent::End,
                             BlendEnd::Open,
+                        ))
+                    } else if crate::blend::blend_corner::end::end_at_smooth_vertex(
+                        k,
+                        b,
+                        vertex,
+                        eu0,
+                        &all_eus,
+                        tan_tol_deg,
+                        earlier_pass_faces,
+                    )? {
+                        // The fork's (41a39ec): a blended edge running on tangentially into
+                        // an edge of its convexity not blended ends at the smooth vertex,
+                        // cut square to its edge there (MakeEndAtSmoothVertex: its own
+                        // construction, a blend corner of type SM_FCR_BLEND)
+                        Some(blend_corner(
+                            FilletCornerKind::NByTwo,
+                            BlendCornerEvent::End,
+                            BlendEnd::AtSmooth,
                         ))
                     } else {
                         Some(blend_corner(
@@ -1590,6 +1628,32 @@ impl FilletCorner {
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_join)
         {
+            return Ok(());
+        }
+        // the fork's (41a39ec): an End at a smooth vertex's patch is its cap
+        if self
+            .blend
+            .is_some_and(|blend| blend.is_end() && blend.end == BlendEnd::AtSmooth)
+        {
+            let built = env.with_patch_env(|env| {
+                crate::blend::blend_corner::end::create_end_cap_patch(self, env)
+            })?;
+            if !built {
+                // the fork notes the cap's failure (SM_FILERR_VERTEX_PROBLEM), as the
+                // session's path does
+                env.exec.error.note_corner_error(
+                    FilletErrorType::VertexProblem,
+                    self.corner_type(),
+                    FilStatus::Failure,
+                    Some(self.kind.name()),
+                    self.filleted_vertex()
+                        .map(ExecutiveErrorObject::TargetVertex),
+                    [None, None],
+                    [None, None],
+                    Some(crate::blend::blend_corner::end::SMOOTH_END_CAP_FAILED),
+                );
+                return Err(SolidError::sm_err("SmBlendCorner::CreateEndPatchOfEnd"));
+            }
             return Ok(());
         }
         if self
@@ -4028,16 +4092,17 @@ mod tests {
             solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
         }
         let seen = RefCell::new(Vec::new());
-        let corner = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
-            seen.borrow_mut().push(eu);
-            let index = outgoing
-                .iter()
-                .position(|&candidate| candidate == eu)
-                .unwrap();
-            Ok(solvers.get(index).unwrap())
-        })
-        .unwrap()
-        .unwrap();
+        let corner =
+            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+                seen.borrow_mut().push(eu);
+                let index = outgoing
+                    .iter()
+                    .position(|&candidate| candidate == eu)
+                    .unwrap();
+                Ok(solvers.get(index).unwrap())
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(*seen.borrow(), outgoing);
         assert_eq!(corner.kind, FilletCornerKind::ConvexNByN);
         assert_eq!(corner.approx_tol_3d, 0.01);
@@ -4045,15 +4110,16 @@ mod tests {
 
         // The next factory call sees the same owned solver's updated state.
         solvers.get_mut(1).unwrap().approx_tol_3d = 0.001;
-        let corner = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
-            let index = outgoing
-                .iter()
-                .position(|&candidate| candidate == eu)
-                .unwrap();
-            Ok(solvers.get(index).unwrap())
-        })
-        .unwrap()
-        .unwrap();
+        let corner =
+            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+                let index = outgoing
+                    .iter()
+                    .position(|&candidate| candidate == eu)
+                    .unwrap();
+                Ok(solvers.get(index).unwrap())
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(corner.approx_tol_3d, 0.001);
     }
 
@@ -4067,24 +4133,26 @@ mod tests {
         solver.fsg = Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear);
         let seen = RefCell::new(Vec::new());
         let failure = invalid("factory_lookup_test", "second solver unavailable");
-        let result = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
-            seen.borrow_mut().push(eu);
-            if seen.borrow().len() == 2 {
-                Err(failure.clone())
-            } else {
-                Ok(&solver)
-            }
-        });
+        let result =
+            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+                seen.borrow_mut().push(eu);
+                if seen.borrow().len() == 2 {
+                    Err(failure.clone())
+                } else {
+                    Ok(&solver)
+                }
+            });
         assert_eq!(result.unwrap_err(), failure);
         assert_eq!(*seen.borrow(), outgoing.get(..2).unwrap());
 
         // Invalid topology fails before the first native solver read.
         seen.borrow_mut().clear();
         b.edgeuse_mut(*outgoing.first().unwrap()).unwrap().cw = None;
-        let result = FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, |eu| {
-            seen.borrow_mut().push(eu);
-            Ok(&solver)
-        });
+        let result =
+            FilletCorner::create_with_solver_lookup(&k, &mut b, vertex, &outgoing, &[], |eu| {
+                seen.borrow_mut().push(eu);
+                Ok(&solver)
+            });
         assert!(result.is_err());
         assert!(seen.borrow().is_empty());
     }

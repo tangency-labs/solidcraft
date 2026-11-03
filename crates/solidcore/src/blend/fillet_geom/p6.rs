@@ -184,6 +184,20 @@ fn copy_as_b_spline(k: &Kernel, curve: &Curve) -> Result<Option<Curve>> {
     Ok(ignored(copy)?.filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE)))
 }
 
+/// The `SmBSplineCurve` a curve of a B-spline class is (`SM_CAST_PTR(SmBSplineCurve, ..)`):
+/// a B-spline, a line's NURB, or a conic's B-spline; `SM_ERR` for any other kind.
+fn b_spline_of_piece(c: &Curve) -> Result<BSplineCurve> {
+    use crate::curve::curve::CurveKind;
+    Ok(match c.kind() {
+        CurveKind::BSpline(b) => b.clone(),
+        CurveKind::Line(l) => l.base_with_nurb()?.into_owned(),
+        CurveKind::Ellipse(e) => e.base().clone(),
+        CurveKind::Hyperbola(h) => h.base().clone(),
+        CurveKind::Parabola(p) => p.base().clone(),
+        _ => return Err(SolidError::sm_err(OP_ON_EDGE)),
+    })
+}
+
 /// `SmCurve::Evaluate(t, 1, TRUE, aPV)`: the position and first derivative.
 fn evaluate_tangent(k: &Kernel, curve: &Curve, t: f64, op: &'static str) -> Result<(Point3, Vec3)> {
     let pv = curve.evaluate(k, t, 1, true, true)?;
@@ -902,16 +916,141 @@ impl FilletBrep {
     /// end point does not drop; those of `Trim` and `ReverseParameterization`.
     pub fn calc_edge_on_edge(&mut self, k: &Kernel, e: EdgeId, target: &Brep) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_ON_EDGE);
+        let orig_edge = self.fillet_edge(e)?.original_edge().ok_or_else(nul)?;
+        // GWC: Stop Fillets from switching SmCurve objects to SmBSplineCurve objs
+        let orig_curve = target.edge(orig_edge)?.curve.as_ref().ok_or_else(nul)?;
+        let new_3d_curve = copy_as_b_spline(k, orig_curve)?.ok_or_else(nul)?;
+        self.finish_edge_on_edge(k, e, target, new_3d_curve, false)
+    }
+
+    /// [`Self::calc_edge_on_edge`] of an edge of a corner at `corner_vertex` (the fork's
+    /// `m_cpCorner`, 63c7962; `fixes.fillet_blend_corner`): a rail's end found on the side
+    /// edge continued across a seam's vertex (`CalcRailIntEdgeuse`,
+    /// [`crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex`]) lies on a
+    /// later edge of that chain, so the edge runs from the corner's vertex along the chain
+    /// to it, the chain's edges (each trimmed to its interval) joined end to end
+    /// (`CreateByJoining`), and is trimmed on the joined curve's natural interval. The walk
+    /// takes at most [`crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS`] edges, as
+    /// the fork's.
+    ///
+    /// # Errors
+    /// As [`Self::calc_edge_on_edge`]; `SM_ERR_NULL_POINTER` without the edge's use on the
+    /// rail's faceuse; `SM_ERR` for an original edge away from the corner's vertex, a
+    /// piece that is not a B-spline, or a chain that does not reach the rail's end's edge;
+    /// those of the continuation, `Trim` and `CreateByJoining`.
+    pub fn calc_edge_on_edge_at_corner(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        target: &mut Brep,
+        corner_vertex: Option<VertexId>,
+        tangency_tol_radians: f64,
+    ) -> Result<()> {
+        let nul = || SolidError::null_pointer(OP_ON_EDGE);
+        let (start_fv, end_fv) = self.edge_end_vertices(e, OP_ON_EDGE)?;
+        let orig_edge = self.fillet_edge(e)?.original_edge().ok_or_else(nul)?;
+        let orig_curve = target.edge(orig_edge)?.curve.as_ref().ok_or_else(nul)?;
+        let mut new_3d_curve = copy_as_b_spline(k, orig_curve)?.ok_or_else(nul)?;
+        let mut joined = false;
+        let tol_deg = crate::math::rad_to_deg(tangency_tol_radians);
+        for fv in [start_fv, end_fv] {
+            let Some(corner_vertex) = corner_vertex else {
+                break;
+            };
+            let record = self.fillet_vertex(fv)?;
+            let (PointClassType::Edgeuse, Some(EntityRef::Edgeuse(fv_eu))) =
+                (record.point_class(), record.point_class_object())
+            else {
+                continue;
+            };
+            let fv_edge = eu1::edge(target, fv_eu)?;
+            if fv_edge == Some(orig_edge) || edge::is_closed(target, orig_edge)? {
+                continue;
+            }
+            // this edge's edgeuse on the rail's faceuse, and the chain from the corner's vertex
+            let fv_faceuse = eu1::faceuse(target, fv_eu)?;
+            let mut curr = None;
+            for eu in edge::edgeuses(target, orig_edge, None, None)? {
+                if curr.is_none() && eu1::faceuse(target, eu)? == fv_faceuse {
+                    curr = Some(eu);
+                }
+            }
+            let mut curr = Some(curr.ok_or_else(nul)?);
+            if edge::start_vertex(target, orig_edge)? != Some(corner_vertex)
+                && edge::end_vertex(target, orig_edge)? != Some(corner_vertex)
+            {
+                return Err(SolidError::sm_err(OP_ON_EDGE));
+            }
+            let mut pieces: Vec<BSplineCurve> = Vec::new();
+            let mut senses: Vec<bool> = Vec::new();
+            let mut from = Some(corner_vertex);
+            let mut reached = false;
+            for _ in 0..crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS {
+                let Some(eu) = curr else {
+                    break;
+                };
+                let piece_edge = eu1::edge(target, eu)?.ok_or_else(nul)?;
+                let piece_curve = target.edge(piece_edge)?.curve.as_ref().ok_or_else(nul)?;
+                // SM_CAST_PTR(SmBSplineCurve, copy): a conic or a line is one too; its
+                // Trim is its own (virtual), the join reads its B-spline
+                let Some(mut piece) = copy_as_b_spline(k, piece_curve)? else {
+                    return Err(SolidError::sm_err(OP_ON_EDGE));
+                };
+                let mut piece_ivl = edge::interval(target, piece_edge)?;
+                piece.trim(k, &mut piece_ivl, TrimMode::Notify)?;
+                pieces.push(b_spline_of_piece(&piece)?);
+                let start = edge::start_vertex(target, piece_edge)?;
+                senses.push(start == from);
+                let to = if start == from {
+                    edge::end_vertex(target, piece_edge)?
+                } else {
+                    start
+                };
+                if Some(piece_edge) == fv_edge {
+                    reached = true;
+                    break;
+                }
+                curr = match to {
+                    Some(to) => crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex(
+                        k, target, eu, to, tol_deg,
+                    )?,
+                    None => None,
+                };
+                from = to;
+            }
+            if !reached {
+                return Err(SolidError::sm_err(OP_ON_EDGE));
+            }
+            let joined_curve = BSplineCurve::create_by_joining(&mut pieces, Some(&senses))?;
+            new_3d_curve = Curve::from(joined_curve);
+            joined = true;
+            break;
+        }
+        self.finish_edge_on_edge(k, e, target, new_3d_curve, joined)
+    }
+
+    /// The rest of `CalcEdgeOnEdge` after the curve's copy: the trim between the end
+    /// points' drops (on the joined curve's natural interval when `joined`, else on the
+    /// original edge's interval), the reversal and the curve's setting.
+    fn finish_edge_on_edge(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        target: &Brep,
+        mut new_3d_curve: Curve,
+        joined: bool,
+    ) -> Result<()> {
+        let nul = || SolidError::null_pointer(OP_ON_EDGE);
         // get filletEdge vertices
         let (start_fv, end_fv) = self.edge_end_vertices(e, OP_ON_EDGE)?;
         let orig_edge = self.fillet_edge(e)?.original_edge().ok_or_else(nul)?;
 
-        // GWC: Stop Fillets from switching SmCurve objects to SmBSplineCurve objs
-        let orig_curve = target.edge(orig_edge)?.curve.as_ref().ok_or_else(nul)?;
-        let mut new_3d_curve = copy_as_b_spline(k, orig_curve)?.ok_or_else(nul)?;
-
         // Trim ThisFilletEdge->OrigCurveCopy by Start and End FilletPoints
-        let mut trim_ivl = edge::interval(target, orig_edge)?;
+        let mut trim_ivl = if joined {
+            new_3d_curve.natural_interval() // the chain joined
+        } else {
+            edge::interval(target, orig_edge)?
+        };
         let tol = edge::tolerance(target, orig_edge)?;
 
         // drop startVertex to thisFilletEdge->OrigCurveCopy
@@ -2125,10 +2264,14 @@ impl FilletBrep {
             env,
             |id| solver_of(solvers, id, OP_TRIM),
         )
+        .map(|_leaked| ())
     }
 
     /// Trim original surfaces using one retained solver and body-qualified marks.
     /// The solver is checked at the same point as the indexed entrypoint's lookup.
+    /// Returns whether the trim leaked (`bBadTrim`: a collected face is the rail's
+    /// face on its other side; nothing was accumulated into `deleted` then), which
+    /// the fork (smlib d657afa) makes an error the caller notes.
     ///
     /// # Errors
     ///
@@ -2147,7 +2290,7 @@ impl FilletBrep {
         env: &TrimOriginalSurfacesEnv<'_>,
         solver_id: FilletSolverId,
         solver: &FilletSolver,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.trim_original_surfaces_resolved(
             k,
             g,
@@ -2184,7 +2327,7 @@ impl FilletBrep {
         mark_locks: &[MarkLock],
         env: &TrimOriginalSurfacesEnv<'_>,
         solver: impl FnOnce(FilletSolverId) -> Result<&'s FilletSolver>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         // locals
         let geom = self.geom(g)?;
         let solver_id = geom
@@ -2497,7 +2640,10 @@ impl FilletBrep {
                 }
             }
         }
-        Ok(())
+        // The fork's (smlib d657afa, under `fixes.fillet_blend_corner`) leaking trim is
+        // an error noted by the caller, which holds the executive's error info; the
+        // faces are not accumulated then either (the fork returns before).
+        Ok(bad_trim)
     }
 
     /// `SmFilletGeom::RecordFilletError(eType, pFilletedEdge, pTargetFace, pRail,

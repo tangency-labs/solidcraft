@@ -15,6 +15,12 @@
 //! through each vertex: the removed region is the round's section (1 - pi/4) r^2 about the
 //! corner's axis over the quarter turn, closed by flat ends, so by Pappus it removes exactly
 //! (1 - pi/4) r^2 (pi/2) (2 - c), c the section's centroid off the corner's wall.
+//!
+//! With `fillet_blend_corner` (WR-697) the fork's End at a smooth vertex (smlib#124,
+//! 41a39ec) ends the round there instead, on the plane square to its edge: the same body,
+//! with or without WR-674 (whose path the End replaces). Its neighbours end the same way
+//! where they run on tangentially into an edge not picked. Their figures are the fork's at
+//! 18e96f1 (`SmApiFilletEdges` on the same plate, `SmApiBrepComputeVolume` at 1e-10).
 
 #![allow(
     clippy::unwrap_used,
@@ -65,6 +71,16 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
         key_of: &|_| ObjectKey(0),
     };
     brep_volume(k, b, 1e-8, &attrs).unwrap()
+}
+
+/// The volume to the fork's comparison accuracy (1e-10).
+fn fine_volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
 }
 
 /// The edge nearest `p`.
@@ -168,11 +184,17 @@ fn do_filleting_builds_the_closed_body() {
     assert!((removed - pappus()).abs() <= 1e-7, "removed {removed}");
 }
 
-/// Without WR-674 the round is handed to the global merge: `DoFilleting` leaves an open
-/// body that removes nothing, and `fillet_edges` refuses it and puts the plate back.
+/// Without WR-674 and the blend corner the round is handed to the global merge:
+/// `DoFilleting` leaves an open body that removes nothing, and `fillet_edges` refuses it and
+/// puts the plate back.
 #[test]
 fn without_the_fix_the_global_merge_leaves_an_open_body() {
-    let mut k = kernel(false);
+    let without = || {
+        let mut k = kernel(false);
+        k.fixes.fillet_blend_corner = false;
+        k
+    };
+    let mut k = without();
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let e = pick(&k, &b, CORNER);
@@ -193,11 +215,30 @@ fn without_the_fix_the_global_merge_leaves_an_open_body() {
     b.refresh_cached_topology();
     assert!(!is_manifold_solid(&b).unwrap());
 
-    let mut k = kernel(false);
+    let mut k = without();
     let mut b = plate(&mut k);
     let e = pick(&k, &b, CORNER);
     assert!(fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).is_err());
     assert!((volume(&k, &mut b) - before).abs() <= 1e-9 * before);
+}
+
+/// Without WR-674 the blend corner's End at a smooth vertex (the fork's 41a39ec) builds the
+/// round with flat ends: the fork's 0.159135839575356 (Pappus to 1.5e-10).
+#[test]
+fn the_blend_corner_ends_the_round_at_the_smooth_vertices() {
+    let mut k = kernel(false);
+    let mut b = plate(&mut k);
+    let before = fine_volume(&k, &mut b);
+    let e = pick(&k, &b, CORNER);
+    fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    assert!(is_manifold_solid(&b).unwrap());
+    assert_eq!(b.face_list().len(), 11);
+    let removed = before - fine_volume(&k, &mut b);
+    assert!(
+        (removed - 0.159_135_839_575_356).abs() <= 1e-9,
+        "removed {removed}"
+    );
 }
 
 /// Pinned SMLib fails the corner; WR-674 alone builds it.
@@ -220,42 +261,35 @@ fn pinned_default_fails_the_corner() {
     assert!((removed - pappus()).abs() <= 1e-7, "removed {removed}");
 }
 
-/// The straight edges next to the corner still build as before with the fix on. The first
-/// figure is with WR-682's `fillet_surface_plane_curve_on_plane_equation`, which is in this
-/// test's set of fixes and takes 8.8e-9 off what that round removes (0.375911985298899
-/// without it): its end's curve is traced on the plane. The body is sound either way.
-///
-/// The tab side's edge and the rim each end at a mixed-convexity End (WR-697's
-/// `fillet_blend_corner`, the fork's 3e26f76, in this test's set of fixes): the end rib is the
-/// intersection between the rails' ends on the end face's surface, which are exact here to
-/// 1e-13. Without it the rib is marched from one rail's end, and the rounds remove
-/// 0.375911976512270 and 7.958674274526857. The rim's closed form, its spandrel
-/// (1 - pi/4) r^2 revolved about the disc's axis outside |x| < 4, is 7.958672911836132:
-/// the End's figure is 5.3e-8 off it, the marched rib's 1.4e-6.
-///
-/// The tab side's End rib is traced from the top rail's end. Until `FlushCurve` kept a
-/// short last span whose merge fails the trace's span test (WR-697 addendum, end-rib flush
-/// merge), the merged span left the rib's UV curve on the round 4.1077e-5 off its 3D curve
-/// (`check_brep` `Bad Gap`, edge tolerance 4e-5), and the round removed 0.375912317213533.
-/// Each body is now checked sound.
+/// The straight edges next to the corner and the rim, each rounded alone. The tab's side
+/// and its top run on tangentially into the corner arcs, which are not picked: with the blend
+/// corner each ends there at the smooth vertex, on the plane square to it (the fork's
+/// 41a39ec), not run on round the arc. The tab side's other end and the rim's ends are
+/// mixed-convexity Ends (the fork's 3e26f76). The figures are the fork's at 18e96f1 on the
+/// same plate (this test's fixes add WR-682's plane curve, among others: solidcore's are
+/// within 0 and 4.5e-11 of them for the tab's top and the rim), except the tab side's. The
+/// fork's tab side round removes 0.344196265039045 and leaves its End rib's UV curve off its
+/// 3D curve (`check_brep` `Bad Gap`). Here `FlushCurve` keeps the short last span (WR-697
+/// addendum, end-rib flush merge, solidcore's own), the body is sound and the round removes
+/// 0.344196254843155, 1.0e-8 less. Each body is checked sound (`check_brep` Level2).
 #[test]
 fn the_neighbours_keep_their_rounds() {
-    for (at, removed_before) in [
-        ([4.0, 28.0, 2.0], 0.375_912_307_117_687),
-        ([0.0, 33.111_111_1, 2.0], 0.278_032_181_169_237_45),
-        ([0.0, -25.0, 2.0], 7.958_672_964_786_274),
+    for (at, removed_by_fork) in [
+        ([4.0, 28.0, 2.0], 0.344_196_254_843_155),
+        ([0.0, 33.111_111_1, 2.0], 0.214_601_836_334_623),
+        ([0.0, -25.0, 2.0], 7.958_672_926_831_696),
     ] {
         let mut k = kernel(true);
         let mut b = plate(&mut k);
-        let before = volume(&k, &mut b);
+        let before = fine_volume(&k, &mut b);
         let e = pick(&k, &b, at);
         fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
         b.refresh_cached_topology();
         let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         assert!(check.is_valid(), "{at:?}: {:?}", check.lines());
-        let removed = before - volume(&k, &mut b);
+        let removed = before - fine_volume(&k, &mut b);
         assert!(
-            (removed - removed_before).abs() <= 1e-9,
+            (removed - removed_by_fork).abs() <= 1e-10,
             "{at:?}: {removed}"
         );
     }

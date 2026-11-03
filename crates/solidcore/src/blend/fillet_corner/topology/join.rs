@@ -39,9 +39,10 @@ fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// The fork's refusal comment (`SM_FILERR_CORNER_UNSUPPORTED`).
+/// The fork's refusal comment (`SM_FILERR_NO_ROOM` with no size building it since
+/// 41a39ec; `SM_FILERR_CORNER_UNSUPPORTED` with 543d25a's comment before).
 pub const JOIN_ACROSS_EDGES: &str =
-    "Fillet Error: blends continuing each other across more than one edge on a side";
+    "Fillet Error: blends continuing each other across more than one edge on a side have no section both reach: no size builds it";
 
 /// Actual objects `SmBlendCorner::MakeJoinTopology` uses.
 #[derive(Debug)]
@@ -67,8 +68,9 @@ pub enum JoinTopology {
     /// The Join's topology is built.
     Built,
     /// More than one edge stands between the blends on a side: the fork notes
-    /// `SM_FILERR_CORNER_UNSUPPORTED` at the vertex ([`JOIN_ACROSS_EDGES`]) and returns
-    /// `SM_ERR`; the caller does both.
+    /// `SM_FILERR_NO_ROOM` at the vertex ([`JOIN_ACROSS_EDGES`]) and the fit 0 on the
+    /// first blended edge (41a39ec: no size builds it), and returns `SM_ERR`; the caller
+    /// does these.
     RefusedAcrossEdges,
 }
 

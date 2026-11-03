@@ -875,6 +875,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),
+        earlier_pass_faces: Vec::new(),
         // the fork's refusal fit (WR-696): none noted, as `FilletExecutive::new` leaves it
         fit_radius: -1.0,
         fit_edge: None,

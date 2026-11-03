@@ -757,6 +757,7 @@ fn state() -> FilletExecutive<Handle> {
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),
+        earlier_pass_faces: Vec::new(),
         fit_radius: -1.0,
         fit_edge: None,
         fit_kind: FitKind::Radius,

@@ -39,6 +39,7 @@ pub mod closed_nx1;
 mod concave_4x2;
 pub mod concave_nxn;
 pub mod end_corners;
+pub mod end_smooth;
 pub mod join;
 mod mixed;
 pub mod mixed_3x2;
@@ -192,7 +193,7 @@ fn find_closed_side_edgeuse(
     }
 }
 
-fn same_convexity_edges(
+pub(crate) fn same_convexity_edges(
     k: &Kernel,
     target: &mut Brep,
     first: EdgeuseId,
@@ -386,7 +387,7 @@ fn is_tangent_seam_at_vertex(
 
 /// `same_convexity_edges_round_vertex` (the fork's tangency-labs/smlib@d5ebcb3): whether
 /// `edge2`, anywhere round the vertex, has the convexity of `first`'s edge.
-fn same_convexity_edges_round_vertex(
+pub(crate) fn same_convexity_edges_round_vertex(
     k: &Kernel,
     target: &mut Brep,
     first: EdgeuseId,

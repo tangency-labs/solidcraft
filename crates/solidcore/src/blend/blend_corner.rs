@@ -64,6 +64,7 @@ use crate::topology::face::p2 as face2;
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 
 pub mod ball;
+pub mod end;
 pub mod mixed;
 pub mod setback;
 pub mod swept;
@@ -108,6 +109,9 @@ pub enum BlendEnd {
     /// `SM_BEND_RUNS_OUT`: its side faces continue each other through the vertex, its rails
     /// meet there (the pinned degenerate corner's).
     RunsOut,
+    /// `SM_BEND_AT_SMOOTH` (smlib 41a39ec): its edge runs on tangentially into an edge not
+    /// blended, cut square to the edge there ([`end`]).
+    AtSmooth,
 }
 
 /// `SmBlendTurn`: a Turn's two modes.

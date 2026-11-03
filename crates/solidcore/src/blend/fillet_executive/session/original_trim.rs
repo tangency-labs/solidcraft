@@ -4,10 +4,11 @@ use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_executive::p3::{
     FilletExecutive, OriginalSurfaceDeletionAccess, OriginalSurfaceTrimAccess,
 };
+use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_geom::p6::{
     TrimOriginalBody, TrimOriginalSurfacesEnv, TrimOriginalSurfacesMarks,
 };
-use crate::error::{EntityRef, Result};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::kernel::Kernel;
 use crate::topology::{
@@ -18,6 +19,9 @@ use crate::topology::{
     topology_traverser::Entity,
     FaceId,
 };
+
+/// `SmFilletGeom::TrimOriginalSurfaces`'s leaking-trim refusal (smlib d657afa).
+const OP_TRIM_LEAK: &str = "blend::fillet_geom::trim_original_surfaces";
 
 /// Face selections before the subsequent native deletion and merge operations.
 #[derive(Debug, Default)]
@@ -201,7 +205,7 @@ impl OriginalSurfaceTrimAccess<FilletObject, FaceId> for TrimAccess<'_, '_> {
             fillet_serial: self.fillet_serial,
             target_serial: self.objects.target_serial,
         };
-        self.objects.pseudo.trim_original_surfaces_with_solver(
+        let leaked = self.objects.pseudo.trim_original_surfaces_with_solver(
             k,
             geom,
             fillet,
@@ -213,7 +217,20 @@ impl OriginalSurfaceTrimAccess<FilletObject, FaceId> for TrimAccess<'_, '_> {
             &env,
             id,
             solver,
-        )
+        )?;
+        // SolidCraft change (smlib d657afa, `fixes.fillet_blend_corner`): faces that
+        // 'leaked' outside the fillet's boundaries are an error. The trim used to be
+        // dropped then, and the fillet's faces merged into the body left whole.
+        if leaked && k.fixes.fillet_blend_corner {
+            executive.error.note_error(
+                FilletErrorType::BadMerge,
+                Some(
+                    "Fillet Error: the faces a fillet's rails enclose on the body reach past its rails (the trim leaks)",
+                ),
+            );
+            return Err(SolidError::sm_err(OP_TRIM_LEAK));
+        }
+        Ok(())
     }
 }
 
@@ -279,6 +296,9 @@ impl FilletSession<'_> {
         serial: u64,
         output: &mut OriginalSurfaceDeletion,
     ) -> Result<()> {
+        if k.fixes.fillet_blend_corner {
+            self.mark_multi_face_trim_edges(k, locks, serial)?;
+        }
         let mut selection = OriginalSurfaceSelection::default();
         let selected = self.executive.select_original_surfaces(
             k,
@@ -387,6 +407,36 @@ impl FilletSession<'_> {
             Err(error) => Err(error),
             Ok(value) => released.map(|()| value),
         }
+    }
+
+    /// SolidCraft change (smlib d657afa, `DoFilletingSteps`, opt-in
+    /// `fixes.fillet_blend_corner`): an edge of the body with more than two faces
+    /// (where two lumps of the body touch along a line, as a bore's wall touching the
+    /// bottom face) bounds the material a blend takes off on one side of it, so it is
+    /// marked with the common edges before the trims: the faces beyond it are not the
+    /// blend's. Unmarked, `TrimOriginalSurfaces` collected across it into the whole
+    /// body (tangency-labs/solidcore#453).
+    fn mark_multi_face_trim_edges(
+        &mut self,
+        k: &Kernel,
+        locks: &[MarkLock],
+        serial: u64,
+    ) -> Result<()> {
+        let mark = locks
+            .first()
+            .ok_or_else(|| invalid("no mark lock for the trim"))?
+            .mark_type();
+        let mut marks = TrimMarks {
+            records: &mut self.objects.notification_records,
+            fillet_serial: serial,
+            target_serial: self.objects.target_serial,
+        };
+        for edge in p1::edges(self.objects.target, None)? {
+            if crate::topology::edge::faces(self.objects.target, edge, None)?.len() > 2 {
+                marks.mark(k, TrimOriginalBody::Target, Entity::Edge(edge), mark);
+            }
+        }
+        Ok(())
     }
 
     fn mark_common_trim_topology(&mut self, k: &Kernel, serial: u64, mark: MarkType) -> Result<()> {

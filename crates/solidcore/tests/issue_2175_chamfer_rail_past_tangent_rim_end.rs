@@ -165,15 +165,29 @@ fn chamfer_past_the_bottom_is_no_room_with_solidcraft_fixes() {
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
 }
 
-/// With the blend corner too (every fix but `geometric_g2_continuity`), the trace runs on to
-/// the edge's ends before it is extended (from smlib#82, `c2_trace_to_edge_ends`), the rails
-/// no longer leave their faces, and the chamfer builds a manifold solid of 12 faces. The
-/// fork at d443f10 (smlib#82's branch), the same chamfer through `SmFilletExecutive` with
-/// both corners bevelled, gives the same: success, 12 faces, `IsManifoldSolid`.
+/// With the blend corner too (every fix but `geometric_g2_continuity`): refused. Before
+/// smlib#124 the trace ran on to the edge's ends before it was extended (from smlib#82,
+/// `c2_trace_to_edge_ends`), the rails no longer left their faces, and the chamfer built a
+/// manifold solid of 12 faces, as the fork does at b785227 (smlib#82 merged, before
+/// smlib#124: success, 12 faces, `IsManifoldSolid`, volume 16940.633475979070).
+///
+/// With smlib#124 the rim edge's bottom end, where it meets the bottom face tangentially, is
+/// an End at a smooth vertex, and both rails end on extended edges, so both ends of the edge
+/// are through points of the trace. The fork at 63c7962 (and at 18e96f1), the same chamfer
+/// through `SmFilletExecutive` with both corners bevelled, fails solving the through point at
+/// the bottom end (`SmFilletSolver::CalcFilletGeom`, knot 0.75, guess (2.5, 22, -0.25)) and
+/// returns `SM_FILERR_EDGE_PROBLEM` (4), "Fillet Surface Computation Failure". The port
+/// skips that point (solidcore-only, WR-641, `fillet_through_extended_rail_end`, #1952), goes
+/// on, and the smooth-vertex End refuses the chamfer with `SM_FILERR_NO_ROOM` (8): its rail
+/// rolls over the bottom face's tangent edge (`CalcEndCapEdges`, 41a39ec). Without WR-641 the
+/// port returns the fork's 4.
 #[test]
-fn chamfer_past_the_bottom_builds_with_the_blend_corner() {
+fn chamfer_past_the_bottom_is_refused_with_the_blend_corner() {
     let mut k = solidcraft_kernel();
-    assert_eq!(chamfer(&mut k), Ok((12, true)));
+    assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
+    let mut k = solidcraft_kernel();
+    k.fixes.fillet_through_extended_rail_end = false;
+    assert_eq!(chamfer(&mut k), Err(FilletErrorType::EdgeProblem as i32));
 }
 
 #[test]

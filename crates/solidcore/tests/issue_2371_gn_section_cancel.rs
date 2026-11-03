@@ -206,32 +206,51 @@ fn a_token_fired_before_the_call_cancels_the_gn_round() {
 /// `Err(Cancelled)`: the time from the cancel to the return, and the check point's
 /// operation.
 #[cfg(not(target_arch = "wasm32"))]
-fn cancel_boss_root_after(delay: std::time::Duration) -> (std::time::Duration, &'static str) {
+fn cancel_boss_root_after(
+    delay: std::time::Duration,
+) -> Option<(std::time::Duration, &'static str)> {
     use std::time::Instant;
     let mut k = gn_kernel(true);
     let mut b = boss_on_plate(&mut k).unwrap();
     let e = pick(&k, &b, BOSS_ROOT);
     let token = CancelToken::new();
     k.set_cancel_token(token.clone());
+    let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
     let canceller = std::thread::spawn(move || {
+        start_rx.recv().unwrap();
         std::thread::sleep(delay);
         token.cancel();
         Instant::now()
     });
+    start_tx.send(()).unwrap();
     let made = fillet_edges(&mut k, &mut b, &[e], 2.0, 2, 2, 0.0);
     let returned = Instant::now();
     let cancelled_at = canceller.join().unwrap();
+    if made.is_ok() && cancelled_at > returned {
+        // a faster build finished the round before the cancel: nothing to cancel
+        return None;
+    }
     let Err(SolidError::Cancelled { operation }) = made else {
         panic!("the cancelled round returned {made:?} (after {delay:?})");
     };
-    (returned.saturating_duration_since(cancelled_at), operation)
+    Some((returned.saturating_duration_since(cancelled_at), operation))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_token_fired_from_another_thread_stops_the_boss_root_round_soon() {
-    for ms in [200, 1500, 4000, 10000] {
-        let (stop, at) = cancel_boss_root_after(std::time::Duration::from_millis(ms));
+    // 0 ms fires as soon as the call starts: the round cannot finish first, so this
+    // case always cancels; the later ones are skipped when a faster build is done by then
+    for ms in [0, 200, 1500, 4000, 10000] {
+        let made = cancel_boss_root_after(std::time::Duration::from_millis(ms));
+        assert!(
+            ms != 0 || made.is_some(),
+            "the round finished before an immediate cancel"
+        );
+        let Some((stop, at)) = made else {
+            eprintln!("ISSUE_2371 done before the cancel {ms} ms in");
+            continue;
+        };
         eprintln!("ISSUE_2371 cancelled {ms} ms in: returned {stop:?} after the cancel, at {at}");
         assert!(
             stop < std::time::Duration::from_secs(5),

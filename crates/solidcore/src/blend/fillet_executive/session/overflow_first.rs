@@ -11,6 +11,7 @@
 //! | [`FilletSession::set_classify_only`] | `SmFilletExecutive::SetClassifyOnly` |
 //! | [`FilletSession::overflow_edges`] | `SmFilletExecutive::GetOverflowEdges` |
 //! | [`FilletSession::mitred_edges`] | `SmFilletExecutive::GetMitredEdges` (the fork's `9ba2b12`) |
+//! | [`FilletSession::add_earlier_pass_face`] | `SmFilletExecutive::AddEarlierPassFace` (the fork's `9822462`) |
 //! | the stop in `FilletExecutive::refuse_blends_larger_than_faces` | the `m_bClassifyOnly` / `m_bOverflowFirst` stop of `CreateFilletBrep` |
 //!
 //! Deviations: both settings are per session and off by default, so a session that does
@@ -28,9 +29,22 @@
 
 use super::{FilletBody, FilletObject, FilletSession};
 use crate::error::EntityRef;
-use crate::topology::EdgeId;
+use crate::topology::{EdgeId, FaceId};
 
 impl FilletSession<'_> {
+    /// `AddEarlierPassFace` (the fork's, tangency-labs/smlib@9822462, smlib#130): `face`
+    /// is one an earlier pass of the same blend made on this body (the rounds that
+    /// overflow go first; the caller's `overflow_first` hands the faces its first pass
+    /// made to the second pass). A later round that runs on tangentially into an edge of
+    /// such a face meets that round as one blend, as when the two go together, rather
+    /// than ending at a smooth vertex. Call it before [`Self::create_corners`].
+    pub fn add_earlier_pass_face(&mut self, face: FaceId) {
+        self.executive.add_earlier_pass_face(FilletObject::Topology(
+            FilletBody::Target,
+            EntityRef::Face(face),
+        ));
+    }
+
     /// `SetOverflowFirst` (the fork's, tangency-labs/smlib `241f7ba`, WR-634; off by
     /// default): when blends of several edges overflow their faces across cliffs (and no
     /// refusal of the cliff overflow applies: none adds material, none rounds into the

@@ -706,6 +706,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             overflow_edges: Vec::new(),
             mitred_edges: Vec::new(),
             fan_split_points: Vec::new(),
+            earlier_pass_faces: Vec::new(),
             fit_radius: -1.0,
             fit_edge: None,
             fit_kind: super::p3::FitKind::Radius,
@@ -860,6 +861,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `CreateFilletBrep`.
     pub fn set_overflow_first(&mut self, value: bool) {
         self.overflow_first = value;
+    }
+
+    /// `AddEarlierPassFace` (the fork's, tangency-labs/smlib@9822462, smlib#130): a face
+    /// an earlier pass of the same blend made (the rounds that overflow go first).
+    pub fn add_earlier_pass_face(&mut self, face: O) {
+        self.earlier_pass_faces.push(face);
+    }
+
+    /// `IsEarlierPassFace` (the fork's, tangency-labs/smlib@9822462): whether `face` is
+    /// one an earlier pass of the same blend made ([`Self::add_earlier_pass_face`]).
+    pub fn is_earlier_pass_face(&self, face: &O) -> bool {
+        self.earlier_pass_faces.contains(face)
     }
 
     /// `SetClassifyOnly` (the fork's, WR-634, tangency-labs/smlib@241f7ba): before

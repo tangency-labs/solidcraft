@@ -1824,15 +1824,21 @@ impl FilletBrep {
             return Ok(());
         };
 
-        let end_face = self.fillet_edge(rib)?.original_face().ok_or_else(nul)?;
-        let end_surface = match context.extended_surface(corner, end_face)? {
-            Some(s) => s.clone(),
-            None => target
-                .face(end_face)?
-                .surface
-                .as_ref()
-                .ok_or_else(nul)?
-                .clone_for_evaluation()?,
+        // an End at a smooth vertex: its plane (the fork's 41a39ec); else the end face
+        // continued, or as it is
+        let end_surface = if let Some(cap) = corner.end_cap.as_ref() {
+            cap.clone()
+        } else {
+            let end_face = self.fillet_edge(rib)?.original_face().ok_or_else(nul)?;
+            match context.extended_surface(corner, end_face)? {
+                Some(s) => s.clone(),
+                None => target
+                    .face(end_face)?
+                    .surface
+                    .as_ref()
+                    .ok_or_else(nul)?
+                    .clone_for_evaluation()?,
+            }
         };
 
         let sid = self.geom(fillet_geom)?.fillet_solver().ok_or_else(nul)?;

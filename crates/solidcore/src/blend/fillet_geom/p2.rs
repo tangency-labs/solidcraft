@@ -111,7 +111,10 @@
 //!   pseudo B-rep has no notification environment); `SetOwner` of the new curve is
 //!   implied by the edge holding it.
 //! - **Arguments.** Out-params become return values; `iDebugLevel` and debug drawing
-//!   are dropped. No input-driven recursion.
+//!   are dropped. One input-driven recursion: `calc_rail_int_edgeuse_with_solvers`
+//!   continues a missed rail end on the next side edge across a seam's vertex (the fork's
+//!   63c7962) by calling itself, at most `SIDE_EDGE_CHAIN_STEPS` (64) deep, then `SM_ERR`
+//!   (the fork has no bound; a chain of seam vertices is a few edges long).
 //! - **Eased corners (the fork's, tangency-labs/smlib `e74bbd3`, #1376).** At a corner
 //!   with an ease (`FilletCorner::ease_dist > 0`, never by default)
 //!   `calc_rail_rail_interpolation` takes at least two derivatives and the G2/G3 fairing
@@ -1672,6 +1675,8 @@ impl FilletBrep {
             corners,
             &mut RailSolvers::Indexed(solvers),
             target,
+            None,
+            0,
         )
     }
 
@@ -1698,6 +1703,8 @@ impl FilletBrep {
             corners,
             &mut RailSolvers::Single(solver_id, solver),
             target,
+            None,
+            0,
         )
     }
 
@@ -1723,6 +1730,8 @@ impl FilletBrep {
             corners,
             &mut RailSolvers::Live(solver_id, solver),
             target,
+            None,
+            0,
         )
     }
 
@@ -1749,10 +1758,18 @@ impl FilletBrep {
             corners,
             &mut RailSolvers::LiveSet(solvers),
             target,
+            None,
+            0,
         )
     }
 
     #[allow(clippy::too_many_lines)] // one upstream routine
+    /// `near` (the fork's `cpNear`, 63c7962): the side edge's end the search starts from,
+    /// `None` for the corner's vertex, else where the side edge continues a missed one;
+    /// `depth` counts those continuations (at most
+    /// [`crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS`], then `SM_ERR`; the fork
+    /// has no bound).
+    #[allow(clippy::too_many_arguments)]
     fn calc_rail_int_edgeuse_with_solvers(
         &mut self,
         k: &Kernel,
@@ -1761,6 +1778,8 @@ impl FilletBrep {
         corners: CornerLookup<'_>,
         solvers: &mut RailSolvers<'_>,
         target: &mut Brep,
+        near: Option<VertexId>,
+        depth: usize,
     ) -> Result<()> {
         const OP: &str = OP_RAIL_EU;
         let corner = self
@@ -1768,8 +1787,11 @@ impl FilletBrep {
             .fillet_corner()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
 
-        // get original Brep vertex
-        let cp_vertex = corners.corner(corner)?.filleted_vertex();
+        // get original Brep vertex (or the side edge's near end)
+        let cp_vertex = match near {
+            Some(near) => Some(near),
+            None => corners.corner(corner)?.filleted_vertex(),
+        };
 
         // get this filletVertex->filletEdgeuse[type == SM_FE_RAIL]->FilletGeom(s)
         let geoms = self.vertex_fillet_geoms(v)?;
@@ -1934,6 +1956,47 @@ impl FilletBrep {
                 }
             }
             self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
+
+            // SolidCraft change (the fork's 63c7962, `fixes.fillet_blend_corner`): a side edge
+            // split only by a seam ending on it (a cylinder's seam on its rim) continues
+            // across that vertex: the rail that runs past the edge's far end ends on the next
+            // edge, between the same two faces. Its end is looked for there, from that vertex
+            // on.
+            if k.fixes.fillet_blend_corner && !found && !is_closed {
+                let far = if edge::start_vertex(target, side_edge)? == cp_vertex {
+                    edge::end_vertex(target, side_edge)?
+                } else if edge::end_vertex(target, side_edge)? == cp_vertex {
+                    edge::start_vertex(target, side_edge)?
+                } else {
+                    None
+                };
+                let tol_deg = crate::math::rad_to_deg(corners.corner(corner)?.tangency_tol_radians);
+                let next = match far {
+                    Some(far) => crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex(
+                        k, target, side_eu1, far, tol_deg,
+                    )?,
+                    None => None,
+                };
+                if let (Some(next), Some(far)) = (next, far) {
+                    if depth >= crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS {
+                        return Err(SolidError::sm_err(OP));
+                    }
+                    self.fillet_vertex_mut(v)?.set_point_class(
+                        crate::intersect::point_class::PointClassType::Edgeuse,
+                        Some(EntityRef::Edgeuse(next)),
+                    );
+                    return self.calc_rail_int_edgeuse_with_solvers(
+                        k,
+                        v,
+                        opt_fg,
+                        corners,
+                        solvers,
+                        target,
+                        Some(far),
+                        depth + 1,
+                    );
+                }
+            }
 
             // when still not found
             if !found {
