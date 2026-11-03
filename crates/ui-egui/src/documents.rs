@@ -47,6 +47,7 @@ pub struct DocSlot {
     pre_sketch_component: Option<crate::PreSketchComponent>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
+    reveals: crate::browser::PendingReveals,
     agent_chat: crate::agent_chat::AgentChat,
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
     link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
@@ -142,6 +143,7 @@ impl DocSlot {
             pre_sketch_component: None,
             view: DocView::default(),
             occurrence_move: None,
+            reveals: Default::default(),
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
             edit_in_place: None,
@@ -215,6 +217,8 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    let reveals = crate::browser::take_reveals(app);
+    crate::semantic_content::leave_document(app);
     if crate::render_workspace::active(app) {
         let _ = crate::render_workspace::enter(app, false);
     }
@@ -248,12 +252,14 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
+        reveals,
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
         jobs: app.swap_jobs(slot.jobs),
     };
+    crate::browser::restore_reveals(app, slot.reveals);
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;
     out.session.crash_journal = false;
@@ -458,6 +464,8 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 pub fn adopt(app: &mut SolveApp, session: Session) {
     if active_is_blank(app) {
         let rev = app.session.revision;
+        crate::browser::discard_reveals(app);
+        crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
         crate::design_properties::close_object(app);
@@ -545,6 +553,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     }
     app.docs.closing = None;
     if n <= 1 {
+        crate::browser::discard_reveals(app);
+        crate::semantic_content::leave_document(app);
         // The last design: a blank one takes its place.
         reset_chat(app);
         if let Some(a) = app.autosave.as_mut().and_then(|a| a.active.take()) {

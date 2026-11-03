@@ -417,7 +417,7 @@ pub fn close(app: &mut SolveApp) {
     if let Some(p) = app.viewport.select_other.popup.take()
         && p.lit_body
     {
-        app.viewport.hover_bodies.clear();
+        crate::semantic_content::set_external_body_hover(app, Vec::new());
     }
 }
 
@@ -557,12 +557,12 @@ pub fn hover_override(app: &mut SolveApp) {
     app.viewport.hover = if body.is_some() { None } else { row.map(|r| r.hit.clone()) };
     match body {
         Some(b) => {
-            app.viewport.hover_bodies = vec![b];
             p.lit_body = true;
+            crate::semantic_content::set_external_body_hover(app, vec![b]);
         }
         None if p.lit_body => {
-            app.viewport.hover_bodies.clear();
             p.lit_body = false;
+            crate::semantic_content::set_external_body_hover(app, Vec::new());
         }
         None => {}
     }

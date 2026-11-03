@@ -226,6 +226,7 @@ fn card_fill(app: &SolveApp, floating: bool) -> egui::Color32 {
 
 /// Full-height left card, or a card sharing the browser column below it.
 pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
     let t = Tokens::get();
     let available = ui.available_rect_before_wrap();
     app.shell.history_dock_space = Some(available);
@@ -1282,7 +1283,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
             })
             .collect(),
         results: crate::timeline::result_index(&app.session.model.results),
-        reveal: app.tree.timeline_reveal.take(),
+        reveal: app.tree.timeline_reveal,
         from_view,
         linked_hover: app.viewport.hover_feature.filter(|id| plan.referenced(*id)),
         drag: ui.data(|data| data.get_temp(drag_id)),
@@ -1480,8 +1481,8 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         None => {
             crate::scenario::publish_rect(&format!("history:feature:{name}"), rect);
             crate::scenario::publish_handle(&format!("timeline:{name}"), rect.center());
-            if rows.reveal == Some(id) {
-                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            if rows.reveal == Some(id) && crate::semantic_content::scroll_acknowledged(ui, rect) {
+                app.tree.timeline_reveal = None;
             }
         }
     }
