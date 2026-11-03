@@ -4,9 +4,10 @@
 //! normal geometry.
 
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::project::resolve;
 use solidcraft_doc::{Document, FeatureKind};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch_store;

@@ -33,11 +33,13 @@ fn match_surface(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&target).is_none() {
         return Err(bad(cmd, format!("no body `{target}`")));
     }
-    let faces: Vec<solidcraft_geom::Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let faces: Vec<solidcore_record::Vec3> =
+        p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if faces.len() > 64 {
         return Err(bad(cmd, "too many points on the face to rebuild"));
     }
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, "`edges` must list 1 to 10000 points on the target's edge chain"));
     }
@@ -63,7 +65,7 @@ mod tests {
     use super::*;
     use crate::Session;
     use serde_json::json;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     fn run(s: &mut Session, c: &str, p: Value) -> Value {
         s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"))

@@ -618,7 +618,7 @@ fn zoomed_view_frame_cost() {
 #[test]
 #[ignore = "manual highlight measurement"]
 fn many_selected_bodies_hover_cost() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let mut h = match std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") {
         Some(path) => {
             let mut h = Harness::new();

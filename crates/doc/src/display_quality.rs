@@ -164,7 +164,7 @@ mod tests {
     /// closer to the surface, and the reference mesh the model reads never changes.
     #[test]
     fn each_level_has_its_own_plan_and_the_reference_mesh_stays() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let body = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 20.0, 50.0).unwrap();
         let mb = crate::ModelBody::new("Body1".into(), body, 1);
         let reference = mb.mesh();

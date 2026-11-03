@@ -3,8 +3,9 @@
 //! without modifying shared component geometry across other instances.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{IDENTITY, mat_inverse, mat_mul, rigid};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::{occurrence, occurrence_path, valid_position};
 use crate::params::{bad, vec3};

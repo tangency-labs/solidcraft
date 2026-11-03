@@ -37,6 +37,7 @@ mod merge_tests;
 pub(crate) mod offset;
 #[cfg(test)]
 mod offset_tests;
+pub(crate) mod picked;
 pub(crate) mod split;
 #[cfg(test)]
 mod split_tests;

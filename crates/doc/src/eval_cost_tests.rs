@@ -4,11 +4,12 @@
 //! component into its frame, and every evaluation wrote every imported STEP file out again to
 //! fingerprint it, so each sketch command took longer the more parts were inserted.
 
+use solidcraft_geom::prelude::*;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
 use solidcraft_sketch::Sketch;
 
@@ -1278,6 +1279,7 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
+        old_auto_size: false,
     }
 }
 

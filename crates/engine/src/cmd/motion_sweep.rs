@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::Document;
 use solidcraft_doc::joints::JointKind;
-use solidcraft_geom::Vec3;
 
 use super::analysis::checked_pairs;
 use super::contact_sweep::{ContactGeometry, Gap};

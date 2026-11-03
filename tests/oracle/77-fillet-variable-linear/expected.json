@@ -1,5 +1,6 @@
 {
   "source": "analytic",
+  "known_failure": "the variable round r 2 to 5 along a box edge fails status 1001 at solidcore 8ddce9016 (as blend_variable::tests::variable_radius_on_a_box_edge in tests/KNOWN_FAILING_TESTS)",
   "method": "box 40x30x20 with its top front edge (y=0, z=20) rounded at a radius running straight from 2 (x=0) to 5 (x=40). The round is the union of the balls rolled along the edge, ball s touching both faces at r(s), the law continued past the edge's ends along its end slopes: each section loses the corner points no ball reaches, up to rho(x, t), the nearest entry into a ball along the ray from the edge at the angle t. V, moments and areas integrated by Gauss-Legendre panels in x and t (tools/oracle-analytic/cases_fillets.py)",
   "body_count": 1,
   "volume_mm3": 23888.613525715446,

@@ -25,6 +25,7 @@ use crate::ui_kit::{Container, Surface};
 use egui::{Align2, FontId, Pos2, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
@@ -191,17 +192,17 @@ fn body_of(h: &Hit) -> Option<&str> {
 fn hit_depth(
     st: &solidcraft_engine::doc::ModelState,
     index: &std::collections::HashMap<&str, usize>,
-    o: solidcraft_engine::geom::Vec3,
-    d: solidcraft_engine::geom::Vec3,
+    o: solidcore_record::Vec3,
+    d: solidcore_record::Vec3,
     h: &Hit,
 ) -> Option<f64> {
-    let along = |p: solidcraft_engine::geom::Vec3| Some((p - o).dot(d)).filter(|t| t.is_finite());
+    let along = |p: solidcore_record::Vec3| Some((p - o).dot(d)).filter(|t| t.is_finite());
     match h {
         Hit::Vertex { point, .. } | Hit::Face { point, .. } => along(*point),
         Hit::Edge { body, index: ei, mid, .. } => {
             let under = index.get(body.as_str()).and_then(|i| st.bodies.get(*i)).and_then(|b| {
                 let (m, place) = b.mesh_in_place();
-                let at = |p: solidcraft_engine::geom::Vec3| solidcraft_engine::doc::apply_point(&place, p);
+                let at = |p: solidcore_record::Vec3| solidcraft_engine::doc::apply_point(&place, p);
                 let dd = d.dot(d);
                 m.edges
                     .get(*ei)?

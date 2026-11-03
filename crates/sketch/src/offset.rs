@@ -1,7 +1,8 @@
 //! Associative offsets keep their output entity ids while their source curves move.
 use crate::{ConstraintKind, CurveKind, Shape, Sketch, SketchError, intersections};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OffsetChain {

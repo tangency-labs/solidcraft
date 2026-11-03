@@ -6,6 +6,7 @@
 
 use serde_json::Value;
 use solidcraft_doc::{BodyName, FeatureKind, NetworkCurve, Operation, Position, SketchId};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
@@ -55,7 +56,7 @@ fn loop_patch(s: &mut Session, p: &Value) -> Result<Value> {
     // of each is the first of the next, and the last boundary's end is the first one's start.
     let state = s.model.state();
     let sk = state.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch has not been solved"))?;
-    let mut ends: Vec<(solidcraft_geom::Vec2, solidcraft_geom::Vec2)> = Vec::with_capacity(curves.len());
+    let mut ends: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::with_capacity(curves.len());
     for id in &curves {
         let ci = sk.sketch.curve_index(id).ok_or_else(|| bad(cmd, format!("no sketch curve `{id}`")))?;
         let pieces = sk.sketch.exact_pieces(ci);

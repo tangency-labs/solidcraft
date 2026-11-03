@@ -1,6 +1,7 @@
 use crate::test_support::run_all;
 use serde_json::json;
 use solidcraft_engine::Session;
+use solidcraft_engine::geom::prelude::*;
 
 use super::*;
 use crate::Services;

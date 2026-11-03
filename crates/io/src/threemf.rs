@@ -15,13 +15,14 @@
 //! `Metadata/model_settings.config`), and those names are used. Packages are untrusted: sizes,
 //! entry counts, model parts, mesh sizes and component nesting are capped.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::io::{Cursor, Read, Write};
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::{IoError, Result};
 

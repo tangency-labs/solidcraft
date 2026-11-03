@@ -20,6 +20,7 @@ mod sheets;
 mod split;
 pub mod ssi;
 pub mod sweeps;
+pub mod trace;
 pub mod trim;
 
 pub use check::{CheckLevel, CheckReport};
@@ -250,6 +251,8 @@ pub fn crash_test() -> Result<()> {
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,
+    /// The body's number in a trace ([`trace`]).
+    id: u64,
 }
 
 impl std::fmt::Debug for Brep {
@@ -261,7 +264,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body }
+        Brep { body, id: trace::next_id() }
     }
 
     /// solidcore's body.
@@ -271,7 +274,9 @@ impl Brep {
 
     /// An axis-aligned box from its lower corner, with positive edge lengths (mm).
     pub fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Brep> {
-        core::make_box(origin, size).map(Brep::made_core)
+        let r = core::make_box(origin, size).map(Brep::made_core);
+        trace::made("make_box", &[], &r, || serde_json::json!({"origin": origin, "size": size}));
+        r
     }
 
     /// Reads a native SMLib `.smb` file.
@@ -286,7 +291,9 @@ impl Brep {
 
     /// A deep copy.
     pub fn try_clone(&self) -> Result<Brep> {
-        core::transform::copy(self.core()).map(Brep::made_core)
+        let r = core::transform::copy(self.core()).map(Brep::made_core);
+        trace::made("copy", &[self], &r, || serde_json::json!({}));
+        r
     }
 
     /// This body moved by the affine `matrix` (column-major: columns 0–2 the images of x, y and
@@ -294,7 +301,9 @@ impl Brep {
     /// mirror it, a non-uniform scale or a shear turns its geometry into NURBS, tolerances scale
     /// with it.
     pub fn transformed(&self, matrix: &[[f64; 4]; 4]) -> Result<Brep> {
-        core::transform::transform(self.core(), matrix).map(Brep::made_core)
+        let r = core::transform::transform(self.core(), matrix).map(Brep::made_core);
+        trace::made("transform", &[self], &r, || serde_json::json!({"matrix": matrix}));
+        r
     }
 
     /// The enclosed volume (mm³) at `relative_accuracy` (SMLib clamps it to [1e-8, 1e-1]).

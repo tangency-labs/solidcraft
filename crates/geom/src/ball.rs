@@ -1,7 +1,8 @@
 //! The smallest ball holding a set of points (Welzl's algorithm): a measure of a point set's size
 //! that does not move with the points, whatever rigid motion carries them.
 
-use crate::Vec3;
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// A ball: every point within `radius` of `center`.
 #[derive(Clone, Copy, Debug, PartialEq)]

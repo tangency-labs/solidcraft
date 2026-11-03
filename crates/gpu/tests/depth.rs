@@ -7,10 +7,12 @@
 //! makes that a failure).
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::{Mesh, Vec3};
+use solidcraft_engine::geom::Mesh;
 use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
 use solidcraft_engine::view::{self, Guides};
+use solidcraft_geom::prelude::*;
 use solidcraft_gpu::GpuError;
 use solidcraft_gpu::capture::{self, Capturer};
 use std::sync::{Arc, OnceLock};

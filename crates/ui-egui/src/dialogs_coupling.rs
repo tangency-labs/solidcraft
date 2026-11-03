@@ -97,7 +97,7 @@ fn occurrence(s: &Session, body: &str) -> Option<u64> {
     s.doc.body_frames(&s.model.state()).into_iter().find(|f| f.0 == body).map(|(_, _, path, _)| path.last().copied().unwrap_or(0))
 }
 
-fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcraft_engine::geom::Vec3)> {
+fn pick(inputs: &[SelInput], i: usize) -> Option<(&str, solidcore_record::Vec3)> {
     match inputs.get(i)?.items.first()? {
         Sel::Face { body, point, .. } | Sel::Edge { body, point, .. } => Some((body.as_str(), *point)),
         _ => None,

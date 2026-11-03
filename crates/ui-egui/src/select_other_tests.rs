@@ -3,6 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -472,7 +473,7 @@ fn an_edge_is_as_deep_as_its_point_under_the_pointer_not_its_middle() {
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
     // On the bottom plate's near top edge along Y (x = 15, y from -15 to 15), well off its middle.
-    let under = solidcraft_engine::geom::Vec3::new(15.0, 9.0, 2.0);
+    let under = solidcore_record::Vec3::new(15.0, 9.0, 2.0);
     let at = h.call("ui.at", json!({"world": [under.x, under.y, under.z]}))["result"].clone();
     let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
@@ -483,7 +484,7 @@ fn an_edge_is_as_deep_as_its_point_under_the_pointer_not_its_middle() {
     let index = st.bodies.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
     let t = super::hit_depth(&st, &index, o, d, edge).expect("a depth");
     let want = (under - o).dot(d);
-    let mid = solidcraft_engine::geom::Vec3::new(15.0, 0.0, 2.0);
+    let mid = solidcore_record::Vec3::new(15.0, 0.0, 2.0);
     assert!((t - want).abs() < 0.5, "depth {t}, the point under the pointer {want}, its middle {}", (mid - o).dot(d));
 }
 

@@ -187,7 +187,8 @@ pub(crate) fn paint_contact_shading(p: &Painter, rect: Rect, on: bool) {
 /// tool marks, tree rows and one simple solid providing recognisable CAD context.
 pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview) {
     let t = Tokens::get();
-    let size = vec2(super::metrics::dimension(ui.available_width()), t.space_24 * 7.0 + t.space_6);
+    let width = super::metrics::dimension(ui.available_width());
+    let size = vec2(width, width * 148.0 / 226.0);
     let (outer, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let p = ui.painter().with_clip_rect(outer);
     t.container_rect(&p, outer, t.radius_lg, t.control_fill, t.dialog_rule);
@@ -214,12 +215,20 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         p.rect(rect, if state.compact { 0 } else { t.radius_sm }, fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         if !label.is_empty() {
             let centre = if h > 20.0 { c.at(x + w * 0.5, y + 7.0) } else { rect.center() };
-            p.text(centre, egui::Align2::CENTER_CENTER, crate::i18n::tr_label(label), egui::FontId::proportional(t.font_small), t.form_dim);
+            p.with_clip_rect(rect.intersect(p.clip_rect())).text(
+                centre,
+                egui::Align2::CENTER_CENTER,
+                crate::i18n::tr_label(label),
+                egui::FontId::proportional(t.font_small),
+                t.form_dim,
+            );
         }
         rect
     };
     panel(inset, inset, 120.0 - inset * 2.0, ribbon_height, "", t.toolbar);
-    panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
+    let browser =
+        panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
+    crate::scenario::publish_rect("prefs:layout_preview:browser", browser);
     // A full row of quiet tool symbols, with label marks only when labels are enabled.
     let quiet = t.form_dim.lerp_to_gamma(t.viewport_top, 0.55);
     for index in 0..10 {
@@ -249,6 +258,9 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         3 => None,
         _ => Some(panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg)),
     };
+    if let Some(history) = history {
+        crate::scenario::publish_rect("prefs:layout_preview:history", history);
+    }
     if let Some(history) = history.filter(|_| state.history == 1) {
         // A single vertical mark reads as the narrow icon-only history rail.
         p.line_segment(
@@ -256,8 +268,18 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
             Stroke::new(2.0, t.form_primary),
         );
     }
+    // An open command dialog demonstrates its placement without another UI host.
+    // The left-column dialog stays below the Browser caption and above any History sharing
+    // that column. Its bounds belong to the Browser region, never to the full column height.
+    let (dialog_x, dialog_top, dialog_height) = if state.dialog_left {
+        (bx, top + 12.0, (browser_height - 12.0 - gap).max(0.0))
+    } else {
+        (120.0 - inset - bw, top, (viewport_bottom - top) * 0.65)
+    };
+    let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
+    crate::scenario::publish_rect("prefs:layout_preview:dialog", dialog);
     crate::scenario::publish_rect("prefs:layout_preview", outer);
-    super::text(ui, crate::i18n::tr("prefs.preview_choices"), super::Text::Note("preview"));
+    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).on_hover_text(crate::i18n::tr("prefs.layout_note"));
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
@@ -283,6 +305,43 @@ pub(crate) fn paint_theme_system(p: &Painter, rect: Rect, light: &ThemeSample, d
 #[cfg(test)]
 mod tests {
     use super::orientation_axes;
+
+    #[test]
+    fn live_layout_preview_follows_each_choice_in_both_themes() {
+        use crate::ui_kit::LayoutPreview;
+        let previous = crate::theme::is_dark();
+        let baseline = LayoutPreview { compact: false, labels: true, history: 0, translucent: false, dialog_left: false };
+        for dark in [false, true] {
+            crate::theme::set_dark(dark);
+            let draw = |state| {
+                let ctx = crate::fonts::test_context();
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    ui.set_width(262.0);
+                    super::paint_layout(ui, state);
+                });
+                format!("{:?}", output.shapes)
+            };
+            let original = draw(baseline);
+            for state in [
+                LayoutPreview { compact: true, ..baseline },
+                LayoutPreview { labels: false, ..baseline },
+                LayoutPreview { history: 1, ..baseline },
+                LayoutPreview { history: 2, ..baseline },
+                LayoutPreview { history: 3, ..baseline },
+                LayoutPreview { translucent: true, ..baseline },
+                LayoutPreview { dialog_left: true, ..baseline },
+            ] {
+                assert_ne!(original, draw(state), "each actual choice changes the schematic");
+            }
+            let _ = draw(LayoutPreview { compact: false, labels: false, history: 2, translucent: true, dialog_left: true });
+            let browser = crate::scenario::rect_of("prefs:layout_preview:browser").unwrap();
+            let history = crate::scenario::rect_of("prefs:layout_preview:history").unwrap();
+            let dialog = crate::scenario::rect_of("prefs:layout_preview:dialog").unwrap();
+            assert!(browser.contains_rect(dialog), "the left-column dialog remains inside the Browser region");
+            assert!(!dialog.intersects(history), "the dialog cannot cover the Under browser History caption");
+        }
+        crate::theme::set_dark(previous);
+    }
 
     /// Both orientation figures draw right-handed axes (#5680): seen from above, the turn from X
     /// to Y and from Y to Z is counter-clockwise on screen (negative cross product, as the canvas y

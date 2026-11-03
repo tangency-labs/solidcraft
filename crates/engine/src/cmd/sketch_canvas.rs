@@ -1,8 +1,9 @@
 //! Canvases (reference images on planes) and decals (images on planar faces).
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_doc::canvas::{Canvas, MAX_CANVAS_BYTES, base64_decode, base64_encode, image_info};
-use solidcraft_geom::Vec2;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};

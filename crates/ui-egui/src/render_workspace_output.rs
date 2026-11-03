@@ -930,6 +930,7 @@ pub(super) fn size_presets(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::settings_choice_row(
                         ui,
                         &ui_kit::SettingsChoice {
+                            icon: None,
                             key: &format!("render:preset:{key}"),
                             title: app.tr(label),
                             summary: &summary,

@@ -248,7 +248,9 @@ fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x(
                 appearance.local.overwrite = true;
                 app.ui.pick_bodies = true;
                 if name == "preferences" {
-                    crate::prefs::open_at(&mut app, crate::prefs::PAGE_GRAPHICS);
+                    // Find the redesigned Layout checkbox by its current visible label.
+                    crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);
+                    app.prefs_window.filter = app.tr("prefs.layout_page.active_commands").to_string();
                 }
                 let mut textures = HashMap::new();
                 let mut final_output = None;

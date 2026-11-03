@@ -4,7 +4,8 @@
 //! the window shows.
 
 use egui::{Pos2, Sense, Stroke, Vec2 as Screen, vec2};
-use solidcraft_engine::geom::{Plane, Vec2};
+use solidcore_record::{Plane, Vec2};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::Kind;

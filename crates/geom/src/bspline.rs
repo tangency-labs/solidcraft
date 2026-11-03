@@ -13,12 +13,12 @@
 
 use std::ops::{Add, AddAssign, Mul, Sub};
 
-use crate::Vec3;
+use solidcore_record::Vec3;
 
 /// Highest polynomial degree accepted in either direction: the B-rep record's own bound
 /// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of
 /// degree 9 (five conditions at each end).
-pub const MAX_SPLINE_DEGREE: usize = 16;
+pub const MAX_SPLINE_DEGREE: usize = solidcore_record::brep::MAX_SPLINE_DEGREE;
 /// Most knots accepted in one knot vector.
 pub const MAX_KNOTS: usize = 1 << 14;
 /// Most control points accepted in one tensor surface.
@@ -707,6 +707,7 @@ impl NurbsSurface {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::prelude::*;
 
     /// A small deterministic generator for test data.
     pub(crate) struct Lcg(pub(crate) u64);
@@ -795,7 +796,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_segment_is_the_same_curve_on_its_interval() {
-        use crate::brep::{Curve, eval::CurveEval};
+        use crate::brep::eval::CurveEval;
+        use solidcore_record::brep::Curve;
         let p = 3;
         let mut rng = Lcg(11);
         let ctrl: Vec<HPoint> = (0..KNOTS.len() - p - 1)

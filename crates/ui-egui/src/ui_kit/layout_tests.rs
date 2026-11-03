@@ -71,6 +71,87 @@ fn carousel_window_clamps_offsets_and_keeps_a_card_on_narrow_pages() {
 }
 
 #[test]
+fn shared_picture_choices_wrap_inside_the_row_and_reserve_their_height() {
+    let choices = [
+        PictureChoice { key: "first", label: "First", figure: |_, _| {} },
+        PictureChoice { key: "second", label: "Second", figure: |_, _| {} },
+        PictureChoice { key: "third", label: "Third", figure: |_, _| {} },
+    ];
+    for dark in [false, true] {
+        let _theme = crate::theme::scoped_tokens(if dark { Tokens::dark() } else { Tokens::light() });
+        for width in [120.0, 260.0, 600.0] {
+            for sized in [false, true] {
+                let ctx = crate::fonts::test_context();
+                crate::test_support::frame(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1000.0))),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.set_width(width);
+                        scope(ui, |ui| {
+                            let picked = if sized {
+                                settings_picture_choices_sized(
+                                    ui,
+                                    "shared",
+                                    "Choices",
+                                    &choices,
+                                    usize::MAX,
+                                    true,
+                                    PictureChoiceSize { width: 110.0, aspect: 1.0, caption: false },
+                                )
+                            } else {
+                                settings_picture_choices(ui, "shared", "Choices", &choices, usize::MAX, true)
+                            };
+                            assert_eq!(picked, None, "drawing does not change an unknown selection");
+                            let row_rect = scenario::rect_of("dialog:row:Choices").unwrap();
+                            for choice in &choices {
+                                let rect = scenario::rect_of(&format!("prefs:shared:{}", choice.key)).unwrap();
+                                assert!(row_rect.expand(0.5).contains_rect(rect), "width={width}, sized={sized}: {rect:?} outside {row_rect:?}");
+                            }
+                            let first = scenario::rect_of("prefs:shared:first").unwrap();
+                            let last = scenario::rect_of("prefs:shared:third").unwrap();
+                            assert_eq!(last.top() > first.top(), width < 600.0);
+                            let next = ui.label("Next").rect;
+                            assert!(next.top() >= last.bottom());
+                        });
+                    },
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn shared_picture_choices_return_clicks_and_respect_both_disabled_states() {
+    use std::cell::Cell;
+    let choices =
+        [PictureChoice { key: "first", label: "First", figure: |_, _| {} }, PictureChoice { key: "second", label: "Second", figure: |_, _| {} }];
+    for (enabled, parent_enabled) in [(true, true), (false, true), (true, false)] {
+        let ctx = crate::fonts::test_context();
+        ctx.enable_accesskit();
+        let picked = Cell::new(None);
+        let draw = |ui: &mut Ui| {
+            ui.add_enabled_ui(parent_enabled, |ui| {
+                picked.set(settings_picture_choices(ui, "shared", "Choices", &choices, 0, enabled));
+            });
+        };
+        frame(&ctx, vec![], draw);
+        let at = scenario::handle_at("prefs:shared:second").unwrap();
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        assert_eq!(picked.get(), (enabled && parent_enabled).then_some(1));
+        picked.set(None);
+        frame(&ctx, key(egui::Key::Tab), draw);
+        frame(&ctx, key(egui::Key::Space), draw);
+        if !enabled || !parent_enabled {
+            assert_eq!(picked.get(), None);
+        }
+    }
+}
+
+#[test]
 fn theme_carousel_moves_one_card_and_disables_its_ends_without_selecting() {
     let ctx = crate::fonts::test_context();
     let sample = ThemeSample::from_tokens(&Tokens::light());
@@ -171,6 +252,44 @@ fn carousel_arrows_expose_disabled_state_hover_and_keyboard_focus() {
     draw(vec![]);
     assert!(scenario::rect_of("keyboard:item:0").is_none(), "keyboard activates Next");
     assert!(scenario::rect_of("keyboard:item:2").is_some());
+}
+
+#[test]
+fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for width in [140.0, 280.0, 646.0] {
+            let ctx = crate::fonts::test_context();
+            let options = [
+                PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
+                PictureChoice { key: "left", label: "Left", figure: paint_history_left },
+                PictureChoice { key: "under_browser", label: "Under browser", figure: paint_history_under_browser },
+                PictureChoice { key: "browser", label: "In browser", figure: paint_history_in_browser },
+            ];
+            frame(&ctx, vec![], |ui| {
+                ui.set_width(width);
+                settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
+            });
+            let row = scenario::rect_of("dialog:row:History").unwrap();
+            for option in &options {
+                let rect = scenario::rect_of(&format!("prefs:geometry_history:{}", option.key)).unwrap();
+                assert!(row.expand(0.5).contains_rect(rect), "{width}: {rect:?} outside {row:?}");
+                assert!(rect.contains(scenario::handle_at(&format!("dialog:History:{}", option.label)).unwrap()));
+            }
+            let at = scenario::handle_at("prefs:geometry_history:left").unwrap();
+            for down in [true, false] {
+                frame(&ctx, pointer(at, down), |ui| {
+                    ui.set_width(width);
+                    let picked = settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
+                    if !down {
+                        assert_eq!(picked, Some(1), "the real card selects its option");
+                    }
+                });
+            }
+        }
+    }
+    crate::theme::set_dark(previous);
 }
 
 #[test]

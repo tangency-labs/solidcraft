@@ -161,7 +161,7 @@ pub(super) fn pick_edges(
 }
 
 /// `pick_vertices` (`vertex_distance`).
-fn pick_vertices(b: &Brep, points: &[[f64; 3]], tol: f64) -> solidcore::Result<std::result::Result<(Vec<VertexId>, Vec<usize>), Miss>> {
+pub(super) fn pick_vertices(b: &Brep, points: &[[f64; 3]], tol: f64) -> solidcore::Result<std::result::Result<(Vec<VertexId>, Vec<usize>), Miss>> {
     let all = brep_p1::vertices(b, None)?;
     pick(&all, points, tol, b.tolerance(), |v, p| Ok(Some((b.vertex(v)?.point - p).length())))
 }

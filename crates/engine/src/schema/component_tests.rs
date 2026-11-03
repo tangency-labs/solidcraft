@@ -1,3 +1,4 @@
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use serde_json::{Value, json};

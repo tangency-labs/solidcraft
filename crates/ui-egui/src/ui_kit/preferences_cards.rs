@@ -110,10 +110,20 @@ pub(crate) fn settings_row_card<R>(ui: &mut Ui, selected: bool, height: f32, add
 }
 
 fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[card.label]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let width = dimension(width);
     let enabled = card.enabled && ui.is_enabled();
     let (rect, response) = ui.allocate_exact_size(vec2(width, card_height(&t, width, card)), if enabled { Sense::click() } else { Sense::hover() });
+    // Labelled compound rows own their search index (settings_picture_choices, for example).
+    // Standalone cards and tiles are independently searchable settings.
+    if super::layout::label(ui).is_empty() {
+        crate::prefs_search::remember(ui, card.label, rect);
+        crate::prefs_search::follow(ui, card.label, rect);
+    }
     let look = card_look(card.selected, enabled, response.hovered(), response.has_focus());
     let p = ui.painter();
     let dim = |c: Color32| c.gamma_multiply(look.alpha);
@@ -177,6 +187,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     let kind = if tile { egui::WidgetType::Checkbox } else { egui::WidgetType::RadioButton };
     response.widget_info(|| egui::WidgetInfo::selected(kind, enabled, card.selected, card.label));
     scenario::publish_target(&format!("prefs:card:{}", card.label), rect);
+    let response = response.on_hover_text(card.label);
     let response = if let Some(options) = card.options { response.on_hover_text(options) } else { response };
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
@@ -192,11 +203,114 @@ fn tick(p: &Painter, r: Rect, ink: Color32) {
 
 /// A radio card: a figure, a label and an optional sub-label. Click it to choose it.
 pub(crate) fn picture_card(ui: &mut Ui, card: &Card, width: f32) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
     paint_card(ui, card, width, false)
+}
+
+/// A real radio choice backed by the canonical preference figure painter.
+pub(crate) struct PictureChoice<'a> {
+    pub key: &'a str,
+    pub label: &'a str,
+    pub figure: fn(&Painter, Rect),
+}
+
+impl PictureChoice<'_> {
+    fn card(&self, selected: bool, enabled: bool, aspect: f32) -> Card<'_> {
+        Card { label: self.label, sub: None, selected, enabled, options: None, check: selected, aspect, figure: &self.figure }
+    }
+}
+
+/// Indexed, wrapping picture choices. The row and every option point at the shipped cards.
+pub(crate) fn settings_picture_choices(
+    ui: &mut Ui,
+    key: &str,
+    label: &str,
+    options: &[PictureChoice<'_>],
+    selected: usize,
+    enabled: bool,
+) -> Option<usize> {
+    let t = Tokens::get();
+    settings_picture_choices_sized(
+        ui,
+        key,
+        label,
+        options,
+        selected,
+        enabled,
+        PictureChoiceSize { width: t.space_24 * 4.0 + t.space_16 + t.space_4, aspect: 226.0 / 148.0, caption: true },
+    )
+}
+
+/// Page-specific card proportions; the ordinary History/Browser composition keeps its defaults.
+pub(crate) struct PictureChoiceSize {
+    pub width: f32,
+    pub aspect: f32,
+    /// Omit a repeated caption when the enclosing section already names the setting.
+    pub caption: bool,
+}
+
+pub(crate) fn settings_picture_choices_sized(
+    ui: &mut Ui,
+    key: &str,
+    label: &str,
+    options: &[PictureChoice<'_>],
+    selected: usize,
+    enabled: bool,
+    size: PictureChoiceSize,
+) -> Option<usize> {
+    let t = Tokens::get();
+    let available = dimension(ui.available_width());
+    let width = options.iter().map(|o| super::ContentWidth::name(ui, o.label) + t.space_12).fold(size.width, f32::max).min(available);
+    let ppp = ui.ctx().pixels_per_point().max(0.5);
+    let width = (width * ppp).floor() / ppp;
+    let columns = (((available + t.space_10) / (width + t.space_10).max(1.0)).floor() as usize).max(1);
+    let rows = options.len().div_ceil(columns);
+    let height = options.first().map_or(0.0, |o| card_height(&t, width, &o.card(selected == 0, enabled, size.aspect))) * rows as f32
+        + rows.saturating_sub(1) as f32 * t.space_10
+        + if size.caption { t.space_16 + t.space_10 } else { 0.0 };
+    super::settings_form(ui, 0.0, |ui| {
+        super::layout::sized_row(ui, label, height, |ui| {
+            crate::prefs_search::note_choices(ui, &options.iter().map(|o| o.label).collect::<Vec<_>>());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = vec2(t.space_10, t.space_10);
+                // Use the real control child, including the scrollbar and form bounds. Round
+                // down so the final card border fits together with every intervening gap.
+                let available = dimension(ui.available_width());
+                let width = (width.min(available) * ppp).floor() / ppp;
+                let columns = (((available + t.space_10) / (width + t.space_10).max(1.0)).floor() as usize).max(1);
+                if size.caption {
+                    super::settings_inline_note(ui, label);
+                }
+                let mut picked = None;
+                let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
+                for (row, choices) in options.chunks(columns).enumerate() {
+                    ui.horizontal_top(|ui| {
+                        for (column, option) in choices.iter().enumerate() {
+                            let index = row * columns + column;
+                            let response = picture_card(ui, &option.card(selected == index, enabled, size.aspect), width);
+                            scenario::publish_target(&format!("prefs:{key}:{}", option.key), response.rect);
+                            scenario::publish_target(&format!("dialog:{label}:{}", option.label), response.rect);
+                            if !indexed && crate::prefs_search::texts_hit(ui, &[option.label]) {
+                                crate::prefs_search::remember(ui, option.label, response.rect);
+                                indexed = true;
+                            }
+                            crate::prefs_search::follow(ui, option.label, response.rect);
+                            if response.clicked() && enabled {
+                                picked = Some(index);
+                            }
+                        }
+                    });
+                }
+                picked
+            })
+            .inner
+        })
+    })
 }
 
 /// A toggle tile: the same picture with a checkbox in the corner. Click it to flip `card.selected`.
 pub(crate) fn toggle_tile(ui: &mut Ui, card: &Card, width: f32) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[card.sub.unwrap_or("")]);
     paint_card(ui, card, width, true)
 }
 
@@ -211,11 +325,19 @@ pub(crate) fn preset_card(
     icon: &dyn Fn(&Painter, Rect, Color32),
     width: f32,
 ) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[name, word]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[name, word]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let enabled = enabled && ui.is_enabled();
     let width = dimension(width);
     let height = t.space_24 * 3.0 - t.space_2;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), if enabled { Sense::click() } else { Sense::hover() });
+    if super::layout::label(ui).is_empty() {
+        crate::prefs_search::remember(ui, name, rect);
+        crate::prefs_search::follow(ui, name, rect);
+    }
     let look = card_look(selected, enabled, response.hovered(), response.has_focus());
     let dim = |c: Color32| c.gamma_multiply(look.alpha);
     let p = ui.painter();
@@ -339,4 +461,82 @@ fn carousel_arrow(ui: &mut Ui, size: egui::Vec2, direction: f32, enabled: bool, 
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     scenario::publish_target(&format!("prefs:carousel:{label}"), rect);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
+}
+
+/// Installed add-on row: 12 pt padding, 36 pt mark and centred, unframed folder action.
+pub(crate) fn settings_plugin_card(
+    ui: &mut Ui,
+    key: &str,
+    name: &str,
+    version: &str,
+    description: &str,
+    enabled: &mut bool,
+) -> egui::InnerResponse<(Response, Response)> {
+    let t = Tokens::get();
+    let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
+    let frame = container
+        .frame(ui.ctx(), t.control_fill, crate::frame::Side::Left)
+        .stroke(Stroke::new(1.0, t.dialog_border))
+        .corner_radius(t.radius_lg)
+        .inner_margin(t.space_12);
+    container.show_frame(ui, frame, ui.max_rect(), |ui| {
+        ui.set_min_width(dimension(ui.available_width()));
+        if !*enabled {
+            ui.multiply_opacity(0.55);
+        }
+        let width = dimension(ui.available_width());
+        let tile_side = t.space_24 + t.space_12;
+        let folder_label = crate::i18n::tr_label("Show in folder");
+        let folder_font = FontId::proportional(t.font_body);
+        let folder_galley = ui.painter().layout_no_wrap(folder_label.into(), folder_font, t.form_dim);
+        let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
+        let actions_width = folder_width + t.space_12 + t.space_16;
+        let beside = width >= tile_side + t.space_12 * 2.0 + actions_width + t.form_label_width;
+        let text_width = (width - tile_side - t.space_12 - if beside { actions_width + t.space_12 } else { 0.0 }).max(1.0);
+        let version_galley = ui.painter().layout_no_wrap(version.into(), FontId::proportional(t.font_small), t.form_dim);
+        let title = ui.painter().layout(
+            name.into(),
+            crate::fonts::semibold(t.font_button),
+            t.form_ink,
+            (text_width - version_galley.size().x - t.space_8).max(1.0),
+        );
+        let header_height = title.size().y.max(t.space_16 + t.space_2);
+        let body = ui.painter().layout(description.into(), FontId::proportional(t.font_body), t.form_dim, text_width);
+        let text_height = header_height + if description.is_empty() { 0.0 } else { t.space_2 + body.size().y };
+        let content_height = tile_side.max(text_height);
+        let height = content_height + if beside { 0.0 } else { t.space_8 + t.space_24 };
+        let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let header_center = rect.top() + content_height / 2.0;
+        let tile = Rect::from_center_size(pos2(rect.left() + tile_side / 2.0, header_center), vec2(tile_side, tile_side));
+        ui.painter().rect_filled(tile, t.radius_lg, t.selected_bg);
+        crate::icons::paint_ink(ui.painter(), tile.shrink(t.space_8), "settings_plug", t.form_primary);
+        scenario::publish_rect(&format!("prefs:plugin:{key}:icon"), tile);
+        let at = pos2(tile.right() + t.space_12, header_center - text_height / 2.0);
+        let title_rect = Rect::from_min_size(at, title.size());
+        scenario::publish_rect(&format!("prefs:plugin:{key}:title"), title_rect);
+        let version_at = pos2(at.x + title.size().x + t.space_8, at.y + (header_height - version_galley.size().y) / 2.0);
+        ui.painter().galley(pos2(at.x, at.y + (header_height - title.size().y) / 2.0), title, t.form_ink);
+        ui.painter().galley(version_at, version_galley, t.form_dim);
+        if !description.is_empty() {
+            ui.painter().galley(at + vec2(0.0, header_height + t.space_2), body, t.form_dim);
+        }
+        let center_y = if beside { rect.center().y } else { rect.bottom() - t.space_12 };
+        let check_rect = Rect::from_center_size(pos2(rect.right() - t.space_8, center_y), vec2(t.space_16, t.space_16));
+        let folder_rect =
+            Rect::from_min_size(pos2(check_rect.left() - t.space_12 - folder_width, center_y - t.space_12), vec2(folder_width, t.space_24));
+        let folder = ui.interact(folder_rect, ui.make_persistent_id("plugin_folder"), Sense::click());
+        // Quiet actions retain their focus affordance without a button surface.
+        if folder.has_focus() {
+            ui.painter().rect_stroke(folder_rect, t.control_radius, Stroke::new(1.0, t.form_primary), StrokeKind::Inside);
+        }
+        let icon = Rect::from_center_size(pos2(folder_rect.left() + t.space_8 + t.space_14 / 2.0, center_y), vec2(t.space_14, t.space_14));
+        crate::icons::paint_ink(ui.painter(), icon, "folder", t.form_dim);
+        ui.painter().galley(pos2(icon.right() + t.space_6, center_y - folder_galley.size().y / 2.0), folder_galley, t.form_dim);
+        folder.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), folder_label));
+        if folder.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", crate::i18n::tr("prefs.plugins_enabled")), enabled);
+        (folder, check)
+    })
 }

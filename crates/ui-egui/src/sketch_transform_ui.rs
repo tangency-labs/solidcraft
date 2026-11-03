@@ -4,8 +4,9 @@
 //! Scale and Angle the window shows, and the entities are drawn where OK would put them.
 
 use egui::{Pos2, Sense, Stroke, Vec2 as Screen, vec2};
+use solidcore_record::{Plane, Vec2};
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::{Plane, Vec2};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::Kind;

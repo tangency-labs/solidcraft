@@ -12,8 +12,9 @@
 //! Sections are exact NURBS curves ([`Section`], from the sketch segments' record curves); a
 //! station is the plain loft's control points moved by an affine map, so each is exact too.
 
+use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::bspline::CurveN;
-use solidcraft_geom::{Plane, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::sweep_path::RailFit;
 use crate::{KernelError, Result};
@@ -42,8 +43,8 @@ impl Section {
 }
 
 /// A record line or (rational) B-spline as a homogeneous NURBS curve.
-fn nurbs(c: &solidcraft_geom::brep::Curve) -> Result<CurveN<4>> {
-    use solidcraft_geom::brep::Curve;
+fn nurbs(c: &solidcore_record::brep::Curve) -> Result<CurveN<4>> {
+    use solidcore_record::brep::Curve;
     let degree = |knots: &[f64], n: usize| knots.len().checked_sub(n + 1).ok_or_else(|| KernelError::Invalid("spline degree".into()));
     Ok(match c {
         Curve::Line { start, end } => {
