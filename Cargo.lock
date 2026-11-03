@@ -4062,7 +4062,7 @@ dependencies = [
 [[package]]
 name = "solidcore-record"
 version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcore?rev=b21eb123ee989bd708726080b5d2298a1f2573b5#b21eb123ee989bd708726080b5d2298a1f2573b5"
+source = "git+https://github.com/tangency-labs/solidcore?rev=f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f#f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f"
 dependencies = [
  "serde",
  "serde_json",
