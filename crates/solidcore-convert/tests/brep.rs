@@ -1,0 +1,467 @@
+//! The record's B-rep and the kernel's, both ways ([`solidcore_convert::brep`]). These are the
+//! tests of the conversion that SolidCraft's flat-array hop had (crates/smlib `import/tests.rs`,
+//! `export/tests.rs`, `core/convert_tests.rs`), on the direct conversion.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::type_complexity,
+    clippy::single_match_else,
+    clippy::redundant_closure_for_method_calls,
+    clippy::redundant_closure
+)] // a test's fixtures
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::primitive::api_primitives as primitives;
+use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::{Brep, Vec3};
+use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
+use solidcore_record::brep::{
+    Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+    Region, Shell, Surface, Vertex, VERSION,
+};
+
+fn kernel() -> Kernel {
+    let mut k = Kernel::new(&KernelOptions::default());
+    k.fixes = UpstreamFixes::all();
+    k
+}
+
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-9, &attrs).unwrap()
+}
+
+fn valid(k: &mut Kernel, b: &mut Brep) {
+    let c = check_brep(k, b, CheckLevel::Level2).unwrap();
+    assert_eq!(c.pointers_status, 1000, "pointers");
+    assert_eq!(
+        c.assert_valid,
+        Some(true),
+        "{:?}",
+        c.reports
+            .reports()
+            .iter()
+            .filter(|r| !r.ok)
+            .map(|r| r.format_log_message())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The cube `[0, s]^3`, written as the record says a body is (canonical order, every face a plane
+/// on unit axes, loops counter-clockwise seen from the plane's natural normal, which points out).
+fn cube(s: f64) -> Record {
+    let c = [
+        [0., 0., 0.],
+        [s, 0., 0.],
+        [s, s, 0.],
+        [0., s, 0.],
+        [0., 0., s],
+        [s, 0., s],
+        [s, s, s],
+        [0., s, s],
+    ];
+    // Each face: its corner cycle (counter-clockwise from outside), its plane's origin and axes.
+    let x = [1.0, 0.0, 0.0];
+    let y = [0.0, 1.0, 0.0];
+    let z = [0.0, 0.0, 1.0];
+    let neg = |a: [f64; 3]| [-a[0], -a[1], -a[2]];
+    let faces: [([usize; 4], [f64; 3], [f64; 3], [f64; 3]); 6] = [
+        ([0, 3, 2, 1], c[0], y, x),      // bottom, normal -z
+        ([4, 5, 6, 7], c[4], x, y),      // top, +z
+        ([0, 1, 5, 4], c[0], x, z),      // front, -y
+        ([1, 2, 6, 5], c[1], y, z),      // right, +x
+        ([2, 3, 7, 6], c[2], neg(x), z), // back, +y
+        ([3, 0, 4, 7], c[3], neg(y), z), // left, -x
+    ];
+    let mut ends: Vec<(usize, usize)> = Vec::new();
+    let mut uses: Vec<Vec<EdgeUseRef>> = Vec::new();
+    let mut out = Vec::new();
+    for (fi, (cycle, o, u, v)) in faces.iter().enumerate() {
+        let uv = |p: [f64; 3]| {
+            let d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            [
+                d[0] * u[0] + d[1] * u[1] + d[2] * u[2],
+                d[0] * v[0] + d[1] * v[1] + d[2] * v[2],
+            ]
+        };
+        let mut edges = Vec::new();
+        for k in 0..4 {
+            let (a, b) = (cycle[k], cycle[(k + 1) % 4]);
+            let (e, forward) = match ends.iter().position(|&(s, t)| (s, t) == (b, a)) {
+                Some(e) => (e, false),
+                None => {
+                    ends.push((a, b));
+                    uses.push(Vec::new());
+                    (ends.len() - 1, true)
+                }
+            };
+            uses[e].push(EdgeUseRef {
+                face: fi as u32,
+                r#loop: 0,
+                position: k as u32,
+                upper: !forward,
+            });
+            let (s0, t0) = ends[e];
+            edges.push(OrientedEdge {
+                edge: e as u32,
+                forward,
+                pcurve: Curve2::Spline {
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                    points: vec![uv(c[s0]), uv(c[t0])],
+                },
+            });
+        }
+        out.push(Face {
+            nurbs: None,
+            surface: Surface::Plane {
+                origin: *o,
+                u_axis: *u,
+                v_axis: *v,
+            },
+            domain: [[0.0, s], [0.0, s]],
+            loops: vec![Loop::Edges { edges }],
+        });
+    }
+    let mut vertex_of: Vec<Option<u32>> = vec![None; 8];
+    let mut vertices = Vec::new();
+    let mut number = |i: usize, vertices: &mut Vec<Vertex>| {
+        *vertex_of[i].get_or_insert_with(|| {
+            vertices.push(Vertex {
+                point: c[i],
+                tolerance: 1e-6,
+            });
+            vertices.len() as u32 - 1
+        })
+    };
+    let edges = ends
+        .iter()
+        .zip(uses)
+        .map(|(&(s0, t0), uses)| {
+            let vs = [number(s0, &mut vertices), number(t0, &mut vertices)];
+            Edge {
+                nurbs: None,
+                curve: Curve::Line {
+                    start: c[s0],
+                    end: c[t0],
+                },
+                interval: [0.0, 1.0],
+                vertices: vs,
+                tolerance: 1e-6,
+                uses,
+            }
+        })
+        .collect();
+    Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+        ],
+        shells: vec![Shell::Faces {
+            faces: (0..6)
+                .map(|face| OrientedFace {
+                    face,
+                    forward: true,
+                })
+                .collect(),
+            wires: vec![],
+        }],
+        faces: out,
+        edges,
+        vertices,
+    }
+}
+
+/// Every record index names a kernel entity, and each kernel face and vertex once.
+fn order_is_total(o: &Order, r: &Record, b: &Brep) {
+    assert_eq!(o.faces.len(), r.faces.len());
+    assert_eq!(o.edges.len(), r.edges.len());
+    assert_eq!(o.vertices.len(), r.vertices.len());
+    let mut faces = o.faces.clone();
+    faces.sort_unstable_by_key(|f| f.index());
+    faces.dedup();
+    assert_eq!(faces.len(), b.face_list().len());
+    for e in &o.edges {
+        assert!(b.edge_list().contains(e));
+    }
+}
+
+#[test]
+fn a_cube_record_builds_the_kernels_cube() {
+    let mut k = kernel();
+    let r = cube(10.0);
+    r.validate().unwrap();
+    let (mut b, order) = to_kernel(&mut k, &r, true).unwrap();
+    assert_eq!(
+        [
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len()
+        ],
+        [6, 12, 8]
+    );
+    assert!(is_manifold_solid(&b).unwrap());
+    assert!((volume(&k, &mut b) - 1000.0).abs() < 1e-6);
+    valid(&mut k, &mut b);
+    order_is_total(&order, &r, &b);
+    // Record vertex i is the kernel vertex at its point.
+    for (i, v) in order.vertices.iter().enumerate() {
+        let p = b.vertex(*v).unwrap().point;
+        assert_eq!([p.x, p.y, p.z], r.vertices[i].point, "vertex {i}");
+    }
+}
+
+#[test]
+fn records_the_conversion_cannot_carry_are_refused() {
+    let mut k = kernel();
+    let mut r = cube(1.0);
+    r.version = 3;
+    assert!(matches!(
+        to_kernel(&mut k, &r, true),
+        Err(Unsupported::Invalid(_))
+    ));
+    let mut r = cube(1.0);
+    r.shells = vec![Shell::Vertex { vertex: 0 }];
+    assert!(to_kernel(&mut k, &r, true).is_err());
+    let mut r = cube(1.0);
+    r.edges[0].tolerance = 2.0;
+    assert!(matches!(
+        to_kernel(&mut k, &r, true),
+        Err(Unsupported::NotYet(_))
+    ));
+}
+
+/// Each primitive goes to the record with its analytic kinds, validates, and comes back to the
+/// same body: the same counts and volume, valid, and the same record again.
+#[test]
+#[ignore = "WIP: to_record is the next commit"]
+fn every_primitive_goes_round_unchanged() {
+    let o = Vec3::new(1.0, 2.0, 3.0);
+    let makers: [(&str, fn(&mut Kernel, Vec3) -> Brep, &[&str]); 5] = [
+        (
+            "box",
+            |k, o| primitives::create_box(k, o, 2.0, 3.0, 4.0).unwrap(),
+            &["plane"],
+        ),
+        (
+            "cylinder",
+            |k, o| primitives::create_cylinder(k, o, 15.0, 50.0).unwrap(),
+            &["plane", "cylinder"],
+        ),
+        (
+            "sphere",
+            |k, o| primitives::create_sphere(k, o, 12.0).unwrap(),
+            &["sphere"],
+        ),
+        (
+            "frustum",
+            |k, o| primitives::create_cone(k, o, 10.0, 4.0, 20.0).unwrap(),
+            &["plane", "cone"],
+        ),
+        (
+            "torus",
+            |k, o| primitives::create_torus(k, o, 22.0, 4.0).unwrap(),
+            &["torus"],
+        ),
+    ];
+    for (name, make, kinds) in makers {
+        let mut k = kernel();
+        let mut b = make(&mut k, o);
+        let v0 = volume(&k, &mut b);
+        let (r, order) = to_record(&mut k, &mut b).unwrap();
+        r.validate_built().unwrap_or_else(|e| panic!("{name}: {e}"));
+        order_is_total(&order, &r, &b);
+        for f in &r.faces {
+            let kind = match f.surface {
+                Surface::Plane { .. } => "plane",
+                Surface::Cylinder { .. } => "cylinder",
+                Surface::Cone { .. } => "cone",
+                Surface::Sphere { .. } => "sphere",
+                Surface::Torus { .. } => "torus",
+                _ => "other",
+            };
+            assert!(kinds.contains(&kind), "{name}: a {kind} face");
+        }
+        let (mut back, _) = to_kernel(&mut k, &r, true).unwrap();
+        assert_eq!(back.face_list().len(), b.face_list().len(), "{name}");
+        assert_eq!(back.edge_list().len(), b.edge_list().len(), "{name}");
+        let v1 = volume(&k, &mut back);
+        assert!((v1 - v0).abs() <= 1e-9 * v0, "{name}: {v0} -> {v1}");
+        valid(&mut k, &mut back);
+        let (again, _) = to_record(&mut k, &mut back).unwrap();
+        assert_eq!(again, r, "{name}: the record changed on a round trip");
+    }
+}
+
+/// A revolution of a line parallel to its axis is that cylinder exactly, and goes as one. A
+/// spline profile a hair off a line (solidcore#2540's sliver) is no cylinder: it goes as the
+/// revolution's NURBS, never as a cylinder the check then refuses.
+#[test]
+fn only_a_revolution_proved_on_its_cylinder_goes_as_one() {
+    let identity = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let line = Curve::Line {
+        start: [5.0, 0.0, 0.0],
+        end: [5.0, 0.0, 4.0],
+    };
+    let exact = Surface::PlacedRevolution {
+        profile: Box::new(line),
+        origin: [0.0; 3],
+        axis: [0.0, 0.0, 1.0],
+        matrix: identity,
+        forward: true,
+    };
+    let bent = Curve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![
+            [5.0, 0.0, 0.0],
+            [5.0 + 7e-7, 0.0, 4.0 / 3.0],
+            [5.0 + 4e-7, 0.0, 8.0 / 3.0],
+            [5.0, 0.0, 4.0],
+        ],
+    };
+    let sliver = Surface::PlacedRevolution {
+        profile: Box::new(bent),
+        origin: [0.0; 3],
+        axis: [0.0, 0.0, 1.0],
+        matrix: identity,
+        forward: true,
+    };
+    let mut k = kernel();
+    let found = solidcore_convert::brep::recognised(
+        &mut k,
+        &exact,
+        [[0.0, 1.0], [0.0, std::f64::consts::PI]],
+    )
+    .unwrap();
+    assert_eq!(found, Some("cylinder"));
+    let found = solidcore_convert::brep::recognised(
+        &mut k,
+        &sliver,
+        [[0.0, 1.0], [0.0, std::f64::consts::PI]],
+    )
+    .unwrap();
+    assert!(found.is_none(), "{found:?}");
+}
+
+/// The square `[0, s]^2` at z = 0 as a sheet: one plane face in an open shell of the infinite
+/// region, its loop counter-clockwise seen from +z.
+fn square(s: f64) -> Record {
+    let c = [[0., 0., 0.], [s, 0., 0.], [s, s, 0.], [0., s, 0.]];
+    let uv = |p: [f64; 3]| [p[0], p[1]];
+    let edges: Vec<Edge> = (0..4)
+        .map(|i| Edge {
+            nurbs: None,
+            curve: Curve::Line {
+                start: c[i],
+                end: c[(i + 1) % 4],
+            },
+            interval: [0.0, 1.0],
+            vertices: [i as u32, ((i + 1) % 4) as u32],
+            tolerance: 1e-6,
+            uses: vec![EdgeUseRef {
+                face: 0,
+                r#loop: 0,
+                position: i as u32,
+                upper: false,
+            }],
+        })
+        .collect();
+    let loop_edges = (0..4)
+        .map(|i| OrientedEdge {
+            edge: i as u32,
+            forward: true,
+            pcurve: Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![uv(c[i]), uv(c[(i + 1) % 4])],
+            },
+        })
+        .collect();
+    Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: vec![],
+        }],
+        faces: vec![Face {
+            nurbs: None,
+            surface: Surface::Plane {
+                origin: [0.0; 3],
+                u_axis: [1.0, 0.0, 0.0],
+                v_axis: [0.0, 1.0, 0.0],
+            },
+            domain: [[0.0, s], [0.0, s]],
+            loops: vec![Loop::Edges { edges: loop_edges }],
+        }],
+        edges,
+        vertices: c
+            .iter()
+            .map(|&point| Vertex {
+                point,
+                tolerance: 1e-6,
+            })
+            .collect(),
+    }
+}
+
+/// A sheet's open shell holds both sides of its face, in the infinite region.
+#[test]
+fn a_square_record_builds_a_sheet_holding_both_sides() {
+    let mut k = kernel();
+    let r = square(3.0);
+    r.validate().unwrap();
+    let (mut b, order) = to_kernel(&mut k, &r, true).unwrap();
+    order_is_total(&order, &r, &b);
+    assert_eq!(
+        [
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len()
+        ],
+        [1, 4, 4]
+    );
+    assert!(!is_manifold_solid(&b).unwrap());
+    let infinite = b.infinite_region().unwrap();
+    let shells = b.region(infinite).unwrap().shells.clone();
+    assert_eq!(shells.len(), 1);
+    assert_eq!(b.shell(shells[0]).unwrap().get_faceuses().unwrap().len(), 2);
+    valid(&mut k, &mut b);
+}
+
+/// A record not marked trusted is healed as it is built, and the healed cube is the cube.
+#[test]
+fn an_untrusted_record_is_healed_into_the_same_body() {
+    let mut k = kernel();
+    let r = cube(2.0);
+    let (mut b, order) = to_kernel(&mut k, &r, false).unwrap();
+    order_is_total(&order, &r, &b);
+    assert!(is_manifold_solid(&b).unwrap());
+    assert!((volume(&k, &mut b) - 8.0).abs() < 1e-9);
+    valid(&mut k, &mut b);
+}
