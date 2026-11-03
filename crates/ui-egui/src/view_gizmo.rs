@@ -36,6 +36,9 @@ const MAX_EDGE_POINTS: usize = 50_000;
 /// The most a body's widest way across may be to its thinnest: a long stick or a thin sheet is
 /// a line from some sides, too thin to see or click.
 const MAX_ASPECT: f64 = 5.0;
+/// Slack on [`MAX_ASPECT`] for the packing's rounding (at most about 2e-4 of a width), so a body
+/// at the limit is still at it once stored and read back.
+const ASPECT_SLACK: f64 = 1e-3;
 /// A face number that names no face, in a packed snapshot.
 const NO_FACE: u16 = u16::MAX;
 const MAX_NAME: usize = 256;
@@ -231,7 +234,7 @@ fn refusal(mesh: &Mesh) -> Option<&'static str> {
         return Some("view_gizmo.too_detailed");
     }
     let (thinnest, widest) = widths(&mesh.positions);
-    (!(widest > 0.0 && thinnest * MAX_ASPECT >= widest)).then_some("view_gizmo.too_thin")
+    (!(widest > 0.0 && thinnest * MAX_ASPECT * (1.0 + ASPECT_SLACK) >= widest)).then_some("view_gizmo.too_thin")
 }
 
 /// The thinnest and the widest the points are across, measured along the three axes, the six
@@ -573,6 +576,23 @@ mod tests {
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 10})).unwrap();
         s.world_state().unwrap().bodies[0].mesh()
+    }
+
+    #[test]
+    fn a_body_at_the_aspect_limit_is_still_accepted_once_packed() {
+        let bar = |thin: f64| {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &json!({"length": 50, "width": thin, "height": thin})).unwrap();
+            // Turned 45 degrees about its length, so the packing rounds its thin widths.
+            let mut mesh = (*s.world_state().unwrap().bodies[0].mesh()).clone();
+            let r = std::f64::consts::FRAC_1_SQRT_2;
+            for p in &mut mesh.positions {
+                *p = Vec3::new(p.x, r * (p.y - p.z), r * (p.y + p.z));
+            }
+            Shape::of("Bar", &mesh, None, &BTreeMap::new())
+        };
+        assert!(bar(10.0001).is_some(), "just inside 5:1 stays inside after packing");
+        assert!(bar(9.9).is_none(), "clearly past 5:1 is still refused");
     }
 
     #[test]
