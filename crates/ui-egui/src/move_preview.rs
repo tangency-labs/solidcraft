@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_engine::doc::{Document, Mat, apply_point, apply_vector, expr::Kind, rigid};
+use solidcraft_engine::doc::{Document, IDENTITY, Mat, apply_point, apply_vector, expr::Kind, mat_inverse, mat_mul, rigid};
 use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
 
 use crate::{
@@ -24,12 +24,22 @@ pub(crate) struct MovePreview {
 }
 
 /// The world meshes of the bodies drawn (the listed bodies, and the bodies of the components
-/// copied), for the design and revision they were taken from.
+/// copied) and the frames that place them, for the design and revision they were taken from.
 struct Cached {
     document: Arc<Document>,
     revision: u64,
     names: Vec<String>,
     meshes: Vec<Arc<Mesh>>,
+    frames: Vec<Mat>,
+}
+
+/// Where the components of `bodies` place them, the world for a body outside one.
+fn placed_frames(app: &SolveApp, bodies: &[String]) -> Vec<Mat> {
+    if app.session.doc.occurrences.is_empty() {
+        return vec![IDENTITY; bodies.len()];
+    }
+    let frames = app.session.placed_document().body_frames(&app.session.model.state());
+    bodies.iter().map(|name| frames.iter().find(|f| f.0 == *name).map_or(IDENTITY, |f| f.3)).collect()
 }
 
 impl MovePreview {
@@ -99,15 +109,24 @@ impl MovePreview {
             if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
             }
-            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, names: names.clone(), meshes });
+            // A component's copy moves in the world (`occurrence.move`), so its bodies take the world's.
+            let mut frames = placed_frames(app, &bodies);
+            frames.resize(names.len(), IDENTITY);
+            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, names: names.clone(), meshes, frames });
         }
         let cache = self.cached.as_ref()?;
-        // About the world origin, as the Move feature turns bodies (`kernel::transform`).
-        let m = rigid(translate, Vec3::ZERO, axis, angle);
+        // As the Move feature does (`kernel::transform`): about the origin of each body's frame,
+        // with the values taken into a frame. A solid.move splits by frame and takes them into each
+        // body's own (`frames::split_move`); an edit takes them into the first body's.
+        let first = *cache.frames.first()?;
+        let edit = id == "timeline.redefine";
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
-        for mesh in &cache.meshes {
+        for (mesh, frame) in cache.meshes.iter().zip(&cache.frames) {
+            let back = mat_inverse(if edit { &first } else { frame })?;
+            let turned = rigid(apply_vector(&back, translate), Vec3::ZERO, apply_vector(&back, axis), angle);
+            let m = mat_mul(&mat_mul(frame, &turned), &mat_inverse(frame)?);
             draw(&mut scene, mesh, &m, colors, &mut bounds);
             if !copy && colors.cut_tint {
                 // Where the body was, as the scratch-design preview shows a body moved away.
@@ -203,6 +222,25 @@ mod tests {
         assert!(pv.compute(&app, &copy, c).unwrap().unwrap().replaced.is_empty());
     }
 
+    /// A body in a turned, placed component turns about its component's origin, not the world's:
+    /// previewed about the world's, it was drawn far from where the feature puts it.
+    #[test]
+    fn a_placed_body_is_previewed_where_the_feature_puts_it() {
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "30 deg", "translate": [130, 20, 20]})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let cmds =
+            [("solid.move".to_string(), json!({"bodies": ["Body1"], "translate": ["10 mm", "-5 mm", "0 mm"], "axis": [1, 0, 0], "angle": "25 deg"}))];
+        let built = MovePreview::default().compute(&app, &cmds, colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        s.execute("solid.move", &cmds[0].1).unwrap();
+        let moved = s.world_state().body("Body1").unwrap().mesh().bounds();
+        assert!(built.bounds.min.dist(moved.min) < 1e-6 && built.bounds.max.dist(moved.max) < 1e-6, "{:?} vs {moved:?}", built.bounds);
+    }
+
     /// Anything it can't take is left to the scratch-design preview.
     #[test]
     fn what_it_cannot_take_goes_to_the_full_preview() {
@@ -245,5 +283,49 @@ mod tests {
         let built = pv.compute(&app, &mixed, c).expect("taken here").expect("built");
         assert!(near(Vec3::new(built.bounds.min.x, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0)), "{:?}", built.bounds);
         assert!(near(Vec3::new(0.0, 0.0, built.bounds.max.z), Vec3::new(0.0, 0.0, 15.0)), "{:?}", built.bounds);
+    }
+
+    /// A turned copy of a placed component turns about the world origin, as `occurrence.move`
+    /// turns it, not about the origin of the component's frame as a body of it would.
+    #[test]
+    fn a_turned_component_copy_is_previewed_where_the_copy_lands() {
+        let mut s = Session::default();
+        let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 15, "body_name": "Peg"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": occurrence, "translate": [100, 0, 0]})).unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let p = json!({"bodies": [], "occurrences": [[occurrence]], "copy": true, "translate": [10, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"});
+        let built = MovePreview::default().compute(&app, &[("solid.move".to_string(), p.clone())], colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        let copy = s.execute("solid.move", &p).unwrap()["occurrences"][0].as_u64().unwrap();
+        let mut landed = Aabb3::EMPTY;
+        for name in s.occurrence_bodies(&[copy], true).unwrap() {
+            landed = landed.union(&s.world_state().body(&name).unwrap().mesh().bounds());
+        }
+        assert!(built.bounds.min.dist(landed.min) < 1e-6 && built.bounds.max.dist(landed.max) < 1e-6, "{:?} vs {landed:?}", built.bounds);
+    }
+
+    /// Bodies in differently turned frames move apart in the world (`frames::split_move`), each by
+    /// the world vector: drawn with the first body's frame, the other moved along its own axes.
+    #[test]
+    fn bodies_in_differently_turned_frames_are_previewed_where_the_move_puts_them() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Plate"})).unwrap();
+        let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 15, "body_name": "Peg"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "90 deg", "translate": [100, 0, 0]})).unwrap();
+        let peg = s.occurrence_bodies(&[occurrence], true).unwrap()[0].clone();
+        let app = SolveApp::new(s, Services::default());
+        let p = json!({"bodies": ["Plate", peg], "translate": [30, 0, 0]});
+        let built = MovePreview::default().compute(&app, &[("solid.move".to_string(), p.clone())], colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        s.execute("solid.move", &p).unwrap();
+        let st = s.world_state();
+        let moved = st.body("Plate").unwrap().mesh().bounds().union(&st.body(&peg).unwrap().mesh().bounds());
+        assert!(built.bounds.min.dist(moved.min) < 1e-6 && built.bounds.max.dist(moved.max) < 1e-6, "{:?} vs {moved:?}", built.bounds);
     }
 }
