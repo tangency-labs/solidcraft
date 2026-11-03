@@ -305,6 +305,24 @@ fn cross_curvature(k: &Kernel, s: &Surface, uv: Point2, w: Vec3) -> Option<f64> 
     Some(nrm.dot(d2) / d1.dot(d1))
 }
 
+/// The Gaussian curvature of `s` at `uv`, from its first and second derivatives.
+fn gaussian_curvature(k: &Kernel, s: &Surface, uv: Point2) -> Option<f64> {
+    let flags = EvaluateFlags {
+        non_zero_tangents: false,
+        ..EvaluateFlags::default()
+    };
+    let d = s.evaluate(k, uv, 2, 2, flags).ok()?;
+    let (su, sv, suu, suv, svv) = (d[1][0], d[0][1], d[2][0], d[1][1], d[0][2]);
+    let nrm = su.cross(sv).unitize().ok()?;
+    let (g11, g12, g22) = (su.dot(su), su.dot(sv), sv.dot(sv));
+    let (l, m, n) = (suu.dot(nrm), suv.dot(nrm), svv.dot(nrm));
+    let det = g11 * g22 - g12 * g12;
+    if !(det > 0.0) {
+        return None;
+    }
+    Some((l * n - m * m) / det)
+}
+
 /// One side of a seam: the surface, its uv along the seam (t in [0, 1]) and a uv step into it.
 struct SeamSide<'a> {
     s: &'a Surface,
@@ -569,6 +587,27 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
     let worst = containment(&fill, &faces, true).unwrap();
     println!("  stands past a face by at most {worst:.3e} (certified)");
     assert!(worst <= 1e-12 * size);
+    // a G1 fill is held convex: the Gaussian curvature of every patch is not negative
+    // (sampled here; the fill is certified on its Bernstein coefficients before it is
+    // returned). The G2 fill is the least-energy one, not held convex yet (#2347)
+    let mut least = f64::MAX;
+    for (p, patch) in patches.iter().enumerate().filter(|_| order == 1) {
+        for i in 0..=16 {
+            for j in 0..=16 {
+                let uv = at(f64::from(i) / 16.0, f64::from(j) / 16.0);
+                if let Some(kg) = gaussian_curvature(&k, patch, uv) {
+                    least = least.min(kg);
+                    assert!(
+                        kg >= -1e-9 / (size * size),
+                        "patch {p} at {uv:?}: Gaussian curvature {kg:e}"
+                    );
+                }
+            }
+        }
+    }
+    if order == 1 {
+        println!("  least Gaussian curvature over the fill {least:.3e}");
+    }
 }
 
 /// `setback_distances_box_corner`: the setbacks by the owner's rule, `max(1.5 r, least +
