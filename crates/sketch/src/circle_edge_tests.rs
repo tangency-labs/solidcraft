@@ -288,4 +288,19 @@ fn the_dimensions_are_drawn_between_the_facing_edge_points() {
         let (lo, hi) = if p0.x < p1.x { (p0, p1) } else { (p1, p0) };
         assert!(lo.dist(v(7.0, 0.0)) < 1e-12 && hi.dist(v(10.0, 0.0)) < 1e-12, "{p0:?} {p1:?}");
     }
+    // Concentric arcs (a trimmed offset keeps its source's centre): across the middle of the arcs,
+    // whichever is the larger and whichever comes first.
+    let mut sk = Sketch::default();
+    let source = sk.add_arc(v(0.0, 0.0), v(20.0, 0.0), v(0.0, 20.0), [None; 3], None).unwrap();
+    let CurveKind::Arc { c, .. } = sk.curves[source].kind else { panic!("not an arc") };
+    let middle = v(1.0, 1.0) * std::f64::consts::FRAC_1_SQRT_2;
+    for r in [18.0, 22.0] {
+        let offset = sk.add_arc(v(0.0, 0.0), v(r, 0.0), v(0.0, r), [Some(c), None, None], None).unwrap();
+        for (a, b) in [(source, offset), (offset, source)] {
+            let (p0, p1, _) = linear(&sk, &ConstraintKind::CircleCircleDistance { a, b, value: 2.0, circles: TwoCircles::Nested });
+            let (lo, hi) = if p0.len() < p1.len() { (p0, p1) } else { (p1, p0) };
+            let (r0, r1) = if r < 20.0 { (r, 20.0) } else { (20.0, r) };
+            assert!(lo.dist(middle * r0) < 1e-9 && hi.dist(middle * r1) < 1e-9, "radius {r}: {p0:?} {p1:?}");
+        }
+    }
 }

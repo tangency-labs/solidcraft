@@ -127,7 +127,11 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
                 }
                 _ => None,
             };
-            let u = unit(cb - ca, middle(b).or_else(|| middle(a)).unwrap_or(Vec2::X));
+            let mid = middle(b).or_else(|| middle(a)).unwrap_or(Vec2::X);
+            // The nested branch below measures along -u when `a` is the inner circle, so point the
+            // fallback away from the arc there, and the dimension still lands on the arc.
+            let mid = if matches!(circles, TwoCircles::Nested) && ra < rb { mid * -1.0 } else { mid };
+            let u = unit(cb - ca, mid);
             let (p0, p1) = match circles {
                 TwoCircles::Nested if ra >= rb => (cb + u * rb, ca + u * ra),
                 TwoCircles::Nested => (ca - u * ra, cb - u * rb),
