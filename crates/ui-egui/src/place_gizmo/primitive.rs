@@ -188,7 +188,7 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
         "solid.cone" | "solid.coil" if n.is_none() => return false,
         "solid.box" => {
             if at.is_none() {
-                crate::primitive_placement::dropped(&mut d.extra, p, n.unwrap_or(Vec3::Z), sz);
+                crate::primitive_placement::dropped(s, &mut d.extra, p, n.unwrap_or(Vec3::Z), sz);
             } else {
                 *at = Some((p, n));
             }
