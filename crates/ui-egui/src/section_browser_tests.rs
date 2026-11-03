@@ -264,3 +264,38 @@ fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility
     assert!(h.app.dialog.is_some());
     assert_eq!(h.app.session.section, cut);
 }
+
+/// Reopened from a section's own geometry (Graphics → Show viewport section status), the dialog
+/// holds the plane as numbers and picks none: the drag arrow still stands on that plane and its
+/// tip reaches the cut (#11423). A plane picked afterwards takes the arrow over.
+#[test]
+fn a_section_reopened_from_its_geometry_keeps_its_drag_arrow() {
+    use solidcraft_engine::doc::expr::Kind as ValueKind;
+    for params in [
+        json!({"plane":"XY","at":-25.4,"flip":true}),
+        json!({"plane":{"origin":[7,-12,4],"normal":[-3,-4,0]},"offset":5}),
+        json!({"plane":{"origin":[7,-12,4],"normal":[0,0,-1]},"offset":-5,"flip":true}),
+    ] {
+        let mut h = harness();
+        h.app.preferences.viewport_section_status = true;
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("inspect.section", params.clone()).unwrap();
+        h.frames(3);
+        let cut = h.app.session.section.unwrap();
+        menu(&mut h, "Edit Section Analysis");
+        let (offset, _, plane) = section_dialog(&h);
+        assert!(plane.is_empty(), "{params}: no plane picked: {plane:?}");
+        let d = h.app.dialog.as_ref().unwrap();
+        let (base, dir) = crate::canvas::anchor(&h.app, d).unwrap_or_else(|| panic!("{params}: no arrow"));
+        let dir = dir.unwrap_or_else(|| panic!("{params}: an arrow with no direction"));
+        let distance = crate::length_input::eval(&h.app.session.doc, &offset, ValueKind::Length).unwrap();
+        let tip = base + dir * distance;
+        assert!((tip - cut.0).len() < 1e-9, "{params}: the arrow ends at {tip:?}, the cut is at {:?}", cut.0);
+        assert!(dir.cross(cut.1).len() < 1e-9, "{params}: the arrow runs along the cut's normal: {dir:?} vs {:?}", cut.1);
+
+        let mut d = h.app.dialog.take().unwrap();
+        d.pick(&h.app.session, solidcraft_engine::Sel::Plane { name: "XZ".into() });
+        let (_, dir) = crate::canvas::anchor(&h.app, &d).unwrap_or_else(|| panic!("{params}: no arrow on the picked plane"));
+        assert!(dir.is_some_and(|n| (n.y.abs() - 1.0).abs() < 1e-9), "{params}: the picked plane's arrow: {dir:?}");
+    }
+}
