@@ -525,9 +525,10 @@ mod tests {
             (9420.0, "g", 1, "9420.0 g"),
             (9420.0, "lb", 2, "20.77 lb"),
             (1.29, "kg", 2, "0.0013 kg"),
-            // A saved unit that isn't a mass unit, or too many decimals: kilograms at 2 decimals.
-            (9420.0, "mm", 3, "9.42 kg"),
-            (9420.0, "kg", 40, "9.42 kg"),
+            // A saved unit that isn't a mass unit: kilograms, at the decimals chosen. Too many
+            // decimals: 8, as for a length.
+            (9420.0, "mm", 3, "9.420 kg"),
+            (9420.0, "kg", 40, "9.42000000 kg"),
         ] {
             (h.app.preferences.mass_unit, h.app.preferences.mass_decimals) = (unit.into(), decimals);
             h.app.menu.props = Some(("Plate".into(), measured(grams)));

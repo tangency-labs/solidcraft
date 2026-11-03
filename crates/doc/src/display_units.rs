@@ -104,7 +104,7 @@ pub fn format_number(x: f64, decimals: u8, f: &NumberFormat) -> Result<Shown> {
 pub fn mass_number(grams: f64, unit: &str, decimals: u8) -> Result<String> {
     let value = expr::unit_info(unit).map_or(grams, |(_, scale)| grams / scale);
     let readable = if value != 0.0 && value.abs() < 1.0 { 1.0 - value.abs().log10().floor() } else { 0.0 };
-    let places = decimals.max((readable as u8).min(8));
+    let places = decimals.min(8).max((readable as u8).min(8));
     Ok(format_value(grams, expr::Kind::Mass, unit, places, &NumberFormat::default())?.text)
 }
 
@@ -497,11 +497,14 @@ mod number_tests {
             (0.0, "kg", 2, "0.00 kg"),
             (-0.0, "kg", 2, "0.00 kg"),
             (-1.29, "kg", 2, "−0.0013 kg"),
+            // More than 8 decimals are 8, as a length's are.
+            (1000.0, "kg", 9, "1.00000000 kg"),
+            (1000.0, "kg", u8::MAX, "1.00000000 kg"),
         ] {
             assert_eq!(format_mass(grams, unit, dp).unwrap(), expected, "{grams} g in {unit:?}, {dp} places");
             assert_eq!(mass_number(grams, unit, dp).unwrap(), expected.rsplit_once(' ').unwrap().0);
         }
-        for (grams, unit, dp) in [(1.0, "mm", 2), (1.0, "", 2), (1.0, "KG", 2), (1.0, "oz", 2), (1.0, "kg", 9), (1.0, "kg", u8::MAX)] {
+        for (grams, unit, dp) in [(1.0, "mm", 2), (1.0, "", 2), (1.0, "KG", 2), (1.0, "oz", 2)] {
             assert!(matches!(format_mass(grams, unit, dp), Err(DocError::Invalid(_))), "{unit:?}, {dp} places");
         }
         for grams in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e16] {

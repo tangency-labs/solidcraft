@@ -74,7 +74,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::row(ui, app.tr("ui.mass_unit"), |ui| {
                     let units: Vec<&str> = expr::UNITS.iter().filter(|(_, kind, _)| *kind == expr::Kind::Mass).map(|(name, ..)| *name).collect();
                     // Another saved unit shows as kilograms, as `show_mass` reads it.
-                    let mut selected = units.iter().position(|u| *u == app.preferences.mass_unit).unwrap_or(1);
+                    let default = units.iter().position(|u| *u == expr::Kind::Mass.default_unit()).unwrap_or(0);
+                    let mut selected = units.iter().position(|u| *u == app.preferences.mass_unit).unwrap_or(default);
                     ui_kit::segmented(ui, &mut selected, &units, ui_kit::Segments { intrinsic: true, ..Default::default() });
                     if let Some(unit) = units.get(selected)
                         && app.preferences.mass_unit != *unit

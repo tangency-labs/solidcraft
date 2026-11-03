@@ -2505,11 +2505,14 @@ pub fn show_mm_bare(app: &SolveApp, v: f64) -> String {
     length_number(v, &app.session.doc.units, app.preferences.length_decimals)
 }
 
-/// A mass given in grams, in the preferences' mass unit and decimals. A saved unit that isn't a mass unit (or more
-/// than 8 decimals) reads as kilograms at 2 decimals, and a mass that isn't a number as a dash.
+/// A mass given in grams, in the preferences' mass unit and decimals (at most 8, as a length's). A saved unit that
+/// isn't a mass unit reads as kilograms, the mass kind's default, and a mass that isn't a number as a dash.
 pub fn show_mass(app: &SolveApp, grams: f64) -> String {
+    use solidcraft_engine::doc::expr;
     let p = &app.preferences;
-    format_mass(grams, &p.mass_unit, p.mass_decimals).or_else(|_| format_mass(grams, "kg", 2)).unwrap_or_else(|_| "—".into())
+    format_mass(grams, &p.mass_unit, p.mass_decimals)
+        .or_else(|_| format_mass(grams, expr::Kind::Mass.default_unit(), p.mass_decimals))
+        .unwrap_or_else(|_| "—".into())
 }
 
 /// The window system choices (`Prefs::window_system`, #3083).
@@ -6124,6 +6127,19 @@ mod tests {
             assert_eq!(h.app.preferences, applied);
             assert_eq!(h.app.session.doc.to_json(), doc);
         }
+    }
+
+    /// A saved mass unit that isn't a mass (an older or hand-edited file) shows on the Design page as
+    /// kilograms, as `show_mass` reads it, and the page saves kilograms.
+    #[test]
+    fn design_mass_unit_that_isnt_a_mass_shows_as_kilograms() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.mass_unit = "mm".into();
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        h.app.prefs_window.filter = "Mass unit".into();
+        h.frames(5);
+        assert_eq!(h.app.preferences.mass_unit, "kg");
     }
 
     #[test]
