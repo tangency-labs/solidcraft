@@ -16,12 +16,9 @@ use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 use crate::expr::{self, Kind, Value};
 use crate::{DocError, Document, IDENTITY, Mat, Result, apply_point, apply_vector, mat_inverse, mat_mul};
 
-#[path = "sheet_convert.rs"]
-mod convert;
 #[path = "sheet_face_names.rs"]
 mod face_names;
-pub use convert::{bend_edge_names, convert_body};
-pub(crate) use convert::{outline_loop, round_wall};
+pub use crate::sheet_surface_convert::bend_edge_names;
 pub use face_names::body_sheet_face_names;
 
 // Bound the aggregate geometry, including sampled curves and intermediate clipping pieces.
@@ -253,7 +250,8 @@ pub struct SheetRule {
     /// end is cut straight from that corner to where its flange's end starts).
     #[serde(default = "rule_corner_relief_shape")]
     pub corner_relief_shape: String,
-    /// Inner radius of flat hems.
+    /// The space between a flat hem's leg and the face it folds over (its bend's inner radius is
+    /// half of it).
     #[serde(default = "rule_hem_gap")]
     pub hem_gap: String,
     /// Gap between flanges that meet at a corner.
@@ -1584,6 +1582,7 @@ impl SheetBody {
 
     /// The folded (or, when unfolded, flat) solid, sewn from its faces.
     pub fn solid(&self) -> Result<Body> {
+        crate::sheet_surface::report(self);
         if self.flat {
             return self.flat_solid();
         }
@@ -3676,7 +3675,8 @@ impl SheetBody {
         Ok(())
     }
 
-    /// A flat hem: a 180° bend with a tiny radius at the panel edge, `length` to its outer face.
+    /// A flat hem: a 180° bend at the panel edge, its leg `gap` off the face it folds over (the
+    /// bend's inner radius is half the gap), `length` to its outer face.
     pub fn add_hem(&mut self, pick: Vec3, length: f64, gap: f64, flip: bool) -> Result<usize> {
         let (panel, a, b, top, dist) = self.edge_at(pick).ok_or_else(|| DocError::Invalid("no sheet edge there".into()))?;
         if dist > self.t * 2.0 + 1e-3 {
@@ -3684,7 +3684,10 @@ impl SheetBody {
         }
         let d = (b - a).normalized().ok_or_else(|| DocError::Invalid("edge".into()))?;
         let outward = Vec2::new(d.y, -d.x);
-        let leg = length - (gap + self.t);
+        if gap < 0.0 {
+            return Err(DocError::Invalid("the hem gap must not be negative".into()));
+        }
+        let leg = length - (gap / 2.0 + self.t);
         if leg < 0.0 {
             return Err(DocError::Invalid("the hem is shorter than its bend".into()));
         }
@@ -3698,7 +3701,7 @@ impl SheetBody {
             len: a.dist(b),
             n: outward,
             angle: if up { std::f64::consts::PI } else { -std::f64::consts::PI },
-            radius: gap,
+            radius: gap / 2.0,
             leg,
             ext: (0.0, 0.0),
             slope: (0.0, 0.0),
@@ -4730,6 +4733,11 @@ pub struct Letters {
 }
 
 impl Letters {
+    /// No text: a sheet that carries none.
+    pub fn none() -> Letters {
+        Letters { regions: Vec::new() }
+    }
+
     /// Whether `lp` is made of the outlines of text the sheet carries: a letter, or one of its
     /// counters.
     pub fn is_letter(&self, lp: &Loop2) -> bool {
@@ -5286,8 +5294,8 @@ mod tests {
         s.add_flange(Vec3::new(50.0, 0.0, 2.5), 20.0, std::f64::consts::FRAC_PI_2, 2.5, "inside", false).unwrap();
         s.add_hem(Vec3::new(50.0, 0.0, 20.0), 8.0, 0.01, false).unwrap();
         let b = s.solid().unwrap();
-        assert!((vol(&b) - 21334.723).abs() < 2.0, "{}", vol(&b));
-        assert!((s.flat_size().unwrap().1 - 84.632035).abs() < 1e-4, "{:?}", s.flat_size());
+        assert!((vol(&b) - 21332.046).abs() < 2.0, "{}", vol(&b));
+        assert!((s.flat_size().unwrap().1 - 84.621327).abs() < 1e-4, "{:?}", s.flat_size());
         // A hole in the base and a slot across the bend.
         let mut s = plate(80.0, 50.0);
         s.add_flange(Vec3::new(40.0, 0.0, 2.5), 20.0, std::f64::consts::FRAC_PI_2, 2.5, "inside", false).unwrap();

@@ -231,6 +231,7 @@
   {
    "command": "sheet.convert",
    "params": {
+    "mode": "thicken",
     "body": "Channel",
     "face": [
      20,

@@ -60,6 +60,8 @@ solidcraft-profile = { workspace = true, features = ["enabled"] }
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+# Sheet metal tests read the joints of a sheet made from surfaces.
+solidcraft-develop = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"

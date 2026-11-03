@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1092",
+  "tangency-labs/solidcraft#1314"
+ ],
+ "what": "an L section modelled with a bend of R2 inside and R4 outside, thickened from a leg with the bend picked on its roll, under a rule of R3: the modelled bend stays a roll of its own radius (a rule's radius does not override a radius the body has)",
+ "source": "analytic",
+ "method": "T = 2, the roll R2 inside and R4 outside, its legs 56 (x 4 .. 60) and 36 (y 4 .. 40) long, 50 deep: the sheet is the body as modelled, V = 50*(2*56 + 2*36 + (pi/4)(4^2 - 2^2)) = 9200 + 150*pi; its flat is 56 + 36 + (pi/2)(R + K T) = 92 + 1.5*pi long. (The section's inner arc runs from (2, 4) to (4, 2): center_point arcs run counterclockwise, and drawn the other way it is three quarters of a circle.)",
+ "body_count": 1,
+ "volume_mm3": 9671.23889803847
+}

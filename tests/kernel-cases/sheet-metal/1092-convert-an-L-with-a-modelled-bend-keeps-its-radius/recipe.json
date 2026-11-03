@@ -80,12 +80,12 @@
      4
     ],
     "start": [
-     4,
-     2
-    ],
-    "end": [
      2,
      4
+    ],
+    "end": [
+     4,
+     2
     ]
    }
   },
@@ -123,6 +123,7 @@
   {
    "command": "sheet.convert",
    "params": {
+    "mode": "thicken",
     "body": "Angle",
     "face": [
      30,

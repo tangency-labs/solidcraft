@@ -1316,6 +1316,46 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
+    /// Formed beads (stiffening ribs): a bead pressed into a planar panel of a sheet made from
+    /// surfaces along each of `curves` (straight sketch lines on one of its faces), standing out
+    /// of that face (the other one with `flip`). Across, a trapezoid: `width` and `depth` on the
+    /// side it stands out of, at the virtual sharps, flanks at `angle` (or the angle that leaves
+    /// `crown_width`), bends of inner radius `base_radius` and `crown_radius` (default: the
+    /// rule's bend radius); along, each end ramps up over `end_length` (default: 3 × the depth).
+    /// `margin` (default: 3 × the thickness) is how near the bead may come to edges, cut-outs,
+    /// bends and other beads before a warning.
+    SheetBead {
+        sketch: SketchId,
+        curves: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<String>,
+        #[walk(length = "Depth")]
+        depth: Expr,
+        #[walk(length = "Width")]
+        width: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Crown width")]
+        crown_width: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Base radius")]
+        base_radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Crown radius")]
+        crown_radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End length")]
+        end_length: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+    },
     /// Unfold a sheet body flat (all bends), or refold it.
     SheetUnfold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1323,18 +1363,48 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refold: bool,
     },
-    /// Convert a body to sheet metal from its fixed face at `face`: a plate of constant
-    /// thickness or, with `bends`, a solid or shelled body whose faces reached from the fixed
-    /// face across those edges become the sheet.
+    /// Convert to sheet metal's thicken mode (#6748): the sheet is the faces picked at `face` and
+    /// `faces`, and every face a bend joins to them. The sharp edges at `bends` become bends and
+    /// every other edge between two faces of the sheet is cut open; cylinders and cones become
+    /// rolls. A bend modelled with its radius is picked on its roll. A shell or a plate keeps its
+    /// thickness; a solid takes its rule's.
     SheetConvert {
         body: BodyName,
         #[walk(pick_if = !bends.is_empty())]
         face: FacePick,
+        /// The faces picked after the first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
+        /// Points on the sharp edges that become bends, or on the rolls of bends modelled with
+        /// their radius.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bends: Vec<Position>,
+        /// inside (default) | outside: the side of a solid's faces its material lies on. A shell
+        /// or a plate keeps its own.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        direction: String,
+    },
+    /// Convert a body to sheet metal (#6748): every face of a solid, or of one
+    /// side of a shell or a plate, less the faces at `skip`. The sharp edges at `bends` become
+    /// bends and every other sharp edge between two faces of the sheet is cut open; cylinders
+    /// and cones become rolls. No face is fixed. The body becomes the folded sheet and the model
+    /// keeps its flat pattern.
+    SheetSurfaceConvert {
+        body: BodyName,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<String>,
         /// Points on the sharp edges that become bends.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bends: Vec<Position>,
+        /// The faces left out of the sheet.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<FacePick>,
+        /// inside (default) | outside: the side of a solid's faces its material lies on. A shell
+        /// or a plate keeps its own.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        direction: String,
     },
     /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
     Boss {
@@ -2430,8 +2500,10 @@ impl FeatureKind {
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
                 | FeatureKind::SheetPath { .. }
+                | FeatureKind::SheetBead { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
+                | FeatureKind::SheetSurfaceConvert { .. }
         )
     }
 
@@ -2487,9 +2559,10 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
             FeatureKind::SheetPath { .. } => "PathFlangeFeature",
+            FeatureKind::SheetBead { .. } => "BeadFeature",
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
-            FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
+            FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
@@ -2571,9 +2644,10 @@ impl FeatureKind {
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
             FeatureKind::SheetPath { .. } => "PathFlange",
+            FeatureKind::SheetBead { .. } => "Bead",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
-            FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
+            FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",

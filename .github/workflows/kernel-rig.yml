@@ -32,6 +32,7 @@ on:
       - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The rig itself: the grading, the runner, the selection and this workflow.
@@ -52,6 +53,7 @@ on:
       - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/src/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The rig itself: the grading, the runner, the selection and this workflow.

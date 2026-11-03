@@ -883,7 +883,9 @@ fn sketch_component_visible(s: &Session, id: u64) -> bool {
 /// Is a sketch used by a later feature?
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
     use solidcraft_doc::FeatureKind;
-    s.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if sketch == id))
+    s.doc.features.iter().any(|f| {
+        matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::SheetBead { sketch, .. } if sketch == id)
+    })
 }
 
 /// Camera framing the model (iso view).
