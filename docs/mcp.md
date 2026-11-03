@@ -191,11 +191,13 @@ configuration folder exists, and no client program is started. Supported:
 | `zed` | Zed's `settings.json` (`context_servers`) |
 | `vscode` | VS Code's user `mcp.json` |
 
-The files are edited in place: only the `solidcraft` entries change, everything else in the file
-(other servers, comments, order) stays as it was, and the file is copied to `<name>.bak` first. A
-file that does not parse is left alone. Running it again after an update moves the program only
-refreshes the path of an entry it wrote; an entry you changed (extra arguments, another program)
-is left as you have it. `--live` also adds `solidcraft-live`, which bridges to the open app (port
+Only the `solidcraft` entries change; everything else in the file (other servers, comments, order)
+stays as it was. Updates replace the file atomically and keep the previous version as `<name>.bak`.
+A failed write leaves the configuration intact. A file that does not parse is left alone.
+Setup also checks for changes since it read the file and refuses a stale edit. This check narrows
+the race with another program writing its settings; it cannot exclude a write after the check.
+After an update moves the program, running setup again only refreshes the path of an entry it wrote.
+An entry you changed (extra arguments, another program) is left as you have it. `--live` also adds `solidcraft-live`, which bridges to the open app (port
 7878, see below). Restart the client afterwards.
 
 SolidCraft also does this by itself: when the app starts it adds the `solidcraft` entry to each
