@@ -112,7 +112,11 @@
           version = (pkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
           src = self;
 
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            # Git dependencies need a fixed-output hash; update it with the rev in Cargo.toml.
+            outputHashes."solidcore-1.0.1" = "sha256-SziXzxkQXY29PBOG7Ct3W8dex4RUWfAEczFUakB0k50=";
+          };
           # The CLI draws the same packaging icons as the other Linux distributions.
           cargoBuildFlags = [
             "-p"
