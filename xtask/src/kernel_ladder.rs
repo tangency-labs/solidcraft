@@ -295,6 +295,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     let list: Vec<PathBuf> = tiers.iter().flat_map(|t| t.cases.iter().map(|c| base.join(c))).collect();
     let all = run_all(&o, &list);
     save_results(&o, &all)?;
+    if let Some(d) = &o.export {
+        println!("{}", crate::kernel_corpus::manifest(d, &all, Some(&read(&golden_path())))?);
+        return Ok(());
+    }
     let results: BTreeMap<String, Value> = all.into_iter().map(|r| (rel_of(&r), r)).collect();
     let golden = read(&golden_path());
     if gate_run {

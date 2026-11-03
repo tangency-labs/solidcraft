@@ -35,6 +35,9 @@ pub(crate) struct Options {
     /// `--validation MODE`: when SMLib's full check runs on the cases' features (each_step,
     /// each_feature, off; the CLI's default, each_feature, when not given).
     validation: Option<String>,
+    /// `--export DIR`: each case's corpus entry for solidcore's rig into DIR (`solidcraft-cli
+    /// kernel-cases --export`), then DIR/manifest.json; no report is written.
+    pub(crate) export: Option<PathBuf>,
 }
 
 /// The run's options; `out` is its output folder unless `--out` gives one.
@@ -54,7 +57,11 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
     if let Some(v) = validation.as_deref().filter(|v| !["each_step", "each_feature", "off"].contains(v)) {
         return Err(format!("--validation must be each_step, each_feature or off, not `{v}`"));
     }
-    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing, validation })
+    let export = arg("--export").map(|p| {
+        let p = PathBuf::from(p);
+        if p.is_absolute() { p } else { root().join(p) }
+    });
+    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing, validation, export })
 }
 
 /// Every case's full result as JSON, into the run's output folder.
@@ -150,6 +157,25 @@ fn run_case(o: &Options, case: &Path) -> Value {
     cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
     if let Some(v) = &o.validation {
         cmd.arg(format!("--validation={v}"));
+    }
+    if let Some(d) = &o.export {
+        // This run's entry replaces the last one's; a case that hangs or crashes now leaves none,
+        // so the manifest marks it, never an entry from an earlier run.
+        if let Ok(under) = case.strip_prefix(root().join("tests/kernel-cases")) {
+            // Case ids hold dots (`m5x0.7`): the names are built whole, never by extension.
+            let entry = d.join(under);
+            let id = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            for stale in [entry.with_file_name(format!("{id}.json")), entry.with_file_name(format!("{id}.bodies.json.gz"))] {
+                if let Err(e) = std::fs::remove_file(&stale)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    eprintln!("kernel-cases: {}: {e}", stale.display());
+                }
+            }
+        }
+        let mut export = std::ffi::OsString::from("--export=");
+        export.push(d);
+        cmd.arg(export);
     }
     cmd.arg(&rel).stdout(Stdio::piped()).stderr(Stdio::piped());
     let base = |status: &str, error: String| {
@@ -405,6 +431,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     }
     let results = run_all(&o, &list);
     save_results(&o, &results)?;
+    if let Some(d) = &o.export {
+        println!("{}", crate::kernel_corpus::manifest(d, &results, None)?);
+        return Ok(());
+    }
     if let Some(file) = &o.known_failing {
         // A gate run grades the run against its baseline, and writes no report; its results.json
         // is still saved above.

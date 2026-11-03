@@ -50,23 +50,41 @@ use crate::{Brep, Result};
 impl Brep {
     /// A cylinder about +Z: base centre, radius and height (mm, > 0).
     pub fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Result<Brep> {
-        crate::core::make_cylinder(origin, radius, height).map(Brep::made_core)
+        let r = crate::core::make_cylinder(origin, radius, height).map(Brep::made_core);
+        crate::trace::made("make_cylinder", &[], &r, || serde_json::json!({"origin": origin, "radius": radius, "height": height}));
+        r
     }
 
     /// A sphere: centre and radius (mm, > 0).
     pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Brep> {
-        crate::core::make_sphere(center, radius).map(Brep::made_core)
+        let r = crate::core::make_sphere(center, radius).map(Brep::made_core);
+        crate::trace::made("make_sphere", &[], &r, || serde_json::json!({"center": center, "radius": radius}));
+        r
     }
 
     /// A cone or frustum about +Z: base centre, base radius (> 0), top radius (≥ 0, not the base
     /// radius) and height (> 0), in mm.
     pub fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, height: f64) -> Result<Brep> {
-        crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core)
+        let r = crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core);
+        crate::trace::made(
+            "make_cone",
+            &[],
+            &r,
+            || serde_json::json!({"origin": origin, "base_radius": base_radius, "top_radius": top_radius, "height": height}),
+        );
+        r
     }
 
     /// A ring torus about +Z: centre, major radius > minor radius > 0 (mm).
     pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Result<Brep> {
-        crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core)
+        let r = crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core);
+        crate::trace::made(
+            "make_torus",
+            &[],
+            &r,
+            || serde_json::json!({"center": center, "major_radius": major_radius, "minor_radius": minor_radius}),
+        );
+        r
     }
 
     /// The flat arrays of this body that the mapping reads.
@@ -82,7 +100,11 @@ impl Brep {
     /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it.
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        native(&arrays)
+        let r = native(&arrays);
+        if let Ok((record, _)) = &r {
+            crate::trace::exported(self, record);
+        }
+        r
     }
 
     /// [`Brep::to_native`], with where each of SMLib's faces and edges went in the record's
@@ -91,7 +113,11 @@ impl Brep {
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        native_ordered(&arrays).map(|(brep, _, order)| (brep, order))
+        let r = native_ordered(&arrays).map(|(brep, _, order)| (brep, order));
+        if let Ok((record, _)) = &r {
+            crate::trace::exported(self, record);
+        }
+        r
     }
 }
 

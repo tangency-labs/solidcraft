@@ -68,7 +68,9 @@ impl Brep {
     /// SMLib's order, which the copy keeps). Run an operation on tagged copies, then read its
     /// result's [`Brep::history`].
     pub fn tagged(&self, operand: usize) -> Result<Brep> {
-        core::history::tag(self.core(), operand).map(Brep::made_core)
+        let r = core::history::tag(self.core(), operand).map(Brep::made_core);
+        crate::trace::made("tagged", &[self], &r, || serde_json::json!({"operand": operand}));
+        r
     }
 
     /// The history of this body, made by an operation from tagged operands: each face's and

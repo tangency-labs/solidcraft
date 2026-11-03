@@ -657,7 +657,34 @@ fn flat_pattern_checks(c: &mut Checks, want: &Value, results: &[Value], rel: f64
     }
 }
 
-fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft_engine::kernel::Validation) -> Value {
+/// [`check_case_in`], and with `export` the case's corpus entry written under it
+/// ([`crate::kernel_cases_export`]).
+fn check_case(
+    dir: &str,
+    dumps: Option<&std::path::Path>,
+    validation: solidcraft_engine::kernel::Validation,
+    export: Option<&std::path::Path>,
+) -> Value {
+    let mut capture = export.map(|_| crate::kernel_cases_export::Capture::default());
+    let out = check_case_in(dir, dumps, validation, capture.as_mut());
+    if let (Some(root), Some(capture)) = (export, capture)
+        && let Err(e) = crate::kernel_cases_export::write(root, dir, &out, capture)
+    {
+        let mut out = out;
+        out["export_error"] = json!(e);
+        return out;
+    }
+    out
+}
+
+/// One case run and graded. With `capture`, the kernel operations its commands make are traced
+/// and kept there with the bodies the case ends with.
+fn check_case_in(
+    dir: &str,
+    dumps: Option<&std::path::Path>,
+    validation: solidcraft_engine::kernel::Validation,
+    mut capture: Option<&mut crate::kernel_cases_export::Capture>,
+) -> Value {
     let (area, name) = case_name(dir);
     let mut out = json!({"case": name, "area": area, "kernel": kernel()});
     let want = match read_json(&format!("{dir}/expected.json")) {
@@ -711,7 +738,18 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
     let mut s = solidcraft_engine::Session::default();
     s.set_validation(validation);
     let clock = std::time::Instant::now();
+    if capture.is_some() {
+        solidcraft_engine::kernel::smlib_trace::start();
+    }
     let ran = s.run_script(&commands);
+    // The trace ends with the commands: grading reads the bodies through the kernel too.
+    if let Some(c) = &mut capture {
+        c.events = solidcraft_engine::kernel::smlib_trace::finish();
+        c.ran = Some(match &ran {
+            Ok(_) => s.world_state().map(|w| w.bodies.iter().map(|b| (b.name.clone(), b.body.record().clone())).collect()).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        });
+    }
     // The commands' own time, without process start or grading: the ladder's timing golden.
     out["seconds"] = json!(clock.elapsed().as_secs_f64());
     let answers = match (ran, may_refuse) {
@@ -976,7 +1014,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             .ok_or_else(|| format!("kernel-cases: --validation= must be each_step, each_feature or off, not `{m}`"))?,
         None => solidcraft_engine::kernel::Validation::default(),
     };
-    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref(), validation)).collect();
+    // `--export=DIR`: each case's kernel operations, their input records and its expected values
+    // go to DIR/<area>/<case>.json, the corpus for solidcore's rig.
+    let export = args.iter().find_map(|a| a.strip_prefix("--export=")).map(std::path::PathBuf::from);
+    if export.as_ref().is_some_and(|d| d.as_os_str().is_empty()) {
+        return Err("kernel-cases: --export= needs a folder".into());
+    }
+    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref(), validation, export.as_deref())).collect();
     if dumps.is_some() {
         solidcraft_engine::kernel::smlib_dump_dir(None);
     }

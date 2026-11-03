@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 log = { workspace = true }
+serde_json = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore = { workspace = true }
@@ -18,4 +19,3 @@ solidcore = { workspace = true }
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 flate2 = "1.1"
-serde_json = { workspace = true }
