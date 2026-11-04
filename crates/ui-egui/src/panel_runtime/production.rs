@@ -331,17 +331,13 @@ impl Product {
                     })
                     .collect()
             }
-            // The magnifier only in its preference; the bar that is always there needs none.
-            Self::Browser => (app.preferences.browser_search_bar == crate::prefs::BrowserSearchBar::Magnifier)
-                .then(|| RuntimeAction {
-                    id: ControlId("magnifier".into()),
-                    label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
-                    enabled: true,
-                    disabled_reason: None,
-                    pressed: Some(crate::browser_search::bar_shown(app)),
-                })
-                .into_iter()
-                .collect(),
+            Self::Browser => vec![RuntimeAction {
+                id: ControlId("magnifier".into()),
+                label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
+                enabled: true,
+                disabled_reason: None,
+                pressed: Some(crate::browser_search::bar_shown(app)),
+            }],
             Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation

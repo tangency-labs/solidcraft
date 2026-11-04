@@ -1,6 +1,6 @@
 [
  {
-  "note": "The browser's search (#1413): the bar is always there by default, with no magnifier; typing keeps the matches with their parents, and Esc or the × ends the search and leaves the bar. With the Preferences' row on the magnifier, the magnifier shows the bar, the list narrows the matches to one kind, and Esc or the second click on the magnifier ends the search with the tree as it was."
+  "note": "The browser's search (#1413): a magnifier in the Browser's header row opens a field over that row (the header keeps its height); typing keeps the matches with their parents, the list narrows them to one kind, and Esc or the \u00d7 ends the search and gives the row back to the title."
  },
  {
   "call": "engine.execute",
@@ -73,22 +73,33 @@
  {
   "expect": {
    "shown_handles": [
-    "browser:search",
-    "browser:search:kinds"
+    "browser:magnifier"
    ],
    "hidden_handles": [
-    "browser:magnifier",
+    "browser:search",
+    "browser:search:kinds",
     "browser:search:clear",
     "browser:search:select-all"
-   ],
-   "prefs": {
-    "browser_search_bar": "always"
-   }
+   ]
   }
  },
  {
+  "note": "The magnifier opens the field and gives it the keyboard."
+ },
+ {
   "click": {
-   "handle": "browser:search"
+   "handle": "browser:magnifier"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "browser:search",
+    "browser:search:clear"
+   ],
+   "hidden_handles": [
+    "browser:search:select-all"
+   ]
   }
  },
  {
@@ -112,7 +123,7 @@
   }
  },
  {
-  "note": "Esc clears the text and the bar stays."
+  "note": "Esc ends the search and closes the field."
  },
  {
   "key": "Escape"
@@ -127,20 +138,21 @@
     "Shaft",
     "Origin"
    ],
-   "shown_handles": [
-    "browser:search"
-   ],
    "hidden_handles": [
+    "browser:search",
     "browser:search:clear"
+   ],
+   "shown_handles": [
+    "browser:magnifier"
    ]
   }
  },
  {
-  "note": "So does the ×."
+  "note": "So does the \u00d7."
  },
  {
   "click": {
-   "handle": "browser:search"
+   "handle": "browser:magnifier"
   }
  },
  {
@@ -164,72 +176,17 @@
     "Shaft",
     "Origin"
    ],
-   "shown_handles": [
+   "hidden_handles": [
     "browser:search"
    ],
-   "hidden_handles": [
-    "browser:search:clear"
-   ]
-  }
- },
- {
-  "note": "The Preferences' row: the bar waits for the magnifier."
- },
- {
-  "call": "ui.prefs",
-  "params": {
-   "browser_search_bar": "magnifier"
-  }
- },
- {
-  "frames": 3
- },
- {
-  "expect": {
    "shown_handles": [
     "browser:magnifier"
-   ],
-   "hidden_handles": [
-    "browser:search",
-    "browser:search:kinds"
-   ],
-   "prefs": {
-    "browser_search_bar": "magnifier"
-   }
+   ]
   }
- },
- {
-  "call": "ui.prefs",
-  "params": {
-   "browser_search_bar": "sometimes"
-  },
-  "fail": true
- },
- {
-  "expect": {
-   "prefs": {
-    "browser_search_bar": "magnifier"
-   }
-  }
- },
- {
-  "note": "The magnifier gives the field the keyboard."
  },
  {
   "click": {
    "handle": "browser:magnifier"
-  }
- },
- {
-  "expect": {
-   "shown_handles": [
-    "browser:search",
-    "browser:search:clear",
-    "browser:search:kinds"
-   ],
-   "hidden_handles": [
-    "browser:search:select-all"
-   ]
   }
  },
  {
@@ -313,7 +270,7 @@
   }
  },
  {
-  "note": "Esc in the field ends the search and the bar goes."
+  "note": "Esc in the field ends the search and the field goes."
  },
  {
   "click": {
@@ -322,50 +279,6 @@
  },
  {
   "key": "Escape"
- },
- {
-  "frames": 3
- },
- {
-  "expect": {
-   "browser_has": [
-    "Plate",
-    "Shaft",
-    "Origin"
-   ],
-   "hidden_handles": [
-    "browser:search"
-   ]
-  }
- },
- {
-  "note": "The magnifier's second click does too."
- },
- {
-  "click": {
-   "handle": "browser:magnifier"
-  }
- },
- {
-  "text": "plate"
- },
- {
-  "frames": 3
- },
- {
-  "expect": {
-   "browser_has": [
-    "Plate"
-   ],
-   "browser_lacks": [
-    "Shaft"
-   ]
-  }
- },
- {
-  "click": {
-   "handle": "browser:magnifier"
-  }
  },
  {
   "frames": 3
