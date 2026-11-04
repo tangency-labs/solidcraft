@@ -1582,6 +1582,17 @@ fn rev_of(s: &Surface) -> Result<&SurfOfRevolution> {
     }
 }
 
+/// The tolerance on a cone generator's line scale against `1/cos(half angle)`, the half
+/// angle in radians. The cone keeps its half angle in degrees, so `1/cos` of it carries the
+/// angle's own rounding: a few ulps of the angle, times `d(1/cos)/d(angle) = sin/cos^2`.
+/// That is far below the relative `EFF_ZERO` until the cone is nearly flat (half angle near
+/// 90 degrees, where cos is tiny), and then it is the larger term.
+fn generator_scale_tolerance(line_scale: f64, half_angle: f64) -> f64 {
+    let angle_rounding = 4.0 * f64::EPSILON * half_angle.abs();
+    let conditioning = half_angle.sin().abs() / (half_angle.cos() * half_angle.cos());
+    (1.0 + line_scale) * EFF_ZERO + conditioning * angle_rounding
+}
+
 fn cone_of(s: &Surface) -> Result<&Cone> {
     match s.kind() {
         SurfaceKind::Cone(c) => Ok(c),
@@ -2233,13 +2244,17 @@ fn cone_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<bo
     rtn &= r.report(CLASS, 4, 0, line.is_some(), UNDEF, UNDEF)?;
     if let Some(line) = line {
         let line_scale = line.line_scale();
-        let cone_scale = 1.0 / (cone.semi_angle_deg() * (PI / 180.0)).cos();
-        let tol = (1.0 + line_scale) * EFF_ZERO;
+        let half_angle = cone.semi_angle_deg() * (PI / 180.0);
+        let cone_scale = 1.0 / half_angle.cos();
+        let tol = generator_scale_tolerance(line_scale, half_angle);
+        // A tolerance at least as large as the scale it checks means the stored angle no
+        // longer fixes even the magnitude of `1/cos` (it may have rounded to 90 degrees), so
+        // the comparison would accept any line scale: refuse instead.
         rtn &= r.report(
             CLASS,
             5,
             0,
-            are_same_to_tol(line_scale, cone_scale, tol),
+            tol < cone_scale && are_same_to_tol(line_scale, cone_scale, tol),
             tol,
             line_scale - cone_scale,
         )?;
@@ -3094,6 +3109,89 @@ mod tests {
             "SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface",
         );
         expect(&with_nurb(cone(-1.0)), 2, &[fold, radius, pole]);
+    }
+
+    /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved
+    /// line a few 1e-4 degrees off perpendicular to the axis) is a cone of half angle about
+    /// 89.9997 degrees. Its generator scale, length/height, is right; only 1/cos of the
+    /// half angle in degrees is rounded, by more than a relative `EFF_ZERO` of a scale of 2e5.
+    #[test]
+    fn nearly_flat_cone_passes_the_generator_scale_check() {
+        for height in [1.3e-5, 2.1e-5] {
+            let s = Surface::from(Cone::new_bounded(
+                O,
+                X,
+                Y,
+                1.0,
+                1.0 + 2.65,
+                0.0,
+                360.0,
+                height,
+                false,
+                false,
+                false,
+            ));
+            assert_clean(&s);
+        }
+    }
+
+    /// Radial width 2.65e10 over height 1e-6: the line scale is 2.65e16 but the half angle rounds
+    /// to 90 degrees (1/cos 1.6e16), so the angle cannot represent the cone and test 5 refuses.
+    #[test]
+    fn cone_whose_angle_rounds_to_flat_is_refused() {
+        let s = Surface::from(Cone::new_bounded(
+            O,
+            X,
+            Y,
+            1.0,
+            1.0 + 2.65e10,
+            0.0,
+            360.0,
+            1e-6,
+            false,
+            false,
+            false,
+        ));
+        let (ok, failed) = failures(&s, 0);
+        assert!(
+            !ok && failed.iter().any(|f| (f.0, f.1) == (CONE_TYPE, 5)),
+            "{failed:?}"
+        );
+    }
+
+    /// Radial width 1000 over height 1000 * tan(1e-6 degrees): a consistent cone at 89.999999
+    /// degrees, where the propagated tolerance is about 1e-7 of the scale, not a refusal.
+    #[test]
+    fn consistent_cone_at_89_999999_degrees_is_accepted() {
+        let height = 1000.0 * (1e-6_f64).to_radians().tan();
+        let s = Surface::from(Cone::new_bounded(
+            O,
+            X,
+            Y,
+            1.0,
+            1.0 + 1000.0,
+            0.0,
+            360.0,
+            height,
+            false,
+            false,
+            false,
+        ));
+        assert_clean(&s);
+    }
+
+    #[test]
+    fn generator_scale_tolerance_still_refuses_a_wrong_scale() {
+        let half_angle = (2.65_f64).atan2(1.3e-5);
+        let scale = 1.0 / half_angle.cos();
+        let tol = generator_scale_tolerance(scale, half_angle);
+        // the rounding of the angle is covered ...
+        assert!(tol > 1e-6 && tol < 1e-4, "{tol}");
+        // ... a scale off by 1e-6 of itself, or by 1e-9 on a gentle cone, is not
+        assert!(scale * 1e-6 > tol);
+        let gentle = 0.3_f64;
+        let tol = generator_scale_tolerance(1.0 / gentle.cos(), gentle);
+        assert!(1e-9 > tol, "{tol}");
     }
 
     #[test]
