@@ -231,24 +231,34 @@ pub(crate) fn freedom(s: &Session, d: &Dialog, i: usize) -> Freedom {
     }
 }
 
+/// Why [`drag_to`] left the hole where it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stuck {
+    /// The line the edge holds the hole on leaves the face before the point asked for.
+    OffFace,
+    /// Anything else: not the hole the edges place, no frame, not exactly one edge, or a distance
+    /// that does not evaluate (which shows its own error).
+    Not,
+}
+
 /// Move the hole at item `i` of the face input toward `near` as far as its one reference edge
 /// lets it: onto the line at the typed distance from it, nearest `near`. The typed distance
-/// stays as it is, an expression included, so a drag never rewrites it. False when the hole
-/// cannot go there (off its face, no frame, not exactly one edge, or not the hole the edges place).
-pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> bool {
+/// stays as it is, an expression included, so a drag never rewrites it.
+pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> Result<(), Stuck> {
     if place_item(d) != Some(i) {
-        return false;
+        return Err(Stuck::Not);
     }
-    let Some((f, picked)) = frame(s, d) else { return false };
+    let Some((f, picked)) = frame(s, d) else { return Err(Stuck::Not) };
     if picked.len() != 1 {
-        return false;
+        return Err(Stuck::Not);
     }
-    let Kind::Hole { opts, .. } = &d.kind else { return false };
+    let Kind::Hole { opts, .. } = &d.kind else { return Err(Stuck::Not) };
     let values: Option<Vec<f64>> = picked.iter().map(|k| model_text(&opts.refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
-    let Some(to) = values.and_then(|v| f.place(near, &v).ok()).filter(|c| on_reference_face(&crate::open_meshing::session_world(s), &f, *c)) else {
-        return false;
-    };
-    let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.get_mut(i)) else { return false };
+    let Some(to) = values.and_then(|v| f.place(near, &v).ok()) else { return Err(Stuck::Not) };
+    if !on_reference_face(&crate::open_meshing::session_world(s), &f, to) {
+        return Err(Stuck::OffFace);
+    }
+    let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.get_mut(i)) else { return Err(Stuck::Not) };
     *point = to;
     // In step already: the place moved by its distances, so there is nothing to measure again.
     let edges = edges(d);
@@ -259,7 +269,7 @@ pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> bool
         sn.edges = edges;
     }
     d.error = None;
-    true
+    Ok(())
 }
 
 /// Keep the distances and the hole's place in step: a new place or a new edge is measured, a

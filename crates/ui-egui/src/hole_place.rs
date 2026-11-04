@@ -240,36 +240,48 @@ pub(crate) fn move_place(d: &mut Dialog, s: &Session, i: usize, to: Sel) -> bool
     true
 }
 
+/// What a pick on a face with a hole did to that hole (see [`pick_moves`]).
+pub(crate) enum PickMove {
+    /// Not a move: the pick goes to the dialog as any pick does.
+    No,
+    Moved,
+    /// Spent, the hole left where it is (the dialog already says why, if anything does).
+    Spent,
+    /// Spent, the hole left where it is, and why.
+    Refused(&'static str),
+}
+
 /// Why a pick did not move a hole one reference edge holds: its line leaves the face first.
-pub(crate) const HELD_OFF_ITS_LINE: &str = "The reference edge holds this hole on a line that leaves the face before the picked point. Pick nearer the line, or take the edge out to move the hole freely.";
+pub(crate) const HELD_OFF_ITS_LINE: &str = "The reference edge holds this hole on a line that leaves the face before the picked point. Pick where the line crosses the face, or take the edge out to move the hole freely.";
 
 /// A Single hole's face place picked on a face that already has a hole moves that hole there
 /// (true), when holes move by clicking. A pick on the hole itself (within its radius) is left to
 /// take it out, as before. A hole held along one reference edge goes along it only, and the pick
 /// is spent either way (it never takes the hole out instead): when the line leaves the face before
-/// the pick, the dialog says so.
-pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
-    let Kind::Hole { opts, diameter, .. } = &d.kind else { return false };
-    let Sel::Face { point, .. } = sel else { return false };
+/// the pick, it is refused with why.
+pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> PickMove {
+    let Kind::Hole { opts, diameter, .. } = &d.kind else { return PickMove::No };
+    let Sel::Face { point, .. } = sel else { return PickMove::No };
     if opts.multiple || d.active != 0 {
-        return false;
+        return PickMove::No;
     }
     let radius = s.doc.eval(diameter, ValueKind::Length).ok().filter(|v| v.is_finite() && *v > 0.0).map_or(0.0, |v| v / 2.0);
     let group = crate::viewport::grouped_selection(s, sel);
-    let Some(inp) = d.inputs.first() else { return false };
-    let Some(i) = inp.items.iter().position(|x| group.iter().any(|g| same_item(x, g))) else { return false };
-    let Some(Sel::Face { point: was, .. }) = inp.items.get(i) else { return false };
+    let Some(inp) = d.inputs.first() else { return PickMove::No };
+    let Some(i) = inp.items.iter().position(|x| group.iter().any(|g| same_item(x, g))) else { return PickMove::No };
+    let Some(Sel::Face { point: was, .. }) = inp.items.get(i) else { return PickMove::No };
     if was.dist(*point) <= radius {
-        return false;
+        return PickMove::No;
     }
     match crate::hole_refs::freedom(s, d, i) {
-        crate::place_gizmo::Freedom::Plane => move_place(d, s, i, sel.clone()),
-        crate::place_gizmo::Freedom::Line(_) => {
-            if !crate::hole_refs::drag_to(s, d, i, *point) {
-                d.error = Some(HELD_OFF_ITS_LINE.to_string());
-            }
-            true
-        }
+        crate::place_gizmo::Freedom::Plane if move_place(d, s, i, sel.clone()) => PickMove::Moved,
+        crate::place_gizmo::Freedom::Plane => PickMove::No,
+        crate::place_gizmo::Freedom::Line(_) => match crate::hole_refs::drag_to(s, d, i, *point) {
+            Ok(()) => PickMove::Moved,
+            Err(crate::hole_refs::Stuck::OffFace) => PickMove::Refused(HELD_OFF_ITS_LINE),
+            // A distance that does not evaluate shows its own error.
+            Err(crate::hole_refs::Stuck::Not) => PickMove::Spent,
+        },
     }
 }
 
