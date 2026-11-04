@@ -237,7 +237,8 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
                 scenario::publish_target(target, visible);
             }
         }
-        let response = if let Some(reason) = reason { response.backing_on_disabled_hover_text(reason) } else { response.backing_on_hover_text(*text) };
+        let response =
+            if let Some(reason) = reason { response.backing_on_disabled_hover_text(reason) } else { response.backing_on_hover_text(*text) };
         if segment_enabled && super::checks::activated(&response) {
             *selected = index;
             clicked = true;

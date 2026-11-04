@@ -3131,7 +3131,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         let open = d.listed == Some(i);
                         let at = rect.translate(vec2(-t.space_24, 0.0));
                         let label = crate::i18n::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
-                        let arrow = crate::ui_kit::disclosure_button_at(ui, at, open, label);
+                        let sense = if tab_order { egui::Sense::CLICK } else { egui::Sense::click() };
+                        let arrow = crate::ui_kit::disclosure_button_at_with_sense(ui, at, open, label, sense);
                         crate::scenario::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
                         if arrow.clicked() {
                             toggle_list = Some(i);
@@ -4039,12 +4040,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let pointer_busy = ctx.input(|i| i.pointer.any_down() || i.pointer.any_pressed() || i.pointer.any_released());
     if d.restore_value_focus && !pointer_busy {
         d.restore_value_focus = false;
-        // Pattern/Mirror resume Tab from the active selection after a canvas pick.
-        // Preserve an existing value editor, but do not focus one merely as a fallback.
-        let target = value_fields
-            .iter()
-            .find(|(id, _)| Some(*id) == d.value_focus)
-            .or_else(|| if selection_tab_order(&d.kind) { None } else { value_fields.first() });
+        // With dialog navigation on, Pattern/Mirror resume Tab from the active selection
+        // after a canvas pick unless a value editor already owned focus.
+        let resume_selection = app.preferences.dialog_tab_navigation && selection_tab_order(&d.kind);
+        let target =
+            value_fields.iter().find(|(id, _)| Some(*id) == d.value_focus).or_else(|| if resume_selection { None } else { value_fields.first() });
         if let Some(&(id, length)) = target {
             d.focus = false;
             ctx.memory_mut(|memory| memory.request_focus(id));

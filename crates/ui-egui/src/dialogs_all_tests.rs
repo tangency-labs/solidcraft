@@ -1718,6 +1718,27 @@ fn keyboard_body_fixture(command: &str, placement: crate::ui_kit::DialogButtons,
 }
 
 #[test]
+fn dialog_tab_preference_controls_pattern_value_focus_fallback() {
+    for enabled in [false, true] {
+        let mut h = keyboard_body_fixture("solid.pattern.circular", crate::ui_kit::DialogButtons::Bottom, true);
+        h.app.preferences.dialog_tab_navigation = enabled;
+        h.app.preferences.value_boxes_in_view = false;
+        h.ctx.memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
+        let dialog = h.app.dialog.as_mut().unwrap();
+        dialog.value_focus = None;
+        dialog.restore_value_focus = true;
+        h.frames(3);
+        let quantity = crate::scenario::handle_at("dialog:Quantity").unwrap();
+        let focused = h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id));
+        assert_eq!(focused.is_some_and(|r| r.rect.contains(quantity)), !enabled, "dialog Tab navigation enabled: {enabled}");
+    }
+}
+
+#[test]
 fn dialog_tab_preference_off_reaches_mirror_and_pattern_clear_buttons() {
     for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {
         let mut h = keyboard_body_fixture(command, crate::ui_kit::DialogButtons::Bottom, true);

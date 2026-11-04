@@ -385,7 +385,9 @@ fn searchable_dropdown_with(
                 }
             });
     };
-    let popup = super::container::show_combo(ui, owner, combo, |ui| crate::dialog_focus::popup(ui, owner, egui::PopupCloseBehavior::CloseOnClickOutside, draw_menu));
+    let popup = super::container::show_combo(ui, owner, combo, |ui| {
+        crate::dialog_focus::popup(ui, owner, egui::PopupCloseBehavior::CloseOnClickOutside, draw_menu)
+    });
     let response = popup.response;
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         response.request_focus();
