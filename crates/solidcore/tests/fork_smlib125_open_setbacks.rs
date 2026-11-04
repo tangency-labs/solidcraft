@@ -1,14 +1,13 @@
 //! tangency-labs/smlib#125 (ef57570, ce748fa, dc757a6; solidcore#2359): open setbacks.
-//! With `Kernel::fixes.fillet_blend_corner`, a corner asked to be set back and left open
+//! A corner asked to be set back and left open
 //! (`SetSetBackFill(.., open)`) is the blend corner's Setback without its fill: G1, each
 //! face's spring curve is the parabola tangent to the two rails at their ends, in two
 //! quadratic halves at its base point `B = (P + 2 X + Q) / 4` (`OpenSetBackSprings`), and the
 //! executive trims the rounds at their creases with those curves imprinted on the faces, so
 //! the hole's `3 n` edges stay free. A concave round's sheet lies in the void it fills
 //! (ce748fa). The `NxN` corners keep their setback paths (the fork's dc757a6 deletes them;
-//! solidcore#2365), and with the flag a setback asked at a corner that builds none is refused
-//! (the refusal is solidcore's, the fork's is in its capi). Without the flag the pinned
-//! corners.
+//! solidcore#2365), and a setback asked at a corner that builds none is refused (the refusal
+//! is solidcore's, the fork's is in its capi).
 //!
 //! The bodies and expected values are those of the fork's capi tests
 //! `setback_open_g1_box_corner_hole` and `setback_open_concave_notch_hole` (cb2a478
@@ -41,12 +40,12 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -246,7 +245,7 @@ const BOX_AT: [[f64; 3]; 3] = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40
 /// parabola (P, X, Q) split at t = 1/2: (P, (P + X) / 2, B) and (B, (X + Q) / 2, Q).
 #[test]
 fn open_g1_box_corner_is_the_setback_hole() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
     let r = blend(&mut k, b, &BOX_AT, 5.0, [60.0, 40.0, 20.0], 8.0, true);
     assert_eq!(r.event, Some(Some(BlendCornerEvent::Setback)));
@@ -296,18 +295,6 @@ fn open_g1_box_corner_is_the_setback_hole() {
     }
 }
 
-/// Without the flag the open request is not the Setback's: the pinned corner, closed.
-#[test]
-fn open_g1_box_corner_without_the_flag_is_the_pinned_corner() {
-    let mut k = all_fixes(false);
-    let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
-    let r = blend(&mut k, b, &BOX_AT, 5.0, [60.0, 40.0, 20.0], 8.0, true);
-    assert_ne!(r.event, Some(Some(BlendCornerEvent::Setback)));
-    assert_eq!(r.code, 0, "{}", r.comment);
-    let b = r.body.expect("a body");
-    assert!(lamina(&b).is_empty());
-}
-
 /// The 60 x 40 x 20 box less [40, 70] x [20, 50] x [10, 30].
 fn notched(k: &mut Kernel) -> Brep {
     let part = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
@@ -323,7 +310,7 @@ const NOTCH_AT: [[f64; 3]; 3] = [[50.0, 20.0, 10.0], [40.0, 30.0, 10.0], [40.0, 
 /// capi `setback_open_concave_notch_hole`).
 #[test]
 fn open_concave_notch_is_the_setback_hole() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let b = notched(&mut k);
     let r = blend(&mut k, b, &NOTCH_AT, 5.0, [40.0, 20.0, 10.0], 7.5, true);
     assert_eq!(r.event, Some(Some(BlendCornerEvent::Setback)));
@@ -342,11 +329,11 @@ fn open_concave_notch_is_the_setback_hole() {
 /// The notch's inner corner left open with the convex edge at x = 60, y = 20 rounded too:
 /// the sheet face of the corner at (60, 20, 10), between the concave rounds that add material
 /// and the convex one that takes it off, is refused (ce748fa; the fork's SMLib at 18e96f1,
-/// run on this body, refuses with the same reason). Without the flag the pinned corners build.
+/// run on this body, refuses with the same reason).
 #[test]
 fn corner_face_between_adding_and_removing_blends_is_refused() {
     let at = [NOTCH_AT[0], NOTCH_AT[1], NOTCH_AT[2], [60.0, 20.0, 15.0]];
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let b = notched(&mut k);
     let r = blend(&mut k, b, &at, 2.0, [40.0, 20.0, 10.0], 7.5, true);
     assert_eq!(r.event, Some(Some(BlendCornerEvent::Setback)));
@@ -358,11 +345,6 @@ fn corner_face_between_adding_and_removing_blends_is_refused() {
         "{}",
         r.comment
     );
-    let mut k = all_fixes(false);
-    let b = notched(&mut k);
-    let r = blend(&mut k, b, &at, 2.0, [40.0, 20.0, 10.0], 7.5, true);
-    assert_eq!(r.code, 0, "{}", r.comment);
-    assert_eq!(counts(&r.body.expect("a body")), (20, 50, 32));
 }
 
 /// A 40 x 40 x 20 box's corner (40, 40, 20) with two of its three edges rounded r 2: the
@@ -376,49 +358,34 @@ fn two_rounds(k: &mut Kernel, fill: bool) -> Blended {
 /// A setback asked with `SetSetBackFill` at a corner that builds none (the two-blend corner,
 /// neither the Setback nor an `NxN` corner) is refused when the corners are made
 /// (`CornerUnsupported`; solidcore-native, the fork refuses it only in its capi), not built
-/// without it. Without the flag the pinned corner, built.
+/// without it.
 #[test]
 fn setback_asked_where_the_setback_is_not_built_is_refused() {
-    for blend_on in [true, false] {
-        let mut k = all_fixes(blend_on);
-        let r = two_rounds(&mut k, true);
-        if blend_on {
-            assert_eq!(r.event, None);
-            assert!(r.body.is_none());
-            assert_eq!(r.code, 9, "{}", r.comment); // CornerUnsupported
-            assert!(r.comment.contains("builds none"), "{}", r.comment);
-        } else {
-            assert_eq!(r.code, 0, "{}", r.comment);
-            assert!(r.body.is_some());
-        }
-    }
+    let mut k = all_fixes();
+    let r = two_rounds(&mut k, true);
+    assert_eq!(r.event, None);
+    assert!(r.body.is_none());
+    assert_eq!(r.code, 9, "{}", r.comment); // CornerUnsupported
+    assert!(r.comment.contains("builds none"), "{}", r.comment);
 }
 
 /// The same corner set back only through `AddSetBackVertex` and `SetSetBackDist` on the made
-/// corner: with the flag `do_filleting` refuses it (`CornerUnsupported`), as the fill's door
-/// does. Without the flag the pinned corner, built.
+/// corner: `do_filleting` refuses it (`CornerUnsupported`), as the fill's door does.
 #[test]
 fn setback_set_on_a_corner_that_builds_none_is_refused() {
-    for blend_on in [true, false] {
-        let mut k = all_fixes(blend_on);
-        let r = two_rounds(&mut k, false);
-        assert!(r.event.is_some());
-        if blend_on {
-            assert!(r.body.is_none());
-            assert_eq!(r.code, 9, "{}", r.comment); // CornerUnsupported
-            assert!(r.comment.contains("builds none"), "{}", r.comment);
-        } else {
-            assert_eq!(r.code, 0, "{}", r.comment);
-            assert!(r.body.is_some());
-        }
-    }
+    let mut k = all_fixes();
+    let r = two_rounds(&mut k, false);
+    assert!(r.event.is_some());
+    assert!(r.body.is_none());
+    assert_eq!(r.code, 9, "{}", r.comment); // CornerUnsupported
+    assert!(r.comment.contains("builds none"), "{}", r.comment);
 }
 
 /// The box [0, 40]^2 x [0, 20] less the cylinder r 20 about (40, 40): at (20, 40, 20) a top
 /// edge, the top arc and the vertical edge, all convex, one curved, rounded 2, set back 4.
 /// Without `fillet_setback_beside_curved_faces` it is no Setback but the `NxN` corner,
 /// whose setback path builds the setback set on it (`SetSetBackDist`): the pinned setback
-/// corner (16, 39, 25), with the flag as without it. The fork's dc757a6 deletes that path
+/// corner (16, 39, 25). The fork's dc757a6 deletes that path
 /// (its SMLib at 18e96f1 builds the corner without the setback, 11 faces); solidcore keeps
 /// it (solidcore#2365). A `SetSetBackFill` request there (which only the Setback reads) is
 /// ignored, as before the port: the corner without a setback (11, 24, 15, as the fork's
@@ -431,14 +398,8 @@ fn nxn_corner_builds_the_setback_set_on_it() {
         [20.0, 40.0, 10.0],
         [25.0, 40.0 - 175.0_f64.sqrt(), 20.0],
     ];
-    for (blend_on, fill, dist) in [
-        (true, false, true),
-        (true, true, true),
-        (true, true, false),
-        (false, false, true),
-        (false, true, false),
-    ] {
-        let mut k = all_fixes(blend_on);
+    for (fill, dist) in [(false, true), (true, true), (true, false)] {
+        let mut k = all_fixes();
         k.fixes.fillet_setback_beside_curved_faces = false;
         let bx = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 20.0).unwrap();
         let cyl = create_cylinder(&mut k, Point3::new(40.0, 40.0, -5.0), 20.0, 30.0).unwrap();
@@ -454,12 +415,12 @@ fn nxn_corner_builds_the_setback_set_on_it() {
             fill,
             dist,
         );
-        assert_eq!(r.event, Some(None), "{blend_on} {fill} {dist}");
+        assert_eq!(r.event, Some(None), "{fill} {dist}");
         assert_eq!(r.code, 0, "{}", r.comment);
         let mut b = r.body.expect("a body");
         stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
         let want = if dist { (16, 39, 25) } else { (11, 24, 15) };
-        assert_eq!(counts(&b), want, "{blend_on} {fill} {dist}");
+        assert_eq!(counts(&b), want, "{fill} {dist}");
     }
 }
 
@@ -487,7 +448,7 @@ fn bar_into_post(k: &mut Kernel, open: bool) -> Blended {
 /// turns on): the trim classifies against the faces' current trims.
 #[test]
 fn open_hole_on_a_body_with_a_closed_face_is_the_corner_nine_edges() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = bar_into_post(&mut k, true);
     assert_eq!(r.event, Some(Some(BlendCornerEvent::Setback)));
     assert_eq!(r.code, 0, "{}", r.comment);
@@ -502,7 +463,7 @@ fn open_hole_on_a_body_with_a_closed_face_is_the_corner_nine_edges() {
 /// 25 vertices, volume 9362.39265676429 (an earlier note's 9362.281 was not this body's).
 #[test]
 fn bar_into_post_setback_filled_is_the_fork_s_solid() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = bar_into_post(&mut k, false);
     assert_eq!(r.event, Some(Some(BlendCornerEvent::Setback)));
     assert_eq!(r.code, 0, "{}", r.comment);

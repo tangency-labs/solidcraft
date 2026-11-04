@@ -1,6 +1,5 @@
 //! WR-697 (the fork's smlib#113, e4083c8 and 34288e5): the blend corner's Turn at a vertex
-//! of four edges is the two blends mitred, with no tangent adjustment
-//! (`Kernel::fixes.fillet_blend_corner`).
+//! of four edges is the two blends mitred, with no tangent adjustment.
 //!
 //! Two blends of one convexity on opposite edges of a four-edge vertex, not G1 there, are
 //! a Turn (`SmBlendCorner::Classify`). The fork builds it with the two-blend topology,
@@ -8,13 +7,8 @@
 //! crossings with the side edges. Its G1 test, its blending branch and its tangent
 //! adjustment went, since `Classify` makes a pair that passes them a Join. The cases are
 //! the apex of a square pyramid (convex) and the bottom of a pyramid-shaped pocket
-//! (concave), two opposite slant edges rounded at r 0.5, 1 and 2. With and without the
-//! flag each builds a valid body with no corner face. The flag's volume is within 1e-8 of
-//! the pinned Nx2 bevel corner's. The flag's other changes to the rounds account for the
-//! difference, at most 6.1e-9 relative (the pyramid at r 2).
-//!
-//! Measured before and after the change on the same tree, every volume here is the same to
-//! the bit with and without the flag. So are the face counts and the check lines.
+//! (concave), two opposite slant edges rounded at r 0.5, 1 and 2. Each builds a valid body
+//! with no corner face.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -38,12 +32,12 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -107,8 +101,8 @@ fn pocket(k: &mut Kernel) -> Brep {
 
 /// The two opposite slant edges through (-5, -5, 5) and (5, 5, 5) rounded `r` together
 /// (a Turn at the four-edge apex): the volume, face count and check lines.
-fn rounded(blend: bool, body: fn(&mut Kernel) -> Brep, r: f64) -> (f64, usize, Vec<String>) {
-    let mut k = all_fixes(blend);
+fn rounded(body: fn(&mut Kernel) -> Brep, r: f64) -> (f64, usize, Vec<String>) {
+    let mut k = all_fixes();
     let mut b = body(&mut k);
     let edges: Vec<EdgeId> = [[-5.0, -5.0, 5.0], [5.0, 5.0, 5.0]]
         .iter()
@@ -138,20 +132,11 @@ fn rounded(blend: bool, body: fn(&mut Kernel) -> Brep, r: f64) -> (f64, usize, V
 
 fn four_edge_turns(name: &str, body: fn(&mut Kernel) -> Brep, faces: usize) {
     for r in [0.5, 1.0, 2.0] {
-        let (pinned, pinned_faces, pinned_lines) = rounded(false, body, r);
-        let (turn, turn_faces, turn_lines) = rounded(true, body, r);
-        eprintln!(
-            "{name} r {r}: volume {turn:?} (without the flag {pinned:?}), {turn_faces} faces"
-        );
-        assert!(pinned_lines.is_empty(), "{name} r {r}: {pinned_lines:?}");
+        let (turn, turn_faces, turn_lines) = rounded(body, r);
+        eprintln!("{name} r {r}: volume {turn:?}, {turn_faces} faces");
         assert!(turn_lines.is_empty(), "{name} r {r}: {turn_lines:?}");
         // the body's faces and the two rounds, mitred: no corner face
-        assert_eq!(pinned_faces, faces, "{name} r {r}");
         assert_eq!(turn_faces, faces, "{name} r {r}");
-        assert!(
-            (turn - pinned).abs() <= 1e-8 * pinned,
-            "{name} r {r}: {turn} {pinned}"
-        );
     }
 }
 

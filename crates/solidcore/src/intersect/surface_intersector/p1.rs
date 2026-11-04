@@ -261,8 +261,9 @@ pub struct TsectPnt {
     /// `m_adUserDoubles`: per-algorithm scratch values.
     pub user_doubles: [f64; MAX_USER_DOUBLES],
     /// `m_apUserPointer[0..2]` (`None`: `NULL`). SMLib's only writer
-    /// (`SmFilletGeom::MakeRailEdgeuse`) stores surfaces in them and its only reader
-    /// (`SmFilletNx2Corner::AdjustTangentCorner`) reads them back as surfaces.
+    /// (`SmFilletGeom::MakeRailEdgeuse`) stores surfaces in them; their only reader,
+    /// `SmFilletNx2Corner::AdjustTangentCorner`, went with the fork's smlib#113 (34288e5,
+    /// #2400).
     pub user_pointer: [Option<UserSurface>; 2],
 }
 
@@ -1216,7 +1217,7 @@ impl<'s> SurfaceIntersector<'s> {
         })
     }
 
-    /// Not upstream (WR-697 addendum, with `fixes.fillet_blend_corner`): whether the span
+    /// Not upstream (WR-697 addendum): whether the span
     /// from `a` to `b` passes the tests [`Self::test_span_accuracy`] makes of a traced
     /// span, without touching either point: the tangent turn within `this_ang_tol_rad`,
     /// and at the same five interior parameters the 3D Hermite span and the two UV

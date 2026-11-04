@@ -16,9 +16,8 @@
 //! would be 0.025 off), and SMLib's validity check at level 2. The fork prints 16.714056916
 //! removed (1.1e-7) and the rib 4.22e-6 off; the port gives both to the digits printed.
 //!
-//! With `fillet_blend_corner` the round's end on the cylinder is the blend corner's End on its
-//! end face; without it, the pinned Nx1 corner. The End builds the pinned construction (#2307
-//! moved it unchanged), so the result is the same either way.
+//! The round's end on the cylinder is the blend corner's End on its end face, which builds
+//! the pinned Nx1 corner's construction (#2307 moved it unchanged).
 //!
 //! How this test drives the kernel differs from the capi: the edge is picked as the nearest
 //! within 0.1 of the capi's point (10, -5, 10), and the round is [`fillet_edges`] (the
@@ -49,13 +48,12 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::{vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner` (as
-/// `wr697_end_and_join.rs`).
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity` (as `wr697_end_and_join.rs`).
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -181,37 +179,32 @@ fn a_round_ending_on_a_cylinder_meets_it_along_a_certified_rib() {
     assert!((want - 16.714055107294).abs() <= 1e-12, "{want}");
     // the edge's end on the cylinder, (sqrt 375, -5, 10)
     let end = Point3::new(375.0_f64.sqrt(), -5.0, 10.0);
-    for blend in [true, false] {
-        let mut k = all_fixes(blend);
-        let bx = create_box(&mut k, Point3::new(0.0, -5.0, 0.0), 30.0, 10.0, 10.0).unwrap();
-        let cyl = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
-        let mut b = boolean_intersection(&mut k, bx, cyl).unwrap();
-        let v0 = volume(&k, &mut b);
-        let tol = 100.0 * b.tolerance();
-        let e = pick(&k, &b, [10.0, -5.0, 10.0]);
-        let (kind, event) = corner_at(&mut k, &b, e, end);
-        assert_eq!(kind, FilletCornerKind::NByOne);
-        assert_eq!(
-            event,
-            blend.then_some((BlendCornerEvent::End, BlendEnd::OnEndFace))
-        );
-        fillet_edges(&mut k, &mut b, &[e], 2.0, 1, 1, 0.0).unwrap();
-        let removed = v0 - volume(&k, &mut b);
-        let off = ribs(&k, &b);
-        eprintln!(
-            "blend {blend}: removed {removed:.12} want {want:.12} (rel {:.3e}); ribs {off:?} \
-             (allowed {tol:.3e})",
-            (removed - want).abs() / want
-        );
-        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
-            .unwrap()
-            .lines();
-        assert!(lines.is_empty(), "{lines:?}");
-        assert!((removed - want).abs() <= 1e-6 * want, "{removed} vs {want}");
-        assert_eq!(off.len(), 1, "{off:?}");
-        assert!(off[0] <= tol, "{off:?} vs {tol}");
-        // the fork's printed values, to their last digit
-        assert!((removed - 16.714056916).abs() <= 5e-10, "{removed}");
-        assert!((off[0] - 4.22e-6).abs() <= 5e-9, "{off:?}");
-    }
+    let mut k = all_fixes();
+    let bx = create_box(&mut k, Point3::new(0.0, -5.0, 0.0), 30.0, 10.0, 10.0).unwrap();
+    let cyl = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
+    let mut b = boolean_intersection(&mut k, bx, cyl).unwrap();
+    let v0 = volume(&k, &mut b);
+    let tol = 100.0 * b.tolerance();
+    let e = pick(&k, &b, [10.0, -5.0, 10.0]);
+    let (kind, event) = corner_at(&mut k, &b, e, end);
+    assert_eq!(kind, FilletCornerKind::NByOne);
+    assert_eq!(event, Some((BlendCornerEvent::End, BlendEnd::OnEndFace)));
+    fillet_edges(&mut k, &mut b, &[e], 2.0, 1, 1, 0.0).unwrap();
+    let removed = v0 - volume(&k, &mut b);
+    let off = ribs(&k, &b);
+    eprintln!(
+        "removed {removed:.12} want {want:.12} (rel {:.3e}); ribs {off:?} \
+         (allowed {tol:.3e})",
+        (removed - want).abs() / want
+    );
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!((removed - want).abs() <= 1e-6 * want, "{removed} vs {want}");
+    assert_eq!(off.len(), 1, "{off:?}");
+    assert!(off[0] <= tol, "{off:?} vs {tol}");
+    // the fork's printed values, to their last digit
+    assert!((removed - 16.714056916).abs() <= 5e-10, "{removed}");
+    assert!((off[0] - 4.22e-6).abs() <= 5e-9, "{off:?}");
 }

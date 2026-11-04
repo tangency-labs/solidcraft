@@ -49,8 +49,7 @@
 //! ([`FilletCorner::setback`]) from its creation (`SetFillOrder`) until its patches are
 //! faces. The fork's corner notes its refusal on the executive itself; here it is returned
 //! ([`SetbackRefusal`]) and the session notes it. The executive's set-back fills
-//! (`m_vSetBackFills`) are the session's, passed in. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion. Beside curved faces
+//! (`m_vSetBackFills`) are the session's, passed in (WR-697). No recursion. Beside curved faces
 //! (solidcore#2343, built in solidcore from the fork's work in progress at 37c9e1d, no fork
 //! commit; with `Kernel::fixes.fillet_setback_beside_curved_faces` too): the curved faces
 //! are found apart from `corner_planes` (`corner_quadrics`); the
@@ -207,8 +206,7 @@ pub fn builds_setback(corner: &FilletCorner) -> bool {
 /// Not the fork's (solidcore-native, WR-697 addendum `setback-asked-not-built-refused`; the
 /// fork refuses this only in its capi): whether a setback set on the made `corner`
 /// (`SetSetBackDist`, its [`FilletCorner::set_back_dist`]) would be dropped, the corner
-/// building none ([`builds_setback`]). With `Kernel::fixes.fillet_blend_corner` the session
-/// refuses it ([`SETBACK_NOT_BUILT`], `CornerUnsupported`) instead of building the corner
+/// building none ([`builds_setback`]). The session refuses it ([`SETBACK_NOT_BUILT`], `CornerUnsupported`) instead of building the corner
 /// without it, and refuses a `SetSetBackFill` request at such a corner when the corners are
 /// made. An N x N corner is never refused, as before the port: it builds the setback set on
 /// it, and ignores a `SetSetBackFill` request (which only the Setback reads).

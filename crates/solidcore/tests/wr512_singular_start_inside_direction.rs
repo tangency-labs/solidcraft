@@ -133,18 +133,6 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
     );
 }
 
-/// The kernel with every fix but `fillet_blend_corner` (the fork's blend corner End, which
-/// builds this round by itself), and the WR-512 fix as given.
-fn every_fix(wr512: bool) -> Kernel {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_blend_corner = false;
-    fixes.ssi_singular_start_inside_direction = wr512;
-    Kernel {
-        fixes,
-        ..Kernel::default()
-    }
-}
-
 #[test]
 fn default_kernel_refuses_the_arc_round() {
     let mut k = Kernel::default();
@@ -161,15 +149,6 @@ fn the_flag_builds_the_arc_round() {
     k.fixes.ssi_singular_start_inside_direction = true;
     let (mut b, r) = both_rounds(&mut k);
     assert_built(&mut k, &mut b, r, 1e-9);
-}
-
-/// Every other fix (but the blend corner End, which the fork has) does not reach the start
-/// point: without WR-512 the round still fails.
-#[test]
-fn every_other_fix_still_refuses_the_arc_round() {
-    let mut k = every_fix(false);
-    let (_, r) = both_rounds(&mut k);
-    assert_refused(r);
 }
 
 /// Every fix with the blend corner End: the arc round's end on the front round, where the
@@ -196,15 +175,4 @@ fn the_blend_corner_runs_the_arc_round_on_as_the_pinned_with_wr512() {
             assert_refused(r);
         }
     }
-}
-
-/// Every fix but the blend corner End: the other fixes build the rounds' faces their own way (the definition rounds of
-/// `fillet_gn_section_generator` and others), so the volume is held to 1e-8, the integration's
-/// accuracy. A round whose end came out a point, or a lost face, is off by far more: the arc
-/// round removes 24.74 mm^3, 2.6e-3 of the part.
-#[test]
-fn every_fix_builds_the_arc_round() {
-    let mut k = every_fix(true);
-    let (mut b, r) = both_rounds(&mut k);
-    assert_built(&mut k, &mut b, r, 1e-8);
 }

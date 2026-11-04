@@ -156,16 +156,7 @@ fn solidcraft_kernel() -> Kernel {
     k
 }
 
-/// SolidCraft's fixes but the blend corner (`fillet_blend_corner`, whose trace rule, from
-/// smlib#82, runs the trace on to the edge's ends: see below).
-#[test]
-fn chamfer_past_the_bottom_is_no_room_with_solidcraft_fixes() {
-    let mut k = solidcraft_kernel();
-    k.fixes.fillet_blend_corner = false;
-    assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
-}
-
-/// With the blend corner too (every fix but `geometric_g2_continuity`): refused. Before
+/// Every fix but `geometric_g2_continuity`: refused. Before
 /// smlib#124 the trace ran on to the edge's ends before it was extended (from smlib#82,
 /// `c2_trace_to_edge_ends`), the rails no longer left their faces, and the chamfer built a
 /// manifold solid of 12 faces, as the fork does at b785227 (smlib#82 merged, before
@@ -190,12 +181,4 @@ fn chamfer_past_the_bottom_is_no_room_with_the_flag() {
     let mut k = Kernel::default();
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
-}
-
-/// Without the flag the port keeps pinned SMLib's result: success, an open body of 14
-/// faces.
-#[test]
-fn chamfer_past_the_bottom_builds_the_open_body_by_default() {
-    let mut k = Kernel::default();
-    assert_eq!(chamfer(&mut k), Ok((14, false)));
 }

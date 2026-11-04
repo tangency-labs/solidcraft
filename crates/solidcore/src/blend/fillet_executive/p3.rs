@@ -704,7 +704,7 @@ pub struct FilletExecutive<O> {
     /// `m_dFitSetBack` (the fork's, smlib#104 f1d81f4; `-1` from the constructor): with a
     /// setback corner refused as too short for a convex fill ([`FilletErrorType::NoRoom`]),
     /// the least setback that builds one: `> 0`, `0` when none does, `< 0` when not that
-    /// cause. Set only with `fixes.fillet_blend_corner` (`NoteFitSetBack`).
+    /// cause (`NoteFitSetBack`).
     pub fit_setback: f64,
 }
 
@@ -1080,11 +1080,9 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
 
-    /// Virtual `AdjustTangentCorner` dispatch: delegate to the ported
-    /// `blend::fillet_corner::p3::FilletCorner::adjust_tangent_corner`, which runs
-    /// `SmFilletNx2Corner::AdjustTangentCorner`,
-    /// `SmFilletNx1ClosedCorner::AdjustTangentCorner` (`blend.fillet_corner_p2`) and the
-    /// base (`blend.fillet_corner_p1`: `return SM_SUCCESS`).
+    /// Virtual `AdjustTangentCorner` dispatch: the base class's `return SM_SUCCESS`
+    /// (`blend.fillet_corner_p1`) at every corner since the Nx2 and closed Nx1 overrides
+    /// went (the fork's smlib#113, 34288e5 and caa67d0; #2400).
     fn adjust_tangent_corner(
         &mut self,
         k: &mut Kernel,
@@ -1441,8 +1439,8 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
 
     /// `SmFilletCorner::GetTangentFilletSolver(pFS)` (virtual): delegate to the already
     /// ported `blend::fillet_corner::p1::FilletCorner::tangent_fillet_solver` (fillet
-    /// corner p1: the base, `SmFillet1x1Corner`, `SmFillet2x2Corner`; it dispatches the
-    /// `SmFilletNx1ClosedCorner` / `SmFilletNx2Corner` overrides to fillet corner p2).
+    /// corner p1: the base; it dispatches the `SmFilletNx2Corner` override to fillet corner
+    /// p2).
     fn corner_tangent_solver(&self, corner: O, solver: O) -> Result<Option<O>>;
 
     /// Context-aware `SmFilletSolver::GetFilletCorner(lIndex)` for adapters that look up
@@ -2787,14 +2785,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             k.check_cancelled(OP)?;
             let topology_noted_before = self.error.code;
             if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
-                // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697;
-                // `fixes.fillet_blend_corner`): a corner refused as one the blends cannot
-                // pass (SM_FILERR_NO_ROOM, noted by the corner), or one it does not build
-                // with its reason, keeps that reason
-                if k.fixes.fillet_blend_corner
-                    && (self.error.code == FilletErrorType::NoRoom as i32
-                        || (self.error.code == FilletErrorType::CornerUnsupported as i32
-                            && topology_noted_before != FilletErrorType::CornerUnsupported as i32))
+                // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697): a
+                // corner refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
+                // the corner), or one it does not build with its reason, keeps that reason
+                if self.error.code == FilletErrorType::NoRoom as i32
+                    || (self.error.code == FilletErrorType::CornerUnsupported as i32
+                        && topology_noted_before != FilletErrorType::CornerUnsupported as i32)
                 {
                     return Err(failure());
                 }
@@ -3263,12 +3259,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             let noted_before = self.error.code;
             if ignore(access.edges_calculate(k, corner, self))?.is_none() {
-                // SolidCraft change (the fork's, 41a39ec; `fixes.fillet_blend_corner`): a
-                // corner that noted why it refused, or one refused as one the blends cannot
-                // pass (SM_FILERR_NO_ROOM, noted by the corner), keeps that reason
-                if k.fixes.fillet_blend_corner
-                    && (self.error.code != noted_before
-                        || self.error.code == FilletErrorType::NoRoom as i32)
+                // SolidCraft change (the fork's, 41a39ec): a corner that noted why it refused,
+                // or one refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
+                // the corner), keeps that reason
+                if self.error.code != noted_before
+                    || self.error.code == FilletErrorType::NoRoom as i32
                 {
                     return Err(failure());
                 }
@@ -3333,11 +3328,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
             if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
-                // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697;
-                // `fixes.fillet_blend_corner`): a corner refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
-                // the corner) keeps that reason
-                if k.fixes.fillet_blend_corner && self.error.code == FilletErrorType::NoRoom as i32
-                {
+                // SolidCraft change (the fork's, smlib#124, fdff996, 61547af, WR-697): a corner
+                // refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by the
+                // corner) keeps that reason
+                if self.error.code == FilletErrorType::NoRoom as i32 {
                     return Err(failure());
                 }
                 return self.corner_vertex_failure(
@@ -3735,10 +3729,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         // An End's rail that runs past its side edge's far end is a second cause, which
         // the corner would refuse once built (SmBlendCorner::RefuseEndPastSideEdge): the
-        // refusal names the smaller of the two radii (the fork's 41a39ec,
-        // `fixes.fillet_blend_corner`).
-        if k.fixes.fillet_blend_corner && self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius
-        {
+        // refusal names the smaller of the two radii (the fork's 41a39ec).
+        if self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius {
             let corners = self.corners.clone();
             for corner in corners {
                 if let Some((fit, edge)) =

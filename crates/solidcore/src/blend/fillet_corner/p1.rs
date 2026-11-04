@@ -31,8 +31,8 @@
 //! | [`FilletCorner::add_fillet_vertex`]          | `AddFilletVertex`                           |
 //! | [`FilletCorner::set_bevel`], [`FilletCorner::set_calc_as_const_rad`], [`FilletCorner::set_chamfer`] | `SetBevel`, `SetCalcAsConstRad`, `SmFilletConvexNxNCorner::SetChamfer` |
 //! | [`FilletCorner::is_bevel_corner`], [`FilletCorner::is_blending_corner`], [`FilletCorner::is_degenerate_corner`], [`FilletCorner::is_extended_surface_patch`], [`FilletCorner::is_calc_as_const_rad`] | `IsBevelCorner`, `IsBlendingCorner`, `IsDegenerateCorner`, `IsExtendedSurfacePatch`, `IsCalcAsConstRad` |
-//! | [`FilletCorner::is_tangent_corner`]          | `IsTangentCorner` (base, `SmFilletNx1ClosedCorner`, `SmFilletNx2Corner`) |
-//! | [`FilletCorner::tangent_fillet_solver`]      | `GetTangentFilletSolver` (base, `SmFillet1x1Corner`, `SmFillet2x2Corner`) |
+//! | [`FilletCorner::is_tangent_corner`]          | `IsTangentCorner` (base, `SmFilletNx2Corner`) |
+//! | [`FilletCorner::tangent_fillet_solver`]      | `GetTangentFilletSolver` (base)             |
 //! | [`FilletCorner::fillet_solvers`]             | `GetFilletSolvers`                          |
 //! | [`FilletCorner::extended_surface`], [`FilletCorner::add_extended_original_surface`] | `GetExtendedSurface`, `AddExtendedOriginalSurface` |
 //! | [`FilletCorner::re_initialize_corner_edges`] | `ReInitializeCornerEdges`                   |
@@ -48,7 +48,7 @@
 //! | [`FilletCorner::adjust_vertex_law_intervals`], [`LawIntervalSolvers`] | the law-interval half of `SmFilletCorner::CalcCornerVertGeom` |
 //! | [`FilletCorner::insert_intersection_topology_with_context`] | `InsertIntersectionTopology` |
 //! | `PlainConstantRadiusFs` (private)            | the `SmConstantRadiusFS` virtuals (not the assisted solver's) |
-//! | `p3::FilletCorner::adjust_topology` / `adjust_tangent_corner` (`_` arms) | `SmFilletCorner::AdjustTopology`, `SmFillet4x3Corner::AdjustTopology`, `SmFilletNxNCorner::AdjustTopology`, `SmFilletCorner::AdjustTangentCorner` (all `return SM_SUCCESS`) |
+//! | `p3::FilletCorner::adjust_topology` (`_` arm), the executive's tangent step | `SmFilletCorner::AdjustTopology`, `SmFillet4x3Corner::AdjustTopology`, `SmFilletNxNCorner::AdjustTopology`, `SmFilletCorner::AdjustTangentCorner` (all `return SM_SUCCESS`) |
 //!
 //! Deviations:
 //! - **Exact arcs.** With `Kernel::fixes.fillet_exact_arc_sections` (WR-708, the fork's
@@ -852,30 +852,28 @@ impl FilletCorner {
         self.calc_as_const_rad
     }
 
-    /// `IsTangentCorner` (virtual): `m_bG1Case` for the closed Nx1 and the Nx2 corner,
-    /// `FALSE` for every other kind.
+    /// `IsTangentCorner` (virtual): `m_bG1Case` for the Nx2 corner (the blend corner's
+    /// Join), `FALSE` for every other kind; the closed Nx1 corner, which only meets itself at
+    /// an angle now, never is one (the fork's smlib#113 caa67d0).
     #[must_use]
     pub const fn is_tangent_corner(&self) -> bool {
         match self.kind {
-            FilletCornerKind::NByOneClosed | FilletCornerKind::NByTwo => self.g1_case,
+            FilletCornerKind::NByTwo => self.g1_case,
             _ => false,
         }
     }
 
-    /// `GetTangentFilletSolver(pFS)` (virtual): the solver of the other filleted edge
-    /// use of a 2x2 corner, the solver itself for a 1x1 corner, `None` (`SM_ASSERT_ERR`)
-    /// when the corner has another number of filleted edge uses or `fs` is not one of
-    /// their solvers; `None` for the base class (`SM_REF1(pFS)`). The closed Nx1 and Nx2
-    /// overrides (unit `blend.fillet_corner_p2`) also test `sm_TestG1Continuity` on the
-    /// filleted edges of `b`, the B-rep being filleted, which the base and the 1x1 / 2x2
-    /// overrides do not read.
+    /// `GetTangentFilletSolver(pFS)` (virtual): the Nx2 override (unit
+    /// `blend.fillet_corner_p2`), which tests `sm_TestG1Continuity` on the filleted edges of
+    /// `b`, the B-rep being filleted; a closed Join's own solver (the fork's 543d25a); `None`
+    /// for the base class (`SM_REF1(pFS)`) and the closed Nx1 corner (the fork's smlib#113
+    /// caa67d0). The 1x1 and 2x2 corners' overrides went with their classes (#2400): the
+    /// blend corner's Join replaced them.
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for a 1x1, 2x2, closed Nx1 or Nx2 corner without
-    /// `m_pSolverEUs` (upstream dereferences it); those of
-    /// [`FilletCorner::tangent_fillet_solver_nx1_closed`] and
-    /// [`FilletCorner::tangent_fillet_solver_nx2`].
+    /// [`SolidError::InvalidInput`] for an Nx2 corner without `m_pSolverEUs` (upstream
+    /// dereferences it); those of [`FilletCorner::tangent_fillet_solver_nx2`].
     pub fn tangent_fillet_solver(
         &self,
         k: &Kernel,
@@ -891,10 +889,8 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for a 1x1, 2x2, closed Nx1 or Nx2 corner without
-    /// `m_pSolverEUs`; those of
-    /// [`FilletCorner::tangent_fillet_solver_nx1_closed_with_lookup`] and
-    /// [`FilletCorner::tangent_fillet_solver_nx2_with_lookup`].
+    /// [`SolidError::InvalidInput`] for an Nx2 corner without `m_pSolverEUs`;
+    /// those of [`FilletCorner::tangent_fillet_solver_nx2_with_lookup`].
     pub fn tangent_fillet_solver_with_lookup<S: Copy + Eq>(
         &self,
         k: &Kernel,
@@ -904,41 +900,6 @@ impl FilletCorner {
     ) -> Result<Option<S>> {
         const OP: &str = "blend::fillet_corner::p1::tangent_fillet_solver";
         match self.kind {
-            FilletCornerKind::OneByOne => {
-                let eus = self
-                    .solver_eus
-                    .as_deref()
-                    .ok_or_else(|| SolidError::invalid_input(OP, NULL_DEREF))?;
-                let [eu] = eus else {
-                    return Ok(None);
-                };
-                let my_fs = solver_of(*eu);
-                if my_fs != Some(fs) {
-                    return Ok(None);
-                }
-                Ok(my_fs)
-            }
-            FilletCornerKind::TwoByTwo => {
-                let eus = self
-                    .solver_eus
-                    .as_deref()
-                    .ok_or_else(|| SolidError::invalid_input(OP, NULL_DEREF))?;
-                let [eu0, eu1_] = eus else {
-                    return Ok(None);
-                };
-                let fs1 = solver_of(*eu0);
-                let fs2 = solver_of(*eu1_);
-                if fs1 == Some(fs) {
-                    return Ok(fs2);
-                }
-                if fs2 == Some(fs) {
-                    return Ok(fs1);
-                }
-                Ok(None)
-            }
-            FilletCornerKind::NByOneClosed => {
-                self.tangent_fillet_solver_nx1_closed_with_lookup(k, b, fs, solver_of)
-            }
             // the fork's SmBlendCorner::GetTangentFilletSolver: a closed Join's one blend
             // continues itself (543d25a; WR-697)
             FilletCornerKind::NByTwo if self.is_closed_join() => {

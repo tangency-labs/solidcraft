@@ -88,12 +88,3 @@ fn wr_552_arc_touching_the_axis_sweeps_a_horn_torus() {
     );
     assert!(lines.is_empty(), "{lines:?}");
 }
-
-/// Without the opt-in the arc sweeps the spindle torus it lies on, and the face's loop
-/// at the axis is turned over (a failure besides test #5).
-#[test]
-fn wr_552_without_the_opt_in_the_spindle_torus_fails_the_check() {
-    let (tori, lines) = revolve(false);
-    assert!(tori.iter().all(|&(major, minor)| major < minor), "{tori:?}");
-    assert!(!lines.is_empty(), "{tori:?}");
-}

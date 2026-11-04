@@ -1,6 +1,6 @@
 //! WR-697 (smlib#79 step 4b, the fork's tangency-labs/smlib@32fd80a): the blend
 //! corner's Mitre turn of two equal cylinders is their exact plane section, and the
-//! fillet faces keep their own trim curves (`Kernel::fixes.fillet_blend_corner`).
+//! fillet faces keep their own trim curves.
 //!
 //! The fork's capi case `turn mitre_boss_base`: a 40 x 30 x 10 plate with a 10 x 10 x 5
 //! boss on it (x 15..25, y 10..20), the boss's four base edges rounded r 1 together. At
@@ -11,9 +11,9 @@
 //! `12500 + 40 (1 - pi/4) + 8 (5/6 - pi/4)` (closed form; the fork's test). The fork
 //! 5e8c9c1 (built locally, `SmFilletExecutive` as capi's `round_edges` calls it) prints
 //! volume 12508.967554846866 and the mitres 1.26e-15 to 3.77e-15 off the plane and 2.44e-15
-//! to 3.55e-15 off the cylinders; without the flag the mitre is the marched intersection,
-//! 1.386e-5 off the cylinders, and the volume 12508.967542131706 (the fork's "as before"
-//! value, 12508.967542132, in its 74e9beb notes).
+//! to 3.55e-15 off the cylinders; pinned SMLib's mitre is the marched intersection,
+//! 1.386e-5 off the cylinders (the fork's "as before" volume 12508.967542132, in its
+//! 74e9beb notes).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -39,12 +39,12 @@ use solidcore::{Brep, Kernel};
 
 const PI: f64 = core::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -187,8 +187,8 @@ fn mitres(k: &Kernel, b: &Brep) -> Mitres {
 }
 
 /// The boss base rounded, stitched: its volume, face count, check lines and mitres.
-fn boss_base_rounded(blend: bool) -> (f64, usize, Vec<String>, Mitres) {
-    let mut k = all_fixes(blend);
+fn boss_base_rounded() -> (f64, usize, Vec<String>, Mitres) {
+    let mut k = all_fixes();
     let mut b = boss_base(&mut k);
     round(&mut k, &mut b, &BASE, &[1.0; 4]).unwrap();
     let v = volume(&k, &mut b);
@@ -204,7 +204,7 @@ const BOSS_BASE_MITRE: f64 = 12500.0 + 40.0 * (1.0 - PI / 4.0) + 8.0 * (5.0 / 6.
 
 #[test]
 fn boss_base_mitres_are_the_rounds_exact_plane_sections() {
-    let (v, faces, lines, m) = boss_base_rounded(true);
+    let (v, faces, lines, m) = boss_base_rounded();
     eprintln!("volume {v:.12} want {BOSS_BASE_MITRE:.12}, {faces} faces, {m:?}");
     assert!(lines.is_empty(), "{lines:?}");
     assert_eq!(faces, 15);
@@ -220,16 +220,4 @@ fn boss_base_mitres_are_the_rounds_exact_plane_sections() {
         (v - BOSS_BASE_MITRE).abs() <= 1e-11 * BOSS_BASE_MITRE,
         "{v}"
     );
-}
-
-#[test]
-fn without_the_flag_the_mitres_are_marched() {
-    let (v, faces, lines, m) = boss_base_rounded(false);
-    eprintln!("volume {v:.12}, {faces} faces, {m:?}");
-    assert!(lines.is_empty(), "{lines:?}");
-    assert_eq!(faces, 15);
-    assert_eq!(m.count, [1; 4]);
-    // the marched intersection, 1.386e-5 off the cylinders
-    assert!(m.cyl > 1e-6, "{m:?}");
-    assert!((v - BOSS_BASE_MITRE).abs() > 1e-9 * BOSS_BASE_MITRE, "{v}");
 }

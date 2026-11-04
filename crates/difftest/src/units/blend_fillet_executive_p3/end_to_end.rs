@@ -673,7 +673,10 @@ fn point(out: &mut Vec<f64>, p: Vec3) {
 pub(super) fn status(error: SolidError) -> SolidResult<f64> {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
-        SolidError::Upstream { code, .. } => Ok(f64::from(code)),
+        // a refusal naming the size that builds is the same status (SolidError::sm_status)
+        SolidError::Upstream { code, .. } | SolidError::FilletRefused { code, .. } => {
+            Ok(f64::from(code))
+        }
         // a failure in solidcore's terms (#2615; a shell's): its C++ comparison status
         e @ SolidError::Failed(_) => Ok(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))),
         error => Err(error),
@@ -1843,6 +1846,27 @@ mod tests {
         );
         record.push(1.0);
         assert!(output(&record).is_err());
+    }
+
+    /// A refusal that names the size that builds (`SolidError::FilletRefused`) is the
+    /// executive's failure status, as `SolidError::sm_status` reads it: the C++ returns the
+    /// status alone. Compared as a status, not a harness error (#2400: the blend corner's
+    /// refusals of rounds the pinned corner built).
+    #[test]
+    fn a_refusal_naming_its_size_is_its_status() {
+        use solidcore::blend::fillet_executive::{FitKind, FitSize};
+        let refused = solidcore::SolidError::FilletRefused {
+            operation: "blend::fillet_executive::session::finish",
+            code: 1001,
+            entity: None,
+            reason: None,
+            fit: FitSize {
+                size: 0.5,
+                edge: None,
+                kind: FitKind::Radius,
+            },
+        };
+        assert_eq!(super::status(refused).expect("a status"), 1001.0);
     }
 
     #[test]

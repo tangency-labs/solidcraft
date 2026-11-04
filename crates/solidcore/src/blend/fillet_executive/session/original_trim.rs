@@ -218,10 +218,10 @@ impl OriginalSurfaceTrimAccess<FilletObject, FaceId> for TrimAccess<'_, '_> {
             id,
             solver,
         )?;
-        // SolidCraft change (smlib d657afa, `fixes.fillet_blend_corner`): faces that
+        // SolidCraft change (smlib d657afa): faces that
         // 'leaked' outside the fillet's boundaries are an error. The trim used to be
         // dropped then, and the fillet's faces merged into the body left whole.
-        if leaked && k.fixes.fillet_blend_corner {
+        if leaked {
             executive.error.note_error(
                 FilletErrorType::BadMerge,
                 Some(
@@ -296,9 +296,7 @@ impl FilletSession<'_> {
         serial: u64,
         output: &mut OriginalSurfaceDeletion,
     ) -> Result<()> {
-        if k.fixes.fillet_blend_corner {
-            self.mark_multi_face_trim_edges(k, locks, serial)?;
-        }
+        self.mark_multi_face_trim_edges(k, locks, serial)?;
         let mut selection = OriginalSurfaceSelection::default();
         let selected = self.executive.select_original_surfaces(
             k,
@@ -409,8 +407,7 @@ impl FilletSession<'_> {
         }
     }
 
-    /// SolidCraft change (smlib d657afa, `DoFilletingSteps`, opt-in
-    /// `fixes.fillet_blend_corner`): an edge of the body with more than two faces
+    /// SolidCraft change (smlib d657afa, `DoFilletingSteps`): an edge of the body with more than two faces
     /// (where two lumps of the body touch along a line, as a bore's wall touching the
     /// bottom face) bounds the material a blend takes off on one side of it, so it is
     /// marked with the common edges before the trims: the faces beyond it are not the

@@ -7,7 +7,7 @@
 //! | `Recovery::segments` | multi-interval `SmFilletSolver::ProcessRollOver` |
 //! | `Recovery::split_rail` | calls [`super::super::p1::split_rail`] |
 //! | `Recovery::support_edge` | calls [`super::super::p1::compute_support_edge`] |
-//! | `Recovery::retraced_end`, `Recovery::end_sections`, `RecoveryOps::end_vertex`, `RecoveryOps::recalc_through` | none (#2406, `fillet_blend_corner`: a rollover's piece traced again up to an End at a smooth vertex) |
+//! | `Recovery::retraced_end`, `Recovery::end_sections`, `RecoveryOps::end_vertex`, `RecoveryOps::recalc_through` | none (#2406: a rollover's piece traced again up to an End at a smooth vertex) |
 //! | `Recovery::keeps_round` (private) | none (#2406, with `fillet_round_as_definition`: the piece before a tangent rollover keeps its round by its definition) |
 //!
 //! Deviations: missing callees have typed call boundaries in `RecoveryOps`;
@@ -256,7 +256,7 @@ pub(super) trait RecoveryOps {
             c.target,
         )
     }
-    /// Not upstream (#2406, `fixes.fillet_blend_corner`): an End at a smooth vertex's
+    /// Not upstream (#2406): an End at a smooth vertex's
     /// rail end `vertex`, on the rail as traced again, where it crosses the End's plane
     /// (`CalcRailIntEndSurface`).
     fn end_vertex(
@@ -274,7 +274,7 @@ pub(super) trait RecoveryOps {
         c.fillets
             .calc_rail_int_end_surface(c.k, vertex, c.corners.lookup(), &context, c.target)
     }
-    /// Not upstream (#2406, `fixes.fillet_blend_corner`): [`RecoveryOps::recalc`]
+    /// Not upstream (#2406): [`RecoveryOps::recalc`]
     /// through the sections of the Ends at smooth vertices the geometry ends on.
     fn recalc_through(
         &mut self,
@@ -471,7 +471,7 @@ impl Recovery<'_> {
         let start = self.start(rail)?;
         required(edge::other_vertex(self.fillets.brep(), rail, Some(start))?)
     }
-    /// Not upstream (#2406; `fixes.fillet_blend_corner` with `fixes.fillet_round_as_definition`):
+    /// Not upstream (#2406; with `fixes.fillet_round_as_definition`):
     /// whether geometry `geom`, a piece of the rollover that ends where a rail rolls over
     /// a tangent edge (`hits`) and is not the last, keeps its round. Its ball rolls on the
     /// same two faces as before (its offsets unchanged, `geom_type` the default), and its
@@ -495,7 +495,7 @@ impl Recovery<'_> {
         saved: &FilletSolverOffsetsData,
     ) -> Result<bool> {
         let fixes = &self.k.fixes;
-        if !(fixes.fillet_blend_corner && fixes.fillet_round_as_definition)
+        if !fixes.fillet_round_as_definition
             || last
             || geom_type != FilletGeomType::Default
             || !hits.iter().any(|h| h.tangent)
@@ -537,7 +537,7 @@ impl Recovery<'_> {
             .ok_or_else(|| SolidError::invalid_input(OP, "offset identity exhausted"))
     }
 
-    /// Not upstream (#2406, `fixes.fillet_blend_corner`): geometry `geom`, the rollover's
+    /// Not upstream (#2406): geometry `geom`, the rollover's
     /// first or last piece, traced again, ends (at its start, or `last`, at its end) on an
     /// End at a smooth vertex: its rails end on the End's plane
     /// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`, two, not mates). The corner is adjusted, as one
@@ -599,7 +599,7 @@ impl Recovery<'_> {
         Ok(out)
     }
 
-    /// Not upstream (#2406, `fixes.fillet_blend_corner`): the sections of the Ends at
+    /// Not upstream (#2406): the sections of the Ends at
     /// smooth vertices that geometry `geom`'s rails end on, before its first point and
     /// after its last: each the section in the End's plane (square to the edge at the
     /// vertex, `FilletCorner::end_cap`), solved on the solver's offsets as they are now
@@ -613,9 +613,6 @@ impl Recovery<'_> {
     /// the plane's normal is not a plane's; those of the section's solve.
     fn end_sections(&mut self, geom: FilletGeomId) -> Result<[Option<TsectPnt>; 2]> {
         let mut out = [None, None];
-        if !self.k.fixes.fillet_blend_corner {
-            return Ok(out);
-        }
         let rail0 = required(self.fillets.geom(geom)?.rail(0))?;
         let along = self.fillets.vertex_point(self.end(rail0)?)?
             - self.fillets.vertex_point(self.start(rail0)?)?;
@@ -707,11 +704,7 @@ impl Recovery<'_> {
             let corner_type = self.corners.corner_type(corner)?;
             let closed_join =
                 corner_type == FilletCornerType::NByTwo && self.corners.is_closed_join(corner)?;
-            if !matches!(
-                corner_type,
-                FilletCornerType::NByOneClosed | FilletCornerType::OneByOne
-            ) && !closed_join
-            {
+            if corner_type != FilletCornerType::NByOneClosed && !closed_join {
                 return Err(SolidError::sm_err(OP));
             }
             if unknown0 {
@@ -1062,10 +1055,7 @@ impl Recovery<'_> {
             let keeps_round = self.keeps_round(current_geom, geom_type, last, &hits, &saved)?;
             // the Ends at smooth vertices the geometry traced again below ends on
             let mut end_vertices = Vec::new();
-            if self.k.fixes.fillet_blend_corner
-                && !keeps_round
-                && (hits.iter().any(|h| h.tangent) || last)
-            {
+            if !keeps_round && (hits.iter().any(|h| h.tangent) || last) {
                 for (at_end, ends_there) in [(false, first), (true, last)] {
                     if ends_there {
                         end_vertices.extend(self.retraced_end(current_geom, at_end, adjusted)?);

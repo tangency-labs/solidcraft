@@ -726,14 +726,14 @@ impl ExecutiveAccess<Handle> for Access {
         corner: Handle,
         _: &mut FilletExecutive<Handle>,
     ) -> SolidResult<()> {
-        // The virtual `pCorner->AdjustTangentCorner()` on the actual corner: the base
-        // returns SM_SUCCESS; the Nx2 and closed Nx1 overrides need a TangentSplitEnv
-        // over the solvers' virtual operations, which this fixture does not build.
+        // The virtual `pCorner->AdjustTangentCorner()` on the actual corner: the base's
+        // SM_SUCCESS at every corner since the Nx2 and closed Nx1 overrides were deleted
+        // (the fork's smlib#113, 34288e5 and caa67d0; #2400).
         let Handle::Corner(cid) = corner else {
             return missing();
         };
-        let c = self.corners.get_mut(cid).ok_or_else(missing_error)?;
-        c.adjust_tangent_corner_with(&mut (), |_, ()| missing(), |_, ()| missing())
+        self.corners.get(cid).ok_or_else(missing_error)?;
+        Ok(())
     }
     fn calc_fillet_geom(
         &mut self,

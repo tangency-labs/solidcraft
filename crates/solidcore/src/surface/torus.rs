@@ -32,8 +32,8 @@
 //! | [`Torus::inside_out`], [`Torus::major_radius`], [`Torus::minor_radius`] | `GetInsideOut`, `GetMajorRadius`, `GetMinorRadius` (inline) |
 //!
 //! Deviations:
-//! - **Horn torus rebuild.** With `Kernel::fixes.fillet_blend_corner` (WR-697, the fork's
-//!   tangency-labs/smlib af7a4d9) [`Torus::rebuild_step_from_nurb_parameters`] takes radii
+//! - **Horn torus rebuild.** (WR-697, the fork's tangency-labs/smlib af7a4d9)
+//!   [`Torus::rebuild_step_from_nurb_parameters`] takes radii
 //!   within its scaled zero as one (a horn torus) and the generator angles' start
 //!   directions from the generator circles' centres (`smgu_CircleFrom3Points`).
 //! - **Derived class.** `SmTorus` derives from `SmSurfOfRevolution`; the base object is
@@ -1309,13 +1309,12 @@ impl Torus {
         let major_vec = other_frame.origin() - ref_frame.origin();
         let mut maj_rad = major_vec.length();
 
-        // not upstream (the fork's tangency-labs/smlib af7a4d9, with
-        // `fixes.fillet_blend_corner`, WR-697): a torus whose generator circles reach the
-        // axis is a horn torus (major radius = minor radius), as a revolved circle that
-        // reaches the axis is. The two radii, fitted to different iso-circles, differ in
-        // their last bits, and a spindle torus's tube would cross the axis there.
-        let horn = k.fixes.fillet_blend_corner;
-        if horn && (maj_rad - min_rad).abs() <= scaled_zero {
+        // not upstream (the fork's tangency-labs/smlib af7a4d9, WR-697): a torus whose
+        // generator circles reach the axis is a horn torus (major radius = minor radius),
+        // as a revolved circle that reaches the axis is. The two radii, fitted to
+        // different iso-circles, differ in their last bits, and a spindle torus's tube
+        // would cross the axis there.
+        if (maj_rad - min_rad).abs() <= scaled_zero {
             maj_rad = min_rad;
         }
 
@@ -1325,7 +1324,7 @@ impl Torus {
         let minor_orientation = other_frame.z_axis().cross(major_vec);
         let inside_out = torus_z_axis.dot(minor_orientation) < 0.0;
 
-        let (start_for_min_angle, start_for_max_angle) = if horn {
+        let (start_for_min_angle, start_for_max_angle) = {
             // not upstream (the fork's af7a4d9, WR-697): the vec to the Center of the
             // GenCurve at the Nurb Min/Max sweep parameter is the vec to that GenCurve's
             // own center, the circle through three of its points. The Nurb Min/Max Point
@@ -1359,17 +1358,6 @@ impl Torus {
             }
             let [min_start, max_start] = starts;
             (min_start, max_start)
-        } else {
-            // project Nurb Min/Max Point to Torus XY plane to get vec to Center of each
-            // GenCurve
-            let min_plane_point =
-                point_project_to_plane(nurb_min_point, torus_origin, torus_z_axis);
-            let max_plane_point =
-                point_project_to_plane(nurb_max_point, torus_origin, torus_z_axis);
-            (
-                (min_plane_point - torus_origin).unitize_or_z(),
-                (max_plane_point - torus_origin).unitize_or_z(),
-            )
         };
         let min_origin = torus_origin + maj_rad * start_for_min_angle;
         let max_origin = torus_origin + maj_rad * start_for_max_angle;

@@ -64,8 +64,8 @@ impl FilletCorner {
         if self.kind != FilletCornerKind::ConcaveNByN {
             return Err(invalid("requires a ConcaveNByN corner"));
         }
-        // Determine if this is a setback corner (kept with `fillet_blend_corner`, where the
-        // fork's dc757a6 drops it: `asked_setback_not_built`)
+        // Determine if this is a setback corner (kept, where the fork's dc757a6 drops it:
+        // `asked_setback_not_built`)
         if self.set_back_dist > self.approx_tol_3d * 100.0 {
             // Let SmFilletConvexNxNCorner handle setbacks (the caller dispatches it)
             return Err(invalid(

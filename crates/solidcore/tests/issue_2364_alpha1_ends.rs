@@ -1,5 +1,5 @@
 //! The fork's smlib#130 (`v1.1.0-alpha.1`) fixes to the End at a smooth vertex (smlib#124,
-//! `fillet_blend_corner`, WR-697), on SolidCraft's own inputs: the bodies its rig handed the
+//! WR-697), on SolidCraft's own inputs: the bodies its rig handed the
 //! fillet (`data/issue_2364_solidcraft_*.smb`, the rig's blend-call dumps, perf-inputs
 //! 2364-ends).
 //!

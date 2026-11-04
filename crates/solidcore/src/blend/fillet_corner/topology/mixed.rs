@@ -12,8 +12,7 @@
 //!
 //! Deviations: the ring (`sm_MixedRing`) read here is kept on the corner
 //! ([`MixedCorner`]) for the later steps, with the blends' solvers' identities (their
-//! first geometries' `GetFilletSolver()`). Opt-in: `Kernel::fixes.fillet_blend_corner`
-//! (WR-697). There is no recursion.
+//! first geometries' `GetFilletSolver()`; WR-697). There is no recursion.
 
 use super::{new_corner_vertex, Nx2TopologyEnv, OP_NX2};
 use crate::blend::blend_corner::mixed::{mixed_ring, MixedCorner};

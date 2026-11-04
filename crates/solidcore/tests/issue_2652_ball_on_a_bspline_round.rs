@@ -48,8 +48,8 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, vertex, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`), `fillet_blend_corner` as given.
-fn kernel(blend_corner: bool) -> Kernel {
+/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`).
+fn kernel() -> Kernel {
     let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
     let mut f = UpstreamFixes::default();
     for name in &names {
@@ -57,8 +57,6 @@ fn kernel(blend_corner: bool) -> Kernel {
             *flag = true;
         }
     }
-    assert!(f.fillet_blend_corner);
-    f.fillet_blend_corner = blend_corner;
     Kernel {
         fixes: f,
         ..Kernel::default()
@@ -284,7 +282,7 @@ fn faces_on_the_ball(k: &Kernel, b: &Brep, c: Point3) -> Vec<FaceId> {
 
 #[test]
 fn the_round_over_a_bspline_round_of_its_radius_is_the_ball_s_piece() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let b = block(&mut k);
     // the round wall is a B-spline, the ball's radius across its top arc
     let (removed, mut b) = round_top(&mut k, b).unwrap();
@@ -297,7 +295,7 @@ fn the_round_over_a_bspline_round_of_its_radius_is_the_ball_s_piece() {
     let ball = faces_on_the_ball(&k, &b, Point3::new(8.0, 8.0, -2.0));
     assert_eq!(ball.len(), 1, "{ball:?}");
     // the same part as the box whose upright round is an exact cylinder
-    let mut kr = kernel(true);
+    let mut kr = kernel();
     let r = reference(&mut kr);
     let (want, _) = round_top(&mut kr, r).unwrap();
     assert!(
@@ -306,30 +304,18 @@ fn the_round_over_a_bspline_round_of_its_radius_is_the_ball_s_piece() {
     );
 }
 
-/// Without `fillet_blend_corner` (#2403's flag, which gates the event) the round is traced
-/// through the fixed centre and fails, as it did before the fix.
-#[test]
-fn without_the_blend_corner_the_round_over_the_bspline_fails() {
-    let mut k = kernel(false);
-    let b = block(&mut k);
-    match round_top(&mut k, b) {
-        Err(SolidError::Upstream { code: 1001, .. }) => {}
-        other => panic!("expected 1001, got {:?}", other.map(|(v, _)| v)),
-    }
-}
-
 /// A ball smaller than the B-spline round (R1.5 against 2): it matches the face nowhere, so
 /// nothing collapses and the round is the one the exact cylinder's box gets.
 #[test]
 fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let b = block(&mut k);
     let (removed, mut b) = round_top_at(&mut k, b, 1.5).unwrap();
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
-    let mut kr = kernel(true);
+    let mut kr = kernel();
     let r = reference(&mut kr);
     let (want, _) = round_top_at(&mut kr, r, 1.5).unwrap();
     assert!(
@@ -343,7 +329,7 @@ fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
 /// the face's least radius there, 2, less the fit margin (open).
 #[test]
 fn a_ball_as_wide_as_the_bspline_along_part_of_the_edge_is_refused_with_its_fit() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let b = block_of(&mut k, &two_radius_outline());
     let margin = 1000.0
         * top_outline(&b)
@@ -377,7 +363,7 @@ fn a_ball_as_wide_as_the_bspline_along_part_of_the_edge_is_refused_with_its_fit(
 /// the fit margin, on a side round's top edge. Before, it failed with 1001 in the trace.
 #[test]
 fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_refused_with_its_fit() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = side_rounded_disc(&mut k, 2);
     let top = top_edges(&b);
     assert_eq!(top.len(), 12);

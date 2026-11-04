@@ -37,8 +37,8 @@
 //! corner with [`FilletCorner::blend`] set, built by the existing Nx2 port. The End
 //! (53c47b8) keeps the pinned corner kind whose construction it moved unchanged
 //! (`NByOne`, `Open`, `Degenerate`) with `blend` set; every blend corner's type is
-//! `SM_FCR_BLEND`, which is `FilletCornerType::NByTwo` here. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697). Out-params are return values.
+//! `SM_FCR_BLEND`, which is `FilletCornerType::NByTwo` here (WR-697). Out-params are return
+//! values.
 
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, test_g1_continuity,

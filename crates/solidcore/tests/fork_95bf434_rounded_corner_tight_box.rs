@@ -4,7 +4,8 @@
 //! or a vertex, which is within the face's zone tolerance of its boundary inside or out.
 //!
 //! The fork's case: the corner of a box of 10 with its three edges there rounded r 1 is a
-//! sphere octant about (1, 1, 1) in [0, 1]^3. Its sphere's points just past the arc in y = 1
+//! sphere octant about (1, 1, 1) in [0, 1]^3 (the blend corner's Ball, a ball patch on that
+//! sphere; the fork at 95bf434 built it as the pinned corner's `SmSphere`). Its sphere's points just past the arc in y = 1
 //! classify on the boundary, and the face boxed to y 1.0000243; with the fix it boxes to
 //! [0, 1]^3, to 1e-9.
 #![allow(
@@ -38,7 +39,8 @@ fn edges_at(k: &Kernel, b: &Brep, p: Point3) -> Vec<EdgeId> {
         .collect()
 }
 
-/// The tight box of the sphere octant at the box's rounded corner, with the search as given.
+/// The tight box of the sphere octant (the Ball's patch) at the box's rounded corner, with
+/// the search as given.
 fn octant_box(searches_trim: bool) -> Extent3d {
     let mut k = Kernel::default();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
@@ -58,10 +60,10 @@ fn octant_box(searches_trim: bool) -> Extent3d {
         .filter(|&f| {
             face::surface(&b, f)
                 .unwrap()
-                .is_some_and(|s| matches!(s.kind(), SurfaceKind::Sphere(_)))
+                .is_some_and(|s| matches!(s.kind(), SurfaceKind::BallPatch(_)))
         })
         .collect();
-    assert_eq!(spheres.len(), 1, "one sphere corner");
+    assert_eq!(spheres.len(), 1, "one ball corner");
     calculate_tight_bounding_box(&k, &b, spheres[0]).unwrap()
 }
 

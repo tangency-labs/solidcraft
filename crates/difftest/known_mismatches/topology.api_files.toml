@@ -1,0 +1,12 @@
+# Known mismatches of topology.api_files (format: crates/difftest/src/known.rs).
+
+# The default kernel's blend corner (#2400; plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): 2 cases.
+[[mismatch]]
+unit = "topology.api_files"
+case = "turn_fillet_box_10_r1"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record.len: cpp=3677 rust=4367)"
+
+[[mismatch]]
+unit = "topology.api_files"
+case = "turn_fillet_box_5_10_20_r05"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record.len: cpp=3677 rust=4367)"

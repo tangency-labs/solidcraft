@@ -36,8 +36,6 @@ use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
-use solidcore::topology::edgeuse::p1 as eu1;
-use solidcore::topology::edgeuse::p3::{evaluate_binormal_uv, BinormalOptions};
 use solidcore::topology::{edge, EdgeId, EdgeuseId};
 use solidcore::{Brep, Kernel};
 
@@ -77,29 +75,6 @@ fn rims(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
             (curve.evaluate_point(k, mid).unwrap().z - 10.0).abs() < 1e-6
         })
         .collect()
-}
-
-/// `sides_offsets`: setback 1 on the face whose normal leans most along +Z, 2 on the
-/// other; `None` where the fork's would refuse.
-fn sides_offsets(k: &Kernel, b: &mut Brep, e: EdgeId, u0: EdgeuseId) -> Option<(f64, f64)> {
-    let u1 = eu1::radial(b, u0).unwrap()?;
-    let t = edge::interval(b, e).unwrap().evaluate(0.5);
-    let options = BinormalOptions::default();
-    let f0 = evaluate_binormal_uv(k, b, u0, t, false, &options).ok()?;
-    let f1 = evaluate_binormal_uv(k, b, u1, t, false, &options).ok()?;
-    let c = f0.eval.binormal.dot(f1.eval.binormal).clamp(-1.0, 1.0);
-    let sn = (1.0 - c * c).max(0.0).sqrt();
-    if sn <= 1e-6 {
-        return None;
-    }
-    let up = Vec3::new(0.0, 0.0, 1.0);
-    let (mut s0, mut s1) = (1.0, 2.0);
-    if f1.eval.face_normal.dot(up).abs() > f0.eval.face_normal.dot(up).abs() {
-        std::mem::swap(&mut s0, &mut s1);
-    }
-    let r0 = (s1 - s0 * c) / sn;
-    let r1 = (s0 - s1 * c) / sn;
-    (r0 > 0.0 && r1 > 0.0).then_some((r0, r1))
 }
 
 /// The chamfer of `edges` (each with its blend edge use) by the offsets `r0` (on each
@@ -150,19 +125,6 @@ fn finish(k: &mut Kernel, b: &mut Brep, before: usize) -> Outcome {
     (before, after, is_manifold_solid(b).unwrap())
 }
 
-/// Rim half `nth` chamfered by the offsets setbacks 1/2 derive: its outcome, or the
-/// chamfer's failure.
-fn chamfer_half(nth: usize) -> solidcore::Result<Outcome> {
-    let mut k = Kernel::default();
-    let mut b = cut_cylinder(&mut k);
-    let before = p1::faces(&b, None).unwrap().len();
-    let e = rims(&k, &b)[nth];
-    let u0 = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
-    let offsets = sides_offsets(&k, &mut b, e, u0).expect("offsets");
-    chamfer(&mut k, &mut b, &[(e, u0)], offsets)?;
-    Ok(finish(&mut k, &mut b, before))
-}
-
 /// Both rim halves (the whole smooth rim) chamfered in one session by `offsets`.
 fn chamfer_whole(offsets: (f64, f64)) -> solidcore::Result<Outcome> {
     let mut k = Kernel::default();
@@ -174,21 +136,6 @@ fn chamfer_whole(offsets: (f64, f64)) -> solidcore::Result<Outcome> {
     }
     chamfer(&mut k, &mut b, &edges, offsets)?;
     Ok(finish(&mut k, &mut b, before))
-}
-
-/// One half edge alone, which ends where the rim continues tangentially into the
-/// unchamfered half, is refused with the executive's generic status (WR-582).
-#[test]
-fn issue_880_half_rim_edge_is_refused_with_1001() {
-    let mut k = Kernel::default();
-    let b = cut_cylinder(&mut k);
-    assert_eq!(rims(&k, &b).len(), 2, "the rim is two half ellipses");
-    for nth in 0..2 {
-        match chamfer_half(nth) {
-            Err(solidcore::SolidError::Upstream { code: 1001, .. }) => {}
-            other => panic!("rim half {nth}: {other:?}"),
-        }
-    }
 }
 
 /// The whole tangent chain, both halves in one session, builds a closed solid with one

@@ -29,8 +29,7 @@
 //! returns `SM_ERR`. Solvers come through [`SweptSolvers`]. The bisection runs at most
 //! 100 steps and the golden section 200, as the fork's; the side edge's chain at most
 //! [`SIDE_EDGE_CHAIN_STEPS`] (the fork's 64) and `CalcRailIntEdgeuse`'s continuation along
-//! it the same (the fork's recursion there has no bound). No recursion. Opt-in: `Kernel::fixes.fillet_blend_corner`
-//! (WR-697).
+//! it the same (the fork's recursion there has no bound). No recursion (WR-697).
 
 use super::swept::SweptSolvers;
 use crate::blend::fillet_corner::p3::CornerPatchEnv;
@@ -525,7 +524,7 @@ fn radius_reaching_side_edge_end(
 }
 
 /// Not the fork's (#2364 review, SolidCraft #11360's `a_round_ending_in_an_earlier_round`,
-/// opt-in `fixes.fillet_blend_corner`): whether the End's face G (the side edge's face that
+/// WR-697): whether the End's face G (the side edge's face that
 /// is not the rail's face F) runs on tangentially past the side edge's far end P, so the rail
 /// running past P stays on F and ends on G's tangent continuation. That holds where P has
 /// exactly three edges: the side edge (F and G), an edge E2 that bounds F and a face H, and
@@ -1156,7 +1155,7 @@ fn ends_in_tangent_edge(
     )
 }
 
-/// Not the fork's (#2406; `fixes.fillet_blend_corner`): whether an End at a smooth
+/// Not the fork's (#2406): whether an End at a smooth
 /// vertex waits for its rails' rollover. A rail that ends on the cap's plane off its side
 /// face F, F being a face of the blended edge whose edge T at the vertex is tangent to the
 /// face G beyond, has left F across T: the ball rolls over T onto G before the plane. The
@@ -1182,7 +1181,7 @@ pub fn end_awaits_rollover(
     end_rolls_over(k, target, pseudo, corner, solvers, rolls_over, true)
 }
 
-/// Not the fork's (#2406; `fixes.fillet_blend_corner`): whether an End at a smooth vertex
+/// Not the fork's (#2406): whether an End at a smooth vertex
 /// can wait for its rails' rollover, before its rail ends are found
 /// ([`end_awaits_rollover`] without its rail end off the side face): F, a face of the
 /// blended edge that a cap edge lies on, has its other edge at the vertex tangent to the
@@ -1203,7 +1202,7 @@ pub fn end_can_await_rollover(
     end_rolls_over(k, target, pseudo, corner, solvers, rolls_over, false)
 }
 
-/// Not the fork's (#2406; `fixes.fillet_blend_corner`): whether an End at a smooth vertex
+/// Not the fork's (#2406): whether an End at a smooth vertex
 /// has a cap edge on a face F of the blended edge (of `fil_eu`) whose other edge at the
 /// vertex is tangent to the face beyond (`sm_TestManifoldTangentRollover` within
 /// `tangency_tol_rad`): the ball can roll over that edge before the End's plane

@@ -1004,7 +1004,7 @@ fn shim_corners(m: &RustModel) -> Result<Vec<FilletCorner>, HarnessError> {
         tag(m.fb.fillet_edge(e).map_err(h)?.fillet_corner());
     }
     Ok((0..count)
-        .map(|_| FilletCorner::new(FilletCornerKind::OneByOne, None, None, None, 1.0e-6, 0.01))
+        .map(|_| FilletCorner::new(FilletCornerKind::FourByThree, None, None, None, 1.0e-6, 0.01))
         .collect())
 }
 

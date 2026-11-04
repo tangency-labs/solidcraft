@@ -198,23 +198,6 @@ fn solidcraft_flags_build_minus_nine_as_the_fork() {
 }
 
 #[test]
-fn flags_off_put_back_failures_are_typed() {
-    // refusals A (-7.5, a corner edge) and B (-9, a rollover) of the issue
-    for (d, comment) in [(-7.5, "Fillet Corner Error"), (-9.0, "Fillet Solver Error")] {
-        let k = &mut Kernel::default();
-        let (_, ex, r) = moved(k, d);
-        assert!(r.is_err(), "d {d}");
-        assert_eq!(
-            ex.refusal(),
-            OffsetFacesRefusal::NotPutBack,
-            "d {d}: {}",
-            ex.reason()
-        );
-        assert!(ex.reason().contains(comment), "d {d}: {}", ex.reason());
-    }
-}
-
-#[test]
 fn flags_off_build_the_depths_above_the_floor() {
     for (d, faces) in [(-6.9, 10), (-7.0, 6)] {
         let k = &mut Kernel::default();
@@ -294,7 +277,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_nx1_tangent_corner_edge = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_tangent_side_edge_same_convexity = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_bigger_step_retry = true;
     k.fixes.fillet_point_step_per_point = true;

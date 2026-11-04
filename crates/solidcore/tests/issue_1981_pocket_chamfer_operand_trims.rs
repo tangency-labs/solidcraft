@@ -151,13 +151,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     assert!((v - want).abs() / want < 1e-8, "{v} vs {want}");
 }
 
-/// Without the WR-654 fix, the issue's flag set still fails as reported.
-#[test]
-fn pocket_chamfer_without_the_fix_fails_at_the_corner_edges() {
-    let (code, comment) = chamfer_rim(true, false).expect_err("fails without the fix");
-    assert_eq!(code, 3, "{comment}");
-}
-
 /// With `keep_operand_uv_trims` off the pocket's walls carry line trims only, so the fix
 /// changes nothing: both give the expected volume, bit for bit the same.
 #[test]

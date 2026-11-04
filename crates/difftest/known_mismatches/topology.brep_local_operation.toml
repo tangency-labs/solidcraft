@@ -17,3 +17,34 @@ case = "fc0016"
 libc = "glibc"
 cpp_defect = "ND-493"
 why = "C++ clock-seeded rand() in IsInnerShell's sample points (ND-493): in 10 fresh-process runs 1 s apart the C++ result had 255 geometry values (the Rust result) in 9 and 765 in 1"
+
+# The default kernel's blend corner (#2400; plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): 6 cases.
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "gen0017"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.geometry[77]: cpp=-8.711111533034435e1 rust=-8.711111519855812e1)"
+
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "gen0036"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.geometry[77]: cpp=-8.72975231355388e1 rust=-8.72975230043746e1)"
+
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "gen0044"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.geometry[77]: cpp=-8.711111533035697e1 rust=-8.711111519856698e1)"
+
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "gen0075"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.geometry[75]: cpp=1.093294088884245e-5 rust=1.0772296664567252e-5)"
+
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "gen0076"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.geometry[65]: cpp=-8.59862060194023e1 rust=-8.598620588388228e1)"
+
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "gen0083"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.geometry[81]: cpp=-8.711111533034433e1 rust=-8.711111519855815e1)"

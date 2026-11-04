@@ -13,6 +13,7 @@
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_box;
@@ -46,9 +47,16 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
         .collect()
 }
 
-fn tray(fix: bool) -> (f64, f64, solidcore::Result<()>) {
+/// The tray rounded on the default kernel, or with every fix but `geometric_g2_continuity`
+/// (`all`, where the blend corner's mitres between the bottom rounds are exact: its rounds'
+/// sections the ball's exact circles).
+fn tray(all: bool) -> (f64, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_ball_patch = fix;
+    if all {
+        let mut f = UpstreamFixes::all();
+        f.geometric_g2_continuity = false;
+        k.fixes = f;
+    }
     let mut tray = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 25.0, 25.0, 10.0).unwrap();
     let bottom = edges_where(&k, &tray, |m| m.z.abs() < 1e-6);
     fillet_edges(&mut k, &mut tray, &bottom, 2.0, 1, 1, 1.0).unwrap();
@@ -85,12 +93,5 @@ fn the_corner_ball_is_made_where_two_bottom_rounds_meet_with_the_fix() {
     assert!(
         (after - (rounded - removed)).abs() < 1e-7 * after,
         "{rounded} {after}"
-    );
-
-    // default: upstream's 1001
-    let (_, _, r) = tray(false);
-    assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
-        "{r:?}"
     );
 }

@@ -1,12 +1,10 @@
-//! Topology of the tangent (1x1, 2x2), 4x3, open-end and degenerate corners.
+//! Topology of the 4x3, open-end and degenerate corners.
 //!
 //! Upstream: `source/SMLib/src/SmFilletCorner.cpp` (4372–4436, 4494–4561, 8570–8669,
 //! 8699–8748, 8779–8861).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`FilletCorner::make_1x1_corner_topology`] | `SmFillet1x1Corner::MakeCornerTopology` |
-//! | [`FilletCorner::make_2x2_corner_topology`] | `SmFillet2x2Corner::MakeCornerTopology` |
 //! | [`FilletCorner::make_4x3_corner_topology`] | `SmFillet4x3Corner::MakeCornerTopology` |
 //! | [`FilletCorner::make_open_corner_topology`] | `SmFilletOpenCorner::MakeCornerTopology` |
 //! | [`FilletCorner::make_degenerate_corner_topology`] | `SmFilletDegenerateCorner::MakeCornerTopology` |
@@ -46,7 +44,7 @@ fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// Actual objects used by the 1x1, 2x2, 4x3, open and degenerate corners'
+/// Actual objects used by the 4x3, open and degenerate corners'
 /// `MakeCornerTopology`.
 #[derive(Debug)]
 pub struct EndCornerTopologyEnv<'a> {
@@ -102,198 +100,6 @@ impl FilletCorner {
                 .copied(),
             "corner without filleted edge use",
         )
-    }
-
-    /// The cross-section vertex `fv0` on the face of `base_eu` and its mate `fv1` on the
-    /// radial face (the shared start of the 1x1 and 2x2 corners).
-    fn make_cross_section_vertices(
-        &mut self,
-        k: &Kernel,
-        target: &Brep,
-        pseudo: &mut FilletBrep,
-        corner: FilletCornerId,
-        base_eu: EdgeuseId,
-    ) -> Result<(
-        crate::topology::VertexId,
-        crate::topology::VertexId,
-        Option<crate::topology::FaceId>,
-    )> {
-        // Create a fillet vertex on one side of the edge
-        let fv0 = new_corner_vertex(k, pseudo, corner)?;
-        let face0 = eu1::face(target, base_eu)?;
-        {
-            let v = pseudo.fillet_vertex_mut(fv0)?;
-            v.set_point_class(PointClassType::Face, face0.map(EntityRef::Face));
-            v.set_fillet_vertex_type(FilletVertexType::OnCrossSection);
-        }
-        self.vertices.push(fv0);
-
-        // Create another fillet vertex on the other side of the edge
-        let fv1 = new_corner_vertex(k, pseudo, corner)?;
-        let face1 = eu1::face(target, radial(target, base_eu)?)?;
-        {
-            let v = pseudo.fillet_vertex_mut(fv1)?;
-            v.set_point_class(PointClassType::Face, face1.map(EntityRef::Face));
-            v.set_fillet_vertex_type(FilletVertexType::Mate);
-            v.set_mate(0, Some(fv0));
-        }
-        pseudo.fillet_vertex_mut(fv0)?.set_mate(0, Some(fv1));
-        self.vertices.push(fv1);
-        Ok((fv0, fv1, face0))
-    }
-
-    /// `SmFillet1x1Corner::MakeCornerTopology`: the cross-section vertex on the
-    /// filleted edge use's face, its mate on the radial face, the cross-section fillet
-    /// edge between them and two rail edge uses (same and opposite) on each closed rail.
-    ///
-    /// Allocations and corner-list insertions occur in native order and remain visible
-    /// if a later operation fails.
-    ///
-    /// # Errors
-    /// `SM_ERR_NULL_POINTER` without the solver; `SM_ERR` unless the new fillet edge has
-    /// two edge uses; invalid topology or corner kind; those of the solver rail lookups
-    /// and pseudo-topology operations.
-    pub fn make_1x1_corner_topology(&mut self, env: EndCornerTopologyEnv<'_>) -> Result<()> {
-        if self.kind != FilletCornerKind::OneByOne {
-            return Err(invalid("requires a 1x1 corner"));
-        }
-        let EndCornerTopologyEnv {
-            k,
-            target,
-            pseudo,
-            corner,
-            solvers,
-            solver_eu_solvers,
-            ..
-        } = env;
-        let fil_edgeuse = self.filleted_eu(0)?;
-        let solver = live(solvers, solver_eu_solvers.first().copied().flatten())?;
-
-        let (fv0, fv1, face0) =
-            self.make_cross_section_vertices(k, target, pseudo, corner, fil_edgeuse)?;
-
-        // Corner consists of one fillet edge only (joining fv0 & fv1)
-        let fillet_edge = pseudo.make_fillet_edge(Some(fv0), Some(fv1), Some(corner))?;
-        pseudo
-            .fillet_edge_mut(fillet_edge)?
-            .set_fillet_edge_type(FilletEdgeType::CrossSection);
-
-        if crate::topology::edge::edgeuses(pseudo.brep(), fillet_edge, None, None)?.len() != 2 {
-            return Err(SolidError::sm_err(OP));
-        }
-
-        let prim = need(
-            eu1::primary_edgeuse(pseudo.brep(), fillet_edge)?,
-            "fillet edge without primary edge use",
-        )?;
-        let fillet_geom = solver.first_fillet_geom()?;
-        let mate = need(
-            eu1::mate(pseudo.brep(), prim)?,
-            "fillet edge use without mate",
-        )?;
-        pseudo.set_edgeuse_fillet_geom(prim, Some(fillet_geom))?;
-        pseudo.set_edgeuse_fillet_geom(mate, Some(fillet_geom))?;
-        self.edges.push(fillet_edge);
-
-        // Setup rails of fillet
-        let rail = solver.find_index_of_rail_on_face(target, face0)?;
-        let other = 1usize
-            .checked_sub(rail)
-            .ok_or_else(|| invalid("rail index past 1"))?;
-
-        // Need two edgeuses for each (closed-)rail
-        for (rail, fv) in [(rail, fv0), (other, fv1)] {
-            for orient in [OrientType::Same, OrientType::Opposite] {
-                pseudo.make_rail_edgeuse_on(
-                    fillet_geom,
-                    rail,
-                    Some(fv),
-                    orient,
-                    None,
-                    lookup(corner, self),
-                    solver,
-                    target,
-                )?;
-            }
-        }
-
-        self.blending = true;
-        Ok(())
-    }
-
-    /// `SmFillet2x2Corner::MakeCornerTopology`: as the 1x1 corner, but the cross-section
-    /// edge's two edge uses take the two G1-continuous fillets' geometries and each
-    /// fillet gets one rail edge use at each of the two vertices.
-    ///
-    /// Allocations and corner-list insertions occur in native order and remain visible
-    /// if a later operation fails.
-    ///
-    /// # Errors
-    /// `SM_ERR_NULL_POINTER` without either solver; invalid topology or corner kind;
-    /// those of the solver rail lookups and pseudo-topology operations.
-    pub fn make_2x2_corner_topology(&mut self, env: EndCornerTopologyEnv<'_>) -> Result<()> {
-        if self.kind != FilletCornerKind::TwoByTwo {
-            return Err(invalid("requires a 2x2 corner"));
-        }
-        let EndCornerTopologyEnv {
-            k,
-            target,
-            pseudo,
-            corner,
-            solvers,
-            solver_eu_solvers,
-            ..
-        } = env;
-        let base_edgeuse1 = self.filleted_eu(0)?;
-        self.filleted_eu(1)?;
-        let solver1 = live(solvers, solver_eu_solvers.first().copied().flatten())?;
-        let solver2 = live(solvers, solver_eu_solvers.get(1).copied().flatten())?;
-
-        let (fv0, fv1, face0) =
-            self.make_cross_section_vertices(k, target, pseudo, corner, base_edgeuse1)?;
-
-        // Corner consists of one fillet edge only (joining fv0 & fv1)
-        let fillet_edge = pseudo.make_fillet_edge(Some(fv0), Some(fv1), Some(corner))?;
-        pseudo
-            .fillet_edge_mut(fillet_edge)?
-            .set_fillet_edge_type(FilletEdgeType::CrossSection);
-        let prim = need(
-            eu1::primary_edgeuse(pseudo.brep(), fillet_edge)?,
-            "fillet edge without primary edge use",
-        )?;
-        let fillet_geom1 = solver1.first_fillet_geom()?;
-        pseudo.set_edgeuse_fillet_geom(prim, Some(fillet_geom1))?;
-        let mate = need(
-            eu1::mate(pseudo.brep(), prim)?,
-            "fillet edge use without mate",
-        )?;
-        let fillet_geom2 = solver2.first_fillet_geom()?;
-        pseudo.set_edgeuse_fillet_geom(mate, Some(fillet_geom2))?;
-        self.edges.push(fillet_edge);
-
-        // Setup rails of fillet
-        let unknown = OrientType::Unknown;
-        for (solver, geom) in [(solver1, fillet_geom1), (solver2, fillet_geom2)] {
-            let rail = solver.find_index_of_rail_on_face(target, face0)?;
-            let other = 1usize
-                .checked_sub(rail)
-                .ok_or_else(|| invalid("rail index past 1"))?;
-            for (rail, fv) in [(rail, fv0), (other, fv1)] {
-                pseudo.make_rail_edgeuse_on(
-                    geom,
-                    rail,
-                    Some(fv),
-                    unknown,
-                    None,
-                    lookup(corner, self),
-                    solver,
-                    target,
-                )?;
-            }
-        }
-
-        self.blending = true;
-        Ok(())
     }
 
     /// `SmFillet4x3Corner::MakeCornerTopology`: one fillet vertex per filleted edge use

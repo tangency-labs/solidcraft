@@ -2,7 +2,7 @@
 //! as a graph over the corner's axis, certified convex (`SmBlendSetback::FillHole`), and the
 //! least scale of the setbacks that certifies (`SmBlendSetback::CertifiedScale`), on the box
 //! corner of the fork's capi `setback_g1_fill_keeps_the_body_convex` cases.
-//! #2344(a) uses 20b1c01's thousandth search. Changed flag-on volumes below are
+//! #2344(a) uses 20b1c01's thousandth search. Changed volumes below are
 //! native executive comparisons, extended to thirteen cases. Scales and
 //! QP/attempt counts are compared to native in `blend_setback::scale::tests`.
 //! Merged-head coordinate/snapshot failures are recorded in the two
@@ -213,20 +213,18 @@ use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
 /// Every fix but `geometric_g2_continuity`, `fillet_exact_round_classes` and
-/// `face_swap_uv_transposes_trims`, with or without `fillet_blend_corner`. The pins are the
+/// `face_swap_uv_transposes_trims`. The pins are the
 /// fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does not
 /// have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves the
 /// volumes by about 1e-10, and so does `face_swap_uv_transposes_trims` (#2479, WR-729: the
-/// exact transpose of a swapped face's trims), which moves the concave corner's volume
-/// without `fillet_blend_corner` by 6e-12.
-fn all_fixes(blend: bool) -> Kernel {
+/// exact transpose of a swapped face's trims).
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         if name != "geometric_g2_continuity"
             && name != "fillet_exact_round_classes"
             && name != "face_swap_uv_transposes_trims"
-            && (blend || name != "fillet_blend_corner")
         {
             *f.flag_mut(name).unwrap() = true;
         }
@@ -390,9 +388,9 @@ fn counts(b: &Brep) -> (usize, usize, usize) {
     )
 }
 
-/// Kernel settings for diagnostic dumps; `FLAGOFF` disables `fillet_blend_corner`.
+/// Kernel settings for diagnostic dumps.
 fn dump_kernel(exact_classes: bool) -> Kernel {
-    let mut k = all_fixes(std::env::var("FLAGOFF").is_err());
+    let mut k = all_fixes();
     k.fixes.fillet_exact_round_classes = exact_classes;
     k
 }
@@ -515,9 +513,8 @@ fn dump_blend_matrix(exact_classes: bool) {
 // Each value is the fork's own (b5bb747 initially, 20b1c01 after #2344(a), run through
 // `SmFilletExecutive` as these build the body): its status and comment, `GetFitSetBack`,
 // face, edge and vertex counts, `SmApiBrepComputeVolume` at 1e-12 (printed to 15
-// digits) and every vertex, which the port matched bit for bit. The values without the
-// flag are the port's pinned corners (difftest gates those), recorded to show the flag is
-// what changes them. The volumes are checked at `PIN_ACCURACY`, to `PIN_TOL`.
+// digits) and every vertex, which the port matched bit for bit. The volumes are checked at
+// `PIN_ACCURACY`, to `PIN_TOL`.
 
 /// The edges at the box corner (40, 30, 20) of a 40 x 30 x 20 box.
 const UNEQUAL_AT: [[f64; 3]; 3] = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
@@ -575,10 +572,10 @@ fn has_vertex(b: &Brep, p: [f64; 3]) -> bool {
 
 /// Rounds r 2, 3 and 4 at a box corner (the capi's `scenario_three_unequal_rounds_at_a_corner`):
 /// no ball touches all three, so the corner is the Setback, its rule's setbacks grown to the
-/// least scale whose G1 fill is certified convex. Without the flag, the pinned corner patch.
+/// least scale whose G1 fill is certified convex.
 #[test]
 fn three_unequal_rounds_are_the_certified_setback_fill() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = blend_box(
         &mut k,
         [40.0, 30.0, 20.0],
@@ -590,23 +587,13 @@ fn three_unequal_rounds_are_the_certified_setback_fill() {
     let mut b = built(&mut k, r, (15, 36, 23), 23841.67429504884);
     let v = volume_at(&k, &mut b, PIN_ACCURACY);
     assert!((v - 23841.674296328).abs() <= 1e-9 * v.abs().max(23841.674296328));
-    let mut k = all_fixes(false);
-    let r = blend_box(
-        &mut k,
-        [40.0, 30.0, 20.0],
-        &UNEQUAL_AT,
-        &[2.0, 3.0, 4.0],
-        None,
-    );
-    built(&mut k, r, (10, 22, 14), 23842.34001926002);
 }
 
 /// Three rounds r 5 at a box corner set back 8 on request (`SetSetBackFill`): the Setback's
-/// three rounds end at 8 along their edges, r from them; filled, 6 patches. Without the flag
-/// the request is the pinned setback corner's.
+/// three rounds end at 8 along their edges, r from them; filled, 6 patches.
 #[test]
 fn asked_setback_is_the_setback_fill() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = blend_box(
         &mut k,
         [60.0, 40.0, 20.0],
@@ -625,27 +612,15 @@ fn asked_setback_is_the_setback_fill() {
     ] {
         assert!(has_vertex(&b, p), "no end-section vertex at {p:?}");
     }
-    let mut k = all_fixes(false);
-    let r = blend_box(
-        &mut k,
-        [60.0, 40.0, 20.0],
-        &ASKED_AT,
-        &[5.0; 3],
-        Some(&asked(8.0, 0.0)),
-    );
-    built(&mut k, r, (15, 36, 23), 47325.53167676825);
 }
 
 /// The same corner eased over 2 before its setback of 8.
 #[test]
 fn eased_asked_setback_is_the_setback_fill() {
     let ask = asked(8.0, 2.0);
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = blend_box(&mut k, [60.0, 40.0, 20.0], &ASKED_AT, &[5.0; 3], Some(&ask));
     built(&mut k, r, (15, 36, 23), 47413.5259896674);
-    let mut k = all_fixes(false);
-    let r = blend_box(&mut k, [60.0, 40.0, 20.0], &ASKED_AT, &[5.0; 3], Some(&ask));
-    built(&mut k, r, (15, 36, 23), 47344.78966041768);
 }
 
 /// A setback asked for that does not fit on the corner's edges (20, the upright edge's
@@ -654,7 +629,7 @@ fn eased_asked_setback_is_the_setback_fill() {
 /// its reason (the fork's `SM_FILERR_CORNER_UNSUPPORTED`, this port's 9).
 #[test]
 fn asked_setback_that_does_not_fit_is_refused() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = blend_box(
         &mut k,
         [60.0, 40.0, 20.0],
@@ -684,16 +659,6 @@ fn asked_setback_that_does_not_fit_is_refused() {
     );
     assert_eq!(r.code, 9);
     assert_eq!(r.comment, "SmBlendSetback: two rounds' rails on a face cross behind their ends (no corner region between them)");
-    // without the flag, the pinned corner builds
-    let mut k = all_fixes(false);
-    let r = blend_box(
-        &mut k,
-        [60.0, 40.0, 20.0],
-        &ASKED_AT,
-        &[5.0; 3],
-        Some(&asked(20.0, 0.0)),
-    );
-    assert_eq!(r.code, 0, "{}", r.comment);
 }
 
 /// Rounds r 2, 3, 4 at a corner set back 4.25 on request: past the rails' crossings but too
@@ -701,7 +666,7 @@ fn asked_setback_that_does_not_fit_is_refused() {
 /// setback that builds (the certifying thousandth whose predecessor fails); at that setback it builds.
 #[test]
 fn asked_setback_too_short_names_what_builds() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = blend_box(
         &mut k,
         [20.0; 3],
@@ -722,17 +687,6 @@ fn asked_setback_too_short_names_what_builds() {
     );
     // Native executive at the new fit: 7879.3005740352419.
     built(&mut k, r, (15, 36, 23), 7879.300574035242);
-    // without the flag the asked setback builds the pinned corner, and no fit is named
-    let mut k = all_fixes(false);
-    let r = blend_box(
-        &mut k,
-        [20.0; 3],
-        &SHORT_AT,
-        &[2.0, 3.0, 4.0],
-        Some(&short(4.25)),
-    );
-    assert!(r.fit < 0.0);
-    built(&mut k, r, (15, 36, 23), 7873.207687501852);
 }
 
 /// The rule's setback of the upright edge (6) is longer than the edge (5.5): it shrinks to
@@ -740,7 +694,7 @@ fn asked_setback_too_short_names_what_builds() {
 /// (the capi's `setback_default_shrinks_to_fit`).
 #[test]
 fn default_setback_shrinks_to_fit() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let r = blend_box(
         &mut k,
         [20.0, 20.0, 5.5],
@@ -752,28 +706,15 @@ fn default_setback_shrinks_to_fit() {
     let b = built(&mut k, r, (15, 36, 23), 2128.9749176154523);
     // the upright round's end section at 4.5, r 4 from its edge on each face
     assert!(has_vertex(&b, [4.0, 0.0, 4.5]) && has_vertex(&b, [0.0, 4.0, 4.5]));
-    let mut k = all_fixes(false);
-    let r = blend_box(
-        &mut k,
-        [20.0, 20.0, 5.5],
-        &SHRINK_AT,
-        &[2.0, 3.0, 4.0],
-        None,
-    );
-    built(&mut k, r, (10, 22, 14), 2128.610459220636);
 }
 
 /// The reentrant corner of a notched box, its three concave edges rounded r 1, 1.5 and 2:
 /// a concave Setback, 18 faces (the capi's `setback_concave_corner_rounds`).
 #[test]
 fn concave_corner_is_the_setback_fill() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let b = notched(&mut k, 10.0);
     let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);
     // Native executive at the new scale: 7015.230424090797.
     built(&mut k, r, (18, 45, 29), 7015.230424090796);
-    let mut k = all_fixes(false);
-    let b = notched(&mut k, 10.0);
-    let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);
-    built(&mut k, r, (13, 31, 20), 7015.147079173456);
 }

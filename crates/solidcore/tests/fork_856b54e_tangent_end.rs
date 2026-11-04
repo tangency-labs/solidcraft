@@ -1,5 +1,5 @@
-//! The SolidCraft fork's tangency-labs/smlib@856b54e, under WR-600's
-//! `fillet_nx1_tangent_side_edge_same_convexity`: a blend whose side face runs tangent
+//! The SolidCraft fork's tangency-labs/smlib@856b54e (WR-600, the blend corner's End): a
+//! blend whose side face runs tangent
 //! into the end face across a side edge (a tangent seam T) ends where its rail crosses
 //! T, and its end rib is solved from that tangent end outward.
 //!
@@ -10,7 +10,7 @@
 //! the fork's change, `SmFilletNx1Corner::MakeCornerTopology` sends the rail end at T to
 //! the extended-edge intersection and the end rib is marched into the point where the
 //! fillet surface touches the end face: a chamfer of either edge fails with status 1001
-//! (Corner Edge Computation Failure). With it, the four blends build, and each volume
+//! (Corner Edge Computation Failure). Here the four blends build, and each volume
 //! agrees with its closed form (the blend's section swept along the edge or about the
 //! disc's axis, cut by the cylinder or the front plane at the tangent end).
 #![allow(
@@ -100,7 +100,7 @@ fn front_top(b: &Brep) -> EdgeId {
 /// (WR-610, WR-643; WR-654 for the B-spline trim on the cylinder, which an
 /// `SmBSplineCurve` would clamp); and the fork's fixes the blends' other parts need (the
 /// concave chamfer's cone and round's torus about the disc's axis, the cap's cover).
-fn kernel(tangent_end: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
@@ -112,14 +112,13 @@ fn kernel(tangent_end: bool) -> Kernel {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.fillet_nx1_tangent_side_edge_same_convexity = tangent_end;
     k
 }
 
 /// Fillet the front top edge or the concave arc with `xsect` (0 chamfer, 1 round) of
 /// size 2; the volume of the result, which must check clean.
-fn blend(tangent_end: bool, front: bool, xsect: u32) -> solidcore::Result<f64> {
-    let mut k = kernel(tangent_end);
+fn blend(front: bool, xsect: u32) -> solidcore::Result<f64> {
+    let mut k = kernel();
     let mut b = peg(&mut k);
     let e = if front {
         front_top(&b)
@@ -181,19 +180,14 @@ fn concave_volume(h: impl Fn(f64) -> f64) -> f64 {
 
 #[test]
 fn front_chamfer_ends_at_its_tangent_end() {
-    // without the change, status 1001 (Corner Edge Computation Failure)
-    let err = blend(false, true, 0).unwrap_err();
-    assert!(err.to_string().contains("1001"), "{err}");
-    let v = blend(true, true, 0).unwrap();
+    let v = blend(true, 0).unwrap();
     let want = front_chamfer_volume();
     assert!((v - want).abs() < 1e-6, "V {v} vs {want}");
 }
 
 #[test]
 fn concave_chamfer_ends_at_its_tangent_ends() {
-    let err = blend(false, false, 0).unwrap_err();
-    assert!(err.to_string().contains("1001"), "{err}");
-    let v = blend(true, false, 0).unwrap();
+    let v = blend(false, 0).unwrap();
     let want = concave_volume(|r| 10.0 - r);
     // the fork: 9457.585735987 against its quadrature's 9457.585731695
     assert!((v - want).abs() < 1e-5, "V {v} vs {want}");
@@ -202,20 +196,12 @@ fn concave_chamfer_ends_at_its_tangent_ends() {
 #[test]
 fn concave_round_ends_at_its_tangent_ends() {
     let want = concave_volume(|r| 2.0 - (4.0 - (10.0 - r) * (10.0 - r)).max(0.0).sqrt());
-    // WR-600's round builds either way; its end ribs built from the tangent ends
-    // outward are nearer the exact volume than the ones marched into them
-    let before = blend(false, false, 1).unwrap();
-    let after = blend(true, false, 1).unwrap();
+    // its end ribs built from the tangent ends outward
+    let after = blend(false, 1).unwrap();
     assert!((after - want).abs() < 1e-5, "V {after} vs {want}");
-    assert!(
-        (after - want).abs() < (before - want).abs(),
-        "{after} {before} {want}"
-    );
 }
 
 #[test]
 fn front_round_ends_at_its_tangent_end() {
-    let v = blend(true, true, 1).unwrap();
-    let before = blend(false, true, 1).unwrap();
-    assert!((v - before).abs() < 1e-5, "V {v} vs {before}");
+    blend(true, 1).unwrap();
 }

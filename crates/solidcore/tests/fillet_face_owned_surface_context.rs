@@ -12,9 +12,12 @@
 //!   `sm_SrfSrfIntersection`'s general intersector makes the face's trimmed cache,
 //!   difftest `stubs4-shell_fillet2-e1-r0.5`.
 //!
-//! Before the face context was wired both stopped at `Unported` (`SmFace::PointClassify`,
-//! `query.face_p2`; `TrimSrfCache::build_tree_with_face`, `surface.trim_srf_cache`). The
-//! expected outcomes are the C++ reference's (difftest compares them exactly).
+//! Before the face context was wired it stopped at `Unported`
+//! (`TrimSrfCache::build_tree_with_face`, `surface.trim_srf_cache`). The expected outcome is
+//! the C++ reference's (difftest compares it exactly). The filleted box's top edges r 2
+//! (`big-rad-filleted_box-r2.0-top-edges`), which the pinned 2x2 corner's big-radius
+//! conversion built, are the blend corner's Join now, which does not build them (#2400:
+//! with every fix it refuses them as the ball not fitting, naming radius 1).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

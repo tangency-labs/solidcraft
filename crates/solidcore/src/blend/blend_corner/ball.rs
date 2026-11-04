@@ -42,8 +42,8 @@
 //! With `Kernel::fixes.fillet_round_as_definition` the patch also keeps its corner
 //! definition (#2357, not the fork's): its sphere and its loop, certified on it
 //! ([`crate::surface::procedural_blend::corner::BallDefinition`]). The fork's
-//! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion; the certified root's Newton
+//! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument (WR-697). No
+//! recursion; the certified root's Newton
 //! loop is bounded at 50 steps, as the fork's.
 
 use crate::blend::blend_corner::BlendCornerEvent;

@@ -585,10 +585,10 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             o.push(0.0);
             // the shim's corner: its fillet edges only, of type SM_FCR_UNKNOWN, which no
             // FilletCornerKind has; the routine tests the type only for
-            // SM_FCR_N_x_N_CONCAVE, which neither is
+            // SM_FCR_N_x_N_CONCAVE, which neither is (the 4x3 kind stands in)
             let mut table = Vec::new();
             if let Some(edges) = corner {
-                let mut c = FilletCorner::new(FilletCornerKind::OneByOne, None, None, None, 1.0e-6, 0.01);
+                let mut c = FilletCorner::new(FilletCornerKind::FourByThree, None, None, None, 1.0e-6, 0.01);
                 for &ce in edges {
                     c.edges.push(rm.edge(ce)?);
                 }

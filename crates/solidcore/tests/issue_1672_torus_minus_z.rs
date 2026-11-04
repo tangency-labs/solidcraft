@@ -150,14 +150,3 @@ fn issue_1672_upstream_torus_rebuild_fails_test_2() {
         (Some(false), vec![(15020, 2), (15015, 2)])
     );
 }
-
-/// The signed interval without the spindle-apex check: upstream's spindle test fails
-/// the rounded horn torus with no report (WR-539).
-#[test]
-fn issue_1672_upstream_spindle_check_fails_without_a_report() {
-    let mut k = fixed_kernel();
-    k.fixes.torus_check_spindle_apex = false;
-    k.fixes.torus_check_reads_v_interval = false;
-    let mut b = revolve(&mut k, Vec3::new(0.0, 0.0, -1.0));
-    assert_eq!(check(&mut k, &mut b), (Some(false), vec![]));
-}

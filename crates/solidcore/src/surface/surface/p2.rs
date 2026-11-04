@@ -4098,11 +4098,8 @@ impl Surface {
             {
                 Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?))
             }
-            // the fork's SmBallPatch (f8e6709), read only with its flag: the pinned reader
-            // refuses the type
-            BALL_PATCH_TYPE if k.fixes.fillet_blend_corner => {
-                Ok(Self::from(BallPatch::read_from_db(db, version)?))
-            }
+            // the fork's SmBallPatch (f8e6709), which the pinned reader refuses
+            BALL_PATCH_TYPE => Ok(Self::from(BallPatch::read_from_db(db, version)?)),
             _ => Err(SolidError::sm_err(OP_READ)),
         }
     }

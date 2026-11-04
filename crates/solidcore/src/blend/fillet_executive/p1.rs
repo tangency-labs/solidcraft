@@ -1163,8 +1163,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `"Corner case not implemented"` (the fork's note) and still keeps the pending
     /// entry: retaining the note does not change the operation's result or topology.
     ///
-    /// A [`CornerCreation::Refused`] corner (the fork's, only with
-    /// `Kernel::fixes.fillet_blend_corner`) is noted at its vertex with its own error and
+    /// A [`CornerCreation::Refused`] corner (the fork's) is noted at its vertex with its own error and
     /// reason, no later unsupported corner's note replaces it, and the operation fails
     /// (`SM_ERR`) after the loop, once the error info is assigned (the fork's
     /// `bRefused` and `bMissingCorner`).

@@ -4,8 +4,7 @@
 //! definition (`SurfaceKind::BallPatch`, `SURF_BASE_TYPE + 42`). Its offset is the net
 //! scaled about the centre, exact on the concentric sphere; it collapses where the radius
 //! would not stay positive; it moves rigidly or by a uniform scale only; and the file
-//! writes the centre and radius, then the net, and reads them back only under
-//! `fillet_blend_corner`.
+//! writes the centre and radius, then the net, and reads them back.
 //!
 //! The box corner is the fork's capi `ball box_corner` case (5e8c9c1); the offsets follow
 //! the fork's capi shell case 5eb43a1 (a box rounded r 3, shelled 2 in: each corner face
@@ -53,12 +52,12 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -94,8 +93,8 @@ fn pick(k: &Kernel, b: &Brep, at: [f64; 3]) -> EdgeId {
 
 /// capi `ball box_corner`: a 40 x 30 x 20 box, the three edges at its corner (40, 30, 20)
 /// rounded r 3 (the ball about (37, 27, 17)); every face's surface.
-fn box_corner(blend: bool) -> (Kernel, Vec<Surface>) {
-    let mut k = all_fixes(blend);
+fn box_corner() -> (Kernel, Vec<Surface>) {
+    let mut k = all_fixes();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let at = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
     let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();
@@ -119,7 +118,7 @@ const CENTRE: Point3 = Point3::new(37.0, 27.0, 17.0);
 
 /// The box corner's Ball face.
 fn ball_face() -> (Kernel, Surface) {
-    let (k, surfaces) = box_corner(true);
+    let (k, surfaces) = box_corner();
     let mut balls: Vec<Surface> = surfaces
         .into_iter()
         .filter(|s| matches!(s.kind(), SurfaceKind::BallPatch(_)))
@@ -180,15 +179,6 @@ fn the_ball_s_face_is_a_ball_patch_on_its_sphere() {
     .unwrap();
     assert!(BallPatch::is_on_sphere(&cut, CENTRE, 3.0, 1e-12).unwrap());
     assert!(!BallPatch::is_on_sphere(&cut, CENTRE, 3.0 * (1.0 + 1e-9), 1e-12).unwrap());
-}
-
-/// Without the flag there is no Ball and no ball patch (the pinned corner).
-#[test]
-fn without_the_flag_there_is_no_ball_patch() {
-    let (_, surfaces) = box_corner(false);
-    assert!(surfaces
-        .iter()
-        .all(|s| !matches!(s.kind(), SurfaceKind::BallPatch(_))));
 }
 
 /// The offsets stay concentric (the fork's capi shell case 5eb43a1: radius 3, the inward
@@ -290,8 +280,8 @@ fn a_transform_moves_the_sphere() {
         .is_err());
 }
 
-/// The record round-trips bit for bit (binary; ASCII to its precision) under the flag,
-/// is refused without it, and a hostile radius or centre is refused.
+/// The record round-trips bit for bit (binary; ASCII to its precision), and a hostile
+/// radius or centre is refused.
 #[test]
 fn a_file_round_trip_is_bit_for_bit() {
     let (k, s) = ball_face();
@@ -332,11 +322,6 @@ fn a_file_round_trip_is_bit_for_bit() {
             assert!(q.centre().distance(p.centre()) <= 1e-9);
             assert!((q.radius() - p.radius()).abs() <= 1e-9);
         }
-        // without the flag the type is refused, as the pinned reader refuses it
-        let off = Kernel::default();
-        let mut r = DatabaseReader::new();
-        r.open_for_read(bytes.clone(), ft);
-        assert!(Surface::read_from_db(&off, BALL_PATCH_TYPE, &mut r, 30).is_err());
     }
 
     // hostile definitions: the record opens with the centre and the radius (4 doubles)
@@ -424,7 +409,7 @@ fn the_shelled_box_keeps_its_corners_on_concentric_spheres() {
     use solidcore::topology::edgeuse::p1 as eu1;
     use solidcore::topology::topology_traverser::face_edges;
     let (a, b, c, rad, inner) = (30.0, 20.0, 10.0, 3.0, 1.0);
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let mut part = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), a, b, c).unwrap();
     let edges = get_edges(&part).unwrap();
     assert_eq!(edges.len(), 12);
@@ -700,7 +685,7 @@ fn front_face(k: &Kernel, b: &Brep) -> FaceId {
 /// tolerance grows with |C|: at the far corner (|C| 75.5) a radius 1e-9 larger is within it.
 #[test]
 fn a_box_rounded_all_round_keeps_its_balls_through_the_data_and_the_file() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let part = rounded_box(&mut k);
     let before = ball_patches(&part);
     assert_eq!(before.len(), 8);
@@ -836,7 +821,7 @@ fn a_box_rounded_all_round_shells_in_and_out_after_a_round_trip() {
         create_offset_solid: true,
         merge_sheet_side_walls: false,
     };
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let part = rounded_box(&mut k);
     // every shell in process; after the data the fork's and the outward one; after the file
     // the fork's (each a debug-build minute or more)

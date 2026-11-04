@@ -212,7 +212,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_nx1_tangent_corner_edge = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_tangent_side_edge_same_convexity = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_bigger_step_retry = true;
     k.fixes.fillet_point_step_per_point = true;

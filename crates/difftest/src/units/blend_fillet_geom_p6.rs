@@ -1006,13 +1006,17 @@ fn opt(x: i64, n: usize) -> Option<usize> {
 }
 
 /// The derived corner class whose `GetCornerType()` is `SmFilletCornerType` `code`
-/// (the abstract `SM_FCT_UNKNOWN` and `SM_FCT_NxN` have none).
+/// (the abstract `SM_FCT_UNKNOWN` and `SM_FCT_NxN` have none, nor `SM_FCR_1_x_1` and
+/// `SM_FCR_2_x_2`, whose classes were deleted with #2400).
+/// The type of the generated cases' corner where its kind does not matter (the ops test
+/// only `SM_FCR_N_x_2`): `SM_FCR_4_x_3`, the shim's `ShimCorner` and the Rust 4x3 corner
+/// reporting it alike (`SM_FCR_2_x_2` until its class was deleted, #2400).
+const STAND_IN: i64 = 6;
+
 fn corner_kind(code: i64) -> Result<FilletCornerKind, HarnessError> {
     Ok(match code {
         1 => FilletCornerKind::Open,
         2 => FilletCornerKind::Degenerate,
-        3 => FilletCornerKind::OneByOne,
-        4 => FilletCornerKind::TwoByTwo,
         5 => FilletCornerKind::ThreeByTwoMixed,
         6 => FilletCornerKind::FourByThree,
         7 => FilletCornerKind::NByOneClosed,
@@ -2005,7 +2009,7 @@ fn gen_edge_on_edge(rng: &mut Rng) -> Inputs {
         model: ModelIn {
             corners: vec![CornerIn {
                 vertex: rng.below(1000) as i64,
-                ctype: 4,
+                ctype: STAND_IN,
                 tol: 1e-3,
             }],
             vertices: vec![vs, ve],
@@ -2065,7 +2069,7 @@ fn gen_fillet_end(rng: &mut Rng) -> Inputs {
             solvers: vec![s],
             corners: vec![CornerIn {
                 vertex: rng.below(1000) as i64,
-                ctype: 4,
+                ctype: STAND_IN,
                 tol: 1e-3,
             }],
             vertices,
@@ -2173,7 +2177,7 @@ fn gen_set_back_rail(rng: &mut Rng) -> Inputs {
             solvers: vec![s],
             corners: vec![CornerIn {
                 vertex: -1,
-                ctype: if n_by_2 { 9 } else { 4 },
+                ctype: if n_by_2 { 9 } else { STAND_IN },
                 // a large tolerance squeezes the edge
                 tol: if rng.chance(0.5) { 10.0 * scale } else { 1e-6 },
             }],
@@ -2322,7 +2326,7 @@ fn gen_should_swap(rng: &mut Rng) -> Inputs {
         model: ModelIn {
             corners: vec![CornerIn {
                 vertex: rng.below(1000) as i64,
-                ctype: 4,
+                ctype: STAND_IN,
                 tol: 1e-3,
             }],
             vertices: vec![vs, ve],

@@ -28,7 +28,6 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
@@ -121,32 +120,10 @@ fn a_round_just_past_the_face_keeps_its_rail_ends_on_the_rails() {
                     (v - expected).abs() <= 1e-8 * expected,
                     "y {y} r {r}: volume {v} against {expected}"
                 ),
-                other @ Outcome::Refused(..) => {
-                    panic!("y {y} r {r}: expected a build at {expected}, got {other:?}")
+                Outcome::Refused(code, comment) => {
+                    panic!("y {y} r {r}: expected a build at {expected}, refused {code}: {comment}")
                 }
             }
-        }
-    }
-}
-
-#[test]
-fn clamped_onto_the_side_edge_s_vertex_the_end_rib_is_off_the_fillet() {
-    // without the flag the rail end sits on the side edge's bottom vertex and the corner
-    // builds its end rib there, off the fillet: the corner's edges fail (error 3)
-    for y in [0.0, 20.0] {
-        for r in [10.05, 10.06, 10.07] {
-            let Outcome::Refused(code, comment) = round(false, y, r) else {
-                panic!("y {y} r {r}: expected the corner to fail without the flag");
-            };
-            assert_eq!(
-                code,
-                FilletErrorType::VertexProblem as i32,
-                "y {y} r {r}: {comment}"
-            );
-            assert_eq!(
-                comment, "Fillet Corner Error: Corner Edge Computation Failure",
-                "y {y} r {r}"
-            );
         }
     }
 }

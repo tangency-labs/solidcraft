@@ -1,0 +1,62 @@
+# Known mismatches of surface.torus (format: crates/difftest/src/known.rs).
+
+# The default kernel's blend corner (#2400; plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): 12 cases.
+[[mismatch]]
+unit = "surface.torus"
+case = "edge_swap_inside_rebuild"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[129]: cpp=8.728832706816693e-16 rust=9.54457398780101e-16)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "edge_swap_inside_offset"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[131]: cpp=2.0679121553410856e-16 rust=2.019356992757579e-16)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "v_neg_plain_rebuild"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[138]: cpp=2.1700694667505123e-17 rust=4.5478826405508014e-32)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0001"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[162]: cpp=-1.7277712092890423e-15 rust=-2.904707741103669e-15)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0047"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[130]: cpp=-4.101126376011248e-16 rust=-4.345177889262588e-16)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0139"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[162]: cpp=6.796169582148275e-16 rust=9.140443269770489e-16)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0219"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[161]: cpp=0e0 rust=4.8290695977012424e-17)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0286"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[160]: cpp=-6.266905339025343e-17 rust=-9.780708814033087e-17)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0289"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[164]: cpp=1.210990595648366e-16 rust=0e0)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0355"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[22]: cpp=1.5790521061418522e2 rust=1.6829229203210454e2)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0358"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[143]: cpp=-3.3999419826688897e-16 rust=-4.268325096133701e-16)"
+
+[[mismatch]]
+unit = "surface.torus"
+case = "gen0393"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.out[131]: cpp=0e0 rust=3.2677068954531057e-15)"

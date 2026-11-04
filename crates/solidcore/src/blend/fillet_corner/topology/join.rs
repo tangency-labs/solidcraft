@@ -15,8 +15,7 @@
 //! ([`JoinTopologyEnv::solver_eu_solvers`]) and notes the refusal's error
 //! ([`JoinTopology::RefusedAcrossEdges`]). A missing solver the fork dereferences
 //! through `NER` is `SM_ERR_NULL_POINTER`; other missing topology is an input error. The
-//! walks round the vertex are bounded by its edge uses. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697).
+//! walks round the vertex are bounded by its edge uses (WR-697).
 
 use super::{find_side_edgeuse, need, new_corner_vertex, radial};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;

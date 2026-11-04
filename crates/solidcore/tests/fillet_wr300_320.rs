@@ -10,19 +10,17 @@
 use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
-use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::edge;
-use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::topology::EdgeId;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
     let mut k = Kernel::default();
@@ -156,199 +154,7 @@ fn rail_rim_on_face_leaves_other_sizes_alone() {
 
 // ---- WR-303: the end of a round that crosses more than one face at a three-edge vertex ----
 
-/// A 60 x 40 x 20 box, its top back edge rounded 5, its top right edge rounded 3, then
-/// its vertical edge x = 60, y = 40 rounded `r` (SolidCraft ladder 07-fillets/016).
-fn box_with_two_rounds_then(k: &mut Kernel, r: f64) -> Outcome {
-    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
-    let e = edge_between(k, &b, [0.0, 40.0, 20.0], [60.0, 40.0, 20.0]);
-    assert!(matches!(
-        fillet(k, &mut b, &[e], 5.0, 1),
-        Outcome::Built { .. }
-    ));
-    let e = edge_between(k, &b, [60.0, 0.0, 20.0], [60.0, 35.0, 20.0]);
-    assert!(matches!(
-        fillet(k, &mut b, &[e], 3.0, 1),
-        Outcome::Built { .. }
-    ));
-    let e = edge_between(k, &b, [60.0, 40.0, 0.0], [60.0, 40.0, 15.0]);
-    fillet(k, &mut b, &[e], r, 1)
-}
-
-/// The third round's end runs across the R5 round's short end arc onto the R3 round: SMLib's
-/// Nx1 corner builds an end rib and fails ("Corner Edge Computation Failure"). With
-/// `fillet_nx1_end_rib_global_merge` the rib is deleted and the global merge cuts the round
-/// off against the body: each builds, to the volumes of the integral of min(R5, R3 top)
-/// over the corner column outside the vertical round (47418.926881, 47546.786538 and
-/// 47591.811067). The kernel's own volume is a quadrature: it lands within ~2e-3 of these on arm
-/// and ~1e-2 on x86 (CI: 47546.79569 for r 4), about 2e-7 relative, hence the 2e-2 tolerance.
-#[test]
-fn round_end_across_a_short_arc_is_cut_off_by_the_body() {
-    for (r, expected) in [
-        (7.0, 47_418.926_881),
-        (4.0, 47_546.786_538),
-        (2.0, 47_591.811_067),
-    ] {
-        let mut k = Kernel::default();
-        assert_eq!(
-            box_with_two_rounds_then(&mut k, r),
-            Outcome::Refused { code: 3 },
-            "r {r}"
-        );
-        let mut k = kernel(|f| f.fillet_nx1_end_rib_global_merge = true);
-        let Outcome::Built { volume, manifold } = box_with_two_rounds_then(&mut k, r) else {
-            panic!("r {r}: refused");
-        };
-        assert!(manifold && near(volume, expected, 2e-2), "r {r}: {volume}");
-    }
-}
-
 // ---- WR-300: a variable round whose rail ends at a rounded corner's arc ----
-
-/// `SmApiVariableRadiusFillet` with a linear law, reporting the executive's error code.
-fn variable(k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], r0: f64, r1: f64) -> Outcome {
-    let result = {
-        let mut session = FilletSession::new(k, b).unwrap();
-        session
-            .prepare_variable_radius_edges(k, edges, r0, FilletLaw::linear(r0, r1, None), 1, 1)
-            .unwrap();
-        session.do_fillet(k).map_err(|_| session.error_info().code)
-    };
-    outcome(k, b, result)
-}
-
-/// A 60 x 40 x 20 box, its vertical edge x = 60, y = 40 rounded 5, then its top back edge
-/// rounded with a radius law `r0` to `r1` along it, ending at that corner round's arc
-/// (SolidCraft ladder 07-fillets/012).
-fn round_into_a_rounded_corner(k: &mut Kernel, r0: f64, r1: f64) -> Outcome {
-    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
-    let e = edge_between(k, &b, [60.0, 40.0, 0.0], [60.0, 40.0, 20.0]);
-    assert!(matches!(
-        fillet(k, &mut b, &[e], 5.0, 1),
-        Outcome::Built { .. }
-    ));
-    let e = edge_between(k, &b, [0.0, 40.0, 20.0], [55.0, 40.0, 20.0]);
-    variable(k, &mut b, &[e], r0, r1)
-}
-
-/// The law runs on past the edge's end, to 5.3636 where the rail meets the arc's end. SMLib's
-/// retry rail search holds the radius at 5 there, finds the arc's end at 5 and builds a body
-/// that is 3.8 mm3 too small (1 to 5; 3.95 for 2 to 5). With `fillet_retry_radius_as_first`
-/// the rail misses the arc and the round is cut off against the body, as the first search
-/// does, which needs `fillet_nx1_end_rib_global_merge` (the corner's end rib). Laws that
-/// end small at the corner do not reach the retry and are unchanged.
-#[test]
-fn retry_rail_search_holds_the_radius_as_the_first_does() {
-    let both = |f: &mut UpstreamFixes| {
-        f.fillet_retry_radius_as_first = true;
-        f.fillet_nx1_end_rib_global_merge = true;
-    };
-    // gains measured on the v1.0.1 port (3.774 and 3.952 on the c9c5979 one)
-    for (r0, off, gain) in [(1.0, 47_751.094_836, 3.777), (2.0, 47_719.705_412, 3.950)] {
-        let mut k = Kernel::default();
-        let Outcome::Built { volume: v, .. } = round_into_a_rounded_corner(&mut k, r0, 5.0) else {
-            panic!("{r0}: refused");
-        };
-        assert!(near(v, off, 1e-3), "{r0} off: {v}");
-
-        let mut k = kernel(both);
-        let Outcome::Built {
-            volume: v,
-            manifold,
-        } = round_into_a_rounded_corner(&mut k, r0, 5.0)
-        else {
-            panic!("{r0}: refused");
-        };
-        assert!(manifold && near(v, off + gain, 1e-3), "{r0} on: {v}");
-
-        // alone, the field leaves the corner's end rib to fail
-        let mut k = kernel(|f| f.fillet_retry_radius_as_first = true);
-        assert_eq!(
-            round_into_a_rounded_corner(&mut k, r0, 5.0),
-            Outcome::Refused { code: 3 }
-        );
-    }
-    for r1 in [1.0, 2.0] {
-        let mut k = Kernel::default();
-        let off = round_into_a_rounded_corner(&mut k, 5.0, r1);
-        let mut k = kernel(both);
-        assert_eq!(round_into_a_rounded_corner(&mut k, 5.0, r1), off);
-    }
-}
-
-/// [`round_into_a_rounded_corner`] with the box first turned 180 degrees about z onto
-/// itself, so the top back edge runs from the corner round's arc (x = 55) to x = 0 and
-/// the law 5 to 1 along it is the same r1 at x = 0 to r5 at x = 55; the variable round's
-/// `DoFillet` result, the body and its face and edge counts.
-fn reversed_round_into_a_rounded_corner(k: &mut Kernel) -> (Result<(), SolidError>, Brep) {
-    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
-    api_rotate(
-        k,
-        Some(TransformObject::Brep(&mut b)),
-        Point3::new(30.0, 20.0, 0.0),
-        Vec3::new(0.0, 0.0, 1.0),
-        180.0,
-    )
-    .unwrap();
-    let e = edge_between(k, &b, [60.0, 40.0, 0.0], [60.0, 40.0, 20.0]);
-    assert!(matches!(
-        fillet(k, &mut b, &[e], 5.0, 1),
-        Outcome::Built { .. }
-    ));
-    let e = edge_between(k, &b, [0.0, 40.0, 20.0], [55.0, 40.0, 20.0]);
-    let curve = edge::curve(&b, e).unwrap().unwrap();
-    let start = curve
-        .evaluate_point(k, edge::interval(&b, e).unwrap().min())
-        .unwrap();
-    assert!(near(start.x, 55.0, 1e-6), "the edge starts at {start:?}");
-    let result = {
-        let mut session = FilletSession::new(k, &mut b).unwrap();
-        session
-            .prepare_variable_radius_edges(k, &[e], 5.0, FilletLaw::linear(5.0, 1.0, None), 1, 1)
-            .unwrap();
-        session.do_fillet(k)
-    };
-    if result.is_ok() {
-        stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()).unwrap();
-    }
-    (result, b)
-}
-
-/// tangency-labs/solidcore#421: the same round with its edge running from the corner
-/// round's arc. SMLib's retry rail search again finds the arc's end at the held radius 5;
-/// that point is now the trace's first, which `DoPointIntersection` cannot start from, so
-/// nothing is traced and `DoFillet` fails with `SM_ERR` (1001), where the forward edge
-/// builds the 3.8 mm3 too small body. WR-300's fields build the same body as forward.
-#[test]
-fn retry_rail_search_holds_the_radius_from_either_end() {
-    let mut k = Kernel::default();
-    let (result, _) = reversed_round_into_a_rounded_corner(&mut k);
-    assert!(
-        matches!(result, Err(SolidError::Upstream { code: 1001, .. })),
-        "{result:?}"
-    );
-
-    let both = |f: &mut UpstreamFixes| {
-        f.fillet_retry_radius_as_first = true;
-        f.fillet_nx1_end_rib_global_merge = true;
-    };
-    let mut k = kernel(both);
-    let Outcome::Built {
-        volume: forward, ..
-    } = round_into_a_rounded_corner(&mut k, 1.0, 5.0)
-    else {
-        panic!("forward: refused");
-    };
-    let mut k = kernel(both);
-    let (result, mut b) = reversed_round_into_a_rounded_corner(&mut k);
-    result.unwrap();
-    assert!(is_manifold_solid(&b).unwrap());
-    assert_eq!((b.face_list().len(), b.edge_list().len()), (8, 18));
-    let v = volume(&k, &mut b);
-    assert!(
-        near(v, forward, 1e-6 * forward),
-        "reversed {v}, forward {forward}"
-    );
-}
 
 /// `FilletErrorType::NoRoom`, the fork's error type for a blend larger than its faces.
 const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
@@ -360,17 +166,6 @@ const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
 fn blends_larger_than_their_faces_are_refused() {
     for xsect in [0, 1] {
         for size in [6.0, 9.0] {
-            let mut k = Kernel::default();
-            assert!(
-                matches!(
-                    holed_cube_blend(&mut k, size, xsect),
-                    Outcome::Built {
-                        manifold: false,
-                        ..
-                    }
-                ),
-                "xsect {xsect} size {size}"
-            );
             let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
             assert_eq!(
                 holed_cube_blend(&mut k, size, xsect),

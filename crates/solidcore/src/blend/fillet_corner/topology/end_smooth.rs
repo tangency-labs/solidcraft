@@ -12,7 +12,7 @@
 //! ([`EndAtSmoothTopologyEnv::solver_eu_solver`]). A missing solver, face or curve the
 //! fork dereferences through `NER` is `SM_ERR_NULL_POINTER`; other missing topology is
 //! an input error. The cap's plane is kept on the corner ([`FilletCorner::end_cap`],
-//! `m_pEndCap`). No recursion. Opt-in: `Kernel::fixes.fillet_blend_corner` (WR-697).
+//! `m_pEndCap`). No recursion (WR-697).
 
 use super::{need, new_corner_vertex, radial};
 use crate::blend::fillet_corner::p3::FilletCorner;

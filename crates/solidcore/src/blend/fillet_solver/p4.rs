@@ -459,11 +459,9 @@ impl FilletSolver {
             }
         }
 
-        // From smlib#82 (WR-697, `fillet_blend_corner`): at an end its corner does not
-        // blend, a trace that stops short of the edge's end runs on to it first
-        if cx.k.fixes.fillet_blend_corner {
-            c2_trace_to_edge_ends(ops, &mut cx, &mut st)?;
-        }
+        // From smlib#82 (WR-697): at an end its corner does not blend, a trace that stops
+        // short of the edge's end runs on to it first
+        c2_trace_to_edge_ends(ops, &mut cx, &mut st)?;
 
         // :1872-1920 no points; drop near-duplicate end points
         c2_clean_ends(ops, &mut cx, &mut st)?;
@@ -1441,7 +1439,7 @@ fn c2_offset_point_ignored(
     .unwrap_or(Vec3::UNDEF))
 }
 
-/// From smlib#82 (the fork's cc0e23f, 47b5471; WR-697, `fillet_blend_corner`): a rail
+/// From smlib#82 (the fork's cc0e23f, 47b5471; WR-697): a rail
 /// ends where its corner's event needs it, so at an end whose corner does not blend (the
 /// trace is extended there: `m_bExtendBefore` at the edge's start, `m_bExtendAfter` at
 /// its end, set from the corners by `SetExtensionFlags`) the trace runs to the edge's own

@@ -14,7 +14,7 @@
 //! | [`FilletCorner::make_nx1_closed_corner_topology`] ([`closed_nx1`]) | `SmFilletNx1ClosedCorner::MakeCornerTopology` |
 //! | [`FilletCorner::make_3x2_mixed_corner_topology`] ([`mixed_3x2`]) | `SmFillet3x2MixedConvexityCorner::MakeCornerTopology` |
 //! | `make_4x2_concave_corner_topology` (crate, `concave_4x2`) | `SmFilletNx2Corner::Make4x2ConcaveCornerTopology` |
-//! | 1x1, 2x2, 4x3, open and degenerate corners ([`end_corners`]) | `SmFillet1x1Corner`, `SmFillet2x2Corner`, `SmFillet4x3Corner`, `SmFilletOpenCorner`, `SmFilletDegenerateCorner` `::MakeCornerTopology` |
+//! | 4x3, open and degenerate corners ([`end_corners`]) | `SmFillet4x3Corner`, `SmFilletOpenCorner`, `SmFilletDegenerateCorner` `::MakeCornerTopology` |
 //!
 //! Deviations: the caller lends the actual target, pseudo-B-rep and solver.
 //! Missing topology that native dereferences is an input error. The Nx1 end rib,
@@ -27,12 +27,12 @@
 //! vertex loop; the lookups have no effects), and its unused `GetEdges` read is
 //! omitted. With `Kernel::fixes.fillet_mitre_concave_face_corners` (WR-642, the fork's
 //! tangency-labs/smlib@4f06e72) the Nx2 corner skips its mixed-convexity 3-sided face and
-//! mitres the blends as at a corner of uniform convexity. With
-//! `Kernel::fixes.fillet_blend_corner` (WR-697, the fork's smlib#113 e4083c8) a blend
-//! corner's Turn at four edges is mitred without the G1 and mixed-convexity tests. With WR-600's
-//! `fillet_nx1_tangent_side_edge_same_convexity` (the fork's tangency-labs/smlib@856b54e)
-//! a tangent side that is a tangent seam is the rail's tangent end (a rail/edge
-//! crossing, the end face across the seam). There is no recursion.
+//! mitres the blends as at a corner of uniform convexity. The Nx2 corner is the blend
+//! corner's Turn: never tangent or blending (`SmBlendCorner::Classify` made those pairs a
+//! Join), at four edges mitred without the G1 and mixed-convexity tests (WR-697, the fork's
+//! smlib#113 e4083c8). A tangent side that is a tangent seam is the rail's tangent end (a rail/edge
+//! crossing, the end face across the seam; WR-600, the fork's
+//! tangency-labs/smlib@856b54e). There is no recursion.
 
 mod ball;
 pub mod closed_nx1;
@@ -276,27 +276,14 @@ pub(crate) fn check_tangential_edgeuse_at_vertex(
     })())
 }
 
-/// Whether a corner takes a tangent seam its rail crosses as the rail's tangent end (the
-/// rail end a rail/edge crossing, the end rib solved from the tangent end, the cap edge
-/// the seam's own curve): WR-600's `fillet_nx1_tangent_side_edge_same_convexity` (the
-/// fork's tangency-labs/smlib@7992ec7 and 856b54e), or the blend corner
-/// (`fillet_blend_corner`), whose End is that corner's construction and carries those
-/// commits as the fork's does (#2500). Without it an End on a tangent seam took the rail
-/// end as the rail's crossing of the end face, which touches the rail there and has no
-/// crossing, and marched its cap edge into that tangency.
-#[must_use]
-pub fn tangent_seam_ends(k: &Kernel) -> bool {
-    k.fixes.fillet_nx1_tangent_side_edge_same_convexity || k.fixes.fillet_blend_corner
-}
-
-/// With `Kernel::fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600, the fork's
-/// tangency-labs/smlib@7992ec7): a side edge of an Nx1 corner whose faces meet
-/// tangentially at `vertex` (a bar's flat side running onto the cylinder its round end
-/// lies on) has no convexity, so it is never of the opposite one: its entry of `same`
-/// (`same_convexity_edges` of each side) becomes `true`. Such an edge that is also a
-/// tangent seam the rail on its side crosses ([`is_tangent_seam_at_vertex`], the fork's
-/// tangency-labs/smlib@856b54e) is a tangent side (`bTangentSide`, the second array).
-/// Without the fix `same` is returned as it is and no side is a tangent side.
+/// WR-600 (the fork's tangency-labs/smlib@7992ec7, which the blend corner's End carries,
+/// #2500): a side edge of an End's corner whose faces meet tangentially at `vertex` (a
+/// bar's flat side running onto the cylinder its round end lies on) has no convexity, so
+/// it is never of the opposite one: its entry of `same` (`same_convexity_edges` of each
+/// side) becomes `true`. Such an edge that is also a tangent seam the rail on its side
+/// crosses ([`is_tangent_seam_at_vertex`], the fork's tangency-labs/smlib@856b54e) is a
+/// tangent side (`bTangentSide`, the second array): the rail's tangent end (a rail/edge
+/// crossing, the end rib solved from the tangent end, the cap edge the seam's own curve).
 fn tangent_sides_same_convexity(
     k: &Kernel,
     target: &mut Brep,
@@ -307,24 +294,20 @@ fn tangent_sides_same_convexity(
     mut same: [bool; 2],
 ) -> Result<([bool; 2], [bool; 2])> {
     let mut tangent_side = [false, false];
-    if tangent_seam_ends(k) {
-        for ((side, same), tangent) in sides
-            .into_iter()
-            .zip(same.iter_mut())
-            .zip(tangent_side.iter_mut())
-        {
-            if check_tangential_edgeuse_at_vertex(k, target, side, vertex, tan_tol_deg)? {
-                *same = true;
-                *tangent =
-                    is_tangent_seam_at_vertex(k, target, filleted, side, vertex, tan_tol_deg)?;
-            }
+    for ((side, same), tangent) in sides
+        .into_iter()
+        .zip(same.iter_mut())
+        .zip(tangent_side.iter_mut())
+    {
+        if check_tangential_edgeuse_at_vertex(k, target, side, vertex, tan_tol_deg)? {
+            *same = true;
+            *tangent = is_tangent_seam_at_vertex(k, target, filleted, side, vertex, tan_tol_deg)?;
         }
     }
     Ok((same, tangent_side))
 }
 
-/// `sm_IsTangentSeamAtVertex` (the fork's tangency-labs/smlib@856b54e, under WR-600's
-/// `fillet_nx1_tangent_side_edge_same_convexity`): whether the side edge of `eu` is a
+/// `sm_IsTangentSeamAtVertex` (the fork's tangency-labs/smlib@856b54e, WR-600): whether the side edge of `eu` is a
 /// tangent seam T at `vertex` that the rail on its side crosses, a tangent end. Its
 /// faces meet tangentially at the vertex and their normal curvatures across it differ
 /// (by more than `SM_EFF_ZERO_SQRT (1 + |k0| + |k1|)`), so the face across it is a
@@ -732,8 +715,9 @@ impl FilletCorner {
 impl FilletCorner {
     /// `SmFilletNx2Corner::MakeCornerTopology`: the fillet vertices where the rails of
     /// the corner's two fillets cross its side edges, the face vertex (rail/rail
-    /// intersection of a bevel, mate of a tangent corner) or the two mates of a
-    /// mixed-convexity 3x2 corner, their rail edge uses and the corner's cross edge(s).
+    /// intersection of a bevel) or the two mates of a mixed-convexity 3x2 corner, their rail
+    /// edge uses and the corner's cross edge(s). The corner is the blend corner's Turn: its
+    /// G1 and blending branches went with the Join that replaced them (#2400).
     ///
     /// Allocations and corner-list insertions occur in native order and remain visible
     /// if a later operation fails. Vertex geometry is computed later.
@@ -857,21 +841,15 @@ impl FilletCorner {
             self.bevel = true;
         }
 
-        // The fork's (WR-697, smlib#113 e4083c8): the blend corner's Turn at four edges is
-        // the two blends mitred, one FILLET_X_FILLET edge. SmBlendCorner::Classify made a
-        // pair that is G1, or within 5 degrees at a face corner of the other convexity, a
-        // Join, with the same tests on the same edges and tolerance, so they are not
-        // repeated (and `m_bG1Case` stays FALSE).
-        let four_edge_turn = total == 4
-            && self.blend.is_some_and(|blend| {
-                blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn
-            });
-        let (is_tangent_case, angle_deg, mixed_convexity) = if four_edge_turn {
-            (false, None, false)
-        } else {
-            // Determine if two edges are tangent at corner vertex.
+        // The corner is the blend corner's Turn (WR-697): SmBlendCorner::Classify made a pair
+        // that is G1, or within 5 degrees at a face corner of the other convexity, a Join, with
+        // the same tests on the same edges and tolerance, so the Turn is never tangent and
+        // never blends here (`m_bG1Case` stays FALSE; the fork's smlib#113 e4083c8, #2400). At
+        // four edges it is the two blends mitred, one FILLET_X_FILLET edge; at three the edges'
+        // angle and the face corner's convexity choose the mitre's kind.
+        let (angle_deg, mixed_convexity) = if total == 3 {
             let tangency_tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
-            let (is_tangent_case, angle_deg) = test_g1_continuity(
+            let (_, angle_deg) = test_g1_continuity(
                 k,
                 target,
                 Some(vertex),
@@ -879,13 +857,12 @@ impl FilletCorner {
                 Some(edge_of(target, base_eu2)?),
                 tangency_tol_deg,
             )?;
-            // Store this value for later use.
-            self.g1_case = is_tangent_case;
-
             let mixed_convexity = check_face_complimentary_corner_concavity(
                 k, target, vertex, base_eu1, base_eu2, None,
             )?;
-            (is_tangent_case, angle_deg, mixed_convexity)
+            (angle_deg, mixed_convexity)
+        } else {
+            (None, false)
         };
         let angle = || angle_deg.ok_or_else(|| invalid("edge angle at the corner is unset"));
 
@@ -1043,28 +1020,19 @@ impl FilletCorner {
                 return Ok(());
             }
 
-            if is_tangent_case || (mixed_convexity && angle()? <= 5.0) {
-                self.blending = true;
-                // The new face-vertex will just be straight across from the
-                // rail-side edge intersection vertex.
-                {
-                    let fv = pseudo.fillet_vertex_mut(face_fv)?;
-                    fv.set_fillet_vertex_type(FilletVertexType::Mate);
-                    fv.set_mate(0, Some(side_fv));
-                }
-                pseudo
-                    .fillet_vertex_mut(side_fv)?
-                    .set_mate(0, Some(face_fv));
-            } else {
-                // The new face vertex will be the intersection of the rails.
-                pseudo
-                    .fillet_vertex_mut(face_fv)?
-                    .set_fillet_vertex_type(FilletVertexType::RailXRail);
-                self.bevel = true;
-                // the fork's (WR-634, tangency-labs/smlib@9ba2b12): the mitre at the
-                // face's concave corner
-                self.mitre = mixed_convexity;
+            // At a face corner of the other convexity the angle is read, as the blending
+            // test read it (an unset one is an input error)
+            if mixed_convexity {
+                angle()?;
             }
+            // The new face vertex will be the intersection of the rails.
+            pseudo
+                .fillet_vertex_mut(face_fv)?
+                .set_fillet_vertex_type(FilletVertexType::RailXRail);
+            self.bevel = true;
+            // the fork's (WR-634, tangency-labs/smlib@9ba2b12): the mitre at the
+            // face's concave corner
+            self.mitre = mixed_convexity;
 
             // Setup rails of fillet
             pseudo.make_rail_edgeuse_on(
@@ -1088,15 +1056,9 @@ impl FilletCorner {
                 target,
             )?;
         } else if total == 4 {
-            if is_tangent_case || (mixed_convexity && angle()? <= 5.0) {
-                // Two filleted edgeuses are tangent to each other
-                self.blending = true;
-                self.bevel = false;
-            } else {
-                // Regular BEVEL corner
-                self.bevel = true;
-                self.blending = false;
-            }
+            // Regular BEVEL corner
+            self.bevel = true;
+            self.blending = false;
         }
 
         // At this point, we have only one fillet (cross) edge at this corner.
@@ -1118,7 +1080,7 @@ impl FilletCorner {
         )?;
         pseudo.set_edgeuse_fillet_geom(primary, Some(geom1))?;
         pseudo.set_edgeuse_fillet_geom(mate, Some(geom2))?;
-        let edge_type = if is_tangent_case || self.blending {
+        let edge_type = if self.blending {
             FilletEdgeType::CrossSection
         } else {
             FilletEdgeType::FilletXFillet
@@ -1173,9 +1135,9 @@ impl FilletCorner {
         ) {
             return Err(invalid("requires a convex or concave NxN corner"));
         }
-        // Determine if this is a setback corner (with `fillet_blend_corner` too: the fork's
-        // dc757a6 drops this path, which solidcore keeps, as the blend corner's Setback does not
-        // build every corner it builds; `asked_setback_not_built`)
+        // Determine if this is a setback corner (the fork's dc757a6 drops this path, which
+        // solidcore keeps, as the blend corner's Setback does not build every corner it
+        // builds; `asked_setback_not_built`)
         let is_set_back = self.set_back_dist > self.approx_tol_3d * 100.0;
 
         // All the edges of corner are filletted
@@ -1392,12 +1354,11 @@ mod tests {
     /// 20 high that is its other round end. At (20, -5, 10) the concave arc where the
     /// top meets the cylinder ends between the bar's top side edge (convex) and the
     /// vertical line where its side runs tangent into the cylinder.
-    fn wr_600_sides(fix: bool) -> ([bool; 2], [bool; 2]) {
+    fn wr_600_sides() -> ([bool; 2], [bool; 2]) {
         use crate::boolean::api_brep::boolean_union;
         use crate::primitive::api_primitives::{create_box, create_cylinder};
         use crate::topology::{edge as edge_q, vertexuse};
         let mut k = Kernel::default();
-        k.fixes.fillet_nx1_tangent_side_edge_same_convexity = fix;
         let block = create_box(&mut k, Point3::new(0.0, -5.0, 0.0), 20.0, 10.0, 10.0).unwrap();
         let end0 = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 10.0).unwrap();
         let post = create_cylinder(&mut k, Point3::new(20.0, 0.0, 0.0), 5.0, 20.0).unwrap();
@@ -1454,14 +1415,11 @@ mod tests {
 
     #[test]
     fn wr_600_tangent_side_edge_is_of_the_filleted_convexity() {
-        // by default the sides' convexities are kept as `same_convexity_edges` read them,
-        // and no side is a tangent side
-        assert_eq!(wr_600_sides(false), ([false, false], [false, false]));
-        // with the fix the tangent side edge is never of the opposite convexity; the
-        // top's convex side edge keeps its reading. The tangent side edge, where the
-        // bar's flat side (no curvature across it) runs into the cylinder (curvature
-        // 1/5), is a tangent seam the rail crosses (tangency-labs/smlib@856b54e)
-        assert_eq!(wr_600_sides(true), ([true, false], [true, false]));
+        // the tangent side edge is never of the opposite convexity; the top's convex side
+        // edge keeps its reading. The tangent side edge, where the bar's flat side (no
+        // curvature across it) runs into the cylinder (curvature 1/5), is a tangent seam
+        // the rail crosses (tangency-labs/smlib@856b54e)
+        assert_eq!(wr_600_sides(), ([true, false], [true, false]));
     }
 
     fn run(kind: FilletCornerKind, all: usize) -> Result<()> {

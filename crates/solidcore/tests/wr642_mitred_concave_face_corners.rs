@@ -19,6 +19,7 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_box;
@@ -26,12 +27,16 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
+/// Every fix but `geometric_g2_continuity`, and WR-642's as given: the blend corner's
+/// Mitre turn of two equal cylinders is their exact plane section only with the rounds'
+/// exact classes and circle sections, its companion fixes (on the default kernel the boss
+/// root's rounds come 4.8e-4 off the closed form, #2400).
 fn kernel(mitre: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    k.fixes.geometric_g2_continuity = false;
     k.fixes.fillet_mitre_concave_face_corners = mitre;
     k
 }

@@ -2,8 +2,7 @@
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmFilletGeom.cpp`
 //! (tangency-labs/smlib@856b54e; the zero-speed rib in `t` of an odd order past 1,
-//! tangency-labs/smlib@cd47efd), under WR-600's
-//! `fillet_nx1_tangent_side_edge_same_convexity`.
+//! tangency-labs/smlib@cd47efd; WR-600).
 //!
 //! | Rust                         | Upstream                    |
 //! |------------------------------|-----------------------------|

@@ -3,7 +3,7 @@
 //! same centre extruded 10 up on its top; its front top edge chamfered 1, then its concave
 //! arc chamfered 2. The second chamfer's chain runs on down the first chamfer's end on the
 //! cylinder, which leaves the front face tangentially: a mixed-convexity End
-//! (`fillet_blend_corner`, WR-697, the fork's 3e26f76 `CalcRailIntEndSurface`).
+//! (WR-697, the fork's 3e26f76 `CalcRailIntEndSurface`).
 //!
 //! The inputs are the bodies SolidCraft passed to each chamfer (binary SMB, written by
 //! solidcore main c002debb5). The chamfer is SolidCraft's: the nearest edge, radius
@@ -14,8 +14,7 @@
 //! Expected values: the fork (tangency-labs/smlib b5bb747 and 18e96f1 agree), run locally
 //! through `SmFilletExecutive` the same way: chamfer 1 alone 9396.981201977540 (8 faces, 18
 //! edges, 12 vertices); both 9432.066057685654 (9/21/14); chamfer 2 on the dumped input 2
-//! 9432.066057685648. With the flag off, solidcore main c002debb5's 9432.066068032667
-//! (SolidCraft's run), which the pinned SMLib's End gives. No closed form.
+//! 9432.066057685648. No closed form.
 
 #![allow(
     clippy::unwrap_used,
@@ -55,17 +54,13 @@ const FORK_ONE: f64 = 9_396.981_201_977_540;
 const FORK_BOTH: f64 = 9_432.066_057_685_654;
 /// The fork's chamfer 2 on the dumped input 2.
 const FORK_TWO_ON_DUMP: f64 = 9_432.066_057_685_648;
-/// solidcore main c002debb5 (the pinned End), both chamfers.
-const BASE_BOTH: f64 = 9_432.066_068_032_667;
 
-/// Every opt-in fix on (SolidCraft's pin-16 set), with `fillet_blend_corner` as given.
-fn kernel(blend_corner: bool) -> Kernel {
-    let mut k = Kernel {
+/// Every opt-in fix on (SolidCraft's pin-16 set).
+fn kernel() -> Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.fillet_blend_corner = blend_corner;
-    k
+    }
 }
 
 /// A SolidCraft file, read under the notification naming as SolidCraft reads it.
@@ -159,29 +154,26 @@ fn assert_rel(v: f64, want: f64, what: &str) {
     );
 }
 
-/// Both chamfers from input 1: the fork's value with the flag on, the base's with it off.
+/// Both chamfers from input 1: the fork's value.
 #[test]
 fn both_chamfers_end_as_the_fork_s() {
-    for blend_corner in [true, false] {
-        let mut k = kernel(blend_corner);
-        let mut b = read(&mut k, INPUT_1);
-        chamfer(&mut k, &mut b, FRONT_TOP, 1.0);
-        let (one, counts) = measure(&k, &mut b);
-        assert_rel(one, FORK_ONE, "chamfer 1");
-        assert_eq!(counts, [8, 18, 12]);
-        chamfer(&mut k, &mut b, CONCAVE_ARC, 2.0);
-        let (both, counts) = measure(&k, &mut b);
-        eprintln!("blend_corner {blend_corner}: both {both:.12} {counts:?}");
-        assert_eq!(counts, [9, 21, 14], "blend_corner {blend_corner}");
-        let want = if blend_corner { FORK_BOTH } else { BASE_BOTH };
-        assert_rel(both, want, &format!("both, blend_corner {blend_corner}"));
-    }
+    let mut k = kernel();
+    let mut b = read(&mut k, INPUT_1);
+    chamfer(&mut k, &mut b, FRONT_TOP, 1.0);
+    let (one, counts) = measure(&k, &mut b);
+    assert_rel(one, FORK_ONE, "chamfer 1");
+    assert_eq!(counts, [8, 18, 12]);
+    chamfer(&mut k, &mut b, CONCAVE_ARC, 2.0);
+    let (both, counts) = measure(&k, &mut b);
+    eprintln!("both {both:.12} {counts:?}");
+    assert_eq!(counts, [9, 21, 14]);
+    assert_rel(both, FORK_BOTH, "both");
 }
 
-/// Chamfer 2 on SolidCraft's input 2, flag on: the fork's value on the same input.
+/// Chamfer 2 on SolidCraft's input 2: the fork's value on the same input.
 #[test]
 fn the_concave_arc_s_chamfer_on_solidcraft_s_input() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = read(&mut k, INPUT_2);
     chamfer(&mut k, &mut b, CONCAVE_ARC, 2.0);
     let (v, counts) = measure(&k, &mut b);

@@ -1,0 +1,47 @@
+# Known mismatches of primitive.api_trim_ops (format: crates/difftest/src/known.rs).
+
+# The default kernel's blend corner (#2400; plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): 9 cases.
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "pat_upstream_filleted_box"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=0e0 rust=9.5e0)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "pat_long_direction"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=0e0 rust=9.5e0)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0018"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=1.1566500740742075e1 rust=1.2041349858786546e1)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0043"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=6.154961544195698e0 rust=2.4727472564510693e0)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0072"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=2.511523290570555e0 rust=-5.633374507787798e-1)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0073"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=3.516038448762102e0 rust=-9.68963188411752e-1)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0075"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[7]: cpp=9.349950725243353e0 rust=-5.253357982678253e-2)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0112"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=6.962519980387759e0 rust=7.347046551623312e0)"
+
+[[mismatch]]
+unit = "primitive.api_trim_ops"
+case = "gen0126"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[5]: cpp=9.703821739618014e0 rust=2.818685040338975e-2)"

@@ -1,10 +1,9 @@
 //! tangency-labs/smlib#125 (278bf77, 3e10318; solidcore#2359): corners of four or more
-//! rounds. With `Kernel::fixes.fillet_blend_corner`, n >= 4 constant rounds of one radius
+//! rounds. n >= 4 constant rounds of one radius
 //! at a vertex of n planes whose offsets by the radius meet in one point are the blend
 //! corner's Ball: the spherical n-gon of that ball between the rounds' end sections, fanned
 //! from contact 0 into n - 2 rational patches exactly on the sphere. Without a common ball
-//! they are a Setback. Without the flag the corner is the pinned `SmFilletConvexNxNCorner`
-//! (or `SmFilletConcaveNxNCorner`).
+//! they are a Setback.
 //!
 //! The bodies are those of the fork's capi tests `ball regular_apex_{4,5,6}`,
 //! `setback four_face_apex` and `setback four_face_pocket_floor` (fc29fdb
@@ -18,8 +17,7 @@
 //! - Every patch is G1 to its neighbours along its edges.
 //!
 //! The square pyramid of WR-502 (`fillet_corner_sphere_from_four_arcs`, 40 across the base
-//! and 30 high, every edge R 2) is a regular apex of four. With `fillet_blend_corner` its apex
-//! is the Ball: two patches on the ball touching the four faces (centre
+//! and 30 high, every edge R 2) is a regular apex of four. Its apex is the Ball: two patches on the ball touching the four faces (centre
 //! `z = (600 - 2 sqrt 1300) / 20`), G1 to the rounds, with or without the WR-502 flag.
 #![allow(
     clippy::unwrap_used,
@@ -48,12 +46,12 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, Brep, EdgeId, FaceId};
 use std::f64::consts::PI;
 
-/// Every opt-in fix on but `geometric_g2_continuity`, with `fillet_blend_corner` on or off.
-fn kernel(blend: bool) -> Kernel {
+/// Every opt-in fix on but `geometric_g2_continuity`.
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -318,8 +316,8 @@ fn ball_patch_offs(k: &Kernel, b: &Brep, f: FaceId, c: Point3, r: f64) -> [f64; 
 }
 
 /// The regular apex of `n` faces, rounded 3.
-fn regular_apex(n: usize, blend: bool) {
-    let mut k = kernel(blend);
+fn regular_apex(n: usize) {
+    let mut k = kernel();
     let r = 3.0;
     let apex = Point3::new(10.0, 10.0, 25.0);
     let ns = apex_normals(&vec![1.0; n], false);
@@ -334,11 +332,6 @@ fn regular_apex(n: usize, blend: bool) {
     let picks: Vec<EdgeId> = es.iter().map(|&d| pick(&k, &b, apex + d * 8.0)).collect();
     let (event, lines) = round(&mut k, &mut b, &picks, r, apex);
     let faces = b.faces().ids().count();
-    if !blend {
-        assert_eq!(event, None, "the pinned NxN corner");
-        assert!(sphere_patches(&k, &b, c, r).is_empty());
-        return;
-    }
     assert_eq!(event, Some(BlendCornerEvent::Ball));
     assert!(lines.is_empty(), "{lines:?}");
     assert_eq!(faces, before + 2 * n - 2);
@@ -361,28 +354,23 @@ fn regular_apex(n: usize, blend: bool) {
 
 #[test]
 fn regular_apex_of_four_is_the_ball() {
-    regular_apex(4, true);
+    regular_apex(4);
 }
 
 #[test]
 fn regular_apex_of_five_is_the_ball() {
-    regular_apex(5, true);
+    regular_apex(5);
 }
 
 #[test]
 fn regular_apex_of_six_is_the_ball() {
-    regular_apex(6, true);
-}
-
-#[test]
-fn regular_apex_of_four_without_the_flag_is_the_pinned_corner() {
-    regular_apex(4, false);
+    regular_apex(6);
 }
 
 /// The capi's `setback_apex`: an apex (or a pocket's floor) of four faces leaning unequally,
 /// no common ball, rounded 1: a Setback, sound, the sharp body's faces plus 3 n.
 fn setback_apex(leans: &[f64], pocket: bool) {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let n = leans.len();
     let r = 1.0;
     let apex = if pocket {
@@ -418,9 +406,8 @@ fn four_face_pocket_floor_is_the_concave_setback() {
 
 /// WR-502's pyramid: the worst deviation of its apex's patches from the ball touching the
 /// four faces (and their count), whether the apex is the Ball.
-fn rounded_pyramid(blend: bool, four_arcs: bool) -> (f64, usize, Option<BlendCornerEvent>) {
+fn rounded_pyramid(four_arcs: bool) -> (f64, usize, Option<BlendCornerEvent>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_blend_corner = blend;
     k.fixes.fillet_corner_sphere_from_four_arcs = four_arcs;
     let mut b = create_pyramid(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0).unwrap();
     let edges = b.edge_list().to_vec();
@@ -439,7 +426,7 @@ fn rounded_pyramid(blend: bool, four_arcs: bool) -> (f64, usize, Option<BlendCor
 #[test]
 fn pyramid_apex_is_the_ball_with_or_without_the_four_arc_sphere() {
     for four_arcs in [false, true] {
-        let (off, patches, event) = rounded_pyramid(true, four_arcs);
+        let (off, patches, event) = rounded_pyramid(four_arcs);
         assert_eq!(event, Some(BlendCornerEvent::Ball));
         assert_eq!(patches, 2);
         assert!(off <= 1e-9, "{off}");

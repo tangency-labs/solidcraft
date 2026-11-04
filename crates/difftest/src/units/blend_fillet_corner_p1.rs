@@ -365,19 +365,36 @@ struct ExtAddIn {
     s: f64,
 }
 
-const KINDS: [FilletCornerKind; 11] = [
-    FilletCornerKind::OneByOne,
-    FilletCornerKind::TwoByTwo,
-    FilletCornerKind::NByOneClosed,
-    FilletCornerKind::NByOne,
-    FilletCornerKind::Degenerate,
-    FilletCornerKind::Open,
-    FilletCornerKind::ThreeByTwoMixed,
-    FilletCornerKind::NByTwo,
-    FilletCornerKind::FourByThree,
-    FilletCornerKind::ConvexNByN,
-    FilletCornerKind::ConcaveNByN,
+/// The derived classes by the shim's index. `SmFillet1x1Corner` and `SmFillet2x2Corner`
+/// (indices 0 and 1) have no Rust class: the blend corner's Join replaced them and they
+/// were deleted (#2400), so their cases are retired ([`retired`]).
+const KINDS: [Option<FilletCornerKind>; 11] = [
+    None,
+    None,
+    Some(FilletCornerKind::NByOneClosed),
+    Some(FilletCornerKind::NByOne),
+    Some(FilletCornerKind::Degenerate),
+    Some(FilletCornerKind::Open),
+    Some(FilletCornerKind::ThreeByTwoMixed),
+    Some(FilletCornerKind::NByTwo),
+    Some(FilletCornerKind::FourByThree),
+    Some(FilletCornerKind::ConvexNByN),
+    Some(FilletCornerKind::ConcaveNByN),
 ];
+
+/// A case on a corner of the deleted `SmFillet1x1Corner` or `SmFillet2x2Corner` (#2400):
+/// not run, no Rust class is left to compare (plan/difftest-waivers.toml).
+fn retired(case: &Case) -> bool {
+    retired_inputs(&case.inputs)
+}
+
+/// [`retired`] on a case's inputs (unit `blend.fillet_corner_p2` runs this unit's cases).
+pub(super) fn retired_inputs(inputs: &Value) -> bool {
+    matches!(
+        serde_json::from_value::<Inputs>(inputs.clone()),
+        Ok(Inputs::Corner { corner, .. }) if KINDS.get(corner.kind).is_some_and(Option::is_none)
+    )
+}
 
 // ---- shared -----------------------------------------------------------------------------
 
@@ -1390,6 +1407,12 @@ impl UnitDiff for Runner {
         };
         serde_json::to_value(i).ok()
     }
+
+    fn cases(&self, ctx: &crate::CaseContext) -> Result<Vec<Case>, HarnessError> {
+        let mut out = crate::runner::default_cases(self, ctx)?;
+        out.retain(|case| !retired(case));
+        Ok(out)
+    }
 }
 
 // ---- the SmFilletCorner methods on the pseudo-B-rep model --------------------------------
@@ -1909,7 +1932,11 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let ci = c.corner;
     let h = |e: SolidError| harness(e.to_string());
     let mut rm = RustModel::build(c.model)?;
-    let kind = *KINDS.get(ci.kind).ok_or_else(|| harness("kind"))?;
+    let kind = KINDS
+        .get(ci.kind)
+        .copied()
+        .flatten()
+        .ok_or_else(|| harness("corner class index without a Rust class (1x1 and 2x2 deleted, #2400)"))?;
     let target_eu = |rm: &RustModel, [e, w]: EuSel| -> Result<EdgeuseId, HarnessError> {
         let edge = *rm
             .target_edges

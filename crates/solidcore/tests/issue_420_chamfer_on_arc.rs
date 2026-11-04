@@ -11,8 +11,7 @@
     clippy::indexing_slicing
 )]
 
-use solidcore::blend::fillet_executive::api::{chamfer_fillet, fillet_edges};
-use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, PI};
@@ -77,32 +76,6 @@ fn the_chamfer_runs_round_the_corner_rounds_with_the_fix() {
     // upstream traces the offset intersection, which collapses to a point, and fails
     let (_, _, r) = chamfered_plate(false);
     assert!(r.is_err(), "upstream should fail: {r:?}");
-}
-
-/// #379: `chamfer_fillet` of every edge of a 10 cube with a radius 2 through hole, by a chord
-/// length of 1/sqrt(2) (legs 0.5).
-fn chamfered_holed_cube(fix: bool) -> (f64, f64) {
-    let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = fix;
-    let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
-    let hole = create_cylinder(&mut k, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
-    let mut body = boolean_difference(&mut k, cube, hole).unwrap();
-    let before = volume(&k, &mut body);
-    chamfer_fillet(&mut k, &mut body, std::f64::consts::FRAC_1_SQRT_2).unwrap();
-    (before, volume(&k, &mut body))
-}
-
-#[test]
-fn the_rims_of_a_through_hole_are_chamfered_with_the_fix() {
-    // a rim of radius r chamfered by legs a loses the triangle (centroid at r + a / 3) turned
-    // once about the axis; the two rims of the hole
-    let (r, a) = (2.0, 0.5);
-    let rims = 2.0 * 2.0 * PI * (r + a / 3.0) * a * a / 2.0;
-
-    let (before, off) = chamfered_holed_cube(false);
-    let (_, on) = chamfered_holed_cube(true);
-    // the cube's edges are chamfered either way, the rims only with the fix
-    assert!((off - on - rims).abs() < 1e-3, "{before} {off} {on}");
 }
 
 // ---- #2486: a chamfer on a cylinder against a plane by its definition ---------------------

@@ -1,6 +1,6 @@
 //! solidcore#2365 (SolidCraft rig, jyviko's review): a corner set back through
-//! `AddSetBackVertex` and `SetSetBackDist` on the N x N corner builds its setback with
-//! `Kernel::fixes.fillet_blend_corner`, as before smlib#125's port. The fork's dc757a6
+//! `AddSetBackVertex` and `SetSetBackDist` on the N x N corner builds its setback, as
+//! before smlib#125's port. The fork's dc757a6
 //! deletes the N x N corners' setback paths, which left these corners refused
 //! (`CornerUnsupported`) by the check that a setback asked is built; solidcore keeps the
 //! paths, and the check refuses only a corner that builds no setback.
@@ -55,7 +55,6 @@ fn solidcraft_fixes() -> Kernel {
             *flag = true;
         }
     }
-    assert!(f.fillet_blend_corner);
     Kernel {
         fixes: f,
         ..Kernel::default()

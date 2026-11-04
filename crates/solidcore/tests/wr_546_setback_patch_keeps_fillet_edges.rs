@@ -53,6 +53,16 @@ fn wr_546_setback_patch_meets_the_rounds_on_their_own_edges() {
         session
             .prepare_constant_radius_edges(&mut k, &edges, 4.0, 1, 1, 1.0)
             .unwrap();
+        // the corner set back (`AddSetBackVertex`): no Ball is built there
+        let set_back: Vec<_> = session
+            .target()
+            .vertices()
+            .ids()
+            .filter(|&v| at_origin(session.target(), v))
+            .collect();
+        for v in set_back {
+            session.add_set_back_vertex(v);
+        }
         session.create_corners(&k, None).unwrap();
         for id in session.fillet_corners().unwrap() {
             if let Some(v) = session.corner(id).unwrap().vertex {

@@ -2,7 +2,9 @@
 # Every entry needs a reason a reviewer can check. Remove ratchet waivers once the PR
 # that needed them has merged (the base commit's reports then no longer contain the case).
 #
-# [[waiver]]
+# 
+
+[[waiver]]
 # unit = "nlib.knots"
 # check = "ratchet"          # or "value-share"
 # case = "insert_at_end"     # ratchet only; omit to waive every case of the unit
@@ -25,3 +27,73 @@ unit = "topology.brep_local_operation"
 check = "ratchet"
 case = "nurb_fillet_face5_same"
 reason = "ND-493 C++ clock-seeded rand() (srand(time(NULL)) in GetPointsInFace via IsInnerShell in the merge stitch): intermittent on main CI at c47d6d3b5 and 7ca6ce7a9; Rust deterministic; parked"
+
+[[waiver]]
+unit = "blend.fillet_corner_p1"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; its corner cases on the deleted 1x1 and 2x2 classes are retired (no Rust class is left to compare) (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_corner_p2"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; its corner cases on the deleted 1x1 and 2x2 classes and its AdjustTopology cases that reach the deleted big-radius conversion are retired; 2 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_corner_p3"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; its cases on the deleted 1x1 and 2x2 classes, AdjustTangentCorner and TestAndConvertBigRadFillet (big_rad_*, and the AdjustTopology cases that reach it) are retired; 95 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_executive_p3"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 155 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_geom_p4"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 23 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "intersect.api_intersectors"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 1 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "intersect.surface_intersector_p2"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 40 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "primitive.api_trim_ops"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 9 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "surface.torus"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 12 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.api_files"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 2 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.api_projection"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 5 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.brep_cutting"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 19 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.brep_local_operation"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 6 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.brep_planar_section"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 12 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."

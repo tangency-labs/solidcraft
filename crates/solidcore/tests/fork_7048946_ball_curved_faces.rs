@@ -1,7 +1,7 @@
 //! smlib#110 (the fork's tangency-labs/smlib@7048946, cases 9a5a8ce and 3969288): three
 //! equal convex or concave rounds at a vertex of planes, cylinders, cones and spheres end
 //! on the one ball touching the three faces, about the faces' triple offset point, and the
-//! corner's face is that ball's triangle (`Kernel::fixes.fillet_blend_corner`, WR-697).
+//! corner's face is that ball's triangle (WR-697).
 //! Before 7048946 `ClassifyBall` took only planes, and these corners were the old convex
 //! corner's patch, off the sphere.
 //!
@@ -43,12 +43,12 @@ use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -194,8 +194,8 @@ fn d_section(rp: f64, ap: f64) -> (f64, f64) {
 }
 
 /// The D prism (R 10, flat 4, H 10), every edge r 2: four Balls on the convex cylinder.
-fn d_prism_rounded(blend: bool) -> (Kernel, Brep) {
-    let mut k = all_fixes(blend);
+fn d_prism_rounded() -> (Kernel, Brep) {
+    let mut k = all_fixes();
     let (rr, a, height, rad): (f64, f64, f64, f64) = (10.0, 4.0, 10.0, 2.0);
     let h = (rr * rr - a * a).sqrt();
     let mut b = d_prism(&mut k, 0.0, 0.0, rr, a, 0.0, height);
@@ -238,7 +238,7 @@ fn d_prism_want() -> (f64, Vec<Point3>) {
 /// (a - r, +-h', H - r or r); the volume Steiner's to 1e-11.
 #[test]
 fn d_prism_corners_are_balls_on_the_cylinder() {
-    let (mut k, mut b) = d_prism_rounded(true);
+    let (mut k, mut b) = d_prism_rounded();
     let (want, centres) = d_prism_want();
     let v = volume(&k, &mut b);
     let n = counts(&b);
@@ -253,24 +253,13 @@ fn d_prism_corners_are_balls_on_the_cylinder() {
     assert!((v - want).abs() <= 1e-11 * want, "{v} {want}");
 }
 
-/// Without the flag the corners are the pinned corner's, not on the ball (fork 9a5a8ce:
-/// "the old convex corner's patch", the volume 2.2e-10 off Steiner's there).
-#[test]
-fn without_the_flag_the_d_prism_corners_are_no_balls() {
-    let (k, b) = d_prism_rounded(false);
-    let (_, centres) = d_prism_want();
-    let offs = sphere_offs(&k, &b, &centres, 2.0);
-    eprintln!("d_prism without the flag: offs {offs:?}");
-    assert!(offs.iter().all(|&o| o > 1e-12), "{offs:?}");
-}
-
 /// capi `ball d_pocket_corners`: a 40 x 40 x 20 block less the D prism (R 8 about (20, 20),
 /// flat x = 24, floor z = 10); the floor's chord and arc and the two uprights r 2. The two
 /// floor corners are Balls on the concave cylinder about (24 - r, 20 +- h', 10 + r); 15
 /// faces, 30 edges, 18 vertices; the volume the block less the opening of the D prism.
 #[test]
 fn d_pocket_corners_are_balls_on_the_concave_cylinder() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let (rr, a, rad, floor, top): (f64, f64, f64, f64, f64) = (8.0, 4.0, 2.0, 10.0, 20.0);
     let h = (rr * rr - a * a).sqrt();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 20.0).unwrap();
@@ -320,7 +309,7 @@ fn d_pocket_corners_are_balls_on_the_concave_cylinder() {
 /// `cone_frustum_volume`, known failing there, smlib#103: not checked.)
 #[test]
 fn cone_frustum_corners_are_balls_some_certified() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let (rr, z1, height, a, rad): (f64, f64, f64, f64, f64) = (10.0, 6.0, 10.0, 4.0, 1.5);
     let beta: f64 = PI / 6.0;
     let (tb, cb) = (beta.tan(), beta.cos());

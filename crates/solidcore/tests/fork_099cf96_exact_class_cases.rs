@@ -28,9 +28,12 @@
 //! vertex on the sphere's seam (the ball). Only the status is checked here: which step of
 //! the fillet returned it isn't visible through `fillet_edges`.
 //!
-//! The left column is checked on the default kernel and the right one with
-//! `fillet_exact_round_classes` alone. With SolidCraft's current section fixes,
-//! the fitted tee meets its original tolerance even with procedural rounds off.
+//! Those two columns were checked on the default kernel and with `fillet_exact_round_classes`
+//! alone while the default was the pinned corner; the blend corner, always built since #2400,
+//! builds `sphere_plane` (its End at a smooth vertex, as the fork since smlib#124) and, on
+//! the default kernel with the exact classes but no other fix, builds the pipes (traced, and
+//! failing a validity test), so neither profile has these marks now. With SolidCraft's
+//! current section fixes, the fitted tee meets its original tolerance even with procedural rounds off.
 //! With `fillet_round_as_definition` enabled (#2274), a fitted round is instead a
 //! `ProceduralBlend`: check its definition's ball contact to 1e-9, and its stored net
 //! against the unchanged fitted tolerance. The historical 1.47e-3 mark describes the
@@ -541,8 +544,6 @@ enum Mark {
     Passes,
     /// Status 1001 from the round.
     Status1001,
-    /// A polynomial (3, 3) B-spline, this far off the ball, where an exact round is wanted.
-    Traced(f64),
     /// The kind is right, but it lies this far off the ball, over the tolerance.
     OverTolerance(f64),
     /// Built, valid and on the ball, but of this volume, not the case's (rel 1e-9).
@@ -558,12 +559,6 @@ fn holds(mark: Mark, got: &Graded) -> bool {
     match (mark, got) {
         (Mark::Passes, Graded::Built { problems, .. }) => problems.is_empty(),
         (Mark::Status1001, Graded::Round(e)) => e.contains("code: 1001"),
-        (Mark::Traced(m), Graded::Built { problems, off, .. }) => {
-            about(*off, m)
-                && problems
-                    .iter()
-                    .any(|p| p.contains("degrees (3, 3), rational false"))
-        }
         (Mark::OverTolerance(m), Graded::Built { problems, off, .. }) => {
             about(*off, m) && problems.len() == 1 && problems[0].contains("off the ball")
         }
@@ -578,19 +573,6 @@ fn holds(mark: Mark, got: &Graded) -> bool {
                 && problems[0].starts_with("volume")
         }
         _ => false,
-    }
-}
-
-/// The fork's mark at 099cf96, before the exact classes.
-fn mark_before(name: &str) -> Mark {
-    match name {
-        "cone_cylinder_sharing_a_ball" => Mark::Traced(3.96e-4),
-        "oblique_plane_cone" => Mark::Traced(9.4e-4),
-        "oblique_plane_cylinder" => Mark::Traced(2.26e-3),
-        "sphere_coaxial_cone" => Mark::Traced(1.47e-3),
-        "cylinders_touching_at_a_point" | "sphere_plane" => Mark::Status1001,
-        "tee_is_fitted" => Mark::OverTolerance(1.47e-3),
-        _ => Mark::Passes,
     }
 }
 
@@ -665,11 +647,6 @@ fn solidcraft_before_definitions() -> Kernel {
 }
 
 #[test]
-fn without_the_flag_the_cases_have_the_fork_s_marks_before_the_exact_classes() {
-    check_all(mark_before, Kernel::default, RoundKind::Fitted);
-}
-
-#[test]
 fn with_solidcraft_s_fixes_without_definitions_the_fitted_round_meets_tolerance() {
     check_all(
         mark_with_section_fixes,
@@ -685,11 +662,6 @@ fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
         solidcraft_kernel,
         RoundKind::Procedural,
     );
-}
-
-#[test]
-fn the_flag_alone_gives_the_fork_s_marks_after_the_exact_classes() {
-    check_all(mark_after, exact_kernel, RoundKind::Fitted);
 }
 
 #[test]

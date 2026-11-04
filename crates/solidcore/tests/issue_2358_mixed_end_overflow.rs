@@ -1,6 +1,5 @@
 //! tangency-labs/solidcore#2358 (the fork's smlib#124): the junction rig's boss, a cylinder
-//! R6 standing 2 into a 60 x 60 x 10 plate, tilted about y, its root rounded, with
-//! `UpstreamFixes::fillet_blend_corner` (WR-697).
+//! R6 standing 2 into a 60 x 60 x 10 plate, tilted about y, its root rounded (WR-697).
 //!
 //! Tilted 20 degrees the cylinder's bottom cap rises out of the plate on the -x side, by
 //! 6 sin 20 - 2 cos 20 = 0.173 at its top: a wedge of air under the cap. The root edge's
@@ -51,13 +50,12 @@ use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 /// (`precise_properties_split_at_surface_knots`). With them on the union measures 3.6e-5
 /// less (38601.117929445747 against the fork's 38601.117965259655), and the removed
 /// volumes move by 1.7e-4.
-fn kernel(blend_corner: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.fillet_blend_corner = blend_corner;
     f.cylinder_plane_section_trims_exact = false;
     f.precise_properties_split_at_surface_knots = false;
     k.fixes = f;
@@ -134,18 +132,13 @@ fn root(k: &Kernel, b: &Brep, deg: f64) -> Vec<EdgeId> {
 }
 
 /// The root of the boss tilted `deg` rounded `r`: the volume it removes and the face count.
-fn rounded(blend_corner: bool, deg: f64, r: f64) -> Result<(f64, usize), SolidError> {
-    rounded_seam(blend_corner, deg, 0.0, r).map(|(v, n, _)| (v, n))
+fn rounded(deg: f64, r: f64) -> Result<(f64, usize), SolidError> {
+    rounded_seam(deg, 0.0, r).map(|(v, n, _)| (v, n))
 }
 
 /// As [`rounded`] with the seam turned `seam`; also the body's vertices.
-fn rounded_seam(
-    blend_corner: bool,
-    deg: f64,
-    seam: f64,
-    r: f64,
-) -> Result<(f64, usize, Vec<Point3>), SolidError> {
-    let mut k = kernel(blend_corner);
+fn rounded_seam(deg: f64, seam: f64, r: f64) -> Result<(f64, usize, Vec<Point3>), SolidError> {
+    let mut k = kernel();
     let mut b = boss_seam(&mut k, deg, seam);
     let before = volume(&k, &mut b);
     let es = root(&k, &b, deg);
@@ -174,7 +167,7 @@ fn the_bound_is_the_closed_form() {
 /// Tilted 20 degrees and rounded 1.5: refused, naming r* less the part's tolerance.
 #[test]
 fn tilt_20_is_refused_naming_the_largest_radius() {
-    let err = rounded(true, 20.0, 1.5).unwrap_err();
+    let err = rounded(20.0, 1.5).unwrap_err();
     let SolidError::FilletRefused { code, fit, .. } = err else {
         panic!("{err:?}");
     };
@@ -188,7 +181,7 @@ fn tilt_20_is_refused_naming_the_largest_radius() {
 #[test]
 fn tilt_20_below_the_bound_builds() {
     for (r, removed) in [(0.25, -0.576_293_097_954), (0.2625, -0.635_789_172_127)] {
-        let (got, faces) = rounded(true, 20.0, r).unwrap();
+        let (got, faces) = rounded(20.0, r).unwrap();
         assert!((got - removed).abs() <= 5e-9, "{r}: {got}");
         assert_eq!(faces, 11);
     }
@@ -203,7 +196,7 @@ fn tilt_20_below_the_bound_builds() {
 /// rails' ends at (-4.176377478, +-4.664695271, 0.893582223).
 #[test]
 fn tilt_40_rail_continued_across_the_seam_vertex() {
-    let (got, faces, points) = rounded_seam(true, 40.0, 125.13, 1.5).unwrap();
+    let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5).unwrap();
     assert!((got - -33.432_934_277_429).abs() <= 5e-9, "{got}");
     assert_eq!(faces, 10);
     for y in [-4.664_695_271, 4.664_695_271] {
@@ -224,13 +217,13 @@ fn tilt_40_rail_continued_across_the_seam_vertex() {
 /// (4e-13 relative).
 #[test]
 fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
-    let err = rounded_seam(true, 20.0, 170.0, 1.5).unwrap_err();
+    let err = rounded_seam(20.0, 170.0, 1.5).unwrap_err();
     let SolidError::FilletRefused { code, fit, .. } = err else {
         panic!("{err:?}");
     };
     assert_eq!(code, 1001);
     assert!((fit.size - 0.262_514_174).abs() <= 1e-9, "{}", fit.size);
-    let (got, faces, _) = rounded_seam(true, 20.0, 170.0, 0.262_514_174).unwrap();
+    let (got, faces, _) = rounded_seam(20.0, 170.0, 0.262_514_174).unwrap();
     assert!((got - -0.636_117_736_700).abs() <= 1e-8, "{got}");
     assert_eq!(faces, 10);
 }
@@ -291,7 +284,7 @@ fn wall_split(k: &mut Kernel, b: &mut Brep, deg: f64) {
 fn tilt_40_wall_split_short_of_the_rail_end_refused() {
     let a = 40.0_f64.to_radians();
     let r120 = (3.0 * a.sin() - 2.0 * a.cos()) / (1.0 - 0.5 * a.sin());
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = boss_seam(&mut k, 40.0, 125.13);
     wall_split(&mut k, &mut b, 40.0);
     let es = root(&k, &b, 40.0);

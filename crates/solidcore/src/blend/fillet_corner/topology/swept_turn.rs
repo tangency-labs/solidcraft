@@ -13,8 +13,8 @@
 //! Deviations: the side edge use (`m_pSideEU`) is kept in
 //! [`FilletCorner::swept`](crate::blend::fillet_corner::p3::FilletCorner::swept). The
 //! solvers of the two rounds are resolved by the caller (`GetFilletSolverOfEdgeuse`).
-//! Opt-in: `Kernel::fixes.fillet_blend_corner` (WR-697) with the session's swept turns
-//! (`FilletSession::set_swept_turns`). There is no recursion.
+//! With the session's swept turns (`FilletSession::set_swept_turns`; WR-697). There is no
+//! recursion.
 
 use super::{find_side_edgeuse, new_corner_vertex, radial, Nx2TopologyEnv, OP_NX2};
 use crate::blend::blend_corner::swept::SweptTurn;

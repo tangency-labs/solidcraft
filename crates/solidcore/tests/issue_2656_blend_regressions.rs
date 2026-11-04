@@ -1,6 +1,6 @@
 //! tangency-labs/solidcore#2656: the blend regressions SolidCraft's pin bump found
-//! (tangency-labs/solidcraft#11875, 8ddce9016 to 5d2635d36), under
-//! `Kernel::fixes.fillet_blend_corner` (WR-697), with SolidCraft's fix set at that pin.
+//! (tangency-labs/solidcraft#11875, 8ddce9016 to 5d2635d36), on
+//! the blend corner (WR-697), with SolidCraft's fix set at that pin.
 //!
 //! **#2364 (smlib#124's End at a smooth vertex).** A blended edge that runs on tangentially
 //! into an edge of its convexity that is not blended was capped there: the blend cut by the
@@ -58,7 +58,7 @@ use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
 /// SolidCraft's fixes at the 5d2635d36 pin: the corpus's `fixes.json` and the eight the bump
-/// turns on (tangency-labs/solidcraft#11875). `fillet_blend_corner` is among them.
+/// turns on (tangency-labs/solidcraft#11875).
 fn solidcraft_kernel() -> Kernel {
     let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
     let mut f = UpstreamFixes::default();
@@ -74,7 +74,6 @@ fn solidcraft_kernel() -> Kernel {
     ]) {
         *f.flag_mut(name).unwrap_or_else(|| panic!("flag {name}")) = true;
     }
-    assert!(f.fillet_blend_corner);
     Kernel {
         fixes: f,
         ..Kernel::default()
@@ -241,7 +240,7 @@ fn read_smb(k: &mut Kernel, bytes: &[u8]) -> Brep {
     b
 }
 
-/// Ladder 07-fillets/012-variable-into-rounded-corner (`fillet_blend_corner`): the 60 x 40 x
+/// Ladder 07-fillets/012-variable-into-rounded-corner: the 60 x 40 x
 /// 20 box's upright (60, 40) rounded r5, then the top back edge by the linear law r1 (x = 0)
 /// to r5 (x = 55), which at x = 55 runs on tangentially into the upright round's top arc and
 /// on into its quarter column until it leaves the part. SolidCraft's closed form: V = 48000 -
@@ -265,8 +264,8 @@ fn ladder_012_variable_round_runs_on_into_the_upright_round() {
     assert_rel(v, 47_755.125_926, 1e-8, "012");
 }
 
-/// Ladder 07-fillets/021-corner-three-sequential-r5-r3-r2-partial-chain
-/// (`fillet_blend_corner`): the box's top back edge r5, the top right edge r3 alone (it runs
+/// Ladder 07-fillets/021-corner-three-sequential-r5-r3-r2-partial-chain:
+/// the box's top back edge r5, the top right edge r3 alone (it runs
 /// on at y = 35 into the r5 round's end arc), then the upright (60, 40) r2 with its tangent
 /// chain, up the arc and along the seam. The case's invariants: 11 faces, one valid body;
 /// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices, 47589.770467. Capped (#2364):
@@ -290,8 +289,7 @@ fn ladder_021_round_runs_on_into_the_earlier_round() {
     assert_rel(v, 47_589.770_467, 1e-8, "021");
 }
 
-/// fillets/1207-fillet-box-end-edge-into-unblended-round-partial-chain
-/// (`fillet_blend_corner`), also SolidCraft's
+/// fillets/1207-fillet-box-end-edge-into-unblended-round-partial-chain, also SolidCraft's
 /// `smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why`: the cube 20's top back
 /// edge r3, then the end face's top edge r1 alone, which at y = 17 runs on into the r3 round's
 /// end arc and through the round until it leaves the part at y = 17 + sqrt 5. SolidCraft's
@@ -308,7 +306,7 @@ fn rig_1207_round_runs_on_past_the_end_arc() {
     assert_rel(v, 7_957.505_202, 1e-8, "1207");
 }
 
-/// SolidCraft's `ops::tests::fillet_takes_exactly_the_picked_edges` (`fillet_blend_corner`):
+/// SolidCraft's `ops::tests::fillet_takes_exactly_the_picked_edges`:
 /// the cube 20's upright (20, 20) rounded r5, then one straight edge of the top rim (now
 /// line, arc, line) r1: one face more (8), the round run on into the upright round's top arc.
 #[test]
@@ -321,7 +319,7 @@ fn rim_edge_runs_on_into_the_upright_round() {
     assert_eq!(faces, 8);
 }
 
-/// SolidCraft's `robustness::fillet_into_an_earlier_round` (`fillet_blend_corner`): the 60 x
+/// SolidCraft's `robustness::fillet_into_an_earlier_round`: the 60 x
 /// 40 x 15 box's top front edge r2, then the front right upright r2 or r3 alone, which runs
 /// on into the first round's end arc: each takes off about what it would alone, 36000 - (1 -
 /// pi/4) (4 * 60 + r^2 * 15), within SolidCraft's 2, with one face more.
@@ -341,7 +339,7 @@ fn upright_runs_on_into_the_earlier_round() {
 
 /// fillets/5158 and fillets/1080 in SolidCraft's two passes (its `overflow_first`: the rounds
 /// that overflow first, then the others), with no faces handed over as the first pass's
-/// (`add_earlier_pass_face`, which SolidCraft does not call) (`fillet_blend_corner`). The
+/// (`add_earlier_pass_face`, which SolidCraft does not call). The
 /// second rounds run on into the first ones' end arcs as before smlib#124: the plate 8
 /// faces, SolidCraft's closed form 1681.903758348 (to 1e-5 there); the notched block 13
 /// faces, 10198.718249 (the fork's two passes, 9822462; its closed form 10198.718039, 2.1e-8
@@ -373,8 +371,8 @@ fn second_pass_runs_on_into_the_first_without_its_faces() {
     assert_rel(v, 10_198.718_249, 1e-9, "1080");
 }
 
-/// fillets/every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain
-/// (`fillet_blend_corner`): the 40 x 30 x 20 box's top front edge rounded curvature-continuous
+/// fillets/every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain:
+/// the 40 x 30 x 20 box's top front edge rounded curvature-continuous
 /// 3, then the top side edge the same way alone, which at y = 3 runs on into the first
 /// round's end curve (a curvature-continuous section: it leaves the top with almost no
 /// curvature, then turns down). Run on it is refused, as before smlib#124, which the case
@@ -390,7 +388,7 @@ fn curvature_side_round_running_on_into_the_front_round_is_not_capped() {
 }
 
 /// fillets/report-fillet-curvature-three-edges-at-bar-corner-solver-residues-outside-setback
-/// (#2369, `fillet_blend_corner`) with SolidCraft's calls: the residues bar's three edges at
+/// (#2369) with SolidCraft's calls: the residues bar's three edges at
 /// its top corner rounded curvature-continuous 2, the vertex set back
 /// (`add_set_back_vertex`), its corner (the Setback) set back 3 (`set_corner_setback`, the
 /// G2 corner's default 1.5 r) with its patches marked; then the cube [-1, 3]^2 x [7, 11]
@@ -469,7 +467,7 @@ fn outside_setback_with_solidcraft_s_calls_is_the_closed_form() {
 }
 
 /// The rig's every-block-cylinder-tangent-concave-arc-r2-partial-chain input
-/// (`fillet_blend_corner`; block 40 x 20 x 15 joined to the cylinder R10 x 30): the concave
+/// (block 40 x 20 x 15 joined to the cylinder R10 x 30): the concave
 /// arc where the block's top meets the cylinder is split at the cylinder's seam, and the
 /// pick (the rig's point) takes one piece. The round of that piece ends at the seam vertex,
 /// where the arc runs on between the same two faces: the End at the smooth vertex caps it

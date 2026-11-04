@@ -39,9 +39,19 @@ fn build(setback: f64, stay_inside: bool) -> solidcore::Result<(Kernel, Brep)> {
         }
     }
     assert_eq!(edges.len(), 3);
+    let mut set_back = None;
+    for v in b.vertices().ids() {
+        if at_corner(&b, v)? {
+            set_back = Some(v);
+        }
+    }
     {
         let mut session = FilletSession::new(&mut k, &mut b)?;
         session.prepare_constant_radius_edges(&mut k, &edges, 5.0, 1, 1, 1.0)?;
+        // set back (`AddSetBackVertex`), so the corner is the N x N corner, not the Ball
+        if let Some(v) = set_back {
+            session.add_set_back_vertex(v);
+        }
         session.create_corners(&k, None)?;
         for id in session.fillet_corners()? {
             if let Some(v) = session.corner(id)?.vertex {

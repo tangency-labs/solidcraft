@@ -148,7 +148,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_nx1_opposite_continuation_side_edge",
     "fillet_nx1_tangent_corner_edge",
     "fillet_nx1_tangent_side_edge",
-    "fillet_nx1_tangent_side_edge_same_convexity",
     "fillet_patch_keeps_fillet_edges",
     "fillet_point_bigger_step_retry",
     "fillet_point_step_per_point",

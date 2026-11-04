@@ -1,6 +1,6 @@
 //! WR-697 (smlib#79 step 4c, the fork's tangency-labs/smlib@79d4763, a6243fa, f8e6709,
 //! 4241a1b): three constant rounds of one radius r and one convexity at a vertex of three
-//! planes are the blend corner's Ball (`Kernel::fixes.fillet_blend_corner`). The ball of
+//! planes are the blend corner's Ball. The ball of
 //! radius r touching the three planes is centred at C, r off each; each round ends on its
 //! section through C, a great circle of that ball, and the corner's face is the ball's
 //! triangle between the three contacts, one rational patch exactly on the sphere, G1 to
@@ -57,12 +57,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -240,7 +240,7 @@ fn box_volume(rad: f64) -> f64 {
 /// rounded r 3: the ball about (37, 27, 17).
 #[test]
 fn box_corner_is_the_balls_octant() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     round(&mut k, &mut b, &BOX_EDGES, 3.0).unwrap();
     let v = volume(&k, &mut b);
@@ -265,31 +265,12 @@ fn box_corner_is_the_balls_octant() {
     assert!((v - want).abs() <= 1e-11 * want, "{v} {want}");
 }
 
-/// Without the flag the corner is the pinned 3x3 corner, whose analytic corner surface is
-/// the `SmSphere` (`MakeAnalyticCornerSurface`): the same octant, but not the fork's
-/// rational patch (9c58248: "never the `SmSphere`").
-#[test]
-fn without_the_flag_the_box_corner_is_the_pinned_sphere() {
-    let mut k = all_fixes(false);
-    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-    round(&mut k, &mut b, &BOX_EDGES, 3.0).unwrap();
-    let vs = [
-        Point3::new(40.0, 27.0, 17.0),
-        Point3::new(37.0, 30.0, 17.0),
-        Point3::new(37.0, 27.0, 20.0),
-    ];
-    let faces = corner_faces(&b, &vs);
-    assert_eq!(faces.len(), 1);
-    let s = face2::surface(&b, faces[0]).unwrap().unwrap();
-    assert!(matches!(s.kind(), SurfaceKind::Sphere(_)), "{:?}", s.kind());
-}
-
 /// capi `ball pocket_corner`: a 40 x 30 x 20 block with a 20 x 10 x 10 pocket, the three
 /// concave edges at the pocket's floor corner (10, 10, 10) rounded r 2: the ball about
 /// (12, 12, 12), added material.
 #[test]
 fn pocket_corner_is_the_balls_octant() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let cut = create_box(&mut k, Point3::new(10.0, 10.0, 10.0), 20.0, 10.0, 11.0).unwrap();
     let mut b = boolean_difference(&mut k, block, cut).unwrap();
@@ -359,7 +340,7 @@ fn half_space(k: &mut Kernel, at: Vec3, n: Vec3) -> Brep {
 /// the ball's sector there, r^3 (pi/3) / 3.
 #[test]
 fn prism_corner_is_on_the_ball() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let s3 = 3.0f64.sqrt();
     let rad = 2.0;
     let kite = [
@@ -412,7 +393,7 @@ fn prism_corner_is_on_the_ball() {
 /// planes and the end sections' planes through C less the ball's sector there.
 #[test]
 fn oblique_corner_is_on_the_ball() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let rad = 2.0;
     let len = 20.0;
     let n = [
@@ -500,7 +481,7 @@ fn oblique_corner_is_on_the_ball() {
 /// the box corner is then the 3x3 corner (its analytic sphere).
 #[test]
 fn a_set_back_vertex_is_no_ball() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let edges: Vec<EdgeId> = BOX_EDGES.iter().map(|&p| pick(&k, &b, p)).collect();
     let target = Point3::new(40.0, 30.0, 20.0);
@@ -1581,9 +1562,9 @@ fn five_and_six_chamfers_at_an_apex_are_bilinear_quadrilaterals() {
 // (the bevel's for the Mitre, the ring's for the Facet), not by two blends meeting. The
 // fork's own events are Nx2 corners by type, as they took over the Nx2 corner's tests one
 // for one; were the chamfer event one too, the executive would treat it as a two-blend
-// corner: its big-radius conversion of the fillet between two Nx2 corners, its squeeze of
-// a rail edge too short at an Nx2 corner, the Nx2 branch of the fillet edges'
-// connectivity, and a mitred Turn's corner edges (#2355's review). At the 2/3/4 corner,
+// corner: its squeeze of a rail edge too short at an Nx2 corner, the Nx2 branch of the
+// fillet edges' connectivity, and a mitred Turn's corner edges (#2355's review; the
+// big-radius conversion it also listed is deleted, #2400). At the 2/3/4 corner,
 // as either type: NByNConvex.
 #[test]
 fn a_chamfer_corner_is_the_nxn_corner_by_type() {

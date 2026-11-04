@@ -4,8 +4,8 @@
 //! run on the top face (its two sides, its two R2 corners and its top, tangent through the
 //! corners, ending at the sharp concave corners at x = +-4) is rounded r 0.5 together.
 //!
-//! Each side round ends at a mixed-convexity End on the R25 wall. With
-//! `fillet_blend_corner` (WR-697, the fork's 3e26f76 `CalcRailIntEndSurface`), the end rib
+//! Each side round ends at a mixed-convexity End on the R25 wall (WR-697, the fork's 3e26f76
+//! `CalcRailIntEndSurface`): the end rib
 //! is the round's intersection with the wall, traced from the top rail's end. At x > 0
 //! the trace's last span was shorter than a tenth of the one before, and `FlushCurve`
 //! merged it into that span without testing the merged span: the rib's UV curve on the
@@ -17,8 +17,7 @@
 //! each end rib on both its supports: its 3D curve within the tolerance of the wall
 //! `x^2 + y^2 = 25^2` and of the round's cylinder (radius 0.5 about the line x = +-3.5,
 //! z = 1.5), and each edge use's UV curve, mapped onto its face, within the edge's
-//! tolerance of the 3D curve. The volume is the pinned (flag off) one,
-//! 4039.146522158091, within the volume a rib may move: the ribs' curves differ by at
+//! tolerance of the 3D curve. The volume is the pinned SMLib End's, 4039.146522158091, within the volume a rib may move: the ribs' curves differ by at
 //! most the approximation tolerance 4e-5 across each end's spandrel, area
 //! (1 - pi/4) r^2 = 0.0537, so 2 * 4e-5 * 0.0537 = 4.3e-6.
 
@@ -55,14 +54,12 @@ const PICKS: [[f64; 3]; 5] = [
     [-4.000_000_002_508_774_5, 27.894_518_234_296_79, 2.0],
 ];
 
-/// Every opt-in fix on (SolidCraft's pin-16 set), with `fillet_blend_corner` as given.
-fn kernel(blend_corner: bool) -> Kernel {
-    let mut k = Kernel {
+/// Every opt-in fix on (SolidCraft's pin-16 set).
+fn kernel() -> Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.fillet_blend_corner = blend_corner;
-    k
+    }
 }
 
 /// The SolidCraft file, read under the notification naming as SolidCraft reads it.
@@ -105,7 +102,7 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
     best.1.expect("an edge at the pick")
 }
 
-/// The pinned (flag off) volume.
+/// The pinned SMLib End's volume.
 const PINNED: f64 = 4_039.146_522_158_091;
 /// What a rib may move the volume by (the file header).
 const RIB_BOUND: f64 = 4.3e-6;
@@ -162,21 +159,17 @@ fn assert_rib_on_its_supports(k: &Kernel, b: &Brep, e: EdgeId) {
 }
 
 /// The rounded body checked as the file header says; its volume.
-fn rounded(blend_corner: bool) -> f64 {
-    let mut k = kernel(blend_corner);
+fn rounded() -> f64 {
+    let mut k = kernel();
     let mut b = body(&mut k);
     let es: Vec<EdgeId> = PICKS.iter().map(|p| pick(&k, &b, *p)).collect();
     fillet_edges(&mut k, &mut b, &es, RADIUS, 1, 1, 1.0).unwrap();
     b.refresh_cached_topology();
     let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    assert!(
-        check.is_valid(),
-        "blend_corner {blend_corner}: {:?}",
-        check.lines()
-    );
-    assert_eq!(b.face_list().len(), 15, "blend_corner {blend_corner}");
+    assert!(check.is_valid(), "{:?}", check.lines());
+    assert_eq!(b.face_list().len(), 15);
     let ribs = end_ribs(&b);
-    assert_eq!(ribs.len(), 2, "blend_corner {blend_corner}");
+    assert_eq!(ribs.len(), 2);
     for e in ribs {
         assert_rib_on_its_supports(&k, &b, e);
     }
@@ -185,23 +178,16 @@ fn rounded(blend_corner: bool) -> f64 {
 
 #[test]
 fn the_input_is_solidcraft_s_plate() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = body(&mut k);
     assert_eq!(b.face_list().len(), 10);
     let v = volume(&k, &mut b);
     assert!((v - 4_040.367_787_504).abs() <= 1e-6, "{v}");
 }
 
-/// The issue's case, with the blend corner: sound, its ribs on their supports.
+/// The issue's case: sound, its ribs on their supports.
 #[test]
 fn the_tab_s_run_rounds_to_a_sound_body() {
-    let v = rounded(true);
+    let v = rounded();
     assert!((v - PINNED).abs() <= RIB_BOUND, "{v} vs pinned {PINNED}");
-}
-
-/// Without the blend corner: the pinned result.
-#[test]
-fn without_the_blend_corner_the_pinned_result() {
-    let v = rounded(false);
-    assert!((v - PINNED).abs() <= 1e-9 * PINNED, "{v}");
 }

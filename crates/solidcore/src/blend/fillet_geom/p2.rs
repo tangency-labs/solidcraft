@@ -1965,12 +1965,12 @@ impl FilletBrep {
             }
             self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
 
-            // SolidCraft change (the fork's 63c7962, `fixes.fillet_blend_corner`): a side edge
+            // SolidCraft change (the fork's 63c7962): a side edge
             // split only by a seam ending on it (a cylinder's seam on its rim) continues
             // across that vertex: the rail that runs past the edge's far end ends on the next
             // edge, between the same two faces. Its end is looked for there, from that vertex
             // on.
-            if k.fixes.fillet_blend_corner && !found && !is_closed {
+            if !found && !is_closed {
                 let far = if edge::start_vertex(target, side_edge)? == cp_vertex {
                     edge::end_vertex(target, side_edge)?
                 } else if edge::end_vertex(target, side_edge)? == cp_vertex {
@@ -3687,7 +3687,7 @@ mod tests {
             })
         ));
         let corners = [FilletCorner::new(
-            crate::blend::fillet_corner::p3::FilletCornerKind::OneByOne,
+            crate::blend::fillet_corner::p3::FilletCornerKind::FourByThree,
             None,
             None,
             None,

@@ -92,22 +92,6 @@ fn variable_round_reach(fix: bool) -> Vec<(f64, [[bool; 2]; 2])> {
     out
 }
 
-/// The fillet error code of a round of radius `r` on a 5 x 5 x 30 bar's long edge.
-fn bar_round_error(fix: bool, r: f64) -> i32 {
-    let mut k = kernel(fix);
-    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 5.0, 30.0).unwrap();
-    let e = edge_where(&k, &b, |p| p.x == 5.0 && p.y == 5.0);
-    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
-    session
-        .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
-        .unwrap();
-    assert!(
-        session.do_fillet(&mut k).is_err(),
-        "r{r} has no room without the cliff overflow"
-    );
-    session.error_info().code
-}
-
 #[test]
 fn variable_round_traced_farther_comes_out_the_same() {
     for fix in [false, true] {
@@ -126,15 +110,6 @@ fn variable_round_trace_reaches_its_rails_only_with_the_flag() {
     assert!((reach - expect).abs() <= 1e-12 * expect, "reach {reach}");
     // each face's u runs across the edge, its v along it
     assert_eq!(across, [[true, false], [true, false]]);
-}
-
-#[test]
-fn bar_round_wider_than_its_faces_finds_its_rail_ends() {
-    // pinned behaviour: no rail ends, the fillet surface fails
-    assert_eq!(bar_round_error(false, 10.0), 4);
-    // with the flag: as far as r9 gets, the corner edges
-    assert_eq!(bar_round_error(true, 9.0), 3);
-    assert_eq!(bar_round_error(true, 10.0), 3);
 }
 
 #[test]

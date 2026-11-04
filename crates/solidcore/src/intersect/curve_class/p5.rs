@@ -18,7 +18,7 @@
 //! callers. Handles and geometry use the part-1 model. Optional [`ClassGeometry`]
 //! callbacks resolve vertex points, topology tolerances and vertex/face gaps; opaque
 //! handles still defer.
-//! With `fillet_blend_corner`, fillet vertex contacts also satisfy the body's
+//! Fillet vertex contacts also satisfy the body's
 //! vertex/face incidence tolerance: the blend curve's approximation allowance must
 //! not capture a separate vertex outside that resolution (#1999).
 //!
@@ -817,7 +817,6 @@ impl<O: ClassObject> CurveClassification<O> {
             // resulting vertex/face incidence. Bound the contact before inserting
             // it; neither the curve nor any topology tolerance is changed.
             let contact_bound = if self.doing_fillets()
-                && k.fixes.fillet_blend_corner
                 && (wrapped.is_some() || self.curve_geometry(geometry)?.dim() == 3)
             {
                 let (body, _) = super::p7::vertex_of(geometry, vertex, OP)?;
@@ -1954,58 +1953,48 @@ mod tests {
 
     #[test]
     fn blend_vertex_contact_does_not_use_the_curve_allowance_as_body_resolution() {
-        for enabled in [false, true] {
-            for filleting in [false, true] {
-                for (body_tol, distance) in [
-                    (1e-5, 0.0),
-                    (1e-5, 1e-6),
-                    (1e-5, 2e-5),
-                    (1e-5, 3e-5),
-                    (1e-4, 3e-5),
-                ] {
-                    let mut k = Kernel::default();
-                    k.fixes.fillet_blend_corner = enabled;
-                    let point = Vec3::new(0.5, distance, 0.0);
-                    let mut body = Brep::new();
-                    body.set_tolerance(body_tol);
-                    let vertex = body.add_vertex(point).unwrap();
-                    let g = VertexGeometry {
-                        curve: geometry().0,
-                        point: Some(point),
-                        gap_calls: core::cell::Cell::new(0),
-                        body_vertex: Some((body, vertex)),
-                    };
-                    let surface = Surface::from(crate::surface::plane::Plane::from_normal(
-                        Vec3::ZERO,
-                        Vec3::new(0.0, 0.0, 1.0),
-                    ));
-                    let mut cc = vertex_classification(&k);
-                    cc.set_size(&k, 1).unwrap();
-                    cc.at_mut(0)
-                        .unwrap()
-                        .set_interval(&Extent1d::from_min_max(0.0, 1.0));
-                    cc.set_src_zone_tol_3d(4e-5);
-                    cc.set_fillet_data(None, filleting);
-                    cc.intersect_vertices(
-                        &k,
-                        &g,
-                        &[VertexTestObject::Vertex],
-                        &surface,
-                        false,
-                        true,
-                    )
+        for filleting in [false, true] {
+            for (body_tol, distance) in [
+                (1e-5, 0.0),
+                (1e-5, 1e-6),
+                (1e-5, 2e-5),
+                (1e-5, 3e-5),
+                (1e-4, 3e-5),
+            ] {
+                let k = Kernel::default();
+                let point = Vec3::new(0.5, distance, 0.0);
+                let mut body = Brep::new();
+                body.set_tolerance(body_tol);
+                let vertex = body.add_vertex(point).unwrap();
+                let g = VertexGeometry {
+                    curve: geometry().0,
+                    point: Some(point),
+                    gap_calls: core::cell::Cell::new(0),
+                    body_vertex: Some((body, vertex)),
+                };
+                let surface = Surface::from(crate::surface::plane::Plane::from_normal(
+                    Vec3::ZERO,
+                    Vec3::new(0.0, 0.0, 1.0),
+                ));
+                let mut cc = vertex_classification(&k);
+                cc.set_size(&k, 1).unwrap();
+                cc.at_mut(0)
+                    .unwrap()
+                    .set_interval(&Extent1d::from_min_max(0.0, 1.0));
+                cc.set_src_zone_tol_3d(4e-5);
+                cc.set_fillet_data(None, filleting);
+                cc.intersect_vertices(&k, &g, &[VertexTestObject::Vertex], &surface, false, true)
                     .unwrap();
-                    let contact = cc.intervals().iter().any(|i| {
-                        i.start.object() == Some(VertexTestObject::Vertex)
-                            || i.end.object() == Some(VertexTestObject::Vertex)
-                    });
-                    assert_eq!(
-                        contact,
-                        !(enabled && filleting && distance >= 2.0 * body_tol),
-                        "enabled={enabled} filleting={filleting} distance={distance}"
-                    );
-                    assert_eq!(cc.src_zone_tol_3d(), 4e-5);
-                }
+                let contact = cc.intervals().iter().any(|i| {
+                    i.start.object() == Some(VertexTestObject::Vertex)
+                        || i.end.object() == Some(VertexTestObject::Vertex)
+                });
+                assert_eq!(
+                    contact,
+                    !(filleting && distance >= 2.0 * body_tol),
+                    "filleting={filleting} distance={distance}"
+                );
+                assert_eq!(cc.src_zone_tol_3d(), 4e-5);
             }
         }
     }

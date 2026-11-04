@@ -63,12 +63,12 @@ const RAD: f64 = 2.0;
 /// 5e-3 (the fork's capi `scenario_three_edges_at_the_knife_edge_arc_corner`).
 const SOLIDCRAFT_VOLUME: f64 = 9524.342896;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn kernel(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -292,7 +292,7 @@ fn assert_arc_corner_ball(name: &str, k: &mut Kernel, b: &mut Brep) -> f64 {
 
 /// The three edges R2 together, the shape both orders end on (passes before the fix).
 fn three_together() -> f64 {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = part(&mut k);
     round(&mut k, &mut b, &[TOP_FRONT, ARC_TOP, UPRIGHT]).unwrap();
     assert_arc_corner_ball("three together", &mut k, &mut b)
@@ -309,7 +309,7 @@ fn three_edges_together_end_on_the_corner_ball() {
 /// triangle, and the arc round is cut back to its section through C.
 #[test]
 fn arc_then_top_front_ends_on_the_corner_ball() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = part(&mut k);
     round(&mut k, &mut b, &[ARC_TOP]).unwrap();
     round(&mut k, &mut b, &[TOP_FRONT, arc_round_end_curve(), UPRIGHT])
@@ -324,7 +324,7 @@ fn arc_then_top_front_ends_on_the_corner_ball() {
 /// round's axis.
 #[test]
 fn top_front_then_upright_ends_on_the_corner_ball() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = part(&mut k);
     round(&mut k, &mut b, &[TOP_FRONT]).unwrap();
     round(
@@ -338,28 +338,6 @@ fn top_front_then_upright_ends_on_the_corner_ball() {
     assert!((v - want).abs() <= 1e-9 * want, "{v} {want}");
 }
 
-/// Without `fillet_blend_corner` the round along the end curve is traced, as in the fork,
-/// and fails.
-#[test]
-fn without_the_blend_corner_the_chain_over_the_end_curve_fails() {
-    for arc_first in [true, false] {
-        let mut k = kernel(false);
-        let mut b = part(&mut k);
-        let r = if arc_first {
-            round(&mut k, &mut b, &[ARC_TOP]).unwrap();
-            round(&mut k, &mut b, &[TOP_FRONT, arc_round_end_curve(), UPRIGHT])
-        } else {
-            round(&mut k, &mut b, &[TOP_FRONT]).unwrap();
-            round(
-                &mut k,
-                &mut b,
-                &[UPRIGHT, top_front_round_end_curve(), ARC_TOP],
-            )
-        };
-        assert!(r.is_err(), "arc first {arc_first}: {r:?}");
-    }
-}
-
 /// `851-fillet-top-front-then-front-left-upright`, the end arc on a plane square to the
 /// round's axis: the chain over it ends on the ball about (2, -19, 8) at the left front top
 /// corner, built (before and after the fix) as the round about the top front round's axis
@@ -369,7 +347,7 @@ fn without_the_blend_corner_the_chain_over_the_end_curve_fails() {
 /// `27 (4 - pi) + 8 (1 - pi/6) - 2 (4 - pi) = 27 (4 - pi) + 2 pi / 3`.
 #[test]
 fn the_flat_end_arc_still_ends_on_its_corner_ball() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = part(&mut k);
     round(&mut k, &mut b, &[TOP_FRONT]).unwrap();
     let first = volume(&k, &mut b);

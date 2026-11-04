@@ -27,8 +27,7 @@
 //! Deviations: out-params are return values; an index the fork reads out of range (only
 //! on malformed data) is `SM_ERR`; a twist term names its side by an index into the
 //! caller's sides instead of a pointer. `sm_MxRoots` recurses at most 61 deep (its own
-//! `depth > 60` stop, as the fork). Opt-in with the Mixed corner
-//! (`Kernel::fixes.fillet_blend_corner`, WR-697).
+//! `depth > 60` stop, as the fork; the Mixed corner, WR-697).
 
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3, BIG_DOUBLE};

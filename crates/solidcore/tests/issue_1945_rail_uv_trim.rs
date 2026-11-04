@@ -167,8 +167,7 @@ const TOP: [Point3; 2] = [
 ];
 
 /// SolidCraft's fixes: every `UpstreamFixes` field on except `geometric_g2_continuity`, so
-/// both rounds are built by the blend corner (`fillet_blend_corner`), the construction kept
-/// since WR-641's `fillet_through_extended_rail_end` was removed (#2500).
+/// both rounds are built by the blend corner, the construction kept since WR-641's `fillet_through_extended_rail_end` was removed (#2500).
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {

@@ -421,7 +421,7 @@ fn both_full_rollovers_execute_in_order_and_preserve_first_mutation_on_error() {
         ..Script::default()
     };
     let mut adjusted = vec![FilletCornerId(9)];
-    f.corners = TestCorners(Some(FilletCornerType::OneByOne));
+    f.corners = TestCorners(Some(FilletCornerType::NByOneClosed));
     assert!(f.context().process(id, &mut adjusted, &mut script).is_err());
     assert_eq!(script.calls, ["full0", "full1"]);
     assert!(f.fb.geom(id).unwrap().need_split);
@@ -438,7 +438,7 @@ fn failed_first_full_rollover_stops_before_second() {
     }
     let mut f = Fixture::new([&[1.0], &[1.0]], true);
     let id = f.geom;
-    f.corners = TestCorners(Some(FilletCornerType::OneByOne));
+    f.corners = TestCorners(Some(FilletCornerType::NByOneClosed));
     assert_eq!(
         f.context().process(id, &mut vec![], &mut Failing),
         Err(SolidError::sm_err("first"))

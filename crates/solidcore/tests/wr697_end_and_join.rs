@@ -1,5 +1,5 @@
 //! WR-697 (smlib#79 step 4d, the fork's tangency-labs/smlib@794946e, 3e26f76, 68e039c,
-//! 543d25a, 53c47b8): with `Kernel::fixes.fillet_blend_corner` a blend ending at a vertex
+//! 543d25a, 53c47b8): a blend ending at a vertex
 //! is the blend corner's End, every G1 continuation of blends is its Join on one shared
 //! section, a mixed-convexity End's rail ends at its crossing with the end face's surface,
 //! and a round whose rails both lie on its neighbours' rails keeps its face.
@@ -31,12 +31,12 @@ use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -157,7 +157,7 @@ fn clean(k: &mut Kernel, b: &mut Brep) {
 }
 
 /// 794946e: a 20 x 4 x 4 bar, its four long edges rounded r 2 in one call, is the rod of
-/// radius 2 (80 pi, 6 faces); without the fix one round is dropped (7 faces). The fork
+/// radius 2 (80 pi, 6 faces), where pinned SMLib drops one round (7 faces). The fork
 /// 5e8c9c1 prints 251.327412287185155 and 6 faces.
 #[test]
 fn a_square_bar_rounded_on_its_four_long_edges_is_a_rod() {
@@ -167,22 +167,14 @@ fn a_square_bar_rounded_on_its_four_long_edges_is_a_rod() {
         [10.0, 0.0, 4.0],
         [10.0, 4.0, 4.0],
     ];
-    for blend in [true, false] {
-        let mut k = all_fixes(blend);
-        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 4.0, 4.0).unwrap();
-        round(&mut k, &mut b, &edges, 2.0);
-        let v = volume(&k, &mut b);
-        eprintln!("blend {blend}: volume {v:.15}, {} faces", faces(&b));
-        clean(&mut k, &mut b);
-        if blend {
-            assert!((v - 80.0 * PI).abs() <= 1e-9 * v, "{v}");
-            assert_eq!(faces(&b), 6);
-        } else {
-            // pinned SMLib drops a round
-            assert!((v - 268.495559215389).abs() <= 1e-9 * v, "{v}");
-            assert_eq!(faces(&b), 7);
-        }
-    }
+    let mut k = all_fixes();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 4.0, 4.0).unwrap();
+    round(&mut k, &mut b, &edges, 2.0);
+    let v = volume(&k, &mut b);
+    eprintln!("volume {v:.15}, {} faces", faces(&b));
+    clean(&mut k, &mut b);
+    assert!((v - 80.0 * PI).abs() <= 1e-9 * v, "{v}");
+    assert_eq!(faces(&b), 6);
 }
 
 /// The step block: a 40 x 30 x 10 block under a 20 x 30 x 10 one whose wall is the cylinder
@@ -228,30 +220,21 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     }
     removed *= h / 3.0;
     let want = 12000.0 + 3000.0 * PI - removed;
-    for blend in [true, false] {
-        let mut k = all_fixes(blend);
-        let mut b = cylinder_wall(&mut k);
-        let cs = corners(&mut k, &mut b.clone(), &[[30.0, 0.0, 10.0]], 2.0);
-        let (kind, event) = at(&cs, [20.0, 0.0, 10.0]);
-        assert_eq!(kind, FilletCornerKind::NByOne);
-        assert_eq!(
-            event,
-            blend.then_some((BlendCornerEvent::End, BlendEnd::OnEndFace))
-        );
-        round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
-        let v = volume(&k, &mut b);
-        let off = nearest_vertex(&b, Point3::new(396.0_f64.sqrt(), 0.0, 8.0));
-        eprintln!("blend {blend}: volume {v:.15} want {want:.15}; rail end off {off:.3e}");
-        clean(&mut k, &mut b);
-        assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
-        assert!(off <= 1e-13, "{off}");
-        let fork = if blend {
-            21407.602511807886913
-        } else {
-            21407.602511915742070
-        };
-        assert!((v - fork).abs() <= 1e-10, "{v} vs the fork's {fork}");
-    }
+    let mut k = all_fixes();
+    let mut b = cylinder_wall(&mut k);
+    let cs = corners(&mut k, &mut b.clone(), &[[30.0, 0.0, 10.0]], 2.0);
+    let (kind, event) = at(&cs, [20.0, 0.0, 10.0]);
+    assert_eq!(kind, FilletCornerKind::NByOne);
+    assert_eq!(event, Some((BlendCornerEvent::End, BlendEnd::OnEndFace)));
+    round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
+    let v = volume(&k, &mut b);
+    let off = nearest_vertex(&b, Point3::new(396.0_f64.sqrt(), 0.0, 8.0));
+    eprintln!("volume {v:.15} want {want:.15}; rail end off {off:.3e}");
+    clean(&mut k, &mut b);
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    assert!(off <= 1e-13, "{off}");
+    let fork = 21407.602511807886913;
+    assert!((v - fork).abs() <= 1e-10, "{v} vs the fork's {fork}");
 }
 
 /// The step with its upper block's profile (0, 10), (20, 10), (17, 20), (0, 20) swept
@@ -281,7 +264,7 @@ fn sloped_wall(k: &mut Kernel) -> Brep {
 /// 17532.946897573881870 (9.4e-8 off the closed form) with the same rail end and counts.
 #[test]
 fn a_mixed_convexity_end_on_a_sloped_wall_has_its_closed_form() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let mut b = sloped_wall(&mut k);
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
     let v = volume(&k, &mut b);
@@ -302,74 +285,54 @@ fn a_mixed_convexity_end_on_a_sloped_wall_has_its_closed_form() {
 fn a_cut_ball_s_rim_joins_on_its_shared_sections() {
     let q = 42.0_f64.sqrt();
     let rim = [[q, q, 4.0], [-q, -q, 4.0]];
-    for blend in [true, false] {
-        let mut k = all_fixes(blend);
-        let s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
-        let cut = create_box(&mut k, Point3::new(-20.0, -20.0, 4.0), 40.0, 40.0, 20.0).unwrap();
-        let mut b = boolean_difference(&mut k, s, cut).unwrap();
-        let cs = corners(&mut k, &mut b.clone(), &rim, 2.0);
-        eprintln!("{cs:?}");
-        assert_eq!(cs.len(), 2);
-        let two = cs.iter().find(|c| c.3 == 22).unwrap();
-        let seam = cs.iter().find(|c| c.3 == 23).unwrap();
-        assert_eq!(seam.1, FilletCornerKind::NByTwo);
-        assert_eq!(seam.2.map(|e| e.0), blend.then_some(BlendCornerEvent::Join));
-        if blend {
-            assert_eq!(two.1, FilletCornerKind::NByTwo);
-            assert_eq!(two.2.map(|e| e.0), Some(BlendCornerEvent::Join));
-        } else {
-            assert_eq!(two.1, FilletCornerKind::TwoByTwo);
-            assert_eq!(two.2, None);
-        }
-        round(&mut k, &mut b, &rim, 2.0);
-        let v = volume(&k, &mut b);
-        eprintln!("blend {blend}: volume {v:.15}");
-        clean(&mut k, &mut b);
-        assert!((v - 3261.518762521006).abs() <= 1e-9 * v, "{v}");
-        assert_eq!(faces(&b), 4);
-    }
+    let mut k = all_fixes();
+    let s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
+    let cut = create_box(&mut k, Point3::new(-20.0, -20.0, 4.0), 40.0, 40.0, 20.0).unwrap();
+    let mut b = boolean_difference(&mut k, s, cut).unwrap();
+    let cs = corners(&mut k, &mut b.clone(), &rim, 2.0);
+    eprintln!("{cs:?}");
+    assert_eq!(cs.len(), 2);
+    let two = cs.iter().find(|c| c.3 == 22).unwrap();
+    let seam = cs.iter().find(|c| c.3 == 23).unwrap();
+    assert_eq!(seam.1, FilletCornerKind::NByTwo);
+    assert_eq!(seam.2.map(|e| e.0), Some(BlendCornerEvent::Join));
+    assert_eq!(two.1, FilletCornerKind::NByTwo);
+    assert_eq!(two.2.map(|e| e.0), Some(BlendCornerEvent::Join));
+    round(&mut k, &mut b, &rim, 2.0);
+    let v = volume(&k, &mut b);
+    eprintln!("volume {v:.15}");
+    clean(&mut k, &mut b);
+    assert!((v - 3261.518762521006).abs() <= 1e-9 * v, "{v}");
+    assert_eq!(faces(&b), 4);
 }
 
 /// 543d25a: the tee's saddle, one closed edge meeting itself at its vertex on the
 /// branch's seam, rounded r 3, is a closed Join (pinned: the closed Nx1 corner); the result is the
 /// pinned corner's. The closed form (the fork's capi `exact_class_tee_is_fitted`) is
 /// 129829.952905668950; this round is not the fork's fitted procedural blend, so the port
-/// lands 2.8e-4 above it, with and without the flag alike. The volume is integrated at
-/// 1e-8, which lands within 6e-6 of the value at 1e-12 (measured on this body), far inside
-/// the 5e-3 it is checked to.
+/// lands 2.8e-4 above it. The volume is integrated at 1e-8, which lands within 6e-6 of the
+/// value at 1e-12 (measured on this body), far inside the 5e-3 it is checked to.
 #[test]
 fn a_tee_s_closed_saddle_is_a_closed_join() {
     let h = 0.5_f64.sqrt() * 8.0;
     let saddle = [[h, h, 368.0_f64.sqrt()]];
-    let mut out = Vec::new();
-    for blend in [true, false] {
-        let mut k = all_fixes(blend);
-        let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 100.0).unwrap();
-        let pl = Axis2Placement::new(Point3::new(-50.0, 0.0, 0.0), Vec3::Y, Vec3::Z);
-        transform(&mut k, &mut pipe, &pl, None, false).unwrap();
-        let branch = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 8.0, 40.0).unwrap();
-        let mut b = boolean_union(&mut k, pipe, branch).unwrap();
-        let cs = corners(&mut k, &mut b.clone(), &saddle, 3.0);
-        assert_eq!(cs.len(), 1);
-        if blend {
-            assert_eq!(cs[0].1, FilletCornerKind::NByTwo);
-            assert_eq!(cs[0].2.map(|e| e.0), Some(BlendCornerEvent::Join));
-            assert_eq!(cs[0].3, 12);
-        } else {
-            assert_eq!(cs[0].1, FilletCornerKind::NByOneClosed);
-        }
-        round(&mut k, &mut b, &saddle, 3.0);
-        clean(&mut k, &mut b);
-        out.push((volume_at(&k, &mut b, 1e-8).unwrap(), faces(&b)));
-    }
-    eprintln!("{out:?}");
-    assert_eq!(out[0], out[1]);
-    assert_eq!(out[0].1, 6);
-    assert!(
-        (out[0].0 - 129829.952905668950).abs() <= 5e-3,
-        "{}",
-        out[0].0
-    );
+    let mut k = all_fixes();
+    let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 100.0).unwrap();
+    let pl = Axis2Placement::new(Point3::new(-50.0, 0.0, 0.0), Vec3::Y, Vec3::Z);
+    transform(&mut k, &mut pipe, &pl, None, false).unwrap();
+    let branch = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 8.0, 40.0).unwrap();
+    let mut b = boolean_union(&mut k, pipe, branch).unwrap();
+    let cs = corners(&mut k, &mut b.clone(), &saddle, 3.0);
+    assert_eq!(cs.len(), 1);
+    assert_eq!(cs[0].1, FilletCornerKind::NByTwo);
+    assert_eq!(cs[0].2.map(|e| e.0), Some(BlendCornerEvent::Join));
+    assert_eq!(cs[0].3, 12);
+    round(&mut k, &mut b, &saddle, 3.0);
+    clean(&mut k, &mut b);
+    let (v, n) = (volume_at(&k, &mut b, 1e-8).unwrap(), faces(&b));
+    eprintln!("volume {v:.15}, {n} faces");
+    assert_eq!(n, 6);
+    assert!((v - 129829.952905668950).abs() <= 5e-3, "{v}");
 }
 
 /// The teardrop's control points: one closed cubic B-spline from its tip (0, 0) round
@@ -495,7 +458,7 @@ fn a_closed_convex_rim_meeting_itself_at_an_angle_is_rounded() {
     for r in [0.5, 1.0] {
         let want = 10.0 * area - length * r * r * (1.0 - PI / 4.0)
             + (3.0 * PI / 4.0 + 1.0) * r.powi(3) * (5.0 / 3.0 - PI / 2.0);
-        let mut k = all_fixes(true);
+        let mut k = all_fixes();
         let mut b = teardrop_prism(&mut k);
         round(&mut k, &mut b, &rim, r);
         let v = volume(&k, &mut b);
@@ -541,49 +504,29 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 }
 
 /// The closed-edge corner where a closed edge meets itself at an angle: the teardrop boss's
-/// foot, rounded r 0.5 and r 1, is the closed Nx1 corner at the tip with and without the
-/// flag (543d25a makes only a closed edge meeting itself G1 the Join). With the flag the
-/// fork's corner there is the angle case alone (smlib#113 caa67d0, 2ac7a17). The volumes
-/// are the port's own (no closed form; the fork was not run on this body): they pin the
-/// results across that change, each body clean with the boss's round and the plate's.
+/// foot, rounded r 0.5 and r 1, is the closed Nx1 corner at the tip (543d25a makes only a
+/// closed edge meeting itself G1 the Join), the fork's angle case alone (smlib#113 caa67d0,
+/// 2ac7a17). The volumes are the port's own (no closed form; the fork was not run on this
+/// body), each body clean with the boss's round and the plate's.
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_corner() {
     let foot = [[15.5, 0.0, 0.0]];
-    for blend in [true, false] {
-        for (r, want) in [
-            (
-                0.5,
-                if blend {
-                    7133.840112885839517
-                } else {
-                    7133.840112799233793
-                },
-            ),
-            (
-                1.0,
-                if blend {
-                    7140.722103719867846
-                } else {
-                    7140.722104405596838
-                },
-            ),
-        ] {
-            let mut k = all_fixes(blend);
-            let mut b = teardrop_boss(&mut k);
-            let cs = corners(&mut k, &mut b.clone(), &foot, r);
-            assert_eq!(cs.len(), 1);
-            assert!(cs[0].0.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-12);
-            assert_eq!(
-                (cs[0].1, cs[0].2, cs[0].3),
-                (FilletCornerKind::NByOneClosed, None, 12)
-            );
-            round(&mut k, &mut b, &foot, r);
-            let v = volume(&k, &mut b);
-            eprintln!("blend {blend} r {r}: volume {v:.15}, {} faces", faces(&b));
-            clean(&mut k, &mut b);
-            assert_eq!(faces(&b), 10);
-            assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
-        }
+    for (r, want) in [(0.5, 7133.840112885839517), (1.0, 7140.722103719867846)] {
+        let mut k = all_fixes();
+        let mut b = teardrop_boss(&mut k);
+        let cs = corners(&mut k, &mut b.clone(), &foot, r);
+        assert_eq!(cs.len(), 1);
+        assert!(cs[0].0.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-12);
+        assert_eq!(
+            (cs[0].1, cs[0].2, cs[0].3),
+            (FilletCornerKind::NByOneClosed, None, 12)
+        );
+        round(&mut k, &mut b, &foot, r);
+        let v = volume(&k, &mut b);
+        eprintln!("r {r}: volume {v:.15}, {} faces", faces(&b));
+        clean(&mut k, &mut b);
+        assert_eq!(faces(&b), 10);
+        assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
     }
 }
 
@@ -599,7 +542,7 @@ use solidcore::topology::face::p2 as face2;
 /// The step's front edge rounded r 2 into an End on `wall`, with or without
 /// `fillet_round_as_definition`.
 fn end_on(wall: fn(&mut Kernel) -> Brep, definition: bool) -> (Kernel, Brep) {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     k.fixes.fillet_round_as_definition = definition;
     let mut b = wall(&mut k);
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);

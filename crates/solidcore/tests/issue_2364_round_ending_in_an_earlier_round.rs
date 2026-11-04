@@ -8,7 +8,7 @@
 //! face). Its rail on the side face runs past the far end P of the side edge, the first
 //! round's boundary there. At P the first round runs on tangentially into the top face, so
 //! the rail ends on the top face, and the global merge cuts the round where it meets the
-//! first round and the top face. With `fillet_blend_corner` the fork's 41a39ec
+//! first round and the top face. The fork's 41a39ec
 //! (`RefuseEndPastSideEdge`, `FitOfEndPastSideEdges`) refused it with `SM_FILERR_NO_ROOM`,
 //! naming 1.04762 (the arc) and 1.05 (the back edge). The fork at v1.1.0-alpha.1 refuses it
 //! too, also with `AddEarlierPassFace`. Before #2364 it built through WR-303's global merge
@@ -42,7 +42,7 @@ const BACK_TOP: Point3 = Point3::new(30.0, 0.0, 10.0);
 /// A point on the upright at the knife-edge tip.
 const TIP: Point3 = Point3::new(W + 21.0, 0.0, 5.0);
 
-/// SolidCraft's rig set: every fix but the five it leaves off (`fillet_blend_corner` on).
+/// SolidCraft's rig set: every fix but the five it leaves off.
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
     f.cone_unbounded_parameterized_as_nurb = false;

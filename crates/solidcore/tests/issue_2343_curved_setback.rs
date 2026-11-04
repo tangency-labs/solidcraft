@@ -1,8 +1,7 @@
 //! tangency-labs/solidcore#2343 (smlib#85 part C, built in solidcore; the fork's work in
 //! progress at tangency-labs/smlib 37c9e1d is the reference, not the target): three unequal
 //! rounds at a vertex where a face is a cylinder, cone or sphere, convex or concave, end on a
-//! Setback (`Kernel::fixes.fillet_setback_beside_curved_faces` with `fillet_blend_corner`,
-//! WR-697), its fill certified no more concave than what each patch is G1 to (the owner's
+//! Setback (`Kernel::fixes.fillet_setback_beside_curved_faces`, WR-697), its fill certified no more concave than what each patch is G1 to (the owner's
 //! ruling (a) on #85, `II >= k G`).
 //!
 //! The cases are the fork's capi `setback` cases `curved_d_prism_corner`,
@@ -18,7 +17,7 @@
 //! of the part's size; and every patch's control net never turning back (`check_brep`'s test
 //! #5, part of the certificate since #2243). Before this change each corner was the old N-sided corner's patch
 //! (`NByNConvex`), not a Setback, and built: without its own flag it still is, so a design
-//! made with `fillet_blend_corner` before rebuilds the same.
+//! made before rebuilds the same.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -56,12 +55,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn all_fixes(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (blend || name != "fillet_blend_corner") {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -551,8 +550,8 @@ fn graded(k: &mut Kernel, b: &mut Brep, case: &Case, n: usize) {
 /// The D prism (R 10, flat a 4, H 10) and its top corner V = (4, sqrt 84, 10), where the
 /// top, the flat and the convex cylinder meet; the chord, the upright and the arc to round
 /// at 2, 2.5 and 3 there.
-fn d_prism_case(blend: bool) -> (Kernel, Brep, Vec<EdgeId>, Case) {
-    let mut k = all_fixes(blend);
+fn d_prism_case() -> (Kernel, Brep, Vec<EdgeId>, Case) {
+    let mut k = all_fixes();
     let (rr, a, hh) = (10.0f64, 4.0f64, 10.0f64);
     let h = (rr * rr - a * a).sqrt();
     let b = d_prism(&mut k, 0.0, 0.0, rr, a, 0.0, hh);
@@ -597,7 +596,7 @@ fn d_prism_case(blend: bool) -> (Kernel, Brep, Vec<EdgeId>, Case) {
 
 #[test]
 fn d_prism_unequal_corner_is_a_setback_beside_the_cylinder() {
-    let (mut k, mut b, edges, case) = d_prism_case(true);
+    let (mut k, mut b, edges, case) = d_prism_case();
     let r = round_each(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
@@ -610,7 +609,7 @@ fn d_prism_unequal_corner_is_a_setback_beside_the_cylinder() {
 /// cylinder and rebuilds the same patch; and moved, the definition's cylinder moves with it.
 #[test]
 fn beside_a_curved_face_the_fill_is_its_definition() {
-    let (mut k, mut b, edges, case) = d_prism_case(true);
+    let (mut k, mut b, edges, case) = d_prism_case();
     assert!(k.fixes.fillet_round_as_definition);
     let r = round_each(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
@@ -666,7 +665,7 @@ fn beside_a_curved_face_the_fill_is_its_definition() {
 /// arc its arc length `R (2 pi - 2 acos(a / R))`, 39.63, not its chord 18.33.
 #[test]
 fn d_prism_corner_room_is_measured_along_its_edges() {
-    let (mut k, mut b, edges, case) = d_prism_case(true);
+    let (mut k, mut b, edges, case) = d_prism_case();
     let r = round_each(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
@@ -695,7 +694,7 @@ fn d_prism_corner_room_is_measured_along_its_edges() {
 #[test]
 fn d_prism_corner_far_from_the_origin_is_a_setback() {
     for o in [1.0e3, 2.0e3, 4.0e3, -4.0e3, 1.0e4] {
-        let mut k = all_fixes(true);
+        let mut k = all_fixes();
         let (rr, a, hh) = (10.0f64, 4.0f64, 10.0f64);
         let h = (rr * rr - a * a).sqrt();
         let mut b = d_prism(&mut k, o, o, rr, a, o, hh);
@@ -727,21 +726,13 @@ fn d_prism_corner_far_from_the_origin_is_a_setback() {
     }
 }
 
-#[test]
-fn without_the_flag_the_d_prism_corner_is_no_setback() {
-    let (mut k, mut b, edges, case) = d_prism_case(false);
-    let r = round_each(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v);
-    assert_ne!(r.event, Some(BlendCornerEvent::Setback));
-}
-
-/// Without `fillet_setback_beside_curved_faces`, `fillet_blend_corner` on (as a design made
-/// before it has them), a corner beside a curved face is the corner it was: not a Setback
+/// Without `fillet_setback_beside_curved_faces` (as a design made before it), a corner beside a curved face is the corner it was: not a Setback
 /// (the N-by-N convex corner), and built, asked for a setback or not. The D prism's corner
 /// (beside a cylinder) and the countersink's (beside a cone).
 #[test]
 fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
     for asked in [None, Some(3.05)] {
-        let (mut k, mut b, edges, case) = d_prism_case(true);
+        let (mut k, mut b, edges, case) = d_prism_case();
         k.fixes.fillet_setback_beside_curved_faces = false;
         let r = round_asked(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v, asked);
         assert_eq!(
@@ -752,7 +743,7 @@ fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
         );
         assert!(r.ok, "{asked:?}: {}", r.reason);
     }
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     k.fixes.fillet_setback_beside_curved_faces = false;
     let (mut b, edges, radii, case) = countersink_case(&mut k);
     let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
@@ -766,7 +757,7 @@ fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
 /// 2.5 and 3: a concave Setback beside a curved face, the fill convex about the void.
 #[test]
 fn d_pocket_unequal_corner_is_a_concave_setback_beside_the_cylinder() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let (rr, h) = (8.0f64, 48.0f64.sqrt());
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 20.0).unwrap();
     let cut = d_prism(&mut k, 20.0, 20.0, rr, 4.0, 10.0, 11.0);
@@ -830,7 +821,7 @@ fn d_pocket_unequal_corner_is_a_concave_setback_beside_the_cylinder() {
 /// wall and the arc's round (k = -1/21).
 #[test]
 fn knife_edge_corner_is_a_setback_no_more_concave_than_its_wall() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let tip = 62.0 + 1.0 / 6.0;
     let x0 = tip - 21.0;
     let mut b = knife_edge_arc_part(&mut k);
@@ -895,7 +886,7 @@ fn knife_edge_corner_is_a_setback_no_more_concave_than_its_wall() {
 /// piece the sphere's seam splits it into).
 #[test]
 fn sphere_corner_is_a_setback_beside_the_sphere() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
     let cut_x = create_box(&mut k, Point3::new(4.0, -20.0, -20.0), 30.0, 40.0, 40.0).unwrap();
     let cut_y = create_box(&mut k, Point3::new(-20.0, 4.0, -20.0), 40.0, 30.0, 40.0).unwrap();
@@ -980,7 +971,7 @@ fn middle(c: [f64; 3], n1: [f64; 3], n2: [f64; 3], r: f64) -> Point3 {
 /// top's arc rounded 1.25, 1.5 and 2 (k = 0). Faces: the part's 5, 4 rounds, 6 patches (15).
 #[test]
 fn cone_frustum_corner_is_a_setback_beside_the_cone() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let tb = (PI / 6.0).tan();
     let (cb, sb) = ((PI / 6.0).cos(), (PI / 6.0).sin());
     let rt = 10.0 - 6.0 * tb;
@@ -1120,7 +1111,7 @@ fn countersink_case(k: &mut Kernel) -> (Brep, Vec<EdgeId>, Vec<f64>, Case) {
             in release; countersink_asked_corner_is_certified_with_its_nets builds the corner \
             without the growth"]
 fn countersink_corner_is_a_setback_no_more_concave_than_its_cone() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let (mut b, edges, radii, case) = countersink_case(&mut k);
     let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
@@ -1133,7 +1124,7 @@ fn countersink_corner_is_a_setback_no_more_concave_than_its_cone() {
 /// never turning back (net test #5) and contained.
 #[test]
 fn countersink_asked_corner_is_certified_with_its_nets() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let (mut b, edges, radii, case) = countersink_case(&mut k);
     let r = round_asked(&mut k, &mut b, &edges, &radii, case.v, Some(3.2));
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
@@ -1151,7 +1142,7 @@ fn countersink_asked_corner_is_certified_with_its_nets() {
 #[ignore = "slow: about 8 minutes in release, more than 20 in the test profile (twelve curved fills); \
             the_named_setback_builds builds the setback it names"]
 fn d_prism_asked_too_short_names_the_setback_that_builds() {
-    let (mut k, mut b, edges, case) = d_prism_case(true);
+    let (mut k, mut b, edges, case) = d_prism_case();
     let r = round_asked(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v, Some(3.05));
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(!r.ok);
@@ -1168,7 +1159,7 @@ fn d_prism_asked_too_short_names_the_setback_that_builds() {
 /// checks): certified at it as it is, its nets never turning back.
 #[test]
 fn the_named_setback_builds() {
-    let (mut k, mut b, edges, case) = d_prism_case(true);
+    let (mut k, mut b, edges, case) = d_prism_case();
     let named = 3.05 * 1.06;
     let r = round_asked(
         &mut k,

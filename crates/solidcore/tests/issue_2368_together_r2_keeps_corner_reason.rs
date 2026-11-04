@@ -11,8 +11,8 @@
 //! it noted) where `CreateFilletBrep` and `GetPreviewFilletSurfaces` call `MakeCornerTopology`
 //! (`SmFilletExecutive.cpp` 3755-3759 and 1216-1219 at smlib#124, 63c7962), as it does after
 //! `CalculateCornerEdges`. The port kept it only there, and returned
-//! `SM_FILERR_VERTEX_PROBLEM` (3), "Unable to Make Topology". With `fillet_blend_corner` it
-//! now returns the fork's refusal: `SM_FILERR_NO_ROOM` (8), fit 0.
+//! `SM_FILERR_VERTEX_PROBLEM` (3), "Unable to Make Topology". It now returns the fork's
+//! refusal: `SM_FILERR_NO_ROOM` (8), fit 0.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -36,14 +36,13 @@ use solidcore::Brep;
 const INPUT: &[u8] = include_bytes!("data/issue_2368_solidcraft_together_r2.smb");
 
 /// SolidCraft's rig set: every fix on but the one it holds back
-/// (`fillet_refuse_rounds_breaking_through`), with `fillet_blend_corner` as given.
-fn kernel(blend_corner: bool) -> Kernel {
+/// (`fillet_refuse_rounds_breaking_through`).
+fn kernel() -> Kernel {
     let mut k = Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     k.fixes.fillet_refuse_rounds_breaking_through = false;
-    k.fixes.fillet_blend_corner = blend_corner;
     k
 }
 
@@ -79,8 +78,8 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
 
 /// The two edges rounded r 2 together as SolidCraft drives the session; the error info's
 /// code, comment and fit on failure.
-fn round(blend_corner: bool) -> Result<(), (i32, String, Option<f64>)> {
-    let mut k = kernel(blend_corner);
+fn round() -> Result<(), (i32, String, Option<f64>)> {
+    let mut k = kernel();
     let mut b = read(&mut k, INPUT);
     let edges = [
         pick(&k, &b, [20.0, 0.874_89, 10.0]),
@@ -109,7 +108,7 @@ fn round(blend_corner: bool) -> Result<(), (i32, String, Option<f64>)> {
 
 #[test]
 fn the_corner_s_no_room_is_kept() {
-    let (code, comment, fit) = round(true).unwrap_err();
+    let (code, comment, fit) = round().unwrap_err();
     assert_eq!(code, FilletErrorType::NoRoom as i32, "{comment}");
     assert!(comment.contains("have no section both reach"), "{comment}");
     assert_eq!(fit, Some(0.0));

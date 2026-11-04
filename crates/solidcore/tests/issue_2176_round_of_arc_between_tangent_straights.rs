@@ -16,9 +16,9 @@
 //! corner's axis over the quarter turn, closed by flat ends, so by Pappus it removes exactly
 //! (1 - pi/4) r^2 (pi/2) (2 - c), c the section's centroid off the corner's wall.
 //!
-//! With `fillet_blend_corner` (WR-697) the fork's End at a smooth vertex (smlib#124,
-//! 41a39ec) ends the round there instead, on the plane square to its edge: the same body,
-//! with or without WR-674 (whose path the End replaces). Its neighbours end the same way
+//! The fork's End at a smooth vertex (smlib#124, 41a39ec; WR-697) ends the round there
+//! instead, on the plane square to its edge: the same body, with or without WR-674 (whose
+//! path the End replaces). Its neighbours end the same way
 //! where they run on tangentially into an edge not picked. Their figures are the fork's at
 //! 18e96f1 (`SmApiFilletEdges` on the same plate, `SmApiBrepComputeVolume` at 1e-10).
 
@@ -184,44 +184,6 @@ fn do_filleting_builds_the_closed_body() {
     assert!((removed - pappus()).abs() <= 1e-7, "removed {removed}");
 }
 
-/// Without WR-674 and the blend corner the round is handed to the global merge:
-/// `DoFilleting` leaves an open body that removes nothing, and `fillet_edges` refuses it and
-/// puts the plate back.
-#[test]
-fn without_the_fix_the_global_merge_leaves_an_open_body() {
-    let without = || {
-        let mut k = kernel(false);
-        k.fixes.fillet_blend_corner = false;
-        k
-    };
-    let mut k = without();
-    let mut b = plate(&mut k);
-    let before = volume(&k, &mut b);
-    let e = pick(&k, &b, CORNER);
-    {
-        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        s.prepare_per_edge_constant_radius(
-            &mut k,
-            &[e],
-            &[RADIUS],
-            &[FilletSurfaceGeneratorType::Circular],
-            1,
-            1.0,
-        )
-        .unwrap();
-        s.create_corners(&k, None).unwrap();
-        s.do_filleting(&mut k, None).unwrap();
-    }
-    b.refresh_cached_topology();
-    assert!(!is_manifold_solid(&b).unwrap());
-
-    let mut k = without();
-    let mut b = plate(&mut k);
-    let e = pick(&k, &b, CORNER);
-    assert!(fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).is_err());
-    assert!((volume(&k, &mut b) - before).abs() <= 1e-9 * before);
-}
-
 /// Without WR-674 the blend corner's End at a smooth vertex (the fork's 41a39ec) builds the
 /// round with flat ends: the fork's 0.159135839575356 (Pappus to 1.5e-10).
 #[test]
@@ -241,30 +203,10 @@ fn the_blend_corner_ends_the_round_at_the_smooth_vertices() {
     );
 }
 
-/// Pinned SMLib fails the corner; WR-674 alone builds it.
-#[test]
-fn pinned_default_fails_the_corner() {
-    let mut k = Kernel::default();
-    let mut b = plate(&mut k);
-    let e = pick(&k, &b, CORNER);
-    assert!(fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).is_err());
-
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_ends_at_tangent_continuation = true;
-    let mut b = plate(&mut k);
-    let before = volume(&k, &mut b);
-    let e = pick(&k, &b, CORNER);
-    fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
-    b.refresh_cached_topology();
-    assert!(is_manifold_solid(&b).unwrap());
-    let removed = before - volume(&k, &mut b);
-    assert!((removed - pappus()).abs() <= 1e-7, "removed {removed}");
-}
-
 /// The straight edges next to the corner and the rim, each rounded alone. The tab's side
 /// and its top run on tangentially into the corner arcs, which are not picked. The fork
 /// (41a39ec) ends each there at the smooth vertex, on the plane square to it. With
-/// tangency-labs/solidcore#2656 (`fillet_blend_corner`) each runs on past the vertex, the
+/// tangency-labs/solidcore#2656 each runs on past the vertex, the
 /// arc turning into the top face away from it, until it leaves the part: past each such end
 /// the round's section, cut by the corner arc's wall `R - sqrt(R^2 - s^2)` in from the
 /// straight side at `s` past the vertex (R = 2), takes off `RUN_ON` more

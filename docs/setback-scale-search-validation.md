@@ -45,9 +45,8 @@ fixture remains a validation follow-up. The twelve-case executive pass is histor
 the expanded merged-head comparison has the explicit failures recorded below.
 The pinned C++ difftests validate default behavior only. Do not treat them as
 proof of opt-in fork parity. Streamed rows and their row/step counters are outside
-this slice. The existing `fillet_blend_corner` flag is temporary while its complete
-construction is being validated: accepted construction parity must make it the default
-and delete the flag and superseded path, rather than retain a permanent fallback.
+this slice. The blend corner, once behind `fillet_blend_corner`, is the default since
+#2400, which deleted the flag and the superseded corner code.
 
 ## Native executive reference
 

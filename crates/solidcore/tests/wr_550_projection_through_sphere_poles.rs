@@ -76,14 +76,13 @@ fn wr_550_line_projected_through_sphere_poles_stays_on_the_sphere() {
     assert!(worst <= tol, "a projected curve is {worst} off the sphere");
 }
 
-/// At a tolerance of 1e-5 the span into the pole built with the neighbour's tangent
-/// leaves the sphere by more than the tolerance (1.26e-5); keeping the pole's own
-/// tangent, every curve stays within it (4.8e-6).
+/// At a tolerance of 1e-5, keeping the pole's own tangent, every curve stays within it
+/// (4.8e-6). (Upstream's span into the pole, built with the neighbour's tangent, left the
+/// sphere by 1.26e-5 until `FlushCurve` kept a short last span whose merge fails the
+/// trace's span test, the blend corner's WR-697 addendum, now always on: #2400.)
 #[test]
 fn wr_550_pole_tangent_keeps_the_projection_within_a_tight_tolerance() {
     let tol = 1e-5;
     let fixed = worst_off_sphere(true, tol);
     assert!(fixed <= tol, "with the fix: {fixed:e} off the sphere");
-    let upstream = worst_off_sphere(false, tol);
-    assert!(upstream > tol, "upstream: {upstream:e} off the sphere");
 }

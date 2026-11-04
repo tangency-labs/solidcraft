@@ -394,7 +394,7 @@ fn revolution_round_crease_is_unchanged() {
 }
 
 /// The blend corner alone (with the two fillet fixes the issue's preset needs to reach the
-/// crease round, WR-600's `fillet_nx1_tangent_side_edge_same_convexity` off): the r 1
+/// crease round): the r 1
 /// round's End on the cylinder is a tangent end, its rail on the torus ending on the
 /// torus/cylinder seam where the round touches the cylinder. Without the tangent end
 /// (#2500) the rail end was taken as the rail's crossing of the cylinder, which has none
@@ -402,7 +402,6 @@ fn revolution_round_crease_is_unchanged() {
 #[test]
 fn the_blend_corner_alone_rounds_the_crease_to_its_tangent_end() {
     let mut k = Kernel::default();
-    k.fixes.fillet_blend_corner = true;
     k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     let (code, built) = crease_round_with(k, Form::AsBuilt);

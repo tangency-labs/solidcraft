@@ -29,10 +29,9 @@
 //! fillet removes the rim's 7.958672926831696 (the rim alone, as #2176's test pins it, its end rib WR-697's End's) plus
 //! the wedge: 8.11780880450819.
 //!
-//! With `fillet_blend_corner` (WR-697, in this test's set of fixes) the fork's End at a
-//! smooth vertex (smlib#124, 41a39ec) ends each corner arc's round at its smooth vertices on
-//! the planes square to it, before WR-674's section ends are reached: the same wedges. The
-//! tests of the path without it turn the blend corner off.
+//! The fork's End at a smooth vertex (smlib#124, 41a39ec; WR-697) ends each corner arc's
+//! round at its smooth vertices on the planes square to it, before WR-674's section ends
+//! are reached: the same wedges.
 
 #![allow(
     clippy::unwrap_used,
@@ -68,15 +67,14 @@ const RIM_REMOVED: f64 = 7.958_672_926_831_696;
 /// [`RIM_REMOVED`], the solidcore-native exact spine.
 const RIM_MEASURED: f64 = 7.958_672_926_877_170_5;
 
-/// Every opt-in fix on (as in the issue), with WR-706 and the blend corner (WR-697) as given.
-fn kernel_with(wr706: bool, blend_corner: bool) -> Kernel {
+/// Every opt-in fix on (as in the issue), with WR-706 as given.
+fn kernel(wr706: bool) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
     f.fillet_section_end_trim_at_creases = wr706;
-    f.fillet_blend_corner = blend_corner;
     k.fixes = f;
     k
 }
@@ -147,16 +145,7 @@ fn pappus() -> f64 {
 /// The fillet of the edges nearest `picks`: the volume it removes and the body's face count,
 /// the body checked sound.
 fn removed(wr706: bool, picks: &[[f64; 3]]) -> Result<(f64, usize), SolidError> {
-    removed_with(wr706, true, picks)
-}
-
-/// As [`removed`], with the blend corner (WR-697) as given.
-fn removed_with(
-    wr706: bool,
-    blend_corner: bool,
-    picks: &[[f64; 3]],
-) -> Result<(f64, usize), SolidError> {
-    let mut k = kernel_with(wr706, blend_corner);
+    let mut k = kernel(wr706);
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let es: Vec<EdgeId> = picks.iter().map(|p| pick(&k, &b, *p)).collect();
@@ -238,27 +227,4 @@ fn without_the_fix_the_blend_corner_builds_both() {
         "removed {both}"
     );
     assert_eq!(faces, 12);
-}
-
-/// Without WR-706 (and without the blend corner, whose End at a smooth vertex ends the
-/// corner arc's round before WR-674's section ends do) the subtraction refuses the round
-/// with a section end next to another round (the issue's 1001, naming the edge the corner
-/// arc runs on into), and still builds the corner arc alone.
-#[test]
-fn without_the_fix_the_subtraction_refuses_both() {
-    let err = removed_with(false, false, &[RIM, CORNER]).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            SolidError::BlendRefused {
-                code: 1001,
-                refusal: solidcore::blend::blend_refusal::BlendRefusal::ContinuesInto { .. },
-                ..
-            }
-        ),
-        "{err:?}"
-    );
-    let (corner, faces) = removed_with(false, false, &[CORNER]).unwrap();
-    assert!((corner - pappus()).abs() <= 1e-7, "corner {corner}");
-    assert_eq!(faces, 11);
 }

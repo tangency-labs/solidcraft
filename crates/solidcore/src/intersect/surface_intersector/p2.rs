@@ -51,8 +51,8 @@
 //!   plane and `SmSurface::LocalPointSolve` (`surface.surface_p5`) return
 //!   [`SolidError::Unported`], which always propagates (also where upstream ignores
 //!   the status).
-//! - **Short last span (opt-in, solidcore-native).** With `fixes.fillet_blend_corner`
-//!   (WR-697 addendum, end-rib flush merge), `FlushCurve` merges a last span shorter
+//! - **Short last span (solidcore-native).** (WR-697 addendum, end-rib flush merge)
+//!   `FlushCurve` merges a last span shorter
 //!   than a tenth of the one before only when the merged span passes the trace's span
 //!   test (`SurfaceIntersector::span_keeps_accuracy`); the fork (18e96f1) merges it
 //!   untested, as pinned SMLib does.
@@ -763,7 +763,7 @@ impl SurfaceIntersector<'_> {
     /// point or unique ([`is_point_unique`] against the start points and the 3D
     /// curves' ends). A curve whose consecutive points are all within
     /// `this_approx_tol_3d` is dropped. A last span shorter than a tenth of the one
-    /// before is merged into it (with `fixes.fillet_blend_corner`, only when the merged
+    /// before is merged into it (only when the merged
     /// span passes `SurfaceIntersector::span_keeps_accuracy`). A crossing curve with
     /// more than one span whose normals stay within 5 degrees is near tangent.
     ///
@@ -862,13 +862,11 @@ impl SurfaceIntersector<'_> {
                 let fin = at(i + 1)?;
                 let t_delta = curr.curve_parameter - prev.curve_parameter;
                 let t_delta_final = fin.curve_parameter - curr.curve_parameter;
-                // With `fixes.fillet_blend_corner` (WR-697 addendum, solidcore-native):
-                // only when the merged span keeps the trace's accuracy. The trace tested
-                // the two spans it made, not the one the merge makes, which can leave
-                // the 3D curve and a UV curve further apart than the tolerance
-                if t_delta_final / t_delta < 0.1
-                    && (!k.fixes.fillet_blend_corner || self.span_keeps_accuracy(k, prev, fin)?)
-                {
+                // Not upstream (WR-697 addendum, solidcore-native): only when the merged
+                // span keeps the trace's accuracy. The trace tested the two spans it made,
+                // not the one the merge makes, which can leave the 3D curve and a UV curve
+                // further apart than the tolerance
+                if t_delta_final / t_delta < 0.1 && self.span_keeps_accuracy(k, prev, fin)? {
                     // skip next to last xsect point
                     i += 1;
                     curr = at(i)?;

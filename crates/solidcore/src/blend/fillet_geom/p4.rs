@@ -21,8 +21,7 @@
 //! | `degenerate_side_at` (private)                    | none (solidcore #2403)                       |
 //!
 //! Deviations:
-//! - **Degenerate sides (solidcore #2403, not in the fork).** With `fillet_blend_corner`,
-//!   `sm_CreateUVCurve` takes an end that drops to one solution on a degenerate side of
+//! - **Degenerate sides (solidcore #2403, not in the fork).** `sm_CreateUVCurve` takes an end that drops to one solution on a degenerate side of
 //!   the surface (a patch's pole, `degenerate_side_at`) onto the iso-curve through the
 //!   other end, as its rule for an end with more than two solutions does: the global
 //!   solve reports such an end once, anywhere along the side.
@@ -849,12 +848,12 @@ pub fn create_uv_curve_on_face(
     let mut start_uv1 = Point2::UNDEF;
     let mut end_uv1 = Point2::UNDEF;
 
-    // fillet_blend_corner: an end on a degenerate side of the surface (a patch's pole,
+    // Not in the fork (#2403): an end on a degenerate side of the surface (a patch's pole,
     // one point for every value of the side's free parameter) drops to one solution
     // anywhere along that side, where the multi-solution rule below needs more than two
     // to know it. The curve is the iso-curve through the other end, as that rule makes
     // it: the end takes the other end's free parameter.
-    if k.fixes.fillet_blend_corner && num_solutions1 == 1 && num_solutions2 == 1 {
+    if num_solutions1 == 1 && num_solutions2 == 1 {
         let on_side1 = degenerate_side_at(k, surface, &uv_domain, start_uv, start_pnt, approx_tol)?;
         let on_side2 = degenerate_side_at(k, surface, &uv_domain, end_uv, end_pnt, approx_tol)?;
         match (on_side1, on_side2) {
@@ -1064,7 +1063,7 @@ impl DegenerateSide {
     }
 }
 
-/// `fillet_blend_corner` (#2403): the side of `uv_domain` a drop of `point` at `uv` lies
+/// Not in the fork (#2403): the side of `uv_domain` a drop of `point` at `uv` lies
 /// on when that side is degenerate, one point (`IsDegenerate` of its iso-curve at
 /// `SM_EFF_ZERO`, as `CreateNaturalUVTrimCurves` culls such sides): the side's point
 /// under `uv` is `point` to `tol`. `None` off every degenerate side.
@@ -1557,7 +1556,7 @@ impl FilletBrep {
         // The fork's (WR-697, 3e26f76): at an End's end rib the rail's end is its crossing
         // with the end face's surface (CalcRailIntEndSurface); the end rib is then the
         // intersection between the two rail ends (CalcFilletIntSideFace)
-        if k.fixes.fillet_blend_corner && !b3x2_mixed_corner_case {
+        if !b3x2_mixed_corner_case {
             return self.calc_rail_int_end_surface(k, v, corners, context, target);
         }
 
@@ -2258,9 +2257,9 @@ impl FilletBrep {
         let region = brep.infinite_region();
         // The fork's (WR-697, 32fd80a): the face's edge uses keep these trim curves, the
         // fillet's own (each its edge's curve on this surface, made with it: a corner's
-        // exact ones exactly). Without the flag MakeFaceWithCurves drops them and each is
-        // made again later by projecting its edge's curve onto the surface.
-        let keep_uv_curves = k.fixes.fillet_blend_corner.then_some(true);
+        // exact ones exactly), where upstream's MakeFaceWithCurves drops them and makes each
+        // again later by projecting its edge's curve onto the surface.
+        let keep_uv_curves = Some(true);
         if matches!(surface_backend, FaceSurfaceBackend::IndexedValue) {
             // Preserve the existing indexed value contract, including its cliff path.
             // This API does not provide shared source-surface/managed-face binding.
@@ -2877,9 +2876,8 @@ mod tests {
         assert!(matches!(e, SolidError::Upstream { .. }));
     }
 
-    /// `fillet_blend_corner` (#2403): a curve from a patch's pole (a ball's triangle, the
-    /// pole its `v = min` side) to a corner of its other side is that corner's `u` iso-curve;
-    /// pinned, the pole drops to one point anywhere along its side.
+    /// #2403: a curve from a patch's pole (a ball's triangle, the pole its `v = min` side)
+    /// to a corner of its other side is that corner's `u` iso-curve.
     #[test]
     fn uv_curve_from_a_pole_is_the_iso_curve_through_its_other_end() {
         use crate::blend::blend_corner::ball::ball_triangle_patch;
@@ -2890,7 +2888,7 @@ mod tests {
         ];
         let (net, _, _) = ball_triangle_patch(Point3::ZERO, 2.0, &dirs, 0, false).unwrap();
         let srf = Surface::from(net);
-        let mut k = kernel();
+        let k = kernel();
         let dom = srf.natural_uv_domain_with_nurb(&k).unwrap();
         let (lo, hi) = (dom.min(), dom.max());
         let pole = Point3::new(0.0, 0.0, 2.0);
@@ -2919,10 +2917,7 @@ mod tests {
                 })
                 .collect()
         };
-        k.fixes.fillet_blend_corner = true;
         assert_eq!(isos(&k), [true, true]);
-        k.fixes.fillet_blend_corner = false;
-        assert!(isos(&k).contains(&false));
     }
 
     #[test]

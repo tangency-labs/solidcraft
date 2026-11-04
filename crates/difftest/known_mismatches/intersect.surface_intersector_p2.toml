@@ -1,0 +1,202 @@
+# Known mismatches of intersect.surface_intersector_p2 (format: crates/difftest/src/known.rs).
+
+# The default kernel's blend corner (#2400; plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): 40 cases.
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "adv_perp_trace_1e-06"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2127 rust=2262)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0000"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2081 rust=1800)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0036"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1527 rust=1418)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0076"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1932 rust=1755)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0080"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1917 rust=1808)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0083"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[925]: cpp=1.001e3 rust=1.007e3)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0139"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3515 rust=3270)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0187"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1109 rust=1000)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0262"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2536 rust=2427)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0312"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=4303 rust=4104)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0345"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3826 rust=3613)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0400"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2183 rust=2074)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0410"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1619 rust=1510)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0423"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3891 rust=3692)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0426"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2295 rust=2186)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0428"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2104 rust=1995)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0524"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3062 rust=2908)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0534"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1197 rust=1088)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0596"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1922 rust=1813)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0641"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=4210 rust=4101)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0680"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3400 rust=3291)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0784"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1942 rust=1743)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0876"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=4331 rust=4086)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0947"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1780 rust=1671)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen0954"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1356 rust=1247)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1016"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3162 rust=3053)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1052"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=3353 rust=3108)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1070"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2024 rust=1825)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1113"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2161 rust=2052)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1162"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2574 rust=2420)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1227"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2721 rust=2508)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1262"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1020 rust=843)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1275"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1455 rust=1346)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1291"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1019 rust=910)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1303"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1516 rust=1407)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1311"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2782 rust=2605)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1341"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2077 rust=1900)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1347"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=2750 rust=2433)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1440"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec[842]: cpp=1.001e3 rust=1.007e3)"
+
+[[mismatch]]
+unit = "intersect.surface_intersector_p2"
+case = "gen1456"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.rec.len: cpp=1814 rust=1660)"

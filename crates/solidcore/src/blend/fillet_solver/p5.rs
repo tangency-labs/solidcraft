@@ -702,7 +702,7 @@ mod tests {
             &mut target,
             &mut fb,
             id,
-            &mut CornerTypes(|_| Ok(FilletCornerType::OneByOne)),
+            &mut CornerTypes(|_| Ok(FilletCornerType::NByOneClosed)),
             &mut adjusted,
             &mut NoOwnership,
         );

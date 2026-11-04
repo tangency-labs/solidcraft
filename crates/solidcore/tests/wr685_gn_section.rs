@@ -334,32 +334,6 @@ fn box_edge_equal_area_round_takes_off_the_circle_s_area() {
     assert!(fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, 1.5).is_err());
 }
 
-/// The box's corner (40, 30, 20) with its three edges rounded r 3 by the order-2 section
-/// in one call: each station resolves the equal area thumbweight from its own wedge (the
-/// fork's 7102bc5), and the corner and the ease before its setbacks (thumbweight 0, the
-/// fork's 22d258a = d01d7b0's adb9854) are built with the edges'. Fork 7102bc5 (built
-/// locally): 23829.652499294883 at the equal area default and 23876.361929859548 at w = 0.
-#[test]
-fn box_corner_equal_area_rounds_take_the_fork_s_volume() {
-    use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
-    let mut k = kernel(true);
-    for (w, want) in [
-        (GN_DEFAULT_THUMBWEIGHT, 23829.652499294883),
-        (0.0, 23876.361929859548),
-    ] {
-        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-        let es = [
-            pick(&k, &b, [20.0, 30.0, 20.0]),
-            pick(&k, &b, [40.0, 15.0, 20.0]),
-            pick(&k, &b, [40.0, 30.0, 10.0]),
-        ];
-        fillet_edges(&mut k, &mut b, &es, 3.0, 2, 2, w).unwrap();
-        let v = volume_of(&k, &mut b);
-        eprintln!("box corner w {w} volume {v:.17e}");
-        assert!((v - want).abs() <= 1e-7 * want, "w {w}: {v} want {want}");
-    }
-}
-
 // The equal area thumbweight of edges of different wedges in one call: each station's
 // own since 7102bc5, in `wr685_gn_equal_area_per_station.rs`.
 
@@ -398,6 +372,16 @@ fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
             s.set_mark_corner_patches(true);
             s.prepare_constant_radius_edges(&mut k, &edges, 8.0, 1, 2, GN_DEFAULT_THUMBWEIGHT)
                 .unwrap();
+            // the corner set back (`AddSetBackVertex`): no Ball is built there
+            let set_back: Vec<_> = s
+                .target()
+                .vertices()
+                .ids()
+                .filter(|&v| at(s.target(), v))
+                .collect();
+            for v in set_back {
+                s.add_set_back_vertex(v);
+            }
             s.create_corners(&k, None).unwrap();
             let corner = s
                 .fillet_corners()

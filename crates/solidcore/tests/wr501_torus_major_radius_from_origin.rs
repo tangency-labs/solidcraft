@@ -9,7 +9,7 @@
 //! NURB of the face the revolve built (R 5, r 1).
 //!
 //! The recognition is at the direct level: the only library caller of the reader is the
-//! exact-fillet quadric read (`fixes.fillet_blend_corner`), and the revolve operation
+//! exact-fillet quadric read, and the revolve operation
 //! itself never calls it, so a public construction + the public reader is where the
 //! guard is observable.
 

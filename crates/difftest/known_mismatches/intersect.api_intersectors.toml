@@ -1,0 +1,7 @@
+# Known mismatches of intersect.api_intersectors (format: crates/difftest/src/known.rs).
+
+# The default kernel's blend corner (#2400; plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): 1 cases.
+[[mismatch]]
+unit = "intersect.api_intersectors"
+case = "gen0037"
+why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[78]: cpp=-2.665105324977061e0 rust=-2.6651204387573064e0)"

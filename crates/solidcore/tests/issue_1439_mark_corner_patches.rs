@@ -47,6 +47,16 @@ fn build(mark: Option<bool>) -> (Brep, Vec<(usize, FaceId)>, usize) {
         }
         s.prepare_constant_radius_edges(&mut k, &edges, 5.0, 1, 1, 1.0)
             .unwrap();
+        // the corner set back (`AddSetBackVertex`): no Ball is built there
+        let set_back: Vec<_> = s
+            .target()
+            .vertices()
+            .ids()
+            .filter(|&v| at_corner(s.target(), v))
+            .collect();
+        for v in set_back {
+            s.add_set_back_vertex(v);
+        }
         s.create_corners(&k, None).unwrap();
         let corners = s.fillet_corners().unwrap();
         let found: Vec<usize> = corners

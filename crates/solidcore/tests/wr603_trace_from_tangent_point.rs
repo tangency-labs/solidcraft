@@ -23,6 +23,7 @@
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -58,9 +59,16 @@ fn nearest_edge(k: &Kernel, b: &Brep, p: Point3) -> EdgeId {
         .unwrap()
 }
 
-/// The volume the arc round adds, and the face count after it.
+/// The volume the arc round adds, and the face count after it, with every fix but
+/// `geometric_g2_continuity` and WR-603's as given: the blend corner's ends and corners on
+/// the peg are built with their companion fixes (on the default kernel the arc's chain fails
+/// at a corner, #2400).
 fn peg(fix: bool) -> (f64, usize) {
-    let mut k = Kernel::default();
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    k.fixes.geometric_g2_continuity = false;
     k.fixes.fillet_trace_from_tangent_point_toward_next = fix;
     let bar = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 16.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(40.0, 8.0, 0.0), 8.0, 20.0).unwrap();

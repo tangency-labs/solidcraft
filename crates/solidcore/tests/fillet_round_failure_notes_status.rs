@@ -34,20 +34,12 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, vertex, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// The fixes a run has: the three under which the rollover failure shows, with or without
-/// `fillet_blend_corner`.
-#[derive(Debug, Clone, Copy)]
-enum Leg {
-    Three,
-    ThreeAndBlendCorner,
-}
-
-fn kernel(leg: Leg) -> Kernel {
+/// The default kernel with the three fixes under which the rollover failure shows.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.offset_extension_as_itself = true;
-    k.fixes.fillet_blend_corner = matches!(leg, Leg::ThreeAndBlendCorner);
     k
 }
 
@@ -234,11 +226,11 @@ fn round(
     Ok((b, lines))
 }
 
-/// Every failure of a pair on a leg (the first round, the second on it, the part's own edges
+/// Every failure of a pair (the first round, the second on it, the part's own edges
 /// of both together), as (which, code, comment, error).
-fn failures(leg: Leg, first: [f64; 3], then: [f64; 3]) -> Vec<(&'static str, i32, String, String)> {
+fn failures(first: [f64; 3], then: [f64; 3]) -> Vec<(&'static str, i32, String, String)> {
     let mut out = Vec::new();
-    let mut k = kernel(leg);
+    let mut k = kernel();
     // (a fresh part for each round: a B-rep's clone does not keep its geometry's owners)
     let body = arc_part(&mut k);
     let part = arc_part(&mut k);
@@ -296,15 +288,16 @@ fn pairs() -> Vec<([f64; 3], [f64; 3])> {
 /// The default comment of an error info that noted nothing.
 const NO_COMMENT: &str = "<no comment>\n";
 
-fn notes_every_failure(leg: Leg) {
+#[test]
+fn every_failure_notes_its_status() {
     for (first, then) in pairs() {
-        for (which, code, comment, err) in failures(leg, first, then) {
-            println!("  {leg:?} {first:?} then {then:?}: {which} failed: status {code}: {comment} [{err}]");
+        for (which, code, comment, err) in failures(first, then) {
+            println!("  {first:?} then {then:?}: {which} failed: status {code}: {comment} [{err}]");
             // (a stitch or check failure after the session is not the session's to note)
             let session = err.starts_with("create_corners") || err.starts_with("do_filleting");
             assert!(
                 !session || (code > 0 && comment != NO_COMMENT),
-                "{leg:?} {first:?} then {then:?}: the {which} round failed without noting why ({err})"
+                "{first:?} then {then:?}: the {which} round failed without noting why ({err})"
             );
         }
     }
@@ -314,7 +307,7 @@ fn notes_every_failure(leg: Leg) {
 /// notes it: `SM_FILERR_EDGE_PROBLEM` with what failed, not code 0.
 #[test]
 fn the_rollover_failure_notes_its_status() {
-    let failed = failures(Leg::Three, arc_top(), LONG);
+    let failed = failures(arc_top(), LONG);
     let (which, code, comment, _) = failed
         .first()
         .expect("the second round fails with the three fixes");
@@ -324,14 +317,4 @@ fn the_rollover_failure_notes_its_status() {
         comment.starts_with("Fillet Surface Computation Failure: "),
         "{comment}"
     );
-}
-
-#[test]
-fn every_failure_notes_its_status() {
-    notes_every_failure(Leg::Three);
-}
-
-#[test]
-fn every_failure_notes_its_status_with_the_blend_corner() {
-    notes_every_failure(Leg::ThreeAndBlendCorner);
 }

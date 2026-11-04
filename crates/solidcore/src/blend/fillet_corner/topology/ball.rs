@@ -12,8 +12,7 @@
 //!
 //! Deviations: the solvers of the rounds are resolved by the caller
 //! (`GetFilletSolverOfEdgeuse` of each ring edge use, else of its mate), and passed in
-//! [`BallTopologyEnv`]. Opt-in: `Kernel::fixes.fillet_blend_corner` (WR-697). There is no
-//! recursion.
+//! [`BallTopologyEnv`] (WR-697). There is no recursion.
 
 use super::{new_corner_vertex, OP_NX2};
 use crate::blend::blend_corner::ball::BallCorner;

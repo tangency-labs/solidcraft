@@ -59,6 +59,16 @@ fn build(setback: f64, ease: f64, halves: bool) -> (Kernel, Brep, Vec<solidcore:
         s.set_blend_curve_at_thirds(true);
         s.prepare_constant_radius_edges(&mut k, &edges, 5.0, 2, 2, 1.0)
             .unwrap();
+        // the corner set back (`AddSetBackVertex`): no Ball is built there
+        let set_back: Vec<_> = s
+            .target()
+            .vertices()
+            .ids()
+            .filter(|&v| at_point(s.target(), v, CORNER))
+            .collect();
+        for v in set_back {
+            s.add_set_back_vertex(v);
+        }
         s.create_corners(&k, None).unwrap();
         let corners = s.fillet_corners().unwrap();
         let found: Vec<_> = corners
@@ -175,20 +185,6 @@ fn assert_quintic_halves(setback: f64, ease: f64) {
             }
         }
     }
-}
-
-/// Off (upstream's MakeFaceBrep): a face curve half is the patch's iso-curve, fitted in its
-/// surfaces' degree (6).
-#[test]
-fn wr_659_off_a_face_curve_half_is_the_fitted_iso_curve() {
-    let (k, b, patch) = build(10.0, 3.0, false);
-    let halves = face_curve_halves(&b, &patch);
-    assert!(!halves.is_empty());
-    let degrees: Vec<(usize, usize)> = halves
-        .iter()
-        .map(|&e| degree_and_spans(&k, &b, e))
-        .collect();
-    assert!(degrees.iter().any(|&(d, _)| d == 6), "{degrees:?}");
 }
 
 #[test]

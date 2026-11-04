@@ -219,16 +219,6 @@ fn sloped_basin_rim_rounds_fill_the_mitre_gap() {
 }
 
 #[test]
-fn without_the_flag_the_mitre_splits_the_side_vertex_as_upstream() {
-    let rim = FORK_BASIN.rim();
-    // the split cuts the larger round by the side wall's own surface: 1001
-    for edges in [&rim[..2], &rim[..]] {
-        let r = blend(false, FORK_BASIN, edges, 0.5, false);
-        assert!(r.as_ref().is_err_and(|e| e.starts_with("code 3 ")), "{r:?}");
-    }
-}
-
-#[test]
 fn sloped_basin_rim_chamfers_fill_the_mitre_gap() {
     // SolidCraft's 1080-fillet-sloped-basin-4-mm-rim-2-2-edges (5835): 145957.3269
     let rim = RIM4_BASIN.rim();

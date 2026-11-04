@@ -43,12 +43,11 @@ const WALL: f64 = 21.0;
 /// SolidCraft's grid gives 9524.342896 to 5e-3.
 const THREE_TOGETHER: f64 = 9524.343664763;
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_blend_corner`.
-fn kernel(blend: bool) -> Kernel {
+/// Every fix but `geometric_g2_continuity`.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::all();
     f.geometric_g2_continuity = false;
-    f.fillet_blend_corner = blend;
     k.fixes = f;
     k
 }
@@ -123,7 +122,7 @@ fn round(k: &mut Kernel, b: &mut Brep) -> (bool, i32, Option<f64>) {
 /// and the refusal sizing never runs: no fit is noted.
 #[test]
 fn the_chain_over_the_end_curve_builds_at_r2_with_no_size_search() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = read(&mut k);
     let (ok, code, fit) = round(&mut k, &mut b);
     assert!(ok, "refused or failed: code {code}, fit {fit:?}");
@@ -143,14 +142,4 @@ fn the_chain_over_the_end_curve_builds_at_r2_with_no_size_search() {
         (v - THREE_TOGETHER).abs() <= 1e-9 * THREE_TOGETHER,
         "{v} {THREE_TOGETHER}"
     );
-}
-
-/// Without `fillet_blend_corner` nothing builds the fixed ball's triangle, so the chain is
-/// not built (the ends are judged by their planes alone, as #2401 does).
-#[test]
-fn without_the_blend_corner_the_chain_is_not_built() {
-    let mut k = kernel(false);
-    let mut b = read(&mut k);
-    let (ok, _, _) = round(&mut k, &mut b);
-    assert!(!ok);
 }

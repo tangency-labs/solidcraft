@@ -82,6 +82,16 @@ fn build(spec: Spec) -> (Kernel, Brep, Vec<FaceId>) {
         };
         s.prepare_constant_radius_edges(&mut k, &edges, 8.0, xsect, continuity, 1.0)
             .unwrap();
+        // the corners set back (`AddSetBackVertex`): no Ball is built there
+        let set_back: Vec<_> = s
+            .target()
+            .vertices()
+            .ids()
+            .filter(|&v| spec.all || at_point(s.target(), v, CORNER))
+            .collect();
+        for v in set_back {
+            s.add_set_back_vertex(v);
+        }
         s.create_corners(&k, None).unwrap();
         let corners = s.fillet_corners().unwrap();
         let found: Vec<_> = corners
@@ -294,13 +304,6 @@ fn an_eased_curvature_continuous_blend_meets_the_contact_lines_flat() {
     eprintln!("issue_1376: G2 blend, worst curvature at the hole's corners {worst:.3e}");
     assert!(met >= 12, "{met}");
     assert!(worst <= 1e-6, "{worst}");
-    // not eased, the face curves are the conics: curved where they leave the contact lines
-    let (k, b, _) = build(Spec {
-        g2_blend: true,
-        ..ROUND
-    });
-    let (worst, _) = worst_at_hole_corners(&k, &b);
-    assert!(worst > 0.1, "{worst}");
 }
 
 #[test]

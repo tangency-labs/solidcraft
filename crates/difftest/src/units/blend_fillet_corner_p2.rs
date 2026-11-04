@@ -105,6 +105,17 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
+/// A case on a corner of the 1x1 or 2x2 class, deleted with #2400 (directly, or through a
+/// case of unit `blend.fillet_corner_p1`): retired, as in that unit and
+/// `blend.fillet_corner_p3`.
+fn retired(case: &Case) -> bool {
+    match case.parse::<Inputs>() {
+        Ok(Inputs::Corner { corner, .. }) => super::blend_fillet_corner_p3::deleted_kind(corner.kind),
+        Ok(Inputs::P1Corner { inner }) => p1::retired_inputs(&inner),
+        _ => false,
+    }
+}
+
 /// Registered runner.
 pub struct Runner;
 
@@ -1055,6 +1066,15 @@ impl UnitDiff for Runner {
             let src = "SmFilletCorner.cpp:5141, :6869 (targeted G1 cases)";
             push(&mut v, name, src, Inputs::P1Corner { inner })?;
         }
+        v.retain(|case| !retired(case));
+        // `AdjustTopology` cases that reach the big-radius conversion, deleted with #2400
+        v.retain(|case| {
+            !matches!(
+                case.parse::<Inputs>(),
+                Ok(Inputs::Corner { method: CornerMethod::AdjustConcave, corner, .. })
+                    if super::blend_fillet_corner_p3::reaches_big_rad_conversion(&corner)
+            )
+        });
         Ok(v)
     }
 }

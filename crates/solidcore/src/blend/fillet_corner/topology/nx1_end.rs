@@ -16,9 +16,8 @@
 //! geometry, extended-surface coincidence), the last statements of
 //! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
 //! holds the corner table and solver store they need, to run before anything else.
-//! With `Kernel::fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600's flag; the
-//! fork's tangency-labs/smlib@856b54e) the end face at a tangent side is extended
-//! `CInfinity` and that side's cap edge is `OnExtendEdge`. There is no recursion.
+//! The end face at a tangent side is extended `CInfinity` and that side's cap edge is
+//! `OnExtendEdge` (WR-600, the fork's tangency-labs/smlib@856b54e). There is no recursion.
 
 use std::collections::BTreeMap;
 

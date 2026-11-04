@@ -11,7 +11,7 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, face::p2 as face, vertex, Brep, EdgeId};
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 const TOP: f64 = 458.266019821167;
 const CYLINDER_RADIUS: f64 = 304.8;
@@ -68,17 +68,6 @@ fn round(
     )?;
     let result = session.do_fillet(k);
     Ok((result, session.error_info().code))
-}
-
-#[test]
-fn pinned_construction_fails_at_the_four_arc_corner_edges() {
-    let (mut k, mut b, edges) = operand().unwrap();
-    let (result, code) = round(&mut k, &mut b, &edges).unwrap();
-    assert!(matches!(
-        result,
-        Err(SolidError::Upstream { code: 1001, .. })
-    ));
-    assert_eq!(code, 3, "corner boundary computation failure");
 }
 
 #[test]

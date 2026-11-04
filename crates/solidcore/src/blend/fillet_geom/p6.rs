@@ -897,7 +897,7 @@ impl FilletBrep {
     }
 
     /// [`Self::calc_edge_on_edge`] of an edge of a corner at `corner_vertex` (the fork's
-    /// `m_cpCorner`, 63c7962; `fixes.fillet_blend_corner`): a rail's end found on the side
+    /// `m_cpCorner`, 63c7962): a rail's end found on the side
     /// edge continued across a seam's vertex (`CalcRailIntEdgeuse`,
     /// [`crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex`]) lies on a
     /// later edge of that chain, so the edge runs from the corner's vertex along the chain
@@ -2341,27 +2341,25 @@ impl FilletBrep {
                 // one edge of the fillet B-rep between both fillets' faces, and its primary
                 // edge use can be the other's: this fillet's face was then never collected
                 // to be kept. A rail edge on one face only has the one.
-                if k.fixes.fillet_blend_corner {
-                    let prim_face = eu1::face(fillet_brep, prim_eu)?;
-                    let own = own_fillet_face(geom, fillet_brep);
-                    let mut own_eu = None;
-                    let mut two_faces = false;
-                    for eu in edge::edgeuses(fillet_brep, fb_edge, None, None)? {
-                        let face = eu1::face(fillet_brep, eu)?;
-                        if face != prim_face {
-                            two_faces = true;
-                        }
-                        if own_eu.is_none() && same_surface(fillet_brep, face, own)? {
-                            own_eu = Some(eu);
-                        }
+                let prim_face = eu1::face(fillet_brep, prim_eu)?;
+                let own = own_fillet_face(geom, fillet_brep);
+                let mut own_eu = None;
+                let mut two_faces = false;
+                for eu in edge::edgeuses(fillet_brep, fb_edge, None, None)? {
+                    let face = eu1::face(fillet_brep, eu)?;
+                    if face != prim_face {
+                        two_faces = true;
                     }
-                    if let Some(eu) = own_eu {
-                        prim_eu = eu;
-                    } else if two_faces {
-                        // SER_MSG: a rail's edge lies between two faces, neither the
-                        // fillet's own
-                        return Err(SolidError::sm_err(OP_TRIM));
+                    if own_eu.is_none() && same_surface(fillet_brep, face, own)? {
+                        own_eu = Some(eu);
                     }
+                }
+                if let Some(eu) = own_eu {
+                    prim_eu = eu;
+                } else if two_faces {
+                    // SER_MSG: a rail's edge lies between two faces, neither the
+                    // fillet's own
+                    return Err(SolidError::sm_err(OP_TRIM));
                 }
                 let fb_face = eu1::face(fillet_brep, prim_eu)?;
 
@@ -2574,7 +2572,7 @@ impl FilletBrep {
                 }
             }
         }
-        // The fork's (smlib d657afa, under `fixes.fillet_blend_corner`) leaking trim is
+        // The fork's (smlib d657afa) leaking trim is
         // an error noted by the caller, which holds the executive's error info; the
         // faces are not accumulated then either (the fork returns before).
         Ok(bad_trim)
@@ -3307,6 +3305,18 @@ mod tests {
         let fs = solver(false);
         let edge = fillet.edge_list()[0];
         pseudo.fillet_edge_mut(rails[0]).unwrap().fillet_brep_edge1 = Some(edge);
+        // the geometry's surface is the fillet B-rep's face on the rail's edge: the rail's
+        // edge use on the fillet's own face is the one the trim follows (the fork's 794946e)
+        let own = edge::faces(&fillet, edge, None).unwrap()[0];
+        pseudo.geom_mut(g).unwrap().fillet_surface = Some(
+            crate::blend::fillet_geom::p1::FilletSurfaceStorage::ManagedFace {
+                body: crate::topology::brep::p3::topology_ref(
+                    fillet.notify_serial().unwrap(),
+                    EntityRef::Brep(crate::topology::BrepId::from_index(0)),
+                ),
+                face: own,
+            },
+        );
         let lock = MarkLock::new(core::slice::from_mut(&mut k.context), 0, ALL_MARKS).unwrap();
         let mark = lock.mark_type();
         let locks = [lock];

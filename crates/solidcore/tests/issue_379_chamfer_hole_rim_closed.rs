@@ -91,21 +91,3 @@ fn issue_379_the_rims_are_chamfered_into_a_closed_solid_with_the_fix() {
         "{removed} vs {want}"
     );
 }
-
-#[test]
-fn issue_379_upstream_leaves_the_rims_open() {
-    let (before, r, k, mut body) = chamfered(false);
-    // upstream reports success, chamfers the cube's own edges, and leaves a body that is
-    // not a closed solid
-    r.unwrap();
-    assert!(
-        !is_manifold_solid(&body).unwrap(),
-        "upstream gave a closed solid"
-    );
-    assert_eq!(revolved_faces(&body), 0);
-    let removed = before - volume(&k, &mut body);
-    assert!(
-        (removed - cube_chamfers(0.5)).abs() <= 1e-6 * before,
-        "{removed}"
-    );
-}

@@ -1,9 +1,8 @@
 //! tangency-labs/solidcore#2369 (smlib#104, WR-616): a 20 mm box with the two top edges at
 //! (20, 0, 20) rounded r 2 and the upright edge there r 3, all three in one fillet. The rounds
-//! are of unequal radii, so no one ball touches them. With `fillet_blend_corner` the corner is
-//! a Setback (the fork's `SmBlendCorner::ClassifySetBack`, tangency-labs/smlib `b5bb747`),
-//! set back by the rule and filled G1: 15 faces. Without the flag it is the pinned
-//! `SmFilletConvexNxNCorner`: 10 faces.
+//! are of unequal radii, so no one ball touches them. The corner is a Setback (the fork's
+//! `SmBlendCorner::ClassifySetBack`, tangency-labs/smlib `b5bb747`), set back by the rule and
+//! filled G1: 15 faces.
 //!
 //! The original fork b5bb747, run through `SmApiFilletEdgesPerEdge` (circular,
 //! G1, thumbweight 1), gave 7928.142563966 with 15 faces. The thousandth-grid
@@ -29,11 +28,10 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{Brep, EdgeId};
 
-/// Every opt-in fix on, with `fillet_blend_corner` (WR-616) on or off.
-fn kernel(blend: bool) -> Kernel {
+/// Every opt-in fix on.
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::all();
-    k.fixes.fillet_blend_corner = blend;
     k
 }
 
@@ -52,8 +50,8 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
 
 /// The box rounded (2, 2, 3) in one fillet: the corner at (20, 0, 20) as made, the volume
 /// (before `check_brep`, which may refine tolerances), the face count.
-fn rounded(blend: bool) -> ((FilletCornerType, Option<BlendCornerEvent>), f64, usize) {
-    let mut k = kernel(blend);
+fn rounded() -> ((FilletCornerType, Option<BlendCornerEvent>), f64, usize) {
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
     let es: Vec<EdgeId> = [[20.0, 10.0, 20.0], [10.0, 0.0, 20.0], [20.0, 0.0, 10.0]]
         .iter()
@@ -106,18 +104,10 @@ fn assert_close(v: f64, want: f64) {
 
 #[test]
 fn unequal_rounds_at_a_box_corner_are_the_setback() {
-    let (made, v, faces) = rounded(true);
+    let (made, v, faces) = rounded();
     assert_eq!(made.1, Some(BlendCornerEvent::Setback));
     assert_eq!(faces, 15);
     // Native SMLib 20b1c01 thousandth-grid search, independently built by
     // blend_setback_executive.cpp (20 20 20 2 2 3 -1 3).
     assert_close(v, 7927.724282512234);
-}
-
-#[test]
-fn unequal_rounds_at_a_box_corner_without_the_flag_are_the_pinned_corner() {
-    let (made, v, faces) = rounded(false);
-    assert_eq!(made, (FilletCornerType::NByNConvex, None));
-    assert_eq!(faces, 10);
-    assert_close(v, 7928.743041465);
 }

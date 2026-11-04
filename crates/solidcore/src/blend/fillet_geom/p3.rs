@@ -550,14 +550,13 @@ impl FilletBrep {
             FilletEdgeType::RailRailInterpolation => {
                 self.calc_rail_rail_interpolation(k, e, Some(corner), corners, solvers, target)
             }
-            FilletEdgeType::OnEdge if k.fixes.fillet_blend_corner => {
+            FilletEdgeType::OnEdge => {
                 // the fork's 63c7962: the edge along a side edge continued across seams'
                 // vertices
                 let c = corners.corner(corner)?;
                 let (vertex, tol) = (c.filleted_vertex(), c.tangency_tol_radians);
                 self.calc_edge_on_edge_at_corner(k, e, target, vertex, tol)
             }
-            FilletEdgeType::OnEdge => self.calc_edge_on_edge(k, e, target),
             FilletEdgeType::OnExtendEdge => {
                 self.calc_edge_on_extended_edge(k, e, Some(corner), corners, target)
             }
@@ -638,14 +637,13 @@ impl FilletBrep {
                     target,
                     error_info,
                 ),
-            FilletEdgeType::OnEdge if k.fixes.fillet_blend_corner => {
+            FilletEdgeType::OnEdge => {
                 // the fork's 63c7962: the edge along a side edge continued across seams'
                 // vertices
                 let c = corners.corner(corner)?;
                 let (vertex, tol) = (c.filleted_vertex(), c.tangency_tol_radians);
                 self.calc_edge_on_edge_at_corner(k, e, target, vertex, tol)
             }
-            FilletEdgeType::OnEdge => self.calc_edge_on_edge(k, e, target),
             FilletEdgeType::RailRailInterpolation => self
                 .calc_rail_rail_interpolation_with_context(
                     k,
@@ -1004,7 +1002,7 @@ impl FilletBrep {
 
     /// [`FilletBrep::re_calc_fillet_geom`] through `ends` as well: sections the
     /// geometry runs through before its first rail-end point (`ends[0]`) and after its
-    /// last (`ends[1]`). Not upstream (#2406, `fixes.fillet_blend_corner`): a rail end on
+    /// last (`ends[1]`). Not upstream (#2406): a rail end on
     /// an End's plane (an extended-edge-use end) gives the trace no point, as upstream,
     /// so a geometry traced again up to such an End runs through the End's section
     /// there.
@@ -1718,9 +1716,7 @@ impl FilletBrep {
                 continue;
             }
             // the fork's `|| IsClosedJoin()` in place of the 1x1 corner (543d25a; WR-697)
-            if (corner_type == FilletCornerType::NByOneClosed
-                || corner_type == FilletCornerType::OneByOne
-                || closed_join)
+            if (corner_type == FilletCornerType::NByOneClosed || closed_join)
                 && Some(eu) == primary_edgeuse(self.brep(), e)?
             {
                 continue;
@@ -2270,7 +2266,7 @@ mod tests {
         let mut fb = FilletBrep::new();
         let a = vertex(&mut fb, &k, Point3::new(0.0, 0.0, 0.0));
         let b = vertex(&mut fb, &k, Point3::new(1.0, 0.0, 0.0));
-        let corner = FilletCorner::new(FilletCornerKind::TwoByTwo, None, None, None, 1e-6, 0.01);
+        let corner = FilletCorner::new(FilletCornerKind::FourByThree, None, None, None, 1e-6, 0.01);
 
         // without the executive's record the note goes to a scratch record
         record_fillet_error(&corner, None, FilletGeomId(0), FilletGeomId(1), a, b);
@@ -2299,7 +2295,7 @@ mod tests {
                 Some(ExecutiveErrorObject::FilletVertex(b)),
             ]
         );
-        assert_eq!(error_info.entity_name, "SmFillet2x2Corner");
+        assert_eq!(error_info.entity_name, "SmFillet4x3Corner");
     }
 
     /// A non-rational curve of dimension `dim` (`NOW` weights; `NOZ` z for 2D).

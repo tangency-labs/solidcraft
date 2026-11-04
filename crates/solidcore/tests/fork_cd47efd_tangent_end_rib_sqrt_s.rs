@@ -1,5 +1,5 @@
-//! The SolidCraft fork's tangency-labs/smlib@cd47efd, under WR-600's
-//! `fillet_nx1_tangent_side_edge_same_convexity`: a G2 blend's end rib at a tangent end
+//! The SolidCraft fork's tangency-labs/smlib@cd47efd (WR-600, the blend corner's End): a G2
+//! blend's end rib at a tangent end
 //! is a B-spline in `t = sqrt(s)`, with zero speed there.
 //!
 //! The part is the fork's tangent-end peg (as in `fork_856b54e_tangent_end.rs`): a bar
@@ -120,7 +120,6 @@ fn kernel() -> Kernel {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.fillet_nx1_tangent_side_edge_same_convexity = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.curve_check_zero_speed_tangent_end = true;
     k.fixes.oscillating_skips_failed_guesses = true;
@@ -171,16 +170,6 @@ fn g2_front_round_end_rib_has_zero_speed_at_its_tangent_end() {
     assert!(lines.is_empty(), "{lines:#?}");
 
     let v = volume(&k, &mut b);
-    // The rib is nearer the exact one than before but changes the volume little: the
-    // same blend with its end rib marched into the tangent end (WR-600's flag off)
-    // gives 9395.419872879.
-    let mut k_off = kernel();
-    k_off.fixes.fillet_nx1_tangent_side_edge_same_convexity = false;
-    let mut b_off = peg(&mut k_off);
-    let e_off = front_top(&b_off);
-    fillet_edges(&mut k_off, &mut b_off, &[e_off], 2.0, 2, 2, 1.0).unwrap();
-    let v_off = volume(&k_off, &mut b_off);
-    assert!((v - v_off).abs() < 5e-5, "V {v} vs {v_off}");
     // 9395.419893021 here, 9395.419890495 with the rib fitted in s (before cd47efd)
     assert!((v - 9395.419893021).abs() < 1e-6, "V {v}");
 }

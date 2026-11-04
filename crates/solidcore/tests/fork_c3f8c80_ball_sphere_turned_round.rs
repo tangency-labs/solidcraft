@@ -1,5 +1,5 @@
 //! The fork's capi `ball sphere_turned_round` (tangency-labs/smlib@c3f8c80, as v1.1.0-alpha
-//! leaves it): the box corner's Ball (`Kernel::fixes.fillet_blend_corner`, WR-697) turned
+//! leaves it): the box corner's Ball (WR-697) turned
 //! round by `SmFace::SwapUV`, as `SmBrep::OrientTrimmedSurfaces` turns a face, then the body
 //! oriented outward again. The corner's face stays the ball patch it was, on the sphere about
 //! (37, 27, 17) of radius 3, bounded on it, G1 to the three rounds, and the body sound at the

@@ -28,9 +28,9 @@
 //! (`NoteError` at the vertex) instead of noted here, and so is the fork's
 //! `NoteFitRadius(0, edge)` at the concave side edge (5e8c9c1, [`TurnRefusal::fit_edge`]).
 //! `%g` in the refusal's text is `fmt_g`. The torus and its loop
-//! are kept in [`SweptTurn`] from the edge geometry until the patch takes them. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697) with the session's swept turns
-//! (`FilletSession::set_swept_turns`, the fork's `SetSweptTurns`). No recursion.
+//! are kept in [`SweptTurn`] from the edge geometry until the patch takes them. With the
+//! session's swept turns (`FilletSession::set_swept_turns`, the fork's `SetSweptTurns`;
+//! WR-697). No recursion.
 
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};

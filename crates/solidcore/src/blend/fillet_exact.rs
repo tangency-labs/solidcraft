@@ -33,15 +33,15 @@
 //! | `ball_on_face_along_arc` (private) | none (solidcore #2652) |
 //!
 //! Deviations:
-//! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** With
-//!   `fillet_blend_corner`, a torus is read too ([`QuadricKind::Torus`]; it has no class of
+//! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** A
+//!   torus is read too ([`QuadricKind::Torus`]; it has no class of
 //!   its own), so that a torus moved in by its tube radius is its tube-centre circle
 //!   ([`QuadricKind::Circle`]), as a cylinder so moved is its axis. An offset collapsed
 //!   onto such a curve that the other offset crosses is a point spine
 //!   ([`classify_ball_on_collapsed_offset`]): the round along an earlier round's end curve,
 //!   where that round has the ball's radius, is a piece of the ball.
 //! - **An offset collapsed by its geometry (solidcore #2652, not in the fork).** With
-//!   `fillet_blend_corner` and a constant ball, a round on a face of no natural quadric (a
+//!   a constant ball, a round on a face of no natural quadric (a
 //!   B-spline, as a round of the ball's radius built by a trace) and a surface quadric is
 //!   the ball's piece ([`BlendSpine::Point`]) where the geometry says the face is as wide as
 //!   the ball: the ball's centre is the same at every point of the round and the ball lies
@@ -112,7 +112,7 @@ pub enum QuadricKind {
     Line,
     /// `SM_BQ_POINT`: a sphere moved in by its radius.
     Point,
-    /// Not in the fork (solidcore #2403, with `fillet_blend_corner`): a torus, its tube of
+    /// Not in the fork (solidcore #2403): a torus, its tube of
     /// radius [`BlendQuadric::tube`] about the circle of radius [`BlendQuadric::radius`] about
     /// the axis. No class of its own: it is read so that its offset by its tube radius is
     /// known as [`QuadricKind::Circle`].
@@ -434,8 +434,8 @@ impl TorusData {
 }
 
 /// `sm_QuadricOfSurface`: the natural quadric of an analytic surface (not an offset
-/// surface), oriented by its normal at `uv`, or [`QuadricKind::None`]; with
-/// `fillet_blend_corner`, a torus as well (solidcore #2403).
+/// surface), oriented by its normal at `uv`, or [`QuadricKind::None`]; a torus as well
+/// (solidcore #2403).
 fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Result<BlendQuadric> {
     let mut q = BlendQuadric::default();
 
@@ -457,11 +457,10 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
         SurfaceKind::Sphere(s) => Some((s.base().position().origin(), s.radius())),
         _ => None,
     };
-    // Not in the fork (solidcore #2403): with `fillet_blend_corner` a torus is read too, as
-    // the last kind (it has no class of its own; see `QuadricKind::Torus`)
-    let tori = k.fixes.fillet_blend_corner;
+    // Not in the fork (solidcore #2403): a torus is read too, as the last kind (it has no
+    // class of its own; see `QuadricKind::Torus`)
     let mut torus = match surface.kind() {
-        SurfaceKind::Torus(t) if tori => Some(TorusData::of(t)),
+        SurfaceKind::Torus(t) => Some(TorusData::of(t)),
         _ => None,
     };
     let mut plane = surface.type_code() == PLANE_TYPE;
@@ -479,7 +478,7 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
                 // no sphere, or TRUE without a sphere (its SER statuses)
                 Ok(None) | Err(_) => {}
             }
-            if sphere.is_none() && tori {
+            if sphere.is_none() {
                 match Torus::is_nurb_surface_torus(k, bss, 1.0) {
                     Ok(Some(t)) => torus = Some(TorusData::of(&t)),
                     Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
@@ -801,7 +800,7 @@ pub enum BlendSpine {
     /// the axis; a sphere with its centre on it): the ball's section turned about the axis.
     Circle,
     /// `SM_BS_POINT`: one point (two cylinders as wide as the ball, their axes meeting): a
-    /// piece of the ball. With `fillet_blend_corner` also an offset collapsed onto a line
+    /// piece of the ball. Also an offset collapsed onto a line
     /// or a circle (a cylinder or torus as wide as the ball) that the other offset crosses
     /// ([`classify_ball_on_collapsed_offset`], solidcore #2403): the ball's triangle.
     Point,
@@ -874,8 +873,7 @@ pub struct ClassInputs {
     /// The tolerance placements are decided within (the body's).
     pub tol: f64,
     /// Whether a face's offset collapsed onto its spine and crossed by the other is the
-    /// ball's piece ([`classify_ball_on_collapsed_offset`], `fillet_blend_corner` with a
-    /// constant ball).
+    /// ball's piece ([`classify_ball_on_collapsed_offset`], with a constant ball).
     pub ball_on_collapsed: bool,
     /// Whether the solver's radii can change along the edge (only the line, circle and
     /// point classes are kept then).
@@ -1412,7 +1410,7 @@ fn curve_crosses_quadric(
     Some(near + x)
 }
 
-/// Not in the fork (solidcore #2403; with `fillet_blend_corner`): a constant round one of
+/// Not in the fork (solidcore #2403): a constant round one of
 /// whose faces is itself a round of the ball's radius on the ball's side (a cylinder or a
 /// torus as wide as the ball), whose offset `blend.offsets` is therefore collapsed onto that
 /// round's spine, a line or a circle, which the other offset (a plane, sphere, cylinder or
@@ -1498,7 +1496,7 @@ pub fn classify_exact_blend(
     ops.setup_offset_values(tsect, Some(&mut radius))?;
     // Not the fork (solidcore #2652): with a constant ball, a face of no natural quadric is
     // read on (`classify_faces`: the ball's piece where its centre stays put)
-    let any_faces = k.fixes.fillet_blend_corner && !ops.offset_radii_can_change()?;
+    let any_faces = !ops.offset_radii_can_change()?;
     let mut faces = [BlendQuadric::default(); 2];
     let mut uvs = [Point2::new(0.0, 0.0); 2];
     let mut offs = [0.0; 2];
@@ -1538,7 +1536,7 @@ pub fn classify_exact_blend(
         offsets: offs,
         centre,
         tol,
-        ball_on_collapsed: k.fixes.fillet_blend_corner && !radii_can_change,
+        ball_on_collapsed: !radii_can_change,
         radii_can_change,
     };
     Ok(classify_faces(faces, &inputs))
@@ -1848,7 +1846,7 @@ pub struct CollapsedOffset {
 /// on the other face's offset, within the solver's tolerance.
 ///
 /// An end at a vertex of one of `joined` (the session's other blended edges) is where the
-/// chain runs on into the next round: with `fixes.fillet_blend_corner` the Join places that
+/// chain runs on into the next round: the Join places that
 /// round's section through the fixed centre and the piece is built as the ball's triangle
 /// between the two sections (`classify_ball_on_collapsed_offset`, #2403), so that end
 /// closes the zone whatever the plane square to the edge. The caller passes `joined` only

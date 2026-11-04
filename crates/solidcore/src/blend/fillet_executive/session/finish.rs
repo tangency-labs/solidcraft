@@ -695,12 +695,11 @@ impl FilletSession<'_> {
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
         // Setback nor an N x N corner) would be dropped silently, so it is refused, as
         // `create_corners` refuses one asked with SetSetBackFill at such a corner
-        if k.fixes.fillet_blend_corner
-            && self
-                .objects
-                .corners
-                .iter()
-                .any(crate::blend::blend_corner::setback::asked_setback_not_built)
+        if self
+            .objects
+            .corners
+            .iter()
+            .any(crate::blend::blend_corner::setback::asked_setback_not_built)
         {
             self.note_refusal(Refusal {
                 code: FilletErrorType::CornerUnsupported,
@@ -789,7 +788,7 @@ impl FilletSession<'_> {
             // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
             // place instead; a WR-674 section end is still subtracted, unless
             // `fillet_section_end_trim_at_creases` (WR-706) trims it too
-            // The fork's ef57570 (smlib#125, `fillet_blend_corner`): so is an open G1 setback
+            // The fork's ef57570 (smlib#125): so is an open G1 setback
             // corner's hole made (no patches: its spring curves are imprinted on its faces
             // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
@@ -969,9 +968,12 @@ mod stitch_identity_tests {
 }
 
 /// `fixes.fillet_refuse_ball_not_fitting` (WR-462, tangency-labs/solidcore#1172): a
-/// 60 x 40 x 20 box, its top edge at y = 40 rounded r5, then its top edge at x = 60
-/// rounded r3, then its vertical edge at x = 60, y = 40 with the two edges up into the
-/// corner (the side's arc on the r5 round, the seam between the rounds).
+/// 60 x 40 x 20 box, its top edge at x = 60 rounded r3, then the round's end arc on the face
+/// y = 40 with the two edges tangent to it (the top edge at y = 40, the vertical edge at
+/// x = 60, y = 40): the ball rolls on the r3 round, so one of radius over 3 does not fit it.
+/// (The box's earlier case, an r5 round on the top edge at y = 40 then the r3 round into
+/// it, rounded the seam the old corner made between the two rounds; the blend corner ends
+/// the r3 round at its smooth vertex instead, so that seam is gone, #2400.)
 #[cfg(test)]
 mod ball_fit_tests {
     use super::*;
@@ -1009,30 +1011,22 @@ mod ball_fit_tests {
         nearest.1.unwrap()
     }
 
-    /// The executive's error code after the corner round of `radius` with the fix on or
-    /// off, and its result.
-    fn corner_round(radius: f64, fix: bool) -> (i32, Result<()>) {
+    /// The executive's error code after the round of `radius` on the r3 round's end with the
+    /// fix on or off, and its result.
+    fn end_round(radius: f64, fix: bool) -> (i32, Result<()>) {
         let mut k = Kernel::default();
         let mut body =
             crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0)
                 .unwrap();
-        for (point, r) in [([30.0, 40.0, 20.0], 5.0), ([60.0, 20.0, 20.0], 3.0)] {
-            let e = edge_near(&k, &body, point);
-            crate::blend::fillet_executive::api::fillet_edges(
-                &mut k,
-                &mut body,
-                &[e],
-                r,
-                1,
-                1,
-                1.0,
-            )
+        let e = edge_near(&k, &body, [60.0, 20.0, 20.0]);
+        crate::blend::fillet_executive::api::fillet_edges(&mut k, &mut body, &[e], 3.0, 1, 1, 1.0)
             .unwrap();
-        }
+        // the r3 round's end arc on y = 40 (about (57, 40, 17)) and the edges tangent to it
+        let h = 3.0 * core::f64::consts::FRAC_1_SQRT_2;
         let edges: Vec<_> = [
-            [60.0, 40.0, 7.5],
-            [60.0, 35.0 + 24.0_f64.sqrt(), 16.0],
-            [58.93224999673208, 37.56010200025561, 19.29486599217306],
+            [57.0 + h, 40.0, 17.0 + h],
+            [30.0, 40.0, 20.0],
+            [60.0, 40.0, 8.0],
         ]
         .into_iter()
         .map(|p| edge_near(&k, &body, p))
@@ -1051,13 +1045,13 @@ mod ball_fit_tests {
         // without the ball-fit rule: a ball of 3.1 between the R5 and R3 rounds fails in
         // the corners; one of 7 is refused before them (#2546, WR-739), its rail on the
         // plane x = 60 past the R5 round's axis (radius 5 - 7 < 0), naming 5
-        let (code, result) = corner_round(3.1, false);
+        let (code, result) = end_round(3.1, false);
         assert!(matches!(
             result,
             Err(SolidError::Upstream { code: 1001, .. })
         ));
         assert_ne!(code, NO_ROOM, "r3.1: the corners fail on their own");
-        let (code, result) = corner_round(7.0, false);
+        let (code, result) = end_round(7.0, false);
         let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
             panic!("r7: {result:?}");
         };
@@ -1068,7 +1062,7 @@ mod ball_fit_tests {
         assert!((fit.size - 5.0).abs() < 1e-12, "r7: {}", fit.size);
         assert_eq!(code, NO_ROOM);
         for radius in [3.1, 7.0] {
-            let (code, result) = corner_round(radius, true);
+            let (code, result) = end_round(radius, true);
             assert!(matches!(
                 result,
                 Err(SolidError::Upstream { code: 1001, .. })
@@ -1079,9 +1073,7 @@ mod ball_fit_tests {
 
     #[test]
     fn a_ball_that_fits_is_not_refused() {
-        let (code, result) = corner_round(2.0, true);
-        // the round past the gate completes (main wired SmFace::PointClassify, which this
-        // test used to stop at)
+        let (code, result) = end_round(2.0, true);
         result.unwrap();
         assert_ne!(code, NO_ROOM);
     }
