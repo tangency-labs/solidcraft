@@ -69,6 +69,31 @@ pub enum Error {
         /// The kernel region's id index.
         region: u32,
     },
+    /// A drafted extrusion's corner its rule cannot close (the kernel's taper refusal): why, and
+    /// where when the kernel's point is finite. Not a blend's [`Error::CornerRefused`], which
+    /// names a corner of a fillet's call that is not set back.
+    DraftCornerRefused {
+        /// Why.
+        why: crate::sweep::CornerRefusal,
+        /// The corner's point.
+        at: Option<[f64; 3]>,
+    },
+    /// A sweep path the kernel leaves undecided for every exact shape it is read as (a
+    /// comparison within its rounding bound of the path tolerance): the first such piece of the
+    /// path and its comparison.
+    PathUndecided {
+        /// The piece's index in the path.
+        piece: usize,
+        /// The comparison.
+        check: crate::sweep::PathCheck,
+    },
+    /// A sweep path whose pieces `join` and `join + 1` are not proved to meet to the path gap; for
+    /// the last join (`join + 1` the path's length), its end and its start, neither proved to meet
+    /// (closed) nor proved apart (open).
+    PathGap {
+        /// The join's index: after piece `join`.
+        join: usize,
+    },
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
@@ -151,6 +176,18 @@ impl std::fmt::Display for Error {
             Error::UnsureRegion { region } => {
                 write!(f, "unsure whether region {region} is material")
             }
+            Error::DraftCornerRefused { why, at } => {
+                write!(f, "the draft corner at {at:?} is refused: {why:?}")
+            }
+            Error::PathUndecided { piece, check } => write!(
+                f,
+                "the sweep path is undecided at piece {piece} ({check:?})"
+            ),
+            Error::PathGap { join } => write!(
+                f,
+                "the sweep path's pieces {join} and {} do not meet",
+                join.saturating_add(1)
+            ),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
             Error::Cancelled => write!(f, "cancelled"),
             Error::Reentered => write!(

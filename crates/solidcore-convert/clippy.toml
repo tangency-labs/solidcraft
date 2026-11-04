@@ -390,7 +390,7 @@ disallowed-methods = [
     { path = "solidcore::geom::certified::distance", reason = "the conversion computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::certified::dot", reason = "the conversion computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::certified::dot_error", reason = "the conversion computes no geometry (docs/layers.md §4)" },
-    { path = "solidcore::geom::certified::made_unit", reason = "the conversion computes no geometry (docs/layers.md §4)" },
+    { path = "solidcore::geom::certified::unit", reason = "the conversion computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::certified::one_minus_dot", reason = "the conversion computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::certified::scaled", reason = "the conversion computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::certified::unit_error", reason = "the conversion computes no geometry (docs/layers.md §4)" },

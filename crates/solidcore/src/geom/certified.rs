@@ -122,27 +122,26 @@ pub fn difference(a: f64, b: f64) -> Bounded {
     }
 }
 
-/// `v * (1 / |v|)`, or `None` for a vector not finite or not longer than `1e-12`: a
-/// direction made unit as sweep profiles and paths make theirs, each component within
-/// [`unit_error`] of `v / |v|`.
+/// `v` made unit by [`Vec3::unitize`], or `None` for a vector not finite or one it refuses
+/// (shorter than `1e-12`): each component within [`unit_error`] of `v / |v|`.
 #[must_use]
-pub fn made_unit(v: Vec3) -> Option<Vec3> {
+pub fn unit(v: Vec3) -> Option<Vec3> {
     if !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
         return None;
     }
-    let n = v.length();
-    (n > 1e-12 && n.is_finite()).then(|| v * (1.0 / n))
+    v.unitize().ok()
 }
 
-/// The error of each component of a unit vector made as `v * (1 / |v|)` from a given
-/// `v`: the length's `gamma_4`, the reciprocal and the product, absolute (a unit
-/// vector's components being at most 1).
+/// The error of each component of a unit vector made by [`unit`] from a given `v`:
+/// `v / |v|`, the squared length within `gamma_3`, then the root and the quotient,
+/// within `gamma_4` absolute (a unit vector's components being at most 1); a vector
+/// whose squared length rounds to 1 is kept as it is, as near. Counted as `gamma_6`.
 #[must_use]
 pub fn unit_error() -> f64 {
     gamma(6)
 }
 
-/// The error of each component of a unit vector made as `c * (1 / |c|)` where `c`'s
+/// The error of each component of a unit vector made by [`unit`] from a `c` whose
 /// components are each within `ec` of exact: `|delta c| <= 2 ec` (`sqrt 3 < 2`) moves
 /// the direction by at most `2 |delta c| / |c|`, then [`unit_error`]'s rounding.
 #[must_use]
@@ -281,6 +280,21 @@ mod tests {
         let d = distance(Point3::new(3.0, 4.0, 0.0), Point3::ZERO);
         assert_eq!(d.value, 5.0);
         assert!(d.bound > 0.0 && d.bound < 1e-14);
+    }
+
+    #[test]
+    fn a_unit_vector_is_the_kernel_s_and_refuses_what_it_cannot_make() {
+        assert_eq!(
+            unit(Vec3::new(3.0, 4.0, 0.0)),
+            Some(Vec3::new(0.6, 0.8, 0.0))
+        );
+        assert_eq!(
+            unit(Vec3::new(3.0, 4.0, 0.0)),
+            Vec3::new(3.0, 4.0, 0.0).unitize().ok()
+        );
+        assert_eq!(unit(Vec3::new(f64::NAN, 0.0, 1.0)), None);
+        assert_eq!(unit(Vec3::new(f64::INFINITY, 0.0, 1.0)), None);
+        assert_eq!(unit(Vec3::new(1e-13, 0.0, 0.0)), None);
     }
 
     #[test]

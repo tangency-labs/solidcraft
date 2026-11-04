@@ -14,7 +14,7 @@
 use super::uv;
 use super::vec::VecExt;
 use super::{Curve2, EvalError};
-use crate::math::Vec3;
+use crate::math::{det3, Vec3};
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -643,10 +643,4 @@ pub(crate) fn affine(m: &[[f64; 4]; 3], p: Vec3) -> Vec3 {
 pub(crate) fn linear(m: &[[f64; 4]; 3], v: Vec3) -> Vec3 {
     let row = |r: &[f64; 4]| r[0] * v.x + r[1] * v.y + r[2] * v.z;
     Vec3::new(row(&m[0]), row(&m[1]), row(&m[2]))
-}
-
-fn det3(m: &[[f64; 4]; 3]) -> f64 {
-    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
-        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
-        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }

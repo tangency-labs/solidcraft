@@ -146,6 +146,15 @@ pub fn rad_to_deg(a: f64) -> f64 {
     a * (180.0 / PI)
 }
 
+/// The determinant of the 3×3 matrix of the first three entries of `m`'s rows, expanded
+/// along the first row.
+#[must_use]
+pub(crate) fn det3(m: &[[f64; 4]; 3]) -> f64 {
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+}
+
 /// An affine 3D transform stored as upstream's row-vector 4×4 matrix
 /// (`SmTransform::m_adT`): `out = [p.x p.y p.z 1] * m`.
 ///

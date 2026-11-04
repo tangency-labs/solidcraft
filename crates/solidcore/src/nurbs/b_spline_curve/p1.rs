@@ -1812,7 +1812,7 @@ impl BSplineCurve {
 }
 
 /// A 4x4 [`RealMatrix`] (`N_SetRealMatrix(.., 3, 3, NL_MT_FULL, 3)`) filled from `m`.
-fn matrix_of(m: &[[f64; 4]; 4]) -> Result<RealMatrix> {
+pub(crate) fn matrix_of(m: &[[f64; 4]; 4]) -> Result<RealMatrix> {
     let mut rma = RealMatrix::new(3, 3, MatrixType::Full, 3)?;
     for (i, row) in m.iter().enumerate() {
         for (j, &v) in row.iter().enumerate() {

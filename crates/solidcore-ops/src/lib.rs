@@ -37,6 +37,7 @@ pub mod order;
 pub mod provenance;
 pub mod session;
 pub mod stitch;
+pub mod sweep;
 
 pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
 pub use boolean::BooleanOp;
