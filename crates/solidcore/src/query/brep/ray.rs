@@ -16,7 +16,7 @@
 //! With `UpstreamFixes::brep_ray_classifies_current_trims` (WR-732), the tree of a
 //! face whose loops close is built with its current trims while the body is edited,
 //! or the classification is `SolidError::FaceTrimsUnavailable` (upstream skips the
-//! trims then); a face whose loops are open mid-edit keeps upstream's tree.
+//! trims then); so is one meeting a face whose loops are open mid-edit.
 
 mod live;
 pub(crate) use live::{solve_mutable_brep_point, solve_mutable_ray};
@@ -163,8 +163,8 @@ fn prepare_surface_cache(
 /// Upstream builds it untrimmed then, and answers right only when it reuses a cache
 /// it built before the edit. Such a face whose trims then fail to implant is
 /// [`SolidError::FaceTrimsUnavailable`]: the untrimmed surface would give a wrong
-/// answer. A face whose loops are open mid-edit keeps upstream's untrimmed tree: it
-/// has no boundary yet, and the fillet session classifies against such faces.
+/// answer. So is a face whose loops are open mid-edit: it has no boundary to implant
+/// (#2624).
 fn face_surface_cache(
     k: &Kernel,
     b: &mut Brep,
@@ -204,15 +204,16 @@ fn face_surface_cache(
             "unexpected cache geometry handle",
         )),
     };
-    // WR-732: while editing, classify against the face's current trims when its loops
-    // close; a face whose loops are open mid-edit has no boundary yet, and keeps
-    // upstream's untrimmed tree (the fillet session classifies against such faces)
-    let editing =
-        k.fixes.brep_ray_classifies_current_trims && b.editing_enabled() && loops_close(b, face)?;
+    // WR-732: while editing, classify against the face's current trims; a face whose
+    // loops are open has no boundary to implant, and no answer
+    let editing = k.fixes.brep_ray_classifies_current_trims && b.editing_enabled();
     let unavailable = SolidError::FaceTrimsUnavailable {
         operation: OP,
         entity: EntityRef::Face(face),
     };
+    if editing && !loops_close(b, face)? {
+        return Err(unavailable);
+    }
     let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, &cache_handle, &entity_of)?;
     if editing {
         mapped = mapped.implanting_while_editing();
@@ -249,6 +250,10 @@ fn face_surface_cache(
 /// being merged into its edge's (a stitch's glue), so two vertices meet when they are
 /// one or lie within the sum of their tolerances of each other.
 ///
+/// An edge's ends are read through its edge uses (`SmEdge::GetVertices`): its cached
+/// pair ([`crate::topology::Edge::vertices`]) is refreshed only when a public operation
+/// returns, and mid-edit can still name a vertex a merge has deleted (#2624).
+///
 /// A loop that names an entity the edit has deleted is open.
 ///
 /// # Errors
@@ -269,6 +274,16 @@ fn loops_close_or_missing(b: &Brep, f: FaceId) -> Result<bool> {
             None => Ok(None),
         }
     };
+    // an edges ends: where its primary edge use and that uses mate start
+    let ends = |edge| -> Result<(Option<_>, Option<_>)> {
+        let Some(primary) = eu1::primary_edgeuse(b, edge)? else {
+            return Ok((None, None));
+        };
+        let Some(mate) = eu1::mate(b, primary)? else {
+            return Ok((None, None));
+        };
+        Ok((start(primary)?, start(mate)?))
+    };
     let meet = |v: crate::topology::VertexId, w: crate::topology::VertexId| -> Result<bool> {
         if v == w {
             return Ok(true);
@@ -286,7 +301,9 @@ fn loops_close_or_missing(b: &Brep, f: FaceId) -> Result<bool> {
                 return Ok(false);
             };
             // the edge use ends at its edge's other vertex
-            let [v0, v1] = b.edge(edge)?.vertices;
+            let (Some(v0), Some(v1)) = ends(edge)? else {
+                return Ok(false);
+            };
             let end = if meet(v0, from)? {
                 v1
             } else if meet(v1, from)? {

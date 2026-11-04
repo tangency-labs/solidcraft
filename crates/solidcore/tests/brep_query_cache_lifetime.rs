@@ -6,7 +6,7 @@
 //! The rays build their caches afresh, so once editing was on (the fillet session's
 //! trim step, #2365) points inside the bar classified as outside. With the flag the
 //! ray's tree of a face whose loops close is built against the face as it is,
-//! whatever the editing flag; a face whose loops are open mid-edit keeps upstream's.
+//! whatever the editing flag; a face whose loops are open mid-edit is refused (#2624).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
 use solidcore::boolean::api_brep::boolean_union;
@@ -216,19 +216,18 @@ fn classified(k: &Kernel, b: &mut Brep, p: Point3, boundaries: bool) -> String {
     }
 }
 
-/// While editing, a face whose loop does not close has no boundary to implant yet: it
-/// keeps upstream's untrimmed tree, so the classification is upstream's, not an error.
-/// (The fillet session classifies against such faces, and builds with upstream's
-/// answers.)
+/// While editing, a face whose loop does not close has no boundary to implant: with the
+/// fix, a classification whose ray meets it is refused naming the face, not answered
+/// against its untrimmed surface. Without the fix, upstream's answer is unchanged.
 #[test]
-fn an_open_loop_mid_edit_keeps_upstream_s_answer() {
+fn an_open_loop_mid_edit_is_refused_naming_its_face() {
     let broken = |k: &mut Kernel| {
         // (the stitch that builds it classifies mid-glue, where an edge use can start
         // at a vertex still being merged into its edge's: those loops close)
         let mut b = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 1.5, 10.0).unwrap();
         // in the side face, the first edge use starts where the second does: its edge
         // then ends away from the second's start, and the loop no longer closes
-        let mut opened = 0;
+        let mut opened = Vec::new();
         let faces: Vec<FaceId> = b.faces().ids().collect();
         for f in faces {
             let lu = solidcore::topology::face::p4::upward_loopuses(&b, f, false, None).unwrap()[0];
@@ -236,24 +235,62 @@ fn an_open_loop_mid_edit_keeps_upstream_s_answer() {
             if let [first, second, ..] = eus[..] {
                 let start = b.edgeuse(second).unwrap().vertexuse;
                 b.edgeuse_mut(first).unwrap().vertexuse = start;
-                opened += 1;
+                opened.push(f);
             }
         }
-        assert_eq!(opened, 1, "the side face");
+        let [side] = opened[..] else {
+            panic!("the side face alone, not {opened:?}");
+        };
         b.set_editing_enabled(true);
-        b
+        (b, side)
     };
     let mut k = kernel();
     let mut upstream = Kernel::default();
-    let mut b = broken(&mut k);
-    let mut c = broken(&mut upstream);
+    let (mut b, side) = broken(&mut k);
+    let (mut c, _) = broken(&mut upstream);
     // the region's ray fires and the boundary solve
     for boundaries in [false, true] {
         let p = Point3::new(0.0, 0.0, 5.0);
-        let with_fix = classified(&k, &mut b, p, boundaries);
-        assert!(!with_fix.starts_with("error"), "{with_fix}");
-        assert_eq!(with_fix, classified(&upstream, &mut c, p, boundaries));
+        let refused = BrepQuery::of_brep(&b).point_3d_classify(&k, &mut b, p, 1e-6, boundaries);
+        assert!(
+            matches!(
+                refused,
+                Err(SolidError::FaceTrimsUnavailable { entity: EntityRef::Face(f), .. }) if f == side
+            ),
+            "{refused:?}"
+        );
+        let unflagged = classified(&upstream, &mut c, p, boundaries);
+        assert!(!unflagged.starts_with("error"), "{unflagged}");
     }
+}
+
+/// Mid-edit, an edge's cached end pair (`Edge::vertices`, refreshed only when a public
+/// operation returns) can name a vertex the edit has merged away, while its edge uses
+/// already name the survivor. Loop closure reads the ends through the uses, as
+/// upstream's `SmEdge::GetVertices` does, so such a face still closes and classifies
+/// against its current trims (#2624: the stitch inside a fillet's finish fires its
+/// region rays at such faces).
+#[test]
+fn a_stale_edge_end_pair_mid_edit_still_closes_its_faces() {
+    let mut k = kernel();
+    let mut b = bar_into_post(&mut k);
+    let expected = [true, true, true, true, false, false];
+    assert_eq!(in_material_at(&k, &mut b, &POINTS), expected, "editing off");
+    b.set_editing_enabled(true);
+    // a vertex merged away mid-edit: every edge's cached pair still names it
+    let merged = b
+        .add_vertex_record(solidcore::topology::Vertex::default())
+        .unwrap();
+    b.remove_vertex_record(merged).unwrap();
+    let edges: Vec<_> = b.edges().ids().collect();
+    for e in edges {
+        b.edge_mut(e).unwrap().vertices = [merged, merged];
+    }
+    assert_eq!(
+        in_material_at(&k, &mut b, &POINTS),
+        expected,
+        "editing on, stale end pairs"
+    );
 }
 
 /// `SmBSplineSurface::Transform` notifies `SM_NO_PRE_EDIT`, and `SmSurface::Notify`
