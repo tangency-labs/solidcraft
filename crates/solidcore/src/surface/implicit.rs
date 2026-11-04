@@ -637,6 +637,7 @@ fn lies_on_canal(
 }
 
 const OP_BUILD: &str = "surface::implicit::AnalyticSupport::build";
+const OP_CHECK: &str = "surface::implicit::AnalyticSupport::check";
 
 /// A support's analytic kind and parameters, beside its NURBS form (#2388): what a
 /// record keeps of a plane, cylinder, cone, sphere or torus support.
@@ -756,6 +757,30 @@ impl AnalyticSupport {
                 minor: *minor_radius,
             },
         }
+    }
+
+    /// An exact class at bound 0 (owner rule 13564): `s`'s analytic kind (its label) with
+    /// its NURBS form proved on that kind's implicit surface by [`lies_on`], to the rounding
+    /// of checking it. Returns the kind, so a caller can compare it with another surface's
+    /// (two kinds equal past the plane's domain are one implicit surface).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a surface of no analytic kind, without a NURBS form, or whose
+    /// form is off its kind; those of making the form and of [`lies_on`].
+    pub fn check(k: &Kernel, s: &Surface) -> Result<Self> {
+        let a = Self::of(s).ok_or_else(|| {
+            SolidError::invalid_input(OP_CHECK, "the surface has no analytic kind")
+        })?;
+        let form = crate::blend::fillet_section::station::as_b_spline(k, s)?
+            .ok_or_else(|| SolidError::invalid_input(OP_CHECK, "the surface has no NURBS form"))?;
+        if !lies_on(&form, &a.implicit())? {
+            return Err(SolidError::invalid_input(
+                OP_CHECK,
+                "the surface's NURBS form is off its analytic kind",
+            ));
+        }
+        Ok(a)
     }
 
     /// The analytic surface on the NURB `form`: refused unless `form` lies on it
