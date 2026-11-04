@@ -183,9 +183,9 @@ messages go as one prompt, in order, when the turn ends normally.
 When you change the design yourself between two messages (a parameter, a feature, an undo, the
 History marker), your next message tells the agent so first, in a short note the conversation
 doesn't show: which parameters changed and from what to what, which features are new, edited or
-removed, and where the History marker went. The agent then reads the design again instead of
-picking edges and faces where they were before. A new chat or a new agent session has seen
-nothing yet, so its first message carries no note.
+removed, and where the History marker went. The note asks the agent to read the design again
+instead of picking edges and faces where they were before. A new chat or a new agent session has
+seen nothing yet, so its first message carries no note.
 
 ## Agents
 
