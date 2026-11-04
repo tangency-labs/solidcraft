@@ -2351,7 +2351,8 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
     Ok(())
 }
 
-pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+/// `key` names the row's scenario handles (`ui_kit::progress_action`).
+pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     if !ribbon::busy(app) {
         return false;
     }
@@ -2366,8 +2367,8 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let cancel =
-        crate::ui_kit::progress_action(ui, &format!("{name} · {} · {:.0}%", app.tr(&phase_key), fraction * 100.0), fraction, app.tr_label("Cancel"));
+    let status = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
+    let cancel = crate::ui_kit::progress_action(ui, key, &name, &status, fraction, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {
         app.start("render.cancel");

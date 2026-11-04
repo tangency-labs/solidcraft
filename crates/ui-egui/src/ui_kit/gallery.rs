@@ -242,7 +242,7 @@ const ELEMENTS: &[Element] = &[
         number_pair(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
     }),
     element!("progress_action", |ui, _| {
-        progress_action(ui, "Rendering · 62%", 0.62, "Cancel");
+        progress_action(ui, "gallery:progress", "Rendering", "· 62%", 0.62, "Cancel");
     }),
     element!("settings_choice_row", |ui, _| {
         settings_choice_row(
