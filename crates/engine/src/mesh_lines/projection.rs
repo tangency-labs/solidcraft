@@ -8,6 +8,8 @@ use solidcraft_geom::prelude::*;
 use solidcraft_render::Camera;
 use std::collections::BTreeMap;
 
+use super::Refused;
+
 pub(crate) struct Drawing {
     pub lines: Vec<Line>,
     pub work: usize,
@@ -60,23 +62,23 @@ impl View {
 
     /// `p` in the view: right and up, and a depth that grows toward the eye (the distance
     /// along back, or its reciprocal's change in perspective).
-    pub(super) fn project(&self, p: Vec3) -> Result<Vec3, &'static str> {
+    pub(super) fn project(&self, p: Vec3) -> Result<Vec3, Refused> {
         if !p.is_finite() {
-            return Err("model contains invalid coordinates");
+            return Err(Refused::Invalid("the model contains invalid coordinates"));
         }
         let d = p - self.origin;
         let z = d.dot(self.back);
         let projected = if let Some(distance) = self.perspective {
             let w = distance - z;
             if w <= distance * 1e-6 {
-                return Err("model crosses the camera eye plane; zoom out before exporting");
+                return Err(Refused::EyePlane);
             }
             Vec3::new(d.dot(self.right) * distance / w, d.dot(self.up) * distance / w, 1. / w)
         } else {
             Vec3::new(d.dot(self.right), d.dot(self.up), z)
         };
         if !projected.is_finite() || projected.len() > 1e12 {
-            return Err("projected coordinates exceed the export range");
+            return Err(Refused::Invalid("the projected coordinates are past the range a view holds"));
         }
         Ok(projected)
     }

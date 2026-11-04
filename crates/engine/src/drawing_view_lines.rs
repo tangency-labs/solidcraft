@@ -18,7 +18,7 @@ use solidcraft_geom::{Aabb2, EPS, Similarity2};
 use solidcraft_kernel::PlanarPiece;
 
 use super::ShownSet;
-use crate::mesh_lines::{self, Ask, Origin, Owner, Scene, View};
+use crate::mesh_lines::{self, Ask, Origin, Owner, Refused, Scene, View};
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -105,7 +105,7 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineReq
     }
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
-    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()))?;
+    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()), refused)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     if scene.placements.len() != shown.bodies.len() {
         return Err(bad(cmd, "two shown bodies have one name: the view can't tell their lines apart"));
@@ -117,7 +117,7 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineReq
     scene.reference_hides_model = reference_hides_model;
     let has_model = shown.bodies.iter().any(|b| !b.reference);
     let is_reference = |owner: Owner| shown.bodies.get(owner.placement as usize).is_some_and(|b| b.reference);
-    let drawing = mesh_lines::drawing(&scene, &[], &View::orthographic(&frame.basis())).map_err(|e| bad(cmd, e))?;
+    let drawing = mesh_lines::drawing(&scene, &[], &View::orthographic(&frame.basis())).map_err(|e| bad(cmd, refused(e)))?;
     let mut by_owner: BTreeMap<Owner, Vec<(Vec2, Vec2, bool)>> = BTreeMap::new();
     let mut covered = 0;
     for line in &drawing.lines {
@@ -393,9 +393,28 @@ fn chain(stretches: &[(Vec2, Vec2, bool)], join: f64) -> Vec<(bool, Vec<Vec2>)> 
     runs
 }
 
+/// What a refusal of a view's lines says on a drawing, with what to do about it there.
+fn refused(e: Refused) -> String {
+    match e {
+        Refused::Cancelled => "drawing the view was cancelled".into(),
+        Refused::Work | Refused::Memory => format!("{e}: raise chord_mm, or choose a smaller scale"),
+        Refused::EyePlane | Refused::Invalid(_) => e.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A view's lines refused say what happened and what to do on a drawing, never in a DXF's terms.
+    #[test]
+    fn a_views_refused_lines_say_what_to_do_on_a_drawing() {
+        for e in [Refused::Cancelled, Refused::Work, Refused::Memory, Refused::EyePlane, Refused::Invalid("the model contains invalid coordinates")] {
+            let says = refused(e);
+            assert!(!["DXF", "export", "tolerance", "zoom", "bodies"].iter().any(|word| says.contains(word)), "{says}");
+        }
+        assert_eq!(refused(Refused::Memory), "the meshes take more memory than the limit allows: raise chord_mm, or choose a smaller scale");
+    }
 
     fn lines_of(pieces: Vec<Piece>) -> Lines {
         let line = ViewLine { shown: 0, reference: false, source: Source::Edge { edge: 0, tangent: false }, pieces };
