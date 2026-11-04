@@ -32,6 +32,10 @@ mod navigation_cache_tests;
 mod overlays_tests;
 
 #[cfg(test)]
+#[path = "viewport_hover_pan_tests.rs"]
+mod hover_pan_tests;
+
+#[cfg(test)]
 #[path = "viewport_removed_later_tests.rs"]
 mod removed_later_tests;
 
