@@ -2354,6 +2354,32 @@ fn expanding_contents_keeps_pattern_rows_in_their_group() {
     assert!(handle_at(&handle).is_some(), "the Patterns group lists the pattern row");
 }
 
+/// With sketch contents off, the sketch row's fold shows and hides its quick pattern list, as it
+/// did before the contents feature (#7917).
+#[test]
+fn turning_sketch_contents_off_keeps_the_pattern_fold() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.preferences.sketch_contents = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
+    let pattern =
+        h.app.run("sketch.pattern.rectangular", json!({"entities":["source"],"count":4,"spacing":20,"alignment":"center","reversed":true})).unwrap()
+            ["pattern"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    h.app.finish_sketch();
+    h.settle();
+    let handle = format!("browser:sketch-pattern:{sketch}:{pattern}");
+    assert!(handle_at(&handle).is_some(), "the quick pattern list is shown");
+    h.step(&json!({"click":{"handle":"fold:Patterned"}})).unwrap();
+    h.settle();
+    assert!(handle_at(&handle).is_none(), "the fold hides the quick pattern list");
+}
+
 /// Stage 3: a contents row of the sketch being edited selects its own entity, so the viewport
 /// lights it and the view's own picks light the row back.
 #[test]

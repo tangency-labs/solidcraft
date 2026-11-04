@@ -3266,7 +3266,10 @@ fn sketch_contents_rows(
                     }
                 }
                 let mut rows = selected_contents_rows(app, contents, sketch, editable);
-                if !rows.iter().any(|id| id == &row.id) {
+                // Rows that select the sketch (an offset or equation curve) must not lend
+                // their curve id to the menu: `ui.delete` would act on the sketch instead.
+                let names_entity = !targets.is_empty() && !matches!(row.kind, RowKind::Link | RowKind::Text);
+                if names_entity && !rows.iter().any(|id| id == &row.id) {
                     rows.push(row.id.clone());
                 }
                 acts.menu = Some((at, Target::SketchContents { sketch, rows, editable }));
@@ -3398,8 +3401,29 @@ fn selected_contents_rows(app: &SolveApp, contents: &SketchContents, sketch: u64
     let mut rows = Vec::new();
     for group in &contents.groups {
         for row in &group.rows {
-            if contents_row_selected(app, row, sketch, editable) && !rows.iter().any(|id| id == &row.id) {
-                rows.push(row.id.clone());
+            if !contents_row_selected(app, row, sketch, editable) {
+                continue;
+            }
+            // A link or text row stands for the geometry it made: the menu resolves ids as
+            // curves and points, and cannot resolve the link's own id.
+            let ids: Vec<String> = if matches!(row.kind, RowKind::Link | RowKind::Text) {
+                contents_row_targets(app, row, sketch, editable, true)
+                    .into_iter()
+                    .filter_map(|sel| match sel {
+                        Sel::SketchCurve { id, .. }
+                        | Sel::SketchPoint { id }
+                        | Sel::ExternalSketchCurve { id, .. }
+                        | Sel::ExternalSketchPoint { id, .. } => Some(id),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                vec![row.id.clone()]
+            };
+            for id in ids {
+                if !rows.iter().any(|seen| seen == &id) {
+                    rows.push(id);
+                }
             }
         }
     }
@@ -3514,7 +3538,7 @@ fn entry_row(
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     // Every sketch folds its contents; the key follows the row's placement prefix
     // (`o:1/s:7/contents`), so two placements of one sketch keep separate fold state.
-    let contents_key = (folder == "sketches").then(|| format!("{}/contents", e.row_key));
+    let contents_key = (folder == "sketches" && app.preferences.sketch_contents).then(|| format!("{}/contents", e.row_key));
     let contents_open = contents_key.as_deref().is_some_and(|key| is_open(app, key, false));
     // The old pattern list is the folded sketch's quick view; expanding the contents replaces it
     // with the organised Patterns group, so the two never show the same rows twice.

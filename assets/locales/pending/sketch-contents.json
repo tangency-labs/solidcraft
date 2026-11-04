@@ -12,7 +12,8 @@
     "sketch.contents.offsets": "Offsets",
     "sketch.contents.links": "Links",
     "sketch.contents.text": "Text",
-    "sketch.contents.other": "Other"
+    "sketch.contents.other": "Other",
+    "prefs.sketch.contents": "Show a sketch's contents in the browser"
   },
   "de": {
     "sketch.contents.points": "Punkte",
