@@ -6,7 +6,10 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Mesh, UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcore_record::brep::Curve;
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Mesh, UnitVec3};
 use solidcraft_kernel::{Body, FaceSurface};
 
 /// The area of the patch of faces `patch` of `body`, worked out on the surface behind
@@ -34,6 +37,18 @@ fn border_edges(mesh: &Mesh, patch: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+/// Whether edge `edge` is a straight line parallel to `axis`.
+fn straight_along(body: &Body, edge: usize, axis: UnitVec3) -> bool {
+    let Some(e) = body.record().edges.get(edge) else { return false };
+    if !matches!(e.curve, Curve::Line { .. }) {
+        return false;
+    }
+    let Ok(c) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()) else { return false };
+    let [t0, t1] = e.interval;
+    let (Some(a), Some(b)) = (c.point(t0), c.point(t1)) else { return false };
+    (b - a).normalized().is_some_and(|d| d.dot(axis.vec()).abs() >= 1.0 - 1e-9)
+}
+
 /// The area of a cylindrical band: the radius of the surface, the turn the band covers
 /// and the distance between its two rims.
 fn cylinder_band(body: &Body, mesh: &Mesh, patch: &[usize], origin: Vec3, axis: UnitVec3, radius: f64) -> Option<f64> {
@@ -55,9 +70,15 @@ fn cylinder_band(body: &Body, mesh: &Mesh, patch: &[usize], origin: Vec3, axis: 
     // The rims of the band: the circles that bound it, each across the axis.
     let mut rims: Vec<(f64, f64)> = Vec::new();
     for edge in border_edges(mesh, patch) {
-        // An edge that is not a circle (a straight cut along the band) leaves the turn of
-        // the band to its rims alone, which is what they say.
-        let Some(circle) = solidcraft_kernel::edge_circle(body, edge) else { continue };
+        // An edge that is not a circle but a straight line along the axis (a seam, a straight
+        // cut along the band) leaves the turn of the band to its rims alone. Any other edge
+        // (the saddle rim of a bore through the wall) cuts the band: not ours to measure.
+        let Some(circle) = solidcraft_kernel::edge_circle(body, edge) else {
+            if straight_along(body, edge, axis) {
+                continue;
+            }
+            return None;
+        };
         if circle.axis.vec().dot(axis.vec()).abs() < 1.0 - 1e-9 || (circle.radius - radius).abs() > tol {
             return None;
         }

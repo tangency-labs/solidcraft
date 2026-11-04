@@ -5,7 +5,7 @@
 use std::f64::consts::TAU;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -131,4 +131,17 @@ fn the_reports_cylinder_measures_exactly() {
     let want = TAU * 5.0 * 20.0;
     assert!((area - want).abs() / want < 1e-6, "the side face's area {area} against its exact {want}: {r}");
     let _ = Vec3::new(40.0, 10.0, 20.0);
+}
+
+/// A bore through the cylinder's wall cuts a rim that is not a circle: the band is no longer
+/// the uncut 2πrh, so the exact shortcut gives way to the mesh's measure.
+#[test]
+fn a_bore_through_the_wall_is_not_measured_as_the_uncut_band() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [0, 0, 0], "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 14, "base": [-7, 0, 10], "axis": [1, 0, 0], "operation": "cut"}));
+    let side = face_of(&s, |f| matches!(f, solidcraft_kernel::FaceSurface::Cylinder { radius, .. } if (radius - 5.0).abs() < 1e-6));
+    let r = measure(&mut s, vec![side]);
+    let area = r["items"][0]["area_mm2"].as_f64().unwrap();
+    assert!(area < TAU * 5.0 * 20.0 - 1.0, "the bored wall's area {area} is less than the uncut {}: {r}", TAU * 5.0 * 20.0);
 }
