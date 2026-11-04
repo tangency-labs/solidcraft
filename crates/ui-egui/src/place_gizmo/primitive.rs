@@ -4,7 +4,8 @@
 //!
 //! Where the place is kept differs by primitive, and the marker moves it there:
 //! - a Cylinder stands where its Face input is picked (and its reference edges measure from
-//!   there, #6380), so a drag replaces that item, as a click on the input does;
+//!   there, #6380), so a drag replaces that item, as a click on the input does; one reference
+//!   edge holds it on a line at the typed distance, as it holds a hole;
 //! - a Box placed by its typed corner or centre (#5638) has the drop written into those fields,
 //!   so it stands on the face, centred across it;
 //! - any other, and a Box a pre-selected face placed, takes the drop as its picked place.
@@ -44,7 +45,7 @@ pub(super) static SPEC: Spec = Spec {
     place: PlaceSource::Own { places: |app, d| super::one(frame(app, d)), move_to },
     click: None,
     footprint,
-    freedom: super::anywhere,
+    freedom: |app, d, key| crate::hole_refs::freedom(&app.session, d, key),
     turn: None,
 };
 
@@ -191,6 +192,14 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
     if crate::hole_refs::takes(d) {
         let Some(to) = face_pick(d, s, hits) else { return false };
         let Some((p, n)) = planar(&to) else { return false };
+        // One reference edge holds it on a line at the typed distance, as it holds a hole; where
+        // the line leaves the face it stays. On another body the edge is let go (below).
+        let same_body = |a: &Sel, b: Option<&Sel>| matches!((a, b), (Sel::Face { body: x, .. }, Some(Sel::Face { body: y, .. })) if x == y);
+        if same_body(&to, d.inputs.first().and_then(|inp| inp.items.first()))
+            && let super::Freedom::Line(_) = crate::hole_refs::freedom(s, d, 0)
+        {
+            return crate::hole_refs::drag_to(s, d, 0, p).is_ok();
+        }
         if let Some(inp) = d.inputs.first_mut() {
             inp.items = vec![to];
         }

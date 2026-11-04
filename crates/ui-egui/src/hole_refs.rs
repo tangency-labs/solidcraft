@@ -236,16 +236,17 @@ fn place_item(d: &Dialog) -> Option<usize> {
 /// What the picked reference edges leave the hole at item `i` of the face input free to do: with
 /// one edge, along it at its distance; with two, anywhere again, a move then setting both
 /// distances (as it did before any edge was picked); with none, anywhere. Only the hole the edges
-/// place (see [`place_item`]) is held; another hole in the same dialog moves anywhere. Read from
+/// place (see [`place_item`]) is held; another hole in the same dialog moves anywhere. A
+/// Cylinder's reference edges hold it the same way. Read from
 /// the frame last found for these edges (`sync` keeps it current), or found again when the design
 /// changed since; an edge picked but not framed yet, or a frame that failed, leaves the hole free.
 pub(crate) fn freedom(s: &Session, d: &Dialog, i: usize) -> Freedom {
-    let Kind::Hole { opts, .. } = &d.kind else { return Freedom::Plane };
+    let Some(refs) = refs(d).filter(|_| takes(d)) else { return Freedom::Plane };
     if place_item(d) != Some(i) {
         return Freedom::Plane;
     }
     let edges = edges(d);
-    let Some(f) = opts.refs.frame.as_ref().filter(|f| f.edges == edges) else { return Freedom::Plane };
+    let Some(f) = refs.frame.as_ref().filter(|f| f.edges == edges) else { return Freedom::Plane };
     let fresh = if f.revision == s.revision { None } else { Some(place(d).and_then(|at| framed(s, d, at, edges))) };
     match fresh.as_ref().unwrap_or(&f.frame).as_ref().map(|(fr, _)| fr.lines.as_slice()) {
         Some([a]) => Freedom::Line(a.along),
@@ -264,8 +265,8 @@ pub(crate) enum Stuck {
 }
 
 /// Move the hole at item `i` of the face input toward `near` as far as its one reference edge
-/// lets it: onto the line at the typed distance from it, nearest `near`. The typed distance
-/// stays as it is, an expression included, so a drag never rewrites it.
+/// lets it: onto the line at the typed distance from it, nearest `near` (a Cylinder's base with
+/// it). The typed distance stays as it is, an expression included, so a drag never rewrites it.
 pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> Result<(), Stuck> {
     if place_item(d) != Some(i) {
         return Err(Stuck::Not);
@@ -274,19 +275,19 @@ pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> Resu
     if picked.len() != 1 {
         return Err(Stuck::Not);
     }
-    let Kind::Hole { opts, .. } = &d.kind else { return Err(Stuck::Not) };
-    let values: Option<Vec<f64>> = picked.iter().map(|k| model_text(&opts.refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
+    let Some(refs) = refs(d).filter(|_| takes(d)) else { return Err(Stuck::Not) };
+    let values: Option<Vec<f64>> = picked.iter().map(|k| model_text(refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
     let Some(to) = values.and_then(|v| f.place(near, &v).ok()) else { return Err(Stuck::Not) };
     if !on_reference_face(&crate::open_meshing::session_world(s), &f, to) {
         return Err(Stuck::OffFace);
     }
-    let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.get_mut(i)) else { return Err(Stuck::Not) };
-    *point = to;
+    if !matches!(d.inputs.first().and_then(|inp| inp.items.get(i)), Some(Sel::Face { .. })) {
+        return Err(Stuck::Not);
+    }
+    set_place(d, to);
     // In step already: the place moved by its distances, so there is nothing to measure again.
     let edges = edges(d);
-    if let Kind::Hole { opts, .. } = &mut d.kind
-        && let Some(sn) = opts.refs.seen.as_mut()
-    {
+    if let Some(sn) = refs_mut(d).and_then(|r| r.seen.as_mut()) {
         sn.place = to;
         sn.edges = edges;
     }

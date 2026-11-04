@@ -195,7 +195,7 @@ fn marker_stands_a_new_cylinder_on_the_face_through_its_face_input() {
 }
 
 #[test]
-fn dragging_a_cylinder_with_a_reference_edge_measures_its_distance_again() {
+fn dragging_a_cylinder_with_a_reference_edge_keeps_its_typed_distance() {
     let mut h = plate();
     start(&mut h, "solid.cylinder");
     h.step(&json!({"click": {"world": [30, 25, 10]}})).unwrap();
@@ -207,13 +207,15 @@ fn dragging_a_cylinder_with_a_reference_edge_measures_its_distance_again() {
         other => panic!("a primitive: {other:?}"),
     };
     assert!((distance(&h) - 30.0).abs() < 0.5, "measured from the left edge: {}", distance(&h));
+    // The left edge holds it at x = 30, as it holds a hole: the drag moves it along the edge only.
     drag(&mut h, [50.0, 30.0, 10.0]);
-    assert!((distance(&h) - 50.0).abs() < 0.5, "measured again from the drop: {}", distance(&h));
+    assert!((distance(&h) - 30.0).abs() < 0.5, "the typed distance stays: {}", distance(&h));
     ok(&mut h);
     let (_, kind) = last(&h);
     let FeatureKind::Cylinder { base, references, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
     assert_eq!(references.len(), 1);
-    assert!(point(&h, base).dist(Vec3::new(50.0, 30.0, 10.0)) < 0.5, "{:?}", point(&h, base));
+    let b = point(&h, base);
+    assert!((b.x - 30.0).abs() < 0.5 && (b.y - 30.0).abs() < 0.5, "along the edge to y = 30: {b:?}");
 }
 
 #[test]
