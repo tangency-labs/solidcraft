@@ -305,8 +305,8 @@ pub struct Pending {
 
 impl Pending {
     /// After its text was edited: the marks that still stand for a group are numbered 1, 2, 3 again,
-    /// a mark of no group is plain text, and the items of a group whose mark was taken out are
-    /// not placed any more (they show as chips).
+    /// a mark of no group is plain text, and the picks of a mark that was taken out are dropped, as
+    /// in the message box.
     fn regroup(&mut self) {
         let (text, order) = pills::renumber(&self.text, &self.context.groups);
         self.text = text;

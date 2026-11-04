@@ -135,9 +135,11 @@ impl Context {
     }
 
     /// The same with the groups renumbered: `order` lists the old number of each group that is
-    /// still in the text, in reading order (it becomes 1, 2, ...); the items of any other group
-    /// are not placed any more.
+    /// still in the text, in reading order (it becomes 1, 2, ...). The items of any other group
+    /// are dropped, as taking a mark out of the message box drops its pick; those that were never
+    /// placed (Attach selection) stay.
     pub fn regrouped(mut self, order: &[u32]) -> Context {
+        self.items.retain(|item| item.group == 0 || order.contains(&item.group));
         let number = |old: u32| order.iter().position(|o| *o == old).map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)).unwrap_or(0);
         let labels: Vec<(u32, String)> = order
             .iter()
