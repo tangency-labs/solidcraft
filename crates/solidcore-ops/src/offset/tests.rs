@@ -1,5 +1,5 @@
 //! Shells, face offsets, thickening and sheet offsets against closed forms (the cases of
-//! SolidCraft's `core/offset_tests.rs`, on face indices).
+//! SolidCraft's `core/offset_tests.rs`, on record face indices through the body's `Order`).
 
 use std::f64::consts::PI;
 
@@ -9,7 +9,7 @@ use solidcore::query::api_queries::face_bounding_box;
 
 use super::{offset_faces, offset_sheet, shell, thicken};
 use crate::session::{self, run};
-use crate::{make_box, make_cylinder, make_sphere, Body, Error};
+use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
 
 fn all_fixes() {
     session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -30,20 +30,25 @@ fn volume(b: &Body) -> f64 {
     b.volume(1e-8).unwrap()
 }
 
-/// The index of the face of `b` whose tight box `pick` accepts.
-fn face(b: &Body, pick: impl Fn(&Extent3d) -> bool) -> usize {
+/// The record order of `b`: record face `i` is the kernel face `order.faces[i]`.
+fn order(b: &Body) -> Order {
+    b.to_record().unwrap().1
+}
+
+/// The record index (through `order`) of the face of `b` whose tight box `pick` accepts.
+fn face(b: &Body, order: &Order, pick: impl Fn(&Extent3d) -> bool) -> usize {
     let k = Kernel::default();
     let brep = b.lock();
-    let faces = brep.face_list().to_vec();
-    faces
+    order
+        .faces
         .iter()
         .position(|&f| pick(&face_bounding_box(&k, &brep, f, true).unwrap()))
         .unwrap()
 }
 
-/// The block's top, `z = 10`.
-fn top(b: &Body) -> usize {
-    face(b, |bx| {
+/// The block's top, `z = 10`, by its record index.
+fn top(b: &Body, order: &Order) -> usize {
+    face(b, order, |bx| {
         (bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9
     })
 }
@@ -53,15 +58,17 @@ fn a_block_shells_to_its_closed_forms() {
     all_fixes();
     // inward 2, open at the top: abc - (a - 4)(b - 4)(c - 2)
     let b = block();
-    shell(&b, &[top(&b)], -2.0).unwrap();
+    let o = order(&b);
+    shell(&b, &o, &[top(&b, &o)], -2.0).unwrap();
     assert!(rel(volume(&b), ABC - 26.0 * 16.0 * 8.0) < 1e-9);
     // closed: (a - 4)(b - 4)(c - 4) hollow
     let b = block();
-    shell(&b, &[], -2.0).unwrap();
+    shell(&b, &order(&b), &[], -2.0).unwrap();
     assert!(rel(volume(&b), ABC - 26.0 * 16.0 * 6.0) < 1e-9);
     // outward 1, the convex edges extended: (a + 2t)(b + 2t)(c + t) - abc
     let b = block();
-    shell(&b, &[top(&b)], 1.0).unwrap();
+    let o = order(&b);
+    shell(&b, &o, &[top(&b, &o)], 1.0).unwrap();
     assert!(rel(volume(&b), 32.0 * 22.0 * 11.0 - ABC) < 1e-9);
 }
 
@@ -70,10 +77,11 @@ fn a_cylinder_shells_open_at_its_top() {
     all_fixes();
     // r 5, h 10, t 1: pi r^2 h - pi (r - t)^2 (h - t)
     let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
-    let at = face(&c, |bx| {
+    let o = order(&c);
+    let at = face(&c, &o, |bx| {
         (bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9
     });
-    shell(&c, &[at], -1.0).unwrap();
+    shell(&c, &o, &[at], -1.0).unwrap();
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
@@ -82,17 +90,23 @@ fn a_wall_with_no_room_is_refused_before_the_kernel() {
     all_fixes();
     // a wall of 15 inside a block 20 wide leaves no cavity
     let b = block();
-    assert_eq!(shell(&b, &[top(&b)], -15.0), Err(Error::NoRoom));
+    let o = order(&b);
+    assert_eq!(shell(&b, &o, &[top(&b, &o)], -15.0), Err(Error::NoRoom));
     // the top moved in 10, as deep as the block: nothing behind it
     let b = block();
-    assert_eq!(offset_faces(&b, &[top(&b)], -10.0), Err(Error::NoRoom));
+    let o = order(&b);
+    assert_eq!(
+        offset_faces(&b, &o, &[top(&b, &o)], -10.0),
+        Err(Error::NoRoom)
+    );
 }
 
 #[test]
 fn the_top_moves_out() {
     all_fixes();
     let b = block();
-    offset_faces(&b, &[top(&b)], 2.0).unwrap();
+    let o = order(&b);
+    offset_faces(&b, &o, &[top(&b, &o)], 2.0).unwrap();
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
 }
 
@@ -100,23 +114,28 @@ fn the_top_moves_out() {
 fn hostile_arguments_are_refused() {
     all_fixes();
     let b = block();
+    let o = order(&b);
     for t in [0.0, f64::NAN, 2e6] {
-        assert_eq!(shell(&b, &[], t), Err(Error::Argument));
-        assert_eq!(offset_faces(&b, &[0], t), Err(Error::Argument));
+        assert_eq!(shell(&b, &o, &[], t), Err(Error::Argument));
+        assert_eq!(offset_faces(&b, &o, &[0], t), Err(Error::Argument));
         assert_eq!(thicken(&b, t, false), Err(Error::Argument));
         assert_eq!(offset_sheet(&b, t), Err(Error::Argument));
     }
     assert_eq!(
-        shell(&b, &[6], -1.0),
+        shell(&b, &o, &[6], -1.0),
         Err(Error::Argument),
         "an index past the faces"
     );
     assert_eq!(
-        shell(&b, &[1, 1], -1.0),
+        shell(&b, &o, &[1, 1], -1.0),
         Err(Error::Argument),
         "an index twice"
     );
-    assert_eq!(offset_faces(&b, &[], 1.0), Err(Error::Argument), "no faces");
+    assert_eq!(
+        offset_faces(&b, &o, &[], 1.0),
+        Err(Error::Argument),
+        "no faces"
+    );
     assert_eq!(
         thicken(&b, 2.0, false),
         Err(Error::Argument),
@@ -308,8 +327,9 @@ fn an_inside_out_body_is_refused() {
             solidcore::topology::face::p1::flip_face_orientation(&mut br, f).unwrap();
         }
     }
+    let o = order(&b);
     let before = b.to_smb(false).unwrap();
-    assert_eq!(shell(&b, &[], -15.0), Err(Error::Argument));
-    assert_eq!(offset_faces(&b, &[0], -2.0), Err(Error::Argument));
+    assert_eq!(shell(&b, &o, &[], -15.0), Err(Error::Argument));
+    assert_eq!(offset_faces(&b, &o, &[0], -2.0), Err(Error::Argument));
     assert_eq!(b.to_smb(false).unwrap(), before);
 }

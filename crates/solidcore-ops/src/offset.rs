@@ -1,5 +1,5 @@
 //! Shells, face offsets, thickening and sheet offsets: each a sequence of kernel calls on faces
-//! taken by their record index.
+//! taken by their record index, through the body's record [`Order`] ([`Body::to_record`]).
 //!
 //! - [`shell`]: the faces named opened, the rest offset into a wall (`SmApiShellBrepFull` with
 //!   convex edges extended and the results merged); an inward wall of a solid is refused before
@@ -24,6 +24,7 @@ use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, FaceId, Kernel, SolidError};
+use solidcore_convert::brep::Order;
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
@@ -59,18 +60,14 @@ fn distance_ok(x: f64) -> bool {
     x.is_finite() && x != 0.0 && x.abs() <= MAX_DISTANCE
 }
 
-/// The face of `b` that record index `i` names. The one place a face index is read: the kernel's
-/// own face order until the record's canonical order (the conversion's `Order`) takes its place.
-fn face_at(b: &Brep, i: usize) -> Result<FaceId> {
-    b.face_list().get(i).copied().ok_or(Error::Argument)
-}
-
-/// The faces of `b` that record indices `faces` name, each once.
-fn faces_of(b: &Brep, faces: &[usize]) -> Result<Vec<FaceId>> {
+/// The faces of `b` that record indices `faces` name through `order` (the [`Order`] of `b`'s
+/// record), each once: an index past the record's faces, one repeated, or one naming a face `b`
+/// does not have (an order taken before an edit removed it) is [`Error::Argument`].
+fn faces_of(b: &Brep, order: &Order, faces: &[usize]) -> Result<Vec<FaceId>> {
     let mut out: Vec<FaceId> = Vec::new();
     for &i in faces {
-        let f = face_at(b, i)?;
-        if out.contains(&f) {
+        let f = order.faces.get(i).copied().ok_or(Error::Argument)?;
+        if out.contains(&f) || !b.face_list().contains(&f) {
             return Err(Error::Argument);
         }
         out.push(f);
@@ -127,21 +124,21 @@ fn replace(
     Ok(finish(k, made, expect)?.map(|r| *b = r))
 }
 
-/// The faces of `body` with record indices `open` opened, the rest offset by `thickness`
-/// (negative: inward) into a wall; none opened gives a closed hollow body. A solid gives a
-/// solid.
+/// The faces of `body` with record indices `open` (through `order`, its record's [`Order`])
+/// opened, the rest offset by `thickness` (negative: inward) into a wall; none opened gives a
+/// closed hollow body. A solid gives a solid.
 ///
 /// # Errors
-/// [`Error::Argument`] for a thickness not finite, zero or past 1e6, an index past the faces
-/// or repeated, or a closed manifold body that is not a valid solid facing out (facing in, or
-/// invalid); [`Error::NoRoom`] for an inward wall of a solid the kernel's room test shows no
+/// [`Error::Argument`] for a thickness not finite, zero or past 1e6, an index past the faces,
+/// repeated or naming a face the body does not have, or a closed manifold body that is not a
+/// valid solid facing out (facing in, or invalid); [`Error::NoRoom`] for an inward wall of a solid the kernel's room test shows no
 /// cavity for; the kernel's refusals; those of [`finish`].
-pub fn shell(body: &Body, open: &[usize], thickness: f64) -> Result<()> {
+pub fn shell(body: &Body, order: &Order, open: &[usize], thickness: f64) -> Result<()> {
     if !distance_ok(thickness) {
         return Err(Error::Argument);
     }
     with_body("SmApiShellBrepFull", body, |k, b| {
-        let open = match faces_of(b, open) {
+        let open = match faces_of(b, order, open) {
             Ok(f) => f,
             Err(e) => return Ok(Err(e)),
         };
@@ -163,23 +160,24 @@ pub fn shell(body: &Body, open: &[usize], thickness: f64) -> Result<()> {
     })?
 }
 
-/// The faces of the solid `body` with record indices `faces` moved `distance` along their
-/// outward normals (negative: inward): each gets its surface's offset and the faces around it
-/// are extended or trimmed to meet it; the tangent blends on them follow.
+/// The faces of the solid `body` with record indices `faces` (through `order`, its record's
+/// [`Order`]) moved `distance` along their outward normals (negative: inward): each gets its
+/// surface's offset and the faces around it are extended or trimmed to meet it; the tangent
+/// blends on them follow.
 ///
 /// # Errors
 /// [`Error::Argument`] for a distance not finite, zero or past 1e6, no faces, an index past the
-/// faces or repeated, or a body that is not a valid solid facing out; [`Error::NoRoom`] for faces moved
-/// in so far that the kernel's room test shows no material behind them, or a blend that no
-/// longer fits; [`Error::Unsupported`] for a blend that cannot be put back as it was;
+/// faces, repeated or naming a face the body does not have, or a body that is not a valid solid
+/// facing out; [`Error::NoRoom`] for faces moved in so far that the kernel's room test shows
+/// no material behind them, or a blend that no longer fits; [`Error::Unsupported`] for a blend that cannot be put back as it was;
 /// [`Error::NotExact`] for one that needs a continuation that cannot be made exactly;
 /// [`Error::NoEffect`] for a move that moved nothing; the kernel's other refusals.
-pub fn offset_faces(body: &Body, faces: &[usize], distance: f64) -> Result<()> {
+pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) -> Result<()> {
     if !distance_ok(distance) || faces.is_empty() {
         return Err(Error::Argument);
     }
     with_body("OffsetFaces", body, |k, b| {
-        let picked = match faces_of(b, faces) {
+        let picked = match faces_of(b, order, faces) {
             Ok(f) => f,
             Err(e) => return Ok(Err(e)),
         };
