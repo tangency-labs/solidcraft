@@ -2259,7 +2259,7 @@ impl Model {
                 track_altered_sheets(&state, &mut next, f, &mut warning);
                 note_join_apart(&state, &next, f, &mut warning);
             }
-            let r = r.and_then(|()| absorb_sheet_cuts(&state, &mut next, f, validation).map_err(|e| kernel::KernelError::Failed(e.to_string())));
+            let r = r.and_then(|()| absorb_sheet_cuts(&state, &mut next, f, validation, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string())));
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
             let error = match r {
@@ -2750,9 +2750,12 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
 /// Reads what a feature cut from a sheet made from surfaces back onto its sheet, and puts the
 /// body built again from the sheet in place (#6748, see `sheet_surface_cuts`). Checking each
 /// step, the body built again is weighed against the body cut.
-fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature, validation: kernel::Validation) -> Result<()> {
+fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature, validation: kernel::Validation, warning: &mut Option<String>) -> Result<()> {
     let weigh = validation == kernel::Validation::EachStep;
-    for (i, sk, built) in crate::sheet_surface_cuts::absorb(before, after, f, weigh)? {
+    for (i, sk, built, note) in crate::sheet_surface_cuts::absorb(before, after, f, weigh)? {
+        if let Some(note) = note {
+            append_warning(warning, note);
+        }
         if let Some(b) = after.bodies.iter_mut().find(|b| b.name == sk.body) {
             more::replace_sheet_body(b, built);
         }
@@ -3213,7 +3216,10 @@ fn apply_traced_with(
             let mut extra = 0usize;
             let mut split: Vec<ModelBody> = Vec::new();
             for mb in std::mem::take(&mut state.bodies) {
-                let Some(&had) = affected.get(&mb.name).filter(|_| !state.sheets.iter().any(|s| s.body == mb.name)) else {
+                // Sheet metal keeps its body whole: what the cut left of the sheet is read back
+                // onto it.
+                let sheet = state.sheets.iter().any(|s| s.body == mb.name) || state.surface_sheets.iter().any(|s| s.body == mb.name);
+                let Some(&had) = affected.get(&mb.name).filter(|_| !sheet) else {
                     split.push(mb);
                     continue;
                 };

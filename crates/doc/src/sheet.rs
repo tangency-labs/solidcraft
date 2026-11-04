@@ -2444,89 +2444,7 @@ impl SheetBody {
     pub fn perforation_holes(&self, p: &SheetPerforation) -> Result<Vec<Vec2>> {
         let regions = self.flat_regions()?;
         let zones = self.bend_zones();
-        let clear = p.diameter / 2.0 + p.margin;
-        let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
-        let mut add = |l: &Loop2| {
-            let pts = l.polyline(1e-3);
-            for (&a, &b) in pts.edges() {
-                segs.push((a, b));
-            }
-        };
-        for r in &regions {
-            add(&r.outer);
-            r.holes.iter().for_each(&mut add);
-        }
-        zones.iter().for_each(|z| add(&z.outer));
-        let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
-        if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
-            return Ok(Vec::new());
-        }
-        // The rows and columns span the flat, or the outline's part of it; the bucket grid below stays the flat's.
-        let mut field = Aabb2 { min: lo, max: hi };
-        if let Some(outline) = &p.outline {
-            let n = segs.len();
-            for r in outline {
-                for l in std::iter::once(&r.outer).chain(&r.holes) {
-                    segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
-                }
-            }
-            field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
-            if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
-                return Ok(Vec::new());
-            }
-        }
-        // Segments bucketed in a grid, so each hole only checks the edges near it.
-        let cell = (2.0 * clear).max(p.pitch).max(1.0);
-        let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
-        let mut grid: Vec<Vec<usize>> = vec![Vec::new(); nx.saturating_mul(ny)];
-        let idx = |x: f64, y: f64| -> (usize, usize) {
-            (((x - lo.x) / cell).floor().clamp(0.0, (nx - 1) as f64) as usize, ((y - lo.y) / cell).floor().clamp(0.0, (ny - 1) as f64) as usize)
-        };
-        for (i, (a, b)) in segs.iter().enumerate() {
-            let (i0, j0) = idx(a.x.min(b.x) - clear, a.y.min(b.y) - clear);
-            let (i1, j1) = idx(a.x.max(b.x) + clear, a.y.max(b.y) + clear);
-            for j in j0..=j1 {
-                for ii in i0..=i1 {
-                    if let Some(c) = grid.get_mut(j * nx + ii) {
-                        c.push(i);
-                    }
-                }
-            }
-        }
-        let dist = |c: Vec2, (a, b): (Vec2, Vec2)| -> f64 {
-            let (d, l) = (b - a, (b - a).dot(b - a));
-            let t = if l > 0.0 { ((c - a).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
-            c.dist(a + d * t)
-        };
-        let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
-        let mut out = Vec::new();
-        let mut row = 0usize;
-        let Aabb2 { min: flo, max: fhi } = field;
-        loop {
-            let y = flo.y + clear + row as f64 * dy;
-            if y > fhi.y - clear + 1e-9 {
-                break;
-            }
-            let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
-            // Steps across the row from its first hole; a mirrored field counts from the right.
-            let mut step = 0.0;
-            while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
-                let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
-                let c = Vec2::new(x, y);
-                let (i, j) = idx(x, y);
-                let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
-                if regions.iter().any(|r| r.contains(c))
-                    && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
-                    && !zones.iter().any(|z| z.contains(c))
-                    && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
-                {
-                    out.push(c);
-                }
-                step += p.pitch;
-            }
-            row += 1;
-        }
-        Ok(out)
+        Ok(perforation_grid(&regions, &zones, p))
     }
 
     /// Open area of all perforation fields (mm²): what they take out of the sheet's faces.
@@ -9280,4 +9198,97 @@ mod tests {
         assert_eq!(material.len(), 2);
         assert!(after.parted_from_base(&material, &two).unwrap().is_empty());
     }
+}
+
+/// Hole centres of a perforation field (#732) on a flat `regions`: a staggered (60°, odd rows
+/// shifted half a pitch) or square grid from the flat's lower-left corner plus margin + radius; a
+/// hole is kept where it is at least margin clear of the material's edges and cut-outs, and of
+/// the regions in `avoid`. A field with an outline keeps its holes inside the outline and margin
+/// clear of its edges too, on a grid from the lower-left corner of the outline's bounding box
+/// (within the flat's).
+pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerforation) -> Vec<Vec2> {
+    let zones = avoid;
+    let clear = p.diameter / 2.0 + p.margin;
+    let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
+    let mut add = |l: &Loop2| {
+        let pts = l.polyline(1e-3);
+        for (&a, &b) in pts.edges() {
+            segs.push((a, b));
+        }
+    };
+    for r in regions {
+        add(&r.outer);
+        r.holes.iter().for_each(&mut add);
+    }
+    zones.iter().for_each(|z| add(&z.outer));
+    let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
+    if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
+        return Vec::new();
+    }
+    // The rows and columns span the flat, or the outline's part of it; the bucket grid below stays the flat's.
+    let mut field = Aabb2 { min: lo, max: hi };
+    if let Some(outline) = &p.outline {
+        let n = segs.len();
+        for r in outline {
+            for l in std::iter::once(&r.outer).chain(&r.holes) {
+                segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
+            }
+        }
+        field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
+        if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
+            return Vec::new();
+        }
+    }
+    // Segments bucketed in a grid, so each hole only checks the edges near it.
+    let cell = (2.0 * clear).max(p.pitch).max(1.0);
+    let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
+    let mut grid: Vec<Vec<usize>> = vec![Vec::new(); nx.saturating_mul(ny)];
+    let idx = |x: f64, y: f64| -> (usize, usize) {
+        (((x - lo.x) / cell).floor().clamp(0.0, (nx - 1) as f64) as usize, ((y - lo.y) / cell).floor().clamp(0.0, (ny - 1) as f64) as usize)
+    };
+    for (i, (a, b)) in segs.iter().enumerate() {
+        let (i0, j0) = idx(a.x.min(b.x) - clear, a.y.min(b.y) - clear);
+        let (i1, j1) = idx(a.x.max(b.x) + clear, a.y.max(b.y) + clear);
+        for j in j0..=j1 {
+            for ii in i0..=i1 {
+                if let Some(c) = grid.get_mut(j * nx + ii) {
+                    c.push(i);
+                }
+            }
+        }
+    }
+    let dist = |c: Vec2, (a, b): (Vec2, Vec2)| -> f64 {
+        let (d, l) = (b - a, (b - a).dot(b - a));
+        let t = if l > 0.0 { ((c - a).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
+        c.dist(a + d * t)
+    };
+    let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
+    let mut out = Vec::new();
+    let mut row = 0usize;
+    let Aabb2 { min: flo, max: fhi } = field;
+    loop {
+        let y = flo.y + clear + row as f64 * dy;
+        if y > fhi.y - clear + 1e-9 {
+            break;
+        }
+        let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
+        // Steps across the row from its first hole; a mirrored field counts from the right.
+        let mut step = 0.0;
+        while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
+            let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
+            let c = Vec2::new(x, y);
+            let (i, j) = idx(x, y);
+            let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
+            if regions.iter().any(|r| r.contains(c))
+                && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                && !zones.iter().any(|z| z.contains(c))
+                && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
+            {
+                out.push(c);
+            }
+            step += p.pitch;
+        }
+        row += 1;
+    }
+    out
 }

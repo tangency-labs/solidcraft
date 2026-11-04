@@ -213,15 +213,25 @@ pub(crate) fn then_list(v: Option<&Value>) -> std::result::Result<Vec<ThenStep>,
 
 /// Where to pick the far edges of the flanges feature `id` made: a point on each, for the flanges
 /// of the next bend of a chain.
-fn far_edge_picks(s: &Session, id: u64, cmd: &str) -> Result<Vec<FlangeEdge>> {
+/// How many panels each sheet made from surfaces has: what a feature added is past them.
+fn surface_panel_counts(s: &Session) -> std::collections::BTreeMap<String, usize> {
+    s.model.state().surface_sheets.iter().map(|sk| (sk.body.clone(), sk.sheet.panels.len())).collect()
+}
+
+fn far_edge_picks(s: &Session, id: u64, before: &std::collections::BTreeMap<String, usize>, cmd: &str) -> Result<Vec<FlangeEdge>> {
     let prefix = format!("F{id}.");
     let st = s.model.state();
-    let picks: Vec<FlangeEdge> = st
+    let mut picks: Vec<FlangeEdge> = st
         .sheets
         .iter()
         .flat_map(|sh| sh.flanges.iter().enumerate().filter(|(_, f)| f.tag.starts_with(&prefix)).filter_map(|(i, _)| sh.far_edge_pick(i)))
         .map(FlangeEdge::at)
         .collect();
+    // On a sheet made from surfaces (#6748): the far edge of each flange panel the feature added.
+    for sk in &st.surface_sheets {
+        let from = before.get(&sk.body).copied().unwrap_or(sk.sheet.panels.len());
+        picks.extend((from..sk.sheet.panels.len()).filter_map(|p| sk.far_edge_point(p)).map(FlangeEdge::at));
+    }
     if picks.is_empty() {
         return Err(bad(cmd, "the flange has no far edge to bend again"));
     }
@@ -384,6 +394,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
             }
             let flip = bool_(p, "flip").unwrap_or(false);
+            let mut before = surface_panel_counts(s);
             let mut made = add_feature(
                 s,
                 p,
@@ -403,7 +414,8 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             // Each further bend stands on the far edge of the flange before it.
             for (angle, height, own_flip) in then {
                 let id = made.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "no feature to bend again"))?;
-                let edges = far_edge_picks(s, id, cmd)?;
+                let edges = far_edge_picks(s, id, &before, cmd)?;
+                before = surface_panel_counts(s);
                 made = add_feature(
                     s,
                     &json!({}),
@@ -814,6 +826,7 @@ fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64) -> Value {
 /// A converted body's flat as `sheet.flat_pattern` reports a sheet's, with how many of its panels are rolls
 /// and the largest stretch any panel's flat leaves.
 fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
+    let sk = &sk.shown();
     let loops: Vec<Ring<Vec2>> = sk.regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
     let pt = |v: &Vec2| json!([v.x, v.y]);
@@ -839,6 +852,16 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness)).collect();
     let roll_lines: Vec<Value> =
         sk.roll_lines.iter().map(|l| json!({"panel": l.panel, "line": l.kind.name(), "start": pt(&l.start), "end": pt(&l.end)})).collect();
+    let perforations: Vec<Value> = sk
+        .perforations
+        .iter()
+        .map(|p| {
+            let n = sk.perforation_holes(p).len();
+            json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "margin": p.margin,
+                "pattern": if p.square { "square" } else { "staggered" }, "count": n,
+                "open_area_mm2": n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)})
+        })
+        .collect();
     let roll_table: Vec<Value> = sk
         .roll_infos()
         .iter()
@@ -846,7 +869,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .collect();
     json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
         "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
-        "perforations": [], "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch})
+        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch})
 }
 
 fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
@@ -1053,13 +1076,14 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
 
 /// The DXF of a sheet made from surfaces (#6748): its flat and its bends.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
+    let sk = &sk.shown();
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
     let drawing = FlatDrawing {
         regions: sk.regions.clone(),
         pockets: sk.pockets.clone(),
         letters: sheet::Letters::none(),
-        perforation: Vec::new(),
+        perforation: sk.perforations.iter().flat_map(|p| sk.perforation_holes(p).into_iter().map(|c| (c, p.diameter / 2.0))).collect(),
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
         display,

@@ -1393,7 +1393,7 @@ fn hole(position: Vec3, direction: Vec3, diameter: f64) -> FeatureKind {
 
 /// The sheet metal bodies of a model.
 fn sheet_bodies(model: &Model) -> Vec<String> {
-    model.state().sheets.iter().map(|s| s.body.clone()).collect()
+    model.state().surface_sheets.iter().map(|s| s.body.clone()).collect()
 }
 
 /// A cut leaves the sheets it cannot reach as they were, without checking that it would leave

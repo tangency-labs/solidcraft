@@ -87,7 +87,7 @@ mod sheet_surface_features;
 mod sheet_surface_fold;
 mod sheet_surface_shadow;
 pub use sheet_surface_convert::{ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces};
-pub use sheet_surface_cuts::Recess;
+pub use sheet_surface_cuts::{Loose, Recess};
 pub mod text_params;
 pub mod thread_forms;
 

@@ -174,7 +174,7 @@ fn planar_sheet_intersection_retains_exact_outline_and_islands() {
         json!({"sketch":"Ring","profiles":[{"point":[57,30]}],"through_all":true,"direction":"symmetric","operation":"intersect"}),
     );
     run(&mut annulus, "sheet.unfold", json!({}));
-    let area: f64 = annulus.model.state().sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
+    let area: f64 = annulus.model.state().surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
     assert!((area - PI * 75.0).abs() < 1e-8, "exact retained area: {area}");
     // inspect.measure integrates a tessellation; exact arc area is checked above.
     let measured = volume(&mut annulus);
@@ -257,7 +257,7 @@ fn empty_sheet_intersection_keeps_geometry_and_metadata_together() {
     assert!(result.as_ref().err().is_some_and(|e| e.to_string().contains("the intersection is empty")), "{result:?}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.model.state().bodies.len(), 1);
-    assert_eq!(s.model.state().sheets.len(), 1);
+    assert_eq!(s.model.state().surface_sheets.len(), 1);
     assert!((volume(&mut s) - 15000.0).abs() < 1e-6);
 }
 
@@ -282,7 +282,7 @@ fn intersect_preserves_both_material_regions_of_a_logical_ring_sheet() {
             run(&mut s, command, json!({}));
         }
         let state = s.model.state();
-        let regions = state.sheets[0].flat_regions().unwrap();
+        let regions = state.surface_sheets[0].regions.clone();
         assert_eq!(regions.len(), 2);
         let area: f64 = regions.iter().map(|r| r.area()).sum();
         assert!((area - (900.0 - PI * 75.0)).abs() < 1e-8, "area={area}");
@@ -412,7 +412,7 @@ fn deleting_sheet_material_prunes_cosmetic_threads_and_undo_restores_them() {
     rectangle_tool(&mut s, "All", [-10.0, -10.0], [110.0, 70.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"All","through_all":true,"direction":"symmetric","operation":"cut"}));
     assert!(s.model.state().bodies.is_empty());
-    assert!(s.model.state().sheets.is_empty());
+    assert!(s.model.state().surface_sheets.is_empty());
     assert!(s.model.state().threads.is_empty());
     assert!(solidcraft_doc::world_state(&s.doc, &s.model.state()).unwrap().threads.is_empty());
     run(&mut s, "edit.undo", json!({}));
@@ -450,7 +450,7 @@ fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "Pocket", [20.0, 20.0], [30.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"Pocket","distance":1,"operation":"cut"}));
-    let name = s.model.state().sheets[0].body.clone();
+    let name = s.model.state().surface_sheets[0].body.clone();
     check(&s, &name, 0, Vec3::ZERO, Vec3::Y, false);
     let destination = run(&mut s, "component.create", json!({"name":"Machined","parent":0,"grounded":false}));
     let component = destination["component"].as_u64().unwrap();
@@ -2000,7 +2000,7 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
         let below = 184.0 * setback + 2.0 * (under(8.0) - under(8.0 - setback));
         let edge = 184.0 + 2.0 * (64.0 - (8.0 - setback) * (8.0 - setback)).sqrt();
         let want = 20_000.0 - (4.0 - PI) * 64.0 - below + edge * (PI + 37.0);
-        let regions = s.model.state().sheets[0].flat_regions().unwrap();
+        let regions = s.model.state().surface_sheets[0].regions.clone();
         assert!(regions.len() == 1 && (regions[0].area() - want).abs() < 1e-6, "{position}: {} vs {want}", regions[0].area());
         let f = flat(&mut s);
         assert!((f["bends"][0]["length"].as_f64().unwrap_or(f64::NAN) - edge).abs() < 1e-9, "{position}: {}", f["bends"]);
@@ -2282,7 +2282,7 @@ fn elliptic_cut_out_stays_exact_in_the_flat_pattern_and_follows_arcs_when_folded
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    let (uncut, blank) = (volume(&mut s), s.model.state().sheets[0].flat_regions().unwrap()[0].area());
+    let (uncut, blank) = (volume(&mut s), s.model.state().surface_sheets[0].regions.clone()[0].area());
     let (plain_faces, plain_cylinders) = faces(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
     run(&mut s, "sketch.ellipse", json!({"center": [40, 30], "major": [55, 30], "minor_radius": 8}));
@@ -2293,7 +2293,7 @@ fn elliptic_cut_out_stays_exact_in_the_flat_pattern_and_follows_arcs_when_folded
     let folded = volume(&mut s);
     assert!((uncut - folded - cut * 2.5).abs() < 0.5, "{}", uncut - folded);
     // The flat pattern holds the ellipse itself, so its area is the blank less π·15·8.
-    let regions = s.model.state().sheets[0].flat_regions().unwrap();
+    let regions = s.model.state().surface_sheets[0].regions.clone();
     let hole = &regions[0].holes[0];
     assert!(hole.segs.len() == 4 && hole.segs.iter().all(|x| matches!(x, Seg2::Conic { .. })), "{} segments", hole.segs.len());
     assert!((regions[0].area() - (blank - cut)).abs() < 1e-9, "{}", regions[0].area());
@@ -2325,7 +2325,7 @@ fn flipped_base_flange_keeps_its_elliptic_outline() {
         run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [25, 0], "minor_radius": 12}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sheet.flange", json!({"sketch": "Oval", "flip": flip}));
-        let regions = s.model.state().sheets[0].flat_regions().unwrap();
+        let regions = s.model.state().surface_sheets[0].regions.clone();
         let outline = &regions[0].outer.segs;
         assert!(
             outline.len() == 4 && outline.iter().all(|x| matches!(x, solidcore_record::Seg2::Conic { .. })),
@@ -2463,7 +2463,7 @@ fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_ref
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
         for stage in ["sheet.unfold", "sheet.refold"] {
-            let regions = s.model.state().sheets[0].flat_regions().unwrap();
+            let regions = s.model.state().surface_sheets[0].regions.clone();
             let rim = &regions[0].outer.segs;
             assert!(
                 !rim.is_empty() && rim.iter().all(|seg| matches!(seg, solidcore_record::Seg2::Arc { radius, .. } if (*radius - 10.0).abs() < 1e-12)),
@@ -2481,7 +2481,7 @@ fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_ref
             }
             run(&mut s, stage, json!({}));
         }
-        assert_eq!(s.model.state().sheets[0].flat_regions().unwrap()[0].holes.len(), 1);
+        assert_eq!(s.model.state().surface_sheets[0].regions.clone()[0].holes.len(), 1);
     }
 }
 
@@ -2489,7 +2489,7 @@ fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_ref
 fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let sheet_name = s.model.state().sheets[0].body.clone();
+    let sheet_name = s.model.state().surface_sheets[0].body.clone();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ring"}));
     for radius in [10, 5] {
         run(&mut s, "sketch.circle.center", json!({"center": [50,30], "radius": radius}));
@@ -2500,7 +2500,7 @@ fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
         "solid.extrude",
         json!({"sketch": "Ring", "profiles": [{"point": [57,30]}], "through_all": true, "operation": "cut", "direction": "symmetric"}),
     );
-    let material = s.model.state().sheets[0].flat_regions().unwrap();
+    let material = s.model.state().surface_sheets[0].regions.clone();
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [200,0,0], "body_name": "SeparateBox"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "BoxCut"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [205,5], "p1": [210,10]}));
@@ -2511,7 +2511,7 @@ fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
         json!({"sketch": "BoxCut", "participants": ["SeparateBox"], "through_all": true, "operation": "cut", "direction": "symmetric"}),
     );
     assert_eq!(s.model.state().bodies.len(), 2);
-    assert_eq!(s.model.state().sheets[0].flat_regions().unwrap(), material);
+    assert_eq!(s.model.state().surface_sheets[0].regions.clone(), material);
     for stage in ["sheet.unfold", "sheet.refold"] {
         run(&mut s, stage, json!({"body": sheet_name}));
         assert_eq!(s.model.state().bodies.len(), 2);
@@ -2527,7 +2527,7 @@ fn specialized_sheet_cuts_respect_component_and_explicit_participants() {
     for explicit in [false, true] {
         let mut s = Session::default();
         base(&mut s, 100.0, 60.0);
-        let name = s.model.state().sheets[0].body.clone();
+        let name = s.model.state().surface_sheets[0].body.clone();
         run(&mut s, "component.create", json!({"name": "Other"}));
         run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "OtherBox"}));
         if explicit {
@@ -2572,7 +2572,7 @@ fn ring_cut_preserves_retained_island_through_unfold_and_refold() {
     assert!((volume(&mut s) - expected).abs() < 0.2);
     material_probes(&s);
     assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(2));
-    let regions = s.model.state().sheets[0].flat_regions().unwrap();
+    let regions = s.model.state().surface_sheets[0].regions.clone();
     assert!(regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(50.0, 30.0))));
     assert!(!regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(57.0, 30.0))));
     assert!(regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(65.0, 30.0))));
@@ -2594,8 +2594,8 @@ fn retained_depth_check(s: &mut Session, want: f64, z0: f64, z1: f64) {
     use solidcore_record::Vec3;
     assert!((volume(s) - want).abs() < 1e-6, "{} vs {want}", volume(s));
     let state = s.model.state();
-    assert_eq!(state.sheets.len(), 1);
-    assert_eq!(state.sheets[0].t, 2.5, "rule stock gauge is preserved");
+    assert_eq!(state.surface_sheets.len(), 1);
+    assert_eq!(state.surface_sheets[0].thickness, 2.5, "rule stock gauge is preserved");
     assert!(
         state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(25.0, 25.0, (z0 + z1) * 0.5)).unwrap() == solidcraft_kernel::PointClass::Inside)
     );
@@ -2712,10 +2712,10 @@ fn partial_depth_intersect_preserves_prior_pockets_and_actual_interval_intersect
         assert_eq!(body.classify_point(Vec3::new(27.0, 25.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Inside);
         assert_eq!(body.classify_point(Vec3::new(27.0, 25.0, 0.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
-    let records = s.model.state().sheets[0].pockets.clone();
+    let records = s.model.state().surface_sheets[0].pockets.clone();
     run(&mut s, "solid.extrude", json!({"sketch":"RetainDepth","distance":1.5,"start_offset":0.25,"operation":"intersect"}));
     assert!((volume(&mut s) - 75.0).abs() < 1e-6);
-    assert_eq!(s.model.state().sheets[0].pockets, records, "no-change leaves replay work unchanged");
+    assert_eq!(s.model.state().surface_sheets[0].pockets, records, "no-change leaves replay work unchanged");
     run(&mut s, "solid.extrude", json!({"sketch":"RetainDepth","distance":0.25,"start_offset":1.0,"operation":"intersect"}));
     assert!((volume(&mut s) - 25.0).abs() < 1e-6);
     run(&mut s, "sheet.unfold", json!({}));
@@ -2740,7 +2740,7 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
             run(&mut s, command, json!({}));
         }
         assert!((volume(&mut s) - 200.0).abs() < 1e-6);
-        assert_eq!(s.model.state().sheets[0].flat_regions().unwrap().len(), 2);
+        assert_eq!(s.model.state().surface_sheets[0].regions.clone().len(), 2);
         for x in [25.0, 65.0] {
             assert_eq!(s.model.state().bodies[0].body.classify_point(Vec3::new(x, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
         }
@@ -2760,7 +2760,7 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
             run(&mut ring, command, json!({}));
         }
         let state = ring.model.state();
-        let area: f64 = state.sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
+        let area: f64 = state.surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
         assert!((area - 75.0 * PI).abs() < 1e-8);
         assert!((volume(&mut ring) - 75.0 * PI).abs() < 0.1);
         assert_eq!(state.bodies[0].body.classify_point(Vec3::new(57.0, 30.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
@@ -2782,7 +2782,7 @@ fn partial_depth_intersect_of_material_already_removed_by_a_pocket_is_refused() 
     let result = s.execute("solid.extrude", &json!({"sketch":"Removed","distance":1,"operation":"intersect"}));
     assert!(result.as_ref().err().is_some_and(|e| e.to_string().contains("the intersection is empty")), "{result:?}");
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!(s.model.state().sheets.len(), 1);
+    assert_eq!(s.model.state().surface_sheets.len(), 1);
     assert!((volume(&mut s) - 14900.0).abs() < 1e-6);
 }
 
@@ -2803,7 +2803,7 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
     rectangle_tool(&mut s, "RetainDepth", [20.0, 20.0], [30.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"RetainDepth","distance":1,"start_offset":0.5,"operation":"intersect","name":"RetainSlab"}));
     let before = s.world_state().unwrap().bodies[0].mesh().bounds();
-    let name = s.model.state().sheets[0].body.clone();
+    let name = s.model.state().surface_sheets[0].body.clone();
     let destination = run(&mut s, "component.create", json!({"name":"Destination","parent":0,"grounded":false}));
     let owner = destination["component"].as_u64().unwrap();
     let occurrence = destination["occurrence"].as_u64().unwrap();
@@ -2849,7 +2849,7 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
     for (angle, translate) in [(37.0, [30.0, 20.0, 10.0]), (121.0, [12345.678, 98765.432, 4321.123])] {
         let mut s = Session::default();
         base(&mut s, 100.0, 60.0);
-        let name = s.model.state().sheets[0].body.clone();
+        let name = s.model.state().surface_sheets[0].body.clone();
         let destination = run(&mut s, "component.create", json!({"name":"Destination","parent":0,"grounded":false}));
         let owner = destination["component"].as_u64().unwrap();
         run(
@@ -2887,7 +2887,7 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
             if let Some(command) = command {
                 run(&mut s, command, json!({}));
             }
-            assert!(s.model.state().sheets[0].pockets.is_empty(), "full gauge must not acquire roundoff-depth pockets");
+            assert!(s.model.state().surface_sheets[0].pockets.is_empty(), "full gauge must not acquire roundoff-depth pockets");
             let world = s.world_state().unwrap();
             let body = &world.body(&name).unwrap().body;
             assert!((solidcraft_kernel::measure(body).unwrap().volume - 250.0).abs() < 1e-5);
@@ -2896,14 +2896,14 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
             assert_eq!(body.classify_point(Vec3::new(10.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         }
         let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-        assert!(cold.model.state().sheets[0].pockets.is_empty());
+        assert!(cold.model.state().surface_sheets[0].pockets.is_empty());
         assert!(flat(&mut cold)["pockets"].as_array().unwrap().is_empty());
         run(&mut s, "timeline.edit", json!({"feature":"PostTransferRetain","set":{"extent":{"distance":"1","start_offset":"0.5"}}}));
         for command in [None, Some("sheet.unfold"), Some("sheet.refold")] {
             if let Some(command) = command {
                 run(&mut s, command, json!({}));
             }
-            assert_eq!(s.model.state().sheets[0].pockets.len(), 2);
+            assert_eq!(s.model.state().surface_sheets[0].pockets.len(), 2);
             let world = s.world_state().unwrap();
             let body = &world.body(&name).unwrap().body;
             let measured = solidcraft_kernel::measure(body).unwrap().volume;
@@ -2926,7 +2926,7 @@ fn partial_depth_intersect_planar_to_object_retains_current_target_depth() {
     use solidcore_record::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let name = s.model.state().sheets[0].body.clone();
+    let name = s.model.state().surface_sheets[0].body.clone();
     run(&mut s, "solid.box", json!({"corner":[200,0,1.5],"length":10,"width":10,"height":1,"body_name":"Roof"}));
     rectangle_tool(&mut s, "Tool", [20.0, 20.0], [30.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"Tool","to":[205,5,1.5],"start_offset":0.5,"operation":"intersect","participants":[name]}));
@@ -2940,7 +2940,7 @@ fn partial_depth_intersect_planar_to_object_retains_current_target_depth() {
         assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
         assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.1)).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 2.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
-        assert_eq!(state.sheets[0].pockets.len(), 2);
+        assert_eq!(state.surface_sheets[0].pockets.len(), 2);
         assert!((solidcraft_kernel::measure(&state.body("Roof").unwrap().body).unwrap().volume - 100.0).abs() < 1e-6);
     }
     let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
@@ -2951,7 +2951,7 @@ fn partial_depth_intersect_planar_to_object_retains_current_target_depth() {
 fn partial_depth_intersect_curved_to_object_refuses_unrepresentable_depth_atomically() {
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let name = s.model.state().sheets[0].body.clone();
+    let name = s.model.state().surface_sheets[0].body.clone();
     run(&mut s, "solid.cylinder", json!({"base":[25,20,12],"axis":[0,1,0],"radius":11,"height":10,"body_name":"CurvedRoof"}));
     rectangle_tool(&mut s, "Tool", [24.0, 23.0], [26.0, 27.0]);
     let before = s.doc.to_json();
@@ -2965,7 +2965,7 @@ fn partial_depth_intersect_curved_to_object_refuses_unrepresentable_depth_atomic
         }
         let state = s.model.state();
         assert!((solidcraft_kernel::measure(&state.body(&name).unwrap().body).unwrap().volume - 15000.0).abs() < 1e-6);
-        assert!(state.sheets[0].pockets.is_empty());
+        assert!(state.surface_sheets[0].pockets.is_empty());
     }
 }
 
@@ -2974,7 +2974,7 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
     use solidcore_record::Vec3;
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let name = s.model.state().sheets[0].body.clone();
+    let name = s.model.state().surface_sheets[0].body.clone();
     run(&mut s, "solid.cylinder", json!({"base":[25,25,0],"axis":[0,0,1],"radius":2,"height":20,"body_name":"CurvedRoof"}));
     run(&mut s, "solid.box", json!({"corner":[19,19,1],"length":12,"width":12,"height":1,"body_name":"StopPlate"}));
     run(&mut s, "solid.combine", json!({"target":"CurvedRoof","tools":["StopPlate"],"operation":"join"}));
@@ -2995,7 +2995,7 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
         let body = &state.body(&name).unwrap().body;
         let measured = solidcraft_kernel::measure(body).unwrap().volume;
         assert!((measured - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 0.01);
-        let area: f64 = state.sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
+        let area: f64 = state.surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
         assert!((area - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 1e-8);
         assert_eq!(body.classify_point(Vec3::new(21.0, 21.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
         assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
@@ -3033,7 +3033,7 @@ fn partial_depth_intersect_sub_extrusion_resolution_layers_refuse_atomically() {
     for (distance, offset) in [(2.5 - 1e-8, 1e-8), (2.5 - 1e-8, 0.0), (1e-8, 0.0)] {
         let mut s = Session::default();
         base(&mut s, 100.0, 60.0);
-        let name = s.model.state().sheets[0].body.clone();
+        let name = s.model.state().surface_sheets[0].body.clone();
         let destination = run(&mut s, "component.create", json!({"name":"Far","parent":0,"grounded":false}));
         let owner = destination["component"].as_u64().unwrap();
         run(
@@ -3053,7 +3053,7 @@ fn partial_depth_intersect_sub_extrusion_resolution_layers_refuse_atomically() {
             .to_string();
         assert!(error.contains("resolution") || error.contains("distance is zero") || error.contains("sheet machining"), "{error}");
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.model.state().sheets[0].pockets.is_empty());
+        assert!(s.model.state().surface_sheets[0].pockets.is_empty());
         assert!((solidcraft_kernel::measure(&s.world_state().unwrap().body(&name).unwrap().body).unwrap().volume - 15000.0).abs() < 1e-5);
     }
 }
@@ -3685,7 +3685,7 @@ fn hole_beside_two_adjacent_edge_flanges_cuts_and_bends_stay_guarded() {
     // Folded, the sheet (2.5 mm, R 2.5, K 0.44) holds its flat area times the thickness, less
     // each bend's flat strip (its length times the allowance (R + K·t)·π/2) and plus its sector
     // (R + t/2)·π/2: t·A + t²·(½ − K)·(π/2)·L for the bends' length L.
-    let flat_area: f64 = s.model.state().sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
+    let flat_area: f64 = s.model.state().surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
     let bends: f64 = flat(&mut s)["bends"].as_array().unwrap().iter().map(|b| b["length"].as_f64().unwrap()).sum();
     let want = 2.5 * flat_area + 2.5 * 2.5 * (0.5 - 0.44) * FRAC_PI_2 * bends;
     assert!(rel(before, want) < 1e-9, "{before} vs {want}");
@@ -5919,7 +5919,7 @@ fn parted_note(area: f64, at: [f64; 2]) -> String {
 }
 
 fn flat_pieces(s: &Session) -> Vec<f64> {
-    s.model.state().sheets[0].flat_regions().unwrap().iter().map(solidcore_record::Region2::area).collect()
+    s.model.state().surface_sheets[0].regions.clone().iter().map(solidcore_record::Region2::area).collect()
 }
 
 #[test]
@@ -6064,7 +6064,7 @@ fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
     rectangle_tool(&mut s, "Pocket", [20.0, 20.0], [30.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch": "Pocket", "distance": 1, "operation": "cut"}));
-    let source = s.model.state().sheets[0].body.clone();
+    let source = s.model.state().surface_sheets[0].body.clone();
     let before = volume(&mut s);
     let blank = run(&mut s, "sheet.flat_pattern", json!({"body": source}));
 
@@ -6100,10 +6100,10 @@ fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
 
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let source = s.model.state().sheets[0].body.clone();
+    let source = s.model.state().surface_sheets[0].body.clone();
     run(&mut s, "solid.pattern.rectangular", json!({"bodies": [source], "dir1": [1, 0, 0], "count1": 2, "spacing1": 150}));
     let state = s.model.state();
-    assert_eq!(state.sheets.len(), state.bodies.len(), "every copy is sheet metal");
+    assert_eq!(state.surface_sheets.len(), state.bodies.len(), "every copy is sheet metal");
     let names: Vec<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
     drop(state);
     for n in names {
@@ -6120,7 +6120,7 @@ fn a_mirror_or_a_join_into_a_sheet_refuses_its_flat_pattern_naming_the_feature()
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    let body = s.model.state().sheets[0].body.clone();
+    let body = s.model.state().surface_sheets[0].body.clone();
     let out = run(&mut s, "solid.mirror", json!({"bodies": [body], "plane": "YZ", "combine": true}));
     assert!(out["warning"].as_str().unwrap_or_default().contains("is sheet metal: its flat pattern, DXF and bend table"), "{out}");
     for result in flat_exports(&mut s) {
@@ -6201,7 +6201,7 @@ fn a_sheet_made_of_sheet_features_and_flat_cuts_still_exports_its_flat_pattern()
     rectangle_tool(&mut s, "Slot", [45.0, -10.0], [55.0, 10.0]);
     run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "direction": "symmetric", "operation": "cut"}));
     run(&mut s, "sheet.refold", json!({}));
-    let body = s.model.state().sheets[0].body.clone();
+    let body = s.model.state().surface_sheets[0].body.clone();
     run(&mut s, "solid.move", json!({"bodies": [body], "translate": [10, 0, 0]}));
     let flagged = |w: &str| w.contains("flat pattern, DXF and bend table") || w.contains("is not kept");
     assert!(s.model.results.iter().all(|r| r.error.is_none() && !r.warning.as_deref().is_some_and(flagged)), "{:?}", s.model.results);

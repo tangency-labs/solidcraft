@@ -1331,9 +1331,16 @@ impl FlatView {
         }
         self.perforation_key = Some((state_key, body.to_owned()));
         self.perforations.clear();
-        let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body) else { return };
         // Bound overlay storage and drawing work, including designs with many fields.
         const MAX_HOLES: usize = 1_000_000;
+        if let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) {
+            for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
+                let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
+                self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+            }
+            return;
+        }
+        let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body) else { return };
         for field in &sheet.perforations {
             if self.perforations.len() >= MAX_HOLES {
                 break;

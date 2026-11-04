@@ -596,7 +596,7 @@ fn on_material(s: Vec2, e: Vec2, regions: &[Region2]) -> Vec<(Vec2, Vec2)> {
 
 /// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
 /// line from its point: the least and the greatest. `None` where it doesn't.
-fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
+pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
     let n = u.perp();
     let mut out: Option<(f64, f64)> = None;
     for l in std::iter::once(&r.outer).chain(&r.holes) {
@@ -2006,6 +2006,32 @@ pub struct SurfaceSheet {
     /// The recesses in the flat, as pockets measured from its face on the sheet's surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pockets: Vec<crate::sheet::SheetPocket>,
+    /// The pieces cuts parted from its panels that hold none of their joints: they stay where
+    /// they were (see `sheet_surface_cuts`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loose: Vec<crate::Loose>,
+    /// Perforation fields (#732): holes on a grid over the flat, not cut into the body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub perforations: Vec<crate::sheet::SheetPerforation>,
+}
+
+/// `r` through `map`, a rigid map of the plane (mirrored or not): lines and arcs stay lines and
+/// arcs, free-form curves map exactly through their control points.
+pub(crate) fn rigid_region(r: &Region2, map: impl Fn(Vec2) -> Vec2) -> Region2 {
+    let (o, ex, ey) = (map(Vec2::new(0.0, 0.0)), map(Vec2::new(1.0, 0.0)), map(Vec2::new(0.0, 1.0)));
+    let (ax, ay) = (ex - o, ey - o);
+    let mirrored = ax.cross(ay) < 0.0;
+    let rot = ax.y.atan2(ax.x);
+    let seg = |sg: &Seg2| -> Seg2 {
+        match *sg {
+            Seg2::Line { a, b } => Seg2::Line { a: map(a), b: map(b) },
+            Seg2::Arc { center, radius, start, sweep } if mirrored => Seg2::Arc { center: map(center), radius, start: rot - start, sweep: -sweep },
+            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: map(center), radius, start: rot + start, sweep },
+            other => other.map_controls(&map),
+        }
+    };
+    let map_loop = |lp: &Loop2| Loop2 { segs: lp.segs.iter().map(seg).collect() };
+    Region2 { outer: map_loop(&r.outer).ccw(), holes: r.holes.iter().map(|h| map_loop(h).ccw().reversed()).collect() }
 }
 
 /// A line across a roll in a sheet's flat, along its rulings, as a bend has its tangent and
@@ -2090,9 +2116,214 @@ impl SurfaceSheet {
             notes: c.notes.clone(),
             recesses: Vec::new(),
             pockets: Vec::new(),
+            loose: Vec::new(),
+            perforations: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         Ok((sheet, c.solid()?))
+    }
+
+    /// A sheet of one flat panel, `region` in `plane`, its material the rule's thickness along the
+    /// plane's normal (a base flange), and its folded body. The sheet's surface is its top, the
+    /// face a thickness along the normal, its material below it, as a plate thickened from its top
+    /// has it: flanges rise from it.
+    pub fn base(body: &str, rule_name: &str, rule: &ConvertRule, plane: Plane, region: Region2) -> Result<(SurfaceSheet, Body)> {
+        let top = plane.origin + plane.normal() * rule.thickness;
+        let place = Rigid3::frame(top, plane.x, plane.y * -1.0).ok_or_else(|| DocError::Invalid("the sketch's plane has no frame".into()))?;
+        // The top's chart runs y the other way: the same outline, mirrored in it (exactly; free-form
+        // curves through their control points).
+        let f = |p: Vec2| Vec2::new(p.x, -p.y);
+        let mirror = |l: &Loop2| {
+            let segs = l
+                .segs
+                .iter()
+                .map(|s| match *s {
+                    Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: f(center), radius, start: -start, sweep: -sweep },
+                    other => other.map_controls(f),
+                })
+                .collect();
+            Loop2 { segs }
+        };
+        let region = Region2 { outer: mirror(&region.outer).ccw(), holes: region.holes.iter().map(|h| mirror(h).ccw().reversed()).collect() };
+        let panel = Panel { name: "base".into(), surface: Surface::Plane, region };
+        Self::made(body, rule_name, rule, vec![panel], vec![Some(place)], Vec::new())
+    }
+
+    /// A sheet from an open chain of lines (a contour flange): `pts` in `plane`, the face of the
+    /// sheet, its material on the right of the travel (or the left when `flip`) and `width` along
+    /// the plane's normal; one panel per line, bent at the rule's radius at each corner, the
+    /// corner its virtual sharp. And its folded body.
+    pub fn contour(
+        body: &str,
+        rule_name: &str,
+        rule: &ConvertRule,
+        plane: &Plane,
+        pts: &[Vec2],
+        width: f64,
+        flip: bool,
+    ) -> Result<(SurfaceSheet, Body)> {
+        if pts.len() < 2 {
+            return err("a contour flange needs an open chain of lines");
+        }
+        let normal = plane.normal();
+        let side = if flip { -1.0 } else { 1.0 };
+        let mut panels = Vec::with_capacity(pts.len() - 1);
+        let mut places = Vec::with_capacity(pts.len() - 1);
+        let mut ways = Vec::with_capacity(pts.len() - 1);
+        for (i, w) in pts.windows(2).enumerate() {
+            let (a, b) = (plane.to_world(w[0]), plane.to_world(w[1]));
+            let d = (b - a).normalized().ok_or_else(|| DocError::Invalid("a zero-length line in the contour".into()))?;
+            // The frame's z toward the material: right of the travel (d x n), or left when flipped.
+            let (origin, y) = if flip { (a + normal * width, normal * -1.0) } else { (a, normal) };
+            places.push(Some(Rigid3::frame(origin, d, y).ok_or_else(|| DocError::Invalid("a contour line has no frame".into()))?));
+            let rect = [Vec2::new(0.0, 0.0), Vec2::new(a.dist(b), 0.0), Vec2::new(a.dist(b), width), Vec2::new(0.0, width)];
+            let region = Region2 { outer: Loop2::polygon(&rect).ccw(), holes: Vec::new() };
+            panels.push(Panel { name: format!("contour {}", i + 1), surface: Surface::Plane, region });
+            ways.push((b, d, d.cross(normal) * side));
+        }
+        let chart = |place: &Rigid3, p: Vec3| {
+            let q = place.inverse().point(p);
+            Vec2::new(q.x, q.y)
+        };
+        let mut joints = Vec::with_capacity(ways.len().saturating_sub(1));
+        for (i, pair) in ways.windows(2).enumerate() {
+            let [(corner, da, toward), (_, db, _)] = pair else { continue };
+            let angle = da.dot(*db).clamp(-1.0, 1.0).acos();
+            if angle < 1e-9 {
+                return err("straight corners in a contour flange");
+            }
+            let (Some(pa), Some(pb)) = (places[i], places[i + 1]) else { continue };
+            // Along the corner, so that `a`'s material lies to its left: `a` lies back along its
+            // line from the corner.
+            let (mut s0, mut s1) = (*corner, *corner + normal * width);
+            let (c0, c1) = (chart(&pa, s0), chart(&pa, s1));
+            if (c1 - c0).cross(Vec2::new(-1.0, 0.0)) < 0.0 {
+                (s0, s1) = (s1, s0);
+            }
+            let (a0, a1, b0, b1) = (chart(&pa, s0), chart(&pa, s1), chart(&pb, s0), chart(&pb, s1));
+            let (Some(dir_a), Some(dir_b)) = ((a1 - a0).normalized(), (b1 - b0).normalized()) else { continue };
+            let bend = Bend {
+                angle,
+                radius: rule.bend_radius,
+                toward_material: db.dot(*toward) > 0.0,
+                datum: Datum::Sharp,
+                length: width,
+                ends: ZoneEnds { near: (0.0, width), far: (0.0, width) },
+                tails: (Tail::Keep, Tail::Keep),
+                relief: (Relief::None, Relief::None),
+            };
+            let (a, b) = (Anchor { panel: i, origin: a0, dir: dir_a }, Anchor { panel: i + 1, origin: b0, dir: dir_b });
+            joints.push(Joint { a, b, kind: JointKind::Bend(bend) });
+        }
+        Self::made(body, rule_name, rule, panels, places, joints)
+    }
+
+    /// A sheet of `panels`, each where `places` puts it, joined by `joints`, under the rule, and
+    /// its folded body.
+    fn made(
+        body: &str,
+        rule_name: &str,
+        rule: &ConvertRule,
+        panels: Vec<Panel>,
+        places: Vec<Option<Rigid3>>,
+        joints: Vec<Joint>,
+    ) -> Result<(SurfaceSheet, Body)> {
+        let mut sheet = SurfaceSheet {
+            body: body.into(),
+            rule: rule_name.into(),
+            sheet: Sheet { thickness: rule.thickness, k_factor: rule.k_factor, panels, joints, corners: Vec::new(), cuts: Vec::new() },
+            places,
+            unfolded: false,
+            thickness: rule.thickness,
+            k_factor: rule.k_factor,
+            regions: Vec::new(),
+            bends: Vec::new(),
+            stretch: 0.0,
+            rolls: 0,
+            roll_lines: Vec::new(),
+            reliefs: Reliefs::of(rule),
+            corner_reliefs: Vec::new(),
+            notes: Vec::new(),
+            recesses: Vec::new(),
+            pockets: Vec::new(),
+            loose: Vec::new(),
+            perforations: Vec::new(),
+        };
+        let solid = sheet.build()?;
+        Ok((sheet, solid))
+    }
+
+    /// Hole centres of a perforation field in the flat: a grid continuous over the developed flat,
+    /// through its bends as perforated stock runs through them, margin clear of its edges and
+    /// cut-outs (see [`crate::sheet::perforation_grid`]).
+    pub fn perforation_holes(&self, p: &crate::sheet::SheetPerforation) -> Vec<Vec2> {
+        crate::sheet::perforation_grid(&self.regions, &[], p)
+    }
+
+    /// Open area of all perforation fields (mm²): what they take out of the sheet's faces.
+    pub fn perforated_area(&self) -> f64 {
+        let shown = self.shown();
+        shown.perforations.iter().map(|p| shown.perforation_holes(p).len() as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)).sum()
+    }
+
+    /// The sheet with its flat as a flat pattern is read: seen from the sheet's surface, the side
+    /// its up bends rise to. The panels' charts face the material, so the flat they lay out is
+    /// that view mirrored; here its regions, bends, roll lines, pockets and perforation outlines
+    /// are mirrored back (a base flange's flat is its sketch's outline as drawn).
+    pub fn shown(&self) -> SurfaceSheet {
+        let f = |p: Vec2| Vec2::new(p.x, -p.y);
+        let r = |g: &Region2| rigid_region(g, f);
+        let mut out = self.clone();
+        out.regions = self.regions.iter().map(r).collect();
+        for b in &mut out.bends {
+            b.zone = r(&b.zone);
+            (b.start, b.end) = (f(b.start), f(b.end));
+            b.tabs = b.tabs.iter().map(r).collect();
+        }
+        for l in &mut out.roll_lines {
+            (l.start, l.end) = (f(l.start), f(l.end));
+        }
+        for p in &mut out.pockets {
+            p.region = r(&p.region);
+        }
+        for p in &mut out.perforations {
+            if let Some(o) = &mut p.outline {
+                *o = o.iter().map(r).collect();
+            }
+        }
+        out
+    }
+
+    /// A perforation field's outline in the flat: closed `regions` of a sketch in `plane`, read
+    /// through each flat panel whose face or other face the plane lies in, clipped to that panel
+    /// (an outline on one face never reaches the next panel in the flat). Refused when the plane
+    /// lies on no panel's face.
+    pub fn perforation_outline(&self, plane: &Plane, regions: &[Region2]) -> Result<Vec<Region2>> {
+        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let frames = crate::sheet_surface_cuts::frames(self, &dev)?;
+        let t = self.thickness;
+        let mut out = Vec::new();
+        let mut found = false;
+        for (i, (panel, frame)) in self.sheet.panels.iter().zip(&frames).enumerate() {
+            let (Surface::Plane, Some(frame), Some(Some(at))) = (&panel.surface, frame, dev.placements.get(i)) else { continue };
+            let z = (plane.origin - frame.shift).dot(frame.z);
+            if frame.z.cross(plane.normal()).len() > 1e-6 || !(-1e-6..=t + 1e-6).contains(&z) {
+                continue;
+            }
+            found = true;
+            let inv = frame.inverse();
+            let map = |p: Vec2| {
+                let q = inv.point(plane.to_world(p));
+                at.point(Vec2::new(q.x, q.y))
+            };
+            let mapped: Vec<Region2> = regions.iter().map(|r| rigid_region(r, map)).collect();
+            let own = rigid_region(&panel.region, |p| at.point(p));
+            out.extend(solidcraft_kernel::planar_regions_boolean(&[own], &mapped, solidcraft_kernel::BoolOp::Intersect, 1e-9)?);
+        }
+        if !found {
+            return err("the perforation's outline sketch must lie on a face of the sheet");
+        }
+        Ok(out)
     }
 
     /// Each roll of the flat (see [`RollInfo`]), from its lines: its length is its middle line's
@@ -2148,13 +2379,24 @@ impl SurfaceSheet {
         let pieces = crate::sheet_surface::pieces(&dev, &mut work)?;
         let regions = crate::sheet_surface::join_pieces(&pieces, &mut work)?;
         self.laid_out(&dev, &pieces, regions)?;
+        // The loose pieces lie in the flat where their panels do.
+        let loose: Vec<Region2> =
+            self.loose.iter().filter_map(|l| dev.placements.get(l.panel).copied().flatten().map(|at| at.region(&l.region))).collect();
+        self.regions.extend(loose);
         if self.unfolded {
             let base = self.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
             let frames: Vec<Option<Rigid3>> = dev.placements.iter().map(|p| p.map(|r| crate::sheet_surface_cuts::lift(&base, &r))).collect();
             return self.recessed(self.flat_solid()?, &frames);
         }
         let folded = fold_onto(&self.sheet, &dev, &self.places)?;
-        let body = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work)?;
+        let mut body = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work)?;
+        // Each loose piece where its panel is folded to.
+        for l in &self.loose {
+            let frame = folded.places.get(l.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a loose piece's panel has no place".into()))?;
+            let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a loose piece's panel has no plane".into()))?;
+            let piece = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&l.region), 0.0, self.thickness)?;
+            body = solidcraft_kernel::boolean(&body, &piece, solidcraft_kernel::BoolOp::Union)?.ok_or_else(|| DocError::Invalid("a loose piece".into()))?;
+        }
         self.recessed(body, &folded.places)
     }
 
@@ -2251,7 +2493,9 @@ impl SurfaceSheet {
                     end: (z.near[1] + z.far[1]) * 0.5,
                     angle: b.angle,
                     radius: b.radius,
-                    up: b.toward_material,
+                    // Up toward the reader of the flat, who sees it from the surface (see
+                    // `shown`): away from the material.
+                    up: !b.toward_material,
                     allowance: b.allowance(self.sheet.thickness, self.sheet.k_factor),
                     tabs: pieces.iter().filter(|(p, _)| matches!(p, Piece::Tab(t, _) if *t == k)).map(|(_, r)| r.clone()).collect(),
                 })

@@ -31,7 +31,7 @@ fn flange_follows_the_picks() {
         assert_eq!(c[0].1["type"], "base");
         assert_eq!(c[0].1["profiles"], json!([0]));
         run_all(&mut app, c);
-        assert_eq!(app.session.model.state().sheets.len(), 1);
+        assert_eq!(app.session.model.state().surface_sheets.len(), 1);
         // Four edge flanges at once, 20 high, outside.
         let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
             .iter()
@@ -370,7 +370,7 @@ fn bend_table_picker_writes_the_current_body() {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-bend-table-{}.csv", std::process::id()));
         let output = path.to_string_lossy().into_owned();
         let chosen = output.clone();
@@ -1299,7 +1299,7 @@ fn hem_handle_runs_along_the_hem_to_its_tip() {
     for flipped in [false, true] {
         let mut app = plate(crate::shell::LayoutMode::Floating);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection = vec![edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap()];
         app.start("sheet.hem");
         let mut d = app.dialog.clone().unwrap();
@@ -1376,7 +1376,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
     for face in [false, true] {
         let mut app = plate(crate::shell::LayoutMode::Docked);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection =
             vec![if face { face_sel(&app.session, Vec3::new(50.0, 30.0, 2.5)).unwrap() } else { Sel::Body { name: body.clone() } }];
         app.start("sheet.perforate");
@@ -1397,7 +1397,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
 fn perforate_edit_restores_dimensions_pattern_and_target() {
     let mut app = plate(crate::shell::LayoutMode::Docked);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-    let body = app.session.model.state().sheets[0].body.clone();
+    let body = app.session.model.state().surface_sheets[0].body.clone();
     app.run("sheet.perforate", json!({"body": body, "diameter": "4 mm", "pitch": "9 mm", "margin": "5 mm", "pattern": "square"})).unwrap();
     let feature = app.session.doc.features.last().unwrap();
     let dialog = edit_dialog(&app, feature.id, None).expect("Perforate can be edited");

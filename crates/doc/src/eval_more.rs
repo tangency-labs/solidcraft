@@ -467,6 +467,20 @@ fn rebuild_sheet(st: &mut ModelState, idx: usize) -> Result<()> {
     Ok(())
 }
 
+/// A rule's values as a sheet made from surfaces takes them.
+fn convert_rule(rv: &crate::sheet::RuleValues) -> crate::ConvertRule {
+    crate::ConvertRule {
+        thickness: rv.thickness,
+        k_factor: rv.k_factor,
+        bend_radius: rv.bend_radius,
+        gap: rv.gap,
+        corner_relief: rv.corner_relief_shape,
+        corner_relief_size: rv.corner_relief,
+        relief_width: rv.relief_width,
+        relief_depth: rv.relief_depth,
+    }
+}
+
 /// Converts the body `body` to sheet metal from its surfaces (#6748), its `faces` as Convert or
 /// Thicken chooses them: the body becomes the folded sheet, and the model keeps the sheet. The
 /// sheet is the rule's: its thickness and bends are, whatever the body's.
@@ -485,19 +499,7 @@ fn convert_to_sheet(
 ) -> Result<()> {
     let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
     let r = doc.sheet_rule(rule.as_deref());
-    let values = |t: Option<f64>| -> Result<crate::ConvertRule> {
-        let rv = doc.rule_values_at(vals, &r, t)?;
-        Ok(crate::ConvertRule {
-            thickness: rv.thickness,
-            k_factor: rv.k_factor,
-            bend_radius: rv.bend_radius,
-            gap: rv.gap,
-            corner_relief: rv.corner_relief_shape,
-            corner_relief_size: rv.corner_relief,
-            relief_width: rv.relief_width,
-            relief_depth: rv.relief_depth,
-        })
-    };
+    let values = |t: Option<f64>| -> Result<crate::ConvertRule> { Ok(convert_rule(&doc.rule_values_at(vals, &r, t)?)) };
     let picks = edge_picks(f, &mb, bends, warning)?;
     let placement = doc.component_transform(doc.model_body_component(&mb));
     let to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
@@ -550,6 +552,34 @@ fn surface_sheet_at(st: &ModelState, body: &Option<crate::BodyName>, pick: Optio
     }
     let p = pick?;
     st.surface_sheets.iter().position(|s| s.free_edge_at(p).ok().flatten().is_some())
+}
+
+/// The sheet made from surfaces a fold is on, and its line's ends where they are now: the sketch
+/// line's, or the points given. The named body's sheet, or the first whose flat panel the line
+/// lies on.
+fn surface_fold_sheet(
+    st: &ModelState,
+    body: &Option<crate::BodyName>,
+    sketch: &Option<crate::SketchId>,
+    curve: &Option<String>,
+    a: &crate::Position,
+    b: &crate::Position,
+) -> Option<(usize, Vec3, Vec3)> {
+    let (a, b) = match (sketch, curve) {
+        (Some(sk), Some(c)) => {
+            let ss = st.sketch(sk.0)?;
+            let ci = ss.sketch.curve_index(c)?;
+            match ss.sketch.segs(ci).as_slice() {
+                [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                _ => return None,
+            }
+        }
+        _ => (a.0, b.0),
+    };
+    if let Some(n) = body {
+        return st.surface_sheets.iter().position(|s| &s.body == n).map(|i| (i, a, b));
+    }
+    st.surface_sheets.iter().position(|s| s.fold_panel_at(a, b)).map(|i| (i, a, b))
 }
 
 /// Builds a sheet made from surfaces again after a change to it, and puts its body in place.
@@ -628,7 +658,7 @@ pub(super) fn sheet_eval(
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let r = doc.sheet_rule(rule.as_deref());
-            let rv = doc.rule_values(vals, &r)?;
+            let rule = convert_rule(&doc.rule_values(vals, &r)?);
             for (k, region) in regions.into_iter().enumerate() {
                 let (plane, region) = if *flip {
                     (Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 }, mirror_y(&region))
@@ -636,25 +666,12 @@ pub(super) fn sheet_eval(
                     (ss.plane, region)
                 };
                 let name = new_name(st, f, k);
-                let mut sh = sheet::base_flange(&name, &r.name, &rv, plane, region);
-                // The sketch's lines name the base panel's edges.
-                sh.base_curves = ss
-                    .sketch
-                    .curves
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| !c.construction)
-                    .flat_map(|(ci, c)| {
-                        ss.sketch.segs(ci).into_iter().filter_map(move |sg| match sg {
-                            Seg2::Line { a, b } => Some((c.id.clone(), a, b)),
-                            _ => None,
-                        })
-                    })
-                    .map(|(id, a, b)| if *flip { (id, Vec2::new(a.x, -a.y), Vec2::new(b.x, -b.y)) } else { (id, a, b) })
-                    .collect();
-                let solid = sh.solid()?;
+                // A sheet made from surfaces (#6748): one flat panel, the profile, every later
+                // feature building on it.
+                let region = Region2 { outer: region.outer.ccw(), holes: region.holes.iter().map(|h| h.ccw().reversed()).collect() };
+                let (sheet, solid) = crate::SurfaceSheet::base(&name, &r.name, &rule, plane, region)?;
                 st.bodies.push(ModelBody::new(name, solid, f.id));
-                st.sheets.push(sh);
+                st.surface_sheets.push(sheet);
             }
             Ok(())
         }
@@ -672,15 +689,14 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
             }
             let r = doc.sheet_rule(rule.as_deref());
-            let rv = doc.rule_values(vals, &r)?;
+            let rule = convert_rule(&doc.rule_values(vals, &r)?);
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
             let pts: Vec<Vec2> = if *reverse { pts.iter().map(|p| Vec2::new(p.x, -p.y)).collect() } else { pts };
-            // Mirroring the sketch swaps the material side too.
+            // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748).
             let name = new_name(st, f, 0);
-            let sh = sheet::contour_flange(&name, &r.name, &rv, &plane, &pts, w, *flip != *reverse)?;
-            let solid = sh.solid()?;
+            let (sheet, solid) = crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &pts, w, *flip != *reverse)?;
             st.bodies.push(ModelBody::new(name, solid, f.id));
-            st.sheets.push(sh);
+            st.surface_sheets.push(sheet);
             Ok(())
         }
         FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
@@ -812,6 +828,32 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
+        FeatureKind::SheetPath { edge, sketch, curves, radius, body } if surface_sheet_at(st, body, Some(edge.0)).is_some() => {
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            if curves.is_empty() || curves.len() > sheet::MAX_PATH_LINES {
+                return Err(DocError::Invalid(format!("a path flange's path must have 1…{} lines", sheet::MAX_PATH_LINES)));
+            }
+            for id in curves {
+                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+                if !ss.sketch.segs(ci).iter().all(|s| matches!(s, Seg2::Line { .. })) {
+                    return Err(DocError::Invalid("not supported yet: arcs in a path flange's path (use lines; the bends are made for you)".into()));
+                }
+            }
+            let path: Vec<Vec3> = chain_points(&ss, &ss.chain_order(curves)?)?.into_iter().map(|p| ss.plane.to_world(p)).collect();
+            let i = surface_sheet_at(st, body, Some(edge.0)).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sk.unfolded {
+                return Err(DocError::Invalid("refold the sheet before adding flanges".into()));
+            }
+            let rr = match radius {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
+            };
+            if let Some(sk) = st.surface_sheets.get_mut(i) {
+                sk.add_path_flange(edge.0, &path, rr)?;
+            }
+            rebuild_surface_sheet(st, i)
+        }
         FeatureKind::SheetPath { edge, sketch, curves, radius, body } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             if curves.is_empty() || curves.len() > sheet::MAX_PATH_LINES {
@@ -848,6 +890,47 @@ pub(super) fn sheet_eval(
             }
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
+        }
+        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles }
+            if match body {
+                Some(n) => st.surface_sheets.iter().any(|s| &s.body == n),
+                None => st.sheets.is_empty() && !st.surface_sheets.is_empty(),
+            } =>
+        {
+            // Without a body name the field goes on the newest sheet.
+            let i = match body {
+                Some(n) => st.surface_sheets.iter().position(|s| &s.body == n),
+                None => st.surface_sheets.len().checked_sub(1),
+            }
+            .ok_or_else(|| DocError::Invalid("there is no sheet metal body".into()))?;
+            let d = val(vals, diameter, Kind::Length)?;
+            let pitch = val(vals, pitch, Kind::Length)?;
+            let margin = match margin {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => d,
+            };
+            let square = match pattern.as_deref() {
+                None | Some("staggered") => false,
+                Some("square") => true,
+                Some(o) => return Err(DocError::Invalid(format!("perforation pattern {o:?}: use \"staggered\" or \"square\""))),
+            };
+            if !(d > 0.0 && pitch > d && margin >= 0.0) {
+                return Err(DocError::Invalid(format!(
+                    "perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter {d}, pitch {pitch}, margin {margin})"
+                )));
+            }
+            let outline = match sketch {
+                Some(sk) => {
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    let regions = select_profiles(ss, profiles.as_ref().unwrap_or(&ProfileSel::All))?;
+                    let sh = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+                    Some(sh.perforation_outline(&ss.plane, &regions)?)
+                }
+                None => None,
+            };
+            let sh = st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
+            Ok(())
         }
         FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
@@ -924,6 +1007,24 @@ pub(super) fn sheet_eval(
             }
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
+        }
+        FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body }
+            if surface_fold_sheet(st, body, sketch, curve, a, b).is_some() =>
+        {
+            let (i, a, b) = surface_fold_sheet(st, body, sketch, curve, a, b).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sk.unfolded {
+                return Err(DocError::Invalid("refold the sheet before folding it".into()));
+            }
+            let ang = val(vals, angle, Kind::Angle)?;
+            let rr = match radius {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
+            };
+            if let Some(sk) = st.surface_sheets.get_mut(i) {
+                sk.add_fold(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?;
+            }
+            rebuild_surface_sheet(st, i)
         }
         FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body } => {
             // The sketch line, where it is now.
