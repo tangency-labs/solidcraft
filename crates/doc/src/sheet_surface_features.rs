@@ -9,9 +9,9 @@
 //!
 //! Not built yet: flanges on part of an edge, and flanges on a curved edge or a roll's edge.
 
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::Cut;
-use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rip, Surface, Tail, ZoneEnds, develop};
+use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rigid3, Rip, Surface, Tail, ZoneEnds, develop};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
 
@@ -480,6 +480,162 @@ impl SurfaceSheet {
             }
         }
         Ok(j)
+    }
+
+    /// The sheet of a copy of its body, named `body`, by `m`: moved, or mirrored into the opposite
+    /// hand. A mirror turns each panel's chart over (v → −v) so that its frame stays
+    /// right-handed with the material where it was: every outline, anchor, cut and record in the
+    /// charts and the flat is mirrored with it, and each joint runs the other way. None for a
+    /// transform that is no rigid motion or mirror, and for a mirror of a sheet with a roll.
+    pub fn copied(&self, body: &str, m: &crate::Mat) -> Option<SurfaceSheet> {
+        let axis = |i: usize| m.get(i).map(|c| Vec3::new(c[0], c[1], c[2]));
+        let (x, y, z) = (axis(0)?, axis(1)?, axis(2)?);
+        let unit = |v: Vec3| (v.dot(v) - 1.0).abs() < 1e-6;
+        let isometry = m.iter().flatten().all(|v| v.is_finite())
+            && unit(x)
+            && unit(y)
+            && unit(z)
+            && x.dot(y).abs() < 1e-6
+            && x.dot(z).abs() < 1e-6
+            && y.dot(z).abs() < 1e-6;
+        if !isometry {
+            return None;
+        }
+        let mirror = x.cross(y).dot(z) < 0.0;
+        if mirror && self.sheet.panels.iter().any(|p| !matches!(p.surface, Surface::Plane)) {
+            return None;
+        }
+        let place = |r: Rigid3| {
+            let (x, y, z) = (crate::apply_vector(m, r.x), crate::apply_vector(m, r.y), crate::apply_vector(m, r.z));
+            Rigid3 { x, y: if mirror { y * -1.0 } else { y }, z, shift: crate::apply_point(m, r.shift) }
+        };
+        let mut out = self.clone();
+        out.body = body.to_string();
+        out.places = self.places.iter().map(|p| p.map(place)).collect();
+        if mirror {
+            out.turn_charts_over();
+        }
+        Some(out)
+    }
+
+    /// Every chart and the flat turned over (v → −v): see [`Self::copied`].
+    fn turn_charts_over(&mut self) {
+        let f = |p: Vec2| Vec2::new(p.x, -p.y);
+        let r = |g: &Region2| crate::sheet_surface_convert::rigid_region(g, f);
+        let seg = |s: &Seg2| crate::sheet_surface_convert::rigid_region(&Region2 { outer: Loop2 { segs: vec![*s] }, holes: Vec::new() }, f).outer.segs;
+        for p in &mut self.sheet.panels {
+            p.region = r(&p.region);
+        }
+        for j in &mut self.sheet.joints {
+            // Each joint runs the other way, from its far end, so each panel's material stays on
+            // its side of it.
+            let turn = |a: &mut Anchor, length: f64| {
+                a.origin = f(a.origin + a.dir * length);
+                a.dir = Vec2::new(-a.dir.x, a.dir.y);
+            };
+            match &mut j.kind {
+                JointKind::Bend(b) => {
+                    let l = b.length;
+                    turn(&mut j.a, l);
+                    turn(&mut j.b, l);
+                    b.ends = ZoneEnds { near: (l - b.ends.near.1, l - b.ends.near.0), far: (l - b.ends.far.1, l - b.ends.far.0) };
+                    b.tails = (b.tails.1, b.tails.0);
+                    b.relief = (b.relief.1, b.relief.0);
+                }
+                JointKind::Seam => {
+                    turn(&mut j.a, 0.0);
+                    turn(&mut j.b, 0.0);
+                }
+                JointKind::Rip(rip) => {
+                    let along = |a: &Anchor, last: Option<&Vec2>| last.map_or(0.0, |q| (*q - a.origin).dot(a.dir));
+                    let (la, lb) = (along(&j.a, rip.edges.0.last()), along(&j.b, rip.edges.1.last()));
+                    turn(&mut j.a, la);
+                    turn(&mut j.b, lb);
+                    for e in [&mut rip.edges.0, &mut rip.edges.1] {
+                        *e = e.iter().rev().map(|p| f(*p)).collect();
+                    }
+                    for c in [&mut rip.curves.0, &mut rip.curves.1] {
+                        *c = c.iter().rev().flat_map(|s| seg(&s.reversed())).collect();
+                    }
+                    rip.turns.reverse();
+                }
+            }
+        }
+        for c in &mut self.sheet.cuts {
+            c.region = r(&c.region);
+        }
+        for x in &mut self.recesses {
+            x.region = r(&x.region);
+        }
+        for l in &mut self.loose {
+            l.region = r(&l.region);
+        }
+        // The flat lies in the first panel's chart: it turns over with it.
+        self.regions = self.regions.iter().map(r).collect();
+        for b in &mut self.bends {
+            b.zone = r(&b.zone);
+            (b.start, b.end) = (f(b.start), f(b.end));
+            b.tabs = b.tabs.iter().map(r).collect();
+        }
+        for l in &mut self.roll_lines {
+            (l.start, l.end) = (f(l.start), f(l.end));
+        }
+        for p in &mut self.pockets {
+            p.region = r(&p.region);
+        }
+        self.labels = self.labels.iter().map(r).collect();
+        for p in &mut self.perforations {
+            if let Some(o) = &mut p.outline {
+                *o = o.iter().map(r).collect();
+            }
+        }
+    }
+
+    /// The flat face of the sheet a point lies on (the body's coordinates, within `tol`, kept
+    /// below a quarter of the thickness): its persistent name, `<panel>:top` for its face on the
+    /// sheet's surface and `<panel>:bottom` for the other (`flat:…` unfolded), and its plane (see
+    /// [`Self::panel_face`]).
+    pub fn panel_face_at(&self, p: Vec3, tol: f64) -> Option<(String, Plane)> {
+        let t = self.thickness;
+        let tol = tol.min(t * 0.25);
+        let dev = develop(&self.sheet, 0).ok()?;
+        let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
+        for (panel, frame) in self.sheet.panels.iter().zip(&frames) {
+            let (Surface::Plane, Some(frame)) = (&panel.surface, frame) else { continue };
+            let q = frame.inverse().point(p);
+            let top = q.z.abs() < (q.z - t).abs();
+            if (if top { q.z.abs() } else { (q.z - t).abs() }) > tol || !panel.region.contains(Vec2::new(q.x, q.y)) {
+                continue;
+            }
+            let name = format!("{}:{}", if self.unfolded { "flat" } else { panel.name.as_str() }, if top { "top" } else { "bottom" });
+            let plane = self.panel_face(&name)?;
+            return Some((name, plane));
+        }
+        None
+    }
+
+    /// The plane of the flat face named `name` (see [`Self::panel_face_at`]), facing out of the
+    /// sheet. Its coordinates are the flat pattern's as it is read (see [`SurfaceSheet::shown`]),
+    /// the other face's mirrored, so a sketch on it measures as the flat pattern does.
+    pub fn panel_face(&self, name: &str) -> Option<Plane> {
+        let (panel, side) = name.rsplit_once(':')?;
+        let top = match side {
+            "top" => true,
+            "bottom" => false,
+            _ => return None,
+        };
+        let i = match panel {
+            "flat" => 0,
+            name => self.sheet.panels.iter().position(|p| p.name == name)?,
+        };
+        let dev = develop(&self.sheet, 0).ok()?;
+        let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
+        let frame = frames.get(i).copied().flatten()?;
+        let back = dev.placements.get(i).copied().flatten()?.inverse();
+        let o = back.point(Vec2::new(0.0, 0.0));
+        let (x, y) = (back.vector(Vec2::new(1.0, 0.0)), back.vector(Vec2::new(0.0, if top { -1.0 } else { 1.0 })));
+        let z = if top { 0.0 } else { self.thickness };
+        Plane::new(frame.point(Vec3::new(o.x, o.y, z)), frame.vector(Vec3::new(x.x, x.y, 0.0)), frame.vector(Vec3::new(y.x, y.y, 0.0)))
     }
 
     /// Whether the line from `a` to `b` lies on a face of one of the sheet's flat panels, across

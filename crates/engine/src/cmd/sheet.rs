@@ -1082,7 +1082,7 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
     let drawing = FlatDrawing {
         regions: sk.regions.clone(),
         pockets: sk.pockets.clone(),
-        letters: sheet::Letters::none(),
+        letters: sheet::Letters::of(&sk.labels),
         perforation: sk.perforations.iter().flat_map(|p| sk.perforation_holes(p).into_iter().map(|c| (c, p.diameter / 2.0))).collect(),
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),

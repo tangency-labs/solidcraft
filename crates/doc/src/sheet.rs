@@ -5055,6 +5055,15 @@ impl Letters {
         Letters { regions: Vec::new() }
     }
 
+    /// The text regions `labels` (flat coordinates), each a letter with its counters.
+    pub fn of(labels: &[Region2]) -> Letters {
+        let regions = labels
+            .iter()
+            .map(|r| (r.outer.polyline(1e-3).bounds().inflated(0.01), std::iter::once(&r.outer).chain(&r.holes).flat_map(|lp| lp.segs.iter().copied()).collect()))
+            .collect();
+        Letters { regions }
+    }
+
     /// Whether `lp` is made of the outlines of text the sheet carries: a letter, or one of its
     /// counters.
     pub fn is_letter(&self, lp: &Loop2) -> bool {
@@ -5347,7 +5356,10 @@ pub fn split_sheet_face_name(name: &str) -> Option<(&str, &str)> {
 /// The plane of the sheet face with a [`sheet_face_name`], in the body's own coordinates.
 pub fn sheet_face_plane(st: &crate::ModelState, name: &str) -> Option<(String, Plane)> {
     let (body, face) = split_sheet_face_name(name)?;
-    let plane = st.sheets.iter().find(|s| s.body == body)?.panel_face(face)?;
+    let plane = match st.sheets.iter().find(|s| s.body == body) {
+        Some(sh) => sh.panel_face(face)?,
+        None => st.surface_sheets.iter().find(|s| s.body == body)?.panel_face(face)?,
+    };
     Some((body.to_string(), plane))
 }
 

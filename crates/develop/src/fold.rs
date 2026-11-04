@@ -132,6 +132,11 @@ impl Bent {
     pub fn angle(&self) -> f64 {
         self.angle
     }
+
+    /// The joint's way in the flat (from the `a` panel's side).
+    pub fn flat_way(&self) -> Vec2 {
+        self.flat.1
+    }
 }
 
 impl Fold {

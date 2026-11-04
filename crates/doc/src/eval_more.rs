@@ -752,12 +752,14 @@ pub(super) fn sheet_eval(
                         },
                     )),
                 };
+            let n0 = sk.sheet.panels.len();
             for (edge, height, angle) in picks {
                 let joint = sk.add_flange_on(edge, height, angle, rr, position, from, *flip)?;
                 if let Some((relief, size)) = own {
                     sk.corner_reliefs.push((joint, relief, size));
                 }
             }
+            tag_panels(&mut sk, n0, f.id);
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }
@@ -850,7 +852,9 @@ pub(super) fn sheet_eval(
                 None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
             };
             if let Some(sk) = st.surface_sheets.get_mut(i) {
+                let n0 = sk.sheet.panels.len();
                 sk.add_path_flange(edge.0, &path, rr)?;
+                tag_panels(sk, n0, f.id);
             }
             rebuild_surface_sheet(st, i)
         }
@@ -984,9 +988,11 @@ pub(super) fn sheet_eval(
             for p in edges {
                 found.push(before.free_edge_at(p.0)?.ok_or_else(|| DocError::Invalid("pick a free edge of the sheet".into()))?);
             }
+            let n0 = sk.sheet.panels.len();
             for edge in found {
                 sk.add_hem_on(edge, l, g, *flip)?;
             }
+            tag_panels(&mut sk, n0, f.id);
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }
@@ -1022,7 +1028,9 @@ pub(super) fn sheet_eval(
                 None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
             };
             if let Some(sk) = st.surface_sheets.get_mut(i) {
+                let n0 = sk.sheet.panels.len();
                 sk.add_fold(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?;
+                tag_panels(sk, n0, f.id);
             }
             rebuild_surface_sheet(st, i)
         }
@@ -1256,6 +1264,17 @@ fn extrude_cut(st: &ModelState, f: &Feature) -> Result<Option<ExtrudeCut>> {
         .flat_map(|ci| ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci)))
         .collect();
     Ok(Some(ExtrudeCut { plane: ss.plane, regions, text, operation: *operation, bound: extent.to.is_some() }))
+}
+
+/// The letters `f` cut, where it is an extrude cut from a sketch with text: the sketch's plane
+/// and the regions of the cut that are letters, with their counters.
+pub(super) fn cut_letters(st: &ModelState, f: &Feature) -> Option<(Plane, Vec<Region2>)> {
+    let cut = extrude_cut(st, f).ok().flatten()?;
+    if cut.operation != Operation::Cut || cut.text.is_empty() || cut.text.len() > MAX_TEXT_CURVES {
+        return None;
+    }
+    let letters: Vec<Region2> = cut.regions.iter().filter(|r| sheet::loop_lies_on(&r.outer, &cut.text)).take(MAX_LABELS).cloned().collect();
+    (!letters.is_empty()).then_some((cut.plane, letters))
 }
 
 /// An untapered extrude join one sheet thick in the plane of a panel of sheet metal (the base or
@@ -2494,6 +2513,15 @@ fn sheet_rule_values(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelS
 }
 
 /// Tag the flanges a feature just added (`F<feature>.<k>`).
+/// Names the panels of a sheet made from surfaces past the first `from` after the feature that
+/// made them, `F<feature>.<k>`, as flat-first tags its flanges: what a sketch on one of their
+/// faces keeps (see [`crate::SurfaceSheet::panel_face_at`]).
+fn tag_panels(sk: &mut crate::SurfaceSheet, from: usize, feature: u64) {
+    for (k, p) in sk.sheet.panels.iter_mut().enumerate().skip(from) {
+        p.name = format!("F{feature}.{}", k - from);
+    }
+}
+
 fn tag_flanges(sh: &mut crate::sheet::SheetBody, from: usize, feature: u64) {
     for (k, fl) in sh.flanges.iter_mut().enumerate().skip(from) {
         fl.tag = format!("F{feature}.{}", k - from);

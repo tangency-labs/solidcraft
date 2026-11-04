@@ -2752,9 +2752,14 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
 /// step, the body built again is weighed against the body cut.
 fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature, validation: kernel::Validation, warning: &mut Option<String>) -> Result<()> {
     let weigh = validation == kernel::Validation::EachStep;
-    for (i, sk, built, note) in crate::sheet_surface_cuts::absorb(before, after, f, weigh)? {
+    let letters = more::cut_letters(after, f);
+    for (i, mut sk, built, note) in crate::sheet_surface_cuts::absorb(before, after, f, weigh)? {
         if let Some(note) = note {
             append_warning(warning, note);
+        }
+        // The sheet remembers where the cut's letters went.
+        if let Some(flat) = letters.as_ref().and_then(|(plane, regions)| sk.flat_of(plane, regions)) {
+            sk.labels.extend(flat);
         }
         if let Some(b) = after.bodies.iter_mut().find(|b| b.name == sk.body) {
             more::replace_sheet_body(b, built);
@@ -5843,6 +5848,11 @@ fn rotation(o: Vec3, a: Vec3, ang: f64) -> Mat {
 /// mirrored into the opposite hand ([`crate::sheet::SheetBody::copied`]), so the copy has its
 /// own flat pattern, DXF and bend table. A copy by any other transform stays a plain solid.
 fn copy_sheet(st: &mut ModelState, from: &str, to: &str, m: &crate::Mat) {
+    if let Some(sheet) = st.surface_sheets.iter().find(|s| s.body == from).and_then(|s| s.copied(to, m)) {
+        st.surface_sheets.retain(|s| s.body != to);
+        st.surface_sheets.push(sheet);
+        return;
+    }
     let Some(sheet) = st.sheets.iter().find(|s| s.body == from).and_then(|s| s.copied(to, m)) else { return };
     st.sheets.retain(|s| s.body != to);
     st.sheets.push(sheet);

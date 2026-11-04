@@ -2010,6 +2010,10 @@ pub struct SurfaceSheet {
     /// they were (see `sheet_surface_cuts`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loose: Vec<crate::Loose>,
+    /// Where text cut through it went, in the flat: each letter with its counters, so its DXF
+    /// can put them on their own layer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<Region2>,
     /// Perforation fields (#732): holes on a grid over the flat, not cut into the body.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub perforations: Vec<crate::sheet::SheetPerforation>,
@@ -2117,6 +2121,7 @@ impl SurfaceSheet {
             recesses: Vec::new(),
             pockets: Vec::new(),
             loose: Vec::new(),
+            labels: Vec::new(),
             perforations: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
@@ -2247,6 +2252,7 @@ impl SurfaceSheet {
             recesses: Vec::new(),
             pockets: Vec::new(),
             loose: Vec::new(),
+            labels: Vec::new(),
             perforations: Vec::new(),
         };
         let solid = sheet.build()?;
@@ -2291,7 +2297,33 @@ impl SurfaceSheet {
                 *o = o.iter().map(r).collect();
             }
         }
+        out.labels = self.labels.iter().map(r).collect();
         out
+    }
+
+    /// `regions` of a plane parallel to a flat panel, seen through it along the plane's normal,
+    /// in the flat: through the first panel that holds the first region's inner point. None
+    /// where no panel does.
+    pub fn flat_of(&self, plane: &Plane, regions: &[Region2]) -> Option<Vec<Region2>> {
+        let dev = develop(&self.sheet, 0).ok()?;
+        let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
+        let first = regions.first()?.interior_point();
+        for (i, (panel, frame)) in self.sheet.panels.iter().zip(&frames).enumerate() {
+            let (Surface::Plane, Some(frame), Some(Some(at))) = (&panel.surface, frame, dev.placements.get(i)) else { continue };
+            if frame.z.cross(plane.normal()).len() > 1e-6 {
+                continue;
+            }
+            let inv = frame.inverse();
+            let chart = |p: Vec2| {
+                let q = inv.point(plane.to_world(p));
+                Vec2::new(q.x, q.y)
+            };
+            if !panel.region.outer.ccw().contains(chart(first)) {
+                continue;
+            }
+            return Some(regions.iter().map(|r| rigid_region(r, |p| at.point(chart(p)))).collect());
+        }
+        None
     }
 
     /// A perforation field's outline in the flat: closed `regions` of a sketch in `plane`, read
