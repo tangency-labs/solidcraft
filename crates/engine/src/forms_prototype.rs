@@ -17,6 +17,7 @@ pub use objects::Part;
 
 #[derive(Clone)]
 struct Snapshot {
+    repair: Option<String>,
     imported: Option<Box<crate::doc::forms::Imported>>,
     pipe_segments: Vec<crate::geom::subdivision::pipe_network::SegmentGeometry>,
     pipe: Option<Box<crate::doc::forms::Pipe>>,
@@ -51,7 +52,16 @@ struct ExtrusionGesture {
 }
 
 #[derive(Clone)]
+pub(crate) struct RepairContext {
+    pub document: std::sync::Arc<crate::doc::Document>,
+    pub moves: std::collections::BTreeMap<u64, crate::doc::Mat>,
+}
+
+#[derive(Clone)]
 pub struct Form {
+    /// Retained authoring data whose external support needs explicit reattachment.
+    pub repair: Option<String>,
+    pub(crate) repair_context: Option<RepairContext>,
     pub imported: Option<Box<crate::doc::forms::Imported>>,
     pub pipe_segments: Vec<crate::geom::subdivision::pipe_network::SegmentGeometry>,
     pub pipe: Option<Box<crate::doc::forms::Pipe>>,
@@ -326,6 +336,8 @@ impl Form {
         let local_vertices = surface.vertices.clone();
         let surface = placement::placed_surface(surface, &placement);
         Ok(Self {
+            repair: None,
+            repair_context: None,
             imported,
             pipe_segments: Vec::new(),
             pipe,
@@ -417,6 +429,37 @@ impl Form {
             return Ok(());
         }
         self.install_matching(definition, report, false)
+    }
+    /// Incorporate a qualified source rebase without adding an edit gesture or
+    /// replacing the editor's Undo/Redo and staged-operation metadata.
+    pub fn refresh_profile_preview(&mut self, definition: crate::doc::forms::Definition) -> Result<()> {
+        let mut expected = self.definition();
+        if expected == definition {
+            return Ok(());
+        }
+        expected.cage.points = definition.cage.points.clone();
+        expected.profile = definition.profile.clone();
+        let same_source = self.profile.as_ref().zip(definition.profile.as_ref()).is_some_and(|(old, new)| {
+            old.source == new.source && old.segments == new.segments && old.continuity == new.continuity && old.partition == new.partition
+        });
+        if !same_source || expected != definition {
+            return Err(error("a Surface preview may only refresh its existing source and guide positions"));
+        }
+        let (surface, logical) = Self::preview(
+            &definition.cage,
+            definition.hierarchy.as_ref(),
+            definition.matching.as_deref(),
+            definition.profile.as_deref(),
+            self.levels,
+        )?;
+        self.cage = definition.cage;
+        self.profile = definition.profile;
+        self.logical = logical;
+        self.install_surface(surface);
+        self.response = None;
+        self.extrusion = None;
+        self.revision = self.revision.wrapping_add(1);
+        Ok(())
     }
     fn install_matching(
         &mut self,
@@ -780,6 +823,7 @@ impl Form {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            repair: self.repair.clone(),
             imported: self.imported.clone(),
             pipe_segments: self.pipe_segments.clone(),
             pipe: self.pipe.clone(),
@@ -1053,6 +1097,8 @@ impl Form {
             self.undo.pop();
             self.redo.push(current);
         }
+        self.repair = snap.repair;
+        self.repair_context = None;
         self.cage = snap.cage;
         self.imported = snap.imported;
         self.pipe = snap.pipe;
@@ -1075,7 +1121,7 @@ impl Form {
         Ok(())
     }
     pub fn inspect(&self) -> Value {
-        json!({"active":true,"placement":self.placement,"tool_preview":self.tool_original.is_some(),"points":self.control_positions().iter().map(|p| [p.x,p.y,p.z]).collect::<Vec<_>>(),"faces":self.logical.faces,"parameters":self.parameters,"editing_feature":self.editing_feature,
+        json!({"active":true,"repair":self.repair,"placement":self.placement,"tool_preview":self.tool_original.is_some(),"points":self.control_positions().iter().map(|p| [p.x,p.y,p.z]).collect::<Vec<_>>(),"faces":self.logical.faces,"parameters":self.parameters,"editing_feature":self.editing_feature,
             "finish_options":self.finish_options,
             "parts":self.parts.iter().map(|(id,p)|json!({"id":id,"name":p.name,"point_count":p.definition.cage.points.len(),"face_count":p.definition.cage.faces.len(),"placement":p.definition.placement})).collect::<Vec<_>>(),
             "consumed_features":self.consumed.keys().copied().collect::<Vec<_>>(),
@@ -1109,7 +1155,8 @@ impl Form {
         Ok(())
     }
     pub(crate) fn same_authoring_source(&self, other: &Self) -> bool {
-        self.draft_identity == other.draft_identity
+        self.repair == other.repair
+            && self.draft_identity == other.draft_identity
             && self.revision == other.revision
             && self.finish_options == other.finish_options
             && self.levels == other.levels

@@ -32,7 +32,7 @@ impl Form {
         self.next_part = next_part;
     }
     pub fn adopt_pipe(&mut self, definition: crate::doc::forms::Definition) -> Result<()> {
-        if definition.pipe.is_none() || !self.parts.is_empty() || !self.consumed.is_empty() {
+        if self.repair.is_some() || definition.pipe.is_none() || !self.parts.is_empty() || !self.consumed.is_empty() {
             return Err(error("finish staged Forms before adopting a pipe source"));
         }
         self.adopt_definition(definition, true)
@@ -52,6 +52,7 @@ impl Form {
     pub(super) fn adopt_definition(&mut self, definition: crate::doc::forms::Definition, checkpoint: bool) -> Result<()> {
         let levels = definition.cage.preview_level(self.levels).map_err(error)?;
         let mut candidate = Self::from_definition(definition, levels, self.editing_feature)?;
+        candidate.repair = self.repair.clone();
         if candidate.pipe.as_ref().zip(self.pipe.as_ref()).is_some_and(|(a, b)| a.source == b.source) {
             candidate.pipe_segments = self.pipe_segments.clone();
         }

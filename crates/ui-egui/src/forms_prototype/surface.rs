@@ -28,11 +28,21 @@ pub(super) fn visible(app: &SolveApp, proj: &Proj, point: Vec3) -> bool {
     let fit = controls::tolerance(app).unwrap_or(0.01);
     let (near, _) = proj.ray(p + egui::vec2(2.0, 0.0));
     let tolerance = (near - o).len().max(3.0 * fit.max(0.05));
-    if let Some((mesh, index)) = live_cad::occlusion(app) {
+    let own_visible = if let Some((mesh, index)) = live_cad::occlusion(app) {
         index.raycast(mesh, o, d).is_none_or(|(t, _)| t >= depth - tolerance)
     } else {
         form.surface.index.raycast(&form.surface.mesh, o, d).is_none_or(|(t, _)| t >= depth - tolerance)
-    }
+    };
+    // Test the exact world point rather than a ray quantized through f32 screen
+    // coordinates: a touching support rim must not become a false nearer wall.
+    let (context_origin, context_direction, context_depth) = if proj.cam.fov > 0.0 {
+        let delta = point - o;
+        let Some(direction) = delta.normalized() else { return false };
+        (o, direction, delta.len())
+    } else {
+        (point - d * depth, d, depth)
+    };
+    own_visible && !context::occludes(app, context_origin, context_direction, context_depth)
 }
 pub(super) fn nearest(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Element> {
     nearest_with(app, proj, pos, app.forms_prototype.pick)
@@ -46,7 +56,7 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
             .iter()
             .enumerate()
             .filter_map(|(i, &p)| {
-                if !form.selectable_control(i) {
+                if !form.selectable_control(i) || !live_cad::handle_available(app, i) {
                     return None;
                 }
                 let q = proj.to_screen(p)?;
@@ -86,21 +96,19 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
     }
     if matches!(mode, Pick::Face | Pick::All) {
         let (o, d) = proj.ray(pos);
-        if form.profile.is_some() {
-            if let Some((mesh, index)) = live_cad::occlusion(app) {
-                let (_, triangle) = index.raycast(mesh, o, d)?;
-                return mesh.tri_face.get(triangle).map(|&face| if face == u32::MAX { Element::Surface } else { Element::Face(face as usize) });
-            }
-            let (_, triangle) = form.surface.index.raycast(&form.surface.mesh, o, d)?;
-            return form
-                .surface
-                .mesh
-                .tri_face
-                .get(triangle)
-                .map(|&face| if face == u32::MAX { Element::Surface } else { Element::Face(face as usize) });
+        let (mesh, index) = if form.profile.is_some() {
+            live_cad::occlusion(app).unwrap_or((&form.surface.mesh, &form.surface.index))
+        } else {
+            (&form.surface.mesh, &form.surface.index)
+        };
+        let (depth, triangle) = index.raycast(mesh, o, d)?;
+        if context::occludes(app, o, d, depth) {
+            return None;
         }
-        let (_, triangle) = form.surface.index.raycast(&form.surface.mesh, o, d)?;
-        return form.surface.mesh.tri_face.get(triangle).map(|&f| Element::Face(f as usize));
+        return mesh
+            .tri_face
+            .get(triangle)
+            .map(|&face| if form.profile.is_some() && face == u32::MAX { Element::Surface } else { Element::Face(face as usize) });
     }
     None
 }
@@ -149,7 +157,7 @@ pub(super) fn overlay(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj) {
         .vertices
         .iter()
         .enumerate()
-        .filter(|(i, _)| form.selectable_control(*i))
+        .filter(|(i, _)| form.selectable_control(*i) && live_cad::handle_available(app, *i))
         .filter_map(|(i, &p)| visible(app, proj, p).then(|| proj.to_screen(p).map(|p| (i, p))).flatten())
         .collect();
     if app.forms_prototype.cage {

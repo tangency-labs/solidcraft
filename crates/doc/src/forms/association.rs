@@ -1,7 +1,7 @@
 //! Persistent Match references and recomputation; preview geometry is never stored here.
 use super::{
     Definition,
-    support::{BoundaryCoordinate, BoundarySupport},
+    support::{BoundaryBinding, BoundaryCoordinate, BoundarySupport},
 };
 use crate::{BodyName, DocError, ModelBody, ModelState, Result};
 use serde::{Deserialize, Serialize};
@@ -181,6 +181,8 @@ pub struct Matching {
     #[serde(default, skip_serializing_if = "is_false")]
     pub adjacent_faces: bool,
     pub source: SupportRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<BoundaryBinding>,
     pub config: Config,
     pub coordinates: Vec<BoundaryCoordinate>,
     pub basis: RootBasis,
@@ -222,6 +224,9 @@ fn install_evaluator(definition: &mut Definition, cage: Cage) -> Result<()> {
 impl Matching {
     pub fn validate(&self, cage: &Cage, hierarchy: Option<&Hierarchy>) -> Result<()> {
         self.source.validate()?;
+        if let Some(binding) = &self.binding {
+            binding.validate()?;
+        }
         let layout = domain_layout(hierarchy)?;
         Domain::new(cage, layout.as_ref().map(|l| l.owners.as_slice()))
             .and_then(|domain| self.config.validate_domain(domain))
@@ -320,7 +325,7 @@ impl Matching {
         if definition.profile.is_some() {
             return Err(invalid("Form Surface continuity is set on its original CAD rim"));
         }
-        let support = request.source.resolve_with(state, request.adjacent_faces && request.order > 0)?;
+        let (support, binding) = request.source.resolve_bound(state, request.adjacent_faces && request.order > 0, None)?;
         let mut definition = definition.clone();
         if let Some(previous) = definition.matching.take() {
             previous.restore(&mut definition, true)?;
@@ -347,6 +352,7 @@ impl Matching {
         definition.matching = Some(Box::new(Self {
             adjacent_faces: request.adjacent_faces,
             source: request.source,
+            binding: Some(binding),
             config,
             coordinates,
             basis: solution.basis,
@@ -357,7 +363,7 @@ impl Matching {
         Ok((definition, solution.report))
     }
     pub fn recompute(&self, definition: &Definition, state: &ModelState, tolerance: f64) -> Result<(Definition, Report)> {
-        let support = self.source.resolve_with(state, self.adjacent_faces && self.config.order > 0)?;
+        let (support, binding) = self.bound_support(definition, state)?;
         let mut base = definition.clone();
         base.matching = None;
         self.restore(&mut base, false)?;
@@ -369,6 +375,7 @@ impl Matching {
         base.matching = Some(Box::new(Self {
             adjacent_faces: self.adjacent_faces,
             source: self.source.clone(),
+            binding: Some(binding),
             config,
             coordinates: self.coordinates.clone(),
             basis: solution.basis,
@@ -377,6 +384,38 @@ impl Matching {
             crease_ancestors: self.crease_ancestors.clone(),
         }));
         Ok((base, solution.report))
+    }
+    fn bound_support(&self, definition: &Definition, state: &ModelState) -> Result<(BoundarySupport, BoundaryBinding)> {
+        let (support, binding) = self.source.resolve_bound(state, self.adjacent_faces && self.config.order > 0, self.binding.as_ref())?;
+        if self.binding.is_some() {
+            return Ok((support, binding));
+        }
+        // Older records retained positional curve ordinals only. Recover their seam from the
+        // authored limit constraints, never by picking the closest current curve after a move.
+        let layout = domain_layout(definition.hierarchy.as_ref())?;
+        let domain = Domain::new(&definition.cage, layout.as_ref().map(|l| l.owners.as_slice())).map_err(|e| invalid(e.to_string()))?;
+        let ring = domain.opening(self.config.edge).map_err(|e| invalid(e.to_string()))?;
+        let order = domain.evaluation_order(&self.config).map_err(|e| invalid(e.to_string()))?;
+        let vertices = matching::evaluated_vertices(&definition.cage, order, 0).map_err(|e| invalid(e.to_string()))?;
+        let points = ring
+            .iter()
+            .map(|&i| vertices.get(i).copied().map(|p| definition.placement.point(p)).ok_or_else(|| invalid("missing legacy Match limit constraint")))
+            .collect::<Result<Vec<_>>>()?;
+        let support = support.recover_legacy(&self.coordinates, &points, self.config.tolerances.position_mm)?;
+        let binding = self.source.bind_support(state, &support)?;
+        Ok((support, binding))
+    }
+    pub fn transform_picks(&mut self, matrix: &crate::Mat) {
+        self.source.transform_picks(matrix);
+        if let Some(binding) = &mut self.binding {
+            binding.transform_picks(matrix);
+        }
+    }
+    pub(crate) fn remap_names(&mut self, features: &BTreeMap<u64, u64>, bodies: &BTreeMap<String, String>) {
+        self.source.remap_names(features, bodies);
+        if let Some(binding) = &mut self.binding {
+            binding.remap_names(features, bodies);
+        }
     }
     /// Follow a subdivision of the bound loop using the old vertex and curve
     /// identities. New controls get coordinates only within their parent span.
@@ -422,7 +461,7 @@ impl Matching {
         if new_ring.len() > 64 {
             return Err(invalid("refining this Match opening exceeds the 64 boundary control budget"));
         }
-        let support = self.source.resolve_with(state, self.adjacent_faces && self.config.order > 0)?;
+        let (support, binding) = self.bound_support(original, state)?;
         let mut config = self.config.clone();
         config.edge =
             [*new_ring.first().ok_or_else(|| invalid("empty refined opening"))?, *new_ring.get(1).ok_or_else(|| invalid("short refined opening"))?];
@@ -442,6 +481,7 @@ impl Matching {
         refined.matching = Some(Box::new(Self {
             adjacent_faces: self.adjacent_faces,
             source: self.source.clone(),
+            binding: Some(binding),
             config,
             coordinates,
             basis: solution.basis,
@@ -460,9 +500,15 @@ impl crate::walk::Walk for Matching {
         self.source.walk_refs_mut(f)
     }
     fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(crate::walk::GeoItem<'a>)) {
-        self.source.walk_geometry(f)
+        self.source.walk_geometry(f);
+        if let Some(binding) = &self.binding {
+            binding.walk_geometry(f);
+        }
     }
     fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(crate::walk::GeoItemMut<'a>)) {
-        self.source.walk_geometry_mut(f)
+        self.source.walk_geometry_mut(f);
+        if let Some(binding) = &mut self.binding {
+            binding.walk_geometry_mut(f);
+        }
     }
 }

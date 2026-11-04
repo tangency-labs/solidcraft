@@ -50,6 +50,8 @@ pub(crate) struct Draft {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct State {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    repair: Option<String>,
     definition: Definition,
     levels: usize,
     parts: BTreeMap<u64, Part>,
@@ -70,6 +72,7 @@ impl Draft {
             base_dirty,
             finish_options: form.finish_options.clone(),
             source: State {
+                repair: form.repair.clone(),
                 definition: form.definition(),
                 levels: form.levels,
                 parts: form.parts.clone(),
@@ -145,6 +148,7 @@ impl Draft {
 impl State {
     fn from_snapshot(s: &Snapshot) -> Self {
         Self {
+            repair: s.repair.clone(),
             definition: Definition {
                 imported: s.imported.clone(),
                 pipe: s.pipe.clone(),
@@ -197,7 +201,13 @@ impl State {
             part.definition.parameters.validate().map_err(error)?;
             part.definition.cage.validate().map_err(error)?;
         }
+        if self.repair.as_ref().is_some_and(|error| error.is_empty() || error.len() > 16_384)
+            || (self.repair.is_some() && (editing.is_none() || (self.definition.profile.is_none() && self.definition.matching.is_none())))
+        {
+            return Err(error("invalid retained Form support recovery marker"));
+        }
         let mut form = Form::from_definition(self.definition, if full_preview { self.levels } else { 0 }, editing)?;
+        form.repair = self.repair;
         form.parts = self.parts;
         form.consumed = self.consumed;
         form.next_part = self.next_part;

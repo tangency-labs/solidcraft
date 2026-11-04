@@ -36,6 +36,9 @@ const RECOVERY: &str = "recovery.sc";
 const LEGACY_RECOVERY: [&str; 2] = ["recovery.solidcraft", "recovery.solvecraft"];
 const RECOVERY_META: &str = "recovery.json";
 
+/// A kept copy includes both the document and its unfinished Form revision.
+pub type KeptRevision = (u64, Option<solidcraft_engine::recovery::FormRevision>);
+
 /// What to do with a file brought in from the computer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Intent {
@@ -85,7 +88,7 @@ pub struct Files {
     /// This page's id: the copies it keeps are named after it (`keep::entry_id`).
     pub keep_page: RefCell<String>,
     /// Kept copies stored by this page, and the design revision each holds once its write ended.
-    pub kept: RefCell<std::collections::HashMap<String, Option<u64>>>,
+    pub kept: RefCell<std::collections::HashMap<String, Option<KeptRevision>>>,
     /// Kept copies being written or removed now (one browser call at a time per copy).
     pub keeping: RefCell<std::collections::HashSet<String>>,
     /// When (ms) the last write of a copy failed, to wait before trying again (`keep::may_write`).
@@ -502,26 +505,20 @@ pub fn free_name(name: &str) -> String {
     format!("{OPFS}{stem} ({}){ext}", js_sys::Date::now() as u64)
 }
 
-/// The same for a kept copy (#10220).
-pub fn prepare_kept(id: &str, original_path: Option<&str>) -> Result<String, String> {
-    prepare_copy(format!("{OPFS}{}", keep::design_file(id)), original_path)
+/// Restore a kept copy without dropping its unfinished editor or rewriting its bytes.
+pub fn recovered_kept(id: &str, original_path: Option<&str>) -> Result<solidcraft_engine::Session, String> {
+    recovered_copy(&format!("{OPFS}{}", keep::design_file(id)), original_path)
 }
 
-fn prepare_copy(path: String, original_path: Option<&str>) -> Result<String, String> {
-    let bytes = vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
-    let mut doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?;
-    solidcraft_engine::resolve_design_links(&mut doc, original_path);
-    let bytes = solidcraft_engine::io::write_design_container(&doc).map_err(|e| e.to_string())?;
-    vfs::insert(&path, bytes);
-    Ok(path)
+fn recovered_copy(path: &str, original_path: Option<&str>) -> Result<solidcraft_engine::Session, String> {
+    let bytes = vfs::read(path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
+    solidcraft_engine::recovery::restore_bytes(&bytes, original_path).map_err(|e| e.to_string())
 }
 
 /// Read the autosave without rewriting it. Its linked parts and editor source
 /// belong to the original location, including remembered disk designs.
 pub fn recovered_session(original_path: Option<&str>) -> Result<solidcraft_engine::Session, String> {
-    let path = format!("{OPFS}{RECOVERY}");
-    let bytes = vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
-    solidcraft_engine::recovery::restore_bytes(&bytes, original_path).map_err(|e| e.to_string())
+    recovered_copy(&format!("{OPFS}{RECOVERY}"), original_path)
 }
 
 /// Pick files on the computer: the File System Access picker where there is one, else an
@@ -788,7 +785,7 @@ pub fn kept_path(id: &str) -> String {
 
 /// Write the copy of a design with unsaved changes (`bytes`, described by `entry`) that holds
 /// its revision `revision`. Its metadata goes last, so a copy is never offered half written.
-pub fn write_kept(files: &Rc<Files>, entry: &keep::Entry, bytes: Vec<u8>, revision: u64) {
+pub fn write_kept(files: &Rc<Files>, entry: &keep::Entry, bytes: Vec<u8>, revision: KeptRevision) {
     let id = entry.id.clone();
     if !files.keeping.borrow_mut().insert(id.clone()) {
         return;

@@ -12,7 +12,10 @@ use solidcore_record::Vec3;
 
 use super::size::Turn;
 use spade::handles::FixedVertexHandle;
-use spade::{AngleLimit, ConstrainedDelaunayTriangulation, Point2, PositionInTriangulation, RefinementParameters, Triangulation};
+use spade::{
+    AngleLimit, ConstrainedDelaunayTriangulation, Intersection, LineIntersectionIterator, Point2, PositionInTriangulation, RefinementParameters,
+    Triangulation,
+};
 
 type Cdt = ConstrainedDelaunayTriangulation<Point2<f64>>;
 
@@ -158,6 +161,336 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
     }
     let extra = uv.split_off(boundary.len());
     Some((extra, tris))
+}
+
+/// A display-only subdivision of an existing bounded UV triangulation.
+pub(crate) struct Constrained {
+    /// Original nodes retain their indices; inserted nodes follow.
+    pub points: Vec<[f64; 2]>,
+    pub triangles: Vec<[u32; 3]>,
+    /// Final node chains, recovered from retained constraint provenance.
+    pub paths: Vec<Vec<u32>>,
+}
+/// Constrain every existing side and each display path. The caller certifies the
+/// full rectangular native trim and supplies canonical shared boundary nodes.
+/// This never decides or changes authored CAD topology.
+pub(crate) fn constrain_existing(points: &[[f64; 2]], triangles: &[[u32; 3]], paths: &[Vec<[f64; 2]>]) -> Option<Constrained> {
+    const MAX_INPUT: usize = 20_000;
+    const MAX_OUTPUT: usize = 100_000;
+    const MAX_WORK: usize = 20_000_000;
+    let total = paths.iter().try_fold(points.len(), |count, path| count.checked_add(path.len()))?;
+    if points.len() < 3 || total > MAX_INPUT || triangles.is_empty() || triangles.len() > MAX_INPUT * 2 {
+        return None;
+    }
+    let finite = |p: &[f64; 2]| p.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x));
+    if !points.iter().all(finite) || paths.iter().flatten().any(|p| !finite(p)) || paths.iter().any(|p| p.len() < 2) {
+        return None;
+    }
+    let area = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    let mut sign = 0.0_f64;
+    let mut original_area = 0.0;
+    let mut sides = std::collections::BTreeSet::new();
+    for &[a, b, c] in triangles {
+        let signed = area(*points.get(a as usize)?, *points.get(b as usize)?, *points.get(c as usize)?);
+        if signed == 0.0 {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = signed.signum();
+        }
+        if signed.signum() != sign {
+            return None;
+        }
+        original_area += signed.abs();
+        for [i, j] in [[a, b], [b, c], [c, a]] {
+            sides.insert([i.min(j), i.max(j)]);
+        }
+    }
+    if sign == 0.0 {
+        return None;
+    }
+    // Refuse a coordinate Spade would change. Retaining the original prefix while
+    // silently collapsing distinct tiny parameters would break node identity.
+    let to = |p: &[f64; 2]| {
+        let original = Point2::new(p[0], p[1]);
+        let normalized = spade::mitigate_underflow(original);
+        (original == normalized).then_some(original)
+    };
+    let mut cdt = Cdt::new();
+    let mut index: HashMap<FixedVertexHandle, u32> = HashMap::new();
+    let mut handles = Vec::with_capacity(points.len());
+    for (i, p) in points.iter().enumerate() {
+        let h = cdt.insert(to(p)?).ok()?;
+        if let Some(&previous) = index.get(&h)
+            && points.get(previous as usize)? != p
+        {
+            return None;
+        }
+        index.entry(h).or_insert(u32::try_from(i).ok()?);
+        handles.push(h);
+    }
+    let mut endpoints = Vec::with_capacity(paths.len());
+    for path in paths {
+        let mut line = Vec::with_capacity(path.len());
+        for p in path {
+            line.push(cdt.insert(to(p)?).ok()?);
+        }
+        endpoints.push(line);
+    }
+    let duplicates = points.len().checked_sub(index.len())?;
+    let mut work = 0usize;
+    for [a, b] in sides {
+        let (a, b) = (*handles.get(a as usize)?, *handles.get(b as usize)?);
+        if a == b || cdt.exists_constraint(a, b) {
+            continue;
+        }
+        let remaining = MAX_WORK.checked_sub(work)?;
+        let count = LineIntersectionIterator::new_from_handles(&cdt, a, b).take(remaining.checked_add(1)?).count();
+        work = work.checked_add(count)?;
+        if work > MAX_WORK || !cdt.can_add_constraint(a, b) {
+            return None;
+        }
+        cdt.add_constraint(a, b);
+    }
+    const MAX_MEMBERS: usize = 400_000;
+    let ordered = |a: FixedVertexHandle, b: FixedVertexHandle| if a.index() < b.index() { [a, b] } else { [b, a] };
+    let mut members: HashMap<[FixedVertexHandle; 2], std::collections::BTreeSet<usize>> = HashMap::new();
+    let mut membership_count = 0usize;
+    let mut segments = Vec::new();
+    let mut logical_segments = Vec::with_capacity(endpoints.len());
+    for line in &endpoints {
+        let mut logical = Vec::new();
+        for pair in line.windows(2) {
+            let (start, end) = (*pair.first()?, *pair.get(1)?);
+            if start == end {
+                return None;
+            }
+            let id = segments.len();
+            let mut at = start;
+            let mut last_stationary_crossing = None;
+            while at != end {
+                let mut crossing = None;
+                for hit in LineIntersectionIterator::new_from_handles(&cdt, at, end) {
+                    work = work.checked_add(1)?;
+                    if work > MAX_WORK {
+                        return None;
+                    }
+                    if let Intersection::EdgeIntersection(edge) = hit
+                        && edge.is_constraint_edge()
+                    {
+                        crossing = Some(edge.vertices().map(|vertex| vertex.fix()));
+                        break;
+                    }
+                }
+                let next = if let Some([x, y]) = crossing {
+                    let (a, b, p, q) = (cdt.vertex(at).position(), cdt.vertex(end).position(), cdt.vertex(x).position(), cdt.vertex(y).position());
+                    let (dx, dy, ex, ey) = (b.x - a.x, b.y - a.y, q.x - p.x, q.y - p.y);
+                    let determinant = dx * ey - dy * ex;
+                    if determinant.abs() <= 64.0 * f64::EPSILON * ((dx * ey).abs() + (dy * ex).abs()) {
+                        return None;
+                    }
+                    let fraction = ((p.x - a.x) * ey - (p.y - a.y) * ex) / determinant;
+                    let point = Point2::new(a.x + fraction * dx, a.y + fraction * dy);
+                    if !finite(&[point.x, point.y]) || to(&[point.x, point.y])? != point {
+                        return None;
+                    }
+                    let edge = cdt.get_edge_from_neighbors(x, y)?;
+                    let edge_id = edge.fix().as_undirected();
+                    let acceptable = match cdt.locate(point) {
+                        PositionInTriangulation::OnEdge(found) => found.as_undirected() == edge_id,
+                        PositionInTriangulation::OnFace(found) => {
+                            edge.face().as_inner().is_some_and(|face| face.fix() == found)
+                                || edge.rev().face().as_inner().is_some_and(|face| face.fix() == found)
+                        }
+                        PositionInTriangulation::OnVertex(found) => {
+                            found == x
+                                || found == y
+                                || (found == end || found == at)
+                                    && (edge.opposite_vertex().is_some_and(|vertex| vertex.fix() == found)
+                                        || edge.rev().opposite_vertex().is_some_and(|vertex| vertex.fix() == found))
+                        }
+                        _ => false,
+                    };
+                    if !acceptable || cdt.num_vertices().checked_add(duplicates)?.checked_add(1)? > MAX_OUTPUT {
+                        return None;
+                    }
+                    let old = ordered(x, y);
+                    let previous = members.remove(&old).unwrap_or_default();
+                    // Two child memberships replace one: enforce the final total
+                    // before insertion or any per-owner graph allocation.
+                    membership_count = membership_count.checked_add(previous.len())?;
+                    if membership_count > MAX_MEMBERS {
+                        return None;
+                    }
+                    let middle = cdt.insert(point).ok()?;
+                    if middle != x && middle != y {
+                        if let Some(edge) = cdt.get_edge_from_neighbors(x, y)
+                            && edge.is_constraint_edge()
+                        {
+                            cdt.remove_constraint_edge(edge.fix().as_undirected());
+                        }
+                        for [a, b] in [[x, middle], [middle, y]] {
+                            let remaining = MAX_WORK.checked_sub(work)?;
+                            let steps = LineIntersectionIterator::new_from_handles(&cdt, a, b).take(remaining.checked_add(1)?).count();
+                            work = work.checked_add(steps)?;
+                            if work > MAX_WORK || cdt.try_add_constraint(a, b).is_empty() {
+                                return None;
+                            }
+                            members.entry(ordered(a, b)).or_default().extend(previous.iter().copied());
+                        }
+                    } else {
+                        // The arithmetic intersection was exactly an existing
+                        // endpoint. Keep the original constraint and its labels.
+                        membership_count = membership_count.checked_sub(previous.len())?;
+                        members.entry(old).or_default().extend(previous);
+                    }
+                    middle
+                } else {
+                    end
+                };
+                if next == at {
+                    // A computed intersection can round exactly to this guide
+                    // endpoint. The known crossed edge was rerouted through that
+                    // SAME vertex; no point was moved or selected by proximity.
+                    let old = crossing.map(|[x, y]| ordered(x, y))?;
+                    if last_stationary_crossing == Some(old) || cdt.exists_constraint(old[0], old[1]) {
+                        return None;
+                    }
+                    last_stationary_crossing = Some(old);
+                    continue;
+                }
+                let remaining = MAX_WORK.checked_sub(work)?;
+                let steps = LineIntersectionIterator::new_from_handles(&cdt, at, next).take(remaining.checked_add(1)?).count();
+                work = work.checked_add(steps)?;
+                if work > MAX_WORK {
+                    return None;
+                }
+                let added = cdt.try_add_constraint(at, next);
+                if added.is_empty() {
+                    return None;
+                }
+                if membership_count.checked_add(added.len())? > MAX_MEMBERS {
+                    return None;
+                }
+                let mut here = at;
+                for edge in added {
+                    let edge = cdt.directed_edge(edge);
+                    if !edge.is_constraint_edge() || edge.from().fix() != here {
+                        return None;
+                    }
+                    let to = edge.to().fix();
+                    if members.entry(ordered(here, to)).or_default().insert(id) {
+                        membership_count = membership_count.checked_add(1)?;
+                    }
+                    here = to;
+                }
+                if here != next {
+                    return None;
+                }
+                at = next;
+            }
+            segments.push([start, end]);
+            logical.push(id);
+        }
+        logical_segments.push(logical);
+    }
+    let mut out = points.to_vec();
+    out.try_reserve(cdt.num_vertices()).ok()?;
+    for vertex in cdt.vertices() {
+        if let std::collections::hash_map::Entry::Vacant(entry) = index.entry(vertex.fix()) {
+            let p = vertex.position();
+            if out.len() >= MAX_OUTPUT || !finite(&[p.x, p.y]) {
+                return None;
+            }
+            entry.insert(u32::try_from(out.len()).ok()?);
+            out.push([p.x, p.y]);
+        }
+    }
+    let mut refined = Vec::new();
+    let triangle_limit = MAX_OUTPUT.checked_mul(2)?;
+    if cdt.num_inner_faces() > triangle_limit {
+        return None;
+    }
+    refined.try_reserve(cdt.num_inner_faces()).ok()?;
+    let mut new_area = 0.0;
+    for face in cdt.inner_faces() {
+        let vertices = face.vertices();
+        let mut triangle = [0; 3];
+        for (target, vertex) in triangle.iter_mut().zip(vertices) {
+            *target = *index.get(&vertex.fix())?;
+        }
+        let signed = area(*out.get(triangle[0] as usize)?, *out.get(triangle[1] as usize)?, *out.get(triangle[2] as usize)?);
+        if signed <= 0.0 {
+            return None;
+        }
+        new_area += signed;
+        if sign < 0.0 {
+            triangle.swap(1, 2);
+        }
+        refined.push(triangle);
+    }
+    // This scalar is an additional check, not a general topology certificate:
+    // the caller certifies a full rectangle and all original sides stay kept.
+    let roundoff = 2048.0 * f64::EPSILON * (triangles.len() + refined.len()) as f64;
+    if (new_area - original_area).abs() > roundoff {
+        return None;
+    }
+    let mut graphs: Vec<HashMap<FixedVertexHandle, Vec<FixedVertexHandle>>> = vec![HashMap::new(); segments.len()];
+    for ([a, b], owners) in members {
+        if !cdt.exists_constraint(a, b) {
+            return None;
+        }
+        work = work.checked_add(owners.len())?;
+        if work > MAX_WORK {
+            return None;
+        }
+        for owner in owners {
+            let graph = graphs.get_mut(owner)?;
+            graph.entry(a).or_default().push(b);
+            graph.entry(b).or_default().push(a);
+        }
+    }
+    let mut final_paths = Vec::with_capacity(endpoints.len());
+    let mut path_nodes = 0usize;
+    for logical in logical_segments {
+        let mut path = Vec::new();
+        for segment in logical {
+            let &[start, end] = segments.get(segment)?;
+            let graph = graphs.get(segment)?;
+            let mut previous = None;
+            let mut at = start;
+            let mut visited = std::collections::HashSet::new();
+            loop {
+                if !visited.insert(at) {
+                    return None;
+                }
+                let id = *index.get(&at)?;
+                if path.last().copied() != Some(id) {
+                    path_nodes = path_nodes.checked_add(1)?;
+                    if path_nodes > MAX_OUTPUT.checked_mul(4)? {
+                        return None;
+                    }
+                    path.push(id);
+                }
+                if at == end {
+                    if graph.get(&at)?.len() != 1 || visited.len() != graph.len() {
+                        return None;
+                    }
+                    break;
+                }
+                let neighbors = graph.get(&at)?;
+                let mut next = neighbors.iter().copied().filter(|&h| Some(h) != previous);
+                let only = next.next()?;
+                if next.next().is_some() {
+                    return None;
+                }
+                previous = Some(at);
+                at = only;
+            }
+        }
+        final_paths.push(path);
+    }
+    Some(Constrained { points: out, triangles: refined, paths: final_paths })
 }
 
 /// The band between a face's boundary `loops` (ranges of the first `n` points of `points`) and
@@ -575,5 +908,95 @@ mod tests {
         let Some((extra, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false }) else { panic!("meshes") };
         assert!(extra.is_empty());
         assert_eq!(tris.len(), 2);
+    }
+    #[test]
+    fn display_constraints_recover_final_crossings_without_changing_uv_coverage() {
+        let points = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let paths = vec![vec![[0.0, 0.25], [1.0, 0.25]], vec![[0.5, 0.0], [0.5, 1.0]], vec![[0.0, 0.75], [1.0, 0.75]]];
+        for clockwise in [false, true] {
+            let mut original = [[0, 1, 2], [0, 2, 3]];
+            if clockwise {
+                for triangle in &mut original {
+                    triangle.swap(1, 2);
+                }
+            }
+            let result = constrain_existing(&points, &original, &paths).unwrap();
+            assert_eq!(&result.points[..points.len()], &points);
+            let edges: std::collections::BTreeSet<_> =
+                result.triangles.iter().flat_map(|&[a, b, c]| [[a.min(b), a.max(b)], [b.min(c), b.max(c)], [a.min(c), a.max(c)]]).collect();
+            let mut sum = 0.0;
+            for &[a, b, c] in &result.triangles {
+                let [a, b, c] = [a, b, c].map(|id| result.points[id as usize]);
+                let signed = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+                assert!(if clockwise { signed < 0.0 } else { signed > 0.0 });
+                sum += signed.abs();
+            }
+            assert!((sum - 2.0).abs() < 1e-12);
+            for (input, path) in paths.iter().zip(&result.paths) {
+                assert_eq!(result.points[*path.first().unwrap() as usize], input[0]);
+                assert_eq!(result.points[*path.last().unwrap() as usize], input[1]);
+                for pair in path.windows(2) {
+                    assert!(edges.contains(&[pair[0].min(pair[1]), pair[0].max(pair[1])]), "every guide segment must be an actual skin side");
+                }
+            }
+            let vertical: Vec<_> = result.paths[1].iter().map(|&id| result.points[id as usize]).collect();
+            assert!(vertical.contains(&[0.5, 0.25]));
+            assert!(vertical.contains(&[0.5, 0.5]));
+            assert!(vertical.contains(&[0.5, 0.75]), "later constraints must subdivide an earlier guide's final chain");
+        }
+        let mut hostile = points;
+        hostile[0][0] = f64::NAN;
+        assert!(constrain_existing(&hostile, &[[0, 1, 2]], &paths).is_none());
+        assert!(constrain_existing(&points, &[[0, 1, 99]], &paths).is_none());
+        assert!(constrain_existing(&points, &[[0, 1, 2], [0, 2, 3]], &[vec![[0.5, 0.5], [0.5, 0.5]]]).is_none());
+        let tiny = [[0.0, 0.0], [1e-100, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        assert!(constrain_existing(&tiny, &[[0, 1, 2], [0, 2, 3]], &paths).is_none(), "normalizing distinct original nodes is unsupported");
+        let close = vec![vec![[0.0, 0.5], [1.0, 0.5]], vec![[0.0, 0.5 + 1e-12], [1.0, 0.5 + 1e-12]]];
+        let separate = constrain_existing(&points, &[[0, 1, 2], [0, 2, 3]], &close).unwrap();
+        for (input, path) in close.iter().zip(&separate.paths) {
+            for &id in path {
+                assert!((separate.points[id as usize][1] - input[0][1]).abs() < 8.0 * f64::EPSILON);
+            }
+        }
+        assert!(separate.paths[0].iter().all(|id| !separate.paths[1].contains(id)), "nearby long constraints keep distinct identities");
+    }
+
+    #[test]
+    fn display_constraints_keep_a_normal_sixteen_cell_guide_grid_with_bounded_work() {
+        let cells = 20usize;
+        let mut uv = Vec::new();
+        let mut triangles = Vec::new();
+        for y in 0..=cells {
+            for x in 0..=cells {
+                uv.push([x as f64 / cells as f64, y as f64 / cells as f64]);
+                if x < cells && y < cells {
+                    let a = (y * (cells + 1) + x) as u32;
+                    let b = a + 1;
+                    let c = a + (cells + 1) as u32;
+                    triangles.extend([[a, b, c + 1], [a, c + 1, c]]);
+                }
+            }
+        }
+        let guides = 16usize;
+        let mut paths = Vec::new();
+        for y in 0..=guides {
+            for x in 0..=guides {
+                if x < guides {
+                    paths.push((0..=24).map(|i| [(x as f64 + i as f64 / 24.0) / guides as f64, y as f64 / guides as f64]).collect());
+                }
+                if y < guides {
+                    paths.push((0..=24).map(|i| [x as f64 / guides as f64, (y as f64 + i as f64 / 24.0) / guides as f64]).collect());
+                }
+            }
+        }
+        let refined = constrain_existing(&uv, &triangles, &paths).unwrap();
+        assert_eq!(refined.paths.len(), 544);
+        let sides: std::collections::BTreeSet<_> =
+            refined.triangles.iter().flat_map(|&[a, b, c]| [[a.min(b), a.max(b)], [b.min(c), b.max(c)], [a.min(c), a.max(c)]]).collect();
+        for path in refined.paths {
+            for pair in path.windows(2) {
+                assert!(sides.contains(&[pair[0].min(pair[1]), pair[0].max(pair[1])]));
+            }
+        }
     }
 }

@@ -924,6 +924,36 @@ fn a_loop_corner_within_its_tolerance_of_a_pole_is_a_pole() {
     assert!(e.to_string().contains("winds around the surface"), "{e}");
 }
 
+#[test]
+fn guided_display_refuses_unqualified_chart_routes_without_changing_the_ordinary_plan_or_record() {
+    let body = ok(crate::box_solid(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0))).keeping_meshes();
+    let tolerance = crate::MeshTolerance::chord(0.01);
+    let before = ok(body.mesh_plan(&tolerance));
+    let record = serde_json::to_value(body.record()).unwrap();
+    let guides = [crate::DisplayGuide {
+        face: 0,
+        points: vec![crate::DisplayGuidePoint::Surface([0.25, 0.25]), crate::DisplayGuidePoint::Surface([0.75, 0.75])],
+    }];
+    let error = match body.mesh_with_guides(&tolerance, &guides) {
+        Ok(_) => panic!("analytic planes are outside this certified spline-quilt route"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires spline charts"), "{error}");
+    assert_eq!(ok(body.mesh_plan(&tolerance)), before);
+    assert_eq!(serde_json::to_value(body.record()).unwrap(), record);
+
+    // A genuine existing spline fixture whose trim winds around a periodic
+    // parameter direction must not be accepted from its UV bounding box.
+    let spline = pyramid_past_a_near_pole(1e-6);
+    let before = serde_json::to_value(&spline).unwrap();
+    let error = match guided::mesh(&spline, 0.01, None, &guides) {
+        Ok(_) => panic!("periodic/partial trims need their own certified route"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires bounded nonperiodic charts"), "{error}");
+    assert_eq!(serde_json::to_value(&spline).unwrap(), before);
+}
+
 /// A whole sphere as one face (its seam the only edge) in a body many times its size: at the
 /// body's chord the seam gets two segments, pole to equator to pole, and every node off the poles
 /// follows a pole. The loop used to start at a pole and close across the other, which unwrapped

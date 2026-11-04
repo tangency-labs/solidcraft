@@ -175,6 +175,20 @@ pub struct FinishOptions {
 pub struct Edit {
     pub feature: u64,
 }
+#[derive(Serialize, JsonSchema)]
+pub struct RepairReply {
+    pub feature: u64,
+    pub error: String,
+    pub form: serde_json::Value,
+}
+/// An explicit logical chart correspondence, never inferred during repair.
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SurfaceMapping {
+    pub swap: bool,
+    pub reverse_u: bool,
+    pub reverse_v: bool,
+}
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Topology {
@@ -227,6 +241,8 @@ pub struct ToolPreview {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Surface {
+    /// Required only for retained-source repair; preserves the existing guide counts and sculpt offsets.
+    pub reattach: Option<SurfaceMapping>,
     pub partition: Option<bool>,
     pub body: String,
     pub face: usize,

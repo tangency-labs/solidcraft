@@ -67,7 +67,14 @@ struct Drag {
     extrude: bool,
     toggle: Option<Element>,
 }
+struct RepairEntry {
+    feature: u64,
+    done: std::sync::mpsc::Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
+}
+
 pub struct State {
+    repair_offer: Option<(u64, String)>,
+    repair_entry: Option<RepairEntry>,
     combination: combine_preview::State,
     show_combination: bool,
     context: context::State,
@@ -107,6 +114,8 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            repair_offer: None,
+            repair_entry: None,
             combination: Default::default(),
             show_combination: true,
             context: Default::default(),
@@ -159,6 +168,11 @@ pub(crate) fn enter(app: &mut SolveApp, id: u64) {
     }
     if run(app, "form.edit", json!({"feature":id})) {
         opened(app);
+    } else if app.session.forms_prototype.is_none()
+        && app.session.doc.feature(id).is_some_and(|feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Form {definition,..} if definition.matching.is_some() || definition.profile.is_some()))
+        && let Some((error, _, true)) = &app.status
+    {
+        app.forms_prototype.repair_offer = Some((id, error.clone()));
     }
 }
 pub(crate) fn start_source(app: &mut SolveApp, pipe: bool) {
@@ -223,7 +237,7 @@ pub fn inspect(app: &SolveApp) -> serde_json::Value {
             Element::Surface => json!({"kind":"surface"}),
         })
         .collect();
-    json!({"active":app.session.forms_prototype.is_some(),"selected":app.forms_prototype.selected,"elements":elements,
+    json!({"active":app.session.forms_prototype.is_some(),"repair_offer":app.forms_prototype.repair_offer,"repair_pending":app.forms_prototype.repair_entry.is_some(),"selected":app.forms_prototype.selected,"elements":elements,
         "edges":edges,"extrusion":extrusion::inspect(app),
         "display":live_cad::inspect(app),"source_curves":curves::inspect(app),"context":context::inspect(app),"tool":tool_panel::inspect(app),
         "combination":{"ready":combine_preview::ready(app).is_some(),"busy":combine_preview::busy(app),
@@ -253,7 +267,7 @@ pub(crate) fn command_completed(app: &mut SolveApp, id: &str) {
     if id == "browser.visibility" {
         app.forms_prototype.context = Default::default();
     }
-    if matches!(id, "form.prototype.undo" | "form.prototype.redo") {
+    if matches!(id, "form.prototype.parameters" | "form.prototype.undo" | "form.prototype.redo") {
         controls::sync(app);
         panel::sync(app);
     }
@@ -297,9 +311,101 @@ pub(crate) fn fit(app: &mut SolveApp) {
 pub(crate) fn leave_document(app: &mut SolveApp) {
     extrusion::suspend(app);
 }
+pub(crate) fn resume_document(app: &mut SolveApp) {
+    // GPU callbacks consume these upload slots. Another tab replaces the shared
+    // renderer's batches, even though this tab's authored Form has not changed.
+    app.forms_prototype.uploaded = 0;
+    for slot in &app.forms_prototype.overlay_slots {
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(GpuScene::default());
+    }
+}
 pub(crate) fn background_tick(app: &mut SolveApp, ctx: &egui::Context) {
+    repair_entry_tick(app);
     interchange::tick(app, ctx);
     extrusion::tick(app, ctx);
+}
+
+pub(crate) fn repair_prompt(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some((feature, error)) = app.forms_prototype.repair_offer.clone() else { return };
+    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new("forms_repair_offer"), "edit", app.tr("forms.repair.title"))
+        .actions(app.tr("forms.repair.open"), app.tr("forms.prototype.cancel"), None)
+        .show(ctx, app.forms_prototype.repair_entry.is_none(), |ui| {
+            ui.add(egui::Label::new(app.tr("forms.repair.offer")).wrap());
+            if app.forms_prototype.repair_entry.is_some() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(app.tr("forms.prototype.previewing"));
+                });
+            }
+            ui.add(egui::Label::new(egui::RichText::new(&error).color(Tokens::get().error)).wrap());
+        });
+    if action == crate::ui_kit::Action::Ok {
+        start_repair_entry(app, ctx, feature);
+    } else if closed || action == crate::ui_kit::Action::Cancel {
+        app.forms_prototype.repair_entry = None;
+        app.forms_prototype.repair_offer = None;
+    }
+}
+fn start_repair_entry(app: &mut SolveApp, ctx: &egui::Context, feature: u64) {
+    if app.forms_prototype.repair_entry.is_some() {
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let copy = app.session.scratch();
+        let wake = ctx.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        match std::thread::Builder::new().name("form-support-repair".into()).spawn(move || {
+            let result = copy.compute_commands(&[("form.repair".into(), json!({"feature":feature}))], None).map_err(|e| e.to_string());
+            let _ = tx.send(result);
+            wake.request_repaint();
+        }) {
+            Ok(_) => app.forms_prototype.repair_entry = Some(RepairEntry { feature, done: rx }),
+            Err(error) => repair_entry_error(app, feature, error.to_string()),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ctx;
+        if run(app, "form.repair", json!({"feature":feature})) {
+            opened(app);
+        } else if let Some((error, _, true)) = app.status.clone() {
+            repair_entry_error(app, feature, error);
+        }
+    }
+}
+fn repair_entry_tick(app: &mut SolveApp) {
+    let Some(pending) = app.forms_prototype.repair_entry.as_ref() else { return };
+    if !app.forms_prototype.repair_offer.as_ref().is_some_and(|(feature, _)| *feature == pending.feature) {
+        app.forms_prototype.repair_entry = None;
+        return;
+    }
+    let feature = pending.feature;
+    let result = match pending.done.try_recv() {
+        Ok(result) => result,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        Err(_) => Err(app.tr("forms.prototype.preview_stopped").to_owned()),
+    };
+    app.forms_prototype.repair_entry = None;
+    // ComputedCommands also checks exact document/draft/authoring context.
+    // A changed source or newly opened draft must take precedence over this job.
+    match result.and_then(|prepared| app.session.accept_commands(prepared).map_err(|e| e.to_string())) {
+        Ok(replies) => {
+            for (id, reply) in replies {
+                let _ = app.command_completed(&id, Ok(reply));
+            }
+            app.status = None;
+        }
+        Err(error) => repair_entry_error(app, feature, error),
+    }
+}
+fn repair_entry_error(app: &mut SolveApp, feature: u64, error: String) {
+    if let Some((offered, visible)) = app.forms_prototype.repair_offer.as_mut()
+        && *offered == feature
+    {
+        *visible = error.clone();
+    }
+    app.set_status(error, true);
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -311,16 +417,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     tool_panel::tick(app);
     live_cad::tick(app, ui.ctx());
-    curves::tick(app, ui.ctx());
-    combine_preview::tick(app, ui.ctx());
+    if !app.session.forms_prototype.as_ref().is_some_and(|f| f.repair.is_some()) {
+        curves::tick(app, ui.ctx());
+        combine_preview::tick(app, ui.ctx());
+    }
     context::tick(app, ui.ctx());
     panel::show(app, ui);
+    live_cad::restore_fixed_profile_handles(app);
     if app.session.forms_prototype.is_none() {
         return;
     }
-    let busy = app.forms_prototype.pending.is_some() || app.forms_prototype.interchange.is_some() || extrusion::released(app);
+    let busy = app.forms_prototype.pending.is_some()
+        || app.forms_prototype.interchange.is_some()
+        || extrusion::released(app)
+        || app.session.forms_prototype.as_ref().is_some_and(|f| f.repair.is_some());
     let token = Tokens::get();
     let rect = ui.available_rect_before_wrap();
+    // Keep all viewport painting, including tool previews and the CPU renderer,
+    // inside the space left by the panel without changing the panel's own clip.
+    let mut viewport_ui = ui.new_child(egui::UiBuilder::new().id_salt("forms_viewport").max_rect(rect));
+    viewport_ui.set_clip_rect(ui.clip_rect().intersect(rect));
+    let ui = &mut viewport_ui;
     app.viewport.rect = Some(rect);
     crate::viewport::refresh_layout(app, ui.ctx());
     let before = crate::viewport::projection(app, rect);
@@ -334,8 +451,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && ui
             .input(|i| i.pointer.hover_pos())
             .is_some_and(|p| triad(app).is_some_and(|t| crate::gizmo::contains_oriented(&before, &t, p, basis(app))));
-    let painter =
-        ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground, ui.id().with("forms_transform"))).with_clip_rect(rect);
+    let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(egui::Order::Foreground, ui.id().with("forms_transform")));
     let dragging_gizmo = if busy || tool_active {
         false
     } else if geometry_first && app.forms_prototype.gizmo_drag.is_none() {
@@ -405,6 +521,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         app.forms_prototype.setting_pivot = false;
     }
+    live_cad::restore_fixed_profile_handles(app);
     ui.painter().rect_filled(rect, 0.0, token.viewport_top);
     let hover_blocked = busy || tool_active || gizmo_hot || dragging_gizmo || app.forms_prototype.drag.is_some() || extrusion::active(app);
     app.forms_prototype.hover = input.hover.filter(|_| input.inside && !hover_blocked).and_then(|p| surface::nearest(app, &proj, p));
@@ -420,7 +537,9 @@ fn select_all(app: &mut SolveApp) {
     app.forms_prototype.pivot = None;
     if let Some(form) = &app.session.forms_prototype {
         app.forms_prototype.elements = match app.forms_prototype.pick {
-            Pick::Vertex => form.logical.faces.iter().flatten().copied().map(Element::Vertex).collect(),
+            Pick::Vertex => {
+                form.logical.faces.iter().flatten().copied().filter(|&id| live_cad::handle_available(app, id)).map(Element::Vertex).collect()
+            }
             Pick::Edge => form.surface.boundaries.iter().map(|(e, _)| Element::Edge(*e)).collect(),
             Pick::Face | Pick::All if form.profile.is_some() => [Element::Surface].into_iter().collect(),
             Pick::Face | Pick::All => form.logical.faces.iter().enumerate().filter(|(_, f)| !f.is_empty()).map(|(i, _)| Element::Face(i)).collect(),
@@ -553,6 +672,9 @@ fn selection_normal(form: &solidcraft_engine::forms_prototype::Form, ids: &[usiz
     ids.iter().filter_map(|&id| form.surface.mesh.normals.get(id)).copied().fold(Vec3::ZERO, |a, b| a + b).normalized()
 }
 fn triad(app: &SolveApp) -> Option<crate::gizmo::Triad> {
+    if app.forms_prototype.selected.iter().any(|&id| !live_cad::handle_available(app, id)) {
+        return None;
+    }
     let form = app.session.forms_prototype.as_ref()?;
     let points: Vec<_> = app.forms_prototype.selected.iter().filter_map(|&i| form.surface.vertices.get(i).copied()).collect();
     if points.is_empty() {
@@ -884,6 +1006,7 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         pv_key: empty_key,
         pv_slot: preview,
         pv_hide: false,
+        preview_bounds: None,
         view_proj: proj.vp.to_f32(),
         back: app.cam.back().to_f32(),
         size_px: [rect.width() * ppp, rect.height() * ppp],
@@ -929,6 +1052,311 @@ fn fallback(ui: &egui::Ui, proj: &Proj, mesh: &Mesh) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_saved_surface_edit_offers_explicit_retained_repair_and_blocks_finish() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session.execute("solid.box", &json!({"length":4,"width":6,"height":1,"body_name":"Support","operation":"new"})).unwrap();
+        let body = h.app.session.model.state().body("Support").unwrap().body.clone();
+        let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        h.app.session.execute("form.surface", &json!({"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":false})).unwrap();
+        let feature = h.app.session.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+        let solidcraft_engine::doc::FeatureKind::Form { definition, .. } = &mut h.app.session.doc_mut().feature_mut(feature).unwrap().kind else {
+            panic!("Form")
+        };
+        let solidcraft_engine::doc::forms::SupportRef::Face { body, .. } = &mut definition.profile.as_mut().unwrap().source else { panic!("face") };
+        *body = "Missing support".into();
+        h.app.session.refresh();
+        let document = serde_json::to_value(h.app.session.doc.as_ref()).unwrap();
+        // Programmatic strict Edit refuses and never opens a prompt.
+        assert!(h.app.run("form.edit", json!({"feature":feature})).is_err());
+        assert!(h.app.forms_prototype.repair_offer.is_none());
+        enter(&mut h.app, feature);
+        assert!(h.app.session.forms_prototype.is_none());
+        assert!(h.app.forms_prototype.repair_offer.is_some());
+        h.frames(3);
+        assert!(h.ctx.memory(|memory| memory.top_modal_layer().is_some()), "retained entry uses the standard input-blocking modal");
+        crate::test_support::click(&mut h, "dialog:ok");
+        if let Some(pending) = h.app.forms_prototype.repair_entry.take() {
+            let result = pending.done.recv().unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(result).unwrap();
+            h.app.forms_prototype.repair_entry = Some(RepairEntry { feature: pending.feature, done: rx });
+            h.frames(3);
+        }
+        assert!(h.app.forms_prototype.repair_offer.is_none());
+        let retained = h.app.session.forms_prototype.as_ref().unwrap().definition();
+        assert!(h.app.session.forms_prototype.as_ref().unwrap().repair.is_some());
+        crate::test_support::click(&mut h, "forms_finish");
+        assert!(h.app.session.forms_prototype.as_ref().unwrap().repair.is_some());
+        assert_eq!(serde_json::to_value(h.app.session.doc.as_ref()).unwrap(), document);
+        crate::test_support::click(&mut h, "forms_repair_reattach");
+        h.frames(3);
+        assert_eq!(tool_panel::inspect(&h.app)["desired"], serde_json::Value::Null, "an explicit mapping is required before preview");
+        crate::test_support::click(&mut h, "forms_tool_cancel");
+        assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().definition(), retained);
+        assert!(h.app.session.forms_prototype.as_ref().unwrap().repair.is_some());
+        crate::test_support::click(&mut h, "forms_cancel");
+        assert!(h.app.session.forms_prototype.is_none());
+        assert_eq!(serde_json::to_value(h.app.session.doc.as_ref()).unwrap(), document);
+    }
+    #[test]
+    fn retained_entry_worker_discards_cancelled_or_changed_document_and_draft_results() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.session.execute("solid.box", &json!({"length":4,"width":6,"height":1,"body_name":"Support","operation":"new"})).unwrap();
+        let body = app.session.model.state().body("Support").unwrap().body.clone();
+        let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        app.session.execute("form.surface", &json!({"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":false})).unwrap();
+        let feature = app.session.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+        let solidcraft_engine::doc::FeatureKind::Form { definition, .. } = &mut app.session.doc_mut().feature_mut(feature).unwrap().kind else {
+            panic!("Form")
+        };
+        let solidcraft_engine::doc::forms::SupportRef::Face { body, .. } = &mut definition.profile.as_mut().unwrap().source else { panic!("face") };
+        *body = "Missing support".into();
+        app.session.refresh();
+        let commands = [("form.repair".into(), json!({"feature":feature}))];
+        let inject = |app: &mut SolveApp, result| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(result).unwrap();
+            app.forms_prototype.repair_offer = Some((feature, "missing support".into()));
+            app.forms_prototype.repair_entry = Some(RepairEntry { feature, done: rx });
+        };
+        let before = serde_json::to_value(app.session.doc.as_ref()).unwrap();
+        let cancelled = app.session.scratch().compute_commands(&commands, None).unwrap();
+        inject(&mut app, Ok(cancelled));
+        app.forms_prototype.repair_offer = None;
+        repair_entry_tick(&mut app);
+        assert!(app.session.forms_prototype.is_none());
+        assert!(app.forms_prototype.repair_entry.is_none());
+        assert_eq!(serde_json::to_value(app.session.doc.as_ref()).unwrap(), before);
+        let stale = app.session.scratch().compute_commands(&commands, None).unwrap();
+        inject(&mut app, Ok(stale));
+        app.session.doc_mut().feature_mut(feature).unwrap().name.push_str(" changed");
+        app.session.refresh();
+        let changed = serde_json::to_value(app.session.doc.as_ref()).unwrap();
+        repair_entry_tick(&mut app);
+        assert!(app.session.forms_prototype.is_none());
+        assert_eq!(serde_json::to_value(app.session.doc.as_ref()).unwrap(), changed);
+        let stale_draft = app.session.scratch().compute_commands(&commands, None).unwrap();
+        inject(&mut app, Ok(stale_draft));
+        app.session.execute("form.prototype.create", &json!({"primitive":"face","size":8,"segments":[2,2,1]})).unwrap();
+        let draft = app.session.forms_prototype.as_ref().unwrap().definition();
+        repair_entry_tick(&mut app);
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), draft);
+        assert_eq!(serde_json::to_value(app.session.doc.as_ref()).unwrap(), changed);
+        app.session.execute("form.prototype.close", &json!({})).unwrap();
+        let failed = app.session.scratch().compute_commands(&[("form.repair".into(), json!({"feature":u64::MAX}))], None).map_err(|e| e.to_string());
+        let failure = failed.as_ref().err().unwrap().clone();
+        inject(&mut app, failed);
+        repair_entry_tick(&mut app);
+        assert_eq!(app.forms_prototype.repair_offer.as_ref().unwrap().1, failure, "the modal must show the actual failed opening reason");
+        assert!(app.session.forms_prototype.is_none());
+        assert_eq!(serde_json::to_value(app.session.doc.as_ref()).unwrap(), changed);
+        let current = app.session.scratch().compute_commands(&commands, None).unwrap();
+        inject(&mut app, Ok(current));
+        repair_entry_tick(&mut app);
+        assert!(app.session.forms_prototype.as_ref().unwrap().repair.is_some());
+        assert!(app.forms_prototype.repair_offer.is_none());
+        assert!(app.forms_prototype.repair_entry.is_none());
+        assert_eq!(serde_json::to_value(app.session.doc.as_ref()).unwrap(), changed);
+    }
+    #[test]
+    fn returning_to_a_form_tab_rearms_consumed_gpu_model_and_overlay_uploads() {
+        for other_form in [false, true] {
+            let mut app = SolveApp::new(Default::default(), Default::default());
+            app.home.open = false;
+            app.session.execute("form.prototype.create", &json!({"size":4,"segments":[2,2,2],"levels":1})).unwrap();
+            let p = app.session.forms_prototype.as_ref().unwrap().cage.points[0] + Vec3::new(0.2, 0.0, 0.0);
+            app.session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[p.x,p.y,p.z]]})).unwrap();
+            app.forms_prototype.elements.insert(Element::Face(0));
+            selection::sync(&mut app);
+            app.forms_prototype.pivot = Some(Vec3::new(2.0, 3.0, 4.0));
+            app.forms_prototype.scale = true;
+            app.viewport.gpu = Some(crate::gpu::GpuTarget {
+                format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+                depth: Some(egui_wgpu::wgpu::TextureFormat::Depth32Float),
+                samples: 1,
+                tess: false,
+                oit: false,
+            });
+            let ctx = egui::Context::default();
+            let draw = |app: &mut SolveApp| {
+                let rect = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0));
+                let projection = crate::viewport::projection(app, rect);
+                let _ = crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+                    render(app, ui, &projection);
+                });
+                viewport_frame(app, &projection, 1.0, app.forms_prototype.uploaded)
+            };
+            let original = app.session.forms_prototype.as_ref().unwrap().inspect();
+            let selection = app.forms_prototype.selected.clone();
+            let first = draw(&mut app);
+            // Match Renderer::prepare/Batches::take: the shared GPU renderer owns
+            // the bytes after consuming all four CPU upload slots.
+            let body = first.slot.lock().unwrap().take().unwrap().tris;
+            let highlights = first.hl_slot.lock().unwrap().take().unwrap().tris;
+            assert!(!body.is_empty() && !highlights.is_empty());
+            for slot in [&first.sketch_slot, &first.pv_slot] {
+                let empty = slot.lock().unwrap().take().unwrap();
+                assert!(empty.tris.is_empty() && empty.lines.is_empty());
+            }
+            crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+            assert_eq!(app.docs.active, 1);
+            if other_form {
+                app.session.execute("form.prototype.create", &json!({"size":7,"segments":[1,1,1],"levels":1})).unwrap();
+                let other_source = app.session.forms_prototype.as_ref().unwrap().inspect();
+                let other = draw(&mut app);
+                assert_ne!(first.key, other.key);
+                for slot in [&other.slot, &other.sketch_slot, &other.hl_slot, &other.pv_slot] {
+                    assert!(slot.lock().unwrap().take().is_some());
+                }
+                crate::documents::switch(&mut app, 0);
+                let returned = draw(&mut app);
+                assert_eq!(returned.slot.lock().unwrap().as_ref().unwrap().tris, body, "A's model must be available to replace B's GPU batch");
+                assert_eq!(returned.hl_slot.lock().unwrap().as_ref().unwrap().tris, highlights);
+                crate::documents::switch(&mut app, 1);
+                assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect(), other_source);
+                crate::documents::switch(&mut app, 0);
+            } else {
+                assert!(app.session.forms_prototype.is_none());
+                crate::documents::switch(&mut app, 0);
+            }
+            assert_eq!(app.docs.active, 0);
+            let returned = draw(&mut app);
+            assert!(Arc::ptr_eq(&first.slot, &returned.slot), "restore retains this tab's slot identity");
+            assert_eq!(returned.slot.lock().unwrap().as_ref().unwrap().tris, body);
+            assert_eq!(returned.hl_slot.lock().unwrap().as_ref().unwrap().tris, highlights);
+            for slot in [&returned.sketch_slot, &returned.pv_slot] {
+                let empty = slot.lock().unwrap().as_ref().unwrap().clone();
+                assert!(
+                    empty.tris.is_empty() && empty.lines.is_empty() && empty.overlay.is_empty() && empty.xray.is_empty(),
+                    "the other tab's origin planes/previews must be replaced by explicit empty uploads"
+                );
+            }
+            assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect(), original);
+            assert_eq!(app.forms_prototype.elements, BTreeSet::from([Element::Face(0)]));
+            assert_eq!(app.forms_prototype.selected, selection);
+            assert_eq!(app.forms_prototype.pivot, Some(Vec3::new(2.0, 3.0, 4.0)));
+            assert!(app.forms_prototype.scale);
+        }
+    }
+    #[test]
+    fn zoomed_viewport_points_tools_and_gizmo_stay_clipped_while_panel_and_visible_picks_work() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("form.prototype.create", json!({"primitive":"plane","size":4,"segments":[2,2,2],"levels":2})).unwrap();
+        h.frames(3);
+        h.app.cam.yaw = 0.0;
+        h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        h.app.cam.fov = 0.0;
+        h.app.cam.distance = 8.0;
+        h.app.cam.target = Vec3::ZERO;
+        live_cad::install_for_test(&mut h.app);
+        let descriptors = solidcraft_engine::forms_prototype::insertion_curves(&h.app.session, controls::tolerance(&h.app).unwrap(), &[]).unwrap();
+        curves::install_for_test(&mut h.app, Ok(descriptors));
+        h.frames(3);
+        let source = h.app.session.forms_prototype.as_ref().unwrap().inspect();
+        crate::test_support::click(&mut h, "forms_insert_points");
+        let rect = h.app.viewport.rect.unwrap();
+        let projection = crate::viewport::projection(&h.app, rect);
+        let (point, position) = h
+            .app
+            .session
+            .forms_prototype
+            .as_ref()
+            .unwrap()
+            .surface
+            .boundaries
+            .iter()
+            .map(|(edge, _)| {
+                let point = curves::get(&h.app, *edge).unwrap().at(0.37).unwrap();
+                (point, projection.to_screen(point).unwrap())
+            })
+            .max_by(|(_, a), (_, b)| a.x.total_cmp(&b.x))
+            .unwrap();
+        assert!(rect.shrink(10.0).contains(position));
+        let (_, _, marker) = curves::nearest(&h.app, &projection, position).unwrap();
+        assert!(point.dist(marker) < 0.01);
+        h.frame_with(crate::test_support::pointer(position, true));
+        h.frame_with(crate::test_support::pointer(position, false));
+        h.frames(3);
+        assert_eq!(tools::point_count_for_test(&h.app), 1);
+        // Pan the authored surface rather than fabricating an out-of-bounds paint shape.
+        // The placed Insert Point marker and source points now project over the panel.
+        let (right, _, _) = h.app.cam.basis();
+        let pixels = projection.to_screen(marker + right).unwrap().x - projection.to_screen(marker).unwrap().x;
+        h.app.cam.target += right * f64::from((position.x - (rect.right() + 35.0)) / pixels);
+        let panel_pick = crate::scenario::handle_at("forms_pick_vertex").unwrap();
+        assert!(panel_pick.x > rect.right());
+        h.frame_with(vec![egui::Event::PointerMoved(panel_pick)]);
+        h.frames(2);
+        let projection = crate::viewport::projection(&h.app, rect);
+        let marker_screen = projection.to_screen(marker).unwrap();
+        assert!(marker_screen.x > rect.right() + 20.0);
+        let mut placed_marker = false;
+        let mut outside_point = false;
+        let mut crossing_mesh = false;
+        let mut panel_text = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                let viewport_shape = match shape {
+                    egui::Shape::Circle(circle) => {
+                        let placed = circle.center.distance(marker_screen) < 0.1 && circle.radius == 5.0 && circle.fill == Tokens::get().accent;
+                        placed_marker |= placed;
+                        let outside = h.app.forms_prototype.projected.iter().any(|(_, p)| p.x > rect.right() && circle.center.distance(*p) < 0.1)
+                            && circle.radius >= 3.0;
+                        outside_point |= outside;
+                        placed || outside
+                    }
+                    egui::Shape::Mesh(mesh) => {
+                        let crossing = mesh.vertices.len() == 3
+                            && mesh.vertices.iter().all(|v| v.color == Tokens::get().body)
+                            && mesh.vertices.iter().any(|v| v.pos.x > rect.right())
+                            && mesh.vertices.iter().any(|v| v.pos.x < rect.right());
+                        crossing_mesh |= crossing;
+                        crossing
+                    }
+                    egui::Shape::Text(text) => {
+                        panel_text |= text.pos.x > rect.right() && clipped.clip_rect.contains(panel_pick);
+                        false
+                    }
+                    _ => false,
+                };
+                if viewport_shape {
+                    assert!(rect.contains_rect(clipped.clip_rect), "viewport paint leaked into the panel: {:?}", clipped.clip_rect);
+                }
+            });
+        }
+        assert!(placed_marker, "the placed marker must remain in the paint list while the pointer is over the panel");
+        assert!(outside_point && crossing_mesh && panel_text);
+        crate::test_support::click(&mut h, "forms_insert_points");
+        crate::test_support::click(&mut h, "forms_pick_vertex");
+        assert!(matches!(h.app.forms_prototype.pick, Pick::Vertex));
+        let (index, visible) = h.app.forms_prototype.projected.iter().copied().find(|(_, p)| rect.shrink(30.0).contains(*p)).unwrap();
+        h.frame_with(crate::test_support::pointer(visible, true));
+        h.frame_with(crate::test_support::pointer(visible, false));
+        h.frames(2);
+        assert_eq!(h.app.forms_prototype.elements, BTreeSet::from([Element::Vertex(index)]));
+        let border = egui::pos2(rect.right() - 3.0, rect.center().y);
+        let (origin, direction) = projection.ray(border);
+        let pivot = origin + direction * (-origin.z / direction.z);
+        h.app.forms_prototype.pivot = Some(pivot);
+        h.frame_with(vec![egui::Event::PointerMoved(panel_pick)]);
+        let center = projection.to_screen(pivot).unwrap();
+        let mut ball = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Circle(circle) = shape
+                    && circle.center.distance(center) < 0.1
+                    && circle.radius == 6.0
+                {
+                    ball = true;
+                    assert!(rect.contains_rect(clipped.clip_rect));
+                }
+            });
+        }
+        assert!(ball, "the transform handle must still be painted at the custom pivot");
+        assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect(), source);
+    }
     #[test]
     fn fresh_and_selected_edges_double_click_expand_the_same_loop_at_sixty_hertz() {
         for preselected in [false, true] {

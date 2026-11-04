@@ -242,6 +242,7 @@ pub use surfaces::{
     reverse_faces, revolve_sheet, stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
+pub use tess::guided::{DisplayGuide, DisplayGuidePoint, GuidedMesh};
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::{

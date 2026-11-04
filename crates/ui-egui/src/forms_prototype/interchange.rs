@@ -210,4 +210,137 @@ mod tests {
         }
         std::fs::remove_file(source).unwrap();
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blender_buttons_route_picked_paths_through_real_workers_without_publishing_or_changing_exported_source() {
+        use std::{cell::Cell, rc::Rc, task::Poll};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("form.prototype.create", json!({"size":10,"segments":[1,1,1]})).unwrap();
+        h.frames(3);
+        let original = h.app.session.forms_prototype.as_ref().unwrap().inspect();
+        let document = h.app.session.execute("document.revision", &json!({})).unwrap();
+        let input = h.dir.join("picked-input.blend");
+        let output = h.dir.join("picked-output.blend");
+        let cage = solidcraft_engine::geom::subdivision::primitives::Parameters { segments: [1; 3], dimensions: [6.; 3], ..Default::default() }
+            .build()
+            .unwrap();
+        std::fs::write(
+            &input,
+            solidcraft_engine::io::blend::write(&[solidcraft_engine::io::blend::Object {
+                name: "Picked cage".into(),
+                cage: cage.clone(),
+                levels: 2,
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+        let assert_picked_cage = |actual: &solidcraft_engine::geom::subdivision::Cage| {
+            assert_eq!(actual.faces, cage.faces);
+            assert_eq!(actual.edge_creases, cage.edge_creases);
+            assert_eq!(actual.vertex_creases, cage.vertex_creases);
+            assert_eq!(actual.points.len(), cage.points.len());
+            for (actual, expected) in actual.points.iter().zip(&cage.points) {
+                // Blender stores single-precision coordinates and its metre scale.
+                // Four relative f32 roundoffs cover both writes and reads of this fixture.
+                let bound = 4.0 * f64::from(f32::EPSILON) * expected.len();
+                assert!((*actual - *expected).len() <= bound, "{actual:?} != {expected:?} within {bound} mm");
+            }
+        };
+
+        let answer_open = Rc::new(Cell::new(false));
+        let open_calls = Rc::new(Cell::new(0));
+        let open_path = input.to_string_lossy().into_owned();
+        h.app.services.pick_open = Some(Box::new({
+            let answer = answer_open.clone();
+            let calls = open_calls.clone();
+            move |extensions| {
+                assert_eq!(extensions, ["blend"]);
+                calls.set(calls.get() + 1);
+                let answer = answer.clone();
+                let path = open_path.clone();
+                Box::pin(std::future::poll_fn(move |_| if answer.get() { Poll::Ready(Some(path.clone())) } else { Poll::Pending }))
+            }
+        }));
+        let section = crate::scenario::handle_at("forms.prototype.interchange").unwrap();
+        h.call("ui.scroll", json!({"x":section.x,"y":500,"delta":-1200,"unit":"point"}));
+        crate::test_support::play(&mut h);
+        crate::test_support::click(&mut h, "forms.prototype.interchange");
+        // Expanding the last section adds content below the current scroll limit.
+        h.call("ui.scroll", json!({"x":section.x,"y":500,"delta":-1200,"unit":"point"}));
+        crate::test_support::play(&mut h);
+        crate::test_support::click(&mut h, "forms_blend_import");
+        assert_eq!(open_calls.get(), 1);
+        assert!(h.app.file_picker_busy());
+        assert!(h.app.forms_prototype.interchange.is_none());
+        assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect(), original);
+
+        answer_open.set(true);
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert!(!h.app.file_picker_busy());
+        let pending = h.app.forms_prototype.interchange.take().expect("the selected .blend path must launch the real native worker");
+        let result = pending.done.recv().unwrap();
+        assert!(matches!(&result, Outcome::Imported(Ok(_))));
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(result).unwrap();
+        h.app.forms_prototype.interchange = Some(Pending { done: rx });
+        tick(&mut h.app, &h.ctx);
+        let imported = h.app.session.forms_prototype.as_ref().unwrap();
+        assert_picked_cage(&imported.cage);
+        assert_eq!(imported.levels, 2);
+        assert_eq!(imported.imported.as_ref().unwrap().object, "Picked cage");
+        assert!(h.app.session.doc.features.is_empty());
+        assert_eq!(h.app.session.execute("document.revision", &json!({})).unwrap(), document);
+
+        let before = h.app.session.forms_prototype.as_ref().unwrap().inspect();
+        h.app.forms_prototype.blend_surface = Some(false);
+        let answer_save = Rc::new(Cell::new(false));
+        let save_calls = Rc::new(Cell::new(0));
+        let save_path = output.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new({
+            let answer = answer_save.clone();
+            let calls = save_calls.clone();
+            move |name, extensions| {
+                assert_eq!(name, "Form.blend");
+                assert_eq!(extensions, ["blend"]);
+                calls.set(calls.get() + 1);
+                let answer = answer.clone();
+                let path = save_path.clone();
+                Box::pin(std::future::poll_fn(move |_| if answer.get() { Poll::Ready(Some(path.clone())) } else { Poll::Pending }))
+            }
+        }));
+        h.frames(3);
+        h.call("ui.scroll", json!({"x":section.x,"y":500,"delta":-1200,"unit":"point"}));
+        crate::test_support::play(&mut h);
+        crate::test_support::click(&mut h, "forms_blend_export");
+        assert_eq!(save_calls.get(), 1);
+        assert!(h.app.file_picker_busy());
+        assert!(!output.exists());
+        assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect(), before);
+        answer_save.set(true);
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert!(!h.app.file_picker_busy());
+        let pending = h.app.forms_prototype.interchange.take().expect("the selected save path must launch the real native export worker");
+        let result = pending.done.recv().unwrap();
+        match &result {
+            Outcome::Exported(Ok(reply)) => {
+                assert_eq!(reply["surface"], false);
+                assert_eq!(reply["objects"].as_array().unwrap().len(), 1);
+                assert_eq!(reply["rejected"], json!([]));
+            }
+            _ => panic!("the rendered Export button did not run a successful native cage export"),
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(result).unwrap();
+        h.app.forms_prototype.interchange = Some(Pending { done: rx });
+        tick(&mut h.app, &h.ctx);
+        let exported = solidcraft_engine::io::blend::read(&std::fs::read(&output).unwrap()).unwrap();
+        assert!(exported.rejected.is_empty());
+        assert_eq!(exported.objects.len(), 1);
+        assert_picked_cage(&exported.objects[0].cage);
+        assert_eq!(exported.objects[0].levels, 2);
+        assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect(), before);
+        assert_eq!(h.app.session.execute("document.revision", &json!({})).unwrap(), document);
+        assert!(h.app.session.doc.features.is_empty());
+    }
 }

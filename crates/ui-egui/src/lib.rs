@@ -1285,7 +1285,7 @@ impl SolveApp {
         };
         if let Ok(v) = &r {
             forms_prototype::command_completed(self, id);
-            if matches!(id, "form.prototype.create" | "form.edit" | "form.surface" | "form.pipe" | "form.blend.import") {
+            if matches!(id, "form.prototype.create" | "form.edit" | "form.repair" | "form.surface" | "form.pipe" | "form.blend.import") {
                 forms_prototype::opened(self);
             }
             if v.get("form_restored").and_then(Value::as_bool) == Some(true)
@@ -3189,6 +3189,7 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
+        forms_prototype::repair_prompt(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).
