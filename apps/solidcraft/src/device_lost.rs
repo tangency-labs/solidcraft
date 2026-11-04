@@ -76,7 +76,8 @@ fn command(
     reason: &str,
 ) -> std::process::Command {
     let mut command = std::process::Command::new(exe);
-    command.args(args).env(LOST_ENV, lost_at.to_string());
+    // The notice of a hang that restarted this launch isn't the next one's (`App::watch_for_a_hang`).
+    command.args(args).env(LOST_ENV, lost_at.to_string()).env_remove(startup::HUNG_ENV);
     match self::reason(Some(reason)) {
         Some(reason) => command.env(REASON_ENV, reason),
         // Not one inherited from an earlier loss.
