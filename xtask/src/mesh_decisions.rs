@@ -61,6 +61,8 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a
 /// preview, or a mesh body.
 pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
+    ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
+    ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),
     ("crates/doc/src/eval.rs:ModelBody::mesh", "the display mesh"),
     ("crates/doc/src/eval.rs:ModelBody::mesh_in_place", "the display mesh where the body stands"),
@@ -72,7 +74,9 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:ModelState::warm_display", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_display_at", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_meshes", "display meshes made ahead"),
+    ("crates/doc/src/eval.rs:feature_json", "fingerprints feature inputs; triangles are only embedded mesh-body source data"),
     ("crates/doc/src/eval.rs:mesh_bodies", "mesh bodies: a mesh import's triangles"),
+    ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
