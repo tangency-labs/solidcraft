@@ -30,7 +30,11 @@
 //!   conversions and intersections they run.
 //! - **`STEPInversion`** returns the parameter and location only on success: upstream
 //!   writes them before returning `SM_ERR` for a point outside the sweep interval or
-//!   not on the generator, and the port returns that error alone.
+//!   not on the generator, and the port returns that error alone. With
+//!   `Kernel::fixes.revolution_frame_from_profile_origin` (WR-738) a planar
+//!   generator's point is also turned onto the start plane's -X half plane when it
+//!   does not lie on the generator on the +X one, so a profile that crosses the axis
+//!   inverts on both sides; upstream turns it onto the +X half plane only.
 //! - **Generator.** As in `p1` the generator is a [`Curve`] derived from
 //!   `SmBSplineCurve`; `CreateOffsetSurface`'s composite-curve branch for any other
 //!   generator is unreachable. Upstream's `STEPInversion` switches the generator's
@@ -51,7 +55,7 @@ use crate::curve::line::Line;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p1::line_point_distance;
+use crate::geom::geom_utility::p1::{line_point_distance, StartPlanePoint};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
 use crate::geom::vector2d::Point2;
@@ -353,7 +357,12 @@ impl SurfOfRevolution {
     /// the sweep angle (the larger of two on a seam when it is below the end of the
     /// sweep) gives the U parameter, the point's distance from the axis a pole, and
     /// the swung point is intersected with the generator for the V parameter. On a
-    /// seam, `uv_guess` picks the end nearer to it.
+    /// seam, `uv_guess` picks the end nearer to it. With
+    /// [`UpstreamFixes::revolution_frame_from_profile_origin`](crate::kernel::UpstreamFixes::revolution_frame_from_profile_origin)
+    /// (WR-738) the point is swung onto both half planes of the generator's plane,
+    /// and the first on which it lies on the generator (+X, then -X at the angle 180
+    /// degrees on) gives both parameters, so a generator that crosses the axis inverts
+    /// on both sides of it.
     ///
     /// # Errors
     ///
@@ -485,8 +494,25 @@ impl SurfOfRevolution {
 
         // Generator curve is planar, so we can solve it analytically.
 
-        // Rotate Point to StartPlane
-        let sp = self.transform_point_to_start_plane(point_on_surf, tol_3d, false)?;
+        // Rotate Point to StartPlane, and intersect the rotated point with genCurve
+        // (with WR-738 the first half plane of the start plane on which it lies on the
+        // generator, see `start_plane_sides`)
+        let mut on_generator = None;
+        for sp in self.start_plane_sides(k, point_on_surf, tol_3d)? {
+            let solve =
+                self.solve_on_generator(k, self.is_out_of_bounds_enabled(), sp.point, tol_3d)?;
+            if !solve.2.is_empty() {
+                on_generator = Some((sp, solve));
+                break;
+            }
+        }
+
+        // error - rotated point not on GenCurve (told apart from failures by
+        // `is_off_generator`; the public inversion answers it, with the fork's fix, as
+        // SM_ERR_NOT_WITHIN_TOLERANCE)
+        let Some((sp, (gen, ivl, solutions))) = on_generator else {
+            return Err(SolidError::sm_err(OP_STEP_INV));
+        };
         let num_angles = sp.angles_deg.len();
         let angle0 = sp.angles_deg.first().copied().unwrap_or(0.0);
         let angle1 = sp.angles_deg.get(1).copied().unwrap_or(0.0);
@@ -529,18 +555,10 @@ impl SurfOfRevolution {
             }
         }
 
-        // intersect rotated point with genCurve
-        let (gen, ivl, solutions) =
-            self.solve_on_generator(k, self.is_out_of_bounds_enabled(), sp.point, tol_3d)?;
-
-        // error - rotated point not on GenCurve (told apart from failures by
-        // `is_off_generator`; the public inversion answers it, with the fork's fix, as
-        // SM_ERR_NOT_WITHIN_TOLERANCE)
-        let Some(first) = solutions.first() else {
-            return Err(SolidError::sm_err(OP_STEP_INV));
-        };
-
         // set output V coordinate
+        let first = solutions
+            .first()
+            .ok_or_else(|| SolidError::sm_err(OP_STEP_INV))?;
         let mut v = first.start.param(0)?;
 
         // for points on closed genCurve seams - update point classification
@@ -617,8 +635,9 @@ impl SurfOfRevolution {
     /// the interval's period, the lower angle on a seam), and its generator parameter
     /// is the generator's closed-form inversion ([`Curve::step_inversion`]: lines,
     /// conics, parabolas, hyperbolas, without a domain) or, for any other generator,
-    /// its solve over the generator's maximum analytic domain. A non-planar generator
-    /// runs [`Self::step_inversion`] over [`Self::max_analytic_domain`].
+    /// its solve over the generator's maximum analytic domain; with WR-738's flag on
+    /// both half planes, as [`Self::step_inversion`]. A non-planar generator runs
+    /// [`Self::step_inversion`] over [`Self::max_analytic_domain`].
     ///
     /// # Errors
     ///
@@ -635,7 +654,16 @@ impl SurfOfRevolution {
             let domain = self.max_analytic_domain(k)?;
             return self.step_inversion(k, &domain, point_on_surf, tol_3d, None);
         }
-        let sp = self.transform_point_to_start_plane(point_on_surf, tol_3d, false)?;
+        let mut on_generator = None;
+        for sp in self.start_plane_sides(k, point_on_surf, tol_3d)? {
+            if let Some(v) = self.generator_param_unbounded(k, sp.point, tol_3d)? {
+                on_generator = Some((sp, v));
+                break;
+            }
+        }
+        let Some((sp, v)) = on_generator else {
+            return Err(not_within_tolerance(OP_STEP_INV));
+        };
         let u = sp.angles_deg.first().copied().unwrap_or(0.0);
         let (dist, _) = line_point_distance(
             self.position.origin(),
@@ -649,27 +677,74 @@ impl SurfOfRevolution {
         } else {
             LocationType::Interior
         };
+        Ok((Point2::new(u, v), location))
+    }
+
+    /// The generator's STEP parameter at `point` in its plane, `None` when `point` is
+    /// farther than `tol_3d` from it: the generator's closed-form inversion
+    /// ([`Curve::step_inversion`]: lines, conics, parabolas, hyperbolas, without a
+    /// domain) or, for any other generator, its solve over its maximum analytic domain.
+    ///
+    /// # Errors
+    ///
+    /// Those of the generator's inversion, evaluation and solve.
+    fn generator_param_unbounded(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        tol_3d: f64,
+    ) -> Result<Option<f64>> {
         let gen = self.gen()?;
-        let v = match gen.kind() {
+        match gen.kind() {
             CurveKind::Line(_)
             | CurveKind::Ellipse(_)
             | CurveKind::Parabola(_)
             | CurveKind::Hyperbola(_) => {
-                let v = gen.step_inversion(k, sp.point)?;
-                if gen.evaluate_step_point(k, v)?.distance(sp.point) > tol_3d {
-                    return Err(not_within_tolerance(OP_STEP_INV));
+                let v = gen.step_inversion(k, point)?;
+                if gen.evaluate_step_point(k, v)?.distance(point) > tol_3d {
+                    return Ok(None);
                 }
-                v
+                Ok(Some(v))
             }
             _ => {
-                let (_, _, solutions) = self.solve_on_generator(k, true, sp.point, tol_3d)?;
-                let first = solutions
-                    .first()
-                    .ok_or_else(|| not_within_tolerance(OP_STEP_INV))?;
-                first.start.param(0)?
+                let (_, _, solutions) = self.solve_on_generator(k, true, point, tol_3d)?;
+                solutions.first().map(|s| s.start.param(0)).transpose()
             }
-        };
-        Ok((Point2::new(u, v), location))
+        }
+    }
+
+    /// The point turned about the axis onto the start (X/Z) plane, as
+    /// [`Self::transform_point_to_start_plane`] turns it onto the +X half plane, with
+    /// its angles in the sweep interval. With
+    /// [`UpstreamFixes::revolution_frame_from_profile_origin`](crate::kernel::UpstreamFixes::revolution_frame_from_profile_origin)
+    /// (WR-738) also onto the -X half plane, at the angles 180 degrees on: the point's
+    /// circle about the axis meets the generator's plane in these two points, and a
+    /// generator that crosses the axis reaches either (the surface's points on its
+    /// other side are `Rz(u) λ(v)` with `λ(v)` on the -X half plane). The +X one comes
+    /// first, as upstream, so a point that lies on the generator there keeps
+    /// upstream's parameters; upstream turns the point onto the +X half plane only,
+    /// and refuses the points of the other side.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::transform_point_to_start_plane`].
+    fn start_plane_sides(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        tol_3d: f64,
+    ) -> Result<Vec<StartPlanePoint>> {
+        let near = self.transform_point_to_start_plane(point, tol_3d, false)?;
+        if !k.fixes.revolution_frame_from_profile_origin {
+            return Ok(vec![near]);
+        }
+        // `p` turned by 180 degrees about the axis: mirrored through its foot on it
+        let origin = self.position.origin();
+        let z_axis = self.position.z_axis();
+        let half_turn = |p: Point3| 2.0 * (origin + (p - origin).dot(z_axis) * z_axis) - p;
+        let mut far = self.transform_point_to_start_plane(half_turn(point), tol_3d, false)?;
+        far.point = half_turn(near.point);
+        Ok(vec![near, far])
     }
 
     // ---- offsets --------------------------------------------------------------------

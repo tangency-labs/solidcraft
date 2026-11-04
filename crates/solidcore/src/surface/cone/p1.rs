@@ -1783,7 +1783,7 @@ impl Cone {
         let (mut uv, location) = if self.rev.planar_generator {
             self.rev.step_inversion_unbounded(k, pos.point, tol_3d)?
         } else {
-            let domain = self.rev.max_analytic_domain(k)?;
+            let domain = self.step_inversion_unbounded_domain(k)?;
             let r = self.rev_step_inversion(k, &domain, pos.point, tol_3d, None)?;
             (r.uv, r.location)
         };
@@ -1791,6 +1791,14 @@ impl Cone {
             uv.y = 2.0 * pos.apex_param - uv.y;
         }
         Ok((uv, location))
+    }
+
+    /// The STEP domain [`Self::step_inversion_unbounded`] searches for a non-planar
+    /// generator: the cone's own [`Self::max_analytic_domain`], which stops at the apex
+    /// (the point is already mirrored onto that nappe), not the base surface of
+    /// revolution's, which runs on over the far one.
+    fn step_inversion_unbounded_domain(&self, k: &Kernel) -> Result<Extent2d> {
+        self.max_analytic_domain(k)
     }
 
     /// `SmSurfOfRevolution::STEPInversion` on the cone's base parts
@@ -2545,6 +2553,38 @@ mod tests {
                     assert!(b.inside);
                 }
             }
+        }
+    }
+
+    /// tangency-labs/solidcore#2628 item 5: the unbounded inversion of a cone read with
+    /// its generator flagged non-planar searches the cone's own maximum analytic
+    /// domain ([`Cone::max_analytic_domain`]: the nappe of the current domain, from the
+    /// apex), not the base surface of revolution's, which runs on past the apex over
+    /// the far nappe that `positive_point` has already mirrored the point away from.
+    /// `cone123` (radius 1 at height 0, 2 at height 3) has its apex at height
+    /// `-1 * 3 / (2 - 1) = -3`: the domain is `[0, 360]` by `[-3, 1000]` (1000 the
+    /// line's maximum analytic extent), not `[-1000, 1000]`. The parameters found are
+    /// those of the planar branch, here at heights 1.5, 10 (past the current domain)
+    /// and -6 (the far nappe, mirrored).
+    #[test]
+    fn non_planar_unbounded_inversion_searches_the_cones_own_domain() {
+        let k = k();
+        let planar = cone123();
+        let mut non_planar = planar.clone();
+        non_planar.rev.planar_generator = false;
+        let d = non_planar.step_inversion_unbounded_domain(&k).unwrap();
+        assert_eq!(d, non_planar.max_analytic_domain(&k).unwrap());
+        assert!((d.v_min() + 3.0).abs() <= 1e-12, "{d:?}");
+        assert_eq!((d.u_min(), d.u_max(), d.v_max()), (0.0, 360.0, 1000.0));
+        for (u, v) in [(30.0_f64, 1.5), (200.0, 10.0), (120.0, -6.0)] {
+            // radius 1 + v / 3, negative past the apex (the point turned by 180 degrees)
+            let r = 1.0 + v / 3.0;
+            let p = Vec3::new(r * u.to_radians().cos(), r * u.to_radians().sin(), v);
+            let (uv, _) = non_planar.step_inversion_unbounded(&k, p, 1e-9).unwrap();
+            assert!(
+                (uv - Point2::new(u, v)).length() < 1e-9,
+                "({u}, {v}) -> {uv:?}"
+            );
         }
     }
 

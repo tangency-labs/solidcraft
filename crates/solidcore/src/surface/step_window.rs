@@ -9,7 +9,9 @@
 //! Apache-2.0), which samples each edge; here each edge's extremes are its
 //! stationary points. The computations are the kernel's own: a point's parameters
 //! are [`Surface::step_inversion_unbounded`]'s, the rates [`Surface::evaluate_step`]'s
-//! where they have no closed form, the edges' pieces their exact NURB Bezier segments
+//! where they have no closed form (on a copy that evaluates outside the surface's
+//! current domain, as the inversion reads it), the edges' pieces their exact NURB
+//! Bezier segments
 //! ([`create_bez_segments`]) or their lines and conic arcs, and the stationary points
 //! without a closed form are certified roots solved by
 //! [`LocalSolve1d::solve_by_bisection`].
@@ -39,6 +41,7 @@ use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW};
 use crate::nurbs::nurbs_crv::create_bez_segments;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
 const OP: &str = "surface::step_window::face_window";
 
@@ -174,8 +177,8 @@ pub struct WindowMargin {
 /// points (a B-spline surface, an extrusion of a profile not across its direction), an
 /// edge curve without an exact NURB, and a root isolation past
 /// [`MAX_ISOLATION_BRACKETS`]. Those of [`Surface::step_inversion_unbounded`],
-/// [`Surface::evaluate_step`], [`Surface::max_analytic_domain`] and the curves'
-/// evaluations.
+/// [`Surface::evaluate_step`], [`Surface::max_analytic_domain`], the surface's copy
+/// for evaluation and the curves' evaluations.
 pub fn face_window(
     k: &Kernel,
     surface: &Surface,
@@ -196,7 +199,7 @@ pub fn face_window(
             "margin negative or not finite",
         ));
     }
-    let map = Map::of(surface, tol);
+    let map = Map::of(surface, tol)?;
     if loops.is_empty() {
         return map.whole();
     }
@@ -474,12 +477,16 @@ enum Shape {
 /// The surface, the tolerance of its boundary and its shape.
 struct Map<'a> {
     surface: &'a Surface,
+    /// A copy of the surface that evaluates outside its current domain instead of
+    /// clamping to it, when the surface clamps: a boundary is read wherever it lies on
+    /// the surface, as its points' parameters are.
+    unclamped: Option<Surface>,
     tol: f64,
     shape: Shape,
 }
 
 impl<'a> Map<'a> {
-    fn of(surface: &'a Surface, tol: f64) -> Self {
+    fn of(surface: &'a Surface, tol: f64) -> Result<Self> {
         let shape = match surface.kind() {
             SurfaceKind::Plane(s) => Shape::Plane {
                 frame: Frame::of(s.position()),
@@ -522,11 +529,12 @@ impl<'a> Map<'a> {
             }
             _ => Shape::Other,
         };
-        Self {
+        Ok(Self {
             surface,
+            unclamped: with_out_of_bounds_enabled(surface)?,
             tol,
             shape,
-        }
+        })
     }
 
     const fn periodic(&self, d: usize) -> bool {
@@ -686,12 +694,15 @@ impl<'a> Map<'a> {
     }
 
     /// The rates of the kernel's STEP parameters along `dp`: the least-squares
-    /// `(Su, Sv) . r = dp` with the STEP derivatives at `q`.
+    /// `(Su, Sv) . r = dp` with the STEP derivatives at `q`, wherever `q` lies (on
+    /// the surface's unclamped copy).
     fn chain(&self, k: &Kernel, dp: Vec3, q: &Params) -> Result<[f64; 2]> {
         let none = || SolidError::invalid_input(OP, "no surface derivative");
         let uv = Point2::new(q.u.unwrap_or(0.0), q.v);
         let d = self
-            .surface
+            .unclamped
+            .as_ref()
+            .unwrap_or(self.surface)
             .evaluate_step(k, uv, 1, 1, EvaluateFlags::default())?;
         let su = d.get(1).and_then(|r| r.first()).copied().ok_or_else(none)?;
         let sv = d.first().and_then(|r| r.get(1)).copied().ok_or_else(none)?;
@@ -2276,7 +2287,7 @@ mod tests {
         ];
         for (i, s) in surfaces.iter().enumerate() {
             let dom = s.step_uv_domain();
-            let map = Map::of(s, TOL);
+            let map = Map::of(s, TOL).unwrap();
             for (fu, fv) in [(0.1, 0.2), (0.45, 0.5), (0.7, 0.9), (0.95, 0.3)] {
                 let u = dom.u_min().max(-1e3) + fu * (dom.u_max().min(1e3) - dom.u_min().max(-1e3));
                 let v = dom.v_min().max(-1e3) + fv * (dom.v_max().min(1e3) - dom.v_min().max(-1e3));
@@ -2361,6 +2372,62 @@ mod tests {
         assert!(plane
             .step_inversion_unbounded(&k, p(0.0, 0.0, 1.0), TOL)
             .is_err());
+    }
+
+    /// The circle about (3, 0, 0) of radius 1 in the XZ plane (`tube(0)`) turned about
+    /// Z, a surface of revolution (not a torus), its sweep set to `[0, 90]` (its
+    /// profile keeps `[0, 360]`).
+    fn quarter_revolution_of_a_circle(k: &Kernel) -> Surface {
+        let mut s = SurfOfRevolution::create_canonical(k, tube(k, 0.0), Vec3::ZERO, Vec3::Z, false)
+            .unwrap();
+        s.adjust_step_uv_domain(k, &Extent2d::from_bounds(0.0, 0.0, 90.0, 360.0))
+            .unwrap();
+        Surface::from(s)
+    }
+
+    /// tangency-labs/solidcore#2628 item 6: the rates of the parameters at a point
+    /// outside the surface's current domain are the surface's own there, not those at
+    /// the domain's nearest point. On `quarter_revolution_of_a_circle` the point
+    /// `(u, v) = (200, 90)` (the top of the profile turned by 200 degrees, outside the
+    /// sweep) has `S(u, v) = Rz(u) ((3 + cos v) X + sin v Z)`; along
+    /// `Sv = (pi / 180) Rz(u) (-sin v X + cos v Z)` the rates are `(0, 1)` (u's in
+    /// radians), along `Su = (pi / 180) (3 + cos v) Rz(u) Y` they are `(pi / 180, 0)`.
+    #[test]
+    fn rates_outside_the_domain_are_the_surfaces_own() {
+        let k = k();
+        let s = quarter_revolution_of_a_circle(&k);
+        let map = Map::of(&s, TOL).unwrap();
+        let (u, v) = (200.0, 90.0);
+        let radial = Vec3::new(rad(u).cos(), rad(u).sin(), 0.0);
+        let along = Vec3::new(-rad(u).sin(), rad(u).cos(), 0.0);
+        let p = (3.0 + rad(v).cos()) * radial + rad(v).sin() * Vec3::Z;
+        let q = map.params(&k, p).unwrap();
+        assert_close(q.u.unwrap(), u);
+        assert_close(q.v, v);
+        let sv = rad(1.0) * (-rad(v).sin() * radial + rad(v).cos() * Vec3::Z);
+        let su = rad(1.0) * (3.0 + rad(v).cos()) * along;
+        let [du, dv] = map.rates(&k, p, sv, &q).unwrap();
+        assert_close(du, 0.0);
+        assert_close(dv, 1.0);
+        let [du, dv] = map.rates(&k, p, su, &q).unwrap();
+        assert_close(du, rad(1.0));
+        assert_close(dv, 0.0);
+    }
+
+    /// The band of `quarter_revolution_of_a_circle` between its profile circles turned
+    /// by 200 and 220 degrees, both outside the sweep, each one closed edge round the
+    /// profile (up v at 220, down at 200, the band on their left): u = [200, 220] and
+    /// v one period from the circles' start, [0, 360].
+    #[test]
+    fn a_band_outside_the_sweep_of_a_revolution() {
+        let k = k();
+        let s = quarter_revolution_of_a_circle(&k);
+        let (a, b) = (tube(&k, 200.0), tube(&k, 220.0));
+        let band = [
+            vec![edge(&b, 0.0, 360.0, true)],
+            vec![edge(&a, 0.0, 360.0, false)],
+        ];
+        assert_window(&window(&k, &s, &band), [200.0, 220.0], [0.0, 360.0]);
     }
 
     /// A circle of radius 1 extruded by (0, 0, 3): the band over a quarter is u its
