@@ -132,10 +132,6 @@ parameters.list
 parameters.move
 parameters.rename
 parameters.users
-parts.fastener
-parts.insert
-parts.library
-parts.resize
 plastic.assign_rule
 plastic.boss
 plastic.lip
