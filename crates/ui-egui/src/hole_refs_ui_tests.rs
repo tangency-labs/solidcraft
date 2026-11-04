@@ -124,6 +124,46 @@ fn a_hole_is_placed_by_its_distances_from_two_edges() {
     assert!(!solid_at(&h, Vec3::new(20.0, 30.0, 8.0)) && solid_at(&h, Vec3::new(10.0, 12.0, 8.0)), "the edit moved the hole to (20, 30)");
 }
 
+/// #10877: a construction plane or an axis is a reference too: its distance is measured from the
+/// line it makes in the face, typing it moves the hole, and Edit Feature picks it again.
+#[test]
+fn a_hole_is_placed_by_its_distance_from_a_plane_or_an_axis() {
+    let mut h = plate();
+    h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 20, "name": "Mid"})).unwrap();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    let picked = place(&h);
+    let set = |h: &mut Harness, label: &str, sel: Sel| {
+        h.app.dialog.as_mut().unwrap().inputs.iter_mut().find(|i| i.label == label).unwrap().items = vec![sel];
+        h.frames(2);
+    };
+    set(&mut h, "Reference 1", Sel::Plane { name: "Mid".into() });
+    let measured = distances(&h);
+    let value = |h: &Harness, s: &str| h.app.session.doc.eval(s, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((value(&h, &measured[0]) - (picked.x - 20.0)).abs() < 1e-3, "{measured:?} from {picked:?}");
+    assert!(h.at(&json!({"handle": "canvas:Distance 1"})).is_ok(), "the distance shows on the canvas");
+    type_into(&mut h, "dialog:Distance 1", "8 mm");
+    assert!((place(&h).x - 28.0).abs() < 1e-6, "the hole moved 8 mm from the plane: {:?}", place(&h));
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::Hole { position, references, .. } = &f.kind else { panic!("the last feature is a hole") };
+    // The face pick is a hair off the whole millimetre, as a real pick is.
+    assert!(position.0.dist(Vec3::new(28.0, 25.0, 10.0)) < 1e-3, "{position:?}");
+    assert!(references.iter().all(|r| r.datum.is_some()), "{references:?}");
+    assert!(!solid_at(&h, Vec3::new(28.0, 25.0, 8.0)) && solid_at(&h, Vec3::new(34.0, 25.0, 8.0)), "drilled 8 mm from the plane");
+    // Edit Feature picks the plane again.
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": f.id}})).unwrap();
+    h.frames(4);
+    let again = h.app.dialog.as_ref().and_then(|d| d.inputs.iter().find(|i| i.label == "Reference 1")).and_then(|i| i.items.first()).cloned();
+    assert!(matches!(&again, Some(Sel::Plane { name }) if name == "Mid"), "{again:?}");
+    // An axis: the Y axis lies along the edge x = 0 of the top face.
+    set(&mut h, "Reference 1", Sel::Axis { name: "Y".into() });
+    type_into(&mut h, "dialog:Distance 1", "6 mm");
+    assert!((place(&h).x - 6.0).abs() < 1e-6, "the hole moved 6 mm from the axis: {:?}", place(&h));
+}
+
 /// #10693: a measured distance reads at the document's precision, while OK still sends the
 /// measured value, not the rounded one.
 #[test]
