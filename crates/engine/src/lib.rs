@@ -244,12 +244,24 @@ impl ForeignCopy {
     }
 }
 
+/// A sheet-sketch editing entry. Its owner is never a model feature id.
+/// Original geometry is only the cancel boundary; Session keeps the one undo history.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetSketchEdit {
+    pub drawing: u64,
+    pub sheet: u64,
+    pub sketch: u64,
+    pub(crate) original: Option<Arc<solidcraft_doc::drawing::SheetSketch>>,
+}
+
 /// One undo step.
 #[derive(Clone, Debug)]
 pub struct Snapshot {
     pub label: String,
     pub doc: Arc<Document>,
     pub active_sketch: Option<u64>,
+    /// Explicitly owned sheet edit, independent of the model sketch being edited.
+    pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     /// What was hidden or shown then (`browser.visibility`). It is saved with the design, so
     /// hiding a body is undone and redone like any other change.
@@ -267,6 +279,7 @@ impl Snapshot {
             label: label.to_string(),
             doc: s.doc.clone(),
             active_sketch: s.active_sketch,
+            active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: s.pending_moves.clone(),
             visibility: s.visibility.clone(),
             part: None,
@@ -404,6 +417,10 @@ impl ComputedCommands {
     }
 }
 
+/// Only redo owners relevant to a scratch's parent. Keys are fixed when the scratch
+/// is made; they do not grow as unrelated drawings are edited or history is evicted.
+type RedoWatch = std::collections::BTreeMap<Option<u64>, bool>;
+
 /// An editing session on one design.
 /// Starts an upload of a file (its name, its bytes) to EasyPrint and returns at once; the host
 /// reports how it went and opens the answer itself. `Err`: it couldn't start.
@@ -414,8 +431,13 @@ pub struct Session {
     pub model: Model,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
+    /// Scratch-only owner provenance, independent of the bounded undo vector.
+    /// Ordinary sessions keep None; adoption never installs a child's watch map.
+    redo_watch: Option<RedoWatch>,
     /// Sketch feature being edited (sketch mode).
     pub active_sketch: Option<u64>,
+    /// Explicitly owned sheet edit, independent of the model sketch being edited.
+    pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     /// The drawing open (by id): drawing commands change it, and the model's wait until it is
     /// closed ([`cmd::Part`]).
     pub open_drawing: Option<u64>,
@@ -570,11 +592,14 @@ pub(crate) struct Checkpoint {
     pub id: u64,
     pub doc: Arc<Document>,
     pub active_sketch: Option<u64>,
+    /// Explicitly owned sheet edit, independent of the model sketch being edited.
+    pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     pub open_drawing: Option<u64>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     pub visibility: Visibility,
     pub undo: Vec<Snapshot>,
     pub redo: Vec<Snapshot>,
+    redo_watch: Option<RedoWatch>,
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -664,7 +689,9 @@ impl Session {
             model,
             undo: Vec::new(),
             redo: Vec::new(),
+            redo_watch: None,
             active_sketch: None,
+            active_sheet_sketch: None,
             open_drawing: None,
             sketch_entry: None,
             feature_edit_sketch: None,
@@ -746,6 +773,9 @@ impl Session {
         // next frame, so commands sent right after `doc.open` or `file.new` are kept.
         let crash_journal = self.crash_journal;
         let replacements = self.replacements.wrapping_add(1);
+        let previous_doc = self.doc.clone();
+        let hidden = self.visibility != fresh.visibility;
+        let redo_watch = self.redo_watch.take();
         *self = fresh;
         self.crash_journal = crash_journal;
         self.auto_project = auto_project;
@@ -758,6 +788,8 @@ impl Session {
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
         self.ids = ids;
+        self.redo_watch = redo_watch;
+        self.note_redo_changes(&previous_doc, hidden);
     }
 
     /// Object ids from `seed` from here on, as a replay of a session whose ids stood there
@@ -849,6 +881,20 @@ impl Session {
         }
         self.render_viewport = viewport.map(Arc::new);
         Ok(())
+    }
+
+    /// An undo or document replacement cannot leave an edit aimed at another owner.
+    pub(crate) fn prune_sheet_sketch_edit(&mut self) {
+        if self.active_sheet_sketch.as_ref().is_some_and(|entry| {
+            self.open_drawing != Some(entry.drawing)
+                || self
+                    .doc
+                    .drawing(entry.drawing)
+                    .and_then(|drawing| drawing.sheet_sketch(entry.sketch))
+                    .is_none_or(|record| record.sheet != entry.sheet)
+        }) {
+            self.active_sheet_sketch = None;
+        }
     }
 
     /// The design as its current file holds it: what is hidden, what its dimensions last read and
@@ -1022,6 +1068,7 @@ impl Session {
         }
         self.revision += 1;
         self.prune_occurrence_state();
+        self.prune_sheet_sketch_edit();
         // Joints follow the geometry their origins snap to.
         if !self.doc.assembly.joints.is_empty() {
             // A solve that moves parts changes what features reading where a part is placed
@@ -1326,16 +1373,25 @@ impl Session {
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
+        // A disabled model command must not evaluate a stale model merely because
+        // it was tried from a drawing. Shared sheet tools read only drawing data.
+        if self.open_drawing.is_some() {
+            spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
+        }
+        let reads_model = spec.reads_model && !(self.open_drawing.is_some() && spec.part == cmd::Part::Sketch);
         if live.is_none() {
             self.live_links = None;
-            if spec.reads_model && self.model.is_stale() {
+            if reads_model && self.model.is_stale() {
                 self.refresh();
             }
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         let open_drawing = self.open_drawing;
-        let before =
-            Snapshot { part: open_drawing.filter(|_| matches!(spec.part, cmd::Part::Drawing | cmd::Part::Open)), ..Snapshot::of(self, spec.label) };
+        let redo_watch_before = self.redo_watch.clone();
+        let before = Snapshot {
+            part: open_drawing.filter(|_| matches!(spec.part, cmd::Part::Drawing | cmd::Part::Open | cmd::Part::Sketch)),
+            ..Snapshot::of(self, spec.label)
+        };
         let ids = self.ids.clone();
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
@@ -1407,6 +1463,7 @@ impl Session {
             // Commands that only read leave no trace (the journal keeps what a replay needs).
             let changed = !Arc::ptr_eq(&self.doc, &before.doc)
                 || self.active_sketch != before.active_sketch
+                || self.active_sheet_sketch != before.active_sheet_sketch
                 || self.pending_moves != before.pending_moves
                 || self.open_drawing != open_drawing
                 || self.active_component != active_before.0
@@ -1462,19 +1519,35 @@ impl Session {
                     if pin {
                         self.pin_body_names();
                     }
+                    // Checkpoint restoration restores matching provenance with history;
+                    // its rollback delta must not re-mark the reverted owners.
+                    if spec.id != "edit.restore_checkpoint" {
+                        self.note_redo_changes(&previous_doc, hidden);
+                    }
                 }
                 Ok(v)
             }
             Err(e) => {
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
+                self.redo_watch = redo_watch_before;
                 self.open_drawing = open_drawing;
+                self.active_sheet_sketch = before.active_sheet_sketch.clone();
                 if changed || hidden || self.pending_moves != before.pending_moves {
+                    // A refused sheet edit can have published its candidate before a later
+                    // constraint-policy check. The same proof used for successful drawing
+                    // edits keeps rollback from evaluating or clearing a stale source model.
+                    let render_only = self.replacements == replacements && self.render_only_change(&before);
+                    let previous_doc = self.doc.clone();
                     self.doc = before.doc;
                     self.active_sketch = before.active_sketch;
                     self.pending_moves = before.pending_moves;
                     self.visibility = before.visibility;
-                    self.refresh();
+                    if render_only {
+                        self.refresh_render(&previous_doc);
+                    } else {
+                        self.refresh();
+                    }
                 }
                 Err(e)
             }
@@ -1512,6 +1585,18 @@ impl Session {
             return v;
         }
         let Some(out) = v.as_object_mut() else { return v };
+        if self.open_drawing.is_some() {
+            if let Some(entry) =
+                self.active_sheet_sketch.as_ref().or(before.active_sheet_sketch.as_ref()).filter(|entry| self.open_drawing == Some(entry.drawing))
+            {
+                let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
+                if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
+                    let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
+                    out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
+                }
+            }
+            return v; // never fall back to the model after a sheet cancellation
+        }
         let named = match params.get("sketch") {
             Some(Value::Number(n)) => self.doc.find_feature(&n.to_string()).map(|f| f.id),
             Some(Value::String(x)) => self.doc.find_feature(x).map(|f| f.id),
@@ -1533,11 +1618,13 @@ impl Session {
             id,
             doc: self.doc.clone(),
             active_sketch: self.active_sketch,
+            active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
             undo: self.undo.clone(),
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
             redo: self.redo.clone(),
+            redo_watch: self.redo_watch.clone(),
         });
         if self.checkpoints.len() > MAX_CHECKPOINTS {
             self.checkpoints.remove(0);
@@ -1553,12 +1640,15 @@ impl Session {
         let before = Snapshot::of(self, "");
         self.doc = c.doc;
         self.active_sketch = c.active_sketch;
+        self.active_sheet_sketch = c.active_sheet_sketch;
         self.open_drawing = c.open_drawing;
         self.pending_moves = c.pending_moves;
         self.visibility = c.visibility;
         self.undo = c.undo;
         self.redo = c.redo;
+        self.redo_watch = c.redo_watch;
         self.selection.clear();
+        self.prune_sheet_sketch_edit();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
         } else if self.visibility_only_change(&before) {
@@ -1579,12 +1669,18 @@ impl Session {
     /// A scratch copy of the session (same design and model, no history or log) to try
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
+        let mut redo_watch: RedoWatch = self.redo_watch.as_ref().map(|watch| watch.keys().map(|part| (*part, false)).collect()).unwrap_or_default();
+        for step in &self.redo {
+            redo_watch.entry(step.part).or_insert(false);
+        }
         Session {
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
             redo: Vec::new(),
+            redo_watch: Some(redo_watch),
             active_sketch: self.active_sketch,
+            active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
             sketch_entry: None,
             feature_edit_sketch: self.feature_edit_sketch,
@@ -1701,10 +1797,14 @@ impl Session {
         for (id, params) in commands {
             let before = computed.doc.clone();
             let active_sketch = computed.active_sketch;
+            let active_sheet_sketch = computed.active_sheet_sketch.clone();
+            let open_drawing = computed.open_drawing;
             let pending_moves = computed.pending_moves.clone();
             let reply = computed.execute(id, params)?;
             let changed = !Arc::ptr_eq(&before, &computed.doc)
                 || active_sketch != computed.active_sketch
+                || active_sheet_sketch != computed.active_sheet_sketch
+                || open_drawing != computed.open_drawing
                 || pending_moves != computed.pending_moves
                 || id.starts_with("select.");
             steps.push(ComputedCommand { id: id.clone(), params: params.clone(), before, after: computed.doc.clone(), changed, reply });
@@ -1741,11 +1841,14 @@ impl Session {
 
     fn same_document_context(&self, source: &Session) -> bool {
         Arc::ptr_eq(&self.doc, &source.doc)
+            && self.ids.seed() == source.ids.seed()
             && self
                 .revision
                 .checked_sub(source.revision)
                 .is_some_and(|delta| self.visibility_revision.checked_sub(source.visibility_revision) == Some(delta))
             && self.active_sketch == source.active_sketch
+            && self.active_sheet_sketch == source.active_sheet_sketch
+            && self.open_drawing == source.open_drawing
             && self.active_component == source.active_component
             && self.active_occurrence_path == source.active_occurrence_path
             && self.pending_moves == source.pending_moves
@@ -1763,10 +1866,15 @@ impl Session {
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
+        let redo_watch = self.redo_watch.clone();
+        let ids = self.ids.clone();
         original.visibility.hidden_joints.clear();
         self.accept_computed(original);
         self.undo = undo;
         self.redo = redo;
+        // Cancelling the editor restores its history, not a newly edited branch.
+        self.redo_watch = redo_watch;
+        self.ids = ids;
         self.selection = selection;
         Ok(())
     }
@@ -1801,10 +1909,40 @@ impl Session {
         self.model.unprime();
     }
 
+    /// Retain scratch provenance for relevant owners even after MAX_UNDO eviction.
+    /// Drawing undo/redo and lifecycle commands cannot be classified by their
+    /// generic CommandSpec part, so inspect the actual drawing/model delta.
+    /// Visibility belongs to the model history even when the document is unchanged.
+    fn note_redo_changes(&mut self, previous: &Document, hidden: bool) {
+        let Some(watch) = &mut self.redo_watch else { return };
+        let model_changed = watch.get(&None) == Some(&false)
+            && (hidden
+                || self.doc.drawings.len() != previous.drawings.len()
+                || previous.drawings.iter().any(|drawing| self.doc.drawing(drawing.id).is_none())
+                || (!self.doc.differs_only_in_drawings(previous) && *self.doc != *previous));
+        for (part, touched) in watch {
+            if !*touched {
+                *touched = match part {
+                    None => model_changed,
+                    Some(id) => match (self.doc.drawing(*id), previous.drawing(*id)) {
+                        (Some(after), Some(before)) => !Arc::ptr_eq(after, before),
+                        (None, None) => false,
+                        _ => true,
+                    },
+                };
+            }
+        }
+    }
+
     /// Commit commands evaluated on a scratch copy without losing this session's file,
     /// saved state, view state, checkpoints or earlier undo steps.
     pub fn accept_computed(&mut self, mut computed: Session) {
         let previous_revision = self.revision;
+        // Audited direct-mutation callers edit one current owner without commands.
+        // Command provenance takes precedence if nested tools erased their history.
+        let tracked = computed.redo_watch.as_ref().is_some_and(|watch| watch.values().any(|touched| *touched));
+        let implicit_part = (computed.undo.is_empty() && computed.redo.is_empty() && !tracked && !Arc::ptr_eq(&self.doc, &computed.doc))
+            .then_some(computed.open_drawing);
         // The first computed step starts from this document. Its undo must restore the view
         // at acceptance, including a body hidden while the computation was running.
         if let Some(before) = computed.undo.first_mut()
@@ -1818,14 +1956,32 @@ impl Session {
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
         self.body_renames = computed.body_renames;
         self.doc = computed.doc;
+        self.ids = computed.ids;
         self.model = computed.model;
         self.world_cache = computed.world_cache;
+        let replaces = |part| {
+            Some(part) == implicit_part
+                || computed.redo_watch.as_ref().and_then(|watch| watch.get(&part)).copied().unwrap_or(false)
+                || computed.undo.iter().chain(&computed.redo).any(|edit| edit.part == part)
+        };
+        self.redo.retain(|step| !replaces(step.part));
+        if let Some(watch) = &mut self.redo_watch {
+            // Propagate only this parent's already-watched keys. Child-local redo
+            // owners do not turn this into a growing, lifetime edit log.
+            for (part, touched) in watch {
+                *touched |= replaces(*part);
+            }
+        }
+        self.redo.append(&mut computed.redo);
         self.undo.append(&mut computed.undo);
         if self.undo.len() > MAX_UNDO {
             self.undo.drain(..self.undo.len() - MAX_UNDO);
         }
-        self.redo = computed.redo;
         self.active_sketch = computed.active_sketch;
+        self.active_sheet_sketch = computed.active_sheet_sketch;
+        self.open_drawing = computed.open_drawing;
+        self.prune_sheet_sketch_edit();
+        drawing_scene::forget_closed(self);
         self.selection = computed.selection;
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);

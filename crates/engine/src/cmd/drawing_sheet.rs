@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+             balloons, and the images and sheet sketches on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -102,11 +102,16 @@ fn listed(on: &OnSheet) -> String {
         let s = if list.len() == 1 { "" } else { "s" };
         (!list.is_empty()).then(|| format!("{} {what}{s} ({})", list.len(), named(list)))
     };
-    let mut kinds: Vec<String> =
-        [kind("view", &on.views), kind("dimension", &on.dimensions), kind("balloon", &on.balloons), kind("image", &on.images)]
-            .into_iter()
-            .flatten()
-            .collect();
+    let mut kinds: Vec<String> = [
+        kind("view", &on.views),
+        kind("dimension", &on.dimensions),
+        kind("balloon", &on.balloons),
+        kind("image", &on.images),
+        kind("sheet sketch", &on.sketches),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let last = kinds.pop().unwrap_or_default();
     if kinds.is_empty() { last } else { format!("{} and {last}", kinds.join(", ")) }
 }
@@ -253,12 +258,16 @@ pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.delete";
     let with_contents = contents_delete(cmd, p, "the sheet goes with everything on it")?;
+    let editing = s.active_sheet_sketch.clone();
     s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         if d.sheets.len() <= 1 {
             return Err(bad(cmd, "a drawing keeps at least one sheet"));
         }
         let Some(sheet) = d.sheets.get(at).cloned() else { return Ok(()) };
+        if editing.as_ref().is_some_and(|entry| entry.drawing == d.id && entry.sheet == sheet.id) {
+            return Err(bad(cmd, "finish or cancel the sheet sketch before deleting its sheet"));
+        }
         let on = d.on_sheet(sheet.id);
         if !on.is_empty() && !with_contents {
             let what = listed(&on);

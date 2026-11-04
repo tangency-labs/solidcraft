@@ -23,6 +23,15 @@ fn scene_svg(s: &Session, sheet: u64) -> Vec<u8> {
     solidcraft_io::paper::paper_svg(&built.scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap().0
 }
 
+fn sheet_sketch(s: &mut Session, sheet: u64, commands: &[(&str, Value)]) -> u64 {
+    let made = run(s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}));
+    for (command, params) in commands {
+        run(s, command, params.clone());
+    }
+    run(s, "sketch.finish", json!({}));
+    ids::decode(made["sketch"].as_str().unwrap()).unwrap()
+}
+
 /// A sheet exports as its scene's SVG, byte for byte, by id or by name: the reply holds it, with
 /// its size and each view's status, as its schema says. Nothing changes and no model is evaluated.
 #[test]
@@ -155,4 +164,132 @@ fn a_shaded_views_picture_follows_the_parts_colour() {
     let red = coloured(&mut s, "#ff0000");
     assert_ne!(red, coloured(&mut s, "#0000ff"), "the colour shows in the picture");
     assert_eq!(red, coloured(&mut s, "#ff0000"));
+}
+
+#[test]
+fn sheet_sketch_statuses_and_supported_strokes_reach_the_export() {
+    let (mut s, sheet, _) = front_and_top();
+    let sketch = sheet_sketch(
+        &mut s,
+        sheet,
+        &[
+            ("sketch.line", json!({"points": [[15,10],[55,10]], "infer": false})),
+            ("sketch.circle.center", json!({"center": [80,30], "radius": 5})),
+            ("sketch.spline.fit_point", json!({"points": [[100,10],[102,12],[104,10]], "connect": false})),
+            ("sketch.conic", json!({"start": [120,10], "end": [140,10], "apex": [130,30], "rho": 0.5, "connect": false})),
+        ],
+    );
+    let (doc, model, evaluations, undo, redo) = (s.doc.clone(), s.model.state(), s.evaluations, s.undo.len(), s.redo.len());
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let expected = json!([{"sketch": ids::encode(sketch), "status": "drawn"}]);
+    assert_eq!(scene["sketches"], expected);
+    let scene_schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    assert!(conforms(scene_schema.as_value(), scene_schema.as_value(), &scene), "{scene}");
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let export_schema = output_schema_for::<ExportResult>();
+    assert!(conforms(export_schema.as_value(), export_schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["sketches"], expected);
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+    assert!(reply["svg"].as_str().unwrap().contains("data-kind=\"sketch\""));
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
+}
+
+#[test]
+fn failed_sheet_sketches_are_named_before_any_file_is_written() {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    let good = sheet_sketch(&mut s, sheet, &[("sketch.line", json!({"points": [[15,10],[55,10]], "infer": false}))]);
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}));
+    let bad = made["sketch"].as_str().unwrap().to_string();
+    let line = run(&mut s, "sketch.line", json!({"points": [[20,30],[60,30]], "infer": false}));
+    run(&mut s, "sketch.centerline", json!({"curves": line["curves"], "value": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let statuses = scene["sketches"].as_array().unwrap();
+    assert_eq!(statuses.len(), 2);
+    assert!(statuses.iter().any(|s| s["sketch"] == ids::encode(good) && s["status"] == "drawn"));
+    let failed = statuses.iter().find(|s| s["sketch"] == bad).unwrap();
+    assert_eq!(failed["status"], "failed");
+    assert!(failed["reason"].as_str().unwrap().contains("centerline"));
+    let schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &scene), "{scene}");
+    let mut extra = scene.clone();
+    extra["sketches"][0]["unexpected"] = json!(true);
+    assert!(!conforms(schema.as_value(), schema.as_value(), &extra), "{extra}");
+    let mut wrong_status = scene.clone();
+    wrong_status["sketches"][0]["status"] = json!("placeholder");
+    assert!(!conforms(schema.as_value(), schema.as_value(), &wrong_status), "{wrong_status}");
+    let folder = Folder::new("drawing-export-sketch-failed");
+    let missing = folder.path("new.svg");
+    let existing = folder.path("existing.svg");
+    std::fs::write(&existing, b"existing drawing bytes").unwrap();
+    let (doc, evaluations, undo, redo) = (s.doc.clone(), s.evaluations, s.undo.len(), s.redo.len());
+    for path in [&missing, &existing] {
+        let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
+        assert!(why.contains(&format!("sketches on the sheet failed: {bad} (")) && why.contains("centerline"), "{why}");
+        assert!(!why.contains(&ids::encode(good)), "{why}");
+    }
+    assert!(!std::path::Path::new(&missing).exists());
+    assert_eq!(std::fs::read(&existing).unwrap(), b"existing drawing bytes");
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
+    let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": missing}));
+    assert!(why.contains(&format!("views on the sheet failed: {} (", ids::encode(top))), "{why}");
+    assert!(why.contains(&format!("sketches on the sheet failed: {bad} (")), "{why}");
+    assert!(!std::path::Path::new(&missing).exists());
+}
+
+#[test]
+fn exact_sheet_freeforms_match_the_scene_schema_and_export_via_shared_grid() {
+    let (mut s, sheet, _) = front_and_top();
+    let sketch = sheet_sketch(
+        &mut s,
+        sheet,
+        &[
+            ("sketch.line", json!({"points": [[15,10],[55,10]], "infer": false})),
+            ("sketch.circle.center", json!({"center": [80,30], "radius": 5})),
+            ("sketch.ellipse", json!({"center": [110,30], "major": [120,30], "minor_radius": 5})),
+            ("sketch.spline.fit_point", json!({"points": [[140,10],[142,12],[144,10]], "connect": false})),
+            ("sketch.conic", json!({"start": [160,10], "end": [180,10], "apex": [170,30], "rho": 0.4, "connect": false})),
+            ("sketch.spline.control_point_5", json!({"points": [[200,10],[210,30],[220,35],[230,35],[240,30],[250,10]], "connect": false})),
+        ],
+    );
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &scene), "{scene}");
+    assert_eq!(scene["sketches"], json!([{"sketch": ids::encode(sketch), "status": "drawn"}]));
+    let group = scene["scene"]["groups"].as_array().unwrap().iter().find(|g| g["object"] == sketch).unwrap();
+    assert_eq!(group["items"].as_array().unwrap().len(), 6, "every authored printable curve stays in the scene");
+    let types: std::collections::BTreeSet<&str> = group["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|item| item["path"].as_array().unwrap())
+        .map(|segment| segment["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, ["arc", "bezier", "conic", "cubic", "line"].into_iter().collect::<std::collections::BTreeSet<_>>());
+    // A3b now admits these exact primitives through the one shared export grid.
+    // The scene still owns every original curve; the command must write that scene.
+    let folder = Folder::new("drawing-export-exact-supported");
+    let missing = folder.path("new.svg");
+    let existing = folder.path("existing.svg");
+    std::fs::write(&existing, b"existing exact drawing").unwrap();
+    let (doc, model, evaluations, undo, redo) = (s.doc.clone(), s.model.state(), s.evaluations, s.undo.len(), s.redo.len());
+    let expected = scene_svg(&s, sheet);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(expected.as_slice()));
+    assert_eq!(reply["sketches"], scene["sketches"]);
+    let svg_text = std::str::from_utf8(&expected).unwrap();
+    let sketch_svg = svg_text.split(&format!("<g data-object=\"{sketch}\" data-kind=\"sketch\">")).nth(1).unwrap().split("</g>").next().unwrap();
+    assert_eq!(sketch_svg.matches("<path ").count(), 6, "all six original curves reach the file");
+    assert!(sketch_svg.contains('C'), "freeforms are written as shared-grid cubic paths");
+    for path in [&missing, &existing] {
+        let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "path": path}));
+        assert_eq!(reply["bytes"].as_u64(), Some(expected.len() as u64));
+        assert_eq!(reply["sketches"], scene["sketches"]);
+        assert_eq!(std::fs::read(path).unwrap(), expected, "new and existing destinations receive the complete same scene");
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
 }

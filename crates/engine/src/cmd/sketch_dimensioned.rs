@@ -60,16 +60,23 @@ fn wanted<'a>(roles: &[&'a str], given: &'a Map<String, Value>, as_drawn: bool) 
 
 pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.draw.dimensioned";
+    let on_sheet = s.open_drawing.is_some();
     let create = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name a supported sketch creator"))?;
     let roles = dimension_roles(create).ok_or_else(|| bad(cmd, "unsupported sketch creator"))?;
     let as_drawn = bool_(p, "as_drawn").unwrap_or(false);
     let locate = bool_(p, "locate").unwrap_or(false);
+    if on_sheet && (as_drawn || locate) {
+        return Err(bad(cmd, "not supported yet: automatic dimensions and origin location in a sheet sketch; provide explicit dimensions"));
+    }
     let mut params = p.get("params").filter(|v| v.is_object()).cloned().ok_or_else(|| bad(cmd, "`params` must be an object"))?;
     let none = Map::new();
     let dimensions = match p.get("dimensions") {
         None if as_drawn || locate => &none,
         given => given.and_then(Value::as_object).ok_or_else(|| bad(cmd, "`dimensions` must be an object"))?,
     };
+    if on_sheet {
+        super::super::sketch_store::sheet_target(s, &params, cmd)?;
+    }
     if dimensions.len() > roles.len() || dimensions.keys().any(|key| !roles.contains(&key.as_str())) {
         return Err(bad(cmd, "unsupported dimension role for this creator"));
     }
@@ -85,12 +92,15 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         let kind = if role == "angle" || role == "sweep" { Kind::Angle } else { Kind::Length };
         // `name = expression` is checked by its right-hand side, read as the user parameter
         // `sketch.dimension` defines will hold it (a bare number in the design's unit) (#7567).
+        if on_sheet && definition(&e).is_some() {
+            return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+        }
         let rhs = match definition(&e) {
             Some((name, "")) => return Err(bad(cmd, format!("{role}: `{name} =` needs a value after the `=`"))),
             Some((_, rhs)) => rhs,
             None => e.as_str(),
         };
-        let evaluated = s.doc.eval(&s.doc.with_design_unit(rhs, kind), kind)?;
+        let evaluated = if on_sheet { s.doc.eval(rhs, kind)? } else { s.doc.eval(&s.doc.with_design_unit(rhs, kind), kind)? };
         if role == "length" {
             overall_length = Some(evaluated);
         }
@@ -176,7 +186,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
             // typed `name = expression` defines the parameter `name` (the reply's `defined`).
             Some(value) => {
                 dimension["value"] = value.clone();
-                dimension["if_redundant"] = json!("driven");
+                if !on_sheet {
+                    dimension["if_redundant"] = json!("driven");
+                }
                 let result = scratch.execute("sketch.dimension", &dimension)?;
                 if let Some(name) = result.get("defined").filter(|v| v.is_string()) {
                     defined.push(name.clone());

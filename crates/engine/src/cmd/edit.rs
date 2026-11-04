@@ -153,7 +153,7 @@ fn nothing(s: &Session, what: &str) -> EngineError {
 fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     let was = Snapshot { part: snap.part, ..Snapshot::of(s, &snap.label) };
     let snap = match snap.part {
-        Some(id) => Snapshot { doc: drawing_from(&s.doc, &snap.doc, id), ..was.clone() },
+        Some(id) => Snapshot { doc: drawing_from(&s.doc, &snap.doc, id), active_sheet_sketch: snap.active_sheet_sketch.clone(), ..was.clone() },
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
     };
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
@@ -162,6 +162,8 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     let display_only = same && !moved && s.visibility != snap.visibility;
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
+    s.active_sheet_sketch = snap.active_sheet_sketch;
+    s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
     s.selection.clear();

@@ -65,6 +65,7 @@ pub mod drawing_image;
 pub mod drawing_revision;
 pub mod drawing_scene;
 pub mod drawing_sheet;
+pub mod drawing_sketch;
 pub mod drawing_view;
 pub mod edit;
 pub mod features;

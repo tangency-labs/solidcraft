@@ -43,6 +43,17 @@ pub(super) fn read(doc: &Document, id: u64) -> Result<&Sketch> {
     Ok(doc.sketch(id)?)
 }
 
+/// Read the selected sketch for a command that needs an owned preflight before editing.
+/// Sheet identities are resolved against the open Drawing, never the model feature ids;
+/// resolving paper expressions and solving here does not publish either document.
+pub(super) fn read_for_command(s: &Session, p: &Value, cmd: &str) -> Result<Sketch> {
+    if s.open_drawing.is_some() {
+        let entry = sheet_target(s, p, cmd)?;
+        return Ok(s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?.sketch);
+    }
+    Ok(read(&s.doc, target(s, p, cmd)?)?.clone())
+}
+
 /// Keep `sk` as sketch `id`.
 pub(super) fn write(doc: &mut Document, id: u64, sk: Sketch) -> Result<()> {
     *doc.sketch_mut(id)? = sk;
@@ -64,6 +75,73 @@ pub(super) fn update<T>(s: &mut Session, id: u64, f: impl FnOnce(&Session, &Docu
 pub(super) fn checked(sk: &Sketch) -> Result<()> {
     sk.validate_periodic_splines()?;
     Ok(())
+}
+
+/// The exact active sheet target, checked before a shared tool reads or edits it.
+/// A number/string can confirm that target; it never selects a model or another sheet.
+pub(super) fn sheet_target(s: &Session, p: &Value, cmd: &str) -> Result<std::sync::Arc<crate::SheetSketchEdit>> {
+    let entry = s.active_sheet_sketch.as_ref().ok_or_else(|| bad(cmd, "no sheet sketch is being edited"))?;
+    if s.open_drawing != Some(entry.drawing) {
+        return Err(bad(cmd, "the edited sketch does not belong to the open drawing"));
+    }
+    let mut owners = s.doc.drawings.iter().filter(|drawing| drawing.id == entry.drawing);
+    let owner = owners.next().ok_or_else(|| bad(cmd, "the edited drawing no longer exists"))?;
+    if owners.next().is_some() {
+        return Err(bad(cmd, "the edited drawing id is ambiguous"));
+    }
+    // Target selection checks identity, not every payload. Staging checks the
+    // candidate before solving; edit_drawing validates the whole publication.
+    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1
+        || owner.sheets.iter().filter(|sheet| sheet.id == entry.sheet).count() != 1
+    {
+        return Err(bad(cmd, "the edited sketch or sheet id is missing or ambiguous"));
+    }
+    let record = owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?;
+    if record.sheet != entry.sheet {
+        return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+    }
+    if let Some(given) = p.get("sketch").filter(|value| !value.is_null()) {
+        let target = match given {
+            Value::Number(number) => number.as_u64(),
+            Value::String(text) => solidcraft_doc::ids::decode(text),
+            _ => None,
+        }
+        .ok_or_else(|| bad(cmd, "a sheet sketch target must be its exact id"))?;
+        if target != entry.sketch {
+            return Err(bad(cmd, "finish or cancel before selecting a different sheet sketch"));
+        }
+    }
+    Ok(entry.clone())
+}
+
+/// Apply an existing geometry tool through R2. The legacy callback may read its
+/// Document, but any attempted source mutation is refused before publication.
+/// This is the sheet receiver of this store, not a second store or solver.
+pub(super) fn edit_sheet<T>(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    change: impl FnOnce(&mut Sketch, &mut Document) -> Result<T>,
+) -> Result<(T, Value)> {
+    let entry = sheet_target(s, p, cmd)?;
+    let design = s.doc.clone();
+    let mut candidate = s.drawing(cmd)?.solve_sheet_sketch(&design, entry.sketch)?.sketch;
+    let mut source = (*design).clone();
+    let out = change(&mut candidate, &mut source)?;
+    if source != *design {
+        return Err(bad(cmd, "a sheet sketch cannot change the source design or its parameters"));
+    }
+    let solved = s.edit_drawing(cmd, |drawing| {
+        let (_, solved) = drawing.edit_sheet_sketch(&design, entry.sketch, |sketch| {
+            *sketch = candidate;
+            Ok(())
+        })?;
+        if solved.sheet != entry.sheet {
+            return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+        }
+        Ok(solved)
+    })?;
+    Ok((out, super::sketch::report_json(&solved.report)))
 }
 
 #[cfg(test)]

@@ -151,6 +151,8 @@ pub enum ObjectKind {
     View,
     /// A dimension's lines and arrowheads.
     Dimension,
+    /// A sheet-owned sketch's printable curves.
+    Sketch,
 }
 
 impl ObjectKind {
@@ -166,6 +168,7 @@ impl ObjectKind {
             ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
+            ObjectKind::Sketch => "SKETCH",
         }
     }
 }
