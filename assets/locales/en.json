@@ -2040,6 +2040,8 @@
   "nav.blender.help": "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
   "nav.creo.help": "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
   "nav.creo.label": "Creo",
+  "nav.drag_keeps_mode.help": "A middle or right drag goes on orbiting, panning or zooming as it began until the button is released, whatever keys are pressed or let go meanwhile. Off: the keys held decide at every moment of the drag.",
+  "nav.drag_keeps_mode.label": "A drag keeps the navigation it started with",
   "nav.free_orbit.help": "Mouse and 3D mouse rotate through both poles and preserve roll. Shift axis snapping is disabled.",
   "nav.free_orbit.label": "Free orbit",
   "nav.free_orbit.snap_help": "Mouse and 3D mouse rotate through both poles and preserve roll. Hold Shift during an orbit drag to snap the view direction and roll.",

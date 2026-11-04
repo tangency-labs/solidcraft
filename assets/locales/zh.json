@@ -2040,6 +2040,8 @@
   "nav.blender.help": "中键拖动旋转，Shift+中键拖动平移，Ctrl+中键拖动缩放；右键拖动不会移动相机",
   "nav.creo.help": "中键拖动旋转，Shift+中键平移，Ctrl+中键上下拖动缩放（向下放大）；滚动滚轮也可缩放",
   "nav.creo.label": "Creo",
+  "nav.drag_keeps_mode.help": "中键或右键拖动会保持开始时的旋转、平移或缩放，直到松开按键，期间按下或松开任何键都不会改变。关闭后：拖动的每一刻都由当时按住的键决定。",
+  "nav.drag_keeps_mode.label": "拖动保持开始时的导航方式",
   "nav.free_orbit.help": "鼠标和3D鼠标可保持滚转并越过两个极点旋转。Shift轴吸附将被禁用。",
   "nav.free_orbit.label": "自由旋转",
   "nav.free_orbit.snap_help": "鼠标和3D鼠标可越过两极旋转，并保留画面旋转角度。在拖动环绕时按住Shift，可吸附视图方向和画面旋转角度。",
