@@ -410,6 +410,11 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// A command's icon in the Customize Toolbar list: the one its ribbon button shows right now.
+fn row_icon(app: &SolveApp, command: &CommandSpec) -> &'static str {
+    crate::render_workspace::interactive_command_info(app, command).icon
+}
+
 /// Customize Toolbar: every command of the tab's panels with a check box (on the toolbar or
 /// not) and its ribbon icon, how to drag them, and Reset Toolbar.
 pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
@@ -444,7 +449,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                             let shown = buttons(app, &tab, panel, &cmds, n);
                             for c in &cmds {
                                 let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), c.icon, &mut on);
+                                let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
                                 crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
                                 if r.changed() {
                                     changes.push((c.id, on));
@@ -470,6 +475,23 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         reset(app, &tab);
     }
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
+}
+
+#[cfg(test)]
+mod row_icon_tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A row shows the icon its ribbon button shows, also when the command's state changes it.
+    #[test]
+    fn a_row_follows_the_ribbon_icon_of_component_colors() {
+        let mut h = Harness::new();
+        let command = solidcraft_engine::find_command("inspect.colored_components").unwrap();
+        assert_eq!(row_icon(&h.app, command), "colored_components");
+        h.app.run(command.id, json!({"enabled": true})).unwrap();
+        assert_eq!(row_icon(&h.app, command), "colored_components_off");
+        assert_eq!(row_icon(&h.app, command), crate::render_workspace::interactive_command_info(&h.app, command).icon);
+    }
 }
 
 #[cfg(test)]
