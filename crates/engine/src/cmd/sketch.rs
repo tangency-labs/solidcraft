@@ -3175,10 +3175,15 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         let want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
         residual = want.map(|w| (w - cur).abs()).filter(|r| r.is_finite());
         // The first length dimension of a sketch with nothing sized yet scales it (#1365).
+        // A sketch axis can also be measured by its fixed endpoints. In that case, only use
+        // the scaled sketch if it satisfies the dimension with those endpoints left in place.
         if scale_sketch
             && !is_angle
-            && let Some(factor) = want.map(|w| w / cur).filter(|f| f.is_finite() && (f - 1.0).abs() > 1e-9)
+            && let Some(want) = want
+            && let Some(factor) = Some(want / cur).filter(|f| f.is_finite() && (f - 1.0).abs() > 1e-9)
             && let Some(big) = sk.scaled_for_first_dimension(factor)
+            && (sk.links.is_empty()
+                || solidcraft_sketch::measure_dimension(&big, &k).is_some_and(|v| (v - want).abs() <= solidcraft_sketch::CONSISTENT))
         {
             *sk = big;
             scaled = Some(factor);

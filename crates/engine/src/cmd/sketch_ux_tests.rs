@@ -1679,6 +1679,58 @@ fn the_first_dimension_scales_a_sketch_drawn_by_eye() {
 }
 
 #[test]
+fn the_first_dimension_scales_a_profile_symmetric_about_the_sketch_axis() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 20], "p1": [10, 30]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let before = sketch(&s);
+
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
+    assert_eq!(out["scaled"], 2.0, "{out}");
+    assert_eq!(out["measured"], 40.0, "{out}");
+    let after = sketch(&s);
+    for (p, q) in before.points.iter().zip(&after.points) {
+        let want = if p.fixed { p.pos } else { p.pos * 2.0 };
+        assert!(q.pos.dist(want) < 1e-6, "{}: {:?} -> {:?}, expected {want:?}", p.id, p.pos, q.pos);
+    }
+}
+
+#[test]
+fn the_first_dimension_leaves_another_profile_on_the_same_sketch_axis_alone() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 20], "p1": [10, 30]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-6, 50], "p1": [6, 65]}));
+    for [a, b] in [["l1.start", "l1.end"], ["l5.start", "l5.end"]] {
+        run(&mut s, "sketch.constraint.symmetry", json!({"a": a, "b": b, "line": "y"}));
+    }
+    let before = sketch(&s);
+
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    let after = sketch(&s);
+    // The second rectangle's four points remain at their original positions.
+    for (p, q) in before.points.iter().zip(&after.points).skip(5).take(4) {
+        assert!(q.pos.dist(p.pos) < 1e-6, "{}: {:?} -> {:?}", p.id, p.pos, q.pos);
+    }
+}
+
+#[test]
+fn the_first_dimension_measuring_to_a_sketch_axis_endpoint_uses_its_fixed_position() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, 20], "p1": [10, 30]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let before = sketch(&s);
+    let axis = before.sketch_axis_curve("y").unwrap();
+    let end = format!("{}.end", before.curves[axis].id);
+    let end_pos = pt(&s, &end);
+
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l1.start", end], "type": "vertical", "value": "60 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    assert_eq!(out["measured"], 60.0, "{out}");
+    assert_eq!(pt(&s, &end), end_pos);
+}
+
+#[test]
 fn the_first_dimension_does_not_scale_a_sketch_that_has_a_size() {
     // A sketch with projected or fixed geometry, or another length dimension, already has a
     // size: its first new dimension sizes what it measures as before.
