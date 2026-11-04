@@ -3413,7 +3413,8 @@ fn a_hole_leaves_hidden_bodies_alone() {
             run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
         }
         // The name of the plate's face that is picked, before the hole takes the point away.
-        let picked = solidcraft_doc::naming::face_name_at_body(s.world_state().unwrap().body("Plate").unwrap(), solidcore_record::Vec3::new(20.0, 20.0, 0.0));
+        let picked =
+            solidcraft_doc::naming::face_name_at_body(s.world_state().unwrap().body("Plate").unwrap(), solidcore_record::Vec3::new(20.0, 20.0, 0.0));
         let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 10, "name": "Hole1"})).unwrap();
         (s, r, picked)
     };
