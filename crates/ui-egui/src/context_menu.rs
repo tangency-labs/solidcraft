@@ -2295,11 +2295,13 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::EditSketch
         | Target::VisualStyle
         | Target::ViewTool
+        | Target::SelectionFilter
         | Target::Navigation
         | Target::Toolbar
         | Target::HistoryControls
         | Target::Workspace
-        | Target::NamedViews => true,
+        | Target::NamedViews
+        | Target::ViewGizmo => true,
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
         Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
         // Construction geometry, as the browser's Construction folder lists it.
