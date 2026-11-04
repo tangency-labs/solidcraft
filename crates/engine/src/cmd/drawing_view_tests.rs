@@ -65,7 +65,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
         id
     };
     let front_settings =
-        ViewOverrides { scale: Some("1:2".parse().unwrap()), display_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() };
+        ViewOverrides { scale: Some("1:2".parse().unwrap()), visual_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() };
     let front = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let front = add(&mut d, front, ViewPlace::At([150.0, 150.0]), front_settings);
     let right = add(&mut d, ViewKind::Projected { parent: front, side: ProjectedSide::Right }, ViewPlace::Aligned(300.0), ViewOverrides::default());
@@ -134,7 +134,7 @@ fn inspect_says_where_each_setting_comes_from() {
         (json!("base"), json!("front"), json!({"at": [150.0, 150.0]}))
     );
     assert_eq!(base["settings"]["scale"], json!({"value": "1:2", "from": "this", "set": "1:2"}));
-    assert_eq!(base["settings"]["display_style"], json!({"value": "visible_hidden", "from": "this", "set": "visible_hidden"}));
+    assert_eq!(base["settings"]["visual_style"], json!({"value": "visible_hidden", "from": "this", "set": "visible_hidden"}));
     assert_eq!(base["settings"]["reference_style"], json!({"value": "visible", "from": "default", "set": null}));
     assert!(base.get("linked").is_none() && base.get("parent").is_none(), "a base view has no parent");
     let projected = inspect_view(&mut s, right);
@@ -149,9 +149,9 @@ fn inspect_says_where_each_setting_comes_from() {
     assert_eq!(projected["settings"]["scale"], json!({"value": "1:2", "from": "parent", "parent": front_id, "set": null}));
     assert_eq!(projected["source"], base["source"]);
     let chained = inspect_view(&mut s, top);
-    assert_eq!(chained["settings"]["display_style"], json!({"value": "visible_hidden", "from": "parent", "parent": front_id, "set": null}));
+    assert_eq!(chained["settings"]["visual_style"], json!({"value": "visible_hidden", "from": "parent", "parent": front_id, "set": null}));
     assert!(chained["direction"].get("named").is_none(), "the right view's top view is no named view: {chained}");
-    assert_eq!(chained["choices"]["display_style"].as_array().unwrap().len(), 5);
+    assert_eq!(chained["choices"]["visual_style"].as_array().unwrap().len(), 5);
     assert_eq!(chained["choices"]["scale"][0], "50:1");
     assert!(s.execute(INSPECT, &json!({"view": ids::encode(99)})).unwrap_err().to_string().contains("no view"));
 }
@@ -165,20 +165,20 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     let (mut s, [front, right, top]) = three_views();
     let evaluations = s.evaluations;
     let steps = s.undo.len();
-    let edited = edit_view(&mut s, right, json!({"display_style": "visible"}));
-    assert_eq!((edited["changed"].clone(), edited["followers"].clone()), (json!(["display_style"]), json!([ids::encode(top)])));
+    let edited = edit_view(&mut s, right, json!({"visual_style": "visible"}));
+    assert_eq!((edited["changed"].clone(), edited["followers"].clone()), (json!(["visual_style"]), json!([ids::encode(top)])));
     assert_eq!(s.undo.len(), steps + 1);
     assert_eq!(inspect_view(&mut s, right)["linked"], "partly");
-    assert_eq!(inspect_view(&mut s, top)["settings"]["display_style"]["parent"], json!(ids::encode(right)));
+    assert_eq!(inspect_view(&mut s, top)["settings"]["visual_style"]["parent"], json!(ids::encode(right)));
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(inspect_view(&mut s, right)["settings"]["display_style"]["from"], "parent");
+    assert_eq!(inspect_view(&mut s, right)["settings"]["visual_style"]["from"], "parent");
     run(&mut s, "edit.redo", json!({}));
-    assert_eq!(edit_view(&mut s, right, json!({"display_style": null}))["changed"], json!(["display_style"]));
-    assert_eq!(inspect_view(&mut s, right)["settings"]["display_style"]["from"], "parent", "null follows the parent again");
+    assert_eq!(edit_view(&mut s, right, json!({"visual_style": null}))["changed"], json!(["visual_style"]));
+    assert_eq!(inspect_view(&mut s, right)["settings"]["visual_style"]["from"], "parent", "null follows the parent again");
     // Unlinked, the display settings are its own at the values they had; linked, they follow again.
     edit_view(&mut s, right, json!({"linked": false}));
     let unlinked = inspect_view(&mut s, right);
-    assert_eq!((unlinked["linked"].clone(), unlinked["settings"]["display_style"]["set"].clone()), (json!(false), json!("visible_hidden")));
+    assert_eq!((unlinked["linked"].clone(), unlinked["settings"]["visual_style"]["set"].clone()), (json!(false), json!("visible_hidden")));
     edit_view(&mut s, right, json!({"linked": true}));
     assert_eq!(inspect_view(&mut s, right)["linked"], true);
     // A base view keeps a scale and has nothing to link to; a projected view's direction is its side's.
@@ -353,7 +353,7 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
     assert_eq!(made.kind, ViewKind::Base { source, view: ViewDirection::Named(NamedView::Right) });
     let own = ViewOverrides {
         scale: Some("1:2".parse().unwrap()),
-        display_style: Some(VisualStyle::VisibleHidden),
+        visual_style: Some(VisualStyle::VisibleHidden),
         reference_style: Some(VisualStyle::Visible),
         reference_hides_model: Some(false),
         tangent_edges: Some(Default::default()),
@@ -366,7 +366,7 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
     for (a, b) in [(was.x, is.x), (was.y, is.y), (was.origin, is.origin)] {
         assert!((a - b).len() < 1e-12, "{a:?} {b:?}");
     }
-    edit_view(&mut s, front, json!({"display_style": "visible", "scale": "1:10"}));
+    edit_view(&mut s, front, json!({"visual_style": "visible", "scale": "1:10"}));
     assert_eq!(saved(&s, of_right).settings, own, "the copy follows nothing");
 }
 
@@ -416,14 +416,14 @@ fn a_base_view_fits_its_sheet_and_saves_the_scale() {
     assert_eq!(inspect_view(&mut s, front)["settings"]["scale"], json!({"value": "2:1", "from": "this", "set": "2:1"}));
     let near_the_left = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [108, 148.5]})).0;
     assert_eq!(near_the_left["scale"]["text"], "1:1", "98 mm to the drawing border: 196 mm of room (the paper's edge would give 216)");
-    let p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:5", "position_mm": [100, 100], "display_style": "visible_hidden", "reference_shown_percent": 50});
+    let p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:5", "position_mm": [100, 100], "visual_style": "visible_hidden", "reference_shown_percent": 50});
     let (given, top) = create(&mut s, BASE, p);
     assert_eq!((given["scale"]["text"].as_str(), given["scale"]["fitted"].as_bool()), (Some("1:5"), Some(false)));
     assert_box(&given, [90.0, 95.0], [110.0, 105.0]);
     let view = saved(&s, top);
     assert_eq!(
         view.settings,
-        ViewOverrides { scale: Some("1:5".parse().unwrap()), display_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() }
+        ViewOverrides { scale: Some("1:5".parse().unwrap()), visual_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() }
     );
     assert_eq!(view.reference_shown_percent, 50.0, "it has no reference parts, so its box doesn't grow");
     let before = s.drawing("test").unwrap().views.len();
@@ -533,7 +533,7 @@ fn hostile_view_creation_is_refused() {
         base(json!({"position_mm": [5, 148.5]})),
         base(json!({"reference_shown_percent": 100.001})),
         base(json!({"reference_shown_percent": -1})),
-        base(json!({"display_style": "glossy"})),
+        base(json!({"visual_style": "glossy"})),
         base(json!({"colour": "red"})),
         base(json!({"position_mm": null})),
     ] {
@@ -666,16 +666,16 @@ fn scale_and_position_set_the_boundary_and_the_design_is_untouched() {
 #[test]
 fn a_shaded_view_has_the_picture_of_its_boundary() {
     let mut s = block();
-    let reply = snap(&mut s, json!({"display_style": "shaded", "scale": "1:2"}));
+    let reply = snap(&mut s, json!({"visual_style": "shaded", "scale": "1:2"}));
     let schema = output_schema_for::<SnapshotResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
     assert_eq!(reply["lines"], json!([]), "the block is shaded: its picture draws it");
     assert_eq!(reply["picture"]["pixels"], json!([591, 119]));
     assert_eq!(reply["picture"]["dpi"], 300.0);
     assert_eq!(reply["picture"]["rect_mm"], reply["boundary_mm"]);
-    let fine = snap(&mut s, json!({"display_style": "shaded", "scale": "1:2", "sheet": {"dpi": 1200}}));
+    let fine = snap(&mut s, json!({"visual_style": "shaded", "scale": "1:2", "sheet": {"dpi": 1200}}));
     assert_eq!(fine["picture"]["pixels"], json!([2363, 473]));
-    let finest = snap(&mut s, json!({"display_style": "shaded", "scale": "1:2", "sheet": {"dpi": 2400}}));
+    let finest = snap(&mut s, json!({"visual_style": "shaded", "scale": "1:2", "sheet": {"dpi": 2400}}));
     assert_eq!(
         (&finest["picture"]["pixels"], &finest["picture"]["dpi"], &finest["sheet"]["dpi"]),
         (&json!([2363, 473]), &json!(1200.0), &json!(2400.0))
@@ -706,7 +706,7 @@ fn a_shaded_part_leaves_out_only_its_own_lines() {
         reply["lines"].as_array().unwrap().iter().map(|l| l["body"].as_str().unwrap().to_owned()).collect()
     };
     let all = snap(&mut s, json!({}));
-    let model_shaded = snap(&mut s, json!({"display_style": "shaded"}));
+    let model_shaded = snap(&mut s, json!({"visual_style": "shaded"}));
     let references_shaded = snap(&mut s, json!({"reference_style": "shaded"}));
     assert!(!references(&model_shaded).is_empty() && references(&model_shaded).iter().all(|r| *r), "{model_shaded}");
     assert!(!references(&references_shaded).is_empty() && references(&references_shaded).iter().all(|r| !*r), "{references_shaded}");
@@ -731,9 +731,9 @@ fn hostile_snapshots_are_refused() {
         (json!({"view": {"direction": [0, 0, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [1e308, 1e308, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [0, 0, 1], "up": [0, 0, 2]}}), "along the view direction"),
-        (json!({"display_style": "shaded_visible_hidden"}), "not supported yet"),
+        (json!({"visual_style": "shaded_visible_hidden"}), "not supported yet"),
         (json!({"reference_style": "shaded_visible"}), "not supported yet: shaded views with lines need the view's exact lines (W06)"),
-        (json!({"display_style": "Shaded"}), "unknown variant"),
+        (json!({"visual_style": "Shaded"}), "unknown variant"),
         (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),
         (json!({"sheet": {"dpi": 2400.1}}), "dpi"),
@@ -841,7 +841,7 @@ fn a_views_lines_are_the_blocks_outline() {
 fn hidden_lines_are_drawn_only_when_the_style_asks() {
     let mut s = block();
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
-    let v = snap(&mut s, json!({"scale": "1:1", "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"scale": "1:1", "visual_style": "visible_hidden"}));
     assert!((drawn_length(&v, "hidden") - 40.0).abs() < 1e-6, "{v}");
     let tower = v["lines"].as_array().unwrap().iter().filter(|l| l["body"] == "Tower").count();
     assert!(tower > 0, "{v}");
@@ -909,7 +909,7 @@ fn a_pocket_behind_the_front_face_is_hidden() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
     let v = snap(&mut s, json!({"scale": "1:1"}));
     assert!(segments(&v, "hidden").is_empty() && (drawn_length(&v, "visible") - 240.0).abs() < 1e-6, "{v}");
-    let v = snap(&mut s, json!({"scale": "1:1", "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"scale": "1:1", "visual_style": "visible_hidden"}));
     assert!((drawn_length(&v, "hidden") - 100.0).abs() < 1e-6, "{v}");
     let on_pocket = |p: Vec2| {
         let inside = (190.0 - 1e-6..=230.0 + 1e-6).contains(&p.x) && (143.5 - 1e-6..=153.5 + 1e-6).contains(&p.y);
@@ -997,7 +997,7 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
             "view": view,
             "scale": scale,
             "chord_mm": chord,
-            "display_style": style,
+            "visual_style": style,
             "scene": true,
             "tangent_edges": tangent,
         });
@@ -1103,7 +1103,7 @@ fn a_hole_seen_end_on_is_its_exact_circle() {
 fn a_rim_cut_where_its_visibility_changes_stays_sampled() {
     let mut s = plate();
     run(&mut s, "solid.box", json!({"length": 30, "width": 4, "height": 2, "corner": [5, 18, 10], "body_name": "Bar", "operation": "new"}));
-    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "visual_style": "visible_hidden"}));
     let hidden = 4.0 * 0.4f64.asin();
     for (visibility, want) in [("hidden", hidden), ("visible", std::f64::consts::TAU - hidden)] {
         let rims = arcs(&v, visibility);
@@ -1182,7 +1182,7 @@ fn a_views_hidden_lines_are_dashed_strokes_under_its_outline() {
     use solidcraft_geom::paper::{Dashes, Item, Scene};
     let mut s = block();
     run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
-    let v = snap(&mut s, json!({"scale": "1:1", "scene": true, "display_style": "visible_hidden"}));
+    let v = snap(&mut s, json!({"scale": "1:1", "scene": true, "visual_style": "visible_hidden"}));
     let schema = output_schema_for::<SnapshotResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
     let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
@@ -1280,7 +1280,7 @@ fn assert_lengths(v: &Value, reference: bool, visible: f64, hidden: f64) {
 #[test]
 fn reference_lines_are_their_own_and_cover_the_model_only_when_told() {
     let view = |hides: bool| {
-        json!({"view": "top", "scale": "1:1", "display_style": "visible_hidden", "reference_style": "visible_hidden",
+        json!({"view": "top", "scale": "1:1", "visual_style": "visible_hidden", "reference_style": "visible_hidden",
                "reference_hides_model": hides, "reference_shown_percent": 100})
     };
     let (mut above, _) = plate_and_block(5.0);
@@ -1299,7 +1299,7 @@ fn reference_lines_are_their_own_and_cover_the_model_only_when_told() {
 }
 
 /// Each style asks for its own hidden lines: reference ones only with `reference_style`, the
-/// model's only with `display_style`.
+/// model's only with `visual_style`.
 #[test]
 fn each_part_of_a_view_draws_hidden_lines_by_its_own_style() {
     let (mut above, _) = plate_and_block(5.0);

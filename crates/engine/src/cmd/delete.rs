@@ -566,7 +566,7 @@ mod tests {
     fn a_drawings_objects_are_selected_without_changing_anything() {
         let (mut s, [front, right, top], dimension, balloon, drawing) = sheet_objects();
         for view in [front, right, top] {
-            run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"display_style": "visible"}}));
+            run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "visible"}}));
         }
         let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
         let svg = run(&mut s, "drawing.export", json!({"sheet": sheet}))["svg"].clone();

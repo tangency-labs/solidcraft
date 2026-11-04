@@ -217,7 +217,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None };
     let styles = Styles::from(view);
-    if let Some(why) = crate::drawing_view::not_drawable(view.display_style.value, view.reference_style.value) {
+    if let Some(why) = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value) {
         return none(Status::Failed(why.into()));
     }
     // Every body the design places, until saved views have `source` and `hide` (V4) to keep a part.
@@ -230,7 +230,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     // The margin keeps the mesh's chord at or above its floor once divided back by the factor.
     let chord_mm = CHORD_MM.max(MIN_MODEL_CHORD_MM * view.scale.value.factor() * (1.0 + 1e-9));
     let reference_hides_model = view.reference_hides_model.value;
-    let (hidden, reference_hidden) = (view.display_style.value.draws_hidden(), view.reference_style.value.draws_hidden());
+    let (hidden, reference_hidden) = (view.visual_style.value.draws_hidden(), view.reference_style.value.draws_hidden());
     let request = LineRequest { shows: around, hidden, reference_hidden, reference_hides_model, tangent_edges, chord_mm };
     let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, CMD) {
         Ok(frame) => frame,

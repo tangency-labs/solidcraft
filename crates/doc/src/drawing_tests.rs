@@ -59,7 +59,7 @@ pub(crate) fn plate() -> Drawing {
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
     let front = ViewKind::Base { source: plate_id, view: ViewDirection::Named(NamedView::Front) };
     let front = add(&mut d, assembly, front, ViewPlace::At([150.0, 150.0]), half, 0.0);
-    let hidden = ViewOverrides { display_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() };
+    let hidden = ViewOverrides { visual_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() };
     let right = ViewKind::Projected { parent: front, side: ProjectedSide::Right };
     let right = add(&mut d, assembly, right, ViewPlace::Aligned(320.0), hidden, 0.0);
     let top = ViewKind::Projected { parent: right, side: ProjectedSide::Above };

@@ -100,7 +100,7 @@ pub struct Styles {
 
 impl From<&ResolvedView> for Styles {
     fn from(view: &ResolvedView) -> Styles {
-        Styles { display: view.display_style.value, reference: view.reference_style.value, reference_hides_model: view.reference_hides_model.value }
+        Styles { display: view.visual_style.value, reference: view.reference_style.value, reference_hides_model: view.reference_hides_model.value }
     }
 }
 

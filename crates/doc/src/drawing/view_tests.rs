@@ -50,7 +50,7 @@ fn scaled(scale: &str) -> ViewOverrides {
 }
 
 fn styled(style: VisualStyle) -> ViewOverrides {
-    ViewOverrides { display_style: Some(style), ..ViewOverrides::default() }
+    ViewOverrides { visual_style: Some(style), ..ViewOverrides::default() }
 }
 
 /// The front view, its right view lined up with it and drawing hidden lines too, and the right
@@ -89,7 +89,7 @@ fn views_save_what_they_set_and_read_back_as_saved() {
         json!([
             {"id": front_id, "sheet": sheet, "kind": {"base": {"source": source, "view": "front"}}, "place": {"at": [150.0, 150.0]}, "settings": {"scale": "1:2"}},
             {"id": top_id, "sheet": sheet, "kind": {"projected": {"parent": right_id, "side": "above"}}, "place": {"at": [320.0, 250.0]}},
-            {"id": right_id, "sheet": sheet, "kind": {"projected": {"parent": front_id, "side": "right"}}, "place": {"aligned": 320.0}, "settings": {"display_style": "visible_hidden"}},
+            {"id": right_id, "sheet": sheet, "kind": {"projected": {"parent": front_id, "side": "right"}}, "place": {"aligned": 320.0}, "settings": {"visual_style": "visible_hidden"}},
         ])
     );
     let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
@@ -283,20 +283,20 @@ fn a_view_resolves_through_its_chain() {
     let right_basis = projected_basis(&NamedView::Front.basis(), ProjectedSide::Right, Projection::Third).unwrap();
     assert_eq!(resolved.basis, projected_basis(&right_basis, ProjectedSide::Above, Projection::Third).unwrap());
     assert_eq!(resolved.scale, Setting { value: "1:2".parse().unwrap(), set_by: SetBy::Parent(front) });
-    assert_eq!(resolved.display_style, Setting { value: VisualStyle::VisibleHidden, set_by: SetBy::Parent(right) });
+    assert_eq!(resolved.visual_style, Setting { value: VisualStyle::VisibleHidden, set_by: SetBy::Parent(right) });
     assert_eq!(resolved.tangent_edges, Setting { value: TangentEdges::Show, set_by: SetBy::This });
     assert_eq!(resolved.reference_style, Setting { value: VisualStyle::Visible, set_by: SetBy::Default });
     assert_eq!(resolved.reference_hides_model, Setting { value: false, set_by: SetBy::Default });
     assert_eq!(resolved.reference_shown_percent, 2.0);
     // The base view gives its own; its projected views follow the drawing's projection.
     let base = d.resolve_view(front).unwrap();
-    assert_eq!((base.basis, base.scale.set_by, base.display_style.set_by), (NamedView::Front.basis(), SetBy::This, SetBy::Default));
+    assert_eq!((base.basis, base.scale.set_by, base.visual_style.set_by), (NamedView::Front.basis(), SetBy::This, SetBy::Default));
     assert_eq!(d.resolve_view(right).unwrap().basis, NamedView::Right.basis());
     d.projection = Projection::First;
     assert_eq!(d.resolve_view(right).unwrap().basis, NamedView::Left.basis());
     // A view's own setting wins over its parent's.
-    view_mut(&mut d, top).settings.display_style = Some(VisualStyle::Visible);
-    assert_eq!(d.resolve_view(top).unwrap().display_style, Setting { value: VisualStyle::Visible, set_by: SetBy::This });
+    view_mut(&mut d, top).settings.visual_style = Some(VisualStyle::Visible);
+    assert_eq!(d.resolve_view(top).unwrap().visual_style, Setting { value: VisualStyle::Visible, set_by: SetBy::This });
     // Four quarter turns the same way bring the front view back.
     let (mut d, mut id_source, front) = self::front();
     let mut last = front;

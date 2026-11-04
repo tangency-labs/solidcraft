@@ -81,7 +81,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<SnapshotResult>)
-    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_shown_percent?: 0..100, how far the box grows from the model's towards holding its reference parts, each side on its own (0, the default: the model's box; 100: holds them all); tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet, hidden lines dashed under the visible ones; source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. measure?: up to 100 values to read on the view, each {linear: {along: x|y, from, to}}, {aligned: {from, to}} (model points), {angle: {edge: [a, b], from: horizontal|vertical|[c, d]}} or {radius: {edge}} (an edge as drawing.dimension.add takes it, which the view must see face on), with units?: mm|cm|m|in|ft (default the design's) and decimals?: 0..6 (default 2) for their labels; the reply then has measurements: [{kind, value_mm and paper_mm, or value_rad, label, meaning: projected, foreshortened, status: exact|approximate}]. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
+    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); visual_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_shown_percent?: 0..100, how far the box grows from the model's towards holding its reference parts, each side on its own (0, the default: the model's box; 100: holds them all); tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet, hidden lines dashed under the visible ones; source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. measure?: up to 100 values to read on the view, each {linear: {along: x|y, from, to}}, {aligned: {from, to}} (model points), {angle: {edge: [a, b], from: horizontal|vertical|[c, d]}} or {radius: {edge}} (an edge as drawing.dimension.add takes it, which the view must see face on), with units?: mm|cm|m|in|ft (default the design's) and decimals?: 0..6 (default 2) for their labels; the reply then has measurements: [{kind, value_mm and paper_mm, or value_rad, label, meaning: projected, foreshortened, status: exact|approximate}]. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
     CommandSpec::new(INSPECT, "Inspect Drawing View", crate::checked!("drawing.view.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -89,14 +89,14 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, display_style, reference_style, reference_hides_model, tangent_edges: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {display_style, scale}}. Read-only; no model is evaluated."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
         .doc_only()
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
-        .params("view: a saved view's id; set: {scale?, display_style?, reference_style?, reference_hides_model?, tangent_edges?: each a value, or null to follow the parent (a base view keeps a scale); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
+        .params("view: a saved view's id; set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?: each a value, or null to follow the parent (a base view keeps a scale); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
     CommandSpec::new(MOVE, "Move View to Sheet", crate::checked!("drawing.view.move_to_sheet", move_to_sheet))
         .icon("move")
         .in_drawing()
@@ -117,7 +117,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&BASE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); display_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; no model is evaluated."),
+        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; no model is evaluated."),
     CommandSpec::new(PROJECTED, "Projected View", crate::checked!("drawing.view.projected", projected))
         .icon("new")
         .in_drawing()
@@ -131,7 +131,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     let request: SnapshotParams = crate::schema::read(CMD, p)?;
     let settings = request.settings();
     let basis = settings.validate().map_err(|e| bad(CMD, e.to_string()))?;
-    if let Some(why) = crate::drawing_view::not_drawable(settings.display_style, settings.reference_style) {
+    if let Some(why) = crate::drawing_view::not_drawable(settings.visual_style, settings.reference_style) {
         return Err(bad(CMD, why));
     }
     if !(request.sheet.dpi.is_finite() && DPI_RANGE.contains(&request.sheet.dpi)) {
@@ -168,11 +168,11 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, format!("at scale {scale} the view reaches past ±{MAX_COORDINATE_MM} mm on paper: choose a smaller scale")));
     }
     let styles =
-        Styles { display: settings.display_style, reference: settings.reference_style, reference_hides_model: settings.reference_hides_model };
+        Styles { display: settings.visual_style, reference: settings.reference_style, reference_hides_model: settings.reference_hides_model };
     let measurements = measurements(s, &request, &basis, scale)?;
     let asked = LineRequest {
         shows: shown,
-        hidden: settings.display_style == VisualStyle::VisibleHidden,
+        hidden: settings.visual_style == VisualStyle::VisibleHidden,
         reference_hidden: settings.reference_style == VisualStyle::VisibleHidden,
         reference_hides_model: settings.reference_hides_model,
         tangent_edges: settings.tangent_edges == TangentEdges::Show,
@@ -211,7 +211,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         scale: ScaleResult { text: scale.to_string(), factor: scale.factor(), fitted },
         position_mm: position.into(),
         sheet: request.sheet,
-        display_style: snake_name(settings.display_style),
+        visual_style: snake_name(settings.visual_style),
         reference_style: snake_name(settings.reference_style),
         extents: extents_result(&extents, None),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
@@ -394,7 +394,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         },
         settings: SettingsResult {
             scale: setting(resolved.scale, own.scale, |s| s.to_string()),
-            display_style: setting(resolved.display_style, own.display_style, snake_name),
+            visual_style: setting(resolved.visual_style, own.visual_style, snake_name),
             reference_style: setting(resolved.reference_style, own.reference_style, snake_name),
             reference_hides_model: setting(resolved.reference_hides_model, own.reference_hides_model, |b| b),
             tangent_edges: setting(resolved.tangent_edges, own.tangent_edges, snake_name),
@@ -410,7 +410,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         dimensions: d.dimensions.iter().filter(|dimension| dimension.view == view.id).map(|dimension| ids::encode(dimension.id)).collect(),
         balloons: d.balloons.iter().filter(|balloon| balloon.view == view.id).map(|balloon| ids::encode(balloon.id)).collect(),
         choices: ChoicesResult {
-            display_style: VisualStyle::ALL.iter().map(|s| snake_name(*s)).collect(),
+            visual_style: VisualStyle::ALL.iter().map(|s| snake_name(*s)).collect(),
             scale: PRESETS.iter().map(ToString::to_string).collect(),
         },
         param_warnings: Vec::new(),
@@ -437,7 +437,7 @@ const DISPLAY_GROUP: usize = 4;
 
 /// How many of the display settings `own` sets itself.
 fn display_set(own: &ViewOverrides) -> usize {
-    [own.display_style.is_some(), own.reference_style.is_some(), own.reference_hides_model.is_some(), own.tangent_edges.is_some()]
+    [own.visual_style.is_some(), own.reference_style.is_some(), own.reference_hides_model.is_some(), own.tangent_edges.is_some()]
         .into_iter()
         .filter(|set| *set)
         .count()
@@ -482,7 +482,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
             return Err(bad(EDIT, "a base view has no parent to follow: `linked` is a projected view's"));
         }
         // Following: the display settings cleared. Its own: each at the value it has now.
-        own.display_style = (!linked).then_some(resolved.display_style.value);
+        own.visual_style = (!linked).then_some(resolved.visual_style.value);
         own.reference_style = (!linked).then_some(resolved.reference_style.value);
         own.reference_hides_model = (!linked).then_some(resolved.reference_hides_model.value);
         own.tangent_edges = (!linked).then_some(resolved.tangent_edges.value);
@@ -493,8 +493,8 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
         }
         own.scale = scale.map(|s| s.0);
     }
-    if let Some(style) = set.display_style {
-        own.display_style = style.map(|s| s.0);
+    if let Some(style) = set.visual_style {
+        own.visual_style = style.map(|s| s.0);
     }
     if let Some(style) = set.reference_style {
         own.reference_style = style.map(|s| s.0);
@@ -528,7 +528,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
     let (x, y) = (&a.settings, &b.settings);
     let fields = [
         ("scale", x.scale != y.scale),
-        ("display_style", x.display_style != y.display_style),
+        ("visual_style", x.visual_style != y.visual_style),
         ("reference_style", x.reference_style != y.reference_style),
         ("reference_hides_model", x.reference_hides_model != y.reference_hides_model),
         ("tangent_edges", x.tangent_edges != y.tangent_edges),
@@ -668,7 +668,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                     view.kind = ViewKind::Base { source: resolved.source, view: looking(&resolved.basis) };
                     view.settings = ViewOverrides {
                         scale: Some(resolved.scale.value),
-                        display_style: Some(resolved.display_style.value),
+                        visual_style: Some(resolved.visual_style.value),
                         reference_style: Some(resolved.reference_style.value),
                         reference_hides_model: Some(resolved.reference_hides_model.value),
                         tangent_edges: Some(resolved.tangent_edges.value),
@@ -725,7 +725,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(BASE, e.to_string()))?;
     let settings = ViewOverrides {
         scale: request.scale.map(|scale| scale.0),
-        display_style: request.display_style.map(|style| style.0),
+        visual_style: request.visual_style.map(|style| style.0),
         reference_style: request.reference_style.map(|style| style.0),
         reference_hides_model: request.reference_hides_model,
         tangent_edges: request.tangent_edges.map(|edges| edges.0),
