@@ -121,14 +121,20 @@ impl SheetBody {
 /// the sheet does not name (a hole's wall, a pocket's floor) and for every face of a body that is
 /// no folded sheet of `st`.
 pub fn body_sheet_face_names(st: &ModelState, b: &ModelBody) -> Vec<Option<String>> {
+    // A sheet made from surfaces names each face by an exact point well inside it and its
+    // normal there: no mesh.
+    if let Some(sk) = st.surface_sheets.iter().find(|s| s.body == b.name) {
+        let n = b.body.face_count();
+        let Some(faces) = SurfaceFaces::of(sk).filter(|_| !sk.unfolded) else { return vec![None; n] };
+        let q = solidcraft_geom::brep::query::Query::new(b.body.record());
+        let tol = (sk.thickness * 1e-3).max(b.body.record().tolerance * 10.0);
+        return (0..n)
+            .map(|f| q.face_sample(f).and_then(|(p, normal)| faces.name_facing(p, normal, tol)).map(|name| super::sheet_face_name(&b.name, &name)))
+            .collect();
+    }
     let m = b.mesh();
     let nf = m.tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0);
-    let Some(sheet) = st.sheets.iter().find(|s| s.body == b.name && !s.flat) else {
-        return match st.surface_sheets.iter().find(|s| s.body == b.name && !s.unfolded).and_then(SurfaceFaces::of) {
-            Some(faces) => voted(&m, nf, faces.t * 0.2, &b.name, |p, n, tol| faces.name_facing(p, n, tol)),
-            None => vec![None; nf],
-        };
-    };
+    let Some(sheet) = st.sheets.iter().find(|s| s.body == b.name && !s.flat) else { return vec![None; nf] };
     // Triangle centres lie inside a face, off a curved one by its facets' sag: a fifth of the
     // thickness takes them and still tells a flat face from the rim beside it.
     voted(&m, nf, sheet.t * 0.2, &b.name, |p, n, tol| sheet.face_name_facing(p, n, tol))
@@ -274,6 +280,24 @@ impl SurfaceFaces {
             return Some(name.clone());
         }
         None
+    }
+}
+
+impl SurfaceSheet {
+    /// Each straight rim of the sheet's flat panels: the panel, its edge in the panel's chart and
+    /// its name there (see [`SurfaceFaces`]).
+    pub(crate) fn rims(&self) -> Vec<(usize, Vec2, Vec2, String)> {
+        let Ok(dev) = develop(&self.sheet, 0) else { return Vec::new() };
+        let Ok(pieces) = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new()) else { return Vec::new() };
+        let mut out = Vec::new();
+        for (i, panel) in self.sheet.panels.iter().enumerate() {
+            let (Surface::Plane, Some(Some(at))) = (&panel.surface, dev.placements.get(i)) else { continue };
+            let back = at.inverse();
+            let own: Vec<Region2> =
+                pieces.iter().filter(|(p, _)| matches!(p, crate::sheet_surface::Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
+            out.extend(rim_names(self, i, &own).into_iter().map(|(a, b, name)| (i, a, b, name)));
+        }
+        out
     }
 }
 

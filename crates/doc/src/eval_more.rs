@@ -613,16 +613,9 @@ fn sheet_for(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Vec3>
 /// display tolerance of one (picks land on the display mesh). A sheet with no mesh to test
 /// against counts as touched.
 fn on_sheet_material(st: &ModelState, i: usize, p: Vec3) -> bool {
-    match st.sheets.get(i) {
-        Some(sh) => on_body_material(st, &sh.body, sh.t, p),
-        None => true,
-    }
-}
-
-/// Whether point `p` touches the material of body `body`, a sheet `t` thick: within a step of
-/// its mesh.
-fn on_body_material(st: &ModelState, body: &str, t: f64, p: Vec3) -> bool {
-    let Some(mb) = st.body(body) else { return true };
+    let Some(sh) = st.sheets.get(i) else { return true };
+    let t = sh.t;
+    let Some(mb) = st.body(&sh.body) else { return true };
     let mesh = mb.mesh();
     if mesh.triangles.is_empty() {
         return true;
@@ -1043,10 +1036,9 @@ pub(super) fn sheet_eval(
             };
             // A fixed point that touches no material at all still picks the side it lies on, so a
             // stored fold keeps recomputing; it says so (#371).
-            let body = sk.body.clone();
             let t = sk.thickness;
             if let Some(p) = fixed
-                && !on_body_material(st, &body, t, p.0)
+                && !sk.touches(p.0, (t * 1e-3).max(1e-6))
             {
                 *warning = Some(format!("{} at ({:.3}, {:.3}, {:.3}); the side of the fold line it lies on stays", sheet::FOLD_FIXED_OFF_SHEET, p.x, p.y, p.z));
             }

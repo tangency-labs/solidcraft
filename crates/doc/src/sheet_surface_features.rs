@@ -733,6 +733,38 @@ impl SurfaceSheet {
         Some((panels, boxes))
     }
 
+    /// Whether point `p` (the body's coordinates) touches the sheet's material, within `tol`: in a
+    /// flat panel's material through its thickness, in a bend, or in a loose piece.
+    pub(crate) fn touches(&self, p: Vec3, tol: f64) -> bool {
+        let near = |r: &Region2, q: Vec2| {
+            r.contains(q) || std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(q).clamp(0.0, 1.0)).dist(q) <= tol)
+        };
+        let t = self.thickness;
+        let Some((panels, _)) = self.pieces_in_space() else { return true };
+        for (_, frame, own) in &panels {
+            let q = frame.inverse().point(p);
+            if q.z >= -tol && q.z <= t + tol && near(own, Vec2::new(q.x, q.y)) {
+                return true;
+            }
+        }
+        let Ok(dev) = develop(&self.sheet, 0) else { return true };
+        let Ok(frames) = crate::sheet_surface_cuts::frames(self, &dev) else { return true };
+        for l in &self.loose {
+            let Some(frame) = frames.get(l.panel).copied().flatten() else { continue };
+            let q = frame.inverse().point(p);
+            if q.z >= -tol && q.z <= t + tol && near(&l.region, Vec2::new(q.x, q.y)) {
+                return true;
+            }
+        }
+        if self.unfolded {
+            return false;
+        }
+        let Ok(fold) = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places) else { return true };
+        dev.zones.iter().any(|z| {
+            fold.bends.get(z.joint).copied().flatten().and_then(|bent| bent.unwrapped(p)).is_some_and(|(flat, depth, _)| depth >= -tol && depth <= t + tol && near(&z.region, flat))
+        })
+    }
+
     /// The flat face of the sheet a point lies on (the body's coordinates, within `tol`, kept
     /// below a quarter of the thickness): its persistent name, `<panel>:top` for its face on the
     /// sheet's surface and `<panel>:bottom` for the other (`flat:…` unfolded), and its plane (see
@@ -753,7 +785,65 @@ impl SurfaceSheet {
             let plane = self.panel_face(&name)?;
             return Some((name, plane));
         }
+        // A rim: the nearest straight edge of a panel, through its thickness.
+        if self.unfolded {
+            return None;
+        }
+        let mut best: Option<(f64, String)> = None;
+        for (i, a, b, rim) in self.rims() {
+            let (Some(frame), Some(panel)) = (frames.get(i).copied().flatten(), self.sheet.panels.get(i)) else { continue };
+            let q = frame.inverse().point(p);
+            if q.z < -tol || q.z > t + tol {
+                continue;
+            }
+            let (q2, d) = (Vec2::new(q.x, q.y), b - a);
+            let along = (q2 - a).dot(d) / d.dot(d).max(1e-18);
+            if !(-1e-9..=1.0 + 1e-9).contains(&along) {
+                continue;
+            }
+            let off = (a + d * along).dist(q2);
+            if off <= tol && best.as_ref().is_none_or(|(o, _)| off < *o) {
+                best = Some((off, format!("{}:rim.{rim}", panel.name)));
+            }
+        }
+        if let Some((_, name)) = best {
+            let plane = self.panel_face(&name)?;
+            return Some((name, plane));
+        }
+        // An end of a bend: within its zone's end, between its faces.
+        let fold = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
+        for z in &dev.zones {
+            let (Some(Some(bent)), Some(joint)) = (fold.bends.get(z.joint), self.sheet.joints.get(z.joint)) else { continue };
+            let Some((flat, depth, _)) = bent.unwrapped(p) else { continue };
+            if depth < -tol || depth > t + tol {
+                continue;
+            }
+            for k in 0..2 {
+                let s = Seg2::Line { a: z.near[k], b: z.far[k] };
+                if s.point_at(s.closest_param(flat).clamp(0.0, 1.0)).dist(flat) <= tol {
+                    let name = format!("{}:bend.end{}", self.sheet.panels.get(joint.b.panel)?.name, 1 - k);
+                    let plane = self.panel_face(&name)?;
+                    return Some((name, plane));
+                }
+            }
+        }
         None
+    }
+
+    /// The plane of the end of the bend that makes panel `panel` at its start (`k` 0, at its
+    /// anchors' origin) or its other end, facing out of the bend, in the body.
+    fn bend_end(&self, panel: usize, k: usize) -> Option<Plane> {
+        let dev = develop(&self.sheet, 0).ok()?;
+        let fold = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
+        let j = self.sheet.joints.iter().position(|j| j.b.panel == panel && matches!(j.kind, JointKind::Bend(_)))?;
+        let z = dev.zones.iter().find(|z| z.joint == j)?;
+        let bent = fold.bends.get(j).copied().flatten()?;
+        let (start, end) = (bent.point(z.near[0], 0.0), bent.point(z.near[1], 0.0));
+        let along = (end - start).normalized()?;
+        let outward = if k == 0 { along * -1.0 } else { along };
+        let origin = bent.point(z.near[k], 0.0);
+        let x = (bent.point(z.near[k], self.thickness) - origin).normalized()?;
+        Plane::new(origin, x, outward.cross(x))
     }
 
     /// The plane of the flat face named `name` (see [`Self::panel_face_at`]), facing out of the
@@ -761,6 +851,21 @@ impl SurfaceSheet {
     /// the other face's mirrored, so a sketch on it measures as the flat pattern does.
     pub fn panel_face(&self, name: &str) -> Option<Plane> {
         let (panel, side) = name.rsplit_once(':')?;
+        if let Some(end) = side.strip_prefix("bend.end") {
+            // Numbered along the flat as it is read: `end1` is at the anchors' origin.
+            let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
+            return self.bend_end(i, if end == "1" { 0 } else { 1 });
+        }
+        if let Some(rim) = side.strip_prefix("rim.") {
+            // Along the rim's edge, through the thickness from the sheet's surface.
+            let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
+            let (_, a, b, _) = self.rims().into_iter().find(|(k, _, _, n)| *k == i && n == rim)?;
+            let dev = develop(&self.sheet, 0).ok()?;
+            let frame = crate::sheet_surface_cuts::frames(self, &dev).ok()?.get(i).copied().flatten()?;
+            let d = (b - a).normalized()?;
+            let foot = a + d * (Vec2::new(0.0, 0.0) - a).dot(d);
+            return Plane::new(frame.point(Vec3::new(foot.x, foot.y, 0.0)), frame.vector(Vec3::new(d.x, d.y, 0.0)), frame.z);
+        }
         let top = match side {
             "top" => true,
             "bottom" => false,

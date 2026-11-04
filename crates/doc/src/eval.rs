@@ -2753,16 +2753,25 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
 fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature, validation: kernel::Validation, warning: &mut Option<String>) -> Result<()> {
     let weigh = validation == kernel::Validation::EachStep;
     let letters = more::cut_letters(after, f);
-    // A cut the sheet can't hold is refused; any other change (a fillet, a join, a mirror into
-    // it) stays on the body, and marks the sheet (see `SurfaceSheet::altered_by`).
+    // What takes material away that the sheet can't hold (a cut, a hole, a chamfer or fillet on
+    // a face's edge) is refused; any other change (a join, a mirror into it, a modelled thread)
+    // stays on the body, and marks the sheet (see `SurfaceSheet::altered_by`).
     let cuts = match &f.kind {
-        FeatureKind::Hole { .. } => true,
+        FeatureKind::Hole { .. } | FeatureKind::Chamfer { .. } | FeatureKind::Fillet { .. } => true,
         FeatureKind::Extrude { operation, .. }
         | FeatureKind::Revolve { operation, .. }
+        | FeatureKind::Box { operation, .. }
+        | FeatureKind::Cylinder { operation, .. }
+        | FeatureKind::Sphere { operation, .. }
+        | FeatureKind::Torus { operation, .. }
+        | FeatureKind::Cone { operation, .. }
         | FeatureKind::Loft { operation, .. }
         | FeatureKind::Sweep { operation, .. }
         | FeatureKind::Pipe { operation, .. }
-        | FeatureKind::Coil { operation, .. } => matches!(operation, Operation::Cut | Operation::Intersect),
+        | FeatureKind::Coil { operation, .. }
+        | FeatureKind::BoundaryFill { operation, .. }
+        | FeatureKind::Thicken { operation, .. }
+        | FeatureKind::SurfaceNetwork { operation, .. } => matches!(operation, Operation::Cut | Operation::Intersect),
         _ => false,
     };
     // What isn't a cut is always weighed: material the sheet doesn't show (a join into a bend)

@@ -204,6 +204,49 @@ impl<'a> Query<'a> {
         out
     }
 
+    /// A point well inside face `f`, exactly on its surface, and the face's unit normal there out
+    /// of the material: of a grid over the face's parameters, the point inside it farthest from
+    /// its loops. What names a face by where it is, with no mesh between.
+    pub fn face_sample(&self, f: usize) -> Option<(Vec3, Vec3)> {
+        const GRID: usize = 15;
+        let s = self.surfaces.get(f)?.as_ref()?;
+        let loops = self.loops.get(f)?.get_or_init(|| self.draw_loops(f));
+        let outer = loops.first()?;
+        let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+        for p in outer {
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        if !(lo[0] <= hi[0] && lo[1] <= hi[1]) {
+            return None;
+        }
+        // How far `uv` is from the loops, in the parameters.
+        let clear = |uv: [f64; 2]| {
+            loops
+                .iter()
+                .flat_map(|ring| (0..ring.len()).filter_map(move |i| Some((*ring.get(i)?, *ring.get((i + 1) % ring.len())?))))
+                .map(|(a, b)| to_segment(uv, a, b))
+                .fold(f64::INFINITY, f64::min)
+        };
+        let mut best: Option<(f64, [f64; 2])> = None;
+        for i in 0..GRID {
+            for j in 0..GRID {
+                let uv = [lo[0] + (hi[0] - lo[0]) * (i as f64 + 0.5) / GRID as f64, lo[1] + (hi[1] - lo[1]) * (j as f64 + 0.5) / GRID as f64];
+                if !self.inside(f, uv) {
+                    continue;
+                }
+                let c = clear(uv);
+                if best.is_none_or(|(b, _)| c > b) {
+                    best = Some((c, uv));
+                }
+            }
+        }
+        let (_, uv) = best?;
+        Some((s.point(uv)?, self.face_normal(f, uv)?))
+    }
+
     /// Whether `uv` lies inside face `f`'s outer loop and outside its holes, by winding number on
     /// its loops drawn from their pcurves.
     fn inside(&self, f: usize, uv: [f64; 2]) -> bool {
