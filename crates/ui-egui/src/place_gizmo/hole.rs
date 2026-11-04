@@ -31,9 +31,9 @@ pub(super) static SPEC: Spec = Spec {
     turn: None,
 };
 
-/// The holes placed so far, each at its face place with the face's outward normal. A hole being
-/// edited whose face is gone keeps its place and the `direction` the edit restored, as a Rest's
-/// frame does, so it still has a marker.
+/// The holes placed so far, each at its face place with the face's outward normal (on a curved
+/// face, the normal where the hole is). A hole being edited whose face is gone keeps its place
+/// and the `direction` the edit restored, as a Rest's frame does, so it still has a marker.
 fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
     let s = &app.session;
     crate::hole_place::places(s, d)
@@ -43,6 +43,11 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
             let n = crate::dialogs::planar_face(s, body, *index)
                 .map(|(_, n)| n)
                 .or_else(|| d.extra.get("direction").and_then(vec3_of))
+                .or_else(|| {
+                    // A curved face: its normal where the hole is.
+                    let m = crate::open_meshing::session_world(s).body(body)?.mesh();
+                    crate::dialogs_assembly::face_normal_near(&m, u32::try_from(*index).ok()?, base)
+                })
                 .and_then(|n| n.normalized())?;
             Some(Place { key, base, n })
         })

@@ -154,6 +154,27 @@ fn a_hole_whose_face_is_gone_keeps_its_marker_through_the_restored_direction() {
     assert!(handle_at("hole:0").is_none(), "no face and no direction: nowhere to stand");
 }
 
+#[test]
+fn a_hole_on_a_curved_face_has_a_marker_standing_out_of_the_face() {
+    // A 20 mm round bar standing on XY, seen from the front: its side has no plane and a new
+    // dialog no stored direction, so the marker takes the face's normal where the hole is.
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": true})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 40, "name": "Bar"})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(0.0, -10.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    assert_eq!(places(&h).len(), 1, "the hole is placed on the bar's side");
+    assert!(handle_at("hole:0").is_some(), "the hole on the curved face has its marker");
+    let d = h.app.dialog.clone().expect("a dialog");
+    let p = super::places(&h.app, &d);
+    assert!(matches!(p.as_slice(), [pl] if pl.n.dot(Vec3::new(0.0, -1.0, 0.0)) > 0.9), "out of the face, radially");
+}
+
 /// The open Hole dialog's reference distances, as typed.
 fn distances(h: &Harness) -> [String; 2] {
     match h.app.dialog.as_ref().map(|d| &d.kind) {
