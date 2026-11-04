@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.drawing_sketch_create": "Create Sheet Sketch",
+    "cmd.drawing_sketch_edit": "Edit Sheet Sketch",
+    "cmd.drawing_sketch_inspect": "Inspect Sheet Sketch"
+  },
+  "ar": {
+    "cmd.drawing_sketch_create": "إنشاء رسم على الورقة",
+    "cmd.drawing_sketch_edit": "تعديل الرسم على الورقة",
+    "cmd.drawing_sketch_inspect": "فحص الرسم على الورقة"
+  },
+  "de": {
+    "cmd.drawing_sketch_create": "Blattskizze erstellen",
+    "cmd.drawing_sketch_edit": "Blattskizze bearbeiten",
+    "cmd.drawing_sketch_inspect": "Blattskizze prüfen"
+  },
+  "he": {
+    "cmd.drawing_sketch_create": "יצירת סקיצה בגיליון",
+    "cmd.drawing_sketch_edit": "עריכת סקיצה בגיליון",
+    "cmd.drawing_sketch_inspect": "בדיקת סקיצה בגיליון"
+  },
+  "ja": {
+    "cmd.drawing_sketch_create": "シートスケッチを作成",
+    "cmd.drawing_sketch_edit": "シートスケッチを編集",
+    "cmd.drawing_sketch_inspect": "シートスケッチを検査"
+  },
+  "ko": {
+    "cmd.drawing_sketch_create": "시트 스케치 만들기",
+    "cmd.drawing_sketch_edit": "시트 스케치 편집",
+    "cmd.drawing_sketch_inspect": "시트 스케치 검사"
+  },
+  "vi": {
+    "cmd.drawing_sketch_create": "Tạo phác thảo trên tờ bản vẽ",
+    "cmd.drawing_sketch_edit": "Chỉnh sửa phác thảo trên tờ bản vẽ",
+    "cmd.drawing_sketch_inspect": "Kiểm tra phác thảo trên tờ bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_sketch_create": "创建图纸草图",
+    "cmd.drawing_sketch_edit": "编辑图纸草图",
+    "cmd.drawing_sketch_inspect": "检查图纸草图"
+  }
+}

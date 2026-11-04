@@ -245,7 +245,6 @@ sketch.auto_project
 sketch.blend_curve
 sketch.break
 sketch.break_link
-sketch.cancel
 sketch.centerline
 sketch.chain
 sketch.chamfer.distance_angle

@@ -273,6 +273,7 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        active_sheet_sketch: None,
         pending_moves: Default::default(),
         part: None,
         visibility: Default::default(),

@@ -546,10 +546,6 @@ fn a_flat_face_that_isnt_one_face_or_isnt_parallel_says_so() {
     assert_eq!(f.resolve(id).status, Status::Suppressed);
 }
 
-fn radial(edge: &ModelEdge, diameter: bool) -> DimensionKind {
-    DimensionKind::Radial { edge: edge.clone(), diameter }
-}
-
 /// A boss of radius 5 along X on the box's right face reads Ø10 between its silhouettes in the front
 /// view, exactly, with its silhouettes 10 apart from one end of it to the other. A notch across its
 /// top cuts its face into pieces, all on the one cylinder, so it still reads Ø10 (found through

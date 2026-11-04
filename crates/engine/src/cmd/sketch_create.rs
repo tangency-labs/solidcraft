@@ -12,7 +12,7 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
+use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg_in, result, slot};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
@@ -31,58 +31,58 @@ mod text_expr_tests;
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
+    CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line).in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("line_mid")
         .enabled(in_sketch)
         .params(concat!("mid: [x,y], point ref or snap (\"mid:<line>\", \"on:<curve>:x,y\", model vertex/edge); end: [x,y]; construction?", created_doc!())),
-    CommandSpec::new("sketch.arc.tangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(concat!(
+    CommandSpec::new("sketch.arc.tangent", "Tangent Arc", arc_tangent).in_sketch_part().at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(concat!(
         "start: end point of a line or arc (\"l1.end\"), end: [x,y]; curve?: the curve to be tangent to (default: the one ending at start)",
         created_doc!()
     )),
     CommandSpec::new("sketch.circle.two_tangent", "2-Tangent Circle", circle_tan_tan)
         .at("SKETCH", "CREATE")
         .icon("circle_tt")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("curves: [two lines/circles/arcs], radius | diameter: expr, near: [x,y] (which of the solutions)", created_doc!())),
     CommandSpec::new("sketch.circle.three_tangent", "3-Tangent Circle", circle_three_tan)
         .at("SKETCH", "CREATE")
         .icon("circle_ttt")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("curves: [three lines/circles/arcs], near: [x,y] (which of the solutions)", created_doc!())),
     CommandSpec::new("sketch.slot.center_point", "Center Point Slot", slot_center_point)
         .at("SKETCH", "CREATE")
         .icon("slot_center")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("center: slot centre, end: one arc centre, width", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", arc_slot_three)
         .at("SKETCH", "CREATE")
         .icon("arc_slot")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("start, through, end: points on the centre arc, width", created_doc!())),
-    CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", arc_slot_center)
+    CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", arc_slot_center).in_sketch_part()
         .at("SKETCH", "CREATE")
         .icon("arc_slot_center")
         .enabled(in_sketch)
         .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
-    CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
+    CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).in_sketch_part().at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
         "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", spline_fit)
         .at("SKETCH", "CREATE")
         .icon("spline")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
     CommandSpec::new("sketch.spline.control_point", "Control Point Spline", spline_cv3)
         .at("SKETCH", "CREATE")
         .icon("spline_cv")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("points: control points (2…500), cubic", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", spline_cv5)
         .at("SKETCH", "CREATE")
         .icon("spline_cv")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
     CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", spline_insert_point)
         .icon("spline")
@@ -97,12 +97,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.conic", "Conic Curve", conic)
         .at("SKETCH", "CREATE")
         .icon("conic")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!("start, end, apex: [x,y] or point refs; rho?: 0…1 (default 0.5: parabola)", created_doc!())),
     CommandSpec::new("sketch.blend_curve", "Blend Curve", blend)
         .at("SKETCH", "MODIFY")
         .icon("blend")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params(concat!(
             "a, b: end points of two curves (\"l1.end\", \"a2.start\"), continuity?: g1|g2|g3|g4 (default g1: a tangent spline; g2…g4 match the reference curves' curvature, curvature rate and 4th derivative as well, as one Bézier of degree 5, 7 or 9)",
             created_doc!()
@@ -110,10 +110,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.centerline", "Centerline", centerline)
         .at("SKETCH", "CREATE")
         .icon("centerline")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params("curves: [line ids], value?: bool (default toggles): centerline line type (not in profiles; an axis)"),
     CommandSpec::new("sketch.infinite", "Infinite Line", infinite_line).icon("infinite")
-        .enabled(in_sketch)
+        .in_sketch_part().enabled(in_sketch)
         .params("curves: [line ids], value?: bool (default toggles): infinite line type (#1359): construction geometry drawn across the whole view through the line's two points; off, a normal line"),
     CommandSpec::new("sketch.text", "Text", text).at("SKETCH", "CREATE").icon("sketch_text").enabled(in_sketch).params(concat!(
         "text: string (\\n breaks lines), or text_expression: the words built from text parameters (parameters.add with unit text) and quoted texts joined by + (\"Label + '-L'\"): the text keeps it, its words follow the parameters (a parameter edit or a configuration row relabels it) and `exprs` returns it as `text`; at: baseline start [x,y], height?: capital height mm (default 5), angle?: deg; at's x and y, height and angle each take a number or an expression over the design's parameters as a string (\"plate_width / 2\", \"label_size\"): the text keeps the expression, follows the parameters, and returns it in `exprs`; an expression naming no parameter is the number it comes to, a bare number in one is in the design's units, \
@@ -182,6 +182,20 @@ const AT_MUST: &str = "`at` must be the baseline start [x, y], each a number or 
 /// to. Returns the value (mm or radians) and the expression kept. Anything else is refused with
 /// `must`.
 pub(super) fn text_number(doc: &solidcraft_doc::Document, v: &Value, cmd: &str, key: &str, must: &str, angle: bool) -> Result<(f64, Option<String>)> {
+    text_number_in(doc, v, cmd, key, must, angle, false)
+}
+
+/// Shared numeric parsing with explicit paper defaults. The source parameter
+/// evaluator still sees the original design and its own parameter units.
+pub(super) fn text_number_in(
+    doc: &solidcraft_doc::Document,
+    v: &Value,
+    cmd: &str,
+    key: &str,
+    must: &str,
+    angle: bool,
+    paper: bool,
+) -> Result<(f64, Option<String>)> {
     use solidcraft_doc::expr::{self, Kind};
     let kind = if angle { Kind::Angle } else { Kind::Length };
     match v {
@@ -190,7 +204,7 @@ pub(super) fn text_number(doc: &solidcraft_doc::Document, v: &Value, cmd: &str, 
             Ok((if angle { x.to_radians() } else { x }, None))
         }
         Value::String(e) if !e.trim().is_empty() && e.len() <= 4096 => {
-            let e = doc.with_design_unit(e.trim(), kind);
+            let e = if paper { e.trim().to_string() } else { doc.with_design_unit(e.trim(), kind) };
             match doc.eval(&e, kind) {
                 Ok(x) => {
                     let x = crate::params::finite(x).ok_or_else(|| bad(cmd, must))?;
@@ -508,9 +522,13 @@ fn joint_derivatives(sk: &Sketch, ci: usize, pi: usize, order: usize, leaving: b
 fn blend(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.blend_curve";
     let order = blend_order(p, cmd)?;
+    let on_sheet = s.open_drawing.is_some();
+    if on_sheet && order > 2 {
+        return Err(bad(cmd, "sheet sketches support G1/G2 blends; higher-order splines need their own bounded record contract"));
+    }
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
-        let pa = req_parg(sk, doc, p, "a", cmd)?.idx().ok_or_else(|| bad(cmd, "`a` must be the end point of a curve"))?;
-        let pb = req_parg(sk, doc, p, "b", cmd)?.idx().ok_or_else(|| bad(cmd, "`b` must be the end point of a curve"))?;
+        let pa = req_parg_in(sk, doc, p, "a", cmd, on_sheet)?.idx().ok_or_else(|| bad(cmd, "`a` must be the end point of a curve"))?;
+        let pb = req_parg_in(sk, doc, p, "b", cmd, on_sheet)?.idx().ok_or_else(|| bad(cmd, "`b` must be the end point of a curve"))?;
         let (ca, ta) = end_of(sk, pa).ok_or_else(|| bad(cmd, "no curve ends at `a`"))?;
         let (cb, tb) = end_of(sk, pb).ok_or_else(|| bad(cmd, "no curve ends at `b`"))?;
         let (qa, qb) = (sk.point(pa).unwrap_or_default(), sk.point(pb).unwrap_or_default());
@@ -634,14 +652,14 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(result(out, info))
 }
 
-fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &str) -> Result<Vec<usize>> {
+fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &str, paper: bool) -> Result<Vec<usize>> {
     let list = p.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`points` must be a list"))?;
     if list.len() < 2 || list.len() > solidcraft_sketch::MAX_SPLINE_POINTS {
         return Err(bad(cmd, "a spline needs 2 to 500 points"));
     }
     let mut out = Vec::new();
     for v in list {
-        let a = super::sketch::parg(sk, doc, v, cmd)?;
+        let a = super::sketch::parg_in(sk, doc, v, cmd, paper)?;
         let i = match a.idx() {
             Some(i) => i,
             None => sk.add_point(a.pos(), None)?,
@@ -655,6 +673,7 @@ fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &
 }
 
 fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> Result<Value> {
+    let on_sheet = s.open_drawing.is_some();
     let periodic = match p.get("periodic") {
         None => false,
         Some(Value::Bool(v)) => *v,
@@ -665,7 +684,7 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
     }
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
-        let mut pts = point_list(sk, doc, p, cmd)?;
+        let mut pts = point_list(sk, doc, p, cmd, on_sheet)?;
         if periodic
             && sk.point(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?)
                 != sk.point(*pts.last().ok_or_else(|| bad(cmd, "missing last point"))?)
@@ -724,6 +743,7 @@ fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.conic";
+    let on_sheet = s.open_drawing.is_some();
     let rho = num(p, "rho").unwrap_or(0.5);
     if !(rho > 1e-6 && rho < 1.0 - 1e-6) {
         return Err(bad(cmd, "`rho` must be between 0 and 1"));
@@ -732,7 +752,7 @@ fn conic(s: &mut Session, p: &Value) -> Result<Value> {
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let mut idx = Vec::new();
         for k in ["start", "end", "apex"] {
-            let a = req_parg(sk, doc, p, k, cmd)?;
+            let a = req_parg_in(sk, doc, p, k, cmd, on_sheet)?;
             idx.push(match a.idx() {
                 Some(i) => i,
                 None => sk.add_point(a.pos(), None)?,
@@ -751,10 +771,11 @@ fn conic(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line.midpoint";
+    let on_sheet = s.open_drawing.is_some();
     let end = req_vec2(cmd, p, "end")?;
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
-        let m = req_parg(sk, doc, p, "mid", cmd)?;
+        let m = req_parg_in(sk, doc, p, "mid", cmd, on_sheet)?;
         let start = m.pos() * 2.0 - end;
         if start.dist(end) < 1e-9 {
             return Err(bad(cmd, "the end must differ from the midpoint"));
@@ -821,9 +842,10 @@ pub(super) fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
 
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.tangent";
+    let on_sheet = s.open_drawing.is_some();
     let end = req_vec2(cmd, p, "end")?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
-        let st = req_parg(sk, doc, p, "start", cmd)?;
+        let st = req_parg_in(sk, doc, p, "start", cmd, on_sheet)?;
         let picked = st.idx().ok_or_else(|| bad(cmd, "`start` must be the end point of a line or arc"))?;
         // The picked point, then any other point at the same place: a trimmed arc's end is its own
         // point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
@@ -921,6 +943,7 @@ fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usi
 /// A circle tangent to `curves`, solved from a start near `near`.
 fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Option<String>) -> Result<Value> {
     let near = req_vec2(cmd, p, "near")?;
+    let on_sheet = s.open_drawing.is_some();
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
         let cs = tangent_curves(sk, p, cmd, n)?;
         let r0 = match &radius {
@@ -943,7 +966,7 @@ fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Optio
             cons.push(add_c(sk, ConstraintKind::Tangent { a: *k, b: c })?);
         }
         if let Some(e) = &radius {
-            let pname = doc.new_model_param(e, "mm");
+            let pname = if on_sheet { e.to_string() } else { doc.new_model_param(e, "mm") };
             let k = sk.add_constraint(ConstraintKind::Radius { c, value: r0 }, Some(pname))?;
             cons.push(k);
         }

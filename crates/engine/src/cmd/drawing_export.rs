@@ -1,7 +1,7 @@
 //! `drawing.export` (#4890 A7): one sheet of the open drawing written out from its scene
 //! ([`crate::drawing_scene::build`]), the scene the sheet page draws, so a file shows what the page
 //! does. SVG for now: PNG comes with the sheet PNG writer (#4890 A4) and DXF with the shared DXF
-//! writer (#5319). A sheet with a view that failed, an image that won't decode or a picture that
+//! writer (#5319). A sheet with a view or sketch that failed, an image that won't decode or a picture that
 //! can't be drawn isn't written; the refusal names them.
 
 use std::path::Path;
@@ -12,7 +12,7 @@ use solidcraft_doc::ids;
 
 use super::CommandSpec;
 use crate::drawing_pictures::SheetPictures;
-use crate::drawing_scene::{Status, sheet_id};
+use crate::drawing_scene::{SketchStatus, Status, sheet_id};
 use crate::params::bad;
 use crate::schema::drawing_export::{ExportFormat, ExportParams, ExportReport, ExportResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default; png and dxf are not supported yet); path?: .svg file (else the reply holds the SVG text) → {sheet, format, bytes, path | svg, report: {widths_snapped, pieces_merged}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's visible lines, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
+    .params("sheet: id or name; format?: svg (default; png and dxf are not supported yet); path?: .svg file (else the reply holds the SVG text) → {sheet, format, bytes, path | svg, report: {widths_snapped, pieces_merged}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}], sketches: [{sketch, status: drawn|failed, reason?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's visible lines, then exact sheet sketches and its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let request: ExportParams = crate::schema::read(CMD, p)?;
@@ -57,8 +57,23 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .collect();
+    let failed_sketches: Vec<String> = built
+        .sketches
+        .iter()
+        .filter_map(|sketch| match &sketch.status {
+            SketchStatus::Failed(why) => Some(format!("{} ({why})", ids::encode(sketch.sketch))),
+            SketchStatus::Drawn => None,
+        })
+        .collect();
+    let mut failures = Vec::new();
     if !failed.is_empty() {
-        return Err(bad(CMD, format!("not written: views on the sheet failed: {}", failed.join(", "))));
+        failures.push(format!("views on the sheet failed: {}", failed.join(", ")));
+    }
+    if !failed_sketches.is_empty() {
+        failures.push(format!("sketches on the sheet failed: {}", failed_sketches.join(", ")));
+    }
+    if !failures.is_empty() {
+        return Err(bad(CMD, format!("not written: {}", failures.join("; "))));
     }
     let prepared = built.scene.prepare().map_err(|e| bad(CMD, e.to_string()))?;
     let pictures = SheetPictures::new(s, &d, sheet).map_err(|e| bad(CMD, e))?;
@@ -82,6 +97,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         report: ExportReport { widths_snapped: written.widths_snapped, pieces_merged: written.pieces_merged },
         views: built.views.into_iter().map(Into::into).collect(),
         dimensions: super::drawing_scene::dimension_results(built.dimensions),
+        sketches: built.sketches.into_iter().map(Into::into).collect(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
