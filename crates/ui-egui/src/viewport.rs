@@ -5026,9 +5026,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
                 if let Some((hit, Some(sel))) = cand {
                     dialog_pick(app, &hit, sel);
-                } else if cand.is_none()
-                    && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. }))
-                {
+                } else if cand.is_none() && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. })) {
                     // Empty viewport space: Clear the selection, keep Measure open (#11331).
                     if let Some(d) = app.dialog.as_mut() {
                         d.clear_active_selection(&app.session);
