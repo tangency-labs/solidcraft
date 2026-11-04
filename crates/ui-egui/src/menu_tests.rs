@@ -2166,6 +2166,8 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     let placement = h.app.session.doc.occurrence_of(part).unwrap().id;
     h.app.run("component.activate", json!({"component": "root"})).unwrap();
     let bad_part = format!("no `bodies` folder of component {part} under `c{part}`");
+    // A placement spelt another way (`o:012` for `o:12`) isn't the row's key either.
+    let bad_alias = format!("no `bodies` folder of component {part} under `o:0{placement}`");
     h.frames(2);
     for (target, error) in [
         (json!({"type": "body", "name": "NoSuchBody"}), "no body `NoSuchBody`"),
@@ -2177,6 +2179,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
         (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),
         (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("c{part}")}), bad_part.as_str()),
+        (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:0{placement}")}), bad_alias.as_str()),
     ] {
         let reply = h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}));
         assert_eq!(reply["error"], error, "{target}");

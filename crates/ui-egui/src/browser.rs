@@ -481,10 +481,14 @@ fn scope_path(scope: &str) -> Vec<u64> {
 }
 
 /// Whether a folder or group's scope key is a row the browser draws for `component`: the design's
-/// own (`c0`, the root only), or a placement of it (`o:<ids>`).
+/// own (`c0`, the root only), or a placement of it, spelt as the browser keys it (`o:12/3`, not
+/// `o:012/3`: the rows' state is kept by that key).
 pub(crate) fn scope_shows(app: &SolveApp, scope: &str, component: u64) -> bool {
-    (component == 0 && scope == "c0")
-        || (is_placement_key(scope) && app.session.occurrence_placement(&scope_path(scope)).is_ok_and(|p| p.component == component))
+    if component == 0 && scope == "c0" {
+        return true;
+    }
+    let path = scope_path(scope);
+    is_placement_key(scope) && occurrence_key(&path) == scope && app.session.occurrence_placement(&path).is_ok_and(|p| p.component == component)
 }
 
 /// Paste on a Bodies or Sketches folder or group: copied (or cut) bodies, or copied sketches and
