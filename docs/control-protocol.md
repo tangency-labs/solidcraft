@@ -588,7 +588,8 @@ connection`. What happens depends on where the request is:
 With nothing outstanding the reply is `{"cancelled": null, "note": "nothing to cancel: …"}`.
 After a request is cancelled or stopped the connection is free at once (`control.pending` says
 `{"pending": null}`). Since a connection sends one request at a time, only a request that
-outlasted its wait (60 s) can be cancelled from the connection that sent it.
+outlasted its wait can be cancelled from the connection that sent it: 60 s, or 3600 s for
+`engine.batch` and for every request from the agent chat's own connection.
 
 ## Engine
 
