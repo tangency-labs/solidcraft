@@ -1705,7 +1705,7 @@
   "help.construct.axis.two_planes": "Creates a construction axis where two planes or flat faces meet. Use it when the axis you need is the line between two faces.",
   "help.construct.axis.two_points": "Creates a construction axis through two points, vertices or sketch points. Use it for an axis that runs between two known positions.",
   "help.construct.plane.along_path": "Creates a construction plane square to an edge or curve, at a position along it. Use it to sketch a profile for a sweep or a section of a path.",
-  "help.construct.plane.at_angle": "Creates a construction plane turned by an angle from a plane or face, about an axis or edge. Use it for sloped sketches, such as an angled bracket.",
+  "help.construct.plane.at_angle": "Creates a construction plane turned by an angle from a plane or face, about an axis or edge. Turn on Use axis direction only to project the axis onto the base and pivot about a point on that plane (the base origin when none is picked). Use it for sloped sketches, such as an angled bracket.",
   "help.construct.plane.axis_point": "Creates a construction plane containing an axis and a point off that axis. Pick an origin or construction axis, a straight edge or sketch line, then a vertex, sketch point or construction point. A point on the axis cannot define a unique plane.",
   "help.construct.plane.midplane": "Creates a construction plane halfway between two planes or flat faces, or bisecting them where they meet at an angle. Use it as a symmetry plane for mirroring.",
   "help.construct.plane.offset": "Creates a construction plane parallel to a plane or flat face, at a distance or through a point. Use it to sketch at a set height above a face.",
