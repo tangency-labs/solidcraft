@@ -2130,11 +2130,31 @@ pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> 
     v
 }
 
+/// Is a named joint origin's triad drawn: its occurrence shown (with its parents), and the
+/// Joints folder shown in the design and on that placement. Hidden hardware keeps no triad.
+pub fn origin_drawn(s: &Session, name: &str) -> bool {
+    let Some(o) = s.doc.assembly.origins.iter().find(|o| o.name == name) else { return false };
+    if s.folder_hidden("c0/joints") {
+        return false;
+    }
+    if o.origin.occurrence == 0 {
+        return true;
+    }
+    let Some(occ) = s.doc.occurrences.iter().find(|x| x.id == o.origin.occurrence) else { return false };
+    // The origin's own placement, not its component's first one (copies hide separately).
+    let mut path = s.doc.first_path(occ.parent);
+    path.push(occ.id);
+    s.occurrence_visible(&path) && !s.folder_hidden(&format!("{}/joints", Session::folder_scope(&path)))
+}
+
 /// Named joint origins in the viewport: a small triad where each sits.
 pub fn origins(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let len = app.cam.half_height() * 2.0 * 0.04;
-    for (_, m) in origins_world(&app.session) {
+    for (name, m) in origins_world(&app.session) {
+        if !origin_drawn(&app.session, &name) {
+            continue;
+        }
         let at = solidcraft_engine::doc::apply_point(&m, Vec3::ZERO);
         let Some(c) = proj.to_screen(at) else { continue };
         for (axis, col) in [(Vec3::X, t.axis_x), (Vec3::Y, t.axis_y), (Vec3::Z, t.axis_z)] {
