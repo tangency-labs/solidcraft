@@ -1662,7 +1662,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::edit_clipboard::leave_text(app, text);
             }
         }
-        "ui.deleteFeatures" => {
+        "ui.deleteFeatures" | "ui.deleteAfterMarker" => {
             let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
             if !ids.is_empty() {
                 crate::timeline::delete_features(app, ids);
@@ -2308,8 +2308,11 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
         Target::Component { id } => component(*id),
         Target::Occurrence { path } => app.session.occurrence_placement(path).is_ok(),
-        Target::Group { id, .. } => doc.browser_groups.iter().any(|g| g.id == *id),
-        Target::Folder { component: id, .. } => component(*id),
+        // The scope is the row it is under: the component's own, or one of its placements.
+        Target::Group { id, scope } => doc.browser_groups.iter().any(|g| g.id == *id && crate::browser::scope_shows(app, scope, g.component)),
+        Target::Folder { component: id, folder, scope } => {
+            component(*id) && ["bodies", "sketches", "construction"].contains(&folder.as_str()) && crate::browser::scope_shows(app, scope, *id)
+        }
         Target::Joint { id } => doc.assembly.joints.iter().any(|j| j.id == *id),
         Target::ToolbarCommand { id } => solidcraft_engine::find_command(id).is_some(),
         Target::NamedView { name } => {
@@ -2322,6 +2325,12 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
     };
     if found {
         return Ok(());
+    }
+    // A folder or group is found by more than one field: name them all.
+    match target {
+        Target::Folder { component, folder, scope } => return Err(format!("no `{folder}` folder of component {component} under `{scope}`")),
+        Target::Group { id, scope } => return Err(format!("no group {id} under `{scope}`")),
+        _ => {}
     }
     let what = serde_json::to_value(target).ok();
     // A History item is a feature.

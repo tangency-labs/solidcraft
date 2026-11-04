@@ -435,7 +435,8 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let marker = doc.marker.unwrap_or(doc.features.len());
     let shown = shown_feature_indices(doc, timeline_component(app, app.tree.history_show_all), app.tree.history_show_hidden);
     if let Some((label, ids)) = after_marker(app, id, index, marker, Some(&shown)) {
-        v.push(Item::action("ui.deleteFeatures", &label, "delete").with(json!({ "features": ids })));
+        // Its own id, so `ui.menuPick` can tell it from Delete.
+        v.push(Item::action("ui.deleteAfterMarker", &label, "delete").with(json!({ "features": ids })));
     }
     v
 }

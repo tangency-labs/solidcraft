@@ -2159,6 +2159,8 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    let group = h.app.run("browser.group", json!({"component": 0, "folder": "bodies", "items": ["Blk"]})).unwrap()["group"].as_u64().unwrap();
+    let bad_group = format!("no group {group} under `c7`");
     h.frames(2);
     for (target, error) in [
         (json!({"type": "body", "name": "NoSuchBody"}), "no body `NoSuchBody`"),
@@ -2166,13 +2168,23 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         (json!({"type": "joint", "id": 7}), "no joint `7`"),
         (json!({"type": "timeline", "feature": 999}), "no feature `999`"),
         (json!({"type": "section"}), "no section"),
+        (json!({"type": "folder", "component": 0, "folder": "drawings", "scope": "c0"}), "no `drawings` folder of component 0 under `c0`"),
+        (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
+        (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),
     ] {
         let reply = h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}));
         assert_eq!(reply["error"], error, "{target}");
         assert_eq!(h.call("ui.menu", json!({}))["result"], json!({"open": false, "pending": false}), "{target}");
     }
-    h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "body", "name": "Blk"}}));
-    assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true);
+    for target in [
+        json!({"type": "body", "name": "Blk"}),
+        json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "c0"}),
+        json!({"type": "group", "id": group, "scope": "c0"}),
+    ] {
+        assert_eq!(h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}))["ok"], true, "{target}");
+        assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "{target}");
+        h.call("ui.menu", json!({"close": true}));
+    }
 }
 
 /// The History bar's feature menu is the shared context menu: `ui.menu` reports it after a
@@ -2219,4 +2231,14 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
     assert_eq!(h.call("ui.menuPick", json!({"item": "Find in Browser"}))["ok"], true);
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Body { name: "Blk".into() }]);
+
+    // After the history marker, Delete and the delete of everything after the marker are two
+    // items with their own ids, so each can be picked.
+    h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+    settle(&mut h);
+    h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    let ids: Vec<&str> = menu["items"].as_array().into_iter().flatten().filter_map(|i| i["id"].as_str()).collect();
+    assert_eq!(ids.iter().filter(|i| **i == "ui.deleteFeatures").count(), 1, "{ids:?}");
+    assert_eq!(ids.iter().filter(|i| **i == "ui.deleteAfterMarker").count(), 1, "{ids:?}");
 }

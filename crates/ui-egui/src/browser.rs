@@ -480,6 +480,13 @@ fn scope_path(scope: &str) -> Vec<u64> {
     scope.strip_prefix("o:").map(|ids| ids.split('/').filter_map(|id| id.parse().ok()).collect()).unwrap_or_default()
 }
 
+/// Whether a folder or group's scope key is a row of `component`: its own row (`c<id>`), or a
+/// placement of it (`o:<ids>`).
+pub(crate) fn scope_shows(app: &SolveApp, scope: &str, component: u64) -> bool {
+    scope == format!("c{component}")
+        || (is_placement_key(scope) && app.session.occurrence_placement(&scope_path(scope)).is_ok_and(|p| p.component == component))
+}
+
 /// Paste on a Bodies or Sketches folder or group: copied (or cut) bodies, or copied sketches and
 /// features, go into its component (that placement), and into the group.
 fn paste_item(app: &SolveApp, component: u64, scope: &str, folder: &str, group: Option<u64>) -> Item {
