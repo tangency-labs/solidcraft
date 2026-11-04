@@ -115,8 +115,8 @@ pub fn section_square_to(
 mod tests {
     use super::*;
 
-    fn refused_here(r: Result<impl Sized>) -> bool {
-        matches!(r, Err(SolidError::InvalidInput { operation, .. }) if operation == OP)
+    fn refused_here(r: &Result<impl Sized>) -> bool {
+        matches!(r, Err(SolidError::InvalidInput { operation, .. }) if *operation == OP)
     }
 
     /// A segment of length 5 (3-4-0) is made with ends where given; ends 1e-10 apart, the
@@ -127,13 +127,13 @@ mod tests {
         let b = Point3::new(4.0, 6.0, 3.0);
         let l = segment_apart(a, b, 1e-9).unwrap();
         assert_eq!(l.line_point(), a);
-        assert!(refused_here(segment_apart(
+        assert!(refused_here(&segment_apart(
             a,
             Point3::new(1.0 + 1e-10, 2.0, 3.0),
             1e-9
         )));
-        assert!(refused_here(segment_apart(a, a, 1e-9)));
-        assert!(refused_here(segment_apart(
+        assert!(refused_here(&segment_apart(a, a, 1e-9)));
+        assert!(refused_here(&segment_apart(
             a,
             Point3::new(f64::NAN, 0.0, 0.0),
             1e-9
@@ -154,11 +154,11 @@ mod tests {
             Vec3::new(1e-13, 0.0, 0.0),
             Vec3::new(f64::NAN, 1.0, 0.0),
         ] {
-            assert!(refused_here(direction(v, "x")), "{v:?}");
+            assert!(refused_here(&direction(v, "x")), "{v:?}");
         }
         let mut k = Kernel::default();
         let mut b = Brep::new_with_infinite_region().unwrap();
-        assert!(refused_here(revolve(
+        assert!(refused_here(&revolve(
             &mut k,
             &[],
             Point3::new(0.0, 0.0, 0.0),
@@ -166,7 +166,7 @@ mod tests {
             90.0,
             false
         )));
-        assert!(refused_here(section_square_to(
+        assert!(refused_here(&section_square_to(
             &k,
             &mut b,
             Point3::new(0.0, 0.0, 0.0),

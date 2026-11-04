@@ -508,7 +508,7 @@ fn check(name: &str) {
             );
         }
         (Expect::Sheet(_), Ok(b)) => {
-            assert_eq!(b.counts().unwrap()[0], 1, "{name}: one planar face")
+            assert_eq!(b.counts().unwrap()[0], 1, "{name}: one planar face");
         }
         (Expect::Corner(why), Err(Error::DraftCornerRefused { why: got, at })) => {
             assert_eq!(&got, why, "{name}");
@@ -829,9 +829,11 @@ fn a_box_s_record_faces_section_at_their_index() {
     );
 }
 
-/// A segment over a 10 mm box projected down (the direction at length 3) lands on one record
-/// face, the top, at z = 10; an index past the record's faces and a direction of no length are
-/// refused.
+/// A segment over a 10 mm box projected down (the direction at length 3) lands on two record
+/// faces, the top at z = 10 and the bottom at z = 0: a parallel projection onto a face is onto
+/// that face's own surface (`SmBrep::CreateParallelProjectionCurves`), whatever lies between;
+/// the side faces take none of it. An index past the record's faces and a direction of no length
+/// are refused.
 #[test]
 fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
     let b = make_box([0.0; 3], [10.0; 3]).unwrap();
@@ -840,11 +842,23 @@ fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
     let landed: Vec<_> = (0..6)
         .filter_map(|i| project_curves(&b, &order, i, &seg, [0.0, 0.0, -3.0], 1e-6).ok())
         .collect();
-    assert_eq!(landed.len(), 1);
-    let Curve::Nurbs { points, .. } = &landed[0][0].0 else {
-        panic!("{:?}", landed[0][0].0)
-    };
-    assert!(points.iter().all(|p| (p[2] / p[3] - 10.0).abs() < 1e-9));
+    assert_eq!(landed.len(), 2, "the top and the bottom");
+    let mut heights: Vec<f64> = landed
+        .iter()
+        .map(|on_face| {
+            let Curve::Nurbs { points, .. } = &on_face[0].0 else {
+                panic!("{:?}", on_face[0].0)
+            };
+            let z = points[0][2] / points[0][3];
+            assert!(points.iter().all(|p| (p[2] / p[3] - z).abs() < 1e-9));
+            z
+        })
+        .collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(
+        (heights[0] - 0.0).abs() < 1e-9 && (heights[1] - 10.0).abs() < 1e-9,
+        "{heights:?}"
+    );
     let at = |i, d| project_curves(&b, &order, i, &seg, d, 1e-6);
     assert_eq!(at(6, Z), Err(Error::Argument), "an index past the faces");
     assert_eq!(
