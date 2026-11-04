@@ -264,6 +264,40 @@ fn pieces_of_a_cut_body_keep_their_body_names_when_the_cut_moves() {
     }
 }
 
+/// A hole that cuts a body in three pieces names them as the design names them when it is
+/// evaluated again from the names it pinned, as on opening it. Found by the model fuzzer: the two
+/// smaller pieces swapped names there, so a later feature naming one of them met the other.
+#[test]
+fn pieces_of_a_cut_keep_their_names_when_the_design_is_evaluated_again() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "name": "P8", "offset": 5}));
+    run(&mut s, "sketch.create", json!({"plane": "P8"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-7, -9], "p1": [5, -7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [7, -3], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+    run(&mut s, "solid.hole", json!({"depth": 14, "diameter": 5, "position": [-1, 10, 8]}));
+    // Each body by name, with where it is (two pieces have the same volume).
+    let pieces = |st: &solidcraft_doc::ModelState| -> Vec<(String, String)> {
+        st.bodies
+            .iter()
+            .map(|b| {
+                let m = solidcraft_kernel::measure(&b.body).unwrap();
+                (b.name.clone(), format!("{:.3} {:.3} {:.3} {:.3}", m.volume, m.centroid.x, m.centroid.y, m.centroid.z))
+            })
+            .collect()
+    };
+    let live = pieces(&s.model.state());
+    assert_eq!(live.len(), 3, "{live:?}");
+    let mut again = solidcraft_doc::Model::new();
+    again.no_cache = true;
+    again.evaluate(&s.doc);
+    assert_eq!(pieces(&again.state()), live);
+}
+
 #[test]
 fn a_name_of_a_body_without_history_is_found_by_geometry_and_says_so_once_it_moves() {
     let mut s = Session::default();
