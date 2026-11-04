@@ -89,9 +89,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&crate::schema::TypedContract::<crate::schema::render::CoatUnbindParams>::new())
         .output(crate::schema::output_schema_for::<crate::schema::render::CoatUnbindResult>)
         .params("name; target: exact saved definition/feature/component/occurrence_path; expected_revision. Removes only that stable coat assignment in one undo, without device or file access."),
-    CommandSpec::new("render.optics.bind","Save Optical Binding",optical_bindings::bind).icon("appearance")
+    CommandSpec::new("render.optics.bind","Save Optical Binding",crate::checked!("render.optics.bind", optical_bindings::bind)).icon("appearance")
+    .contract(&optical_bindings::BIND_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_bindings::OpticsBindingSaved>)
         .params("name: CPU or GPU setup; set?: complete numerical setup patch; body_index and body_name: exact captured target; expected_revision; optics:{ior,absorption_per_mm:[r,g,b],boundary:closed_mesh|closed_box|thin_sheet,thickness_mm,shadow_transmission,subsurface?:{scattering_per_mm,anisotropy}}; replace?:false. Stores stable definition/feature/occurrence identity in one undo without modifying engineering geometry/materials. CPU consumes at most eight certified optical targets. Without options.path, sheets and axis-aligned boxes retain the existing transport. Explicit progressive options.path enables exact closed-mesh certification, bounded nested convex-parent media, Beer/Snell/Fresnel and thin transmitted shadows; touching or unproven boundaries and closed transmitted-shadow connections refuse explicitly. Existing subsurface parameters may be consumed on certified closed Path media with denoising explicitly off; scalar free-flight/HG walks and separate Beer absorption are supported without refracting-boundary next-event approximation. A zero scattering rate preserves transport. GPU nested media require separate job.options.nested_media and producer certification. Unresolved or incompatible targets refuse atomically."),
-    CommandSpec::new("render.optics.unbind","Remove Optical Binding",optical_bindings::unbind).icon("appearance").doc_only()
+    CommandSpec::new("render.optics.unbind","Remove Optical Binding",crate::checked!("render.optics.unbind", optical_bindings::unbind)).icon("appearance").doc_only()
+    .contract(&optical_bindings::UNBIND_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_bindings::OpticsUnbound>)
         .params("name: saved setup; target: exact saved definition/feature/component/occurrence_path; expected_revision. Removes only that optical assignment in one undo without a device or file access."),
     CommandSpec::new("render.result.regrade", "Regrade Linear Master", jobs::regrade).icon("render_image").noundo().doc_only()
         .params("job?: exact completed JobId (default selected result); presentation: {exposure_ev?,tone_map?,finishing?,backdrop?,background?,transparent_background?}. Queues cancellable nondestructive PNG presentation from that retained native FLOAT32 master, not from PNG. Captured geometry/camera/lighting and source EXR remain unchanged; no path tracing, denoising, external EXR import or automatic file writes. Returns a distinct job with source identity and original-master digest. Existing frame retention and export rules still apply."),
@@ -143,9 +147,13 @@ CommandSpec::new("render.stage.clear", "Remove Render Stage", crate::checked!("r
     .contract(&staging::CLEAR_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: setup, set?: setup patch. Removes saved render-only panels atomically; CAD geometry and lighting are unchanged."),
-CommandSpec::new("render.library.surface.bind", "Save Surface Binding", surface_bindings::bind).icon("appearance")
+CommandSpec::new("render.library.surface.bind", "Save Surface Binding", crate::checked!("render.library.surface.bind", surface_bindings::bind)).icon("appearance")
+    .contract(&surface_bindings::BIND_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_bindings::SurfaceBindingSaved>)
     .params("name: CPU or GPU setup; set?: setup patch; surface: same input as render.library.surface.prepare; replace?: false. Pins exact source hashes and definition/feature/occurrence identity with local-mm mapping in one undo. No paths, mesh ordinals or physical material changes."),
-CommandSpec::new("render.library.surface.unbind", "Remove Surface Binding", surface_bindings::unbind).icon("appearance").doc_only()
+CommandSpec::new("render.library.surface.unbind", "Remove Surface Binding", crate::checked!("render.library.surface.unbind", surface_bindings::unbind)).icon("appearance").doc_only()
+    .contract(&surface_bindings::UNBIND_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_bindings::SurfaceBindingSaved>)
     .params("name: setup, target: saved definition/feature/component/occurrence_path, set?: setup patch. Removes only that explicit binding in one undo; no device or current geometry required."),
     CommandSpec::new("render.result.pin", "Retain Displayed Render Result", jobs::pin).icon("inspect").noundo().doc_only()
         .params("job?: completed JobId (default selected result), or null to clear selection. Selects within the eight retained completed results; oldest is evicted first. Preserves exact export bytes and original host memory accounting. No design/undo change; preview or foreign jobs refuse."),

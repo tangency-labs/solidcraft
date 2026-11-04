@@ -83,6 +83,7 @@ pub mod parts;
 pub mod plastic;
 pub mod print_face;
 pub mod render;
+pub mod render_bindings;
 pub mod render_hdr;
 pub mod render_library;
 pub mod render_lights;
