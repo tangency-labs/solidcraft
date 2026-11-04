@@ -556,12 +556,11 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
 }
 
 /// Whether the sketch already holds point `m` at the middle of line `l`, though no constraint says
-/// so: adding that Midpoint takes away no degree of freedom from the `base` the sketch has (a
-/// center rectangle's centre, held on one diagonal, is the other's middle too because the
-/// diagonals bisect each other).
-fn middle_implied(sk: &Sketch, base: usize, m: usize, l: usize) -> bool {
+/// so: adding that Midpoint takes away no degree of freedom (a center rectangle's centre, held on
+/// one diagonal, is the other's middle too because the diagonals bisect each other).
+fn middle_implied(sk: &Sketch, m: usize, l: usize) -> bool {
     let mut with = sk.clone();
-    add_c(&mut with, ConstraintKind::Midpoint { p: m, l }).is_ok() && dof_now(&with) == base
+    add_c(&mut with, ConstraintKind::Midpoint { p: m, l }).is_ok() && dof_now(&with) == dof_now(sk)
 }
 
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
@@ -617,7 +616,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         })
         .collect();
     // The sketch as it was, for `middle_implied`: only needed when a midpoint can be cut.
-    let before = (!midpoints.is_empty()).then(|| (sk.clone(), dof_now(sk)));
+    let before = (!midpoints.is_empty()).then(|| sk.clone());
     release_extent(sk, ci);
     let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
@@ -652,7 +651,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
                 _ => None,
             };
             let implied = match &before {
-                Some((was, base)) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, *base, m, cutter),
+                Some(was) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, m, cutter),
                 _ => false,
             };
             if implied {
