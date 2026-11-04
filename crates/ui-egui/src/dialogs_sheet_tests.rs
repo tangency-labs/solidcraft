@@ -708,7 +708,7 @@ fn flange_dialog_does_not_guess_wall_names_for_a_rotated_profile() {
     app.run("sketch.finish", json!({})).unwrap();
     app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
     let points: Vec<_> = outline.windows(2).map(|edge| Vec3::new((edge[0][0] + edge[1][0]) * 0.5, (edge[0][1] + edge[1][1]) * 0.5, 2.5)).collect();
-    assert_eq!(app.session.world_state().sheets[0].flange_corner_pairs(&points).len(), 4);
+    assert_eq!(app.session.world_state().unwrap().sheets[0].flange_corner_pairs(&points).len(), 4);
     let walls = rectangle_walls(&app, &points);
     assert_eq!(walls, vec![None; 4]);
     assert_eq!(wall_name(&walls, 0), "Wall 1");

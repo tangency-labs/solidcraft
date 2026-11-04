@@ -285,7 +285,7 @@ impl Mapper<'_> {
             Value::Object(o) => {
                 let b = o.get("body").and_then(Value::as_str).map(str::to_string);
                 let mut m = o.clone();
-                for k in ["point", "face", "edge", "vertex", "at"] {
+                for k in ["point", "face", "edge", "vertex", "at", "covering", "covered"] {
                     if let Some(x) = o.get(k)
                         && let Some(y) = self.pick(x, b.as_deref().or(body))
                     {

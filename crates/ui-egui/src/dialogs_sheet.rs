@@ -361,15 +361,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                                             [(a, angle.as_str(), "angle", "sm_edge_angle"), (h, height.as_str(), "height", "sm_edge_height")]
                                         {
                                             ui.push_id((id, n), |ui| {
-                                                ui.allocate_ui_with_layout(
+                                                let field = ui.allocate_ui_with_layout(
                                                     vec2(w, Tokens::get().control_height),
                                                     egui::Layout::left_to_right(egui::Align::Center),
                                                     |ui| {
                                                         enter |= crate::ui_kit::hint_field(ui, text, hint);
                                                     },
                                                 );
-                                                let at = ui.min_rect().center();
-                                                crate::scenario::publish_handle(&format!("dialog:Edge {} {what}", n + 1), at);
+                                                crate::scenario::publish_handle(
+                                                    &format!("dialog:Edge {} {what}", n + 1),
+                                                    field.response.rect.center(),
+                                                );
                                             });
                                         }
                                     });
@@ -606,11 +608,13 @@ fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
 
 // ---- commands ----
 
+/// Extracts the flange body and tag from a selected face on a sheet metal body.
+/// Returns an error if the selection is not a flat face on a flange.
 fn corner_flange(app: &SolveApp, selection: Option<&Sel>) -> Result<(String, String), String> {
     let Some(Sel::Face { body, point, .. }) = selection else {
         return Err("select a flat face on each flange".into());
     };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.iter().find(|sheet| sheet.body == *body).ok_or("select flanges on a sheet metal body")?;
     let (name, _) = sheet.panel_face_at(*point, 0.01).ok_or("select a flat face on a flange")?;
     let tag = name
@@ -621,15 +625,17 @@ fn corner_flange(app: &SolveApp, selection: Option<&Sel>) -> Result<(String, Str
     Ok((body.clone(), tag.into()))
 }
 
+/// Creates a selection point at the center of a flange's panel for picking and hover feedback.
+/// Returns `None` if the flange or its panel cannot be located.
 fn corner_flange_sel(app: &SolveApp, body: &str, tag: &str) -> Option<Sel> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.iter().find(|sheet| sheet.body == body)?;
     let flange = sheet.flanges.iter().find(|flange| flange.tag == tag)?;
     let points = sheet.panel(flange).outer.polyline(1e-3);
     if points.is_empty() {
         return None;
     }
-    let center = points.iter().copied().fold(solidcraft_engine::geom::Vec2::ZERO, |sum, point| sum + point) / points.len() as f64;
+    let center = points.iter().copied().fold(Vec2::ZERO, |sum, point| sum + point) / points.len() as f64;
     let plane = sheet.panel_face(&format!("{tag}:top"))?;
     face_sel(&app.session, plane.to_world(center))
 }
@@ -703,6 +709,8 @@ fn edge_point_list(inputs: &[SelInput]) -> Vec<Vec3> {
     items(inputs, 0).edge_points()
 }
 
+/// Updates the list of corner join choices based on available edge pairs, retaining common settings
+/// (corner type, overlap, gap, covering group) if `inherit` is true and all corners share the same values.
 fn update_corner_choices(app: &SolveApp, points: &[Vec3], choices: &mut Vec<FlangeCornerChoice>, inherit: bool) {
     choices.retain(|choice| [choice.first, choice.second].iter().all(|edge| points.iter().any(|point| point.dist(*edge) < 1e-6)));
     let common = choices
@@ -719,7 +727,7 @@ fn update_corner_choices(app: &SolveApp, points: &[Vec3], choices: &mut Vec<Flan
         .first()
         .and_then(|choice| covering_group(choice, points, &walls))
         .filter(|group| inherit && choices.iter().all(|choice| covering_group(choice, points, &walls) == Some(*group)));
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     for sheet in &state.sheets {
         for (first, second) in sheet.flange_corner_pairs(points) {
             let (Some(first), Some(second)) = (points.get(first), points.get(second)) else { continue };
@@ -750,8 +758,10 @@ fn update_corner_choices(app: &SolveApp, points: &[Vec3], choices: &mut Vec<Flan
 
 const WALL_NAMES: [&str; 4] = ["Front", "Rear", "Left", "Right"];
 
+/// Identifies which wall (front/rear/left/right) each edge point belongs to on a rectangular base.
+/// Returns `None` for points not near a wall or if the base is not rectangular.
 fn rectangle_walls(app: &SolveApp, points: &[Vec3]) -> Vec<Option<usize>> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(sheet) = state.sheets.iter().find(|sheet| !sheet.flange_corner_pairs(points).is_empty()) else { return vec![None; points.len()] };
     let outline = sheet.base.outer.polyline(1e-3);
     let low = outline.iter().fold((f64::INFINITY, f64::INFINITY), |bounds, point| (bounds.0.min(point.x), bounds.1.min(point.y)));
@@ -778,6 +788,7 @@ fn rectangle_walls(app: &SolveApp, points: &[Vec3]) -> Vec<Option<usize>> {
         .collect()
 }
 
+/// Returns the display name for a wall at the given index (Front/Rear/Left/Right or "Wall N").
 fn wall_name(walls: &[Option<usize>], index: usize) -> String {
     walls
         .get(index)
@@ -788,6 +799,8 @@ fn wall_name(walls: &[Option<usize>], index: usize) -> String {
         .unwrap_or_else(|| format!("{} {}", crate::i18n::tr_label("Wall"), index + 1))
 }
 
+/// Highlights or hovers wall edges when a response is focused or contains the pointer.
+/// Returns true if the response is active (hovered, focused, or parent is focused).
 fn hover_walls(ui: &egui::Ui, response: &egui::Response, points: &[Vec3]) -> bool {
     let focused = ui.ctx().memory(|memory| memory.focused()).and_then(|id| ui.ctx().read_response(id));
     let active = response.contains_pointer() || response.has_focus() || focused.is_some_and(|focused| response.rect.contains_rect(focused.rect));
@@ -797,18 +810,23 @@ fn hover_walls(ui: &egui::Ui, response: &egui::Response, points: &[Vec3]) -> boo
     active
 }
 
+/// Highlights the corner marker (edge pair) when hovering over a corner's UI response.
 fn hover_corner(ui: &egui::Ui, response: &egui::Response, corner: &FlangeCornerChoice, walls: &[Vec3]) {
     if hover_walls(ui, response, walls) {
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sheet_corner_marker"), Some([corner.first, corner.second])));
     }
 }
 
+/// Determines which wall group (0 = front/rear, 1 = left/right) a corner's covering flange belongs to.
+/// Returns `None` if the covering flange is not on a recognized wall.
 fn covering_group(corner: &FlangeCornerChoice, points: &[Vec3], walls: &[Option<usize>]) -> Option<usize> {
     let selected = if corner.cover_second { corner.second } else { corner.first };
     let index = points.iter().position(|point| point.dist(selected) < 1e-6)?;
     Some(usize::from(walls.get(index).copied().flatten()? >= 2))
 }
 
+/// Updates all corners to use the covering flange that belongs to the specified wall group.
+/// Wall group 0 = front/rear walls, group 1 = left/right walls.
 fn set_covering_group(corners: &mut [FlangeCornerChoice], points: &[Vec3], walls: &[Option<usize>], group: usize) {
     for corner in corners {
         if let Some(index) = points.iter().position(|point| point.dist(corner.second) < 1e-6) {
@@ -817,10 +835,14 @@ fn set_covering_group(corners: &mut [FlangeCornerChoice], points: &[Vec3], walls
     }
 }
 
+/// UI input field for entering a custom corner gap value with a localized hint.
+/// Returns true if the value changed.
 fn corner_gap_field(ui: &mut egui::Ui, gap: &mut String, hint: &str) -> bool {
     crate::ui_kit::hint_field(ui, gap, crate::i18n::tr_label(hint))
 }
 
+/// Renders UI rows for corner configuration: corner type (butt/partial/full), gap, covering group selection,
+/// and per-corner overrides. Returns true if the user made changes requiring re-evaluation.
 fn flange_corner_rows(app: &SolveApp, ui: &mut egui::Ui, points: &[Vec3], corners: &mut [FlangeCornerChoice]) -> bool {
     if corners.is_empty() {
         return false;
@@ -1378,6 +1400,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
 
 // ---- view ----
 
+/// Finds the closest wall edge to a point, within the wall's tolerance.
+/// Returns a reference to the wall if found, or `None` if no wall is close enough.
 fn preview_wall(walls: &[crate::preview::SheetWallPreview], point: Vec3) -> Option<&crate::preview::SheetWallPreview> {
     walls
         .iter()
@@ -1395,6 +1419,8 @@ fn preview_wall(walls: &[crate::preview::SheetWallPreview], point: Vec3) -> Opti
         .map(|(wall, _)| wall)
 }
 
+/// Finds the corner marker position (midpoint of closest edges) between two corner points on wall edges.
+/// Returns `None` if either point is not near a wall or the walls don't intersect.
 fn corner_marker(walls: &[crate::preview::SheetWallPreview], points: [Vec3; 2]) -> Option<Vec3> {
     let first = preview_wall(walls, points[0])?;
     let second = preview_wall(walls, points[1])?;
@@ -1406,6 +1432,8 @@ fn corner_marker(walls: &[crate::preview::SheetWallPreview], points: [Vec3; 2]) 
         .map(|(first, second)| (first + second) * 0.5)
 }
 
+/// Renders the corner selection overlay: highlights hovered wall edges and displays corner markers.
+/// Only renders when the preview is active and the flange dialog is open and not in error.
 pub(crate) fn corner_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj, dialog: &Dialog) {
     if dialog.collapsed
         || !matches!(dialog.kind, Kind::Sheet(Sm::Flange { ty: 1, .. }))

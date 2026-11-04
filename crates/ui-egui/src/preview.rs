@@ -793,8 +793,9 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         .sheets
         .iter()
         .flat_map(|sheet| {
-            sheet.flanges.iter().filter(|flange| flange.parent.is_none()).filter_map(|flange| {
-                let plane = sheet.panel_face(&format!("{}:top", flange.tag))?;
+            sheet.flanges.iter().enumerate().filter(|(_, flange)| flange.parent.is_none()).filter_map(|(index, flange)| {
+                let name = if flange.tag.is_empty() { format!("#{index}") } else { flange.tag.clone() };
+                let plane = sheet.panel_face(&format!("{name}:top"))?;
                 Some(SheetWallPreview {
                     edge: [sheet.frame.to_world(flange.p), sheet.frame.to_world(flange.p + flange.d * flange.len)],
                     outline: sheet.panel(flange).outer.polyline(1e-3).into_iter().map(|point| plane.to_world(point)).collect(),

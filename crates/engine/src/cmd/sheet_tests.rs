@@ -6853,3 +6853,68 @@ fn a_flange_on_part_of_a_stepped_outline_spans_that_part() {
     let expected = 215.8 * 403.5 + 377.8 * (allowance + 18.0);
     assert!(rel(flat_area(&flat(&mut s)), expected) < 1e-9, "{} vs {expected}", flat_area(&flat(&mut s)));
 }
+
+/// Regression: corner_type omitted from a corner object defaults to "butt".
+#[test]
+fn flange_corner_type_omitted_defaults_to_butt() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "active": true}));
+    base(&mut s, 120.0, 90.0);
+    let result = run(
+        &mut s,
+        "sheet.flange",
+        json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 30, "corners": [{"covering": [60, 0, 2], "covered": [0, 45, 2]}]}),
+    );
+    assert!(result["feature"].is_number(), "corner_type omitted should default to butt: {result}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Regression: corner_type null on a corner object defaults to "butt".
+#[test]
+fn flange_corner_type_null_defaults_to_butt() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "active": true}));
+    base(&mut s, 120.0, 90.0);
+    let result = run(
+        &mut s,
+        "sheet.flange",
+        json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 30, "corners": [{"covering": [60, 0, 2], "covered": [0, 45, 2], "corner_type": null}]}),
+    );
+    assert!(result["feature"].is_number(), "corner_type null should default to butt: {result}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Regression: invalid corner_type strings are rejected (e.g., wrong case, unknown names).
+#[test]
+fn flange_corner_type_invalid_strings_rejected() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "active": true}));
+    base(&mut s, 120.0, 90.0);
+    let before = s.doc.to_json();
+
+    for invalid_type in ["BUTT", "PARTIAL", "FULL", "Butt", "Full", "Partial", "unknown", "corner", "", "butt ", " butt"] {
+        let entry = json!({"covering": [60, 0, 2], "covered": [0, 45, 2], "corner_type": invalid_type});
+        let result =
+            s.execute("sheet.flange", &json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 30, "corners": [entry]}));
+        assert!(result.is_err(), "corner_type '{invalid_type}' should be rejected: {result:?}");
+        assert_eq!(s.doc.to_json(), before, "design should be unchanged after rejecting '{invalid_type}'");
+    }
+}
+
+/// A custom gap works with the default butt join and with explicit butt and full joins.
+#[test]
+fn flange_corner_gap_only_works() {
+    for corner_type in [None, Some("butt"), Some("full")] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "active": true}));
+        base(&mut s, 120.0, 90.0);
+        let mut corner = json!({"covering": [60, 0, 2], "covered": [0, 45, 2], "gap": "0.5 mm"});
+        if let Some(kind) = corner_type {
+            corner["corner_type"] = json!(kind);
+        }
+        let result =
+            run(&mut s, "sheet.flange", json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 30, "corners": [corner]}));
+        assert!(result["feature"].is_number(), "gap corner (type={corner_type:?}) should succeed: {result}");
+        assert!(s.model.results.iter().all(|result| result.error.is_none()), "{:?}", s.model.results);
+    }
+}

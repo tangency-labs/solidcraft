@@ -2992,6 +2992,8 @@ impl SheetBody {
         self.add_flanges(&[pick], height, angle, radius, position, flip)?.into_iter().next().ok_or_else(|| DocError::Invalid("flange".into()))
     }
 
+    /// Finds pairs of edges that share a vertex and are non-parallel, suitable for corner joins.
+    /// Returns indices of edges from the input `picks` that form valid corner join candidates.
     pub fn flange_corner_pairs(&self, picks: &[Vec3]) -> Vec<(usize, usize)> {
         if picks.len() > 1000 {
             return Vec::new();
@@ -3159,6 +3161,8 @@ impl SheetBody {
         self.add_flanges_joined(edges, radius, position, flip, relief, &[])
     }
 
+    /// Adds edge flanges and closes their corners with specified joins (overlap, covering, and gap).
+    /// Each join can optionally overlap a neighboring flange's panel. Returns flange indices and notes on corners that couldn't be closed or relieved.
     pub fn add_flanges_joined(
         &mut self,
         edges: &[EdgeFlange],
@@ -3937,10 +3941,14 @@ impl SheetBody {
         Ok(notes)
     }
 
+    /// Joins two neighboring flanges using the sheet rule's gap.
+    /// `None` makes a butt join; `Some(length)` extends the covering panel over the covered panel.
     pub fn join_corner(&mut self, covering: usize, covered: usize, overlap: Option<f64>) -> Result<()> {
         self.join_corner_with_gap(covering, covered, overlap, self.gap)
     }
 
+    /// Joins two flanges at their corner with a custom gap, optionally overlapping the covering panel over the covered one.
+    /// Returns an error if the flanges are invalid, misaligned, or the overlap geometrically conflicts.
     pub fn join_corner_with_gap(&mut self, covering: usize, covered: usize, overlap: Option<f64>, gap: f64) -> Result<()> {
         if self.flat || covering == covered {
             return Err(DocError::Invalid("pick two different flanges on a folded sheet".into()));
@@ -4046,10 +4054,14 @@ impl SheetBody {
         self.close_corner_overlap(k, None)
     }
 
+    /// Closes a corner with optional overlap and default gap. The `overlap` parameter specifies
+    /// a covering flange index and the amount (thickness) it extends over the covered flange.
     fn close_corner_overlap(&mut self, k: &Corner, overlap: Option<(usize, f64)>) -> std::result::Result<(), String> {
         self.close_corner_with_gap(k, overlap, self.gap)
     }
 
+    /// Closes a corner with an explicit gap of at least `MIN_CORNER_GAP`.
+    /// An overlap names the covering flange and a finite length in `(0, thickness]`.
     fn close_corner_with_gap(&mut self, k: &Corner, overlap: Option<(usize, f64)>, gap: f64) -> std::result::Result<(), String> {
         if !gap.is_finite() || gap < MIN_CORNER_GAP {
             return Err(format!("the flange gap {gap:.4} mm is below {MIN_CORNER_GAP} mm or is not finite"));
