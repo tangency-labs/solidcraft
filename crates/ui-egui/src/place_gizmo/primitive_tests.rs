@@ -173,6 +173,19 @@ fn a_dropped_box_in_a_metre_design_is_written_in_metres_at_the_dropped_place() {
     }
 }
 
+/// A size typed as a bare expression ("2 * 1") is in the design's unit, as OK reads it: in an
+/// inch design the corner a drop writes is 1 in back from the point, not 1 mm.
+#[test]
+fn a_dropped_box_reads_a_bare_size_expression_in_the_design_unit() {
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("document.units", &json!({"units": "in"})).unwrap();
+    let mut extra = serde_json::Map::new();
+    crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(50.8, 50.8, 0.0), Vec3::Z, Vec3::new(50.8, 50.8, 25.4), ["2 * 1", "2 * 1", "1"]);
+    let Some(serde_json::Value::Array(corner)) = extra.get("corner") else { panic!("the corner: {extra:?}") };
+    let x = s.doc.eval(corner[0].as_str().unwrap(), solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((x - 25.4).abs() < 1e-6, "1 in back from 2 in: {x} mm from {corner:?}");
+}
+
 #[test]
 fn marker_stands_a_new_cylinder_on_the_face_through_its_face_input() {
     let mut h = plate();
