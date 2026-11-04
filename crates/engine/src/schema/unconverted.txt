@@ -39,13 +39,6 @@ component.replace_with_link
 component.revert_position
 component.unlock
 component.update_links
-contact.check
-contact.create
-contact.disable_all
-contact.edit
-contact.enable_all
-contact.enable_sets
-contact.list
 doc.open
 doc.recover
 doc.recovery_discard

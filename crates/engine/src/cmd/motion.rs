@@ -14,7 +14,10 @@ use solidcraft_kernel::Body;
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
 use crate::params::{bad, bool_, str_, vec3};
-use crate::schema::motion::{FindLimitsParams, FindLimitsResult};
+use crate::schema::motion::{
+    ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
+    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, FindLimitsParams, FindLimitsResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -39,26 +42,55 @@ macro_rules! trace_doc {
     };
 }
 
+const CONTACT_ENABLE_CONTRACT: TypedContract<ContactEnableParams> = TypedContract::new();
+const CONTACT_NONE_CONTRACT: TypedContract<ContactNoParams> = TypedContract::new();
+const CONTACT_CREATE_CONTRACT: TypedContract<ContactCreateParams> = TypedContract::new();
+const CONTACT_EDIT_CONTRACT: TypedContract<ContactEditParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("contact.enable_sets", "Enable Contact Sets", enable_sets).at("SOLID", "ASSEMBLE").icon("contact_sets").params(
-        "enabled?: bool (default true) — driving joints and motion studies stop where bodies in one contact set would pass through each other",
-    ),
-    CommandSpec::new("contact.enable_all", "Enable All Contact", enable_all)
+    CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
+        .at("SOLID", "ASSEMBLE")
+        .icon("contact_sets")
+        .contract(&CONTACT_ENABLE_CONTRACT)
+        .output(output_schema_for::<ContactSwitch>)
+        .params(
+            "enabled?: bool (default true) — driving joints and motion studies stop where bodies in one contact set would pass through each other",
+        ),
+    CommandSpec::new("contact.enable_all", "Enable All Contact", crate::checked!("contact.enable_all", enable_all))
         .at("SOLID", "ASSEMBLE")
         .icon("contact_all")
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactSwitch>)
         .params("every occurrence takes part in contact (one set of all)"),
-    CommandSpec::new("contact.disable_all", "Disable Contact", disable_all).at("SOLID", "ASSEMBLE").icon("contact_off").params("contact off"),
-    CommandSpec::new("contact.create", "New Contact Set", new_set)
+    CommandSpec::new("contact.disable_all", "Disable Contact", crate::checked!("contact.disable_all", disable_all))
+        .at("SOLID", "ASSEMBLE")
+        .icon("contact_off")
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactSwitch>)
+        .params("contact off"),
+    CommandSpec::new("contact.create", "New Contact Set", crate::checked!("contact.create", new_set))
         .at("SOLID", "ASSEMBLE")
         .icon("contact_new")
+        .contract(&CONTACT_CREATE_CONTRACT)
+        .output(output_schema_for::<ContactSetCreated>)
         .params("occurrences: [ids or names] (two or more); name?"),
-    CommandSpec::new("contact.edit", "Edit Contact Set", edit_set)
+    CommandSpec::new("contact.edit", "Edit Contact Set", crate::checked!("contact.edit", edit_set))
         .icon("edit")
+        .contract(&CONTACT_EDIT_CONTRACT)
+        .output(output_schema_for::<ContactSetEdited>)
         .params("set: id|name; occurrences?; name?; suppressed?: bool; delete?: bool"),
-    CommandSpec::new("contact.list", "List Contact Sets", list_sets).icon("list").noundo().doc_only().params("→ sets, enabled, all"),
-    CommandSpec::new("contact.check", "Check Contact", check)
+    CommandSpec::new("contact.list", "List Contact Sets", crate::checked!("contact.list", list_sets))
+        .icon("list")
+        .noundo()
+        .doc_only()
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactSets>)
+        .params("→ sets, enabled, all"),
+    CommandSpec::new("contact.check", "Check Contact", crate::checked!("contact.check", check))
         .icon("interference")
         .noundo()
+        .contract(&CONTACT_NONE_CONTRACT)
+        .output(output_schema_for::<ContactCheck>)
         .params("→ pairs in contact sets that pass through each other now"),
     CommandSpec::new("motion.study", "Motion Study", study).at("SOLID", "ASSEMBLE").icon("play").params(
         "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
@@ -525,24 +557,30 @@ pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) ->
     Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
 }
 
+/// A contact command's reply as JSON: they build their replies from the types their output
+/// schemas describe, so the two can't drift apart.
+fn contact_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn enable_sets(s: &mut Session, p: &Value) -> Result<Value> {
-    let on = bool_(p, "enabled").unwrap_or(true);
-    s.doc_mut().assembly.contact_enabled = on;
-    Ok(json!({"enabled": on}))
+    let enabled = bool_(p, "enabled").unwrap_or(true);
+    s.doc_mut().assembly.contact_enabled = enabled;
+    contact_reply("contact.enable_sets", ContactSwitch { enabled, all: None, param_warnings: Vec::new() })
 }
 
 fn enable_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_enabled = true;
     a.contact_all = true;
-    Ok(json!({"enabled": true, "all": true}))
+    contact_reply("contact.enable_all", ContactSwitch { enabled: true, all: Some(true), param_warnings: Vec::new() })
 }
 
 fn disable_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_enabled = false;
     a.contact_all = false;
-    Ok(json!({"enabled": false}))
+    contact_reply("contact.disable_all", ContactSwitch { enabled: false, all: None, param_warnings: Vec::new() })
 }
 
 fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -560,7 +598,7 @@ fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
     let a = &mut s.doc_mut().assembly;
     a.contact_sets.push(ContactSet { id, name: name.clone(), occurrences: occ, suppressed: false });
     a.contact_enabled = true;
-    Ok(json!({"set": id, "name": name}))
+    contact_reply(cmd, ContactSetCreated { set: id, name, param_warnings: Vec::new() })
 }
 
 fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -582,7 +620,7 @@ fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
     let i = set_index(s, p, cmd)?;
     if bool_(p, "delete").unwrap_or(false) {
         s.doc_mut().assembly.contact_sets.remove(i);
-        return Ok(json!({"deleted": true}));
+        return contact_reply(cmd, ContactSetEdited { change: ContactSetChange::Deleted { deleted: true }, param_warnings: Vec::new() });
     }
     let occ = if p.get("occurrences").is_some() { Some(occurrences(s, p, cmd)?) } else { None };
     if occ.as_ref().is_some_and(|o| o.len() < 2) {
@@ -598,17 +636,19 @@ fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(x) = bool_(p, "suppressed") {
         c.suppressed = x;
     }
-    Ok(json!({"set": c.id}))
+    let set = c.id;
+    contact_reply(cmd, ContactSetEdited { change: ContactSetChange::Changed { set }, param_warnings: Vec::new() })
 }
 
 fn list_sets(s: &mut Session, _p: &Value) -> Result<Value> {
     let a = &s.doc.assembly;
-    Ok(json!({"enabled": a.contact_enabled, "all": a.contact_all, "sets": a.contact_sets}))
+    let sets = a.contact_sets.iter().map(ContactSetInfo::from).collect();
+    contact_reply("contact.list", ContactSets { enabled: a.contact_enabled, all: a.contact_all, sets, param_warnings: Vec::new() })
 }
 
 fn check(s: &mut Session, _p: &Value) -> Result<Value> {
-    let c = collisions(s);
-    Ok(json!({"collisions": c.iter().map(|(a, b, d)| json!({"a": a, "b": b, "depth_mm": d})).collect::<Vec<_>>()}))
+    let collisions = collisions(s).into_iter().map(|(a, b, depth_mm)| ContactCollision { a, b, depth_mm }).collect();
+    contact_reply("contact.check", ContactCheck { collisions, param_warnings: Vec::new() })
 }
 
 // ---- Motion studies ----
