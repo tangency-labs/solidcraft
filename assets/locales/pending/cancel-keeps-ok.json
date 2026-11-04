@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.cancel_keeps_computing_ok": "Keep a computing OK running in the background after Cancel",
+    "prefs.dialogs_group": "Dialogs"
+  },
+  "ar": {
+    "prefs.cancel_keeps_computing_ok": "إبقاء تنفيذ موافق قيد الحساب يعمل في الخلفية بعد إلغاء الأمر",
+    "prefs.dialogs_group": "النوافذ"
+  },
+  "he": {
+    "prefs.cancel_keeps_computing_ok": "להמשיך להריץ ברקע אישור שעדיין מחושב לאחר ביטול",
+    "prefs.dialogs_group": "חלונות דו-שיח"
+  },
+  "ja": {
+    "prefs.cancel_keeps_computing_ok": "キャンセル後も計算中の OK をバックグラウンドで続ける",
+    "prefs.dialogs_group": "ダイアログ"
+  },
+  "vi": {
+    "prefs.cancel_keeps_computing_ok": "Giữ OK đang tính toán chạy nền sau khi Hủy",
+    "prefs.dialogs_group": "Hộp thoại"
+  },
+  "zh": {
+    "prefs.cancel_keeps_computing_ok": "取消后让正在计算的“确定”在后台继续运行",
+    "prefs.dialogs_group": "对话框"
+  }
+}
