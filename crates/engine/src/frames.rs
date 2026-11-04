@@ -434,7 +434,11 @@ impl Drop for Nested {
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
-    if !picks || !placed(s) {
+    // Edit Feature of a revolve restores its saved axis (and the origin's expressions) even
+    // where nothing is placed (`map_local`).
+    let revolve_edit =
+        id == "timeline.redefine" && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve"));
+    if !picks || (!placed(s) && !revolve_edit) {
         return Ok(None);
     }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
@@ -442,7 +446,8 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     if id == "solid.move" && split_move(s, params)?.is_some() {
         return Ok(None);
     }
-    let world = s.world_state()?;
+    // Nothing placed: the model is its own world, and only the saved axis is restored.
+    let world = if placed(s) { s.world_state()? } else { s.model.state() };
     Ok(map_local(s, &world, id, params))
 }
 
@@ -527,16 +532,41 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         if let solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } = &feature.kind {
             context.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
         }
-        let mut inner = map_local(&context, world, cmd, params.get("params")?)?;
+        // Nothing to map (a surface revolve has no picks; a design with no placed component needs
+        // none): an untouched explicit axis is still restored below.
+        let mapped = if placed(s) { map_local(&context, world, cmd, params.get("params")?) } else { None };
+        let mut inner = match mapped {
+            Some(inner) => inner,
+            None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
+            None => return None,
+        };
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
-        if cmd == "solid.revolve"
-            && let solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. } = &feature.kind
+        if let (
+            "solid.revolve" | "surface.revolve",
+            solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. }
+            | solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. },
+        ) = (cmd, &feature.kind)
+            && let Ok(at) = s.doc.eval_point(origin)
         {
             let frame = context.active_component_frame();
-            let displayed = serde_json::json!({"origin":pt(apply_point(&frame,origin.0)),"dir":pt(apply_vector(&frame,dir.0))});
-            if params.get("params").and_then(|p| p.get("axis")) == Some(&displayed) {
-                inner["axis"] = serde_json::json!({"origin":pt(origin.0),"dir":pt(dir.0)});
+            // Each half is kept when the dialog gives back what it showed (to float dust), so
+            // editing only the direction leaves the origin's expressions alone.
+            let given = params.get("params").and_then(|p| p.get("axis"));
+            let shown = |key: &str, shown: Vec3| {
+                let given = given.and_then(|a| a.get(key)).and_then(Value::as_array)?;
+                let [x, y, z] = given.as_slice() else { return None };
+                let near = |g: &Value, w: f64| g.as_f64().is_some_and(|g| (g - w).abs() <= 1e-9 * (1.0 + w.abs()));
+                (near(x, shown.x) && near(y, shown.y) && near(z, shown.z)).then_some(())
+            };
+            if let Some(axis) = inner.get_mut("axis").and_then(Value::as_object_mut) {
+                if shown("origin", apply_point(&frame, at)).is_some() {
+                    // The origin as saved: its expressions stay expressions.
+                    axis.insert("origin".into(), placement_point(origin));
+                }
+                if shown("dir", apply_vector(&frame, dir.0)).is_some() {
+                    axis.insert("dir".into(), pt(dir.0));
+                }
             }
         }
         let points = match (&feature.kind, cmd) {
@@ -677,16 +707,19 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     m.changed.then_some(Value::Object(out))
 }
 
+/// A placement point as saved: a plain number stays a number, an expression is its text.
+fn placement_point(p: &solidcraft_doc::PointExpr) -> Value {
+    Value::Array(
+        p.iter()
+            .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
+            .collect(),
+    )
+}
+
 /// A primitive's saved placement inputs, in its component's frame, for redefining it with `cmd`.
 fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'static str, Value)> {
     use solidcraft_doc::FeatureKind as Feature;
-    let point = |p: &solidcraft_doc::PointExpr| {
-        Value::Array(
-            p.iter()
-                .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
-                .collect(),
-        )
-    };
+    let point = placement_point;
     match (kind, cmd) {
         (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],

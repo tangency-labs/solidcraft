@@ -713,6 +713,7 @@ impl ModelState {
     /// After a feature evaluated to this state from `before` with cache key `key`: bodies it
     /// made or changed take that key, sketches it made a digest of their solved geometry (see
     /// [`quantize`]); the rest keep theirs.
+    /// `f` must have gone through [`naming_feature`]: face naming reads no parameter values.
     fn stamp(&mut self, doc: &Document, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
         let feature = f.id;
         let depth = before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1;
@@ -1380,6 +1381,12 @@ impl Document {
     /// The values features are evaluated with: the parameters, and the design's length unit.
     pub fn evaluation_values(&self) -> BTreeMap<String, Value> {
         evaluation_values(self).0
+    }
+
+    /// A placement point read as the features read it: the parameters, and a bare number
+    /// beside them in the design's length unit (#9015).
+    pub fn eval_point(&self, p: &crate::PointExpr) -> Result<Vec3> {
+        point(&self.evaluation_values(), p)
     }
 }
 
@@ -2342,7 +2349,9 @@ impl Model {
                         }
                         _ => mats,
                     };
-                    next.stamp(doc, &state, f, key, mats);
+                    // A revolve axis origin that follows parameters names its faces from its values.
+                    let named = naming_feature(&vals, f);
+                    next.stamp(doc, &state, &named, key, mats);
                     // Evaluated again only for what came before it (a mirror moved by a drag).
                     if let Some(old) = self.results.get(i).filter(|old| old.id == f.id) {
                         let made = old.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| (b.name.as_str(), b));
@@ -4226,10 +4235,26 @@ fn blend_body(
     Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
 }
 
+/// `f` as the naming of its faces reads it: a revolve's explicit axis origin written as the values
+/// it has now (the naming has no parameter values to read an expression with).
+fn naming_feature<'a>(vals: &BTreeMap<String, Value>, f: &'a Feature) -> std::borrow::Cow<'a, Feature> {
+    if let FeatureKind::Revolve { axis: AxisRef::Line { origin, .. }, .. } = &f.kind
+        && let Ok(o) = point(vals, origin)
+    {
+        let mut g = f.clone();
+        if let FeatureKind::Revolve { axis: AxisRef::Line { origin, .. }, .. } = &mut g.kind {
+            *origin = [format!("{} mm", o.x).into(), format!("{} mm", o.y).into(), format!("{} mm", o.z).into()];
+        }
+        return std::borrow::Cow::Owned(g);
+    }
+    std::borrow::Cow::Borrowed(f)
+}
+
 /// The revolve axis in the sketch's plane coordinates (a point and a direction). `st` is the model
 /// an axis on an edge or face of it is found in; `construct` gives a construction axis, by name, in
-/// the sketch's 3D frame.
+/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with.
 pub(crate) fn revolve_axis(
+    vals: &BTreeMap<String, Value>,
     ss: &SolvedSketch,
     axis: &AxisRef,
     st: &ModelState,
@@ -4264,7 +4289,7 @@ pub(crate) fn revolve_axis(
             }
             Ok((pl.to_local(Vec3::ZERO), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
         }
-        AxisRef::Line { origin, dir } => line_in_sketch_plane(ss, origin.0, dir.0),
+        AxisRef::Line { origin, dir } => line_in_sketch_plane(ss, point(vals, origin)?, dir.0),
         AxisRef::Model { geo } => {
             let (o, d) = crate::construct::model_axis(st, geo)?;
             line_in_sketch_plane(ss, o, d)
@@ -5377,8 +5402,9 @@ fn feature_tools_with_constructor(
                 f,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let (o, d) =
-                revolve_axis(&ss, axis, &*axis_state(doc, st, f.component, axis)?, &|name| construction_axis_in(Some(doc), st, name, f.component))?;
+            let (o, d) = revolve_axis(vals, &ss, axis, &*axis_state(doc, st, f.component, axis)?, &|name| {
+                construction_axis_in(Some(doc), st, name, f.component)
+            })?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
             let angles = if to.is_some() {
