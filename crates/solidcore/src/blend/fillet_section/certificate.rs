@@ -685,8 +685,10 @@ pub fn face_partials_over(
 /// The parts of `[lo, hi]` between the knots strictly inside it, each with the span whose
 /// closed interval holds it: a knot crossed where the direction is continuous to less than
 /// `continuity` (degree minus multiplicity) is refused, and so is an interval past the
-/// knots' range (the face or curve is not defined there).
-fn knot_cuts(
+/// knots' range (the face or curve is not defined there). A point `lo = hi` on an inner
+/// knot lies in both spans' closed intervals: it is returned twice, once with each, so a
+/// hull over the parts holds both one-sided values there (#2570).
+pub(crate) fn knot_cuts(
     knots: &[f64],
     p: usize,
     n: usize,
@@ -701,6 +703,15 @@ fn knot_cuts(
     let (first, last) = (knot(knots, p as isize), knot(knots, n as isize));
     if !(lo >= first && hi <= last && lo <= hi) {
         return Err(refused("a box past the face's knots"));
+    }
+    let after = span(knots, p, n, lo);
+    if lo == hi && after > p && knot(knots, after as isize) == lo {
+        // the span that ends at the knot: the last one before it that is not empty
+        let mut before = after - 1;
+        while before > p && knot(knots, before as isize) >= knot(knots, before as isize + 1) {
+            before -= 1;
+        }
+        return Ok(vec![(lo, hi, before), (lo, hi, after)]);
     }
     let mut at = vec![lo];
     let mut prev = f64::NAN;
@@ -722,6 +733,12 @@ fn knot_cuts(
         .zip(at.iter().skip(1))
         .map(|(&a, &b)| (a, b, span(knots, p, n, 0.5 * (a + b))))
         .collect())
+}
+
+/// Whether `[lo, hi]` lies on more than one piece of `knots` (it crosses an inner knot, or
+/// is a point on one), or past their range.
+pub(crate) fn crosses_a_knot(knots: &[f64], p: usize, n: usize, lo: f64, hi: f64) -> bool {
+    knot_cuts(knots, p, n, lo, hi, 0).map_or(true, |c| c.len() > 1)
 }
 
 /// The continuity a face must have at a knot line a feet's box crosses
@@ -764,27 +781,27 @@ pub fn nurbs_partials_over_box(
             let p = nurbs_partials_over_piece(cn, ku, kv, a0, a1, b0, b1, lk)?;
             out = Some(match out {
                 None => p,
-                Some(mut h) => {
-                    for a in 0..=lk {
-                        for b in 0..=(lk - a) {
-                            let (x, y) = (h.at(a, b), p.at(a, b));
-                            h.set(
-                                a,
-                                b,
-                                V3 {
-                                    x: x.x.hull(y.x),
-                                    y: x.y.hull(y.y),
-                                    z: x.z.hull(y.z),
-                                },
-                            );
-                        }
-                    }
-                    h
-                }
+                Some(h) => partials_hull(h, &p, lk),
             });
         }
     }
     out.ok_or_else(|| SolidError::sm_err(OP))
+}
+
+/// The hull of two enclosures of partials, `a + b <= lk`.
+pub(crate) fn partials_hull(mut h: Partials<Ivl>, p: &Partials<Ivl>, lk: usize) -> Partials<Ivl> {
+    for a in 0..=lk {
+        for b in 0..=(lk - a) {
+            let (x, y) = (h.at(a, b), p.at(a, b));
+            let v = V3 {
+                x: x.x.hull(y.x),
+                y: x.y.hull(y.y),
+                z: x.z.hull(y.z),
+            };
+            h.set(a, b, v);
+        }
+    }
+    h
 }
 
 /// A span the feet are enclosed over (`sm_GnSpanAt`, c5b6bb7): S, the feet's guesses at
@@ -804,11 +821,12 @@ pub struct SpanAt {
     pub kv: [usize; 2],
     /// `lLeader`.
     pub leader: Option<usize>,
-    /// Not upstream: a NURBS face's partials over a box, and the leader's series over S,
-    /// are enclosed piece by piece ([`nurbs_partials_over_box`],
-    /// [`leader_series_piecewise`]), so the feet and S may cross knot lines (`ku`, `kv` and
-    /// `leader` unused for them); `false`: on the pieces `ku`, `kv` and `leader`, continued
-    /// (upstream's, which relies on the station invariant).
+    /// Not upstream: a NURBS face's partials over a box are enclosed piece by piece
+    /// ([`nurbs_partials_over_box`]), so the feet may cross knot lines (`ku`, `kv` unused for
+    /// them), and the leader's series over S on the piece `leader` names (the caller cut S
+    /// at the leader's knots: a point S on a knot, the side it names) or, `None`, piece by
+    /// piece ([`leader_series_piecewise`]); `false`: on the pieces `ku`, `kv` and `leader`,
+    /// continued (upstream's, which relies on the station invariant).
     pub piecewise: bool,
 }
 
@@ -896,7 +914,7 @@ pub fn gn_enclose_over(
         None => None,
     };
     let law_r = law_r.as_ref();
-    let (leader, tangent) = if at.piecewise {
+    let (leader, tangent) = if at.piecewise && at.leader.is_none() {
         gn_try!(leader_series_piecewise(leader_n, s, tr), None)
     } else {
         gn_try!(leader_series_over(leader_n, s, tr, at.leader), None)
@@ -2115,6 +2133,13 @@ mod tests {
             continued_misses,
             "the left piece continued is not the face past the knot"
         );
+        // a point on the knot: both sides' partials (the third u-partial jumps there)
+        let at = nurbs_partials_over_box(&n, 1.0, 1.0, 0.25, 0.25, 3, FEET_BOX_CONTINUITY).unwrap();
+        let sides = [3, 4].map(|ku| nurbs_partials::<f64>(&n, ku, 1, 1.0, 0.25, 3).at(3, 0).z);
+        assert!(sides[0] != sides[1], "{sides:?}");
+        for c in sides {
+            assert!(contains(at.at(3, 0).z, c), "{c} not in {:?}", at.at(3, 0).z);
+        }
         // a double knot (C^1) crossed by a feet's box is refused; at C^1 asked, enclosed
         let d = cubic_with_knot(2);
         assert!(matches!(

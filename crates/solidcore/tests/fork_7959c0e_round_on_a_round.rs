@@ -30,6 +30,12 @@
 )] // test helpers
 
 use solidcore::blend::fillet_executive::api::{create_face_from_surface, fillet_edges};
+use solidcore::blend::fillet_section::definition_box::{
+    definition_partials_over_box, gn_def_face_of,
+};
+use solidcore::blend::fillet_section::interval::Ivl;
+use solidcore::blend::fillet_section::series::V3;
+use solidcore::blend::fillet_section::station::{span, Nurbs};
 use solidcore::boolean::api_brep::boolean_with_options;
 use solidcore::boolean::merge::p1::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
@@ -304,13 +310,19 @@ struct Outcome {
     sound: bool,
 }
 
-/// The case, up to the second round (the fork's checks before it are asserted here).
-fn round_on_a_round(k: &mut Kernel) -> Outcome {
+/// The twisted wedge with its front edge rounded r 3: that round is its definition.
+fn rounded_wedge(k: &mut Kernel) -> Brep {
     let top = twisted_top();
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 30.0, 50.0).unwrap();
     let mut r = split_back(k, block, &top);
     let front = pick(k, &r, [30.0, 0.0, 25.0]);
     fillet_edges(k, &mut r, &[front], 3.0, 1, 1, 1.0).unwrap();
+    r
+}
+
+/// The case, up to the second round (the fork's checks before it are asserted here).
+fn round_on_a_round(k: &mut Kernel) -> Outcome {
+    let r = rounded_wedge(k);
     // the cut: the plane's normal (2, 1.2, 1.2) (its axes' cross product), the part behind
     // it kept
     let plane = Surface::from(Plane::new(
@@ -418,4 +430,139 @@ fn without_wr714_the_round_on_the_round_is_built_as_before() {
     );
     assert!(o.sound, "{o:?}");
     assert_eq!(o.graded, 0, "{o:?}");
+}
+
+/// The net `net` with its distinct inner knot `kv` along s taken out (every copy of it),
+/// one control row fewer per copy: the net a knot removal leaves. Only its knots along s
+/// are read by the enclosure of its definition (they name the piece whose station seeds
+/// the feet); its points are the rows kept.
+fn without_knot(net: &Nurbs, along_u: bool, kv: f64) -> Nurbs {
+    let mut n = net.clone();
+    let knots = if along_u { &mut n.u } else { &mut n.v };
+    let before = knots.len();
+    knots.retain(|&x| x != kv);
+    let gone = before - knots.len();
+    assert!(gone > 0, "{kv} is not a knot");
+    if along_u {
+        n.nu -= gone;
+        n.pw.truncate(4 * n.nu * n.nv);
+    } else {
+        let nv = n.nv - gone;
+        let mut pw = Vec::with_capacity(4 * n.nu * nv);
+        for i in 0..n.nu {
+            pw.extend_from_slice(&net.pw[4 * i * net.nv..4 * (i * net.nv + nv)]);
+        }
+        n.nv = nv;
+        n.pw = pw;
+    }
+    n
+}
+
+/// How far `p` is outside the enclosure `e` (0 inside), in the max norm.
+fn outside(e: V3<Ivl>, p: Point3) -> f64 {
+    let off = |i: Ivl, x: f64| (i.lo - x).max(x - i.hi).max(0.0);
+    off(e.x, p.x).max(off(e.y, p.y)).max(off(e.z, p.z))
+}
+
+/// tangency-labs/solidcore#2570: the certificate of a round on the round encloses the
+/// inner round's definition on the faces under it and its leader themselves, whatever its
+/// net's stations. The inner round's net is taken with one knot along s removed (each in
+/// turn), so a piece of it spans a station: where a foot crosses a knot line of the twisted
+/// top, a C2 cubic, or the leader's knot. The enclosure of its definition at 21 points
+/// across that piece must hold the definition there (its own evaluator, the station solved
+/// at that s), and so must its enclosure over a box across the lost station. Before, the
+/// enclosure took the faces' pieces at the station in the middle of the net's piece,
+/// continued past the station, and every one was proved, up to 1.38e-3 off the definition.
+/// Every point is proved but the round's two ends, where its feet lie on the edge of the
+/// front face's knot range and Krawczyk's box reaches past it, which is refused.
+#[test]
+fn a_net_with_a_knot_removed_is_enclosed_on_its_definition() {
+    let mut k = solidcraft_kernel();
+    let r = rounded_wedge(&mut k);
+    let (mut rounds, mut points, mut proved, mut worst) = (0, 0, 0, 0.0_f64);
+    let (mut boxes, mut boxes_proved, mut ends_refused) = (0, 0, 0);
+    for &f in r.face_list() {
+        let Some(s) = face2::surface(&r, f).unwrap() else {
+            continue;
+        };
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            continue;
+        };
+        rounds += 1;
+        let along_u = u_is_s(pb);
+        let net = Nurbs::of(pb.net()).unwrap();
+        let ks = knots_along_s(pb);
+        let dom = pb.net().natural_uv_domain();
+        let (lo, hi) = (dom.min(), dom.max());
+        for j in 1..ks.len() - 1 {
+            let coarse = without_knot(&net, along_u, ks[j]);
+            let (a, b) = (ks[j - 1], ks[j + 1]);
+            // a box across the station the coarse net lost, a quarter of the way to the
+            // stations beside it along s and 2% of t across the middle line: its feet cross
+            // the knot line or the leader's knot there, and the enclosure, cut at those,
+            // must hold the definition at every point of the box
+            let (sa, sb) = (ks[j] - 0.25 * (ks[j] - a), ks[j] + 0.25 * (b - ks[j]));
+            let (c, w) = if along_u {
+                (0.5 * (lo.y + hi.y), 0.01 * (hi.y - lo.y))
+            } else {
+                (0.5 * (lo.x + hi.x), 0.01 * (hi.x - lo.x))
+            };
+            let (ua, ub, va, vb) = if along_u {
+                (sa, sb, c - w, c + w)
+            } else {
+                (c - w, c + w, sa, sb)
+            };
+            let mut d = gn_def_face_of(&k, s).unwrap();
+            let ku = span(&coarse.u, coarse.p, coarse.nu, 0.5 * (ua + ub));
+            let kv = span(&coarse.v, coarse.q, coarse.nv, 0.5 * (va + vb));
+            boxes += 1;
+            if let Ok(p) =
+                definition_partials_over_box(&k, &mut d, &coarse, ku, kv, ua, ub, va, vb, 0)
+            {
+                boxes_proved += 1;
+                for i in 0..=20 {
+                    for q in [-1.0, 0.0, 1.0] {
+                        let x = sa + (sb - sa) * f64::from(i) / 20.0;
+                        let uv = if along_u {
+                            Point2::new(x, c + q * w)
+                        } else {
+                            Point2::new(c + q * w, x)
+                        };
+                        let want = pb.evaluate_point(&k, uv).unwrap();
+                        worst = worst.max(outside(p.at(0, 0), want));
+                    }
+                }
+            }
+            for i in 0..=20 {
+                let x = a + (b - a) * f64::from(i) / 20.0;
+                let uv = if along_u {
+                    Point2::new(x, 0.5 * (lo.y + hi.y))
+                } else {
+                    Point2::new(0.5 * (lo.x + hi.x), x)
+                };
+                let mut d = gn_def_face_of(&k, s).unwrap();
+                let ku = span(&coarse.u, coarse.p, coarse.nu, uv.x);
+                let kv = span(&coarse.v, coarse.q, coarse.nv, uv.y);
+                points += 1;
+                let got = definition_partials_over_box(
+                    &k, &mut d, &coarse, ku, kv, uv.x, uv.x, uv.y, uv.y, 0,
+                );
+                match got {
+                    Ok(p) => {
+                        proved += 1;
+                        let want = pb.evaluate_point(&k, uv).unwrap();
+                        worst = worst.max(outside(p.at(0, 0), want));
+                    }
+                    Err(_) if x == ks[0] || x == ks[ks.len() - 1] => ends_refused += 1,
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+    println!("{rounds} round(s): {proved} of {points} points ({ends_refused} at the ends refused) and {boxes_proved} of {boxes} boxes proved, the worst {worst:.3e} off its definition");
+    assert_eq!(rounds, 1);
+    assert!(
+        proved + ends_refused == points && boxes_proved == boxes && worst == 0.0,
+        "{proved} of {points} ({ends_refused} ends refused), {boxes_proved} of {boxes} boxes, worst {worst:e}"
+    );
 }

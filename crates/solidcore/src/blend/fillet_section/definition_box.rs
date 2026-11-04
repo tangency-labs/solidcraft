@@ -1,8 +1,9 @@
 //! A face that is a blend by its definition, enclosed over a box of its `(u, v)` for the
 //! certificate of a blend on it (opt-in, not upstream): its feet over the box's s by
-//! Krawczyk's operator on the polynomial pieces of the faces under them, then its arc in
-//! rounded interval arithmetic, in the centred form where one order more is held. Only a
-//! round of the ball's circle (a constant radius) between NURBS faces is enclosed.
+//! Krawczyk's operator on the faces under them (every polynomial piece the feet's box
+//! covers, hulled), then its arc in rounded interval arithmetic, in the centred form where
+//! one order more is held. Only a round of the ball's circle (a constant radius) between
+//! NURBS faces is enclosed.
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletSection.cpp`
 //! (tangency-labs/smlib@c5b6bb7, smlib#101, merged at 852dd8c). Only
@@ -28,12 +29,23 @@
 //!   [`SolidError::sm_err`], which the certificate takes as nothing proved.
 //! - **Bounds.** The enclosure of the inner definition's feet takes no definition of its
 //!   own (its supports are NURBS faces), so the nesting is one deep.
+//! - **Pieces (#2570).** The fork takes, over every box, the faces' and the leader's
+//!   polynomial pieces at the station in the middle of the net's piece the box is in,
+//!   continued: the surfaces only where the net has a station wherever a foot crosses a
+//!   knot line or the leader's knot, which a net with knots removed, refitted or edited
+//!   does not, and a box past a station continues the pieces across it. Here every box
+//!   is cut at the leader's knots it crosses, and its feet's box at the faces' knot lines,
+//!   each part enclosed on its own pieces (exact there) and the hull taken: the
+//!   definition piecewise, whatever the net. A part whose feet cross a knot line takes
+//!   the direct enclosure, not the centred form. The net's piece only seeds the feet.
 
-use super::certificate::{gn_enclose_over, NurbsCurve, SpanAt};
+use super::certificate::{
+    crosses_a_knot, gn_enclose_over, knot_cuts, partials_hull, NurbsCurve, SpanAt,
+};
 use super::definition::{t2_pow, tv_dot, T2Of, TvOf};
 use super::interval::{cmax, cmin, Ivl};
 use super::series::{Trunc, MAX_S, V3};
-use super::station::{as_b_spline, gn_solve_station, smax, span, Nurbs, Partials};
+use super::station::{as_b_spline, gn_solve_station, smax, Nurbs, Partials};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -48,8 +60,8 @@ type T2 = T2Of<Ivl>;
 /// `sm_TVT<sm_Ivl>`.
 type Tv = TvOf<Ivl>;
 
-/// `sm_GnDefPiece`: the station at the middle of one piece of a definition's net along s
-/// (between two of its stations), solved once.
+/// `sm_GnDefPiece`: the station at the middle of one piece of a definition's net along s,
+/// solved once: the feet's guesses over the piece.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DefPiece {
     /// `lState`: 0 not solved yet, 1 solved, -1 the station did not solve.
@@ -58,11 +70,6 @@ pub struct DefPiece {
     s: f64,
     /// `ax`: the feet there, their first s-derivatives and second over 2.
     ax: [[f64; 4]; 3],
-    /// `aku`, `akv`: the faces' polynomial pieces the feet lie on over the piece.
-    ku: [usize; 2],
-    kv: [usize; 2],
-    /// `lLeader`: the leader's.
-    leader: usize,
 }
 
 impl DefPiece {
@@ -71,16 +78,12 @@ impl DefPiece {
         state: 0,
         s: 0.0,
         ax: [[0.0; 4]; 3],
-        ku: [0; 2],
-        kv: [0; 2],
-        leader: 0,
     };
 }
 
 /// `sm_GnDefFace`: a face that is a blend by its definition, for the certificate of a
 /// blend on it: its definition's partials over a box of its `(u, v)` enclosed
-/// ([`definition_partials_over_box`]), on the polynomial pieces of the faces it rolls on
-/// that its piece of the net lies on.
+/// ([`definition_partials_over_box`]), on the faces it rolls on.
 #[derive(Clone, Debug)]
 pub struct GnDefFace<'a> {
     /// `pDef`.
@@ -183,8 +186,8 @@ pub fn gn_def_face_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<GnDefFace<
 }
 
 /// `sm_DefPieceAt`: the station at the middle of the net's piece `kk` along s, solved
-/// once: its feet's pieces of the faces, the leader's piece and the feet's Taylor terms
-/// there (the guesses over the piece).
+/// once: the feet's Taylor terms there (the guesses over the piece; the fork's also names
+/// the faces' and the leader's pieces there, which the enclosure does not take).
 ///
 /// # Errors
 ///
@@ -233,16 +236,6 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
                     *x = st.x.get(q).map_or(f64::NAN, |sq| sq.at(i, 0));
                 }
             }
-            for (f, n) in d.sup_n.iter().enumerate() {
-                let [x0, ..] = p.ax;
-                let fu = x0.get(2 * f).copied().unwrap_or(f64::NAN);
-                let fv = x0.get(2 * f + 1).copied().unwrap_or(f64::NAN);
-                if let (Some(u), Some(v)) = (p.ku.get_mut(f), p.kv.get_mut(f)) {
-                    *u = span(&n.u, n.p, n.nu, fu);
-                    *v = span(&n.v, n.q, n.nv, fv);
-                }
-            }
-            p.leader = span(&d.leader.u, d.leader.p, d.leader.n, p.s);
             p.state = 1;
             if let Some(slot) = d.pieces.get_mut(kk) {
                 *slot = p;
@@ -299,23 +292,48 @@ pub fn bern_taylor_over(b: &[f64], t: Ivl, lj: usize) -> Vec<Ivl> {
     out
 }
 
+/// The box `[ua, ub] x [va, vb]` of the definition's `(u, v)` in its `(s, t)`.
+fn box_st(d: &GnDefFace<'_>, ua: f64, ub: f64, va: f64, vb: f64) -> Result<(Ivl, Ivl)> {
+    let (ps, pt) = if d.swapped {
+        (Ivl::new(va, vb), Ivl::new(ua, ub))
+    } else {
+        (Ivl::new(ua, ub), Ivl::new(va, vb))
+    };
+    let s = Ivl::from(d.a[0]) + Ivl::from(d.b[0]) * ps;
+    let t = Ivl::from(d.a[1]) + Ivl::from(d.b[1]) * pt;
+    let finite = s.lo.is_finite() && s.hi.is_finite() && t.lo.is_finite() && t.hi.is_finite();
+    if !finite {
+        return Err(SolidError::sm_err(OP));
+    }
+    Ok((s, t))
+}
+
+/// The parts of `s` between the leader's knots it crosses, each with the leader's piece it
+/// lies on (a point on a knot: once with each side's piece), so each part's definition is
+/// that of one polynomial piece of the leader, exact (#2570).
+fn leader_parts(d: &GnDefFace<'_>, s: Ivl) -> Result<Vec<(Ivl, usize)>> {
+    let l = &d.leader;
+    Ok(knot_cuts(&l.u, l.p, l.n, s.lo, s.hi, 0)?
+        .into_iter()
+        .map(|(a, b, k)| (Ivl::new(a, b), k))
+        .collect())
+}
+
 /// `sm_DefinitionPartialsNaive`: the definition's partials over the box
 /// `[ua, ub] x [va, vb]` of its `(u, v)`, to total order `lk`, enclosed: `P[a][b]` holds
-/// `d^(a+b) S / du^a dv^b` at every point of the box. On the net's piece along s that
-/// `(ku, kv)` is in (between two of the definition's stations) its feet lie on one
-/// polynomial piece of each face it rolls on (a station stands where a foot crosses a knot
-/// line), and the definition there is that of the pieces' polynomials, continued over the
-/// rest of the box as the faces' pieces are ([`gn_enclose_over`]): its feet's series in s
-/// over the box's s enclosed by Krawczyk's operator on those pieces, the leader's piece,
-/// then the arc in `(sigma, dt)` over the box's t, as `EvaluateDefinition` makes it (the
-/// circle's centre the ball's: a constant radius), in rounded interval arithmetic.
-///
-/// The station invariant is the construction's and is not checked here (the certificate's
-/// boxes rely on it); [`definition_partials_piecewise`] needs none.
+/// `d^(a+b) S / du^a dv^b` at every point of the box (at a station inside it, where the
+/// definition is only as smooth as its faces and its leader, both sides' partials). The
+/// box's s is cut at the leader's knots it crosses, each part enclosed on its own
+/// ([`partials_on`]), and the hull taken. No station invariant is assumed: a net with knots
+/// removed, refitted or edited is enclosed on its definition all the same (#2570); `(ku,
+/// kv)` names the net's piece whose middle station seeds the feet. Refused where the feet's
+/// box crosses a face's knot line below [`super::certificate::FEET_BOX_CONTINUITY`], or a
+/// box lies past a face's or the leader's knots.
 ///
 /// # Errors
 ///
-/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`.
+/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`;
+/// [`SolidError::Unsupported`] for a box past the leader's knots.
 #[allow(clippy::too_many_arguments)]
 pub fn definition_partials_naive(
     k: &Kernel,
@@ -329,79 +347,57 @@ pub fn definition_partials_naive(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    partials_naive(k, d, net, [ku, kv], [ua, ub, va, vb], lk, false)
+    let kk = if d.swapped { kv } else { ku };
+    let (s, t) = box_st(d, ua, ub, va, vb)?;
+    let mut out: Option<Partials<Ivl>> = None;
+    for (part, leader) in leader_parts(d, s)? {
+        let (p, _) = partials_on(k, d, net, kk, part, leader, t, lk)?;
+        out = Some(match out {
+            None => p,
+            Some(h) => partials_hull(h, &p, lk),
+        });
+    }
+    out.ok_or_else(|| SolidError::sm_err(OP))
 }
 
-/// [`definition_partials_naive`] without the station invariant: the faces it rolls on are
-/// enclosed piece by piece over the feet's boxes
-/// ([`super::certificate::nurbs_partials_over_box`]: cut at the knot lines a box crosses,
-/// each part on its own piece, the hull), so a foot may cross a face's knot line (at a
-/// station, or anywhere on a refitted net) and the enclosure is still of the definition,
-/// certified to the faces' continuity there; the leader's series over the box's s likewise
-/// ([`super::certificate::leader_series_piecewise`]). The partials up to `lk` are each part's
-/// hull, which encloses them at every point of the box whatever the continuity at a crossed
-/// line, so `lk` sets no continuity; only Krawczyk's mean-value test over the feet's box needs
-/// the faces C^2 across a crossed line ([`super::certificate::FEET_BOX_CONTINUITY`]), and the
-/// leader continuous. Refused where a crossed knot line is below that, or the box is past a
-/// face's or the leader's knots. Not upstream (the certified normal's and point's query,
-/// `query::normal`).
+/// The definition's partials over `s x t` (`s` on the leader's piece `leader`), to total
+/// order `lk` in its `(u, v)`, enclosed, and whether its feet's box crosses a knot line of
+/// a face (where the definition is only as smooth as the face). Its feet's series in s
+/// over `s` are enclosed by Krawczyk's operator on the faces it rolls on themselves
+/// ([`gn_enclose_over`] piecewise: the feet's box cut at the faces' knot lines, each part on
+/// its own piece, hulled) and the leader's piece, seeded from the station in the middle of
+/// the net's piece `kk` along s; then the arc in `(sigma, dt)` over t, as
+/// `EvaluateDefinition` makes it (the circle's centre the ball's: a constant radius), in
+/// rounded interval arithmetic.
 ///
 /// # Errors
 ///
-/// `SM_ERR` where an enclosure is not proved (a crossed knot line refused among them);
-/// those of [`definition_partials_naive`].
-#[allow(clippy::too_many_arguments)]
-pub fn definition_partials_piecewise(
+/// `SM_ERR` where an enclosure is not proved, or `lk` is past `SM_GN_MAXS`.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn partials_on(
     k: &Kernel,
     d: &mut GnDefFace<'_>,
     net: &Nurbs,
-    ku: usize,
-    kv: usize,
-    ua: f64,
-    ub: f64,
-    va: f64,
-    vb: f64,
+    kk: usize,
+    s: Ivl,
+    leader: usize,
+    t: Ivl,
     lk: usize,
-) -> Result<Partials<Ivl>> {
-    partials_naive(k, d, net, [ku, kv], [ua, ub, va, vb], lk, true)
-}
-
-#[allow(clippy::too_many_lines)]
-fn partials_naive(
-    k: &Kernel,
-    d: &mut GnDefFace<'_>,
-    net: &Nurbs,
-    [ku, kv]: [usize; 2],
-    [ua, ub, va, vb]: [f64; 4],
-    lk: usize,
-    piecewise: bool,
-) -> Result<Partials<Ivl>> {
+) -> Result<(Partials<Ivl>, bool)> {
     if lk > MAX_S {
         return Err(SolidError::sm_err(OP));
     }
-    let piece = def_piece_at(k, d, net, if d.swapped { kv } else { ku })?;
-    // the box in (s, t)
-    let (ps, pt) = if d.swapped {
-        (Ivl::new(va, vb), Ivl::new(ua, ub))
-    } else {
-        (Ivl::new(ua, ub), Ivl::new(va, vb))
-    };
-    let s = Ivl::from(d.a[0]) + Ivl::from(d.b[0]) * ps;
-    let t = Ivl::from(d.a[1]) + Ivl::from(d.b[1]) * pt;
-    let finite = s.lo.is_finite() && s.hi.is_finite() && t.lo.is_finite() && t.hi.is_finite();
-    if !finite {
-        return Err(SolidError::sm_err(OP));
-    }
-    // the feet over the box's s, guessed at its ends from the piece's middle
+    let piece = def_piece_at(k, d, net, kk)?;
+    // the feet over s, guessed at its ends from the piece's middle
     let [x0, x1, x2] = piece.ax;
     let mut at = SpanAt {
         s,
         xa: [0.0; 4],
         xb: [0.0; 4],
-        ku: piece.ku,
-        kv: piece.kv,
-        leader: Some(piece.leader),
-        piecewise,
+        ku: [0; 2],
+        kv: [0; 2],
+        leader: Some(leader),
+        piecewise: true,
     };
 
     let da = s.lo - piece.s;
@@ -420,6 +416,13 @@ fn partials_naive(
     else {
         return Err(SolidError::sm_err(OP));
     };
+    let mut crossed = false;
+    for (f, n) in d.sup_n.iter().enumerate() {
+        let xu = e.x.get(2 * f).map_or_else(Ivl::whole, |x| x.at(0, 0));
+        let xv = e.x.get(2 * f + 1).map_or_else(Ivl::whole, |x| x.at(0, 0));
+        crossed |= crosses_a_knot(&n.u, n.p, n.nu, xu.lo, xu.hi)
+            || crosses_a_knot(&n.v, n.q, n.nv, xv.lo, xv.hi);
+    }
 
     // the arc from the first rail to the second about the ball's centre, weights 1,
     // cos(theta / 2), 1 (to total order lk: the rest is not asked for)
@@ -507,14 +510,17 @@ fn partials_naive(
             );
         }
     }
-    Ok(out)
+    Ok((out, crossed))
 }
 
 /// `sm_DefinitionPartialsOverBox`: [`definition_partials_naive`] in the centred form where
-/// the box has room and one order more is held: the partials at the box's middle plus the
-/// next order's over the box times the box's half widths (the mean value theorem), within
-/// the direct enclosure, whose interval arithmetic widens with the box much more than the
-/// centred form's does.
+/// the box has room and one order more is held: the partials at the middle plus the next
+/// order's over the box times the box's half widths (the mean value theorem), within the
+/// direct enclosure, whose interval arithmetic widens with the box much more than the
+/// centred form's does. The box's s is cut at the leader's knots it crosses and each part
+/// taken on its own, then the hull (#2570); a part whose feet cross a knot line of a face,
+/// where the definition is not smooth to the order the mean value theorem takes, is the
+/// direct enclosure alone.
 ///
 /// # Errors
 ///
@@ -535,12 +541,42 @@ pub fn definition_partials_over_box(
     if !(lk < MAX_S && (ub > ua || vb > va)) {
         return definition_partials_naive(k, d, net, ku, kv, ua, ub, va, vb, lk);
     }
-    let um = 0.5 * (ua + ub);
-    let vm = 0.5 * (va + vb);
-    let wide = definition_partials_naive(k, d, net, ku, kv, ua, ub, va, vb, lk + 1)?;
-    let mid = definition_partials_naive(k, d, net, ku, kv, um, um, vm, vm, lk)?;
-    let du = Ivl::new(ua, ub) - Ivl::from(um);
-    let dv = Ivl::new(va, vb) - Ivl::from(vm);
+    let kk = if d.swapped { kv } else { ku };
+    let (s, t) = box_st(d, ua, ub, va, vb)?;
+    let mut out: Option<Partials<Ivl>> = None;
+    for (part, leader) in leader_parts(d, s)? {
+        let p = centred_on(k, d, net, kk, part, leader, t, lk)?;
+        out = Some(match out {
+            None => p,
+            Some(h) => partials_hull(h, &p, lk),
+        });
+    }
+    out.ok_or_else(|| SolidError::sm_err(OP))
+}
+
+/// [`definition_partials_over_box`] on one part `s x t` (`s` on the leader's piece
+/// `leader`).
+#[allow(clippy::too_many_arguments)]
+fn centred_on(
+    k: &Kernel,
+    d: &mut GnDefFace<'_>,
+    net: &Nurbs,
+    kk: usize,
+    s: Ivl,
+    leader: usize,
+    t: Ivl,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    let (wide, crossed) = partials_on(k, d, net, kk, s, leader, t, lk + 1)?;
+    if crossed {
+        return Ok(wide);
+    }
+    let (sm, tm) = (s.mid(), t.mid());
+    let (mid, _) = partials_on(k, d, net, kk, Ivl::from(sm), leader, Ivl::from(tm), lk)?;
+    // the part's half widths in (u, v): s = A + B p
+    let dp = (s - Ivl::from(sm)) / Ivl::from(d.b[0]);
+    let dq = (t - Ivl::from(tm)) / Ivl::from(d.b[1]);
+    let (du, dv) = if d.swapped { (dq, dp) } else { (dp, dq) };
     let mut out = Partials::default();
     for a in 0..=lk {
         for b in 0..=(lk - a) {

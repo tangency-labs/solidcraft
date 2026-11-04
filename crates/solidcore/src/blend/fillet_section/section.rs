@@ -391,8 +391,8 @@ pub(crate) fn certificate_faces<'a>(
 ) -> Result<([Nurbs; 2], GnDefs<'a>)> {
     let mut nurbs = Vec::new();
     // a face that is a blend by its definition: its definition enclosed over the
-    // certificate's boxes (definition_partials_over_box), its net's knots its stations
-    // (c5b6bb7, WR-714)
+    // certificate's boxes (definition_partials_over_box), on the faces under it and its
+    // leader, whatever its net (c5b6bb7, WR-714, #2570)
     let mut defs = GnDefs::default();
     for (f, face) in faces.into_iter().enumerate() {
         let Some(bs) = super::station::as_b_spline(k, face)? else {

@@ -60,7 +60,7 @@
 //! Deviations: none (no upstream counterpart). No recursion beyond the fixed curve-bounded
 //! hops, bounded by the surface nesting limit.
 
-use crate::blend::fillet_section::definition_box::{definition_partials_piecewise, gn_def_face_of};
+use crate::blend::fillet_section::definition_box::{definition_partials_naive, gn_def_face_of};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::station::{as_b_spline, Nurbs};
 use crate::error::{Result, SolidError};
@@ -345,7 +345,7 @@ fn definition_jet(
         .ok_or_else(|| unsupported("(u, v) outside the blend's net"))?;
     let kv = span(&net.v, net.q, net.nv.saturating_sub(1), uv.y)
         .ok_or_else(|| unsupported("(u, v) outside the blend's net"))?;
-    let p = definition_partials_piecewise(k, &mut d, &net, ku, kv, uv.x, uv.x, uv.y, uv.y, lk)
+    let p = definition_partials_naive(k, &mut d, &net, ku, kv, uv.x, uv.x, uv.y, uv.y, lk)
         .map_err(|e| {
             if e.is_unported_or_cancelled() {
                 e
