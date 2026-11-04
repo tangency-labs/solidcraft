@@ -1615,6 +1615,10 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
             Container::paint_frame(ui.painter(), frame, r);
         }
         tab_click = ribbon_contents(app, ui, RibbonShape { floating, cards, r, ws, folded: false });
+        if tab_click.is_some() {
+            // The other tab's panels are drawn now; the old tab's open drop-down is gone with them.
+            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
+        }
         if floating {
             let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
             for card in [cards.workspace, cards.ribbon] {
@@ -5481,6 +5485,35 @@ mod dropdown_toggle_tests {
             assert!(h.app.preferences.ribbon_tabs_only, "{layout}: `on` sets it");
             assert!(h.app.session.undo.is_empty(), "{layout}: a window setting, not a design change");
         }
+    }
+
+    /// Switching tabs with a panel's drop-down open forgets that drop-down, so the pointer leaving
+    /// the overlay still closes it (#10112).
+    #[test]
+    fn ribbon_tabs_only_closes_after_a_tab_switch_with_a_panel_menu_open() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        h.app.start("view.ribbon_tabs_only");
+        h.frames(3);
+        let tab = rect_of("toolbar_tab:MODEL").unwrap().center();
+        h.step(&json!({"click": [tab.x, tab.y]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "panel:MODEL:MODIFY"}})).unwrap();
+        h.frames(2);
+        let key = egui::Id::new("sc_panel_open");
+        assert!(h.app.ui.ribbon_open);
+        assert!(h.ctx.data(|d| d.get_temp::<egui::Id>(key)).is_some(), "the panel menu is open");
+        let other = rect_of("toolbar_tab:SURFACE").unwrap().center();
+        h.step(&json!({"click": [other.x, other.y]})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "SURFACE");
+        assert!(h.app.ui.ribbon_open, "the other tab's panels are shown");
+        assert!(h.ctx.data(|d| d.get_temp::<egui::Id>(key)).is_none(), "the old menu is forgotten");
+        let away = h.app.viewport.rect.unwrap().center() + egui::vec2(0.0, 150.0);
+        h.step(&json!({"move": [away.x, away.y]})).unwrap();
+        h.frames(2);
+        assert!(!h.app.ui.ribbon_open, "leaving still closes the overlay");
     }
 
     /// A drop-down row's help tooltip names the key the command runs from now, not its default.
