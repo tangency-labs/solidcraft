@@ -10,6 +10,7 @@
 //! - `backend.rs`: the [`backend::ChatBackend`] seam; `acp_client.rs` is the ACP backend.
 //! - `gate.rs`: what the agent's tool requests may do (run, ask the user first, or never).
 //! - `panel.rs`: the panel itself (docking, minimising, the picker, the conversation).
+//! - `times.rs`: when each item came in, and how long the agent has been working.
 //! - Here: the conversation, turns (each one undoes as one step), and the requests waiting for
 //!   Allow or Deny.
 
@@ -37,6 +38,7 @@ pub mod paste;
 mod process;
 pub mod settings;
 pub mod summary;
+mod times;
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -269,6 +271,9 @@ struct Turn {
     replied: bool,
     edit_requested: bool,
     label: String,
+    /// When it was sent, and when the agent last said or did something (ms since the epoch).
+    began: f64,
+    heard: f64,
 }
 
 /// A message typed while the agent works: shown in the transcript as "Queued" until it is sent.
@@ -333,6 +338,9 @@ pub struct AgentChat {
     /// creating/opening a design may carry the conversation, but a person's tab switch may not.
     pub(crate) following_document: bool,
     pub items: Vec<Item>,
+    /// When each item came in, beside it (`times[n]` is `items[n]`'s); shorter when items were
+    /// added without one, which then show no time.
+    pub(crate) times: Vec<times::Stamp>,
     pub input: String,
     /// The viewer, open on one message's pictures.
     gallery: Option<Gallery>,
@@ -594,8 +602,29 @@ impl AgentChat {
     fn push(&mut self, item: Item) {
         if self.items.len() >= MAX_ITEMS {
             self.items.drain(..MAX_ITEMS / 10);
+            self.times.drain(..self.times.len().min(MAX_ITEMS / 10));
         }
+        // Items added without a time (none are, outside tests) keep their places unknown.
+        self.times.resize(self.items.len(), times::Stamp::default());
         self.items.push(item);
+        self.times.push(times::Stamp::now());
+    }
+    /// Take the item at `at` out of the conversation, with its time.
+    fn remove_item(&mut self, at: usize) {
+        if at < self.items.len() {
+            self.items.remove(at);
+        }
+        if at < self.times.len() {
+            self.times.remove(at);
+        }
+    }
+    /// When the item at `n` came in (not known: an item added without one).
+    pub(crate) fn stamp(&self, n: usize) -> times::Stamp {
+        if self.times.len() > self.items.len() { times::Stamp::default() } else { self.times.get(n).copied().unwrap_or_default() }
+    }
+    /// While the agent works on a message: when it last said or did something.
+    pub(crate) fn heard_at(&self) -> Option<f64> {
+        self.turn.as_ref().filter(|_| self.state() == State::Busy).map(|t| t.heard)
     }
     /// Keep the picture just sent with the message at `at` in the conversation (the user can open
     /// it). A message sent again (after a sign-in) has its picture already: nothing is added, and
@@ -678,6 +707,11 @@ impl AgentChat {
             self.login_results.insert(self.running_id.clone(), signed_in);
             // A newer chat result supersedes the old test, including one still in flight.
             self.settings.tests.remove(&self.running_id);
+        }
+        if matches!(e, Event::Text { .. } | Event::Tool { .. } | Event::Plan(_))
+            && let Some(turn) = self.turn.as_mut()
+        {
+            turn.heard = crate::now_ms();
         }
         match e {
             Event::Documents(documents) => self.documents = documents,
@@ -1220,7 +1254,7 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
     if let Some((text, image, at, files)) = chat.queued.take() {
         if let Some(at) = at.filter(|&at| matches!(chat.items.get(at), Some(Item::User { .. }))) {
-            chat.items.remove(at);
+            chat.remove_item(at);
         }
         // The text already carries the selection, so there is no context to show again.
         chat.pending.insert(0, Pending { text, image, context: Context::default(), files });
@@ -1492,6 +1526,7 @@ pub fn new_chat(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
+    chat.times.clear();
     chat.turn_warning = None;
     chat.gallery = None;
     chat.picked.clear();
@@ -1581,6 +1616,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
     let label: String = first_line.chars().take(48).collect();
     app.agent_chat.turn_warning = None;
+    let now = crate::now_ms();
     app.agent_chat.turn = Some(Turn {
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         start_doc: app.session.doc.clone(),
@@ -1593,6 +1629,8 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         tool_called: false,
         replied: false,
         edit_requested: requests_edit(&text),
+        began: now,
+        heard: now,
     });
     app.agent_chat.last = Some((text, image, at, files));
     app.agent_chat.state = Some(State::Busy);
@@ -1856,6 +1894,14 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     if steps > 0 {
         let doc = session.doc.clone();
         chat.push(Item::Changes { steps, doc, undone: false });
+    }
+    // How long the answer took, under its last item ("Answered in 23 min").
+    let answered = chat.ended.as_deref().is_some_and(|r| !matches!(r, "cancelled" | "error" | "auth")) && !chat.stopped;
+    let took = (crate::now_ms() - turn.began).max(0.0);
+    if chat.times.len() == chat.items.len()
+        && let Some(stamp) = chat.times.last_mut()
+    {
+        stamp.took = Some((took, answered));
     }
 }
 

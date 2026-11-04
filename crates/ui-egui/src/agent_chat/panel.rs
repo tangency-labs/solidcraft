@@ -1643,6 +1643,24 @@ fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
     }
 }
 
+/// When a message or tool call came in, small and dim ("3 min ago"); its exact time on hover.
+#[cfg(not(target_arch = "wasm32"))]
+fn time_label(ui: &mut egui::Ui, n: usize, stamp: &times::Stamp, now: f64) {
+    let (Some(ago), Some(exact)) = (times::ago(stamp, now), times::exact(stamp)) else { return };
+    let t = Tokens::get();
+    let r = ui.add(egui::Label::new(RichText::new(ago).size(t.font_small).color(t.text_dim)).selectable(false)).backing_on_hover_text(exact);
+    crate::scenario::publish_rect(&format!("agent_chat:time:{n}"), r.rect);
+}
+
+/// After the last item of an answer: how long it took ("Answered in 23 min").
+#[cfg(not(target_arch = "wasm32"))]
+fn took_line(ui: &mut egui::Ui, stamp: &times::Stamp) {
+    if let Some(text) = times::took(stamp) {
+        let t = Tokens::get();
+        ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+    }
+}
+
 /// The right-click menu of one transcript message (#10675): the same single action as the
 /// visible button, on the whole message area, beside the composer's own text menu.
 /// The area stays hover-only so partial text selection keeps working, so the menu opens on a
@@ -1718,7 +1736,10 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut open_gallery: Option<Gallery> = None;
     let current_doc = app.session.doc.clone();
     let units = summary::Units { units: &app.session.doc.units, decimals: app.preferences.length_decimals };
+    let now = crate::now_ms();
+    let busy = app.agent_chat.state() == State::Busy;
     for (n, item) in app.agent_chat.items.iter().enumerate() {
+        let stamp = app.agent_chat.stamp(n);
         match item {
             Item::User { text, image, pictures, context, files } => {
                 // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
@@ -1738,10 +1759,15 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     context_chips(ui, context, false);
                     files_line(ui, files.iter().map(String::as_str));
-                    if copyable {
+                    if copyable || stamp.known() {
                         // Top-aligned: a row centred across its height takes all the height left in
                         // the conversation's view, which stretched a prompt near the top.
-                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| copy_message_button(ui, n, text));
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                            if copyable {
+                                copy_message_button(ui, n, text);
+                            }
+                            time_label(ui, n, &stamp, now);
+                        });
                     }
                 });
                 if copyable {
@@ -1757,7 +1783,10 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let before = ui.cursor();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
                     if !text.is_empty() {
-                        copy_message_button(ui, n, text);
+                        ui.horizontal(|ui| {
+                            copy_message_button(ui, n, text);
+                            time_label(ui, n, &stamp, now);
+                        });
                         let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
                         let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                         copy_message_menu(ui, &resp, n, text);
@@ -1768,9 +1797,10 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if n > 0 && matches!(app.agent_chat.items.get(n - 1), Some(Item::Tool { .. })) {
                     continue;
                 }
+                let cards = app.agent_chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).count();
                 ui_kit::assistant_tool_frame(ui, false, |ui| {
                     ui.spacing_mut().item_spacing.y = Tokens::get().space_2;
-                    for (offset, next) in app.agent_chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).enumerate() {
+                    for (offset, next) in app.agent_chat.items.iter().skip(n).take(cards).enumerate() {
                         if let Item::Tool { title, kind, status, input, output, .. } = next {
                             let words = summary::summary(title, input.as_ref(), output.as_deref(), *status == Some(ToolStatus::Completed), units);
                             let call = ToolCall {
@@ -1780,11 +1810,19 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 status: *status,
                                 input: input.as_ref(),
                                 output: output.as_deref(),
+                                stamp: app.agent_chat.stamp(n + offset),
+                                now,
+                                live: busy,
                             };
                             tool_card(ui, n + offset, &call);
                         }
                     }
                 });
+                // The answer's time goes after the cards when they end it.
+                for k in n..n + cards {
+                    took_line(ui, &app.agent_chat.stamp(k));
+                }
+                continue;
             }
             Item::Plan(entries) => {
                 for (c, s) in entries {
@@ -1891,11 +1929,25 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             }
         }
+        took_line(ui, &stamp);
+    }
+    // While the agent works with no tool running, how long since it last said or did something
+    // (a running tool's card counts for itself).
+    if let Some(heard) = app.agent_chat.heard_at()
+        && app.agent_chat.waiting() == 0
+        && !matches!(app.agent_chat.items.last(), Some(Item::Tool { status: Some(ToolStatus::InProgress), .. }))
+    {
+        let line = ui.label(RichText::new(times::thinking(heard, now)).color(t.text_dim).size(t.font_small));
+        crate::scenario::publish_rect("agent_chat:thinking", line.rect);
+    }
+    // "3 min ago" moves on: by the second for the first minute, then by the minute.
+    if !busy && let Some(last) = app.agent_chat.times.iter().rev().find(|s| s.known()) {
+        let young = now - last.at < 60_000.0;
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(if young { 1 } else { 30 }));
     }
     let (mut send_now_clicked, mut send_queue_clicked) = (false, false);
     let mut remove: Option<usize> = None;
     let mut edit_done: Option<(usize, Option<String>)> = None;
-    let busy = app.agent_chat.state() == State::Busy;
     let stopped = app.agent_chat.stopped;
     let editing = app.agent_chat.pending_edit.clone();
     let mut start_edit: Option<(usize, String)> = None;
@@ -2233,6 +2285,10 @@ struct ToolCall<'a> {
     status: Option<ToolStatus>,
     input: Option<&'a Value>,
     output: Option<&'a str>,
+    /// When the call came in, the time now (ms), and whether the agent is still at it.
+    stamp: times::Stamp,
+    now: f64,
+    live: bool,
 }
 
 /// Longest raw text shown under a card's Details (characters).
@@ -2266,9 +2322,14 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
                     ui_kit::disclosure(ui.painter(), rect.center(), state_.is_open(), t.text_dim);
                     ui.label(RichText::new(tr("ui.ai_tool_details")).size(t.font_small).color(t.text_dim));
                 }
-                ui.label(RichText::new(tr(state)).size(t.font_small).color(color));
+                // A running call counts how long it has run ("running for 30 s").
+                let running = (call.live && status == Some(ToolStatus::InProgress)).then(|| times::running(&call.stamp, call.now)).flatten();
+                ui.label(RichText::new(running.as_deref().unwrap_or(tr(state))).size(t.font_small).color(color));
                 if !call.kind.is_empty() && call.kind != "other" {
                     ui.label(RichText::new(call.kind).size(t.font_small).color(t.text_dim));
+                }
+                if running.is_none() {
+                    time_label(ui, n, &call.stamp, call.now);
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let text = match call.summary {
