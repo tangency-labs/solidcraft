@@ -105,7 +105,7 @@ fn point(e: &Entity, code: i32) -> Vec2 {
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
 fn loops(s: &Session) -> Vec<solidcore_record::Loop2> {
-    let regions = s.model.state().surface_sheets[0].regions.clone();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     regions.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.clone())).collect()
 }
 
@@ -162,7 +162,7 @@ fn a_spline_cut_out_is_the_splines_it_was() {
     }
     // The same plate comes back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().surface_sheets[0].regions.clone()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!((areas[0] - plate).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -196,7 +196,7 @@ fn a_g4_blend_cut_out_is_one_spline_of_degree_nine_and_closes() {
 
     // The cut-out closes, so the same plate and the same cut-out come back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().surface_sheets[0].regions.clone()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!(areas.len() == 2 && (areas[0] - plate).abs() < 1e-6 && (areas[1] - (6000.0 - plate)).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -221,7 +221,7 @@ fn text_is_splines_and_lines_not_chords() {
     // The plate with the letters cut out comes back from the file with its area (the largest region; the islands inside the
     // letters come in no fixed order).
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().surface_sheets[0].regions.clone().iter().map(|r| r.area()).fold(0.0, f64::max);
+    let plate = s.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).fold(0.0, f64::max);
     assert!((areas[0] - plate).abs() < 1e-3, "{areas:?} {plate}");
 }
 
@@ -344,7 +344,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     let es = entities(dxf);
     let on = |layer: &str| es.iter().filter(|e| layer_of(e) == layer).collect::<Vec<_>>();
     // OUTLINE: the tray's outer contour alone, one entity for each of its segments (lines and arcs).
-    let regions = s.model.state().surface_sheets[0].regions.clone();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     let plate =
         regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
     assert_eq!(on("OUTLINE").len(), solidcraft_io::loop_shapes(&plate).len());

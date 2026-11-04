@@ -2340,6 +2340,7 @@ impl SurfaceSheet {
     pub fn perforation_outline(&self, plane: &Plane, regions: &[Region2]) -> Result<Vec<Region2>> {
         let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
         let frames = crate::sheet_surface_cuts::frames(self, &dev)?;
+        let pieces = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new())?;
         let t = self.thickness;
         let mut out = Vec::new();
         let mut found = false;
@@ -2356,8 +2357,9 @@ impl SurfaceSheet {
                 at.point(Vec2::new(q.x, q.y))
             };
             let mapped: Vec<Region2> = regions.iter().map(|r| rigid_region(r, map)).collect();
-            let own = rigid_region(&panel.region, |p| at.point(p));
-            out.extend(solidcraft_kernel::planar_regions_boolean(&[own], &mapped, solidcraft_kernel::BoolOp::Intersect, 1e-9)?);
+            // The panel's material in the flat, short of its bends.
+            let own: Vec<Region2> = pieces.iter().filter(|(p, _)| matches!(p, crate::sheet_surface::Piece::Panel(k) if *k == i)).map(|(_, r)| r.clone()).collect();
+            out.extend(solidcraft_kernel::planar_regions_boolean(&own, &mapped, solidcraft_kernel::BoolOp::Intersect, 1e-9)?);
         }
         if !found {
             return err("the perforation's outline sketch must lie on a face of the sheet");

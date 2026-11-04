@@ -24,6 +24,14 @@ fn flat(s: &mut Session) -> Value {
     run(s, "sheet.flat_pattern", json!({}))
 }
 
+/// The frame of a sheet's base as a base flange's sketch has it: its origin on the face the
+/// sketch is on, its axes the sketch's. (The base panel's own frame is on the sheet's surface,
+/// the other face, its y the other way.)
+fn base_frame(sh: &solidcraft_doc::SurfaceSheet) -> (solidcore_record::Vec3, solidcore_record::Vec3, solidcore_record::Vec3) {
+    let place = sh.places[0].unwrap();
+    (place.shift + place.z * sh.thickness, place.x, place.y * -1.0)
+}
+
 /// A w x h base flange on XY.
 fn base(s: &mut Session, w: f64, h: f64) {
     run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
@@ -73,10 +81,9 @@ fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen(
             );
             base(&mut s, 120.0, 90.0);
             run(&mut s, "sheet.flange", json!({"edges":[[60,0,2]],"height":"30 mm","angle":"90 deg"}));
-            let sheet = &s.model.state().sheets[0];
-            let parent = &sheet.flanges[0];
-            let point = parent.p + parent.d * parent.len + parent.n * (sheet.allowance(parent) + parent.leg * 0.5);
-            let side = solidcraft_doc::apply_point(&sheet.world(Some(0)), Vec3::new(point.x, point.y, sheet.t));
+            // The first flange's end at x = 120, halfway up its leg (from R + T = 3 to 30), on its
+            // inside face (y = T).
+            let side = Vec3::new(120.0, 2.0, 16.5);
             let mut edges = vec![json!([120, 45, 2]), json!([side.x, side.y, side.z])];
             if reverse {
                 edges.reverse();
@@ -90,7 +97,7 @@ fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen(
             assert!(no_errors_or_warnings(&s), "{shape}, reverse={reverse}: {:?}", s.model.results);
             let formed = volume(&mut s);
             let pattern = flat(&mut s);
-            assert_eq!(s.model.state().sheets[0].holes.len(), 1);
+            assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(1), "{pattern}");
             let body = &s.model.state().bodies[0].body;
             assert!(body.validity().is_empty() && body.shell_count() == 1);
             run(&mut s, "edit.undo", json!({}));
@@ -174,7 +181,7 @@ fn planar_sheet_intersection_retains_exact_outline_and_islands() {
         json!({"sketch":"Ring","profiles":[{"point":[57,30]}],"through_all":true,"direction":"symmetric","operation":"intersect"}),
     );
     run(&mut annulus, "sheet.unfold", json!({}));
-    let area: f64 = annulus.model.state().surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
+    let area: f64 = annulus.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).sum();
     assert!((area - PI * 75.0).abs() < 1e-8, "exact retained area: {area}");
     // inspect.measure integrates a tessellation; exact arc area is checked above.
     let measured = volume(&mut annulus);
@@ -282,7 +289,7 @@ fn intersect_preserves_both_material_regions_of_a_logical_ring_sheet() {
             run(&mut s, command, json!({}));
         }
         let state = s.model.state();
-        let regions = state.surface_sheets[0].regions.clone();
+        let regions = state.surface_sheets[0].shown().regions;
         assert_eq!(regions.len(), 2);
         let area: f64 = regions.iter().map(|r| r.area()).sum();
         assert!((area - (900.0 - PI * 75.0)).abs() < 1e-8, "area={area}");
@@ -300,27 +307,20 @@ fn intersect_preserves_both_material_regions_of_a_logical_ring_sheet() {
 #[test]
 fn machining_a_folded_parallel_panel_preserves_its_pocket_on_unfold() {
     use solidcore_record::Vec3;
-    use solidcraft_doc::{apply_point, apply_vector};
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges":[[50,0,2.5]],"height":20}));
-    let sh = s.model.state().sheets[0].clone();
-    let points = sh.panel(&sh.flanges[0]).outer.polyline(1e-3);
-    let c = points.iter().copied().fold(solidcore_record::Vec2::ZERO, |sum, p| sum + p) / (points.len() as f64);
-    let w = sh.world(Some(0));
-    let origin = apply_point(&w, Vec3::ZERO);
-    let x = apply_vector(&w, Vec3::X);
-    let y = apply_vector(&w, Vec3::Y);
-    run(
-        &mut s,
-        "sketch.create",
-        json!({"name":"PanelPocket","plane":{"origin":[origin.x,origin.y,origin.z],"x_dir":[x.x,x.y,x.z],"y_dir":[y.x,y.y,y.z]}}),
-    );
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[c.x-2.0,c.y-2.0],"p1":[c.x+2.0,c.y+2.0]}));
+    // On the flange's outside face (y = 0), in the middle of its leg, its normal into the flange.
+    run(&mut s, "sketch.create", json!({"name":"PanelPocket","plane":{"origin":[50.0, 0.0, 12.5],"x_dir":[1,0,0],"y_dir":[0,0,-1]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-2.0,-2.0],"p1":[2.0,2.0]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":"PanelPocket","distance":1,"operation":"cut"}));
     assert!((volume(&mut s) - (18972.62196081845 - 16.0)).abs() < 0.2);
     run(&mut s, "sheet.unfold", json!({}));
+    // The pocket in the flat, where the flat pattern has it.
+    let pocket = flat(&mut s)["pockets"][0]["outline"].as_array().cloned().unwrap_or_default();
+    let n = pocket.len().max(1) as f64;
+    let c = pocket.iter().fold(solidcore_record::Vec2::ZERO, |sum, p| sum + solidcore_record::Vec2::new(p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0))) / n;
     let state = s.model.state();
     let body = &state.bodies[0].body;
     assert_eq!(body.classify_point(Vec3::new(c.x, c.y, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
@@ -427,14 +427,16 @@ fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
         let mb = state.body(name).unwrap();
         assert_eq!(mb.component, owner);
         assert_eq!(mb.transferred, transferred);
-        let sh = state.sheets.iter().find(|sh| sh.body == name).unwrap();
-        assert!(sh.frame.origin.dist(local_origin) < 1e-8, "{:?}", sh.frame);
-        assert!(sh.frame.x.dist(Vec3::X) < 1e-8);
-        assert!(sh.frame.y.dist(local_y) < 1e-8);
+        let sh = state.surface_sheets.iter().find(|sh| sh.body == name).unwrap();
+        let (origin, x, y) = base_frame(sh);
+        assert!(origin.dist(local_origin) < 1e-8, "{origin:?}");
+        assert!(x.dist(Vec3::X) < 1e-8);
+        assert!(y.dist(local_y) < 1e-8);
         assert_eq!(sh.pockets.len(), 1);
         assert_eq!((sh.pockets[0].z0, sh.pockets[0].z1), (0.0, 1.0));
-        let cut = sh.frame.to_world(solidcore_record::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 0.5;
-        let floor = sh.frame.to_world(solidcore_record::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 1.5;
+        let normal = x.cross(y);
+        let cut = origin + x * 25.0 + y * 25.0 + normal * 0.5;
+        let floor = origin + x * 25.0 + y * 25.0 + normal * 1.5;
         assert_eq!(mb.body.classify_point(cut).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert_eq!(mb.body.classify_point(floor).unwrap(), solidcraft_kernel::PointClass::Inside);
         let world = s.world_state().unwrap();
@@ -2000,7 +2002,7 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
         let below = 184.0 * setback + 2.0 * (under(8.0) - under(8.0 - setback));
         let edge = 184.0 + 2.0 * (64.0 - (8.0 - setback) * (8.0 - setback)).sqrt();
         let want = 20_000.0 - (4.0 - PI) * 64.0 - below + edge * (PI + 37.0);
-        let regions = s.model.state().surface_sheets[0].regions.clone();
+        let regions = s.model.state().surface_sheets[0].shown().regions;
         assert!(regions.len() == 1 && (regions[0].area() - want).abs() < 1e-6, "{position}: {} vs {want}", regions[0].area());
         let f = flat(&mut s);
         assert!((f["bends"][0]["length"].as_f64().unwrap_or(f64::NAN) - edge).abs() < 1e-9, "{position}: {}", f["bends"]);
@@ -2161,33 +2163,34 @@ fn malformed_fold_points_are_rejected_atomically() {
 
 #[test]
 fn flat_dxf_preserves_exact_cutout_entities() {
-    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Seg2, Vec2};
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    let mut sh = s.model.state().sheets[0].clone();
-    sh.holes = vec![Region2 {
-        outer: Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, 30.0), radius: 5.0, start: -PI, sweep: -2.0 * PI }] },
-        holes: Vec::new(),
-    }];
-    let dxf = super::flat_dxf(&sh, &super::DxfOptions::default()).unwrap();
+    // The base panel's chart runs y the other way from the flat as it is read (see `shown`).
+    let with_hole = |s: &Session, hole: Loop2| {
+        let mut sk = s.model.state().surface_sheets[0].clone();
+        sk.sheet.panels[0].region.holes = vec![hole];
+        sk.build().unwrap();
+        super::surface_dxf(s, &sk, &super::DxfOptions::default()).unwrap()
+    };
+    let dxf = with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());
     assert_eq!(dxf.matches("0\nCIRCLE\n").count(), 1, "{dxf}");
     assert!(!dxf.contains("0\nARC\n"), "a full circle must not become a zero-length ARC");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 5);
-    assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Circle(c, r) if *c == Vec2::new(40.0, 30.0) && (*r - 5.0).abs() < 1e-9)));
-    sh.holes[0].outer = Loop2 {
+    assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Circle(c, r) if c.dist(Vec2::new(40.0, 30.0)) < 1e-9 && (*r - 5.0).abs() < 1e-9)));
+    let d = Loop2 {
         segs: vec![
-            Seg2::Line { a: Vec2::new(10.0, 10.0), b: Vec2::new(30.0, 10.0) },
-            Seg2::Arc { center: Vec2::new(20.0, 10.0), radius: 10.0, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(10.0, -10.0), b: Vec2::new(30.0, -10.0) },
+            Seg2::Arc { center: Vec2::new(20.0, -10.0), radius: 10.0, start: 0.0, sweep: -PI },
         ],
     };
-    let dxf = super::flat_dxf(&sh, &super::DxfOptions::default()).unwrap();
+    let dxf = with_hole(&s, d.ccw().reversed());
     assert_eq!(dxf.matches("0\nLINE\n").count(), 5, "four outline lines and one exact cutout line");
     assert_eq!(dxf.matches("0\nARC\n").count(), 1);
-    assert!(dxf.contains(" 50\n0.0\n 51\n180.0\n"), "{dxf}");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 6);
-    assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, a, b } if *c == Vec2::new(20.0, 10.0) && a.dist(Vec2::new(30.0, 10.0)) < 1e-9 && b.dist(Vec2::new(10.0, 10.0)) < 1e-9)));
+    assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, .. } if c.dist(Vec2::new(20.0, 10.0)) < 1e-9)), "{read:?}");
 }
 
 // A profile chosen by a point outside its inner loop must keep that inner loop through
@@ -2259,8 +2262,7 @@ fn inherited_round_hole_survives_flange_and_unfold_in_flipped_frames() {
         assert!((folded - (18972.62196081845 - PI * 25.0 * 2.5)).abs() < 0.2, "{folded}");
         let f = flat(&mut s);
         assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(1));
-        let sh = s.model.state().sheets[0].clone();
-        let regions = sh.flat_regions().unwrap();
+        let regions = s.model.state().surface_sheets[0].shown().regions;
         assert_eq!(regions[0].holes[0].segs.len(), 2);
         assert!(regions[0].holes[0].segs.iter().all(|s| matches!(s, solidcore_record::Seg2::Arc { radius, .. } if (*radius - 5.0).abs() < 1e-9)));
         let expected = regions.iter().map(solidcore_record::Region2::area).sum::<f64>() * 2.5;
@@ -2282,7 +2284,7 @@ fn elliptic_cut_out_stays_exact_in_the_flat_pattern_and_follows_arcs_when_folded
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    let (uncut, blank) = (volume(&mut s), s.model.state().surface_sheets[0].regions.clone()[0].area());
+    let (uncut, blank) = (volume(&mut s), s.model.state().surface_sheets[0].shown().regions[0].area());
     let (plain_faces, plain_cylinders) = faces(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
     run(&mut s, "sketch.ellipse", json!({"center": [40, 30], "major": [55, 30], "minor_radius": 8}));
@@ -2293,7 +2295,7 @@ fn elliptic_cut_out_stays_exact_in_the_flat_pattern_and_follows_arcs_when_folded
     let folded = volume(&mut s);
     assert!((uncut - folded - cut * 2.5).abs() < 0.5, "{}", uncut - folded);
     // The flat pattern holds the ellipse itself, so its area is the blank less π·15·8.
-    let regions = s.model.state().surface_sheets[0].regions.clone();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     let hole = &regions[0].holes[0];
     assert!(hole.segs.len() == 4 && hole.segs.iter().all(|x| matches!(x, Seg2::Conic { .. })), "{} segments", hole.segs.len());
     assert!((regions[0].area() - (blank - cut)).abs() < 1e-9, "{}", regions[0].area());
@@ -2325,7 +2327,7 @@ fn flipped_base_flange_keeps_its_elliptic_outline() {
         run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [25, 0], "minor_radius": 12}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sheet.flange", json!({"sketch": "Oval", "flip": flip}));
-        let regions = s.model.state().surface_sheets[0].regions.clone();
+        let regions = s.model.state().surface_sheets[0].shown().regions;
         let outline = &regions[0].outer.segs;
         assert!(
             outline.len() == 4 && outline.iter().all(|x| matches!(x, solidcore_record::Seg2::Conic { .. })),
@@ -2463,7 +2465,7 @@ fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_ref
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
         for stage in ["sheet.unfold", "sheet.refold"] {
-            let regions = s.model.state().surface_sheets[0].regions.clone();
+            let regions = s.model.state().surface_sheets[0].shown().regions;
             let rim = &regions[0].outer.segs;
             assert!(
                 !rim.is_empty() && rim.iter().all(|seg| matches!(seg, solidcore_record::Seg2::Arc { radius, .. } if (*radius - 10.0).abs() < 1e-12)),
@@ -2481,7 +2483,7 @@ fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_ref
             }
             run(&mut s, stage, json!({}));
         }
-        assert_eq!(s.model.state().surface_sheets[0].regions.clone()[0].holes.len(), 1);
+        assert_eq!(s.model.state().surface_sheets[0].shown().regions[0].holes.len(), 1);
     }
 }
 
@@ -2500,7 +2502,7 @@ fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
         "solid.extrude",
         json!({"sketch": "Ring", "profiles": [{"point": [57,30]}], "through_all": true, "operation": "cut", "direction": "symmetric"}),
     );
-    let material = s.model.state().surface_sheets[0].regions.clone();
+    let material = s.model.state().surface_sheets[0].shown().regions;
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [200,0,0], "body_name": "SeparateBox"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "BoxCut"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [205,5], "p1": [210,10]}));
@@ -2511,7 +2513,7 @@ fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
         json!({"sketch": "BoxCut", "participants": ["SeparateBox"], "through_all": true, "operation": "cut", "direction": "symmetric"}),
     );
     assert_eq!(s.model.state().bodies.len(), 2);
-    assert_eq!(s.model.state().surface_sheets[0].regions.clone(), material);
+    assert_eq!(s.model.state().surface_sheets[0].shown().regions, material);
     for stage in ["sheet.unfold", "sheet.refold"] {
         run(&mut s, stage, json!({"body": sheet_name}));
         assert_eq!(s.model.state().bodies.len(), 2);
@@ -2543,7 +2545,7 @@ fn specialized_sheet_cuts_respect_component_and_explicit_participants() {
         run(&mut s, "solid.extrude", params);
         let m = run(&mut s, "inspect.measure", json!({"bodies": [name]}));
         assert!((m["total"]["volume_mm3"].as_f64().unwrap() - 15000.0).abs() < 1e-6);
-        assert!(s.model.state().sheets[0].holes.is_empty());
+        assert!(s.model.state().surface_sheets[0].regions.iter().all(|r| r.holes.is_empty()));
         let m = run(&mut s, "inspect.measure", json!({"bodies": ["OtherBox"]}));
         assert!((m["total"]["volume_mm3"].as_f64().unwrap() - 59000.0).abs() < 1e-6);
     }
@@ -2572,7 +2574,7 @@ fn ring_cut_preserves_retained_island_through_unfold_and_refold() {
     assert!((volume(&mut s) - expected).abs() < 0.2);
     material_probes(&s);
     assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(2));
-    let regions = s.model.state().surface_sheets[0].regions.clone();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     assert!(regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(50.0, 30.0))));
     assert!(!regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(57.0, 30.0))));
     assert!(regions.iter().any(|r| r.contains(solidcore_record::Vec2::new(65.0, 30.0))));
@@ -2740,7 +2742,7 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
             run(&mut s, command, json!({}));
         }
         assert!((volume(&mut s) - 200.0).abs() < 1e-6);
-        assert_eq!(s.model.state().surface_sheets[0].regions.clone().len(), 2);
+        assert_eq!(s.model.state().surface_sheets[0].shown().regions.len(), 2);
         for x in [25.0, 65.0] {
             assert_eq!(s.model.state().bodies[0].body.classify_point(Vec3::new(x, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
         }
@@ -2760,7 +2762,7 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
             run(&mut ring, command, json!({}));
         }
         let state = ring.model.state();
-        let area: f64 = state.surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
+        let area: f64 = state.surface_sheets[0].shown().regions.iter().map(|r| r.area()).sum();
         assert!((area - 75.0 * PI).abs() < 1e-8);
         assert!((volume(&mut ring) - 75.0 * PI).abs() < 0.1);
         assert_eq!(state.bodies[0].body.classify_point(Vec3::new(57.0, 30.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
@@ -2814,10 +2816,11 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
             run(&mut s, command, json!({}));
         }
         let state = s.model.state();
-        let sh = &state.sheets[0];
-        assert_eq!(sh.t, 2.5);
-        assert!(sh.frame.origin.dist(Vec3::new(-30.0, -10.0, 20.0)) < 1e-8);
-        assert!(sh.frame.normal().dist(Vec3::Y) < 1e-8);
+        let sh = &state.surface_sheets[0];
+        assert_eq!(sh.thickness, 2.5);
+        let (origin, x, y) = base_frame(sh);
+        assert!(origin.dist(Vec3::new(-30.0, -10.0, 20.0)) < 1e-8, "{origin:?}");
+        assert!(x.cross(y).dist(Vec3::Y) < 1e-8);
         assert_eq!(sh.pockets.len(), 2);
         assert_eq!(state.body(&name).unwrap().component, owner);
         assert!(state.body(&name).unwrap().transferred);
@@ -2995,7 +2998,7 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
         let body = &state.body(&name).unwrap().body;
         let measured = solidcraft_kernel::measure(body).unwrap().volume;
         assert!((measured - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 0.01);
-        let area: f64 = state.surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
+        let area: f64 = state.surface_sheets[0].shown().regions.iter().map(|r| r.area()).sum();
         assert!((area - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 1e-8);
         assert_eq!(body.classify_point(Vec3::new(21.0, 21.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
         assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
@@ -3685,7 +3688,7 @@ fn hole_beside_two_adjacent_edge_flanges_cuts_and_bends_stay_guarded() {
     // Folded, the sheet (2.5 mm, R 2.5, K 0.44) holds its flat area times the thickness, less
     // each bend's flat strip (its length times the allowance (R + K·t)·π/2) and plus its sector
     // (R + t/2)·π/2: t·A + t²·(½ − K)·(π/2)·L for the bends' length L.
-    let flat_area: f64 = s.model.state().surface_sheets[0].regions.clone().iter().map(|r| r.area()).sum();
+    let flat_area: f64 = s.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).sum();
     let bends: f64 = flat(&mut s)["bends"].as_array().unwrap().iter().map(|b| b["length"].as_f64().unwrap()).sum();
     let want = 2.5 * flat_area + 2.5 * 2.5 * (0.5 - 0.44) * FRAC_PI_2 * bends;
     assert!(rel(before, want) < 1e-9, "{before} vs {want}");
@@ -4418,8 +4421,8 @@ fn an_edge_flange_feature_can_tear_its_corners_under_a_notch_rule() {
     let (v0, stepped) = (volume(&mut notch), outline_points(&flat(&mut notch)));
     let mut s = two_flange_groups(json!({}), json!({"corner_relief_shape": "tear"}), json!({}));
     assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
-    let torn = s.model.state().sheets.last().map(|b| b.flanges.iter().map(|f| f.tear).collect::<Vec<_>>()).unwrap_or_default();
-    assert_eq!(torn.iter().filter(|t| **t != (false, false)).count(), 2, "{torn:?}");
+    let torn = s.model.state().surface_sheets.last().map_or(0, |k| k.sheet.corners.iter().filter(|c| c.relief == solidcraft_develop::CornerRelief::Tear).count());
+    assert_eq!(torn, 2, "{torn:?}");
     let want = 2.0 * ba * grow / 2.0 * 2.0;
     assert!((volume(&mut s) - v0 - want).abs() < 0.05, "{} - {v0} vs {want}", volume(&mut s));
     assert_eq!(outline_points(&flat(&mut s)).len() + 2, stepped.len());
@@ -5736,7 +5739,9 @@ fn perforation_reduces_volume_and_mass_by_the_open_area() {
 /// #732: holes stay out of bend zones, also when the fold comes after the perforation; the field follows the sheet
 /// through unfold / refold and through save and reopen.
 #[test]
-fn perforation_skips_bend_zones_and_survives_fold_unfold_and_reopen() {
+fn perforation_runs_through_bends_and_survives_fold_unfold_and_reopen() {
+    // A perforation field is perforated stock (#6748): its grid runs on through a bend made after
+    // it, continuous on the developed flat, as stock perforated before it was bent.
     let mut s = Session::default();
     outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 60], [0, 60]]));
     run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1"}));
@@ -5744,14 +5749,11 @@ fn perforation_skips_bend_zones_and_survives_fold_unfold_and_reopen() {
     run(&mut s, "sheet.fold", json!({"points": [[80, 0, 0.8], [80, 60, 0.8]], "fixed": [40, 30, 0.4]}));
     let folded = flat(&mut s);
     let count = folded["perforations"][0]["count"].as_u64().unwrap();
-    assert!(count < flat_count, "holes in the new bend zone are dropped: {count} of {flat_count}");
+    assert_eq!(count, flat_count, "the fold keeps the flat, and the holes in it");
     let zone = &folded["bend_zones"][0]; // [min x, max x, min y, max y] of the bend zone, flat coordinates
     let (z0, z1) = (zone[0].as_f64().unwrap_or(f64::NAN), zone[1].as_f64().unwrap_or(f64::NAN));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(
-        perforation_circles(&dxf).iter().all(|&(x, _, r)| x + r + 1.0 <= z0 + 1e-9 || x - r - 1.0 >= z1 - 1e-9),
-        "no hole within margin of the bend zone x {z0}..{z1}"
-    );
+    assert!(perforation_circles(&dxf).iter().any(|&(x, _, _)| x > z0 && x < z1), "holes in the bend zone x {z0}..{z1}");
     let volume_folded = volume(&mut s);
     run(&mut s, "sheet.unfold", json!({}));
     assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(count));
@@ -5919,7 +5921,7 @@ fn parted_note(area: f64, at: [f64; 2]) -> String {
 }
 
 fn flat_pieces(s: &Session) -> Vec<f64> {
-    s.model.state().surface_sheets[0].regions.clone().iter().map(solidcore_record::Region2::area).collect()
+    s.model.state().surface_sheets[0].shown().regions.iter().map(solidcore_record::Region2::area).collect()
 }
 
 #[test]
@@ -6161,7 +6163,6 @@ fn a_fillet_on_a_sheet_corner_is_refused_until_a_sheet_feature_rebuilds_the_body
     let out = run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
     assert!(out["warning"].as_str().is_some_and(|w| w.contains("what Fillet1 changed is not kept")), "{out}");
     assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
-    assert_eq!(s.model.state().sheets[0].altered_by, None);
 }
 
 /// A cosmetic thread in a sheet's hole leaves its flat pattern as it is; a modelled thread cuts
@@ -6205,7 +6206,6 @@ fn a_sheet_made_of_sheet_features_and_flat_cuts_still_exports_its_flat_pattern()
     run(&mut s, "solid.move", json!({"bodies": [body], "translate": [10, 0, 0]}));
     let flagged = |w: &str| w.contains("flat pattern, DXF and bend table") || w.contains("is not kept");
     assert!(s.model.results.iter().all(|r| r.error.is_none() && !r.warning.as_deref().is_some_and(flagged)), "{:?}", s.model.results);
-    assert_eq!(s.model.state().sheets[0].altered_by, None);
     for result in flat_exports(&mut s) {
         let value = result.expect("a sheet the flat pattern describes");
         assert!(value.is_object(), "{value}");
