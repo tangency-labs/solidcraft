@@ -15,6 +15,7 @@
 //! parameters, and [`command`] does the rest after `SolveApp::run`.
 
 use serde_json::{Map, Value, json};
+use solidcraft_engine::io::vfs;
 use solidcraft_engine::{MAX_PROFILE_NAME, profile_name};
 
 use crate::ui_kit::BackingTooltipExt as _;
@@ -418,13 +419,14 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     skipped
 }
 
-/// A profile file read and checked, refusing one too large to be a profile.
+/// A profile file read and checked, refusing one too large to be a profile. Read through `vfs`, so
+/// an MCP agent's folders apply as they do to the engine's files (#11362).
 fn read_file(path: &str) -> Result<Value, String> {
-    let size = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.len();
+    let size = vfs::len(path).map_err(|e| format!("{path}: {e}"))?;
     if size > MAX_FILE_BYTES {
         return Err(format!("{path}: a settings profile file is at most {} MiB", MAX_FILE_BYTES / 1024 / 1024));
     }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let text = vfs::read_to_string(path, MAX_FILE_BYTES as usize).map_err(|e| format!("{path}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{path}: not a settings profile: {e}"))
 }
 
@@ -494,7 +496,7 @@ pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String>
             let doc = app.settings_profiles.get(name)?.clone();
             if let Some(path) = v.get("path").and_then(Value::as_str) {
                 let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
-                std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))?;
+                vfs::write(path, text.as_bytes()).map_err(|e| format!("{path}: {e}"))?;
                 return Ok(json!({ "profile": doc, "path": path }));
             }
             Ok(json!({ "profile": doc }))
