@@ -825,3 +825,25 @@ fn clearing_runs_in_the_climb_direction_only_until_the_planner_walks_both() {
     let climb = AdaptiveParams { climb: true, ..adaptive_params };
     assert!(adaptive(&regions, &tool(6.0), &climb, &c).is_ok());
 }
+
+#[test]
+fn a_circle_wall_comes_out_as_exact_arcs() {
+    // The planner's exact offsetting degenerates on a full-circle arc (its
+    // chord is zero), so the geometry never hands it one: every arc past
+    // half a turn is written as two halves, and the wall stays true arcs.
+    let disc = [Region2 { outer: Loop2::circle(v(0.0, 0.0), 10.0), holes: vec![] }];
+    for side in [Side::Outside, Side::Inside] {
+        let params = ContourParams { side, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+        let path = contour(&disc, &tool(4.0), &params, &cut(0.0, -2.0, 2.0)).unwrap();
+        let wall_radius = if side == Side::Outside { 12.0 } else { 8.0 };
+        let mut arcs = 0;
+        for m in &path.moves {
+            if let Move::Arc { to, center, .. } = *m {
+                arcs += 1;
+                close(v(to.x, to.y).dist(center), wall_radius, 1e-6);
+                close(v(center.x, center.y).dist(v(0.0, 0.0)), 0.0, 1e-9);
+            }
+        }
+        assert!(arcs >= 4, "{side:?}: {arcs} arcs for two depth passes");
+    }
+}

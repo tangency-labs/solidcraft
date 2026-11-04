@@ -1081,11 +1081,9 @@ mod tests {
     }
 
     #[test]
-    fn circle_sketch_posts_within_its_tolerance() {
-        // A circle wall comes out as a tolerance chain, not arcs: the
-        // planner's exact offsetting covers line walls only (rolled
-        // corners included), and arc walls are followed within the
-        // operation's tolerance until it learns arc boundaries.
+    fn circle_sketch_posts_g2_or_g3() {
+        // The wall of a circle sketch is true arcs: the planner offsets the
+        // curve-true boundary exactly, so the post writes G2/G3.
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane": "XY"}));
         run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
@@ -1103,7 +1101,7 @@ mod tests {
         );
         let posted = run(&mut s, "cam.post", json!({"setup": "Top"}));
         let gcode = posted["code"].as_str().unwrap();
-        assert!(gcode.contains("X-11.99") || gcode.contains("X-12") || gcode.contains("Y-11.99"), "the wall follows the circle: {gcode}");
+        assert!(gcode.contains("G2 ") || gcode.contains("G3 "), "{gcode}");
         assert!(posted["readback"]["within"].as_bool().unwrap());
     }
 }

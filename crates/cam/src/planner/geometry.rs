@@ -33,7 +33,19 @@ fn append_loop(g: &mut raygeo::geo::geometry::Geometry, lp: &Loop2, tolerance: f
                 } else if a.dist(current) > 1e-9 {
                     g.line_to(a.x, a.y, 0.0);
                 }
-                g.arc_to(b.x, b.y, center.x - a.x, center.y - a.y, sweep < 0.0, 0.0);
+                // A full-circle arc starts and ends at the same point, and the
+                // planner's exact offsetting degenerates on the zero chord: the
+                // wall silently comes out as a tolerance chain instead of arcs.
+                // No arc segment of the geometry spans more than half a turn —
+                // the same rule the translator holds output arcs to.
+                if sweep.abs() > std::f64::consts::PI {
+                    let mid = center + Vec2::from_angle(start + sweep * 0.5) * radius;
+                    let mid_offset = center - mid;
+                    g.arc_to(mid.x, mid.y, center.x - a.x, center.y - a.y, sweep < 0.0, 0.0);
+                    g.arc_to(b.x, b.y, mid_offset.x, mid_offset.y, sweep < 0.0, 0.0);
+                } else {
+                    g.arc_to(b.x, b.y, center.x - a.x, center.y - a.y, sweep < 0.0, 0.0);
+                }
                 current = b;
             }
             ref other => {
