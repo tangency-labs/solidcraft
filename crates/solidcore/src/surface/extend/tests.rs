@@ -6,6 +6,7 @@ use crate::nurbs::knots::Side;
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
+use crate::surface::procedural_blend::ProceduralBlend;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
 
 fn k() -> Kernel {
@@ -1002,6 +1003,197 @@ fn ruled_with_end_weight_ratios_that_differ_is_c1_and_straight_up_to_its_reach()
     assert!(named > 0.1 && named < 1e3, "{named}");
     let e = s
         .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, named)
+        .unwrap();
+    meets(&e, named);
+}
+
+/// A ball of radius 2 between the planes y = 0 (side -1) and z = 0 (side +1) along the
+/// leader (0, 2, 2) -> (10, 2, 2), of order `order`, on a toy net (a unit square, bound
+/// 1e-3); with `certified`, on its own net and bound ([`net_of_definition`]). The planes
+/// run to x = 20, so the feet have room along.
+fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
+    use crate::blend::fillet_section::recertify::net_of_definition;
+    use crate::blend::fillet_section::section::GnSectionFsg;
+    use crate::geom::vector3d::Point3;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::procedural_blend::BlendDefinitionInput;
+    let mut kk = k();
+    kk.fixes.fillet_gn_section_generator = true;
+    kk.fixes.fillet_round_as_definition = true;
+    let (l, r) = (10.0, 2.0);
+    let bilinear =
+        |p: [Point3; 4]| BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap();
+    let o = Point3::new(0.0, 0.0, 0.0);
+    let a = Surface::from(bilinear([
+        o,
+        Point3::new(2.0 * l, 0.0, 0.0),
+        Point3::new(0.0, 0.0, l),
+        Point3::new(2.0 * l, 0.0, l),
+    ]));
+    let b = Surface::from(bilinear([
+        o,
+        Point3::new(2.0 * l, 0.0, 0.0),
+        Point3::new(0.0, l, 0.0),
+        Point3::new(2.0 * l, l, 0.0),
+    ]));
+    let toy = bilinear([
+        o,
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+    ]);
+    let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
+    let leader = line(Point3::new(0.0, r, r), Point3::new(l, r, r));
+    let seed = line(Point3::new(0.0, r / l, 0.0), Point3::new(0.5, r / l, 0.0));
+    let input = BlendDefinitionInput {
+        supports: [&a, &b],
+        sides: [-1.0, 1.0],
+        offsets: [r, r],
+        law: None,
+        order,
+        thumbweight: if order >= 2 { 0.5 } else { 0.0 },
+        leader: &leader,
+        seeds: [&seed, &seed],
+        bound: 1e-3,
+        chamfer: None,
+    };
+    let valid = |n: u32, w: f64| GnSectionFsg::is_valid(n as usize, w);
+    let pb = ProceduralBlend::create(&kk, &toy, &input, valid).unwrap();
+    if !certified {
+        return (kk, pb);
+    }
+    let (net, bound) = net_of_definition(&kk, &pb, 1e-12).unwrap();
+    let input = BlendDefinitionInput { bound, ..input };
+    let pb = ProceduralBlend::create(&kk, &net, &input, valid).unwrap();
+    (kk, pb)
+}
+
+#[test]
+fn a_round_continues_on_its_ball_past_a_foot_with_its_bound_grown_in_closed_form() {
+    let (kk, pb) = round_blend(1, true);
+    let s = Surface::from(pb.clone());
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    // past the foot on z = 0 (t = 1, the net's v) by an arc of 1 on the ball of radius 2
+    let e = s
+        .extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Ruled, 1.0)
+        .unwrap();
+    meets(&e, 1.0);
+    let SurfaceKind::ProceduralBlend(out) = e.surface.kind() else {
+        panic!("not a blend: {:?}", e.surface.kind());
+    };
+    let d = e.surface.natural_uv_domain_with_nurb(&kk).unwrap();
+    let te = d.max().y;
+    assert!(te > 1.0, "{d:?}");
+    // the growth, in closed form: T_4(2 te - 1) times the net's weight ratio (W is at least
+    // 1 past the foot, at most 1 on the source)
+    let x = 2.0 * te - 1.0;
+    let t4 = 8.0 * x.powi(4) - 8.0 * x * x + 1.0;
+    let ws = |n: &crate::nurbs::srf_basic::Surface| {
+        let w: Vec<f64> = n.cpts().iter().flatten().map(|c| c.w).collect();
+        (
+            w.iter().copied().fold(0.0_f64, f64::max),
+            w.iter().copied().fold(f64::INFINITY, f64::min),
+        )
+    };
+    let (vhi, _) = ws(pb.net.gw_nurb().unwrap());
+    let (_, vlo) = ws(out.net.gw_nurb().unwrap());
+    let want = pb.bound() * t4 * vhi / vlo;
+    assert!(
+        out.bound() >= want && out.bound() <= want * (1.0 + 1e-12) + 1e-15 + e.extension,
+        "{} vs {want}",
+        out.bound()
+    );
+    // the continued part: on the ball's circle about the leader, within the bound of the
+    // definition continued, and the end an arc of 1 past the foot
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let u = f64::from(i) / 8.0;
+            let v = 1.0 + (te - 1.0) * f64::from(j) / 8.0;
+            let p = e.surface.evaluate_point(&kk, Vec2::new(u, v)).unwrap();
+            let st = out.definition_parameters(Point2::new(u, v));
+            let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
+            assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
+            let rad = (p.y - 2.0).hypot(p.z - 2.0);
+            assert!((rad - 2.0).abs() <= out.bound() + 1e-12, "{p:?}");
+        }
+    }
+    let end = e.surface.evaluate_point(&kk, Vec2::new(0.5, te)).unwrap();
+    let phi = (end.z - 2.0).atan2(end.y - 2.0);
+    assert!((phi - (-FRAC_PI_2 + 0.5)).abs() < 1e-8, "{end:?} {phi}");
+    // the source part is the source's net, bit for bit
+    let src = pb.net.gw_nurb().unwrap();
+    let got = out.net.gw_nurb().unwrap();
+    assert!(keeps(src, got, BoxSide::VMax).unwrap());
+}
+
+#[test]
+fn a_round_continues_along_its_spine_by_a_span_of_its_definition() {
+    let (kk, pb) = round_blend(1, true);
+    let s = Surface::from(pb.clone());
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    // past x = 10 by 3 along the straight spine: the ball's cylinder about the leader
+    let e = s
+        .extended_by_distance(&kk, &d0, BoxSide::UMax, Continuity::Tangent, 3.0)
+        .unwrap();
+    meets(&e, 3.0);
+    let SurfaceKind::ProceduralBlend(out) = e.surface.kind() else {
+        panic!("not a blend: {:?}", e.surface.kind());
+    };
+    let d = e.surface.natural_uv_domain_with_nurb(&kk).unwrap();
+    let ue = d.max().x;
+    assert!((ue - 1.3).abs() < 1e-6, "{d:?}");
+    assert!(
+        out.bound() >= pb.bound() && out.bound() < 1e-6,
+        "{}",
+        out.bound()
+    );
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let u = 1.0 + (ue - 1.0) * f64::from(i) / 8.0;
+            let v = f64::from(j) / 8.0;
+            let p = e.surface.evaluate_point(&kk, Vec2::new(u, v)).unwrap();
+            let st = out.definition_parameters(Point2::new(u, v));
+            let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
+            assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
+            let rad = (p.y - 2.0).hypot(p.z - 2.0);
+            assert!((rad - 2.0).abs() <= out.bound() + 1e-12, "{p:?}");
+            assert!((p.x - 10.0 * u).abs() <= out.bound() + 1e-9, "{p:?}");
+        }
+    }
+    // its seeds are on the new station, and the net re-certifies against its definition
+    let sigma = out.definition().seeds[0].knots(None).unwrap().0;
+    assert_eq!(sigma.len(), 3, "{sigma:?}");
+    let again = crate::blend::fillet_section::recertify::recertify(&kk, out).unwrap();
+    assert!(again <= out.bound(), "{again} vs {}", out.bound());
+}
+
+#[test]
+fn a_gn_section_across_is_refused() {
+    let (kk, pb) = round_blend(2, false);
+    let s = Surface::from(pb);
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    match s.extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, 0.1) {
+        Err(SolidError::Unsupported { .. }) => {}
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_round_along_past_its_supports_is_refused_naming_a_distance_that_works() {
+    // the planes run to x = 20 and the spine ends at x = 10: past x = 20 a foot leaves its
+    // support, so 15 along is refused, naming a distance under 10 that is met
+    let (kk, pb) = round_blend(1, true);
+    let s = Surface::from(pb);
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    let named = match s.extended_by_distance(&kk, &d0, BoxSide::UMax, Continuity::Tangent, 15.0) {
+        Err(SolidError::ExtendRefused {
+            distance: Some(x), ..
+        }) => x,
+        other => panic!("{other:?}"),
+    };
+    assert!(named > 0.0 && named <= 10.0 + 1e-6, "{named}");
+    let e = s
+        .extended_by_distance(&kk, &d0, BoxSide::UMax, Continuity::Tangent, named)
         .unwrap();
     meets(&e, named);
 }

@@ -738,6 +738,69 @@ pub(crate) fn net_of_definition(
     pb: &ProceduralBlend,
     target: f64,
 ) -> Result<(BSplineSurface, f64)> {
+    let (ss, spans, certified, ld, _) = spans_of_definition(k, pb, target, None)?;
+    let net = net_of_spans(&ss, &spans, ld)?;
+    let faces = pb.supports();
+    let bound = certified
+        + stored_net_distance(&net, &spans, ld)?
+        + 3.0 * precision_floor(k, faces, pb.definition().order, &net)?;
+    Ok((net, bound))
+}
+
+/// One span of a definition's net, as [`net_of_definition`] makes it: its homogeneous rows
+/// `W P` and weights `W` (4 along s by `ld` across, `[i * ld + j]`, from the lower station
+/// to the higher), its certificate and `ld`.
+pub(crate) struct DefinitionSpan {
+    pub(crate) homog: Vec<Vec3>,
+    pub(crate) weights: Vec<f64>,
+    pub(crate) certified: f64,
+    pub(crate) ld: usize,
+    /// The span's two stations, the lower s first.
+    pub(crate) stations: Vec<GnStation>,
+}
+
+/// The span of a definition's net between its last two stations (`high`) or its first two,
+/// solved and certified as [`net_of_definition`] does each.
+///
+/// # Errors
+///
+/// Those of [`net_of_definition`].
+pub(crate) fn end_span_of_definition(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    high: bool,
+    target: f64,
+) -> Result<DefinitionSpan> {
+    let count = pb.definition().seeds[0].knots(None)?.0.len();
+    let first = if high { count.saturating_sub(2) } else { 0 };
+    let (_, mut spans, certified, ld, stations) = spans_of_definition(k, pb, target, Some(first))?;
+    let (homog, weights) = spans.pop().ok_or_else(|| SolidError::sm_err(OP))?;
+    Ok(DefinitionSpan {
+        homog,
+        weights,
+        certified,
+        ld,
+        stations,
+    })
+}
+
+/// The stations' s, the spans, the largest certificate, the width across and the stations.
+type SpansOfDefinition = (
+    Vec<f64>,
+    Vec<(Vec<Vec3>, Vec<f64>)>,
+    f64,
+    usize,
+    Vec<GnStation>,
+);
+
+/// The spans of a definition's net on its stations (all, or only the one from station
+/// `only`), each certified ([`SpansOfDefinition`]).
+fn spans_of_definition(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    target: f64,
+    only: Option<usize>,
+) -> Result<SpansOfDefinition> {
     let d = pb.definition();
     let n = d.order as usize;
     let equal_area = n >= 2 && d.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
@@ -786,12 +849,14 @@ pub(crate) fn net_of_definition(
         equal_area,
         law: law.as_ref(),
     };
-    let stations =
-        definition_stations(k, &system, [seed0, seed1], &sigma, &vec![true; sigma.len()])?;
-    let solved: Vec<GnStation> = stations
-        .into_iter()
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let needed: Vec<bool> = (0..sigma.len())
+        .map(|j| only.is_none_or(|i| j == i || Some(j) == i.checked_add(1)))
+        .collect();
+    let stations = definition_stations(k, &system, [seed0, seed1], &sigma, &needed)?;
+    let solved: Vec<GnStation> = stations.into_iter().flatten().collect();
+    if solved.len() != needed.iter().filter(|&&x| x).count() || solved.len() < 2 {
+        return Err(SolidError::sm_err(OP));
+    }
     let mut vary = varying(n, r, &solved, equal_area);
     let mut spans = Vec::new();
     let mut certified = 0.0_f64;
@@ -828,11 +893,7 @@ pub(crate) fn net_of_definition(
         certified = certified.max(c);
     }
     let ss: Vec<f64> = solved.iter().map(|st| st.s).collect();
-    let net = net_of_spans(&ss, &spans, ld)?;
-    let bound = certified
-        + stored_net_distance(&net, &spans, ld)?
-        + 3.0 * precision_floor(k, faces, d.order, &net)?;
-    Ok((net, bound))
+    Ok((ss, spans, certified, ld, solved))
 }
 
 /// -1, 0 or +1.

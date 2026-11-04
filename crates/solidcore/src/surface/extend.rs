@@ -70,6 +70,8 @@
 //! is of degree 1 across it (a plane; a cone or cylinder along its rulings): a straight row's
 //! mirror, its C2 condition and its tangent line are its own continuation.
 //!
+//! **Blends.** A procedural blend is extended by its definition, not its net (`blend`).
+//!
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use std::cell::Cell;
@@ -213,9 +215,12 @@ impl Surface {
     ///
     /// - `InvalidInput`: a distance not finite and positive; a side not the form's end; a
     ///   form moved off its analytic label; a form not clamped at the side;
-    /// - `Unsupported`: a kind with no exact B-spline form here (a procedural blend, a curve
-    ///   bounded, STEP or in-volume surface); an offset surface is the offset of its base
-    ///   extended (`offset_extended`), with its base's errors;
+    /// - `Unsupported`: a kind with no exact B-spline form here (a curve bounded, STEP or
+    ///   in-volume surface); an offset surface is the offset of its base extended
+    ///   (`offset_extended`), with its base's errors; a procedural blend is extended by its
+    ///   definition (`blend`: across its section continued, along its spine by a span of its
+    ///   construction), refused for a G^n section across, a net cut across or turned, or a
+    ///   side that is not its definition's end station;
     /// - [`SolidError::ExtendRefused`]: a weight would not be positive, with a distance whose
     ///   weights are ([`ExtendRefusal::WeightVanishes`]); the length at the distance not
     ///   measurable to the stop, with the longest distance found that is
@@ -239,11 +244,8 @@ impl Surface {
         if let SurfaceKind::OffsetSurface(o) = self.kind() {
             return offset_extended(k, o, dom, side, how, distance);
         }
-        if matches!(self.kind(), SurfaceKind::ProceduralBlend(_)) {
-            return Err(SolidError::Unsupported {
-                operation: OP,
-                reason: "a blend is extended by its definition, not its net",
-            });
+        if let SurfaceKind::ProceduralBlend(pb) = self.kind() {
+            return blend::blend_extended(k, pb, dom, side, distance);
         }
         let analytic = AnalyticSupport::of(self).is_some();
         let form = crate::blend::fillet_section::station::as_b_spline(k, self)?.ok_or(
@@ -1329,6 +1331,7 @@ fn keeps(net: &Net, out: &Net, side: BoxSide) -> Result<bool> {
     Ok(points_kept && a.len() <= b.len())
 }
 
+mod blend;
 mod sides;
 pub use sides::{ExtendedSides, SideExtension};
 
