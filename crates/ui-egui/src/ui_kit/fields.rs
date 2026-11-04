@@ -1058,7 +1058,7 @@ pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
 }
 
 /// Reserve Enter for applying a feature form while its controls are being drawn.
-pub(super) fn with_feature_form<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn with_feature_form<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let ctx = ui.ctx().clone();
     let id = egui::Id::new("feature_form_enter_to_apply");
     let previous = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);

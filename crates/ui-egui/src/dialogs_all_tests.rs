@@ -439,6 +439,18 @@ form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
 
+#[test]
+fn motion_study_enter_toggles_loop_without_applying() {
+    use crate::dialogs_motion::Mo;
+    let mut h = fixture();
+    h.app.start("motion.study");
+    h.frames(6);
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Motion(Mo::MotionStudy { looping: true, .. })));
+    crate::test_support::dialog_tab_to(&mut h, "dialog:motion:loop");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Motion(Mo::MotionStudy { looping: false, .. })));
+}
+
 /// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
 /// as they got them, in English.
 #[test]

@@ -3757,6 +3757,12 @@ pub(crate) fn card_width(d: &Dialog) -> f32 {
     }
 }
 
+fn dialog_enter_applies(kind: &Kind) -> bool {
+    !matches!(kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
+        && !matches!(kind, Kind::Motion(k) if k.wide())
+        && !matches!(kind, Kind::Material { editor, .. } if editor.editing())
+}
+
 /// A dialog's primary and closing actions. Measure only closes; a deletion's primary action
 /// says what it does.
 pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
@@ -3941,6 +3947,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         cancel = closed || action == crate::ui_kit::Action::Cancel;
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| !host || painted);
     } else {
+        let enter_applies = dialog_enter_applies(&d.kind);
         let mut draw_dialog = |ui: &mut egui::Ui| {
             painted = ui.is_visible() && !ui.is_sizing_pass();
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
@@ -3999,7 +4006,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         };
-        let response = panel.show(ctx, Some(&mut keep), draw_dialog);
+        let response = panel.show(ctx, Some(&mut keep), |ui| if enter_applies { crate::ui_kit::with_feature_form(ui, draw_dialog) } else { draw_dialog(ui) });
         app.viewport.dialog_rect = response.filter(|_| !host || painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
@@ -4072,9 +4079,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
-    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
-        && !matches!(&d.kind, Kind::Motion(k) if k.wide())
-        && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
+    let enter_applies = dialog_enter_applies(&d.kind);
     let report_active = app.issue_report.draft.is_some();
     if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
