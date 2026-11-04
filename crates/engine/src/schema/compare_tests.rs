@@ -65,3 +65,10 @@ fn a_comparison_replies_with_its_schema() {
     matches(&r, false);
     matches(&run(&mut s, "inspect.compare", json!({"a": "A", "b": "A (2)", "color": false, "tolerence": 1})), true);
 }
+
+/// A `color` string in the published schema carries the same pattern the handler checks.
+#[test]
+fn the_color_string_has_a_pattern() {
+    let schema = serde_json::to_string(&input_schema_for::<CompareParams>()).unwrap();
+    assert!(schema.contains(r"^\\s*#?[0-9a-fA-F]{6}\\s*$"), "{schema}");
+}

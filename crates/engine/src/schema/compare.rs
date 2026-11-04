@@ -116,7 +116,7 @@ impl JsonSchema for CompareColor {
         let color = || {
             serde_json::json!({
                 "anyOf": [
-                    {"description": "\"#rrggbb\": six hex digits, the # optional.", "type": "string"},
+                    {"description": "\"#rrggbb\": six hex digits, the # optional.", "type": "string", "pattern": "^\\s*#?[0-9a-fA-F]{6}\\s*$"},
                     {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 255}, "minItems": 3, "maxItems": 3},
                     {"type": "null"}
                 ]
