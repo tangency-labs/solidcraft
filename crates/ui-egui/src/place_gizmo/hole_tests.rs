@@ -231,6 +231,16 @@ fn a_measured_distance_finer_than_its_field_survives_a_drag_along_the_edge() {
 }
 
 #[test]
+fn a_design_change_frees_a_held_hole_whose_edge_is_gone_in_the_same_frame() {
+    let mut h = held_by_the_left_edge();
+    assert!(matches!(crate::hole_refs::freedom(&h.app.session, h.app.dialog.as_ref().expect("a dialog"), 0), crate::place_gizmo::Freedom::Line(_)));
+    // Cut the block's left 5 mm away while the dialog is open: the reference edge is gone.
+    h.app.run("solid.box", json!({"length": 5, "width": 40, "height": 30, "corner": [-1, -5, -5], "operation": "cut"})).unwrap();
+    let d = h.app.dialog.as_ref().expect("the dialog stays open");
+    assert!(matches!(crate::hole_refs::freedom(&h.app.session, d, 0), crate::place_gizmo::Freedom::Plane), "no edge to hold the hole to any more");
+}
+
+#[test]
 fn a_pick_elsewhere_on_the_face_keeps_a_held_hole_on_its_line() {
     let mut h = held_by_the_left_edge();
     h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
