@@ -103,7 +103,8 @@ fn where_two_markers_overlap_the_nearer_one_takes_the_press() {
     let before = places(&h);
     assert_eq!(before.len(), 2, "{before:?}");
     let (Some(a), Some(b)) = (handle_at("hole:0"), handle_at("hole:1")) else { panic!("two markers") };
-    assert!(a.distance(b) < 36.0, "the reaches overlap: {a:?} {b:?}");
+    // The press below lies a third of the way along: inside the second marker's 18 pt reach too.
+    assert!(a.distance(b) * 2.0 / 3.0 < 18.0, "the press is inside both reaches: {a:?} {b:?}");
     // Pressed a third of the way from the first to the second (inside both reaches) and dragged
     // down: the first moves, the second stays.
     let press = [f64::from(a.x + (b.x - a.x) / 3.0), f64::from(a.y)];
@@ -203,6 +204,11 @@ fn a_hole_on_a_curved_face_has_a_marker_standing_out_of_the_face() {
     let d = h.app.dialog.clone().expect("a dialog");
     let p = super::places(&h.app, &d);
     assert!(matches!(p.as_slice(), [pl] if pl.n.dot(Vec3::new(0.0, -1.0, 0.0)) > 0.9), "out of the face, radially");
+    // Edit Feature stores the direction the hole had; the face, while it is there, still wins.
+    h.app.dialog.as_mut().expect("a dialog").extra.insert("direction".into(), crate::place_gizmo::pt(Vec3::new(0.0, 0.0, 1.0)));
+    let d = h.app.dialog.clone().expect("a dialog");
+    let p = super::places(&h.app, &d);
+    assert!(matches!(p.as_slice(), [pl] if pl.n.dot(Vec3::new(0.0, -1.0, 0.0)) > 0.9), "the face's normal before a stored direction");
 }
 
 /// The open Hole dialog's reference distances, as typed.
