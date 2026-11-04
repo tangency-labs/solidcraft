@@ -1412,8 +1412,8 @@ fn reindex_block(block: CachedBlock, draws: &[BodyDraw]) -> CachedBlock {
 /// The model scene's instanced meshes: imported reference meshes, shared triangles drawn more
 /// than once, and large bodies ([`INSTANCE_ALONE`]), with each body's placement.
 struct Instances {
-    /// Each candidate body's shared mesh and placement, by body name.
-    candidates: std::collections::HashMap<String, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)>,
+    /// Each candidate body's shared mesh, placement and eligibility for existing LODs, by name.
+    candidates: std::collections::HashMap<String, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat, bool)>,
     /// The meshes drawn as instances, in the order their first placement came, by address.
     meshes: Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, crate::gpu::InstancedMesh)>,
     /// Where a mesh's look already is in `meshes`, so placing a body is a lookup, not a scan.
@@ -1436,10 +1436,11 @@ impl Instances {
             }
             candidates = placed
                 .into_iter()
-                .filter(|(_, reference, (m, _))| {
-                    *reference || m.triangles.len() >= INSTANCE_ALONE || uses.get(&(std::sync::Arc::as_ptr(m) as usize)).is_some_and(|n| *n > 1)
+                .filter_map(|(name, reference, (mesh, placement))| {
+                    let lod_eligible =
+                        mesh.triangles.len() >= INSTANCE_ALONE || uses.get(&(std::sync::Arc::as_ptr(&mesh) as usize)).is_some_and(|n| *n > 1);
+                    (reference || lod_eligible).then_some((name, (mesh, placement, lod_eligible)))
                 })
-                .map(|(name, _, mesh)| (name, mesh))
                 .collect();
         }
         Instances { candidates, meshes: Vec::new(), by_mesh: std::collections::HashMap::new(), kept, lods: app.viewport.mesh_lods.clone() }
@@ -1452,8 +1453,13 @@ impl Instances {
         b: &solidcraft_engine::doc::ModelBody,
         col: crate::gpu::PaletteIndex,
         look: crate::gpu::InstanceLook,
+        oit: bool,
     ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
-        let (mesh, m) = self.candidates.get(&b.name)?.clone();
+        let (mesh, m, lod_eligible) = self.candidates.get(&b.name)?.clone();
+        // A smaller single reference mesh formerly used the sorted CPU glass stream.
+        if !lod_eligible && look == crate::gpu::InstanceLook::Glass && !oit {
+            return None;
+        }
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let at = match self.by_mesh.get(&(key, look)).copied() {
@@ -1468,8 +1474,8 @@ impl Instances {
                             Some((_, t)) => t.clone(),
                             None => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
                         },
-                        // A large mesh's levels of detail, once made (until then, drawn in full).
-                        self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default(),
+                        // Keep the existing detail of newly instanced single reference meshes.
+                        if lod_eligible { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
                 };
                 self.meshes.push((
@@ -1646,7 +1652,8 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
             crate::gpu::InstanceLook::Opaque => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
-        let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look)).flatten();
+        let instanced =
+            (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look, app.viewport.gpu.is_some_and(|g| g.oit))).flatten();
         let name = b.name.clone();
         let body = match instanced {
             Some((mesh, place)) => BodyDraw {
@@ -8822,6 +8829,52 @@ mod tests {
         for (a, b) in actual.iter().zip(expected) {
             assert!(a.iter().zip(b).all(|(a, b)| (*a - b).abs() < 1e-4));
         }
+    }
+
+    fn single_reference_grid(n: u32) -> SolveApp {
+        use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+        let mut doc = Document::default();
+        let positions = (0..=n).flat_map(|y| (0..=n).flat_map(move |x| [f64::from(x), f64::from(y), 0.0])).collect();
+        let triangles = (0..n)
+            .flat_map(|y| {
+                (0..n).flat_map(move |x| {
+                    let a = y * (n + 1) + x;
+                    [a, a + 1, a + n + 2, a, a + n + 2, a + n + 1]
+                })
+            })
+            .collect();
+        let meshes = vec![MeshData { name: "Grid".into(), positions, triangles, color: None }];
+        doc.add_feature(FeatureKind::MeshImport { file: "grid.stl".into(), meshes }, Some("Grid")).unwrap();
+        let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.ui.visual_style = 1;
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app
+    }
+
+    #[test]
+    fn a_single_reference_mesh_below_the_former_instance_threshold_keeps_full_detail() {
+        let app = single_reference_grid(100);
+        let scene = build_scene(&app);
+        let instance = scene.instanced.first().unwrap();
+        assert_eq!(scene.instanced.len(), 1);
+        assert_eq!(instance.tris.indices.len(), 20_000 * 3);
+        assert!(instance.levels.is_empty());
+        assert!(!app.viewport.mesh_lods.busy(), "no simplification job is started");
+        assert_eq!(app.viewport.mesh_lods.generation(), 0);
+    }
+
+    #[test]
+    fn a_small_translucent_reference_mesh_keeps_the_sorted_fallback_without_oit() {
+        let mut app = single_reference_grid(2);
+        app.run("appearance.assign", json!({"bodies":["Grid"],"color":"#3366cc","opacity":0.4})).unwrap();
+        let sorted = build_scene(&app);
+        assert!(sorted.instanced.is_empty(), "the non-OIT path sorts individual glass triangles");
+        assert!(!sorted.merged().glass.is_empty());
+        app.viewport.gpu.as_mut().unwrap().oit = true;
+        let instanced = build_scene(&app);
+        assert_eq!(instanced.instanced.len(), 1);
+        assert_eq!(instanced.instanced[0].look, crate::gpu::InstanceLook::Glass);
     }
 
     /// A large mesh's shared vertices made ahead (by the background mesher after a file is
