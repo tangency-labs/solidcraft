@@ -480,10 +480,10 @@ fn scope_path(scope: &str) -> Vec<u64> {
     scope.strip_prefix("o:").map(|ids| ids.split('/').filter_map(|id| id.parse().ok()).collect()).unwrap_or_default()
 }
 
-/// Whether a folder or group's scope key is a row of `component`: its own row (`c<id>`), or a
-/// placement of it (`o:<ids>`).
+/// Whether a folder or group's scope key is a row the browser draws for `component`: the design's
+/// own (`c0`, the root only), or a placement of it (`o:<ids>`).
 pub(crate) fn scope_shows(app: &SolveApp, scope: &str, component: u64) -> bool {
-    scope == format!("c{component}")
+    (component == 0 && scope == "c0")
         || (is_placement_key(scope) && app.session.occurrence_placement(&scope_path(scope)).is_ok_and(|p| p.component == component))
 }
 

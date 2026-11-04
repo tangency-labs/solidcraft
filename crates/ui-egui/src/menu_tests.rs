@@ -2161,6 +2161,11 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
     let group = h.app.run("browser.group", json!({"component": 0, "folder": "bodies", "items": ["Blk"]})).unwrap()["group"].as_u64().unwrap();
     let bad_group = format!("no group {group} under `c7`");
+    // A part's folders are drawn under its placement, never under a `c<id>` row of its own.
+    let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
+    let placement = h.app.session.doc.occurrence_of(part).unwrap().id;
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let bad_part = format!("no `bodies` folder of component {part} under `c{part}`");
     h.frames(2);
     for (target, error) in [
         (json!({"type": "body", "name": "NoSuchBody"}), "no body `NoSuchBody`"),
@@ -2171,6 +2176,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         (json!({"type": "folder", "component": 0, "folder": "drawings", "scope": "c0"}), "no `drawings` folder of component 0 under `c0`"),
         (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
         (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),
+        (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("c{part}")}), bad_part.as_str()),
     ] {
         let reply = h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}));
         assert_eq!(reply["error"], error, "{target}");
@@ -2180,6 +2186,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         json!({"type": "body", "name": "Blk"}),
         json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "c0"}),
         json!({"type": "group", "id": group, "scope": "c0"}),
+        json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:{placement}")}),
     ] {
         assert_eq!(h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}))["ok"], true, "{target}");
         assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "{target}");
@@ -2241,4 +2248,14 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     let ids: Vec<&str> = menu["items"].as_array().into_iter().flatten().filter_map(|i| i["id"].as_str()).collect();
     assert_eq!(ids.iter().filter(|i| **i == "ui.deleteFeatures").count(), 1, "{ids:?}");
     assert_eq!(ids.iter().filter(|i| **i == "ui.deleteAfterMarker").count(), 1, "{ids:?}");
+    assert_eq!(h.call("ui.menuPick", json!({"item": "ui.deleteAfterMarker"}))["ok"], true);
+    for _ in 0..500 {
+        if h.app.delete_check.is_none() && h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(2);
+    assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
 }
