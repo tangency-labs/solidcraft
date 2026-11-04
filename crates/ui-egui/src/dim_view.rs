@@ -832,7 +832,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let sk = &source.sketch;
         let centres = if is_draft { draft_centres.as_ref().unwrap_or(&centres) } else { &centres };
         let to = |p: Vec2| proj.to_screen(source.plane.to_world(p));
-        let Some(frame) = shown_frame(app.preferences.ellipse_axes, sk, &c.kind) else { continue };
+        // A draft is drawn as it will be added: with the preference it was made with.
+        let half_axes =
+            if is_draft { draft.as_ref().map_or(app.preferences.ellipse_axes, |(_, d)| d.half_axes) } else { app.preferences.ellipse_axes };
+        let Some(frame) = shown_frame(half_axes, sk, &c.kind) else { continue };
         let anchor = match frame {
             DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
