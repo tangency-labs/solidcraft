@@ -745,7 +745,7 @@ fn on_cone(w: &Wall, h: Vec3) -> bool {
 /// its face, from the least angle of its seams to the greatest ([`seam_angles`]; the
 /// face's bottom and top arcs run between the seams' ends), so `SmBrep::ShrinkGeometry`
 /// finds the face's domain its surface's and keeps its exact pcurves. The reach padded
-/// past the seams leaves the face short of its surface, which ShrinkGeometry trims,
+/// past the seams leaves the face short of its surface, which `ShrinkGeometry` trims,
 /// removing every trim curve to project the edges again (#2497). `None` otherwise.
 fn cone_face_angles<'s>(
     k: &Kernel,

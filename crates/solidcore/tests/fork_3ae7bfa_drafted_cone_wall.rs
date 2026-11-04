@@ -355,7 +355,7 @@ fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     let (mut caps, mut chord, mut cone) = (0, 0, 0);
     for f in get_faces(&b).unwrap() {
         let s = face::surface(&b, f).unwrap().unwrap();
-        let pts = grid(&k, &s);
+        let pts = grid(&k, s);
         // the fraction of the height, and the point less its height (in the profile's plane)
         let at = |q: Point3| {
             let t = (q - o).dot(m) / h.dot(m);
@@ -494,7 +494,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
             apex.distance(Point3::new(0.0, 0.0, 8.0 / tan)) < 1e-12,
             "apex {apex:?}"
         );
-        let off = grid(&k, &s)
+        let off = grid(&k, s)
             .into_iter()
             .map(|q| (q.x.hypot(q.y) - (8.0 - q.z * tan)).abs())
             .fold(0.0, f64::max);
