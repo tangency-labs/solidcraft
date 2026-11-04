@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the 1200x630 social preview image for the solidcore progress site.
 
-Portable: Pillow only, no machine-specific paths, deterministic. Writes
-site/assets/og-image.png. Run from the repo root:
+Pillow only, with ordered platform font fallbacks. Writes site/assets/og-image.png.
+Run from the repo root:
 
     python3 site/gen-og-image.py
 
@@ -34,18 +34,29 @@ NAVY = "#2E3B50"
 ICE = "#E6ECF3"
 LIGHT = "#C7D2E0"
 
+# Regular and bold paths for each family, in preference order.
 FONT_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "C:/Windows/Fonts/arialbd.ttf",
+    (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ),
+    (
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    ),
+    ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
 ]
 
 
 def font(size, bold=False):
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    for path in FONT_CANDIDATES:
-        if path.endswith(name) and pathlib.Path(path).exists():
+    """Load the first installed font matching the requested style and size.
+
+    Try families in candidate order without substituting regular for bold or
+    vice versa. If no matching font file exists, use Pillow's default font.
+    """
+    for regular_path, bold_path in FONT_CANDIDATES:
+        path = bold_path if bold else regular_path
+        if pathlib.Path(path).exists():
             return ImageFont.truetype(path, size)
     return ImageFont.load_default()
 
