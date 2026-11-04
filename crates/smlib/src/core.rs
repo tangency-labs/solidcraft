@@ -394,7 +394,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
-    f.fillet_round_ends_on_outline = true;
+    // Held back: see `HELD_BACK`.
+    f.fillet_round_ends_on_outline = false;
     f.fillet_setback_beside_curved_faces = true;
     f.fillet_chamfer_corner = true;
     f
@@ -414,8 +415,20 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
 /// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
 /// #1080 and #5835. A fix under the same flag is in progress on solidcore.
+///
+/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
+/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
+/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
+/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
+/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
+/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
+/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
+/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
+/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
+/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
+/// status 1001), where with it off they build.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
+const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
