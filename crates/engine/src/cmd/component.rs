@@ -85,7 +85,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<CreateResult>)
         .params("name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool (default true); grounded?: bool (default: true for the design's first part, false otherwise)"),
     CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies))
-        .icon("component")
+        .icon("component_from_bodies")
         .contract(&FROM_BODIES_CONTRACT)
         .output(output_schema_for::<FromBodiesResult>)
         .params("bodies: [names] → one new component per body, named after it"),
@@ -129,7 +129,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
         ),
     CommandSpec::new("component.properties", "Component Physical Properties", crate::checked!("component.properties", properties::component))
-        .icon("measure").noundo()
+        .icon("component_properties").noundo()
         .contract(&PROPERTIES_CONTRACT)
         .output(output_schema_for::<PropertiesResult>)
         .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}"),
