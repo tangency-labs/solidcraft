@@ -382,8 +382,11 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
 - **The most correct solution, in solidcore.** Don't match SMLib or the fork by default. Use them,
   pinned or fork, for test inputs, expected values and known constructions; where their approach
   is the most correct one, use it, and never copy their bugs. The redesigned constructions (the
-  generic blend, `docs/generic-blend.md`) are designed on their solidcore issue and built here; the
-  fork's results are a cross-check, not a baseline to keep bit for bit.
+  generic blend, `docs/generic-blend.md`) are designed on their solidcore issue and built here.
+- **Which baseline a test keeps.** Code ported unchanged from the pinned C++ or the fork keeps their
+  results bit for bit. Code written or changed in solidcore sets its own baseline: closed forms,
+  geometric checks and invariants grade it, and its measured values are the reference from then on,
+  with the fork's numbers at most a cross-check.
 - **No compatibility flags.** A fix changes the default result, with a regression test that fails
   without it. No new `Kernel::fixes` (`UpstreamFixes`) field, no old path kept behind a switch,
   no preference for the old behaviour: a saved design rebuilds with today's correct result. Each PR

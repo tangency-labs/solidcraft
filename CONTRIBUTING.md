@@ -43,7 +43,8 @@ case, replacing the code they supersede. This page is the short version;
 
 - **The most correct solution, not SMLib's.** SMLib and the SolidCraft fork are references to
   consult (inputs, expected values, known constructions), never targets to match. Prove a result
-  with closed forms, geometric checks and invariants.
+  with closed forms, geometric checks and invariants. Code ported unchanged keeps their results
+  bit for bit; code written or changed here sets its own baseline.
 - **No compatibility flags.** A fix changes the default result, with a test that fails without
   it; no old path is kept behind a flag, and a saved design rebuilds with today's correct result.
   Say in the PR which results change and show the evidence. Retiring the `UpstreamFixes` flags

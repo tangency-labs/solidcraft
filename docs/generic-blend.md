@@ -863,15 +863,16 @@ Counts on SMLib 5e8c9c1: 220 pass, 17 refused as expected, 34 known failing.
 **Origin.** The blend was designed and first built in the SolidCraft fork of SMLib (2026-10 to
 2026-11-02, v1.1.0-alpha), where its constructions replaced SMLib's fillet code. solidcore is based on
 SMLib and continues from there on its own path: new construction is designed on its solidcore issue
-and lands here. The fork's results are the baseline the brought-over steps match, bit for bit, and
-the difftest shows it when the maintainers run it; the issues below link back to where each step
-started.
+and lands here. A step brought over from the fork unchanged keeps the fork's results bit for bit;
+a step written or changed in solidcore sets its own baseline, graded by closed forms, geometric
+checks and invariants, with the fork's numbers at most a cross-check. The issues below link back to
+where each step started.
 
 **The new construction replaces the old one; the old code is deleted.**
-- A step lands behind its `UpstreamFixes` flag only while it is being brought over, so its results can
-  be checked case by case.
-- Once it is in and matches, the flag becomes the default, and the old path is deleted along with
-  the flags and patches made to it. Nothing is kept as a fallback.
+- A step lands as the default, with no `UpstreamFixes` flag (`AGENTS.md` §4b): the cases whose
+  results change are listed in its pull request with why the new result is right.
+- The old path is deleted in the same change, along with the flags and patches made to it. Nothing
+  is kept as a fallback.
 - Don't extend an old path; improve the construction that replaces it. Where the old path is still
   reached, bring over what changes behaviour now and name the pending deletion in the pull request.
 
