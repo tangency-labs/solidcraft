@@ -1,5 +1,11 @@
 //! The cliff overflow trimmed at its creases in place (WR-695, tangency-labs/smlib#79
-//! step 6, `UpstreamFixes::fillet_overflow_trim_at_creases`), against the fork's own build.
+//! step 6, `UpstreamFixes::fillet_overflow_trim_at_creases`).
+//!
+//! Each case is graded against the closed form of the section the round removes
+//! ([`removed_area`] swept along the edge), the face count and `AssertValid` at
+//! [`CheckLevel::Level2`]. One case, the round trimmed at a hole, has no closed form here
+//! (its crease runs on the hole's cylinder through a general surface intersection): that one
+//! keeps the fork's build as a cross-check, at the tolerance it had.
 
 #![allow(
     clippy::unwrap_used,
@@ -20,6 +26,7 @@ use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
@@ -110,10 +117,16 @@ fn blend(
                 is_manifold_solid(&b).unwrap(),
                 "r {r}: not a manifold solid"
             );
-            Outcome::Built {
+            let built = Outcome::Built {
                 volume: volume(&k, &mut b),
                 faces: b.faces().ids().count(),
-            }
+            };
+            b.use_arena_naming().unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "r {r}: check_brep: {lines:?}");
+            built
         }
         Err(_) => Outcome::Refused(info.code, info.comment),
     }
@@ -192,31 +205,36 @@ fn cube_20(k: &mut Kernel) -> Brep {
     create_box(k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap()
 }
 
-/// The relative volume tolerance against the fork: both integrate at 1e-7, and the bar's
-/// (the worst) agree to 5.1e-9.
+/// The relative volume tolerance against the closed form. [`volume`] integrates at 1e-7 and
+/// reaches 1.8e-10 relative at worst over these six bodies (the bar's round, measured on
+/// 2026-11-04); this leaves that a factor of five.
+const CLOSED_REL: f64 = 1e-9;
+
+/// The relative tolerance of the one case with no closed form here, the round trimmed at a
+/// hole, against the fork's build: as before, and solidcore sits 1.8e-10 from it.
 const FORK_REL: f64 = 1e-8;
 
-// The fork values below are from a local build of tangency-labs/smlib 5e8c9c1 (#79),
-// `SmFilletExecutive` run on the same body and edge without a global merge, its volume by
-// `SmApiBrepComputeVolume(b, 1e-7)`; the closed forms are `removed_area` swept along the edge.
+// The closed forms below are `removed_area` swept along the edge. The one fork value is from a
+// local build of tangency-labs/smlib 5e8c9c1 (#79), `SmFilletExecutive` run on the same body
+// and edge without a global merge, its volume by `SmApiBrepComputeVolume(b, 1e-7)`.
 
 /// The stepped bar's edge at x = 10 rounded r6, past the step's 5 high face: the round is
-/// cut along its crease with the step's riser (fork 1546.0445712066119, 8 faces; closed
-/// form 1546.0445712960786). Without the trim it is subtracted (the same volume).
+/// cut along its crease with the step's riser, 8 faces and 1546.0445712960786 of the 1700.
+/// Without the trim it is subtracted, to the same volume.
 #[test]
 fn step_round_trimmed_at_its_crease() {
     let (s, t) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
     let closed = 1700.0 - 20.0 * removed_area(6.0, 10.0, 5.0);
     assert_builds(
         &blend(true, stepped_bar, s, t, 6.0, false),
-        1_546.044_571_206_611_9,
-        FORK_REL,
+        closed,
+        CLOSED_REL,
         8,
     );
     assert_builds(
         &blend(false, stepped_bar, s, t, 6.0, false),
         closed,
-        FORK_REL,
+        CLOSED_REL,
         8,
     );
 }
@@ -239,49 +257,46 @@ fn chamfer_reaching_every_face_is_refused() {
     assert_builds(
         &blend(false, stepped_bar, s, t, 4.0, true),
         1540.0,
-        FORK_REL,
+        CLOSED_REL,
         9,
     );
 }
 
-/// An 80 x 5 x 5 bar's top edge rounded r10, past both faces (fork 630.29349055572698,
-/// 5 faces; closed form 630.2934872554397).
+/// An 80 x 5 x 5 bar's top edge rounded r10, past both faces: 5 faces and 630.2934872554397
+/// of the 2000. This is the case the fork's own build grades worst, 5.2e-9 relative over the
+/// closed form against solidcore's 1.8e-10 under it.
 #[test]
 fn bar_round_past_both_faces() {
     let (s, t) = (p(0.0, 5.0, 5.0), p(80.0, 5.0, 5.0));
     let closed = 2000.0 - 80.0 * removed_area(10.0, 5.0, 5.0);
-    assert_builds(
-        &blend(true, bar, s, t, 10.0, false),
-        630.293_490_555_726_98,
-        FORK_REL,
-        5,
-    );
-    assert_builds(&blend(false, bar, s, t, 10.0, false), closed, FORK_REL, 5);
+    assert_builds(&blend(true, bar, s, t, 10.0, false), closed, CLOSED_REL, 5);
+    assert_builds(&blend(false, bar, s, t, 10.0, false), closed, CLOSED_REL, 5);
 }
 
-/// A 40 x 20 x 10 box's top back edge rounded r10.05, just past the 10 high face (fork
-/// 7132.9872030818296, 6 faces).
+/// A 40 x 20 x 10 box's top back edge rounded r10.05, just past the 10 high face: 6 faces
+/// and 7132.987202861085 of the 8000.
 #[test]
 fn box_round_just_past_its_face() {
     let (s, t) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     let closed = 8000.0 - 40.0 * removed_area(10.05, 20.0, 10.0);
     assert_builds(
         &blend(true, box_40_20_10, s, t, 10.05, false),
-        7_132.987_203_081_829_6,
-        FORK_REL,
+        closed,
+        CLOSED_REL,
         6,
     );
     assert_builds(
         &blend(false, box_40_20_10, s, t, 10.05, false),
         closed,
-        FORK_REL,
+        CLOSED_REL,
         6,
     );
 }
 
-/// The same edge of the box drilled at (20, 14.5) radius 3, rounded r4: the round's
-/// crease on the hole's cylinder is a general surface intersection (fork
-/// 7580.2873423407682, 8 faces).
+/// The same edge of the box drilled at (20, 14.5) radius 3, rounded r4: the round's crease on
+/// the hole's cylinder is a general surface intersection, so the volume has no closed form
+/// here. 8 faces, `AssertValid` clean at `Level2` (both from [`blend`]), and the volume
+/// against the fork's build as a cross-check.
 #[test]
 fn round_trimmed_at_a_hole() {
     let (s, t) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
@@ -297,35 +312,42 @@ fn round_trimmed_at_a_hole() {
     ));
 }
 
-/// A 10 x 20 x 30 box's top edge rounded r12, past the 10 wide top (fork
-/// 5384.1782852748292, 6 faces).
+/// A 10 x 20 x 30 box's top edge rounded r12, past the 10 wide top: 6 faces and
+/// 5384.178285184314 of the 6000, and the subtraction gives the same.
 #[test]
 fn round_past_the_top() {
     let (s, t) = (p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
+    let closed = 6000.0 - 20.0 * removed_area(12.0, 10.0, 30.0);
     assert_builds(
         &blend(true, box_10_20_30, s, t, 12.0, false),
-        5_384.178_285_274_829_2,
-        FORK_REL,
+        closed,
+        CLOSED_REL,
         6,
     );
-    assert!(matches!(
-        blend(false, box_10_20_30, s, t, 12.0, false),
-        Outcome::Built { .. }
-    ));
+    assert_builds(
+        &blend(false, box_10_20_30, s, t, 12.0, false),
+        closed,
+        CLOSED_REL,
+        6,
+    );
 }
 
-/// A 20 cube's edge rounded r21, past both 20 wide faces (fork 6107.5293694920529, 5 faces).
+/// A 20 cube's edge rounded r21, past both 20 wide faces: 5 faces and 6107.529369550197 of
+/// the 8000, and the subtraction gives the same.
 #[test]
 fn cube_round_past_both_faces() {
     let (s, t) = (p(0.0, 0.0, 0.0), p(20.0, 0.0, 0.0));
+    let closed = 8000.0 - 20.0 * removed_area(21.0, 20.0, 20.0);
     assert_builds(
         &blend(true, cube_20, s, t, 21.0, false),
-        6_107.529_369_492_052_9,
-        FORK_REL,
+        closed,
+        CLOSED_REL,
         5,
     );
-    assert!(matches!(
-        blend(false, cube_20, s, t, 21.0, false),
-        Outcome::Built { .. }
-    ));
+    assert_builds(
+        &blend(false, cube_20, s, t, 21.0, false),
+        closed,
+        CLOSED_REL,
+        5,
+    );
 }

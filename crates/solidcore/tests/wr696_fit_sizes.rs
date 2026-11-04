@@ -252,7 +252,10 @@ fn two_rounds_on_a_narrow_end_fit_where_their_bands_meet() {
 }
 
 /// `fillet_edges` carries the fit on its refusal: the bridged block's round r9 (part 2's
-/// `BandCutsThePart`), fit 7.8184271464117412 as the fork's build gives it.
+/// `BandCutsThePart`), fit 7.8184271464117412 as the fork's build gives it. The bound behind
+/// that number: the band takes all of the bridge where `d(r) = r - sqrt(2 r - 1) = 4`, that
+/// is `r = 5 + 2 sqrt 2`, less a thousand edge tolerances of 1e-5. That is the bound
+/// `wr696_band_cuts.rs` derives for the same body, edge and size, graded to the same 1e-8.
 #[test]
 fn fillet_edges_returns_the_fit_on_the_refusal() {
     let mut k = kernel(true);
@@ -272,6 +275,12 @@ fn fillet_edges_returns_the_fit_on_the_refusal() {
     assert_eq!(reason, Some(NoRoomReason::CutsThePart));
     assert_eq!(fit.kind, FitKind::Radius);
     assert_eq!(fit.edge, Some(e));
+    let closed = 5.0 + 2.0 * 2.0_f64.sqrt() - 0.01;
+    assert!(
+        (fit.size - closed).abs() <= 1e-8 * closed,
+        "{} vs closed form {closed}",
+        fit.size
+    );
     assert!(
         (fit.size - 7.8184271464117412).abs() <= 1e-12 * fit.size,
         "{}",
