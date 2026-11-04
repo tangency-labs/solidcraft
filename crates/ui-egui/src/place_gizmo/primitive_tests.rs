@@ -190,6 +190,16 @@ fn a_bare_size_is_read_in_the_design_unit_by_the_marker() {
     assert!((size.x - 50.8).abs() < 1e-6, "2 in: {size:?}");
     assert!(drop_on(&mut h, [40.0, 25.0, 10.0]));
     assert!((typed(&h, "corner").x - (40.0 - 25.4)).abs() < 1e-3, "{:?}", typed(&h, "corner"));
+    // A decimal comma and a unitless expression are in the design's unit too, as OK reads them.
+    for (text, inches) in [("2,5", 2.5), ("2 * 1", 2.0)] {
+        if let Some(Kind::Primitive { fields, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some(f) = fields.iter_mut().find(|f| f.0 == "length")
+        {
+            f.1 = text.into();
+        }
+        let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+        assert!((size.x - inches * 25.4).abs() < 1e-6, "{text}: {size:?}");
+    }
 }
 
 /// An empty placement field is 0, as OK sends it: while one is cleared to be retyped the marker

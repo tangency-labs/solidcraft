@@ -31,7 +31,7 @@ use solidcraft_engine::geom::prelude::*;
 
 use solidcraft_engine::Sel;
 
-use super::{PlaceSource, Spec, circle, face_pick, len, rect, vec3_of};
+use super::{PlaceSource, Spec, circle, face_pick, rect, vec3_of};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::viewport::Hit;
@@ -94,11 +94,18 @@ fn coil_with_profile(d: &Dialog) -> bool {
     matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.iter().any(|i| !i.items.is_empty())
 }
 
-/// A size field's value (mm), zero when it is missing or does not evaluate. A bare number is in
-/// the design's unit, as OK reads it.
+/// A size field's value (mm), zero when it is missing or does not evaluate, read as OK reads it
+/// (`length_input::eval`): a bare number, a decimal comma or a unitless expression is in the
+/// design's unit.
 fn size(app: &SolveApp, d: &Dialog, key: &str) -> f64 {
     let Kind::Primitive { fields, .. } = &d.kind else { return 0.0 };
-    fields.iter().find(|f| f.0 == key).map(|f| len(app, &app.session.doc.with_design_unit(&f.1, ValueKind::Length))).unwrap_or(0.0)
+    fields
+        .iter()
+        .find(|f| f.0 == key)
+        .and_then(|f| crate::length_input::eval(&app.session.doc, &f.1, ValueKind::Length).ok())
+        .filter(|v| v.is_finite())
+        .map(f64::abs)
+        .unwrap_or(0.0)
 }
 
 /// The radius, from whichever of `radius` (Edit Feature) or `diameter` (a new one) the dialog holds.
