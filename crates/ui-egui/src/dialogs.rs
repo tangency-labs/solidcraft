@@ -5994,9 +5994,15 @@ fn stored_frames(s: &Session) -> Option<Vec<(String, solidcraft_engine::doc::Mat
 /// The edge of a visible body through (or nearest) a point.
 pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
     let st = crate::open_meshing::session_world(s);
+    edge_sel_on(s, None, p0)
+}
+
+/// [`edge_sel`], searching only the body called `only` when given (a pick saved on that body).
+pub(crate) fn edge_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<Sel> {
+    let st = s.world_state();
     let frames = stored_frames(s);
     let mut best: Option<(f64, Sel)> = None;
-    for b in &st.bodies {
+    for b in st.bodies.iter().filter(|b| only.is_none_or(|n| b.name == n)) {
         let p = stored_on(&frames, &b.name, p0);
         let m = b.mesh();
         for (i, e) in m.edges.iter().enumerate() {
@@ -6011,6 +6017,11 @@ pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
 
 /// The body face containing a point (nearest triangle).
 pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    face_sel_on(s, None, p0)
+}
+
+/// [`face_sel`], searching only the body called `only` when given (a pick saved on that body).
+pub(crate) fn face_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
     if !p0.is_finite() {
@@ -6019,7 +6030,7 @@ pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
     let st = crate::open_meshing::session_world(s);
     let frames = stored_frames(s);
     let mut best: Option<(f64, &solidcraft_engine::doc::ModelBody, usize, Vec3)> = None;
-    for b in &st.bodies {
+    for b in st.bodies.iter().filter(|b| only.is_none_or(|n| b.name == n)) {
         let p = stored_on(&frames, &b.name, p0);
         let m = b.mesh();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {

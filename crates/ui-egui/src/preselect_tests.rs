@@ -2181,6 +2181,61 @@ fn match_surface_dialog_defaults_picks_and_edit_values() {
     assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g3"}));
 }
 
+/// A Fair tolerance is a length: a bare value follows the design unit on OK, like Stitch's.
+#[test]
+fn fair_surface_tolerance_is_a_length_in_the_design_unit() {
+    let mut app = app_with(json!([]));
+    app.session.execute("document.units", &json!({"units":"in"})).unwrap();
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.fair");
+    if let Kind::Surface(crate::dialogs_surface::Surf::Fair { tolerance, .. }) = &mut d.kind {
+        *tolerance = "0.1".into();
+    } else {
+        panic!("expected the Fair dialog");
+    }
+    let (_, p) = apply_commands(&app, &d).unwrap().remove(0);
+    let sent = p["tolerance"].as_str().unwrap_or_default();
+    let mm = app.session.doc.eval(sent, ValueKind::Length).unwrap();
+    assert!((mm - 2.54).abs() < 1e-9, "{sent} -> {mm}");
+    // Refilling an edit goes through the same length fields.
+    let mut k = d.kind.clone();
+    assert_eq!(crate::length_input::fields(&app.session.doc, &mut k).len(), 1);
+}
+
+/// Edit Feature restores a Fair or Match pick on the body it was saved on, even when another
+/// body has geometry at the same point (here the seam the two boxes share).
+#[test]
+fn fair_and_match_picks_reopen_on_their_saved_bodies() {
+    use solidcraft_engine::doc::kernel::Continuity;
+    use solidcraft_engine::doc::{BodyName, FacePick, FeatureKind, IDENTITY, Position};
+    let app = app_with(json!([
+        {"command":"solid.box", "params":{"corner":[0,0,0],"length":10,"width":10,"height":10,"body_name":"Src"}},
+        {"command":"solid.box", "params":{"corner":[10,0,0],"length":10,"width":10,"height":10,"body_name":"Target","operation":"new"}}
+    ]));
+    // The shared wall is x = 10 and the shared edge runs along it at y = 0.
+    let wall = FacePick(Vec3::new(10.0, 5.0, 5.0));
+    let edge = Position(Vec3::new(10.0, 0.0, 5.0));
+    let fair = FeatureKind::SurfaceFair {
+        body: BodyName::from("Target"),
+        faces: vec![wall],
+        strength: 1.0,
+        iterations: 1,
+        keep_edges: true,
+        tolerance: String::new().into(),
+    };
+    let (_, inputs, _) = crate::dialogs_surface::for_feature(&app, &fair, &IDENTITY).unwrap();
+    assert!(matches!(inputs[0].items.as_slice(), [Sel::Face { body, .. }] if body == "Target"), "{:?}", inputs[0].items);
+    let matched = FeatureKind::SurfaceMatch {
+        body: BodyName::from("Target"),
+        faces: vec![wall],
+        target: BodyName::from("Target"),
+        edges: vec![edge],
+        order: Continuity::G2,
+    };
+    let (_, inputs, _) = crate::dialogs_surface::for_feature(&app, &matched, &IDENTITY).unwrap();
+    assert!(matches!(inputs[0].items.as_slice(), [Sel::Face { body, .. }] if body == "Target"), "{:?}", inputs[0].items);
+    assert!(matches!(inputs[2].items.as_slice(), [Sel::Edge { body, .. }] if body == "Target"), "{:?}", inputs[2].items);
+}
+
 #[test]
 fn surface_extrude_dialog_takes_profiles_and_curves() {
     // A rectangle and a free line in one sketch: the dialog sends both (the profile's walls
