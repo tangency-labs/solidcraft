@@ -57,12 +57,17 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
 /// earlier ones sleep); a face does too unless an edge's or curve's points are awake, so the
 /// pointer can cross the faces between a rim and its centre. Anything else keeps them. All sleep
 /// when the input doesn't take them.
-pub fn update(app: &mut SolveApp) {
+///
+/// A sketch curve under the pointer wakes its points even where the input doesn't take the
+/// curve itself (Move's points), so it is looked for among all the hits (`hits`), not only the
+/// hover.
+pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     if !wanted(app) {
         app.viewport.woken = Woken::default();
         return;
     }
-    let Some(item) = app.viewport.hover.as_ref().and_then(item_of) else { return };
+    let curve = hits.iter().find_map(item_of).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
+    let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(item_of)) else { return };
     if app.viewport.woken.item.as_ref().is_some_and(|w| same_item(w, &item)) {
         return;
     }
@@ -82,7 +87,8 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
         Some((bodies, m)) if bodies.contains(&p.body) => solidcraft_engine::doc::apply_point(m, p.at),
         _ => p.at,
     };
-    app.viewport.woken.points.iter().map(|p| (at(p), p)).collect()
+    // A point of a body hidden since it woke is not shown or picked.
+    app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_visible(&p.body)).map(|p| (at(p), p)).collect()
 }
 
 /// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance

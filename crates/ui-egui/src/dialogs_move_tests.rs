@@ -830,6 +830,45 @@ fn a_woken_point_behind_a_face_is_not_picked() {
     assert!(!matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(hidden) < 1e-6), "{from:?}");
 }
 
+/// A woken point of a body hidden since it woke is neither shown nor picked.
+#[test]
+fn woken_points_of_a_hidden_body_sleep() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(!crate::snap_wake::shown(&h.app).is_empty(), "{:?}", h.app.viewport.woken);
+    h.app.session.visibility.hidden_bodies.push("Body1".into());
+    assert!(crate::snap_wake::shown(&h.app).is_empty(), "{:?}", h.app.viewport.woken);
+}
+
+/// Move's points don't take a sketch line, but hovering one wakes its middle, which they take.
+#[test]
+fn a_sketch_line_wakes_its_middle_for_move() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[60, 0], [80, 0]], "ids": ["l"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.cam.distance = 200.0;
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h.step(&json!({ "move": { "world": [65, 0, 0] } })).unwrap();
+    let middle = Vec3::new(70.0, 0.0, 0.0);
+    assert!(
+        h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-6),
+        "hover {:?} woken {:?}",
+        h.app.viewport.hover,
+        h.app.viewport.woken
+    );
+    h.step(&json!({ "click": { "world": [70, 0, 0] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{from:?}");
+}
+
 /// Crossing a face on the way from a rim to its centre keeps the centre awake: only another
 /// edge or curve puts a rim's points to sleep.
 #[test]

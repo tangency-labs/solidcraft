@@ -2805,12 +2805,17 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // picked; a centre inside its own face (a sphere's, a torus's) is, when that face is in front.
     let own_face_in_front = cap.is_none()
         && matches!((&bestf, &app.viewport.woken.item), (Some((_, Hit::Face { body, index, .. })), Some(Sel::Face { body: wb, index: wi, .. })) if body == wb && index == wi);
+    // A body's point lies on the face in front within that body's own slack, as its vertices do;
+    // a point of no body (sketch geometry) takes the scene's.
+    let point_slack = |body: &str| {
+        st.bodies.iter().enumerate().find(|(_, b)| b.name == body).and_then(|(i, b)| body_box(i, b)).map_or(slack, |bb| pick_slack(bb.diagonal()))
+    };
     let woken: Vec<Hit> = crate::snap_wake::hits(app, proj, pos)
         .into_iter()
         .filter(|(dd, h, kind)| {
             (*dd < crate::snap_wake::ON || *dd < edge_near)
                 && *dd < point_near
-                && matches!(h, Hit::Vertex { point, .. } if visible(*point, slack)
+                && matches!(h, Hit::Vertex { body, point } if visible(*point, point_slack(body))
                     || (kept(*point) && own_face_in_front && *kind == solidcraft_engine::snap::SnapKind::Centre))
         })
         .map(|x| x.1)
@@ -4596,7 +4601,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     wake_centre(app, &hits);
 
-    crate::snap_wake::update(app);
+    crate::snap_wake::update(app, &hits);
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
