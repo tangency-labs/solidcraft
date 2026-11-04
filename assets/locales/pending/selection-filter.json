@@ -9,8 +9,7 @@
     "Curve": "Curve",
     "Curve feature": "Curve feature",
     "Point": "Point",
-    "Sheet body": "Sheet body",
-    "View": "View"
+    "Sheet body": "Sheet body"
   },
   "zh": {
     "No selection filter": "无选择过滤器",
@@ -22,8 +21,7 @@
     "Curve": "曲线",
     "Curve feature": "曲线特征",
     "Point": "点",
-    "Sheet body": "片体",
-    "View": "视图"
+    "Sheet body": "片体"
   },
   "ja": {
     "No selection filter": "選択フィルターなし",
@@ -35,8 +33,7 @@
     "Curve": "曲線",
     "Curve feature": "曲線フィーチャ",
     "Point": "点",
-    "Sheet body": "シートボディ",
-    "View": "ビュー"
+    "Sheet body": "シートボディ"
   },
   "de": {
     "No selection filter": "Kein Auswahlfilter",
@@ -48,8 +45,7 @@
     "Curve": "Kurve",
     "Curve feature": "Kurvenmerkmal",
     "Point": "Punkt",
-    "Sheet body": "Flächenkörper",
-    "View": "Ansicht"
+    "Sheet body": "Flächenkörper"
   },
   "ko": {
     "No selection filter": "선택 필터 없음",
@@ -61,8 +57,7 @@
     "Curve": "곡선",
     "Curve feature": "곡선 피처",
     "Point": "점",
-    "Sheet body": "시트 바디",
-    "View": "뷰"
+    "Sheet body": "시트 바디"
   },
   "ar": {
     "No selection filter": "بلا مرشّح اختيار",
@@ -74,8 +69,7 @@
     "Curve feature": "ميزة منحنى",
     "Point": "نقطة",
     "Sheet body": "جسم صفيحي",
-    "Sketch": "رسم تخطيطي",
-    "View": "منظر"
+    "Sketch": "رسم تخطيطي"
   },
   "he": {
     "No selection filter": "ללא מסנן בחירה",
@@ -87,8 +81,7 @@
     "Curve feature": "תכונת עקומה",
     "Point": "נקודה",
     "Sheet body": "גוף יריעתי",
-    "Sketch": "סקיצה",
-    "View": "תצוגה"
+    "Sketch": "סקיצה"
   },
   "vi": {
     "No selection filter": "Không có bộ lọc chọn",
@@ -100,7 +93,6 @@
     "Curve feature": "Tính năng đường cong",
     "Point": "Điểm",
     "Sheet body": "Khối tấm",
-    "Sketch": "Bản phác",
-    "View": "Khung nhìn"
+    "Sketch": "Bản phác"
   }
 }
