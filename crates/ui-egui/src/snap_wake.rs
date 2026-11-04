@@ -92,7 +92,6 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     // Crossing a face of the rim's own body on the way to its centre keeps the rim's points and
     // adds the face's; a face of another body sleeps them and wakes its own.
     let points = snap_points(&app.session, &item);
-    remember(app, &item, &points);
     if let Sel::Face { body: face_body, .. } = &item
         && let Some(rim) = app.viewport.woken.item.clone().filter(|w| matches!(w, Sel::Edge { body, .. } if body == face_body))
     {
@@ -100,15 +99,21 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
         let rim_points = snap_points(&app.session, &rim);
         let w = &mut app.viewport.woken;
         w.points = rim_points;
+        // Only the face's own points are remembered as the face's: a point the rim already
+        // shows there stays the rim's, as it is drawn and picked.
+        let mut added = Vec::new();
         for p in points {
             let tol = 1e-6 * (1.0 + p.at.x.abs().max(p.at.y.abs()).max(p.at.z.abs()));
             if !w.points.iter().any(|q| (q.at.x - p.at.x).abs() <= tol && (q.at.y - p.at.y).abs() <= tol && (q.at.z - p.at.z).abs() <= tol) {
-                w.points.push(p);
+                added.push(p);
             }
         }
-        w.face = Some(item);
+        w.points.extend(added.iter().cloned());
+        w.face = Some(item.clone());
+        remember(app, &item, &added);
         return;
     }
+    remember(app, &item, &points);
     app.viewport.woken = Woken { item: Some(item), face: None, points, revision: app.session.revision };
 }
 
