@@ -1253,7 +1253,7 @@ fn is_cone_point_in_trim_domain(
     Ok(loc == LocationType::Pole
         || anal_uv_domain
             .u_interval()
-            .contains_periodic_value_with(step_uv.x, 360.0, -1.0, &k.fixes)
+            .contains_periodic_value(step_uv.x, 360.0, -1.0)
             .contained)
 }
 
@@ -1426,7 +1426,7 @@ pub fn ellipse_trim_intervals(
             // catch seam intersections
             if loc == LocationType::Interior
                 && sweep_ivl
-                    .contains_periodic_value_with(cone_step_uv.x, 360.0, -1.0, &k.fixes)
+                    .contains_periodic_value(cone_step_uv.x, 360.0, -1.0)
                     .contained
             {
                 // add ellipse angleDeg for intersection to in/out angle array

@@ -1697,19 +1697,19 @@ fn iso_curve(
         let max_ang_rad =
             ignored(circle_z_axis.ccw_angle_between(x_axis, circle_max_vec))?.unwrap_or(0.0);
         let min_ang_deg = anal_domain
-            .contains_periodic_value_with(min_ang_rad * 180.0 / PI, 360.0, -1.0, &k.fixes)
+            .contains_periodic_value(min_ang_rad * 180.0 / PI, 360.0, -1.0)
             .periodic_value;
         let mut max_ang_deg = anal_domain
-            .contains_periodic_value_with(max_ang_rad * 180.0 / PI, 360.0, -1.0, &k.fixes)
+            .contains_periodic_value(max_ang_rad * 180.0 / PI, 360.0, -1.0)
             .periodic_value;
 
         // when both values are on a closed interval seam
         if anal_domain.is_closed(360.0)
             && anal_domain
-                .is_value_on_periodic_boundary_with(min_ang_deg, 360.0, EFF_ZERO, &k.fixes)
+                .is_value_on_periodic_boundary(min_ang_deg, 360.0, EFF_ZERO)
                 .0
             && anal_domain
-                .is_value_on_periodic_boundary_with(max_ang_deg, 360.0, EFF_ZERO, &k.fixes)
+                .is_value_on_periodic_boundary(max_ang_deg, 360.0, EFF_ZERO)
                 .0
         {
             // set interval to whole domain

@@ -1411,10 +1411,10 @@ impl Plane {
 
             // ellipse start/stop angles deg with periodicity
             let enter_ang_deg = anal_ivl
-                .contains_periodic_value_with(enter_ang_rad * 180.0 / PI, 360.0, -1.0, &k.fixes)
+                .contains_periodic_value(enter_ang_rad * 180.0 / PI, 360.0, -1.0)
                 .periodic_value;
             let exit_ang_deg = anal_ivl
-                .contains_periodic_value_with(exit_ang_rad * 180.0 / PI, 360.0, -1.0, &k.fixes)
+                .contains_periodic_value(exit_ang_rad * 180.0 / PI, 360.0, -1.0)
                 .periodic_value;
 
             // when circNorm is opposite to plane Norm Start/End will be reversed

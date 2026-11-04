@@ -50,10 +50,10 @@
 //! | [`Extent1d::are_disjoint_periodic`]          | `AreDisjointPeriodic`                        |
 //! | [`Extent1d::periodic_wrap`]                  | `PeriodicWrap`                               |
 //! | [`Extent1d::intersect_periodic`]             | `IntersectPeriodic`                          |
-//! | [`Extent1d::clamp_periodic_value`], [`Extent1d::clamp_periodic_value_with`] | `ClampPeriodicValue` |
-//! | [`Extent1d::contains_periodic_value`], [`Extent1d::contains_periodic_value_with`], [`PeriodicContainment`] | `ContainsPeriodicValue` |
+//! | [`Extent1d::clamp_periodic_value`]           | `ClampPeriodicValue`                         |
+//! | [`Extent1d::contains_periodic_value`], [`PeriodicContainment`] | `ContainsPeriodicValue`    |
 //! | [`Extent1d::is_closed`]                      | `IsClosed`                                   |
-//! | [`Extent1d::is_value_on_periodic_boundary`], [`Extent1d::is_value_on_periodic_boundary_with`] | `IsValueOnPeriodicBoundary` |
+//! | [`Extent1d::is_value_on_periodic_boundary`]  | `IsValueOnPeriodicBoundary`                  |
 //! | [`ExtentNd`], [`ExtentNd::new`]              | `SmExtentNd`, `SmExtentNd(ULONG)`, destructor |
 //! | [`ExtentNd::get`], [`ExtentNd::get_mut`]     | `operator[] const`, `operator[]`             |
 //! | [`ExtentNd::clamp_vector`]                   | `ClampVector`                                |
@@ -72,8 +72,9 @@
 //!   prefix and zero-fills, unbounded dimensions are not written, counts are
 //!   incremented); arrays shorter than the dimension (undefined behaviour upstream)
 //!   are rejected with [`SolidError::InvalidInput`].
-//! - The `*_with` periodic variants take the kernel's [`UpstreamFixes`] for the opt-in
-//!   `periodic_value_past_start_moves_down` (WR-509, #1518); the plain ones are upstream.
+//! - `ContainsPeriodicValue` moves a value within the tolerance of the top of the period
+//!   above the start down by the period, and keeps it where that lies in the interval,
+//!   instead of setting it to the start (WR-509, #1518; tangency-labs/smlib#46).
 //! - `SM_ASSERT*` debug checks and the error-log side effect of `SE(...)` are not
 //!   ported (they do not change results). The destructor's "undefined" sentinel has
 //!   no Rust counterpart; [`Extent1d::is_defined`] still checks for it.
@@ -81,7 +82,6 @@
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::BoundaryType;
 use crate::geom::tol::{are_same, are_same_to_tol};
-use crate::kernel::UpstreamFixes;
 use crate::math::{
     is_infinite_param, max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER,
     UNDEF_DOUBLE,
@@ -813,20 +813,7 @@ impl Extent1d {
     /// outside (`ClampPeriodicValue`; upstream default `tol` is `-1`).
     #[must_use]
     pub fn clamp_periodic_value(&self, v: f64, period: f64, tol: f64) -> f64 {
-        self.clamp_periodic_value_with(v, period, tol, &UpstreamFixes::default())
-    }
-
-    /// [`Extent1d::clamp_periodic_value`] with the opt-in fixes of `fixes` (see
-    /// [`Extent1d::contains_periodic_value_with`]).
-    #[must_use]
-    pub fn clamp_periodic_value_with(
-        &self,
-        v: f64,
-        period: f64,
-        tol: f64,
-        fixes: &UpstreamFixes,
-    ) -> f64 {
-        let c = self.contains_periodic_value_with(v, period, tol, fixes);
+        let c = self.contains_periodic_value(v, period, tol);
         if c.contained {
             c.periodic_value
         } else if c.dist_to_min < c.dist_to_max {
@@ -841,21 +828,6 @@ impl Extent1d {
     /// periodic value and its distances to the ends (`ContainsPeriodicValue`).
     #[must_use]
     pub fn contains_periodic_value(&self, v: f64, period: f64, tol: f64) -> PeriodicContainment {
-        self.contains_periodic_value_with(v, period, tol, &UpstreamFixes::default())
-    }
-
-    /// [`Extent1d::contains_periodic_value`] with the opt-in fixes of `fixes`: with
-    /// [`UpstreamFixes::periodic_value_past_start_moves_down`] (WR-509, #1518) a value
-    /// near the top of the period above the start is moved down by the period, and
-    /// kept when that lies in the interval, instead of being set to the start.
-    #[must_use]
-    pub fn contains_periodic_value_with(
-        &self,
-        v: f64,
-        period: f64,
-        tol: f64,
-        fixes: &UpstreamFixes,
-    ) -> PeriodicContainment {
         let zero = if tol > 0.0 { tol } else { EFF_ZERO_DEG };
         let mut contained = self.contains_value(v, zero);
         if contained || period == 0.0 {
@@ -876,16 +848,11 @@ impl Extent1d {
         contained = map > self.min - zero && map < self.max + zero;
 
         if !contained && are_same_to_tol(map, ivl.max(), zero) {
-            if fixes.periodic_value_past_start_moves_down {
-                // a period down, kept where it lies in the interval, not set to the start
-                // (WR-509, #1518; tangency-labs/smlib#46)
-                let down = map - period;
-                if down > self.min - zero && down < self.max + zero {
-                    map = down;
-                    contained = true;
-                }
-            } else if are_same_to_tol(map - period, self.min, zero) {
-                map = self.min;
+            // a period down, kept where it lies in the interval; the C++ sets it to the
+            // start instead (WR-509, #1518; tangency-labs/smlib#46)
+            let down = map - period;
+            if down > self.min - zero && down < self.max + zero {
+                map = down;
                 contained = true;
             }
         }
@@ -925,20 +892,7 @@ impl Extent1d {
     /// default `tol` is `EFF_ZERO`).
     #[must_use]
     pub fn is_value_on_periodic_boundary(&self, v: f64, period: f64, tol: f64) -> (bool, f64) {
-        self.is_value_on_periodic_boundary_with(v, period, tol, &UpstreamFixes::default())
-    }
-
-    /// [`Extent1d::is_value_on_periodic_boundary`] with the opt-in fixes of `fixes`
-    /// (see [`Extent1d::contains_periodic_value_with`]).
-    #[must_use]
-    pub fn is_value_on_periodic_boundary_with(
-        &self,
-        v: f64,
-        period: f64,
-        tol: f64,
-        fixes: &UpstreamFixes,
-    ) -> (bool, f64) {
-        let c = self.contains_periodic_value_with(v, period, tol, fixes);
+        let c = self.contains_periodic_value(v, period, tol);
         let on = c.dist_to_min < tol || c.dist_to_max < tol;
         (on, min2(c.dist_to_min, c.dist_to_max))
     }
@@ -1204,35 +1158,20 @@ mod tests {
     #[test]
     fn issue_1518_value_past_start_moves_down_a_period() {
         // An interval shorter than the tolerance (1e-4 degrees), and a value 3e-5 past
-        // its start given a period up.
+        // its start given a period up: the C++ returns the start (-10).
         let q = Extent1d::from_min_max(-10.0, -10.0 + 7.0e-5);
         let v = 350.0 + 3.0e-5;
-        let up = q.contains_periodic_value(v, 360.0, -1.0);
-        assert!(up.contained);
-        assert_eq!(up.periodic_value, -10.0);
-
-        let fixes = UpstreamFixes {
-            periodic_value_past_start_moves_down: true,
-            ..UpstreamFixes::default()
-        };
-        let c = q.contains_periodic_value_with(v, 360.0, -1.0, &fixes);
+        let c = q.contains_periodic_value(v, 360.0, -1.0);
         assert!(c.contained);
         assert_eq!(c.periodic_value, v - 360.0);
         assert!((c.dist_to_min - 3.0e-5).abs() < 1e-12);
-        assert_eq!(
-            q.clamp_periodic_value_with(v, 360.0, -1.0, &fixes),
-            v - 360.0
-        );
+        assert_eq!(q.clamp_periodic_value(v, 360.0, -1.0), v - 360.0);
 
         // a value within the tolerance below the start keeps its place a period down
-        // (upstream: the start)
+        // (the C++: the start, 0)
         let r = Extent1d::from_min_max(0.0, 90.0);
         let w = 360.0 - 5.0e-5;
-        assert_eq!(
-            r.contains_periodic_value(w, 360.0, -1.0).periodic_value,
-            0.0
-        );
-        let c = r.contains_periodic_value_with(w, 360.0, -1.0, &fixes);
+        let c = r.contains_periodic_value(w, 360.0, -1.0);
         assert!(c.contained);
         assert_eq!(c.periodic_value, w - 360.0);
     }
