@@ -1,0 +1,30 @@
+{
+  "en": {
+    "ui.report_characters_left_one": "{count} character left",
+    "ui.report_characters_left_other": "{count} characters left"
+  },
+  "ar": {
+    "ui.report_characters_left_one": "الأحرف المتبقية: {count}",
+    "ui.report_characters_left_other": "الأحرف المتبقية: {count}"
+  },
+  "de": {
+    "ui.report_characters_left_one": "{count} Zeichen übrig",
+    "ui.report_characters_left_other": "{count} Zeichen übrig"
+  },
+  "he": {
+    "ui.report_characters_left_one": "תווים שנותרו: {count}",
+    "ui.report_characters_left_other": "תווים שנותרו: {count}"
+  },
+  "ja": {
+    "ui.report_characters_left_one": "残り {count} 文字",
+    "ui.report_characters_left_other": "残り {count} 文字"
+  },
+  "vi": {
+    "ui.report_characters_left_one": "Còn {count} ký tự",
+    "ui.report_characters_left_other": "Còn {count} ký tự"
+  },
+  "zh": {
+    "ui.report_characters_left_one": "剩余 {count} 个字符",
+    "ui.report_characters_left_other": "剩余 {count} 个字符"
+  }
+}
