@@ -2931,10 +2931,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
                 ui_kit::settings_page(ui, show);
             }
         }
-        PAGE_ASSISTANT => {
-            crate::agent_chat::settings::page(app, ui);
-            crate::agent_chat::settings::mcp_section(app, ui);
-        }
+        PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
         PAGE_PLUGINS => crate::plugins::page(app, ui),
         PAGE_GENERAL => general::show(app, ui),
         PAGE_APPEARANCE => interface::appearance(app, ui, t),

@@ -3585,6 +3585,8 @@ fn a_bridged_server_leaves_the_check_to_an_app_that_makes_it() {
         let level = req["params"]["param_check"].clone();
         match req["method"].as_str() {
             Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            // The server's own question, not a tool call: it carries no level.
+            Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
             Some("engine.batch") => {
                 log.lock().unwrap().push(level.clone());
                 json!({"ok": true, "result": {"completed": 1, "results": [{"param_warnings": ["the app's own"]}], "undone": 0}, "param_check": level})
