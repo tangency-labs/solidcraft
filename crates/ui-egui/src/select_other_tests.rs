@@ -961,6 +961,67 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
 }
 
 #[test]
+fn hidden_edge_mode_keeps_section_caps_as_occluders() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    let (mut h, pos) = covered_edge();
+    h.app.ui.visual_style = 3;
+    h.app.preferences.select_hidden_edges = true;
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target), "an ordinary face permits hidden edges");
+    // The target remains below the cut, but the section cap through the cover hides it.
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    assert!(!pick(&h.app, &proj, pos).iter().any(target), "ordinary picking must respect the cap");
+    assert!(!pick_all(&h.app, &proj, pos).iter().any(target), "Select Other must respect the cap");
+    // A plane between the bodies removes the cover without making a cap over the target.
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 15.0), solidcore_record::Vec3::Z));
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target));
+}
+
+#[test]
+fn hidden_edge_ties_prefer_visible_edges_without_overriding_distance() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    for front_first in [false, true] {
+        for offset in [0.0, -0.1] {
+            let mut h = Harness::new();
+            h.app.set_origin_shown(false);
+            for front in [front_first, !front_first] {
+                h.app
+                    .run("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,if front { offset } else { 0.0 },if front { 20 } else { 0 }],"body_name":if front { "Front" } else { "Rear" }}))
+                    .unwrap();
+            }
+            h.call("ui.view", json!({"view":"top"}));
+            h.call("ui.view", json!({"view":"fit"}));
+            h.app.ui.visual_style = 3;
+            // Standard views stop just short of vertical; use an exact pole for a true screen tie.
+            h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
+            h.app.ui.perspective = false;
+            let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+            assert_eq!(h.app.session.world_state().unwrap().bodies[0].name, if front_first { "Front" } else { "Rear" });
+            if offset == 0.0 {
+                for x in [0.0, 40.0] {
+                    assert_eq!(proj.to_screen(solidcore_record::Vec3::new(x, 0.0, 10.0)), proj.to_screen(solidcore_record::Vec3::new(x, 0.0, 30.0)));
+                }
+            }
+            // Keep the ray inside both faces so boundary rounding cannot hide the nearer face.
+            let pos = proj.to_screen(solidcore_record::Vec3::new(20.0, 0.02, 10.0)).unwrap();
+            for enabled in [false, true] {
+                h.app.preferences.select_hidden_edges = enabled;
+                let expected = if enabled && offset != 0.0 { "Rear" } else { "Front" };
+                for (all, hits) in [(false, pick(&h.app, &proj, pos)), (true, pick_all(&h.app, &proj, pos))] {
+                    let edges: Vec<&str> =
+                        hits.iter().filter_map(|hit| if let Hit::Edge { body, .. } = hit { Some(body.as_str()) } else { None }).collect();
+                    assert_eq!(edges.first().copied(), Some(expected), "front_first={front_first}, offset={offset}, enabled={enabled}: {edges:?}");
+                    if enabled && all {
+                        assert!(edges.contains(&"Rear"), "Select Other still offers the hidden edge: {edges:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn hidden_edge_mode_reaches_the_far_side_of_the_same_body() {
     use crate::viewport::{Hit, pick_all, projection};
     let mut h = Harness::new();

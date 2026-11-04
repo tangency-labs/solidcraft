@@ -2767,8 +2767,12 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             let point = ray_segment_closest(o, d, p0, p1);
             // Hidden-edge mode changes only edges of shown bodies. Section clipping,
             // vertex picks and modelling edge identities keep their ordinary rules.
-            if dd < 6.0 && beste.wants(dd) && (visible(point, body_slack) || (hidden_edges && kept(point))) {
-                beste.offer(dd, Hit::Edge { body: b.name.clone(), index: ei, mid: at(polyline_mid(e)), point });
+            let seen = visible(point, body_slack);
+            let key = (dd, !seen);
+            // A section cap still hides kept material; only ordinary faces permit hidden edges.
+            let hidden = hidden_edges && kept(point) && cap.is_none_or(|t| (point - o).dot(d) <= t + body_slack);
+            if dd < 6.0 && beste.wants(key) && (seen || hidden) {
+                beste.offer(key, Hit::Edge { body: b.name.clone(), index: ei, mid: at(polyline_mid(e)), point });
             }
         }
     }
