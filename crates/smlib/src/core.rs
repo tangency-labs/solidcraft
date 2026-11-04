@@ -6,7 +6,6 @@
 //! fork fixed in its own sources; each one turned on here says which fork commit it matches.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -153,7 +152,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.fillet_point_bigger_step_retry = true;
-    f.fillet_through_extended_rail_end = true;
     f.precise_properties_body_length_scale = true;
     f.offset_extension_from_base = true;
     f.corner_blend_stays_inside_neighbours = true;
@@ -390,6 +388,16 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.shell_one_construction = true;
+    f.offset_extends_ball_patches_as_themselves = true;
+    f.approximate_surface_checks_every_row = true;
+    f.topological_vertex_has_only_edge_uses = true;
+    f.planar_section_face_tolerance = true;
+    f.face_swap_uv_transposes_trims = true;
+    f.closed_smooth_pole_tangent_limit = true;
+    // Held back: see `HELD_BACK`.
+    f.fillet_round_ends_on_outline = false;
+    f.fillet_setback_beside_curved_faces = true;
+    f.fillet_chamfer_corner = true;
     f
 }
 
@@ -407,20 +415,25 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
 /// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
 /// #1080 and #5835. A fix under the same flag is in progress on solidcore.
+///
+/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
+/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
+/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
+/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
+/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
+/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
+/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
+/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
+/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
+/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
+/// status 1001), where with it off they build.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
+const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
-/// How far apart two kernels' procedural blend serials start. A body keeps the serials of the
-/// kernel that made it and may be used on any other, whose memo of solved stations is keyed by
-/// serial alone: the ranges keep one definition's stations from answering for another's.
-pub(crate) const BLEND_SERIALS_PER_KERNEL: u64 = 1 << 40;
-
-/// A new kernel. Each takes the next range of blend serials, the first starting at 0.
+/// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
-    static MADE: AtomicU64 = AtomicU64::new(0);
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes();
-    k.blend_last_serial.set(MADE.fetch_add(1, Ordering::Relaxed).wrapping_mul(BLEND_SERIALS_PER_KERNEL));
     k
 }
 
