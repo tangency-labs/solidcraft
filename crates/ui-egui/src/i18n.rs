@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
         assert_eq!(match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
         assert_eq!(match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
-        assert_eq!(match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(match_system_tags(&tags(&["pt-PT"])), "pt-PT", "exact tag");
         assert_eq!(match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
         assert_eq!(match_system_tags(&tags(&[])), "en", "nothing: English");
         assert_eq!(match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
