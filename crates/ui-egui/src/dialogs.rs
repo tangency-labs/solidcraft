@@ -5023,6 +5023,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 // The picked faces' body: a point alone may name a flush face of another body (#4555).
                 // A Browser body pick with faces scopes them when they all sit on that body.
                 if let [name] = body_names.as_slice() {
+                    if face_sels.iter().any(|s| matches!(s, Sel::Face { body, .. } if body != name)) {
+                        return Err("the faces are on a different body than the one picked".into());
+                    }
                     p["body"] = json!(name);
                 } else {
                     let mut bodies = face_sels.iter().filter_map(|s| if let Sel::Face { body, .. } = s { Some(body.as_str()) } else { None });
@@ -7818,6 +7821,28 @@ mod shell_body_tests {
         assert_eq!(cmd, "solid.shell");
         assert_eq!(p["faces"], json!([]), "no faces: a closed hollow");
         assert_eq!(p["body"], json!(name), "{p}");
+    }
+
+    /// A face of one body with another body clicked in the Browser is refused, not sent with the
+    /// wrong body.
+    #[test]
+    fn faces_on_another_body_than_the_browser_pick_are_refused() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[50,0,0],"operation":"new"})).unwrap();
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let other = st.bodies[1].name.to_string();
+        h.step(&json!({"call":"ui.view","params":{"view":"top"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.step(&json!({"click":{"world":[10,10,10]}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_mut().expect("the shell dialog");
+        assert!(matches!(d.inputs[0].items.as_slice(), [Sel::Face { .. }]), "the top face of the first box is picked");
+        assert!(dialog_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_ok());
+        h.app.dialog.as_mut().unwrap().inputs[0].items.push(Sel::Body { name: other });
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("the faces are on a different body than the one picked"));
     }
 
     /// A body selected before Shell starts is taken the same way as a Browser click (#794).
