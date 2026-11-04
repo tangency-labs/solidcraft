@@ -222,6 +222,11 @@ pub(crate) fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &s
     row(ui, label, |ui| super::count_field(ui, value, limits))
 }
 
+/// Angle expression row with step arrows of `step.step_deg` degrees. Tokens: `row, angle_step_field`.
+pub(crate) fn angle_step_row(ui: &mut Ui, label: &str, value: &mut String, step: &super::AngleStep<'_>) -> bool {
+    row(ui, label, |ui| super::angle_step_field(ui, value, step))
+}
+
 /// Expression row with an empty-value hint. Tokens: `row, hint_field`.
 pub(crate) fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
     row(ui, label, |ui| super::hint_field(ui, value, hint))

@@ -128,6 +128,140 @@ fn step_count(text: &str, delta: i64, limits: &Count<'_>) -> Option<String> {
     candidates.into_iter().flatten().find(|c| (limits.eval)(c).is_some_and(|v| (v - target as f64).abs() < 1e-9))
 }
 
+/// An angle expression field's step size in degrees, and how its text evaluates in **degrees**
+/// (callers convert the document's radian angle kind).
+pub(crate) struct AngleStep<'a> {
+    pub step_deg: f64,
+    pub eval: &'a dyn Fn(&str) -> Option<f64>,
+}
+
+/// Expression editor for an angle, with up and down step arrows at its right edge. An arrow
+/// steps the evaluated angle by `step_deg` degrees: a plain number (or `N deg`) is replaced,
+/// an expression keeps its parameters and gains or adjusts a trailing `± n deg`. Returns
+/// accepted Enter. Tokens: same as [`count_field`].
+pub(crate) fn angle_step_field(ui: &mut Ui, value: &mut String, step: &AngleStep<'_>) -> bool {
+    let t = Tokens::get();
+    let reserve = (t.control_height * 0.75).round();
+    let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
+    let rect = response.rect;
+    let column = egui::Rect::from_min_max(egui::pos2((rect.right() - reserve).max(rect.left()), rect.top()), rect.max);
+    let painter = ui.painter_at(rect);
+    painter.vline(column.left(), column.y_range().shrink(t.space_4), egui::Stroke::new(1.0, t.control_border));
+    let row = label(ui).to_owned();
+    let step_label = format_angle_step(step.step_deg);
+    for (delta, half, name) in [(1_i64, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
+        let next = step_angle(value, delta, step);
+        let arrow = ui.interact(half, ui.id().with(("sc_angle_step", &row, name)), egui::Sense::click());
+        let enabled = ui.is_enabled() && next.is_some();
+        let over = ui.rect_contains_pointer(half);
+        if over {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+        }
+        if enabled && over {
+            painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
+        }
+        let ink = if enabled { t.form_ink } else { t.form_dim };
+        let (c, w, h) = (half.center(), (reserve * 0.18).max(2.0), (half.height() * 0.2).max(2.0));
+        let tip = if delta > 0 { -h } else { h };
+        painter.add(egui::Shape::convex_polygon(
+            vec![egui::pos2(c.x, c.y + tip * 0.5), egui::pos2(c.x + w, c.y - tip * 0.5), egui::pos2(c.x - w, c.y - tip * 0.5)],
+            ink,
+            egui::Stroke::NONE,
+        ));
+        let sign = if delta > 0 { format!("+{step_label}") } else { format!("−{step_label}") };
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
+        scenario::publish_handle(&format!("dialog:{row} {name}"), half.center());
+        if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
+            *value = next;
+        }
+    }
+    enter
+}
+
+fn format_angle_step(step_deg: f64) -> String {
+    if (step_deg - step_deg.round()).abs() < 1e-9 {
+        format!("{}°", step_deg.round() as i64)
+    } else {
+        format!("{step_deg}°")
+    }
+}
+
+/// `text` stepped by `delta` multiples of `step.step_deg`, or None when it does not evaluate
+/// or the step would not move. A typed number between grid steps goes to the next one; an
+/// expression that evaluates between them is left alone when a whole-step nudge would not move.
+fn step_angle(text: &str, delta: i64, step: &AngleStep<'_>) -> Option<String> {
+    const SAFE: f64 = 1e9;
+    let step_deg = step.step_deg;
+    if !(step_deg.is_finite() && step_deg > 0.0 && delta != 0) {
+        return None;
+    }
+    let trimmed = text.trim();
+    let now_deg = if trimmed.is_empty() {
+        0.0
+    } else {
+        let now_deg = (step.eval)(trimmed).filter(|v| v.is_finite() && v.abs() < SAFE)?;
+        if !now_deg.is_finite() || now_deg.abs() >= SAFE {
+            return None;
+        }
+        now_deg
+    };
+    let units = now_deg / step_deg;
+    let from = if delta > 0 { units.floor() } else { units.ceil() };
+    let target = (from + delta as f64) * step_deg;
+    if !target.is_finite() || target.abs() >= SAFE {
+        return None;
+    }
+    let moves = if delta > 0 { target > now_deg + 1e-9 } else { target < now_deg - 1e-9 };
+    if !moves {
+        return None;
+    }
+    if trimmed.is_empty() || plain_angle_degrees(trimmed).is_some() {
+        return Some(format_degrees(target));
+    }
+    let delta_deg = target - now_deg;
+    let whole = delta_deg.round();
+    if (delta_deg - whole).abs() > 1e-6 {
+        return None;
+    }
+    let n = whole as i64;
+    let offset = |base: &str, n: i64| match n {
+        0 => base.to_owned(),
+        n if n > 0 => format!("{base} + {n} deg"),
+        n => format!("{base} - {} deg", n.unsigned_abs()),
+    };
+    let tail = trimmed.rfind(['+', '-']).and_then(|at| {
+        let (base, rest) = (trimmed[..at].trim_end(), trimmed[at + 1..].trim());
+        let number = rest.strip_suffix("deg").map(str::trim).unwrap_or(rest);
+        let n: i64 = number.bytes().all(|b| b.is_ascii_digit()).then(|| number.parse().ok()).flatten()?;
+        let base_ok = !base.is_empty() && !base.ends_with(['+', '-', '*', '/', '^', '(', ',']);
+        base_ok.then(|| (base, if trimmed[at..].starts_with('-') { -n } else { n }))
+    });
+    let candidates =
+        [tail.map(|(base, cur)| offset(base, cur.saturating_add(n))), Some(offset(trimmed, n)), Some(offset(&format!("({trimmed})"), n))];
+    candidates.into_iter().flatten().find(|c| (step.eval)(c).is_some_and(|v| (v - target).abs() < 1e-6))
+}
+
+/// A typed angle that is only a number, optionally with a `deg` unit — safe to replace wholesale.
+fn plain_angle_degrees(text: &str) -> Option<f64> {
+    let text = text.trim();
+    if solidcraft_engine::doc::expr::is_bare_number(text) {
+        return text.parse().ok();
+    }
+    let without = text.strip_suffix("deg").map(str::trim).unwrap_or(text);
+    if without.len() != text.len() && solidcraft_engine::doc::expr::is_bare_number(without) {
+        return without.parse().ok();
+    }
+    None
+}
+
+fn format_degrees(deg: f64) -> String {
+    if (deg - deg.round()).abs() < 1e-9 {
+        format!("{} deg", deg.round() as i64)
+    } else {
+        format!("{deg} deg")
+    }
+}
+
 /// Names, thread designations and plain numeric counts do not accept expression completion.
 /// Plain text editor without expression completion; returns (Enter, changed). Tokens: `same as field`.
 pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, bool) {
