@@ -785,6 +785,22 @@ fn a_focused_angle_field_nudges_by_one_degree_on_the_wheel() {
         &mut draw,
     );
     assert!((*degrees.borrow() - 30.0).abs() < 1e-9, "wheel down subtracts one degree: {}", *degrees.borrow());
+    // Pointer away from the focused field: the wheel must not nudge it.
+    let away = egui::pos2(at.x + 400.0, at.y + 400.0);
+    frame(
+        &ctx,
+        vec![
+            egui::Event::PointerMoved(away),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, 1.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ],
+        &mut draw,
+    );
+    assert!((*degrees.borrow() - 30.0).abs() < 1e-9, "wheel away from the field leaves the value: {}", *degrees.borrow());
 }
 
 /// #10582: an angle typed a key at a time keeps its decimal point when its owner keeps it in
