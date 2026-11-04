@@ -926,7 +926,11 @@ nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --step-cor
   after it are the same. The child gets `--constructor` as a fifth argument.
 * **Verdicts** (per body): `MATCH` (every stage agrees: statuses and counts equal,
   values within `1e-9` relative), `HEAL-DIFF` (every build stage agrees, the heal or a
-  later stage differs), `DIFF` (a build stage differs), `DEFERRED` (the Rust side
+  later stage differs), `DIFF` (a build stage differs), `CPP-ND` (a body whose C++
+  result depends on the run, listed with the varying stages in
+  `crates/difftest/step_cpp_nondeterministic/`, one file per body: its other stages
+  agree, and the detail shows the Rust values of the listed stages only, so the row is
+  the same in every run while the Rust result is), `DEFERRED` (the Rust side
   reached unported code; the unit is shown), `CRASH` (a child crashed, timed out or
   the shim rejected the input), `SKIPPED` (no B-rep body in the file), `RUST-ONLY` (a
   build without `cpp`: the Rust side built the body, nothing was compared).

@@ -18,6 +18,13 @@
 //! with its unit. This is a report, not a gate: verdicts never fail the run, and it is
 //! not part of CI (the files are not in the repository).
 //!
+//! A body whose C++ result is known to depend on the run (a confirmed upstream
+//! nondeterminism, e.g. ND-1's clock-seeded sampling) is listed in
+//! [`CPP_NONDETERMINISTIC_DIR`], one file per body, with the stages that vary. Its
+//! other stages are compared as usual; where they agree its verdict is `CPP-ND` and its
+//! detail shows only the Rust values of the listed stages, so its row is the same in
+//! every run while the Rust result is.
+//!
 //! With `--constructor` each body is built instead through `SmBrepConstructor`
 //! ([`step_import::script::from_body`], run by [`crate::constructor`] and the
 //! `topology.brep_constructor` shim): shared edges joined by the importer, face
@@ -29,6 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use solidcore::curve::curve::Curve;
@@ -75,20 +83,83 @@ pub const ACCURACY: f64 = 1e-6;
 pub const TIMEOUT: Duration = Duration::from_secs(600);
 /// Where the corpus is fetched.
 pub const CORPUS_DIR: &str = "corpus/steptools";
+/// Where the bodies with a run-dependent C++ result are listed (one TOML file per body,
+/// [`CppNondeterministic`]), relative to the repository root.
+pub const CPP_NONDETERMINISTIC_DIR: &str = "crates/difftest/step_cpp_nondeterministic";
 /// Verdicts, in summary order.
 /// `HEAL-DIFF`: every build stage agrees and the first difference is in `SmApiHealBrep`
 /// or after it; `DIFF`: a build stage (faces, stitch, counts, manifold, area, volume)
-/// differs; `RUST-ONLY`: a build without `cpp` built the body on the Rust side alone and
+/// differs; `CPP-ND`: a body listed in [`CPP_NONDETERMINISTIC_DIR`] whose other stages
+/// agree; `RUST-ONLY`: a build without `cpp` built the body on the Rust side alone and
 /// compared nothing.
-pub const VERDICTS: [&str; 7] = [
+pub const VERDICTS: [&str; 8] = [
     "MATCH",
     "HEAL-DIFF",
     "DIFF",
+    "CPP-ND",
     "DEFERRED",
     "CRASH",
     "SKIPPED",
     "RUST-ONLY",
 ];
+
+/// A corpus body whose C++ result depends on the run (a file in
+/// [`CPP_NONDETERMINISTIC_DIR`]):
+///
+/// ```toml
+/// file = "ap203/bull.stp"
+/// body = 0
+/// stages = ["volume", "healed_volume"]
+/// upstream_issue = "ND-1"
+/// why = "the stitch's clock-seeded shell test decides which regions are void"
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CppNondeterministic {
+    /// The file, relative to the corpus directory, with `/`.
+    pub file: String,
+    /// The body's index in the file.
+    pub body: usize,
+    /// The stages whose C++ values vary between runs; they are not compared.
+    pub stages: Vec<String>,
+    /// The confirmed upstream issue (`plan/upstream-issues/<id>--*.md`).
+    pub upstream_issue: String,
+    /// What varies and why.
+    pub why: String,
+}
+
+/// The entries of [`CPP_NONDETERMINISTIC_DIR`] under `root`, in file name order (none
+/// when the directory is missing).
+///
+/// # Errors
+///
+/// A file that cannot be read or parsed, or an entry without stages.
+pub fn load_cpp_nondeterministic(root: &Path) -> Result<Vec<CppNondeterministic>, HarnessError> {
+    let dir = root.join(CPP_NONDETERMINISTIC_DIR);
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut paths: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+        .collect();
+    paths.sort();
+    let mut out = Vec::new();
+    for path in paths {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
+        let entry: CppNondeterministic = toml::from_str(&text)
+            .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
+        if entry.stages.is_empty() {
+            return Err(HarnessError::new(format!(
+                "{}: no stages listed",
+                path.display()
+            )));
+        }
+        out.push(entry);
+    }
+    Ok(out)
+}
 
 /// What one kernel reported for one body: stages in order, and where the Rust side
 /// stopped on unported code.
@@ -974,7 +1045,19 @@ fn run_children(
 
 /// The first stage where the two records differ: `(stage, index, cpp, rust)`.
 pub fn first_difference(cpp: &Record, rust: &Record) -> Option<(String, usize, f64, f64)> {
+    first_difference_except(cpp, rust, &[])
+}
+
+/// [`first_difference`] over the stages not named in `skip`.
+fn first_difference_except(
+    cpp: &Record,
+    rust: &Record,
+    skip: &[String],
+) -> Option<(String, usize, f64, f64)> {
     for (name, rv) in &rust.stages {
+        if skip.contains(name) {
+            continue;
+        }
         let Some(cv) = cpp.stage(name) else {
             continue;
         };
@@ -1019,7 +1102,14 @@ fn side_summary(r: &RunResult) -> Value {
 
 /// The verdict of one body from its results in [`sides`] order (`two_sided`: C++ then
 /// Rust; otherwise Rust alone, which compares nothing and is `RUST-ONLY`, not `MATCH`).
-fn verdict(results: &[RunResult], two_sided: bool) -> (String, Value) {
+/// A body listed with a run-dependent C++ result (`nondeterministic`) has its listed
+/// stages left out of the comparison, and where the rest agree it is `CPP-ND`, with the
+/// Rust values of the listed stages.
+fn verdict(
+    results: &[RunResult],
+    two_sided: bool,
+    nondeterministic: Option<&CppNondeterministic>,
+) -> (String, Value) {
     let (cpp, rust) = match (results.first(), results.get(1)) {
         (Some(c), Some(r)) if two_sided => (Some(c), r),
         (Some(r), _) => (None, r),
@@ -1032,9 +1122,10 @@ fn verdict(results: &[RunResult], two_sided: bool) -> (String, Value) {
         Err(e) => return ("CRASH".into(), json!({"side": "rust", "detail": e})),
         Ok(r) => r,
     };
+    let skip = nondeterministic.map_or(&[][..], |n| n.stages.as_slice());
     let diff = cpp
         .and_then(|c| c.as_ref().ok())
-        .and_then(|c| first_difference(c, rust));
+        .and_then(|c| first_difference_except(c, rust, skip));
     if let Some((stage, i, a, b)) = diff {
         let v = if stage.starts_with("heal") {
             "HEAL-DIFF"
@@ -1054,6 +1145,17 @@ fn verdict(results: &[RunResult], two_sided: bool) -> (String, Value) {
     }
     if cpp.is_none() {
         return ("RUST-ONLY".into(), Value::Null);
+    }
+    if let Some(n) = nondeterministic {
+        let values: BTreeMap<&str, Option<&[f64]>> = n
+            .stages
+            .iter()
+            .map(|s| (s.as_str(), rust.stage(s)))
+            .collect();
+        return (
+            "CPP-ND".into(),
+            json!({"upstream_issue": n.upstream_issue, "rust": values}),
+        );
     }
     ("MATCH".into(), Value::Null)
 }
@@ -1151,6 +1253,8 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
         }
     }
 
+    let nondeterministic = load_cpp_nondeterministic(root)?;
+    let mut listed_seen = vec![false; nondeterministic.len()];
     let results = run_children(&work, &raw, opts.jobs, opts.constructor)?;
     let mut tally: BTreeMap<String, usize> = BTreeMap::new();
     let mut deferred_units: BTreeMap<String, usize> = BTreeMap::new();
@@ -1184,7 +1288,17 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
                 continue;
             }
             let res = results.get(wi).map_or(&[][..], Vec::as_slice);
-            let (v, detail) = verdict(res, sides().len() == 2);
+            let listed = nondeterministic
+                .iter()
+                .position(|n| n.file == rel && n.body == bi);
+            if let Some(slot) = listed.and_then(|i| listed_seen.get_mut(i)) {
+                *slot = true;
+            }
+            let (v, detail) = verdict(
+                res,
+                sides().len() == 2,
+                listed.and_then(|i| nondeterministic.get(i)),
+            );
             *tally.entry(v.clone()).or_default() += 1;
             if v == "DEFERRED" {
                 if let Some(u) = detail.get("unit").and_then(Value::as_str) {
@@ -1268,6 +1382,16 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
     if !unsupported.is_empty() {
         println!("unsupported (bodies skipped by the importer): {unsupported:?}");
     }
+    // (a filtered run does not reach every listed body)
+    let unused: Vec<String> = nondeterministic
+        .iter()
+        .zip(&listed_seen)
+        .filter(|(_, seen)| !**seen)
+        .map(|(n, _)| format!("{} body {}", n.file, n.body))
+        .collect();
+    if opts.glob.is_none() && !unused.is_empty() {
+        println!("listed in {CPP_NONDETERMINISTIC_DIR} but not in the corpus: {unused:?}");
+    }
     if !opts.no_report {
         let report = json!({
             "corpus": CORPUS_DIR,
@@ -1327,16 +1451,16 @@ mod tests {
     #[test]
     fn a_rust_only_build_is_not_a_match() {
         // Without `cpp` there is no C++ side: nothing was compared.
-        assert_eq!(verdict(&[Ok(built(1.0))], false).0, "RUST-ONLY");
-        assert_eq!(verdict(&[Ok(deferred())], false).0, "DEFERRED");
-        assert_eq!(verdict(&[Err("killed".into())], false).0, "CRASH");
-        assert_eq!(verdict(&[], false).0, "CRASH");
+        assert_eq!(verdict(&[Ok(built(1.0))], false, None).0, "RUST-ONLY");
+        assert_eq!(verdict(&[Ok(deferred())], false, None).0, "DEFERRED");
+        assert_eq!(verdict(&[Err("killed".into())], false, None).0, "CRASH");
+        assert_eq!(verdict(&[], false, None).0, "CRASH");
         assert!(VERDICTS.contains(&"RUST-ONLY"));
     }
 
     #[test]
     fn two_sided_verdicts_are_unchanged() {
-        let v = |c: RunResult, r: RunResult| verdict(&[c, r], true).0;
+        let v = |c: RunResult, r: RunResult| verdict(&[c, r], true, None).0;
         assert_eq!(v(Ok(built(1.0)), Ok(built(1.0))), "MATCH");
         assert_eq!(v(Ok(built(1.0)), Ok(built(2.0))), "DIFF");
         let mut healed = built(1.0);
@@ -1345,5 +1469,52 @@ mod tests {
         assert_eq!(v(Ok(built(1.0)), Ok(deferred())), "DEFERRED");
         assert_eq!(v(Err("timeout".into()), Ok(built(1.0))), "CRASH");
         assert_eq!(v(Ok(built(1.0)), Err("timeout".into())), "CRASH");
+    }
+
+    #[test]
+    fn a_listed_body_is_cpp_nd_whatever_its_listed_stages() {
+        let entry = CppNondeterministic {
+            file: "ap203/bull.stp".into(),
+            body: 0,
+            stages: vec!["volume".into(), "healed_volume".into()],
+            upstream_issue: "ND-1".into(),
+            why: "clock-seeded".into(),
+        };
+        let v = |c: RunResult, r: RunResult| verdict(&[c, r], true, Some(&entry));
+        // the same verdict and detail whether the C++ volume agrees or not
+        let (agree, detail) = v(Ok(built(1.0)), Ok(built(1.0)));
+        assert_eq!(agree, "CPP-ND");
+        assert_eq!(v(Ok(built(2.0)), Ok(built(1.0))), (agree, detail.clone()));
+        assert_eq!(detail["upstream_issue"], "ND-1");
+        assert_eq!(detail["rust"]["volume"], json!([0.0, 1.0]));
+        // a stage not listed still differs
+        let mut faces = built(1.0);
+        faces.stages[0].1[1] = 0.0;
+        assert_eq!(v(Ok(faces), Ok(built(1.0))).0, "DIFF");
+        // a Rust change in a listed stage changes the row
+        assert_ne!(v(Ok(built(1.0)), Ok(built(3.0))).1, detail);
+        assert_eq!(v(Ok(built(1.0)), Ok(deferred())).0, "DEFERRED");
+        assert_eq!(v(Err("timeout".into()), Ok(built(1.0))).0, "CRASH");
+        assert!(VERDICTS.contains(&"CPP-ND"));
+    }
+
+    #[test]
+    fn the_listed_bodies_load() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let listed = load_cpp_nondeterministic(&root).unwrap();
+        let bull = listed
+            .iter()
+            .find(|n| n.file == "ap203/bull.stp" && n.body == 0)
+            .expect("bull.stp body 0 is listed");
+        assert_eq!(bull.upstream_issue, "ND-1");
+        for n in &listed {
+            let issues = root.join("plan/upstream-issues");
+            let prefix = format!("{}--", n.upstream_issue);
+            let found = std::fs::read_dir(&issues)
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|e| e.file_name().to_string_lossy().starts_with(&prefix));
+            assert!(found, "{}: no {prefix}* in plan/upstream-issues", n.file);
+        }
     }
 }
