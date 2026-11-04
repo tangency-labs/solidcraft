@@ -889,11 +889,14 @@ fn a_round_on_a_reopened_round_lies_on_it() {
         if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
             // the round's tolerance is above the reopened round's bound: its net answers
             // all but the definition's own work (recorded 53 evaluations, 10 solves of one
-            // Newton step, of 150 948)
+            // Newton step, of 150 948), and the session's question (`round_too_small`)
+            // whether the round changes the part, which reads the faces' normals across the
+            // edge on the reopened round's definition: one evaluation and one solve more
+            // (65 and 13 measured with it, 64 and 12 before it)
             assert!(pb.bound() < 1e-8, "the bound {:e}", pb.bound());
             assert!(
-                counts.evaluations <= 64
-                    && counts.solves <= 12
+                counts.evaluations <= 65
+                    && counts.solves <= 13
                     && counts.most_newton_steps <= 1
                     && counts.evaluations * 1000 <= counts.net_evaluations,
                 "{counts:?}"

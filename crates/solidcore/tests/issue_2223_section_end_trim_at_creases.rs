@@ -242,13 +242,20 @@ fn without_the_fix_the_blend_corner_builds_both() {
 
 /// Without WR-706 (and without the blend corner, whose End at a smooth vertex ends the
 /// corner arc's round before WR-674's section ends do) the subtraction refuses the round
-/// with a section end next to another round (the issue's 1001), and still builds the corner
-/// arc alone.
+/// with a section end next to another round (the issue's 1001, naming the edge the corner
+/// arc runs on into), and still builds the corner arc alone.
 #[test]
 fn without_the_fix_the_subtraction_refuses_both() {
     let err = removed_with(false, false, &[RIM, CORNER]).unwrap_err();
     assert!(
-        matches!(err, SolidError::Upstream { code: 1001, .. }),
+        matches!(
+            err,
+            SolidError::BlendRefused {
+                code: 1001,
+                refusal: solidcore::blend::blend_refusal::BlendRefusal::ContinuesInto { .. },
+                ..
+            }
+        ),
         "{err:?}"
     );
     let (corner, faces) = removed_with(false, false, &[CORNER]).unwrap();

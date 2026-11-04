@@ -5,6 +5,7 @@
 //! Upstream: `source/SMLib/inc/SmFilletExecutive.h`, `source/SMLib/src/SmFilletExecutive.cpp`.
 
 pub mod api;
+mod law_radii;
 pub mod p1;
 pub mod p2;
 pub mod p3;

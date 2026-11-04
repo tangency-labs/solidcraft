@@ -627,6 +627,8 @@ impl FilletSession<'_> {
         error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
         let status = self.do_filleting_steps(k, error_out);
+        // a refusal on an edge or a corner, as data
+        let status = self.typed_filleting(k, status);
         let joined = self.join_blended_vertex_fans();
         match status {
             Ok(()) => joined,

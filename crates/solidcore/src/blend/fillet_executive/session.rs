@@ -105,6 +105,7 @@ mod concave_nxn;
 mod corner_marks;
 mod crossing_rails;
 mod ease;
+mod edge_refusals;
 pub(crate) mod finish;
 pub mod fit_size;
 mod keep_features;
@@ -327,6 +328,9 @@ struct SessionObjects<'target> {
     /// the fillet surfaces noted before the merge where their radius law turns, which the
     /// split after it finds again ([`law_corners`]).
     radius_corner_surfaces: Vec<law_corners::RadiusCornerSurface>,
+    /// (not upstream) The last Setback refusal noted, as data, for `DoFilleting` to return
+    /// once its later steps have made it their own failure (`edge_refusals`).
+    setback_refusal: Option<crate::blend::blend_refusal::BlendRefusal>,
     /// (not upstream, #2489) The marks of the faces the session made, while
     /// `Kernel::blend_face_log` is on (`blend_face_log`).
     blend_face_marks: Vec<AttributeHandle>,
@@ -710,6 +714,18 @@ fn note_setback_refusal(
         refusal.error,
         Some(&refusal.comment),
     );
+}
+
+/// The error of a refused Setback: its refusal as data where it has one
+/// ([`SolidError::BlendRefused`]), else `SM_ERR`; the status is `SM_ERR` either way.
+fn setback_refused(
+    operation: &'static str,
+    refusal: &crate::blend::blend_corner::setback::SetbackRefusal,
+) -> SolidError {
+    match refusal.refusal {
+        Some(typed) => typed.error(operation, crate::error::SM_ERR),
+        None => SolidError::sm_err(operation),
+    }
 }
 
 /// The session's solver slots as the corner-patch builders' solver store.
@@ -1644,6 +1660,7 @@ impl<'target> FilletSession<'target> {
                 set_back_vertices: Vec::new(),
                 set_back_fills: Vec::new(),
                 radius_corner_surfaces: Vec::new(),
+                setback_refusal: None,
                 blend_face_marks: Vec::new(),
                 chamfer_corner: crate::blend::blend_corner::BlendChamferCorner::Mitre,
             },
@@ -1833,12 +1850,13 @@ impl<'target> FilletSession<'target> {
             2 => FilletSurfaceGeneratorType::BlendCurve,
             _ => FilletSurfaceGeneratorType::Circular,
         };
+        self.refuse_rounds_too_small(k, edges, &[radius], &[xsect])?;
         let edges = edges
             .iter()
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
             .collect::<Vec<_>>();
         self.executive.set_do_global_merge(true);
-        self.executive.set_fillet_parameters(
+        let prepared = self.executive.set_fillet_parameters(
             k,
             &mut self.objects,
             &FilletParameters {
@@ -1856,7 +1874,8 @@ impl<'target> FilletSession<'target> {
                 thumbweight,
                 second_radii: None,
             },
-        )
+        );
+        self.typed_unblendable(k, prepared)
     }
 
     /// `SetDoGlobalMerge(TRUE)` then the per-edge `SetFilletParameters` overload
@@ -1976,7 +1995,7 @@ impl<'target> FilletSession<'target> {
             .iter()
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
             .collect::<Vec<_>>();
-        self.executive.set_fillet_parameters(
+        let prepared = self.executive.set_fillet_parameters(
             k,
             &mut self.objects,
             &FilletParameters {
@@ -1994,7 +2013,8 @@ impl<'target> FilletSession<'target> {
                 thumbweight,
                 second_radii: None,
             },
-        )
+        );
+        self.typed_unblendable(k, prepared)
     }
 
     #[allow(clippy::too_many_arguments)] // the native overload's parameters
@@ -2039,13 +2059,16 @@ impl<'target> FilletSession<'target> {
                 entity: None,
             });
         }
+        if radius_type == FilletSolverType::ConstRadius && second_radii.is_none() {
+            self.refuse_rounds_too_small(k, edges, radii, xsect_types)?;
+        }
         let radius_types = vec![radius_type; edges.len()];
         let edges = edges
             .iter()
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
             .collect::<Vec<_>>();
         self.executive.set_do_global_merge(true);
-        self.executive.set_fillet_parameters(
+        let prepared = self.executive.set_fillet_parameters(
             k,
             &mut self.objects,
             &FilletParameters {
@@ -2063,7 +2086,8 @@ impl<'target> FilletSession<'target> {
                 thumbweight,
                 second_radii,
             },
-        )
+        );
+        self.typed_unblendable(k, prepared)
     }
 
     /// `SetDoGlobalMerge(TRUE)` then the same-parameters `SetFilletParameters`
@@ -2106,7 +2130,7 @@ impl<'target> FilletSession<'target> {
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
             .collect::<Vec<_>>();
         self.executive.set_do_global_merge(true);
-        self.executive.set_fillet_parameters(
+        let prepared = self.executive.set_fillet_parameters(
             k,
             &mut self.objects,
             &FilletParameters {
@@ -2130,7 +2154,8 @@ impl<'target> FilletSession<'target> {
                 },
                 second_radii: None,
             },
-        )
+        );
+        self.typed_unblendable(k, prepared)
     }
 
     /// Create and retain the actual corners in native executive order.
@@ -3037,6 +3062,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             pseudo,
             solvers,
             corners,
+            setback_refusal,
             extended_surfaces,
             set_back_fills,
             ..
@@ -3122,7 +3148,8 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             };
             if let Err(refusal) = refused {
                 note_setback_refusal(executive, target, corner.filleted_vertex(), &refusal);
-                return Err(SolidError::sm_err("SmBlendCorner::BuildSetBackFill"));
+                *setback_refusal = refusal.refusal;
+                return Err(setback_refused("SmBlendCorner::BuildSetBackFill", &refusal));
             }
         }
         // The fork's (WR-697, 6fd0411, 6e79de5): a Mixed corner's edges and its two faces'
@@ -6291,6 +6318,7 @@ impl SessionObjects<'_> {
             solvers,
             corners,
             set_back_fills,
+            setback_refusal,
             ..
         } = self;
         let corner = corners
@@ -6315,7 +6343,11 @@ impl SessionObjects<'_> {
         };
         if let Err(refusal) = refused {
             note_setback_refusal(executive, target, corner.filleted_vertex(), &refusal);
-            return Err(SolidError::sm_err("SmBlendCorner::MakeSetBackTopology"));
+            *setback_refusal = refusal.refusal;
+            return Err(setback_refused(
+                "SmBlendCorner::MakeSetBackTopology",
+                &refusal,
+            ));
         }
         Ok(())
     }

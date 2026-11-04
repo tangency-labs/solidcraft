@@ -28,6 +28,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::blend::blend_refusal::BlendRefusal;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
 use solidcore::error::SolidError;
@@ -229,12 +230,20 @@ fn rim_and_both_corner_arcs_round_together() {
 
 /// Without WR-706 (and without the blend corner, whose End at a smooth vertex ends the
 /// rounds before WR-674's section ends do) the subtraction still refuses the pair (it builds
-/// only a lone round with section ends), as before.
+/// only a lone round with section ends), as before: the session's typed refusal of a round
+/// that cannot end where its edge runs on tangentially, with upstream's status.
 #[test]
 fn without_the_fix_the_pair_is_refused() {
     let err = removed_with(false, false, &[CORNER, CORNER_L]).unwrap_err();
     assert!(
-        matches!(err, SolidError::Upstream { code: 1001, .. }),
+        matches!(
+            err,
+            SolidError::BlendRefused {
+                code: 1001,
+                refusal: BlendRefusal::ContinuesInto { .. },
+                ..
+            }
+        ),
         "{err:?}"
     );
 }

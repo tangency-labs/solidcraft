@@ -7,6 +7,7 @@
 //! |------|----------|
 //! | [`FilletSession::prepare_per_edge_two_offsets`] | `SetFilletParameters` setup with `SmConstantRadiusFS::pdOptSecondRadius` |
 //! | [`FilletSession::prepare_chamfers`] | not upstream (#2486): chamfers by their sizes, kept in their definitions |
+//! | [`FilletSession::prepare_chamfers_along`] | not upstream: the same, each first size along a face the caller names |
 //!
 //! Deviations: explicit generator descriptors replace cross-section type codes.
 //! List sizes and live edges are checked before changing session state. No recursion.
@@ -92,7 +93,7 @@ impl FilletSession<'_> {
             None
         };
         for (index, &id) in edges.iter().enumerate() {
-            let edgeuse = self.blend_edgeuse(k, id)?.ok_or_else(invalid)?;
+            let edgeuse = self.blendable_edgeuse(k, id)?;
             let approx_tol = 4.0 * edge::tolerance(self.target(), id)?;
             let solver = self.new_constant_radius_solver_with_second(
                 k,
@@ -138,18 +139,62 @@ impl FilletSession<'_> {
         edges: &[EdgeId],
         sizes: &[ChamferSize],
     ) -> Result<()> {
+        self.prepare_chamfers_along(k, edges, sizes, &[])
+            .map(|_| ())
+    }
+
+    /// [`Self::prepare_chamfers`], with each edge's first size along the face `along` names
+    /// (empty: support 1 for every edge; else one face per edge, either face of its edge),
+    /// and the offsets each edge's solver was given, `[support 1, support 2]` per edge. A
+    /// size along support 2 is kept as it was asked when it is two distances (swapped onto
+    /// the supports); a distance and an angle to support 2 is kept as its two setbacks at the
+    /// wedge, as no size names an angle to support 2. Not upstream (solidcore's).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::prepare_chamfers`]; native invalid input for `along` neither empty
+    /// nor one face per edge, or a face that is neither of its edge's.
+    pub fn prepare_chamfers_along(
+        &mut self,
+        k: &Kernel,
+        edges: &[EdgeId],
+        sizes: &[ChamferSize],
+        along: &[crate::topology::FaceId],
+    ) -> Result<Vec<[f64; 2]>> {
         use crate::topology::edgeuse::p1 as eu1;
         use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
-        if edges.is_empty() || !(sizes.len() == 1 || sizes.len() == edges.len()) {
+        if edges.is_empty()
+            || !(sizes.len() == 1 || sizes.len() == edges.len())
+            || !(along.is_empty() || along.len() == edges.len())
+        {
             return Err(invalid());
         }
         let mut chamfers = Vec::new();
         let mut first = Vec::new();
         let mut second = Vec::new();
         for (index, &id) in edges.iter().enumerate() {
-            let u0 = self.blend_edgeuse(k, id)?.ok_or_else(invalid)?;
+            let u0 = self.blendable_edgeuse(k, id)?;
             let target: &mut crate::Brep = &mut *self.objects.target;
             let u1 = eu1::radial(target, u0)?.ok_or_else(invalid)?;
+            // the support the first size is along: 1 unless `along` names support 2's face
+            let on_second = match along.get(index) {
+                None => false,
+                Some(&face) => {
+                    let face_of = |u| -> Result<Option<crate::topology::FaceId>> {
+                        Ok(match eu1::faceuse(target, u)? {
+                            Some(fu) => target.faceuse(fu)?.face,
+                            None => None,
+                        })
+                    };
+                    if face_of(u0)? == Some(face) {
+                        false
+                    } else if face_of(u1)? == Some(face) {
+                        true
+                    } else {
+                        return Err(invalid());
+                    }
+                }
+            };
             let t = target
                 .edge(id)
                 .map_err(|_| invalid())?
@@ -162,14 +207,29 @@ impl FilletSession<'_> {
             let b1 = evaluate_binormal(k, target, u1, t, false, &o)?
                 .binormal
                 .unitize()?;
+            // clamp: constant bounds, the lower below the upper (cannot panic)
             let wedge = b0.dot(b1).clamp(-1.0, 1.0).acos();
-            let chamfer =
+            let asked =
                 ChamferDefinition::new(value(sizes, index)?, wedge).map_err(|_| invalid())?;
+            let chamfer = if on_second {
+                let [a, b] = asked.setbacks();
+                let size = match asked.size {
+                    ChamferSize::Distances(_) | ChamferSize::DistanceAngle { .. } => {
+                        ChamferSize::Distances([b, a])
+                    }
+                    // a chord's setbacks are equal: the same along either face
+                    chord @ ChamferSize::Chord(_) => chord,
+                };
+                ChamferDefinition::new(size, wedge).map_err(|_| invalid())?
+            } else {
+                asked
+            };
             let [r1, r2] = chamfer.offsets().map_err(|_| invalid())?;
             first.push(r1);
             second.push(r2);
             chamfers.push(chamfer);
         }
+        let offsets: Vec<[f64; 2]> = first.iter().zip(&second).map(|(&a, &b)| [a, b]).collect();
         let solvers_before = self.objects.solvers.len();
         self.prepare_per_edge_two_offsets(
             k,
@@ -190,6 +250,6 @@ impl FilletSession<'_> {
                 solver.base_mut().chamfer = Some(chamfer);
             }
         }
-        Ok(())
+        Ok(offsets)
     }
 }

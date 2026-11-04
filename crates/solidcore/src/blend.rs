@@ -6,8 +6,11 @@
 //! `SmFilletRemoval`, `SmCurveFilletExecutive`, `SmFeatureExecutive` in `source/SMLib`, and
 //! `SM_API/SmApiFillets`.
 
+pub mod band_room;
 pub mod blend_corner;
+pub mod blend_refusal;
 pub mod blend_setback;
+pub mod chamfer_side;
 pub mod definition_check;
 pub mod feature_executive;
 pub mod fillet_classification;
@@ -27,3 +30,4 @@ pub mod fillet_standard_solver;
 pub mod hcr;
 pub mod identify_fillet;
 pub mod law_corners;
+pub mod round_room;

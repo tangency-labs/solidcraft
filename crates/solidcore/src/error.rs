@@ -374,6 +374,38 @@ pub enum SolidError {
     #[error("{0}")]
     Failed(Box<Failure>),
 
+    /// A blend refused on one of its edges or corners, with what an application words it
+    /// with ([`crate::blend::blend_refusal::BlendRefusal`]): an edge with no blend, a round
+    /// too small to change the part, a blend that cannot end where its edge runs on
+    /// tangentially, a setback too short or too long. `code` is the status the refusal
+    /// stood for before it was typed (`SM_ERR_INVALID_INPUT` for an edge with no blend,
+    /// `SM_ERR` for the others), so [`SolidError::sm_status`] is unchanged.
+    #[error("{operation}: upstream status {code}: refused ({refusal:?})")]
+    BlendRefused {
+        /// Operation that refused.
+        operation: &'static str,
+        /// Upstream `SmStatus` value.
+        code: i32,
+        /// What was refused, and why.
+        refusal: crate::blend::blend_refusal::BlendRefusal,
+    },
+
+    /// A round refused for the room it leaves or takes, with what the refusal found
+    /// ([`crate::blend::round_room::RoundRefusal`]): rounds whose result crosses a face's
+    /// boundary over itself, or a variable round along a straight edge between planes whose
+    /// band does not fit its faces. Not upstream (SolidCraft's checks, made the kernel's).
+    /// `code` is the status (`SM_ERR`) so [`SolidError::sm_status`] reads as an ordinary
+    /// failure.
+    #[error("{operation}: upstream status {code}: refused ({refusal:?})")]
+    RoundRefused {
+        /// Operation that refused.
+        operation: &'static str,
+        /// Upstream `SmStatus` value (`SM_ERR`).
+        code: i32,
+        /// Why, and what it found.
+        refusal: crate::blend::round_room::RoundRefusal,
+    },
+
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
     /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
@@ -901,7 +933,10 @@ impl SolidError {
     #[must_use]
     pub const fn sm_status(&self) -> Option<i32> {
         match self {
-            Self::Upstream { code, .. } | Self::FilletRefused { code, .. } => Some(*code),
+            Self::Upstream { code, .. }
+            | Self::FilletRefused { code, .. }
+            | Self::BlendRefused { code, .. }
+            | Self::RoundRefused { code, .. } => Some(*code),
             Self::Failed(f) => Some(f.status),
             Self::Nlib { .. } => Some(SM_ERR),
             Self::InvalidInput { .. }
@@ -984,6 +1019,9 @@ impl SolidError {
             Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
             Self::Cancelled { .. } => ErrorKind::Cancelled,
             Self::FilletRefused { .. } => ErrorKind::FilletTooLarge,
+            Self::BlendRefused { code, .. } | Self::RoundRefused { code, .. } => {
+                ErrorKind::of_status(*code)
+            }
             Self::Failed(f) => f.kind(),
             Self::Unported { .. } => ErrorKind::Unported,
         }
@@ -1056,6 +1094,8 @@ impl SolidError {
             | Self::PortInvariant { operation, .. }
             | Self::Upstream { operation, .. }
             | Self::FilletRefused { operation, .. }
+            | Self::BlendRefused { operation, .. }
+            | Self::RoundRefused { operation, .. }
             | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
@@ -1076,6 +1116,7 @@ impl SolidError {
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }
             | Self::FilletRefused { entity, .. } => *entity,
+            Self::BlendRefused { refusal, .. } => Some(refusal.entity()),
             Self::Failed(f) => f.entity,
             Self::InvalidInput { .. }
             | Self::NotConverged { .. }
@@ -1084,6 +1125,7 @@ impl SolidError {
             | Self::Nlib { .. }
             | Self::Unported { .. }
             | Self::Cancelled { .. }
+            | Self::RoundRefused { .. }
             | Self::PreparationRequired { .. } => None,
         }
     }

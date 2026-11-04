@@ -25,7 +25,7 @@
 //! |------------------------------|-------------------------------------------------------|
 //! | [`SetbackCorner`]            | `SmBlendCorner`'s `m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`, `m_bSetBackOverflows`, `m_pFill` |
 //! | [`SetBackFill`], [`set_back_fill_of`] | `SmFilletExecutive::SetBackFill`, `GetSetBackFill` |
-//! | [`SetbackRefusal`]           | `SetBackNotBuilt`, the corner's `NoteError` and `NoteFitSetBack` |
+//! | [`SetbackRefusal`]           | `SetBackNotBuilt`, the corner's `NoteError` and `NoteFitSetBack` (its `refusal` as data: solidcore's) |
 //! | [`classify_setback`]         | `SmBlendCorner::ClassifySetBack`                      |
 //! | [`make_setback_topology`]    | `SmBlendCorner::MakeSetBackTopology`                  |
 //! | [`build_setback_fill`]       | `SmBlendCorner::BuildSetBackFill`                     |
@@ -65,6 +65,7 @@ use std::sync::Arc;
 use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
+use crate::blend::blend_refusal::BlendRefusal;
 use crate::blend::blend_setback::{
     bisect_thousandths, certified_scale, containment, distances, fill_hole_counted,
     fill_hole_probe, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
@@ -237,6 +238,10 @@ pub struct SetbackRefusal {
     pub comment: String,
     /// `NoteFitSetBack(dSetBack)`: `Some` where the corner notes one.
     pub fit_setback: Option<f64>,
+    /// Not the fork's: the refusal as data, where it is one of a setback asked for that
+    /// stops short of the rails' crossing or does not fit on the corner's edges
+    /// ([`BlendRefusal::SetbackTooShort`], [`BlendRefusal::SetbackTooLong`]).
+    pub refusal: Option<BlendRefusal>,
 }
 
 impl SetbackRefusal {
@@ -246,7 +251,14 @@ impl SetbackRefusal {
             error: FilletErrorType::CornerUnsupported,
             comment: why.into(),
             fit_setback: None,
+            refusal: None,
         }
+    }
+
+    /// This refusal carrying `refusal` as data.
+    const fn typed(mut self, refusal: BlendRefusal) -> Self {
+        self.refusal = Some(refusal);
+        self
     }
 
     /// `NoteError(.., SM_FILERR_NO_ROOM, cWhy)`.
@@ -255,6 +267,7 @@ impl SetbackRefusal {
             error: FilletErrorType::NoRoom,
             comment: why.into(),
             fit_setback,
+            refusal: None,
         }
     }
 }
@@ -1141,7 +1154,11 @@ pub fn make_setback_topology(
                     fmt_g(largest)
                 ),
                 None,
-            )));
+            )
+            .typed(BlendRefusal::SetbackTooLong {
+                vertex: vtx,
+                largest,
+            })));
         }
         if short {
             let mut most = 0.0;
@@ -1152,7 +1169,11 @@ pub fn make_setback_topology(
                 "Fillet Error: a setback of {} stops short of where the rails of the rounds beside an edge cross it, {} from the vertex",
                 fmt_g(a.setback),
                 fmt_g(most)
-            ))));
+            ))
+            .typed(BlendRefusal::SetbackTooShort {
+                vertex: vtx,
+                least: most,
+            })));
         }
         corner.ease_dist = a.ease;
     }

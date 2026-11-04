@@ -27,6 +27,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
 
+pub mod blend;
 pub mod body;
 pub mod boolean;
 pub mod check;
@@ -41,10 +42,14 @@ pub mod session;
 pub mod stitch;
 pub mod sweep;
 
+pub use blend::{
+    band_room, blend, chamfer_sides, edge_faces_along, fillet_variable, tangent_chain, BandRoom,
+    Blend, Blended, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack,
+};
 pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
-pub use error::{Error, FitKind, Result, RoomReason};
+pub use error::{Error, FitKind, Result, RoomReason, Unblendable};
 pub use measure::{
     point_distance, Distance, EdgePoint, GapSample, MassPropertiesEstimate, Normal, PointClass,
 };

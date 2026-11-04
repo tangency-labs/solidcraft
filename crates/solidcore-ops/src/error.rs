@@ -54,6 +54,34 @@ pub enum Error {
         /// The corner's index among the call's corners.
         corner: usize,
     },
+    /// The rounds would leave a face whose boundary crosses itself (rounds overlapping where
+    /// a wall is thinner than both): the points where it does, and the largest size that
+    /// leaves no crossing, when the kernel finds it.
+    RoundsCross {
+        /// Points where a face's boundary crosses itself.
+        at: Vec<[f64; 3]>,
+        /// The largest size that leaves no crossing.
+        fit: Option<f64>,
+    },
+    /// A band's room is not known at an end of the edge: a face's side there leans away from
+    /// the edge (how far its far end lies past the plane square to the edge), or is not
+    /// straight (no lean). The vertex is a record index.
+    TaperEndUnsupported {
+        /// The edge's vertex at that end.
+        vertex: usize,
+        /// The side's lean past the square, when the side is straight.
+        lean: Option<f64>,
+    },
+    /// The faces of the edge close to a point at both its ends: no band fits there.
+    FacesCloseAtBothEnds,
+    /// A variable round's radius is larger than its band's room at a station of the edge:
+    /// the station (from the start the call named) and the largest radius proved to fit there.
+    RoomRunsOut {
+        /// The station, a fraction of the way along the edge.
+        at: f64,
+        /// The largest radius proved to fit there.
+        largest: f64,
+    },
     /// The kernel reported success but the operation did nothing: a blend that made no face, a
     /// face move or draft that moved no face.
     NoEffect,
@@ -110,6 +138,65 @@ pub enum Error {
     /// A step the kernel has not ported yet, refused rather than built another way: what is
     /// missing.
     Unported(&'static str),
+    /// An edge that has no blend (the kernel's `BlendRefusal::EdgeNotBlendable`): its index
+    /// and why.
+    EdgeNotBlendable {
+        /// The edge's index.
+        edge: usize,
+        /// Why it has no blend.
+        reason: Unblendable,
+    },
+    /// A blend that cannot end where its edge runs on tangentially into an edge not blended
+    /// with it (the kernel's `BlendRefusal::ContinuesInto`): blending that edge too, its
+    /// tangent chain ([`crate::blend::tangent_chain`]), runs the blend on.
+    ContinuesInto {
+        /// The blended edge's index.
+        edge: usize,
+        /// The index of the edge it runs on into.
+        continues_into: usize,
+    },
+    /// A round too small to change the part (the kernel's `BlendRefusal::RoundTooSmall`): it
+    /// lies within the edge's tolerance of the edge.
+    RoundTooSmall {
+        /// The edge's index.
+        edge: usize,
+        /// The least turn of its faces' normals across it, radians.
+        turn: f64,
+        /// The edge's tolerance.
+        tolerance: f64,
+        /// The least radius that rounds it.
+        smallest: f64,
+    },
+    /// A corner's setback that stops short of where the rails of the rounds beside an edge
+    /// cross it (the kernel's `BlendRefusal::SetbackTooShort`).
+    SetbackTooShort {
+        /// The corner's vertex index.
+        vertex: usize,
+        /// The least setback.
+        least: f64,
+    },
+    /// A corner's setback that does not fit on its edges (the kernel's
+    /// `BlendRefusal::SetbackTooLong`): one below `largest` fits.
+    SetbackTooLong {
+        /// The corner's vertex index.
+        vertex: usize,
+        /// The bound below which a setback fits.
+        largest: f64,
+    },
+}
+
+/// Why an edge has no blend ([`Error::EdgeNotBlendable`]), as the kernel names it
+/// (`NotBlendable`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unblendable {
+    /// Its faces meet tangentially all along it: nothing to round.
+    Smooth,
+    /// It is not between two faces.
+    NotTwoFaces,
+    /// Its faces are tangent, or folded back on each other, where the blend is set up.
+    Tangent,
+    /// The side to blend cannot be told.
+    Ambiguous,
 }
 
 /// Why a blend has no room, as the kernel names its refusal (`NoRoomReason`).
@@ -172,6 +259,21 @@ impl std::fmt::Display for Error {
                 write!(f, "a blend corner of this kind is not supported yet")
             }
             Error::CornerRefused { corner } => write!(f, "corner {corner} is not set back"),
+            Error::RoundsCross { at, fit } => write!(
+                f,
+                "the rounds leave a face whose boundary crosses itself at {at:?} (largest {fit:?})"
+            ),
+            Error::TaperEndUnsupported { vertex, lean } => write!(
+                f,
+                "the band's room is not known at vertex {vertex} (its side leans {lean:?})"
+            ),
+            Error::FacesCloseAtBothEnds => {
+                write!(f, "the faces close to a point at both ends of the edge")
+            }
+            Error::RoomRunsOut { at, largest } => write!(
+                f,
+                "the room runs out at {at} along the edge (largest radius there {largest})"
+            ),
             Error::NoEffect => write!(f, "the operation did nothing"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
             Error::Profile(r) => write!(
@@ -212,6 +314,26 @@ impl std::fmt::Display for Error {
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unsupported(what) | Error::Unported(what) => {
                 write!(f, "not supported yet: {what}")
+            }
+            Error::EdgeNotBlendable { edge, reason } => {
+                write!(f, "edge {edge} has no blend ({reason:?})")
+            }
+            Error::ContinuesInto {
+                edge,
+                continues_into,
+            } => write!(
+                f,
+                "the blend of edge {edge} cannot end where it runs on into edge {continues_into}"
+            ),
+            Error::RoundTooSmall { edge, smallest, .. } => write!(
+                f,
+                "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
+            ),
+            Error::SetbackTooShort { vertex, least } => {
+                write!(f, "the setback at vertex {vertex} is shorter than {least}")
+            }
+            Error::SetbackTooLong { vertex, largest } => {
+                write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
             }
         }
     }

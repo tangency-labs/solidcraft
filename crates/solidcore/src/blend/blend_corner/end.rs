@@ -6,7 +6,7 @@
 //!
 //! | Rust                              | Fork                                      |
 //! |-----------------------------------|-------------------------------------------|
-//! | [`end_at_smooth_vertex`]          | `SmBlendCorner::EndAtSmoothVertex`        |
+//! | [`end_at_smooth_vertex`], [`continuing_edges`] | `SmBlendCorner::EndAtSmoothVertex` (its test, with every edge it finds: solidcore's) |
 //! | [`calc_end_edge_geom`]            | `SmBlendCorner::CalcEndEdgeGeom` (before the base `CalcCornerEdgeGeom`) |
 //! | `calc_end_cap_edges` (private)    | `SmBlendCorner::CalcEndCapEdges`          |
 //! | `ball_touching_at` (private)      | `SmBlendCorner::BallTouchingAt` (54a4ee7 splits it out of 41a39ec's `RadiusReachingSideEdgeEnd`, bit for bit) |
@@ -126,10 +126,40 @@ fn radial_face(target: &Brep, eu: EdgeuseId) -> Result<FaceId> {
 
 /// The fork's `SmBlendCorner::EndAtSmoothVertex` (41a39ec): whether the blended edge (of
 /// `fil_eu`) runs on at `vertex`, tangentially, into an edge of its convexity that is
-/// not blended. The other edge must run on along one of the blended edge's faces and
-/// leave the vertex opposite to it, within `tan_tol_deg` (two edges leaving it the same
-/// way meet in a cusp, a knife edge's tip, which nothing continues). `all_eus` are the
-/// edge uses round the vertex.
+/// not blended ([`continuing_edges`], the first one found). `all_eus` are the edge uses
+/// round the vertex.
+///
+/// # Errors
+/// Those of [`continuing_edges`].
+pub fn end_at_smooth_vertex(
+    k: &Kernel,
+    target: &mut Brep,
+    vertex: VertexId,
+    fil_eu: EdgeuseId,
+    all_eus: &[EdgeuseId],
+    tan_tol_deg: f64,
+    earlier_pass_faces: &[FaceId],
+) -> Result<bool> {
+    let found = continuing_edges(
+        k,
+        target,
+        vertex,
+        fil_eu,
+        all_eus,
+        tan_tol_deg,
+        earlier_pass_faces,
+        true,
+        true,
+    )?;
+    Ok(!found.is_empty())
+}
+
+/// The edges of `all_eus` (edge uses of the edges round `vertex`) that the edge of `fil_eu`
+/// runs on into at `vertex`, tangentially, each of its convexity (the fork's
+/// `EndAtSmoothVertex`'s test, 41a39ec; `first`: only the first found). Such an edge runs
+/// on along one of the edge's faces and leaves the vertex opposite to it, within
+/// `tan_tol_deg` (two edges leaving it the same way meet in a cusp, a knife edge's tip,
+/// which nothing continues).
 ///
 /// An edge whose faces meet tangentially (a flat side running onto a round end) has no
 /// convexity and is no such edge: the End on the end face takes the vertex (the fork's
@@ -141,12 +171,15 @@ fn radial_face(target: &Brep, eu: EdgeuseId) -> Result<FaceId> {
 /// past the vertex, runs out of the part (`run_on_leaves_the_part`: the edge turns into
 /// their shared face away from the blended edge continued, as an earlier round's end arc
 /// does). There the End on the end face runs the blend on, as before smlib#124, instead of
-/// capping it with a face square to the blends at the vertex.
+/// capping it with a face square to the blends at the vertex. `run_out` asks for that test:
+/// the End's question; without it, the edges the blended edge continues into tangentially,
+/// whether or not a blend run on would stay in the part (a tangent chain's).
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` for an edge use without face, radial or edge; those of the
 /// convexity test.
-pub fn end_at_smooth_vertex(
+#[allow(clippy::too_many_arguments)] // the fork's test, with what it is asked for
+pub fn continuing_edges(
     k: &Kernel,
     target: &mut Brep,
     vertex: VertexId,
@@ -154,12 +187,15 @@ pub fn end_at_smooth_vertex(
     all_eus: &[EdgeuseId],
     tan_tol_deg: f64,
     earlier_pass_faces: &[FaceId],
-) -> Result<bool> {
+    first: bool,
+    run_out: bool,
+) -> Result<Vec<EdgeId>> {
+    let mut found = Vec::new();
     let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
     let fil_faces = [face_of(target, fil_eu)?, radial_face(target, fil_eu)?];
     for &eu in all_eus {
         let other = eu1::edge(target, eu)?.ok_or_else(nul)?;
-        if other == fil_edge {
+        if other == fil_edge || found.contains(&other) {
             continue;
         }
         // an edge whose faces meet tangentially (a flat side running onto a round end) has
@@ -212,12 +248,15 @@ pub fn end_at_smooth_vertex(
             && leaves
             && leave0.dot(leave1) < -(tan_tol_deg * (PI / 180.0)).cos()
             && same_convexity_edges_round_vertex(k, target, fil_eu, other)?
-            && !run_on_leaves_the_part(k, target, vertex, fil_eu, eu, leave0)?
+            && !(run_out && run_on_leaves_the_part(k, target, vertex, fil_eu, eu, leave0)?)
         {
-            return Ok(true);
+            found.push(other);
+            if first {
+                break;
+            }
         }
     }
-    Ok(false)
+    Ok(found)
 }
 
 /// Whether the blend of the edge of `fil_eu`, run on past `vertex` along the edge of
