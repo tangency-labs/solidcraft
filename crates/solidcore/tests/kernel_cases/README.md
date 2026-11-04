@@ -36,7 +36,8 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 | Field | Meaning |
 |---|---|
 | `case`, `area`, `sources`, `what` | The case, as SolidCraft's rig names it. |
-| `calls` | The operations that made the result, in order: `op`, `inputs` (bodies `b<n>`), `params`, and `outputs` or `error`. Usually one operation on records; a chain where operations pass bodies on without a record between them. |
+| `calls` | The operations in execution order: `op`, `inputs` (bodies `b<n>`), `params`, and `outputs` or `error`. Keep discarded tool construction and handled attempts too, even when their outputs do not reach the final bodies. |
+| `continued` | Optional boolean on a call with `error`. `true` means the application handled this refusal: replay must observe a refusal, continue to any later calls, and grade the final result. A handled refusal can be the last call when the application keeps an earlier body. Omitted or `false` keeps the terminal-refusal behavior. A marker after a terminal refusal is invalid. |
 | `bodies` | The operand bodies given as records: `trusted` and `keeping_splines` say how SolidCraft read each record into the kernel. |
 | `params` | The operation's arguments as SolidCraft passed them. A pick by points is `{kind, points, tolerance, picked}`: each point's pick is `{index, at}`, the entity's index in the body's list of its kind and where it is (an edge's ends, a vertex's point), or `{miss}`. |
 | `result` | The bodies the case ends with: `made` by an operation, or an `operand` carried through unchanged. |

@@ -83,6 +83,31 @@ fn validate_results(e: &Value, bodies: &serde_json::Map<String, Value>, made: &[
     }
 }
 
+fn validate_continuations(e: &Value, f: &Path) {
+    let calls = e["calls"].as_array().unwrap();
+    let mut terminal = false;
+    for (i, c) in calls.iter().enumerate() {
+        if let Some(marker) = c.get("continued") {
+            assert!(
+                marker.is_boolean(),
+                "{}: call {i}: continued must be a boolean",
+                f.display()
+            );
+            assert!(
+                c["error"].is_string(),
+                "{}: call {i}: continued requires an expected error",
+                f.display()
+            );
+            assert!(
+                !terminal,
+                "{}: call {i}: continued follows a terminal refusal",
+                f.display()
+            );
+        }
+        terminal |= c["error"].is_string() && c["continued"].as_bool() != Some(true);
+    }
+}
+
 #[test]
 fn every_operand_is_a_valid_record_and_every_input_is_given() {
     let mut files = Vec::new();
@@ -122,6 +147,7 @@ fn every_operand_is_a_valid_record_and_every_input_is_given() {
                 records += 1;
             }
         }
+        validate_continuations(&e, f);
         // An operation's input is a record given here or an earlier operation's output.
         let mut made: Vec<&str> = Vec::new();
         for c in e["calls"].as_array().unwrap() {
@@ -191,6 +217,32 @@ fn regression_area_counts() {
         assert!(
             std::panic::catch_unwind(|| validate_counts(root, &files, &invalid)).is_err(),
             "accepted {invalid}"
+        );
+    }
+}
+
+#[test]
+fn regression_handled_refusal_markers() {
+    let path = Path::new("case.json");
+    for calls in [
+        serde_json::json!([{"error": "refused"}]),
+        serde_json::json!([{"error": "refused", "continued": false}]),
+        serde_json::json!([{"error": "refused", "continued": true}]),
+        serde_json::json!([{"error": "refused", "continued": true}, {"outputs": ["b1"]}]),
+    ] {
+        validate_continuations(&serde_json::json!({"calls": calls}), path);
+    }
+    for calls in [
+        serde_json::json!([{"error": "refused", "continued": "true"}, {}]),
+        serde_json::json!([{"outputs": ["b1"], "continued": true}, {}]),
+        serde_json::json!([{"outputs": ["b1"], "continued": false}]),
+        serde_json::json!([{"error": "terminal"}, {"error": "later", "continued": true}]),
+        serde_json::json!([{"error": "terminal", "continued": false}, {"error": "later", "continued": true}]),
+    ] {
+        let e = serde_json::json!({"calls": calls});
+        assert!(
+            std::panic::catch_unwind(|| validate_continuations(&e, path)).is_err(),
+            "accepted {e}"
         );
     }
 }
