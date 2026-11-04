@@ -547,7 +547,7 @@ fn volume_totals_skip_open_surfaces_and_keep_closed_box_properties() {
         assert_eq!(props_before["total"][key], props_after["total"][key]);
     }
     let com = run(&mut s, "inspect.center_of_mass", json!({}));
-    assert_eq!(com["open_bodies_skipped"], 1, "{com}");
+    assert_eq!(com["skipped"].as_array().map(Vec::len), Some(1), "{com}");
     assert_eq!(com["bodies"].as_array().map(Vec::len), Some(1), "{com}");
     assert!(close(&com["volume"], 6000.0, 1e-9), "{com}");
     for (axis, expected) in [5.0, 10.0, 15.0].into_iter().enumerate() {
@@ -576,7 +576,7 @@ fn center_of_mass_reports_the_same_volume_and_centre_as_measure() {
         }
     }
     assert!(close(&com["volume"], measured["total"]["volume_mm3"].as_f64().unwrap(), 1e-6), "{com} vs {measured}");
-    assert_eq!(com["open_bodies_skipped"], 0, "{com}");
+    assert_eq!(com["skipped"].as_array().map(Vec::len), Some(0), "{com}");
     // Worked out by hand: the sphere is 4/3 pi r^3, the cup a cylinder less its 8 x 18 bore.
     let ball = 4.0 / 3.0 * PI * 1000.0;
     let cup = PI * (100.0 * 20.0 - 64.0 * 18.0);
