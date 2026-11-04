@@ -12,6 +12,51 @@ pub fn transfer(source: &str, destination: &str, original: &[u8], contents: &[u8
     if !std::fs::symlink_metadata(source)?.file_type().is_file() {
         return Err(Error::new(ErrorKind::InvalidInput, "Choose a regular design file, not a symbolic link or folder"));
     }
+    // A case-only name on an insensitive volume resolves to the source itself.
+    // An exact destination entry (including a separate hard link) is never replaced.
+    if moving
+        && source != destination
+        && source.parent() == destination.parent()
+        && std::fs::symlink_metadata(destination).is_ok_and(|m| m.file_type().is_file())
+        && same_file::is_same_file(source, destination)?
+    {
+        let parent = source.parent().unwrap_or_else(|| Path::new("."));
+        let mut exact_destination = false;
+        for entry in std::fs::read_dir(parent)? {
+            if Some(entry?.file_name().as_os_str()) == destination.file_name() {
+                exact_destination = true;
+                break;
+            }
+        }
+        if !exact_destination {
+            let current = crate::vfs::read(&source.to_string_lossy(), crate::MAX_DESIGN_BYTES)?;
+            if current != original || contents != original {
+                return Err(Error::other("The original changed or needs rewritten contents; refresh and retry"));
+            }
+            // Vacate the old spelling through an owned temporary path, then use the
+            // same no-clobber primitive as ordinary moves. A racing destination must
+            // not be overwritten. Once it holds the source, never auto-delete it.
+            let mut temporary = tempfile::Builder::new().prefix(".solidcraft-rename-").tempfile_in(parent)?.into_temp_path();
+            std::fs::rename(source, &temporary)?;
+            temporary.disable_cleanup(true);
+            if let Err(error) = temporary.persist_noclobber(destination) {
+                let original_error = error.error;
+                if let Err(recovery) = error.path.persist_noclobber(source) {
+                    return Err(Error::other(format!(
+                        "Rename failed: {original_error}. The original is preserved at {} because its old name could not be restored: {}",
+                        recovery.path.display(),
+                        recovery.error
+                    )));
+                }
+                return Err(original_error);
+            }
+            #[cfg(unix)]
+            if let Ok(directory) = std::fs::File::open(parent) {
+                let _ = directory.sync_all();
+            }
+            return Ok(());
+        }
+    }
     let parent = destination.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(contents)?;

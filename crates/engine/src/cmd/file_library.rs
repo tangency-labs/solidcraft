@@ -70,7 +70,8 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
         guard(s, path)?;
     }
     if !solidcraft_io::is_design_path(path) || !solidcraft_io::is_design_path(destination) {
-        return Err(bad("file", "Keep a supported design extension (.solidcraft or .json)"));
+        let extensions = solidcraft_io::DESIGN_EXTS.iter().copied().chain(["json"]).map(|ext| format!(".{ext}")).collect::<Vec<_>>().join(", ");
+        return Err(bad("file", format!("Keep a supported design extension ({extensions})")));
     }
     let original = solidcraft_io::vfs::read(path, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(e.to_string()))?;
     // Validate before a filesystem mutation, and keep external component links pointing
@@ -131,6 +132,52 @@ mod tests {
     }
     fn session() -> Session {
         Session::new(solidcraft_doc::Document::new("Unsaved"))
+    }
+
+    #[test]
+    fn library_case_only_rename_preserves_bytes_and_requested_spelling() {
+        let f = Fixture::new();
+        let source = f.design("Part.sc");
+        let destination = f.0.join("part.sc");
+        let before = std::fs::read(&source).unwrap();
+        let mut s = session();
+        if destination.exists() {
+            assert!(s.execute("file.copy", &json!({"path":source,"destination":destination})).is_err());
+            assert_eq!(std::fs::read(&source).unwrap(), before);
+            std::fs::write(&source, b"newer bytes").unwrap();
+            assert!(solidcraft_io::library_files::transfer(source.to_str().unwrap(), destination.to_str().unwrap(), &before, &before, true).is_err());
+            assert_eq!(std::fs::read(&source).unwrap(), b"newer bytes");
+            std::fs::write(&source, &before).unwrap();
+        }
+        s.execute("file.move", &json!({"path":source,"destination":destination})).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), before);
+        let names: Vec<_> = std::fs::read_dir(&f.0).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert!(names.contains(&std::ffi::OsString::from("part.sc")));
+        assert!(!names.contains(&std::ffi::OsString::from("Part.sc")));
+        assert_eq!(names.len(), 1, "successful rename leaves no temporary files");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn library_existing_hard_link_is_not_replaced_by_move() {
+        let f = Fixture::new();
+        let source = f.design("Part.sc");
+        let destination = f.0.join("Existing.sc");
+        std::fs::hard_link(&source, &destination).unwrap();
+        let before = std::fs::read(&source).unwrap();
+        assert!(session().execute("file.move", &json!({"path":source,"destination":destination})).is_err());
+        assert_eq!(std::fs::read(&source).unwrap(), before);
+        assert_eq!(std::fs::read(&destination).unwrap(), before);
+    }
+
+    #[test]
+    fn library_extension_hint_includes_every_accepted_extension() {
+        let f = Fixture::new();
+        let source = f.design("Part.sc");
+        let error = session().execute("file.copy", &json!({"path":source,"destination":f.0.join("Part.txt")})).unwrap_err().to_string();
+        for extension in solidcraft_io::DESIGN_EXTS.iter().copied().chain(["json"]) {
+            assert!(error.contains(&format!(".{extension}")), "{error}");
+        }
     }
 
     #[test]

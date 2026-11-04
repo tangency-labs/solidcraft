@@ -134,6 +134,7 @@ fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Optio
     };
     let params = json!({"path":path, "destination":destination});
     let guards = crate::documents::file_guard_sessions(app);
+    let command_check = app.session.command_check();
     let scope = solidcraft_engine::io::vfs::current_scope();
     let (tx, rx) = std::sync::mpsc::channel();
     let protected = crate::i18n::tr("library.close_using_file").to_owned();
@@ -144,7 +145,9 @@ fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Optio
             if action != Action::Copy && guards.iter().any(|s| solidcraft_engine::session_uses_file(s, &path)) {
                 return (false, Err(protected));
             }
-            (true, solidcraft_engine::Session::default().execute(command, &params).map_err(|e| e.to_string()))
+            let mut session = solidcraft_engine::Session::default();
+            session.set_command_check(command_check);
+            (true, session.execute(command, &params).map_err(|e| e.to_string()))
         });
         let _ = tx.send(result);
     });
@@ -281,6 +284,28 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert!(!h.app.file_picker_busy());
+    }
+
+    #[test]
+    fn background_file_actions_honor_host_command_restrictions() {
+        let mut h = Harness::new();
+        let e = entry(&h);
+        let before = std::fs::read(&e.path).unwrap();
+        let destination = h.dir.join("Denied.sc");
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = calls.clone();
+        h.app.session.set_command_check(Some(std::sync::Arc::new(move |command, _, _| {
+            recorded.lock().unwrap().push(command.to_owned());
+            Err("Host denied this file action".into())
+        })));
+        for action in [Action::Copy, Action::Move, Action::Trash] {
+            assert!(execute(&mut h.app, &e, action, Some(&destination)));
+            finish_job(&mut h);
+            assert_eq!(std::fs::read(&e.path).unwrap(), before);
+            assert!(!destination.exists());
+            assert!(h.app.library.error.as_deref().is_some_and(|e| e.contains("Host denied")));
+        }
+        assert_eq!(*calls.lock().unwrap(), ["file.copy", "file.move", "file.trash"]);
     }
 
     #[test]

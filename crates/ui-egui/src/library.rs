@@ -214,6 +214,8 @@ impl LibraryState {
     }
 
     fn navigate(&mut self, path: PathBuf) {
+        self.listing = Listing::default();
+        self.filter_key = None;
         self.current = path;
         self.search.clear();
         self.refresh();
@@ -229,15 +231,17 @@ impl LibraryState {
 
     pub(super) fn refresh(&mut self) {
         self.refresh_on_return = false;
-        self.listing = Listing::default();
-        self.filter_key = None;
         self.error = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Dropping the old receiver prevents a slow previous folder from replacing
             // the latest selection. The worker owns only paths and a bounded listing.
             self.pending = None;
-            let Some(root) = self.root.clone() else { return };
+            let Some(root) = self.root.clone() else {
+                self.listing = Listing::default();
+                self.filter_key = None;
+                return;
+            };
             let current = self.current.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             let language = crate::i18n::language();
@@ -246,7 +250,11 @@ impl LibraryState {
                 let _ = tx.send(read_folder(&root, &current));
             }) {
                 Ok(_) => self.pending = Some(rx),
-                Err(error) => self.error = Some(crate::i18n::format("library.scan_failed", &[("error", &error.to_string())])),
+                Err(error) => {
+                    self.listing = Listing::default();
+                    self.filter_key = None;
+                    self.error = Some(crate::i18n::format("library.scan_failed", &[("error", &error.to_string())]));
+                }
             }
         }
     }
@@ -263,12 +271,18 @@ impl LibraryState {
                             self.filter_key = None;
                             self.listing_changed = true;
                         }
-                        Err(error) => self.error = Some(error),
+                        Err(error) => {
+                            self.listing = Listing::default();
+                            self.filter_key = None;
+                            self.error = Some(error);
+                        }
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(50)),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.pending = None;
+                    self.listing = Listing::default();
+                    self.filter_key = None;
                     self.error = Some(crate::i18n::tr("library.scan_stopped").into());
                 }
             }
@@ -882,6 +896,43 @@ mod tests {
 
     fn folder_picker(h: &mut Harness, path: Option<String>) {
         h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(path.clone()))));
+    }
+
+    #[test]
+    fn refresh_keeps_visible_cards_but_navigation_and_scan_failures_clear_them() {
+        let mut h = Harness::new();
+        std::fs::write(h.dir.join("Part.sc"), b"design").unwrap();
+        h.app.library.set_root(h.dir.clone());
+        wait(&mut h.app);
+        assert_eq!(h.app.library.listing.entries.len(), 1);
+        h.app.library.update_filter();
+        let key = h.app.library.filter_key.clone();
+        h.app.library.refresh();
+        assert_eq!(h.app.library.listing.entries.len(), 1);
+        assert_eq!(h.app.library.filter_key, key);
+        wait(&mut h.app);
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.library.pending = Some(rx);
+        tx.send(Err("scan failed".into())).unwrap();
+        h.app.library.poll(&h.ctx);
+        assert!(h.app.library.listing.entries.is_empty());
+        h.app.library.refresh();
+        wait(&mut h.app);
+        assert_eq!(h.app.library.listing.entries.len(), 1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.library.pending = Some(rx);
+        drop(tx);
+        h.app.library.poll(&h.ctx);
+        assert!(h.app.library.listing.entries.is_empty());
+        h.app.library.refresh();
+        wait(&mut h.app);
+        assert_eq!(h.app.library.listing.entries.len(), 1);
+        let other = h.dir.join("Other");
+        std::fs::create_dir(&other).unwrap();
+        h.app.library.navigate(other);
+        assert!(h.app.library.listing.entries.is_empty());
+        wait(&mut h.app);
+        assert!(h.app.library.listing.entries.is_empty());
     }
 
     #[test]
