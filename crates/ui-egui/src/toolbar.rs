@@ -1633,6 +1633,16 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut toggle: Option<&'static str> = None;
         // The open drop-down (a button dropped on it leaves the toolbar).
         let mut popup_rect: Option<Rect> = None;
+        // Search can draw a preview of its own. Only the open panel menu follows the pointer.
+        let mut open_panel_menu = None;
+        let mut hovered_panel_menu = None;
+        let follow_panel_hover = app.preferences.ribbon_menus_follow_hover
+            && ui.input(|i| {
+                !i.pointer.any_down()
+                    && i.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerGone))
+                    && !i.events.iter().any(|e| matches!(e, egui::Event::Touch { .. }))
+            })
+            && !egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ui.ctx());
         let mut overflow = Vec::new();
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
@@ -1752,6 +1762,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let free_x = bx + buttons_width + BUTTON_GAP;
             let free = Rect::from_min_size(pos2(free_x, top + 2.0), vec2((px + width - 4.0 - free_x).max(0.0), button_height));
             let fresp = ui.interact(free, ui.id().with(("panel_free", panel)), if collapsed { Sense::click() } else { Sense::hover() });
+            let collapsed_hovered = collapsed && fresp.hovered();
             let mut opened = false;
             if collapsed {
                 // One button: the panel's first command's icon over a caret; it opens the
@@ -2017,6 +2028,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let panel_open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))) == Some(popup_id);
             let accent = crate::theme::TabAccent::for_tab(&t, &tab);
             let hot = lresp.hovered() && enabled_panel;
+            if follow_panel_hover && enabled_panel && !finish && (hot || collapsed_hovered) {
+                hovered_panel_menu = Some(popup_id);
+            }
             if hidden_running && !panel_open {
                 // Its command is running from the drop-down: the label shows it like a pressed button.
                 painter.rect(lr, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
@@ -2164,6 +2178,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                     });
                 popup_rect = Some(area.response.rect);
+                if open {
+                    open_panel_menu = Some((popup_id, area.response.rect));
+                }
                 crate::scenario::publish_rect("toolbar_dropdown", area.response.rect);
                 // A drag out of the drop-down ends with a release elsewhere: not a click elsewhere.
                 let dragging = egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ui.ctx());
@@ -2225,6 +2242,31 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Resolve persistent paint only after large buttons, dropdowns and overflow have
         // dispatched their actions. No already-painted old analysis can survive replacement.
         paint_persistent_ribbon(app, ui, persistent_paints, &tab, "ribbon");
+
+        if follow_panel_hover {
+            let ribbon = Rect::from_min_max(pos2(ribbon_left, r.top()), r.max);
+            let pointer = ui.input(|i| i.pointer.hover_pos());
+            let changed = ui.ctx().data_mut(|d| {
+                let key = egui::Id::new("sc_panel_open");
+                let Some(open) = d.get_temp::<egui::Id>(key) else { return false };
+                let menu = open_panel_menu.filter(|(id, _)| *id == open).map(|(_, rect)| rect);
+                let stays_open =
+                    pointer.zip(menu).is_some_and(|(p, menu)| ribbon.expand(t.space_4).contains(p) || menu.expand(t.space_4).contains(p));
+                if !stays_open {
+                    d.remove::<egui::Id>(key);
+                    true
+                } else if let Some(hovered) = hovered_panel_menu.filter(|hovered| *hovered != open) {
+                    // Change the id after drawing all panels, so only one menu is drawn per pass.
+                    d.insert_temp(key, hovered);
+                    true
+                } else {
+                    false
+                }
+            });
+            if changed {
+                ui.ctx().request_repaint();
+            }
+        }
 
         // Dragging a command: its icon follows the pointer; a toolbar button dragged off the
         // toolbar (or into the open drop-down) shows it will be removed.
@@ -5028,6 +5070,48 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "panel:MODEL:CREATE"}})).unwrap();
         h.frames(2);
         assert!(rect_of("toolbar_dropdown").is_none(), "the second click closes it");
+    }
+
+    #[test]
+    fn ribbon_panel_menus_follow_hover_only_after_click_and_only_when_enabled() {
+        for follow_hover in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            let prefs = h.call("ui.prefs", json!({"ribbon_menus_follow_hover":follow_hover}));
+            assert_eq!(prefs["result"]["ribbon_menus_follow_hover"], follow_hover);
+            let create = "panel:MODEL:CREATE";
+            let modify = "panel:MODEL:MODIFY";
+            let move_to = |h: &mut Harness, handle| {
+                h.step(&json!({"move":{"handle":handle}})).unwrap();
+                h.frames(3);
+            };
+            move_to(&mut h, create);
+            assert!(rect_of("toolbar_dropdown").is_none(), "hover alone never opens a menu");
+            h.step(&json!({"click":{"handle":create}})).unwrap();
+            h.frames(3);
+            let create_menu = rect_of("toolbar_dropdown").expect("Create menu");
+            move_to(&mut h, "dropdown:solid.box");
+            assert_eq!(rect_of("toolbar_dropdown"), Some(create_menu), "moving into the menu keeps it open");
+
+            move_to(&mut h, modify);
+            if follow_hover {
+                let modify_menu = rect_of("toolbar_dropdown").expect("Modify menu");
+                assert!(modify_menu.left() > create_menu.left(), "hover switches to the panel on the right");
+                move_to(&mut h, create);
+                assert_eq!(rect_of("toolbar_dropdown"), Some(create_menu), "hover also switches to the left");
+            } else {
+                assert_eq!(rect_of("toolbar_dropdown"), Some(create_menu), "click-only mode ignores sibling hover");
+            }
+            let outside = h.app.viewport.rect.unwrap().right_bottom() - egui::vec2(40.0, 60.0);
+            h.step(&json!({"move":[outside.x,outside.y]})).unwrap();
+            h.frames(3);
+            assert_eq!(rect_of("toolbar_dropdown"), (!follow_hover).then_some(create_menu), "only hover mode closes on leaving");
+            if follow_hover {
+                move_to(&mut h, modify);
+                assert!(rect_of("toolbar_dropdown").is_none(), "returning to the ribbon still needs a click");
+            }
+        }
     }
 
     /// A click on the lit button of the sketch tool in use ends it, so clicks in the view select

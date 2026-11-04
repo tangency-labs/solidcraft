@@ -14,11 +14,14 @@
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically
   when entered, and the other tabs remain available. Click a
-  panel's name for all its commands. Drag a command from the dropdown onto a panel's label
+  panel's name for all its commands. With **Switch panel menus on hover** enabled in
+  **Preferences > Layout > Toolbar tabs**, click once to open a menu, then hover another
+  panel's name to switch. Move outside the ribbon and open menu to close it.
+  Drag a command from the dropdown onto a panel's label
   or empty space to append it; the insertion line shows its destination. Drop onto an existing
   button to insert before it. Buttons can also move between panels, and the layout is saved.
   Click the **+** after the tabs, right-click a tab or empty toolbar space, or use
-  **Preferences > Interface > Toolbar tabs** to hide or restore tabs. Every existing tab,
+  **Preferences > Layout > Toolbar tabs** to hide or restore tabs. Every existing tab,
   including Sheet Metal and Weldments, stays visible by default. Tabs you hide stay hidden in every
   design until you show them again. Hidden tabs keep
   their customised buttons, commands in search and shortcuts; with all tabs hidden, **+** remains.

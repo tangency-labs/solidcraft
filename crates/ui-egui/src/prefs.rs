@@ -1278,6 +1278,8 @@ preference_settings! {
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
     /// instead of a list of small icons with names (#4739).
     ribbon_icon_grid: bool = false, PAGE_LAYOUT;
+    /// After a ribbon panel menu is open, hover another panel to switch to its menu.
+    ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
     ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
@@ -6027,6 +6029,7 @@ mod tests {
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
+            ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
             ("timeline_left", json!(true), PAGE_LAYOUT),
             ("timeline_under_browser", json!(true), PAGE_LAYOUT),

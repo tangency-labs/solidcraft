@@ -477,6 +477,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.layout_page.active_commands"),
                 app.tr("prefs.ribbon_reveal"),
                 app.tr("prefs.layout_page.pinned_menus"),
+                app.tr("prefs.layout_page.hover_panel_menus"),
             ];
             let widest =
                 labels.iter().map(|label| ui_kit::ContentWidth::label(ui, label)).fold(0.0, f32::max) + t.space_14 + t.space_6 * 2.0 + t.space_16;
@@ -484,10 +485,10 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             let width = (ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32;
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = t.space_6;
-                for row in (0..4).step_by(columns) {
+                for row in (0..labels.len()).step_by(columns) {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = t.space_16;
-                        for index in row..(row + columns).min(4) {
+                        for index in row..(row + columns).min(labels.len()) {
                             ui.allocate_ui_with_layout(
                                 egui::vec2(width.max(0.0), t.control_height),
                                 egui::Layout::top_down(egui::Align::Min),
@@ -526,6 +527,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                             app.tr("ui.ribbon_menus_skip_pinned"),
                                             &mut app.preferences.ribbon_menus_skip_pinned,
                                             "ribbon_menus_skip_pinned",
+                                        );
+                                    }
+                                    4 => {
+                                        layout_check(
+                                            ui,
+                                            app.tr("prefs.layout_page.hover_panel_menus"),
+                                            app.tr("prefs.layout_page.hover_panel_menus_help"),
+                                            &mut app.preferences.ribbon_menus_follow_hover,
+                                            "ribbon_menus_follow_hover",
                                         );
                                     }
                                     _ => {}
