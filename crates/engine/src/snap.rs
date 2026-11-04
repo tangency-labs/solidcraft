@@ -108,7 +108,9 @@ pub fn snap_points_from(s: &Session, sel: &Sel) -> Vec<(SnapPoint, SnapSource)> 
         // split one circle into are one.
         let r = radius(at, &from);
         let one_circle = |other: Option<f64>| match (other, r) {
-            (Some(a), Some(b)) => (a - b).abs() <= tol,
+            // By the radii's own size, not the place's: far from the origin two close rims
+            // would otherwise count as one.
+            (Some(a), Some(b)) => (a - b).abs() <= SAME * (1.0 + a.max(b)),
             (None, None) => true,
             _ => false,
         };

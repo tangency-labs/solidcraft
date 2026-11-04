@@ -286,3 +286,22 @@ fn a_washers_two_rims_keep_a_centre_each() {
     radii.sort_by(f64::total_cmp);
     assert!(radii.len() == 2 && (radii[0] - 4.0).abs() < 1e-9 && (radii[1] - 10.0).abs() < 1e-9, "one centre per rim: {got:?}");
 }
+
+#[test]
+fn a_washer_far_from_the_origin_keeps_both_its_rims() {
+    // Rims of 4 and 4.05 around (60000, 0, 5): 60 m out, the place's own tolerance is wider than
+    // the 0.05 between them, so the rims are told apart by their radii.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4.05, "height": 5, "base": [60000, 0, 0]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 7, "base": [60000, 0, -1], "operation": "cut"}));
+    let top = face(&s, |p| (p.z - 5.0).abs() < 1e-9);
+    let got = snap_points_from(&s, &top);
+    let at = Vec3::new(60000.0, 0.0, 5.0);
+    let mut radii: Vec<f64> = got
+        .iter()
+        .filter(|(p, _)| p.kind == SnapKind::Centre && p.at.dist(at) < 1e-6)
+        .filter_map(|(p, from)| from.edge.map(|e| e.dist(p.at)))
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    assert!(radii.len() == 2 && (radii[0] - 4.0).abs() < 1e-6 && (radii[1] - 4.05).abs() < 1e-6, "one centre per rim: {radii:?} in {got:?}");
+}
