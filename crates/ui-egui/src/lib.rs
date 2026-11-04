@@ -735,6 +735,8 @@ pub struct SolveApp {
     pub agent_chat: agent_chat::AgentChat,
     /// Making SolidCraft available to the AI apps installed here ([`ai_connect`]).
     pub ai_connect: ai_connect::State,
+    /// Embedded Model Context Protocol (MCP) server controller.
+    pub mcp_server: solidcraft_mcp::McpServerController,
     pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
     shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     queued_shots: Vec<(u64, f64, u32)>,
@@ -902,6 +904,7 @@ impl SolveApp {
             control_rx: None,
             agent_chat: Default::default(),
             ai_connect: Default::default(),
+            mcp_server: Default::default(),
             control_held: Default::default(),
             control_job: None,
             control_answering: Vec::new(),

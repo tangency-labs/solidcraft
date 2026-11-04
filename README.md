@@ -94,12 +94,10 @@ More commands, the Windows cross-build and the browser build are in [docs/buildi
 
 ## AI agents (MCP)
 
-`solidcraft-cli mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server. Headless it
-runs its own design session, or with `--connect` it drives the running app so you can watch.
-Claude Code: `claude mcp add solidcraft -- solidcraft-cli mcp`. If a terminal doesn't find
-`solidcraft-cli` (older Windows installers don't put it on `PATH`), give its full path (by default
-`"C:\\Program Files\\SolidCraft\\solidcraft-cli.exe"`). Tools, access rules and an example session:
-[docs/mcp.md](docs/mcp.md).
+SolidCraft speaks the [Model Context Protocol](https://modelcontextprotocol.io), allowing any MCP-compatible AI agent (Google Antigravity, Claude, LM Studio, Cursor) to model interactively in 2D and 3D.
+
+- **Built-in GUI Control Center:** Start, stop, and configure the MCP server directly from the desktop interface (**Preferences > AI & MCP Server** or the status bar indicator) without ever opening a terminal. Includes configurable transport modes (SSE/HTTP, Stdio, WebSocket), live status indicators, telemetry logs, and a dynamic interactive connection guide with 1-click clipboard copy. See [docs/mcp-gui.md](docs/mcp-gui.md).
+- **CLI MCP Server:** `solidcraft-cli mcp` runs as a headless server or bridges to the running app via `--connect`. Claude Code: `claude mcp add solidcraft -- solidcraft-cli mcp`. If a terminal doesn't find `solidcraft-cli` (older Windows installers don't put it on `PATH`), give its full path (by default `"C:\\Program Files\\SolidCraft\\solidcraft-cli.exe"`). Tools, access rules and an example session: [docs/mcp.md](docs/mcp.md).
 
 ## Scripts
 

@@ -4097,6 +4097,7 @@ dependencies = [
  "solidcraft-3dx-client",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-mcp",
  "solidcraft-space-mouse",
  "solidcraft-ui-egui",
  "ureq",
@@ -4258,6 +4259,7 @@ name = "solidcraft-mcp"
 version = "0.40.0-rc.2"
 dependencies = [
  "image",
+ "serde",
  "serde_json",
  "solidcraft-engine",
  "solidcraft-gpu",
@@ -4347,6 +4349,7 @@ dependencies = [
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
+ "rfd",
  "semver",
  "serde",
  "serde_json",
@@ -4354,6 +4357,7 @@ dependencies = [
  "solidcore-record",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-mcp",
  "solidcraft-space-mouse",
  "syn 2.0.119",
  "sys-locale",

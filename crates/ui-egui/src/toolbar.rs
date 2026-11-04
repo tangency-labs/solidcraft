@@ -2289,6 +2289,9 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
         AssistantMark::Waiting(count) => crate::ui_kit::AssistantEntryState::Waiting(count),
     };
     crate::ui_kit::assistant_entry(ui, &resp, state, app.agent_chat.open, ui.ctx().global_style().animation_time > 0.0);
+    if app.mcp_server.is_running() {
+        ui.painter().circle_filled(pos2(at.right() - 6.0, at.top() + 6.0), 3.5, Color32::from_rgb(74, 222, 128));
+    }
     if resp.backing_on_hover_text(tip).clicked() {
         crate::agent_chat::toggle(app);
     }

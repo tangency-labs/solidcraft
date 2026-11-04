@@ -440,6 +440,9 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
 /// Former page names remain usable through both ui.prefs and scenario handles.
 const PAGE_ALIASES: &[(&str, usize)] = &[
     ("AI", PAGE_ASSISTANT),
+    ("AI & MCP Server", PAGE_ASSISTANT),
+    ("MCP", PAGE_ASSISTANT),
+    ("MCP Server", PAGE_ASSISTANT),
     ("Interface", PAGE_APPEARANCE),
     ("Interface/navigation bar", PAGE_LAYOUT),
     ("Keyboard Shortcuts", PAGE_SHORTCUTS),
@@ -1516,6 +1519,16 @@ preference_settings! {
     agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
     agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
+    /// Transport mode for the embedded MCP server ("sse", "stdio", "websocket").
+    mcp_transport: String = "sse".into(), PAGE_ASSISTANT;
+    /// Bind address / host for the embedded MCP server.
+    mcp_host: String = "127.0.0.1".into(), PAGE_ASSISTANT;
+    /// Port for the embedded MCP server.
+    mcp_port: u16 = 8989, PAGE_ASSISTANT;
+    /// Working directory path for the AI agent (empty: uses active design or app directory).
+    mcp_workspace: String = String::new(), PAGE_ASSISTANT;
+    /// Automatically start the embedded MCP server when SolidCraft launches.
+    mcp_autostart: bool = true, PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
