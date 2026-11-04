@@ -124,28 +124,31 @@ form_case!(equation_curve, "sketch.equation_curve", ["Form", "x(t)", "y(t)", "St
 #[test]
 fn finish_sketch_applies_pending_corners_before_closing() {
     for command in ["sketch.fillet", "sketch.chamfer.equal_distance"] {
-        let mut h = fixture();
-        let sketch = h.app.session.active_sketch.unwrap();
-        let mut d = picked(&h, command);
-        d.inputs[0].items = h
-            .app
-            .session
-            .doc
-            .sketch(sketch)
-            .unwrap()
-            .points
-            .iter()
-            .filter(|p| p.id != "origin")
-            .map(|p| Sel::SketchPoint { id: p.id.clone() })
-            .collect();
-        h.app.dialog = Some(d);
-        h.frames(4);
-        h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
-        h.settle();
-        assert!(h.app.session.active_sketch.is_none());
-        assert!(h.app.dialog.is_none(), "{command}: its dialog must close with the sketch");
-        assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 8, "{command}: all four corners must be kept");
-        assert!(h.app.preview.error.is_none());
+        for apply_on_tool_start in [false, true] {
+            let mut h = fixture();
+            h.call("ui.prefs", json!({"sketch_apply_corners_on_tool_start":apply_on_tool_start}));
+            let sketch = h.app.session.active_sketch.unwrap();
+            let mut d = picked(&h, command);
+            d.inputs[0].items = h
+                .app
+                .session
+                .doc
+                .sketch(sketch)
+                .unwrap()
+                .points
+                .iter()
+                .filter(|p| p.id != "origin")
+                .map(|p| Sel::SketchPoint { id: p.id.clone() })
+                .collect();
+            h.app.dialog = Some(d);
+            h.frames(4);
+            h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none());
+            assert!(h.app.dialog.is_none(), "{command}: its dialog must close with the sketch");
+            assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 8, "{command}: all four corners must be kept");
+            assert!(h.app.preview.error.is_none());
+        }
     }
 }
 
@@ -943,4 +946,52 @@ fn a_refused_corner_discards_the_requested_command() {
     assert_eq!(h.app.session.active_sketch, Some(sketch), "OK applies the corrected corner without the discarded Extrude request");
     assert!(h.app.dialog.is_none());
     assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 5);
+}
+
+/// The compatibility preference discards pending corners, including a running computation,
+/// before opening Extrude on the unchanged profile and restoring an edited sketch's marker.
+#[test]
+fn starting_another_command_can_discard_pending_corners() {
+    for command in ["sketch.fillet", "sketch.chamfer.equal_distance"] {
+        for edited in [false, true] {
+            for applying in [false, true] {
+                let mut h = fixture();
+                h.call("ui.prefs", json!({"sketch_apply_corners_on_tool_start":false}));
+                let sketch = h.app.session.active_sketch.unwrap();
+                if edited {
+                    h.app.run("sketch.finish", json!({})).unwrap();
+                    h.app.run("solid.extrude", json!({"distance":10})).unwrap();
+                    h.app.edit_sketch(sketch);
+                }
+                let before = h.app.session.doc.sketch(sketch).unwrap().clone();
+                h.app.dialog = Some(picked(&h, command));
+                h.frames(4);
+                let (send, done) = std::sync::mpsc::channel();
+                if applying {
+                    let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+                    h.app.applying = Some(Applying {
+                        done,
+                        ready: None,
+                        seen: true,
+                        started: crate::now_ms(),
+                        cmds,
+                        progress: Default::default(),
+                        quality: Default::default(),
+                    });
+                } else {
+                    drop(done);
+                }
+                h.app.start("solid.extrude");
+                h.settle();
+                assert!(h.app.applying.is_none(), "the discarded corner cannot apply later");
+                assert!(send.send(Err("discarded corner".into())).is_err());
+                assert!(h.app.session.active_sketch.is_none());
+                assert_eq!(h.app.session.doc.marker, None);
+                assert_eq!(h.app.session.doc.sketch(sketch).unwrap(), &before, "{command}: retain the original corners");
+                let d = h.app.dialog.as_ref().expect("the requested Extrude dialog");
+                assert!(matches!(d.kind, Kind::Extrude { .. }));
+                assert!(d.inputs[0].items.contains(&Sel::Profile { sketch, index: 0 }));
+            }
+        }
+    }
 }

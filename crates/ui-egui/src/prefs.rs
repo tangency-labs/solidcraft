@@ -1574,6 +1574,9 @@ preference_settings! {
     sketch_align_points: bool = false, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
+    /// Apply pending sketch fillets and chamfers before starting a tool that ends the sketch.
+    /// Off: discard the preview, as before. Explicit Finish Sketch still applies the corners.
+    sketch_apply_corners_on_tool_start: bool = true, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
     manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
@@ -7534,6 +7537,7 @@ mod tests {
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
+                ("sketch_apply_corners_on_tool_start", "prefs.sketch_apply_corners_on_tool_start"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
                 ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
@@ -9464,6 +9468,27 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
         assert!(!app.session.is_dirty());
         assert_eq!(app.session.undo.len(), undo);
+    }
+
+    /// The compatibility choice persists, can be cancelled, and resets only on the Sketch page.
+    #[test]
+    fn sketch_corner_tool_start_preference_persists_cancels_and_resets() {
+        assert!(Prefs::default().sketch_apply_corners_on_tool_start);
+        assert!(lenient(&json!({"theme":"light"})).sketch_apply_corners_on_tool_start);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Sketch","sketch_apply_corners_on_tool_start":false}));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.sketch_apply_corners_on_tool_start);
+        h.call("ui.prefs", json!({"open":"Sketch","sketch_apply_corners_on_tool_start":false,"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.sketch_apply_corners_on_tool_start);
+        h.call("ui.prefs", json!({"open":"General","button":"defaults"}));
+        assert!(!h.app.preferences.sketch_apply_corners_on_tool_start);
+        h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
+        assert!(h.app.preferences.sketch_apply_corners_on_tool_start);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.sketch_apply_corners_on_tool_start);
     }
 
     #[test]

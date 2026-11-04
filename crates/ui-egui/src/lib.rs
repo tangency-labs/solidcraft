@@ -1995,9 +1995,17 @@ impl SolveApp {
         // Keep the requested tool with the corner dialog until its apply succeeds, including
         // an already-running computation. Resuming through start also restores the history marker
         // and selects the finished sketch's profile before opening the tool.
-        if interactive && ends_sketch(id) && self.session.active_sketch.is_some() && self.dialog.as_mut().is_some_and(|d| d.request_sketch_finish(id))
-        {
-            return;
+        if interactive && ends_sketch(id) && self.session.active_sketch.is_some() {
+            if self.preferences.sketch_apply_corners_on_tool_start {
+                if self.dialog.as_mut().is_some_and(|d| d.request_sketch_finish(id)) {
+                    return;
+                }
+            } else if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchModify(sketch_modify_ui::Mod::Corner { .. }))) {
+                // Preserve the old tool-start behaviour before finish_sketch can accept the
+                // preview. Cancelling also drops an in-progress corner computation.
+                dialogs::cancel(self);
+                self.preview.reset();
+            }
         }
         // Cancel before finishing a sketch or waiting for its history marker.
         if interactive && (self.editing_state.is_some() || self.applying.is_some()) {

@@ -183,6 +183,13 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "opening_closing", app.tr("prefs.sketch.opening_closing"), |ui| {
         check(
             ui,
+            "sketch_apply_corners_on_tool_start",
+            "prefs.sketch_apply_corners_on_tool_start",
+            Some("prefs.sketch_apply_corners_on_tool_start_note"),
+            &mut app.preferences.sketch_apply_corners_on_tool_start,
+        );
+        check(
+            ui,
             "sketch_face_activates_part",
             "prefs.sketch_face_activates_part",
             Some("prefs.sketch_face_activates_part_note"),

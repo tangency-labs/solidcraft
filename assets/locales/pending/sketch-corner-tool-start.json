@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.sketch_apply_corners_on_tool_start": "تطبيق التدوير والشطف قبل بدء أداة أخرى",
+    "prefs.sketch_apply_corners_on_tool_start_note": "تطبيق تدويرات الرسم وشطفاته المعلّقة قبل أن تنهي أداة مثل البثق الرسم. عند الإيقاف: تُهمل المعاينة كما كان سابقًا. يظل «إنهاء الرسم» يطبّق عمليات الزوايا المعلّقة."
+  },
+  "de": {
+    "prefs.sketch_apply_corners_on_tool_start": "Verrundungen und Fasen vor dem Start eines anderen Werkzeugs anwenden",
+    "prefs.sketch_apply_corners_on_tool_start_note": "Wendet ausstehende Skizzenverrundungen und -fasen an, bevor ein Werkzeug wie Extrusion die Skizze beendet. Aus: Verwirft die Vorschau wie bisher. Skizze fertigstellen wendet ausstehende Ecken weiterhin an."
+  },
+  "en": {
+    "prefs.sketch_apply_corners_on_tool_start": "Apply fillets and chamfers before starting another tool",
+    "prefs.sketch_apply_corners_on_tool_start_note": "Apply pending sketch fillets and chamfers before a tool such as Extrude finishes the sketch. Off: discard the preview, as before. Finish Sketch still applies pending corners."
+  },
+  "he": {
+    "prefs.sketch_apply_corners_on_tool_start": "החלת עיגולי פינות ופאזות לפני הפעלת כלי אחר",
+    "prefs.sketch_apply_corners_on_tool_start_note": "החלת עיגולי פינות ופאזות ממתינים בסקיצה לפני שכלי כגון שיחול מסיים אותה. כבוי: ביטול התצוגה המקדימה, כמו בעבר. ״סיום סקיצה״ עדיין מחיל את פעולות הפינות הממתינות."
+  },
+  "ja": {
+    "prefs.sketch_apply_corners_on_tool_start": "別のツールを開始する前にフィレットと面取りを適用",
+    "prefs.sketch_apply_corners_on_tool_start_note": "押し出しなどのツールがスケッチを終了する前に、保留中のスケッチのフィレットと面取りを適用します。オフの場合は従来どおりプレビューを破棄します。「スケッチを終了」は引き続き保留中のコーナーを適用します。"
+  },
+  "ko": {
+    "prefs.sketch_apply_corners_on_tool_start": "다른 도구를 시작하기 전에 필렛과 모따기 적용",
+    "prefs.sketch_apply_corners_on_tool_start_note": "돌출 같은 도구가 스케치를 종료하기 전에 대기 중인 스케치 필렛과 모따기를 적용합니다. 끄면 이전처럼 미리보기를 취소합니다. 스케치 완료는 계속 대기 중인 코너를 적용합니다."
+  },
+  "vi": {
+    "prefs.sketch_apply_corners_on_tool_start": "Áp dụng bo góc và vát góc trước khi bắt đầu công cụ khác",
+    "prefs.sketch_apply_corners_on_tool_start_note": "Áp dụng các bo góc và vát góc đang chờ của phác thảo trước khi công cụ như Đùn kết thúc phác thảo. Tắt: bỏ bản xem trước như trước đây. Hoàn tất phác thảo vẫn áp dụng các thao tác góc đang chờ."
+  },
+  "zh": {
+    "prefs.sketch_apply_corners_on_tool_start": "启动其他工具前应用圆角和倒角",
+    "prefs.sketch_apply_corners_on_tool_start_note": "在拉伸等工具结束草图之前，应用待处理的草图圆角和倒角。关闭时，与之前一样丢弃预览。“完成草图”仍会应用待处理的角部操作。"
+  }
+}
