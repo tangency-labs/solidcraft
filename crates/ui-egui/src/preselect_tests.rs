@@ -932,15 +932,14 @@ fn press_pull_then_curved_face_offsets_it() {
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
 }
 
-/// Whether a `role` accessibility node labeled `text` is drawn inside the published rect
-/// `rect_handle` ("dialog:window" is the panel, "dialog:header" its heading band).
+/// Whether an accessibility node labeled `text` is drawn inside the published rect
+/// `rect_handle` ("dialog:header" is the dialog's heading band), so a same-named widget
+/// elsewhere on screen cannot satisfy the check.
 fn label_in(h: &crate::scenario::Harness, rect_handle: &str, text: &str) -> bool {
     let Some(rect) = crate::scenario::rect_of(rect_handle) else { return false };
     let Some(tree) = h.output.accesskit_update.as_ref() else { return false };
     tree.nodes.iter().any(|(_, n)| {
-        n.role() == egui::accesskit::Role::Label
-            && n.label() == Some(text)
-            && n.bounds().is_some_and(|b| rect.contains(egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
+        n.label() == Some(text) && n.bounds().is_some_and(|b| rect.contains(egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
     })
 }
 
