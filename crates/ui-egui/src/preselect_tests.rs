@@ -3605,6 +3605,25 @@ fn shell_lists_the_faces_its_chip_counts() {
     assert!(h.widget("1 selected").is_some());
 }
 
+/// #11663: Fix started with only points selected (no curve to fix them through) gives each of
+/// them its own Fix constraint, so a selection of loose points is not silently dropped.
+#[test]
+fn fix_takes_a_selection_of_only_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [10, 10]})).unwrap();
+    h.app.run("sketch.point", json!({"point": [30, 20]})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let ids: Vec<String> = h.app.session.doc.sketch(sid).unwrap().points.iter().skip(1).map(|p| p.id.clone()).collect();
+    assert_eq!(ids.len(), 2, "two loose points to select");
+    let fixes = |h: &crate::scenario::Harness| h.app.session.doc.sketch(sid).unwrap().constraints.iter().filter(|c| c.kind.name() == "Fix").count();
+    let before = fixes(&h);
+    h.app.session.selection = ids.iter().map(|id| Sel::SketchPoint { id: id.clone() }).collect();
+    h.app.start("sketch.constraint.fix");
+    assert_eq!(fixes(&h), before + 2, "each selected point got a Fix constraint ({:?})", h.app.status);
+    assert!(h.app.tool.is_none(), "Fix applied at once, no pick tool left running");
+}
+
 /// #11663: a box drawn over a sketch takes its dimensions and constraint icons along with its
 /// lines and points. Fix started with that selection fixes the lines and points; it does not fall
 /// back to the pick tool. Hundreds of entities (more than the 200 a constraint pick takes) too.
