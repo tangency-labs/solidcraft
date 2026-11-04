@@ -61,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source releases its dependent straight offsets' linked extents (offset_released: curve ids), retaining their driving normal-distance dimensions and parallel relations", created_doc!())),
+        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source or its single-line offset releases linked extents (offset_released: curve ids), retaining their driving normal-distance dimensions and parallel relations", created_doc!())),
     CommandSpec::new("sketch.trim.path", "Trim Along Path", trim_path)
         .icon("trim")
         .enabled(in_sketch)
@@ -506,7 +506,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
-        let released = release_source_line_offsets(sk, doc, ci, cmd)?;
+        let released = release_line_offsets(sk, doc, ci, cmd)?;
         let (mut out, _) = remove_piece(sk, ci, at, cmd)?;
         if !released.is_empty() {
             out["offset_released"] = json!(released);
@@ -517,10 +517,10 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"result": out, "sketch": info}))
 }
 
-/// A source line's endpoints may change independently of its parallel offsets. Materialize
+/// Source lines and their single-line offsets can have independent endpoints. Materialize
 /// the affected line chains before Trim, retaining their original driving distance parameters
-/// as point-line dimensions. Directly trimming an associated output remains a separate command policy.
-fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
+/// as point-line dimensions. Closed or mixed-curve output chains still need their association.
+fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
     if curve.infinite || sk.is_linked_curve(ci) || !matches!(curve.kind, CurveKind::Line { .. }) {
         return Ok(Vec::new());
@@ -532,7 +532,7 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
         .enumerate()
         .filter_map(|(i, offset)| {
             (offset.topology.is_none()
-                && offset.sources.iter().any(|(source, _)| source == &id)
+                && (offset.sources.iter().any(|(source, _)| source == &id) || (offset.sources.len() == 1 && offset.outputs.contains(&id)))
                 && offset.sources.len() == offset.outputs.len()
                 && offset.sources.iter().zip(&offset.outputs).all(|((source, _), output)| {
                     [source, output]
@@ -547,7 +547,7 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
     }
     let report = solve_current(sk, doc)?;
     if !report.keeps_orientation() {
-        return Err(bad(cmd, report.failure(|_| "cannot trim a source with conflicting offset dimensions".into())));
+        return Err(bad(cmd, report.failure(|_| "cannot trim a line with conflicting offset dimensions".into())));
     }
     let mut released = Vec::new();
     for index in affected.into_iter().rev() {
@@ -847,7 +847,7 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
             after = (si, t);
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
-            let cut = release_source_line_offsets(sk, doc, ci, cmd).and_then(|released| {
+            let cut = release_line_offsets(sk, doc, ci, cmd).and_then(|released| {
                 let (mut out, gone) = remove_piece(sk, ci, q, cmd)?;
                 if !released.is_empty() {
                     out["offset_released"] = json!(released);
