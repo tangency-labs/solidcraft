@@ -99,7 +99,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
         .enabled(in_sketch)
-        .params(concat!("entities: [curve/point ids], line: straight curve id, x / y for a sketch axis, or {axis: X|Y|Z} for an origin axis in the sketch plane (symmetry constraints are added)", created_doc!())),
+        .params(concat!("entities: [curve/point ids], line: straight curve id, x / y for a sketch axis, or {axis: X|Y|Z} for an origin axis (the mirror line is the axis's projection into the sketch plane; an axis perpendicular to the plane is refused) (symmetry constraints are added)", created_doc!())),
     CommandSpec::new("sketch.pattern.circular", "Circular Pattern", pattern_circular)
         .at("SKETCH", "PATTERN")
         .icon("sketch_circ_pattern")
@@ -3313,7 +3313,17 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
                 sk.links.iter().find(|link| link.kind == solidcraft_sketch::LinkKind::Project && link.source == source).map(|link| link.id.clone());
             let link = match link {
                 Some(link) => link,
-                None => sk.add_link(solidcraft_sketch::LinkKind::Project, source, &geom)?,
+                None => {
+                    let link = sk.add_link(solidcraft_sketch::LinkKind::Project, source, &geom)?;
+                    // A mirror line is reference geometry: it stays out of profiles, as the
+                    // sketch's own axes do.
+                    for c in sk.link_curves(&link) {
+                        if let Some(curve) = sk.curves.get_mut(c) {
+                            curve.construction = true;
+                        }
+                    }
+                    link
+                }
             };
             sk.link_curves(&link).first().copied().ok_or_else(|| bad(cmd, "the origin axis does not resolve to a straight line"))?
         } else {
