@@ -1265,6 +1265,27 @@ impl Brep {
                 reason: "a snapshot of a B-rep whose surface owner is cleared",
             });
         }
+        // copy(false) already clones the arenas and their nested geometry. Validate
+        // every root before that first recursive copy, not only before replacing it
+        // with its exact snapshot copy below.
+        for (_, face) in self.faces.iter() {
+            if let Some(surface) = face.surface.as_ref() {
+                surface.check_evaluation_copy_depth(0)?;
+            }
+        }
+        for (_, edge) in self.edges.iter() {
+            if let Some(curve) = edge.curve.as_ref() {
+                Surface::check_curve_evaluation_copy_depth(curve, 0)?;
+            }
+        }
+        for (_, edgeuse) in self.edgeuses.iter() {
+            if let Some(curve) = edgeuse.uv_trim_curve.as_ref() {
+                Surface::check_curve_evaluation_copy_depth(curve, 0)?;
+            }
+        }
+        for surface in &self.deleted_surfaces {
+            surface.check_evaluation_copy_depth(0)?;
+        }
         let mut saved = self.copy(false);
         for (id, face) in self.faces.iter() {
             if let Some(surface) = face.surface.as_ref() {
@@ -2257,6 +2278,72 @@ mod tests {
         assert!(b.loops().is_empty());
     }
 
+    #[test]
+    fn snapshot_checks_face_and_deleted_definition_roots_before_edit() {
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_blend::corner::{CornerDefinition, EndDefinition};
+        use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
+
+        // Internal guard fixtures, not a claim that public constructors admit an
+        // over-limit body. Each definition owns just one more surface.
+        fn nested_definition(depth: usize) -> Surface {
+            let mut surface = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+            for _ in 0..depth {
+                let mut outer = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+                outer.set_corner_definition(CornerDefinition::End(EndDefinition {
+                    support: Box::new(surface),
+                    boundary: Vec::new(),
+                }));
+                surface = outer;
+            }
+            surface
+        }
+
+        for depth in [MAX_GEOMETRY_NESTING, MAX_GEOMETRY_NESTING + 1] {
+            for deleted in [false, true] {
+                let mut brep = Brep::new();
+                brep.set_key(ObjectKey(77));
+                let surface = nested_definition(depth);
+                if deleted {
+                    brep.deleted_surfaces.push(surface);
+                } else {
+                    let shell = brep.add_shell().unwrap();
+                    let face = brep.add_face(shell).unwrap();
+                    brep.face_mut(face).unwrap().surface = Some(surface);
+                }
+                let mut edited = false;
+                let result = brep.with_rollback(
+                    |_| {
+                        edited = true;
+                        Ok(())
+                    },
+                    |_| true,
+                );
+                if depth == MAX_GEOMETRY_NESTING {
+                    result.unwrap();
+                    assert!(edited);
+                } else {
+                    assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
+                    assert!(!edited);
+                }
+                assert_eq!(brep.key(), ObjectKey(77));
+                let surface = if deleted {
+                    brep.deleted_surfaces.first().unwrap()
+                } else {
+                    brep.faces
+                        .iter()
+                        .next()
+                        .unwrap()
+                        .1
+                        .surface
+                        .as_ref()
+                        .unwrap()
+                };
+                assert!(surface.procedural_definition().is_some());
+            }
+        }
+    }
+
     /// A snapshot put back gives the B-rep as it was, every part an operation may change:
     /// the naming, the key, the locked box, the attributes (a temporary one too) and their
     /// lists, the notification identities of the B-rep and of its geometry, the owners
@@ -2358,5 +2445,179 @@ mod tests {
             )
             .unwrap();
         assert_eq!(again, surface_key);
+    }
+
+    #[test]
+    fn rollback_preserves_iso_edge_sweep_definition() {
+        use crate::curve::curve::CurveKind;
+        use crate::curve::iso_curve::IsoCurve;
+        use crate::kernel::Kernel;
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::sweep::screw::screw_sweep;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+
+        let mut k = Kernel::default();
+        let points = [
+            Vec3::new(4.1, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.9),
+            Vec3::new(4.1, 0.0, 0.9),
+        ];
+        let profile: Vec<Curve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| Curve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let mut b = screw_sweep(&mut k, &profile, Vec3::ZERO, Vec3::Z, 1.5, 2.0, 1.5e-4).unwrap();
+        assert!(brep::p2::is_manifold_solid(&b).unwrap());
+
+        // Only replace an actual wall boundary with the same parameterization, not
+        // just a curve with the same endpoints. The body's own tolerance is the gate.
+        let mut replacement = None;
+        'faces: for (face_id, face) in b.faces().iter() {
+            let Some(wall) = face.surface.as_ref() else {
+                continue;
+            };
+            if wall.procedural_sweep().is_none() {
+                continue;
+            }
+            wall.check_evaluation_copy_depth(1).unwrap();
+            let domain = wall.natural_uv_domain_if_built();
+            for (direction, parameter) in [
+                (SurfParamType::U, domain.u_interval().min()),
+                (SurfParamType::U, domain.u_interval().max()),
+                (SurfParamType::V, domain.v_interval().min()),
+                (SurfParamType::V, domain.v_interval().max()),
+            ] {
+                let iso = IsoCurve::from_surface(
+                    &k,
+                    wall.clone_exact_bounded(),
+                    direction,
+                    parameter,
+                    false,
+                    false,
+                )
+                .unwrap();
+                let candidate = Curve::from(iso);
+                let natural = candidate.natural_interval();
+                for loop_id in &face.loops {
+                    for use_ in &b.loop_(*loop_id).unwrap().edges {
+                        let edge = b.edge(use_.edge).unwrap();
+                        let Some(old) = edge.curve.as_ref() else {
+                            continue;
+                        };
+                        let interval = edge.interval;
+                        if interval.min() < natural.min() || interval.max() > natural.max() {
+                            continue;
+                        }
+                        let tolerance = b.tolerance().max(edge.tolerance);
+                        let matches = [0.0, 0.25, 0.5, 0.75, 1.0].into_iter().all(|fraction| {
+                            let t = interval.min() + fraction * (interval.max() - interval.min());
+                            match (old.evaluate_point(&k, t), candidate.evaluate_point(&k, t)) {
+                                (Ok(a), Ok(c)) => (a - c).length() <= tolerance,
+                                _ => false,
+                            }
+                        });
+                        if matches {
+                            let mut candidate = candidate;
+                            candidate.set_owner(old.owner(), None);
+                            replacement = Some((face_id, use_.edge, candidate));
+                            break 'faces;
+                        }
+                    }
+                }
+            }
+        }
+        let (_face, edge, curve) = replacement.expect("no matching parameterized wall boundary");
+        b.edge_mut(edge).unwrap().curve = Some(curve);
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level1).unwrap();
+        assert!(check.is_valid(), "invalid fixture: {:?}", check.lines());
+        let key = k
+            .context
+            .geometry_key(
+                b.edge_mut(edge)
+                    .unwrap()
+                    .curve
+                    .as_mut()
+                    .unwrap()
+                    .notify_identity_slot(),
+            )
+            .unwrap();
+
+        // No geometry evaluation while reading the state: include the whole sweep
+        // definition, its explicit certificate and stations, and both owners.
+        let state = |body: &Brep| {
+            let e = body.edge(edge).unwrap();
+            let c = e.curve.as_ref().unwrap();
+            let CurveKind::Iso(iso) = c.kind() else {
+                panic!("edge is not iso")
+            };
+            let surface = iso.surface();
+            assert!(matches!(
+                surface.kind(),
+                crate::surface::surface::SurfaceKind::BSpline(_)
+            ));
+            let definition = surface.procedural_definition().expect("lost definition");
+            let sweep = surface.procedural_sweep().expect("lost sweep");
+            (
+                e.interval,
+                e.tolerance,
+                c.owner(),
+                c.notify_key(),
+                iso.surf_param(),
+                iso.iso_parameter(),
+                iso.from_left(),
+                surface.owner(),
+                surface.natural_uv_domain_if_built(),
+                (
+                    format!("{:?}", sweep.definition()),
+                    sweep.definition().stations().to_vec(),
+                    sweep.bound(),
+                    definition.bound(),
+                ),
+            )
+        };
+        let before = state(&b);
+        assert_eq!(before.3, Some(key));
+        eprintln!("fixture Level1 valid; edge {edge:?}, notification key {key:?}, stations {:?}, bound {:?}", before.9.1, before.9.2);
+        let old_tolerance = b.edge(edge).unwrap().tolerance;
+        b.with_rollback(
+            |body| {
+                body.edge_mut(edge)?.tolerance = old_tolerance + 1.0;
+                Ok(())
+            },
+            Result::is_ok,
+        )
+        .unwrap();
+        assert_eq!(b.edge(edge).unwrap().tolerance, old_tolerance + 1.0);
+        b.edge_mut(edge).unwrap().tolerance = old_tolerance;
+        assert_eq!(state(&b), before);
+        eprintln!("successful edit control passed");
+        let mut ran = false;
+        let result: Result<()> = b.with_rollback(
+            |body| {
+                ran = true;
+                body.edge_mut(edge)?.curve = None;
+                Err(SolidError::InvalidInput {
+                    operation: "rollback_test",
+                    reason: "intended refusal",
+                })
+            },
+            Result::is_ok,
+        );
+        assert!(ran);
+        assert!(matches!(
+            result,
+            Err(SolidError::InvalidInput {
+                operation: "rollback_test",
+                reason: "intended refusal"
+            })
+        ));
+        eprintln!(
+            "failed edit ran, mutated edge, returned intended refusal; restored key {:?}",
+            b.edge(edge).unwrap().curve.as_ref().unwrap().notify_key()
+        );
+        assert_eq!(state(&b), before);
     }
 }

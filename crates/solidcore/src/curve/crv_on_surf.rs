@@ -576,8 +576,13 @@ impl CrvOnSurf {
     ///
     /// # Errors
     ///
-    /// Those of the parts' `Copy`.
+    /// `InvalidInput` if either child exceeds the geometry nesting limit at depth 1;
+    /// otherwise those of the parts' `Copy`.
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
+        // Validate both graphs before either copy can recursively traverse one.
+        Surface::check_curve_evaluation_copy_depth(&self.uv_curve, 1)?;
+        self.surface.check_evaluation_copy_depth(1)?;
+
         // figure out what the target curve owns - those things will be deep copied
         let owns_curve = self.owner_flag == 1 || self.owner_flag == 2 || self.owner_flag == 3;
         let owns_surface = self.owner_flag == 2 || self.owner_flag == 3;
@@ -2321,6 +2326,158 @@ mod tests {
         cur.knots_mut()
             .copy_from_slice(&[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
         Curve::from(BSplineCurve::from_nurb(cur, 2, false))
+    }
+
+    #[test]
+    fn tangent_field_exact_and_snapshot_preserve_populated_base_state() {
+        use crate::curve::tangent_field::{TangentFieldCurve, TangentFieldMembers};
+
+        let mut k = Kernel::default();
+        let mut base = CrvOnSurf::new(&k, uv(), patch().into(), None, 3).unwrap();
+        k.context
+            .geometry_key(base.uv_curve.notify_identity_slot())
+            .unwrap();
+        base.owner_links = (false, true);
+        base.set_breaks_cache(false, vec![0.25, 0.75]);
+        let CurveKind::BSpline(approximation) = uv().kind().clone() else {
+            panic!("expected B-spline");
+        };
+        let cache = base.approx_cache_mut();
+        cache.bs_approx = Some(Box::new(approximation));
+        cache.max_gap_3d = 0.125;
+        cache.parametrization_matches = true;
+        let members = TangentFieldMembers {
+            dir_type: 1,
+            start_tangent: Vec3::X,
+            end_tangent: Vec3::Y,
+        };
+        let field = TangentFieldCurve::from_parts(base, members);
+        let mut curve = Curve::new(CurveKind::TangentField(Box::new(field)));
+        k.context
+            .geometry_key(curve.notify_identity_slot())
+            .unwrap();
+        for (copy, snapshot) in [
+            (curve.clone_exact_bounded(), false),
+            (curve.snapshot_copy().unwrap(), true),
+        ] {
+            assert_eq!(
+                copy.notify_key(),
+                if snapshot { curve.notify_key() } else { None }
+            );
+            let CurveKind::TangentField(field) = copy.kind() else {
+                panic!("expected tangent field")
+            };
+            assert_eq!(field.members(), members);
+            let base = field.base();
+            assert_eq!(base.uv_curve.notify_key(), None);
+            assert_eq!(base.owner_links, (false, true));
+            assert!(!base.need_breaks());
+            assert_eq!(base.breaks(), vec![0.25, 0.75]);
+            let cache = base.lock_approx_cache();
+            let points = cache.bs_approx.as_ref().unwrap().control_points().unwrap();
+            assert_eq!(points.len(), 3);
+            assert_eq!((points[1].x, points[1].y), (0.5, 0.9));
+            assert_eq!(cache.max_gap_3d, 0.125);
+            assert!(cache.parametrization_matches);
+        }
+    }
+
+    #[test]
+    fn tangent_field_exact_copies_share_the_plane_nurb_cell() {
+        use crate::curve::tangent_field::{TangentFieldCurve, TangentFieldMembers};
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::SurfaceKind;
+
+        let k = Kernel::default();
+        let base = CrvOnSurf::new(
+            &k,
+            uv(),
+            Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)),
+            Some(Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)),
+            3,
+        )
+        .unwrap();
+        let curve = Curve::new(CurveKind::TangentField(Box::new(
+            TangentFieldCurve::from_parts(
+                base,
+                TangentFieldMembers {
+                    dir_type: 1,
+                    start_tangent: Vec3::X,
+                    end_tangent: Vec3::Y,
+                },
+            ),
+        )));
+        let surface = |curve: &Curve| match curve.kind() {
+            CurveKind::TangentField(field) => field.base().surface().clone_exact_bounded(),
+            _ => panic!("expected tangent field"),
+        };
+        let has_nurb = |curve: &Curve| match surface(curve).kind() {
+            SurfaceKind::Plane(plane) => plane.base().gw_nurb().is_some(),
+            _ => panic!("expected plane"),
+        };
+        assert!(!has_nurb(&curve));
+        let exact = curve.clone_exact_bounded();
+        let snapshot = curve.snapshot_copy().unwrap();
+        let ordinary = curve.clone();
+        surface(&curve).natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(has_nurb(&curve));
+        assert!(has_nurb(&exact));
+        assert!(has_nurb(&snapshot));
+        assert!(!has_nurb(&ordinary));
+    }
+
+    #[test]
+    fn copy_rejects_overdeep_borrowed_surface_definition() {
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_blend::corner::{CornerDefinition, EndDefinition};
+
+        let k = Kernel::default();
+        let mut curve = CrvOnSurf::new(&k, uv(), patch().into(), None, 0).unwrap();
+        let mut surface = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+        for _ in 0..=MAX_GEOMETRY_NESTING {
+            let mut parent = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+            parent.set_corner_definition(CornerDefinition::End(EndDefinition {
+                support: Box::new(surface),
+                boundary: Vec::new(),
+            }));
+            surface = parent;
+        }
+        // Deliberately bypass constructors to exercise the borrowed-child guard.
+        *curve.surface = surface;
+        assert!(matches!(
+            curve.copy(&k),
+            Err(SolidError::InvalidInput { .. })
+        ));
+
+        // Both top-level curve arenas must be checked before a B-rep copies its
+        // geometry or invokes an edit. These are synthetic guard fixtures.
+        for uv_root in [false, true] {
+            let mut brep = crate::topology::Brep::new();
+            let curve = Curve::from(curve.clone_exact_shared());
+            if uv_root {
+                brep.add_edgeuse_record(crate::topology::Edgeuse {
+                    uv_trim_curve: Some(curve),
+                    ..Default::default()
+                })
+                .unwrap();
+            } else {
+                let a = brep.add_vertex(Vec3::ZERO).unwrap();
+                let b = brep.add_vertex(Vec3::X).unwrap();
+                let edge = brep.add_edge(a, b).unwrap();
+                brep.edge_mut(edge).unwrap().curve = Some(curve);
+            }
+            let mut edited = false;
+            let result = brep.with_rollback(
+                |_| {
+                    edited = true;
+                    Ok(())
+                },
+                |_| true,
+            );
+            assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
+            assert!(!edited);
+            assert_eq!(brep.edges().len(), usize::from(!uv_root));
+        }
     }
 
     #[test]

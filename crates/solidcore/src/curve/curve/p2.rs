@@ -234,7 +234,7 @@ use crate::nurbs::b_spline_curve::{
 };
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
-use crate::surface::surface::p2::SurfaceEvaluate;
+use crate::surface::surface::p2::{Surface, SurfaceEvaluate};
 use crate::topology::database_io::DatabaseReader;
 
 // ---- type codes ---------------------------------------------------------------------
@@ -637,14 +637,15 @@ impl Clone for Curve {
 
 impl Curve {
     /// This curve as a B-rep's [`Snapshot`](crate::topology::Snapshot) keeps it: the exact
-    /// evaluation copy (its kind, owner and edge tolerance, the memo of its cache shared)
+    /// copy (its kind, nested definitions, owner and edge tolerance, the memo of its cache shared)
     /// under this object's notification identity.
     ///
     /// # Errors
     ///
     /// `InvalidInput` for geometry nested deeper than `MAX_GEOMETRY_NESTING`.
     pub(crate) fn snapshot_copy(&self) -> Result<Self> {
-        let mut copy = self.clone_for_evaluation_depth(0)?;
+        Surface::check_curve_evaluation_copy_depth(self, 0)?;
+        let mut copy = self.clone_exact_bounded();
         copy.notify_identity = self.notify_identity.duplicate_for_snapshot();
         Ok(copy)
     }
@@ -667,7 +668,9 @@ impl Curve {
             CurveKind::Conic(c) => CurveKind::Conic(*c),
             CurveKind::CrvInVolume(c) => CurveKind::CrvInVolume(Box::new(c.clone_exact_bounded())),
             CurveKind::CrvOnSurf(c) => CurveKind::CrvOnSurf(Box::new(c.clone_exact_shared())),
-            CurveKind::TangentField(c) => CurveKind::TangentField(Box::new(c.as_ref().clone())),
+            CurveKind::TangentField(c) => {
+                CurveKind::TangentField(Box::new(c.clone_exact_bounded()))
+            }
             CurveKind::Line(c) => CurveKind::Line(c.clone_exact_bounded()),
             CurveKind::Ellipse(c) => CurveKind::Ellipse(c.clone_exact_bounded()),
             CurveKind::Parabola(c) => CurveKind::Parabola(c.clone_exact_bounded()),
@@ -793,7 +796,7 @@ impl Curve {
 
     /// Copy every owned geometry branch within Surface's shared `MAX_GEOMETRY_NESTING` (32) bound.
     pub(crate) fn clone_for_evaluation_depth(&self, depth: usize) -> Result<Self> {
-        crate::surface::surface::p2::Surface::check_curve_evaluation_copy_depth(self, depth)?;
+        Surface::check_curve_evaluation_copy_depth(self, depth)?;
         let kind = match &self.kind {
             CurveKind::BSpline(c) => CurveKind::BSpline(c.clone_exact()),
             CurveKind::Hermite(c) => CurveKind::Hermite(*c),

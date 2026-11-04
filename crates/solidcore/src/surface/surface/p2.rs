@@ -100,9 +100,10 @@
 //!   caller (upstream deletes the object the caller holds).
 //! - **Nesting.** [`MAX_GEOMETRY_NESTING`] (32, the database reader's bound; upstream
 //!   fixtures nest at most 3) bounds wrapper geometry across curves, surfaces and
-//!   volumes. Every wrapper constructor and setter checks its inner geometry with the
-//!   non-recursive `check_geometry_nesting`, so the recursive dispatch below, `Clone`
-//!   and `Drop` stay bounded (no limit upstream). 32 rather than 64 because a 64-deep
+//!   volumes, including deep-cloned retained-definition surfaces. Wrapper checks and
+//!   B-rep snapshots use the non-recursive `check_geometry_nesting` before recursive
+//!   copying (no limit upstream). Off-snapshot infallible clones still rely on their
+//!   callers' nesting invariants. 32 rather than 64 because a 64-deep
 //!   offset chain overflows the 1 MiB wasm32 stack unoptimised (`topology::database_io`,
 //!   "Stack use").
 //! - **Owner tolerance.** A surface holds only an owner handle, never its B-rep, so the
@@ -645,10 +646,12 @@ impl Surface {
     /// This includes trim curves, curve-on-surface children and volume chains, not only
     /// the surface basis.
     pub(crate) fn check_evaluation_copy_depth(&self, initial_depth: usize) -> Result<()> {
-        // These variants own no nested geometry. Preserve the depth-limit error
+        // These stored variants own no nested geometry when no definition is retained.
+        // Preserve the depth-limit error
         // through the general walker, but avoid its stack allocation for leaves.
         if initial_depth <= MAX_GEOMETRY_NESTING
-            && matches!(self.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_))
+            && self.definition.is_none()
+            && matches!(&self.kind, SurfaceKind::BSpline(_) | SurfaceKind::Plane(_))
         {
             return Ok(());
         }
@@ -766,60 +769,91 @@ pub(crate) fn check_geometry_nesting(
         }
         let mut push = |geometry| pending.push((geometry, depth + 1));
         match geometry {
-            Geometry::Surface(surface) => match surface.kind() {
-                SurfaceKind::BSpline(_) | SurfaceKind::BallPatch(_) | SurfaceKind::Plane(_) => {}
-                SurfaceKind::ProceduralBlend(p) => {
-                    for support in p.supports() {
-                        push(Geometry::Surface(support));
+            Geometry::Surface(surface) => {
+                use crate::surface::procedural_blend::corner::CornerDefinition;
+
+                if let Some(definition) = &surface.definition {
+                    match definition.as_ref() {
+                        KeptDefinition::Round(round) => {
+                            for support in &round.supports {
+                                push(Geometry::Surface(support));
+                            }
+                        }
+                        KeptDefinition::Corner(corner) => match corner {
+                            CornerDefinition::Swept(swept) => {
+                                push(Geometry::Surface(&swept.common));
+                            }
+                            CornerDefinition::End(end) => {
+                                push(Geometry::Surface(&end.support));
+                            }
+                            CornerDefinition::Mixed(mixed) => {
+                                for blend in &mixed.blends {
+                                    push(Geometry::Surface(blend));
+                                }
+                                push(Geometry::Surface(&mixed.common));
+                            }
+                            // Clone shares the fill instead of cloning its surfaces.
+                            CornerDefinition::Setback(_) => {}
+                        },
+                        KeptDefinition::Sweep(_) => {}
                     }
                 }
-                SurfaceKind::Cone(s) => {
-                    if let Some(c) = s.rev().gen_curve() {
-                        push(Geometry::Curve(c));
+                match &surface.kind {
+                    SurfaceKind::BSpline(_) | SurfaceKind::BallPatch(_) | SurfaceKind::Plane(_) => {
+                    }
+                    SurfaceKind::ProceduralBlend(p) => {
+                        for support in p.supports() {
+                            push(Geometry::Surface(support));
+                        }
+                    }
+                    SurfaceKind::Cone(s) => {
+                        if let Some(c) = s.rev().gen_curve() {
+                            push(Geometry::Curve(c));
+                        }
+                    }
+                    SurfaceKind::Sphere(s) => {
+                        if let Some(c) = s.base().gen_curve() {
+                            push(Geometry::Curve(c));
+                        }
+                    }
+                    SurfaceKind::Torus(s) => {
+                        if let Some(c) = s.base().gen_curve() {
+                            push(Geometry::Curve(c));
+                        }
+                    }
+                    SurfaceKind::SurfOfRevolution(s) => {
+                        if let Some(c) = s.gen_curve() {
+                            push(Geometry::Curve(c));
+                        }
+                    }
+                    SurfaceKind::SurfOfExtrusion(s) => {
+                        if let Some(c) = s.gen_curve() {
+                            push(Geometry::Curve(c));
+                        }
+                    }
+                    SurfaceKind::Step(s) => {
+                        if let Some(s) = s.surface() {
+                            push(Geometry::Surface(s));
+                        }
+                    }
+                    SurfaceKind::CurveBounded(s) => {
+                        for c in s.boundaries_3d().iter().chain(s.boundaries_uv()) {
+                            push(Geometry::Curve(c));
+                        }
+                        push(Geometry::Surface(s.basis()));
+                    }
+                    SurfaceKind::SrfInVolume(s) => {
+                        push(Geometry::Volume(s.volume()));
+                        push(Geometry::Surface(s.surface()));
+                    }
+                    SurfaceKind::OffsetSurface(s) => {
+                        push(Geometry::Surface(s.base_surface()));
+                        if let Some(e) = s.extended_base_surface() {
+                            push(Geometry::Surface(e));
+                        }
                     }
                 }
-                SurfaceKind::Sphere(s) => {
-                    if let Some(c) = s.base().gen_curve() {
-                        push(Geometry::Curve(c));
-                    }
-                }
-                SurfaceKind::Torus(s) => {
-                    if let Some(c) = s.base().gen_curve() {
-                        push(Geometry::Curve(c));
-                    }
-                }
-                SurfaceKind::SurfOfRevolution(s) => {
-                    if let Some(c) = s.gen_curve() {
-                        push(Geometry::Curve(c));
-                    }
-                }
-                SurfaceKind::SurfOfExtrusion(s) => {
-                    if let Some(c) = s.gen_curve() {
-                        push(Geometry::Curve(c));
-                    }
-                }
-                SurfaceKind::Step(s) => {
-                    if let Some(s) = s.surface() {
-                        push(Geometry::Surface(s));
-                    }
-                }
-                SurfaceKind::CurveBounded(s) => {
-                    for c in s.boundaries_3d().iter().chain(s.boundaries_uv()) {
-                        push(Geometry::Curve(c));
-                    }
-                    push(Geometry::Surface(s.basis()));
-                }
-                SurfaceKind::SrfInVolume(s) => {
-                    push(Geometry::Volume(s.volume()));
-                    push(Geometry::Surface(s.surface()));
-                }
-                SurfaceKind::OffsetSurface(s) => {
-                    push(Geometry::Surface(s.base_surface()));
-                    if let Some(e) = s.extended_base_surface() {
-                        push(Geometry::Surface(e));
-                    }
-                }
-            },
+            }
             Geometry::Curve(curve) => match curve.kind() {
                 CurveKind::Projected(c) => push(Geometry::Curve(c.curve())),
                 CurveKind::Iso(c) => push(Geometry::Surface(c.surface())),
@@ -7986,6 +8020,54 @@ mod tests {
                 assert_eq!(leaf.is_ok(), depth <= MAX_GEOMETRY_NESTING);
             }
         }
+    }
+
+    #[test]
+    fn retained_end_definition_obeys_geometry_depth_limit() {
+        use crate::surface::procedural_blend::corner::{CornerDefinition, EndDefinition};
+
+        for mut root in [
+            bilinear(),
+            Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)),
+        ] {
+            root.definition = Some(Box::new(KeptDefinition::Corner(CornerDefinition::End(
+                EndDefinition {
+                    support: Box::new(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z))),
+                    boundary: Vec::new(),
+                },
+            ))));
+            assert!(root
+                .check_evaluation_copy_depth(MAX_GEOMETRY_NESTING - 1)
+                .is_ok());
+            assert!(matches!(
+                root.check_evaluation_copy_depth(MAX_GEOMETRY_NESTING),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn retained_swept_definition_obeys_geometry_depth_limit() {
+        use crate::surface::procedural_blend::corner::{CornerDefinition, SweptDefinition};
+
+        let mut root = bilinear();
+        root.definition = Some(Box::new(KeptDefinition::Corner(CornerDefinition::Swept(
+            SweptDefinition {
+                common: Box::new(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z))),
+                axis_point: Vec3::ZERO,
+                axis: Vec3::Z,
+                centres: [Vec3::X, Vec3::Y],
+                radius: 1.0,
+                tol: 1e-6,
+            },
+        ))));
+        assert!(root
+            .check_evaluation_copy_depth(MAX_GEOMETRY_NESTING - 1)
+            .is_ok());
+        assert!(matches!(
+            root.check_evaluation_copy_depth(MAX_GEOMETRY_NESTING),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]

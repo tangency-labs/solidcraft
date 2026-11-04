@@ -527,6 +527,16 @@ pub(crate) struct TangentFieldMembers {
 }
 
 impl TangentFieldCurve {
+    /// Copy the field as the same object, preserving the base's shared state.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            base: self.base.clone_exact_shared(),
+            dir_type: self.dir_type,
+            start_tangent: self.start_tangent,
+            end_tangent: self.end_tangent,
+        }
+    }
+
     /// `SmTangentField_TYPE`.
     pub const TYPE: i64 = TANGENT_FIELD_TYPE;
 
