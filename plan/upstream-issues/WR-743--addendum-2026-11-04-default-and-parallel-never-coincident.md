@@ -1,4 +1,4 @@
-Updates: WR-739
+Updates: WR-743
 
 The opt-in `iso_circle_planes_parallel_within_angle_tolerance` is removed; the fix is the default result of `test_for_iso_circles`. It also closes a gap of the opt-in: planes whose normals passed the angle test but lay further apart than `tol_3d` went to `intersect_two_planes`, which judges coincidence on its own coordinate-scaled tolerance (`EFF_ZERO * (1 + max coordinate)`). With a small `tolerance_scale` it answered "parallel, coincident", so `common_axis` stayed true with no common line. When the angle test passes, a `Parallel` answer from the helper is now never coincident (the pair is two planes with no common line, so no common axis); a `Line` answer passes through, so a short-sweep torus is still found. Test: `near_parallel_planes_beyond_tol_3d_are_not_coincident_by_the_helper_tolerance` (`crates/solidcore/src/surface/surf_of_revolution/p1.rs`).
 

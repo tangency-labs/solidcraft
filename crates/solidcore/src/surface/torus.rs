@@ -2253,7 +2253,7 @@ mod tests {
 
     /// A half torus of minor radius 0.1 at coordinates of about 200: the minor circles at its
     /// two ends lie in one plane to rounding, which `test_for_iso_circles` takes for parallel (not
-    /// a line off the axis, WR-739), so it is found.
+    /// a line off the axis, WR-743), so it is found.
     #[test]
     fn small_far_half_torus_is_found_with_near_parallel_iso_planes() {
         let k = Kernel::default();

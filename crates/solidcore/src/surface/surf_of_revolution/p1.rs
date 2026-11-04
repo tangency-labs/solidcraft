@@ -2015,7 +2015,7 @@ pub fn test_for_iso_circles(
 
         // find line of intersection between two isoCurve planes
         if out.common_axis {
-            // not upstream (WR-739): planes whose normals are within the angle tolerance are
+            // not upstream (WR-743): planes whose normals are within the angle tolerance are
             // parallel, so the line upstream gets from them (off the axis by rounding / angle) is
             // rounding. Within tol_3d of each other over both whole circles (see `circles_in_one_plane`) they are one plane, beyond it two,
             // whatever `intersect_two_planes` judges on its own coordinate-scaled tolerance; a
@@ -2067,7 +2067,7 @@ pub fn test_for_iso_circles(
                     out.common_axis = false;
                 }
             } else {
-                // not upstream (WR-739): a plane with no line (parallel, not coincident) has no common
+                // not upstream (WR-743): a plane with no line (parallel, not coincident) has no common
                 // line with the others; `this_common_line_*` are then the last `Line` answer's, stale
                 if !success && !coincident {
                     out.common_axis = false;
@@ -2597,7 +2597,7 @@ mod tests {
         assert!(!g.found_circles);
     }
 
-    /// WR-739 with a small `tolerance_scale`: a cylinder 2e-12 high at z = 4 has parallel circle planes
+    /// WR-743 with a small `tolerance_scale`: a cylinder 2e-12 high at z = 4 has parallel circle planes
     /// further apart than `tol_3d` (1e-13) but within the coordinate-scaled tolerance
     /// `intersect_two_planes` judges coincidence by. They are two planes with no common line, so
     /// there is no common axis (it stayed true, with no line written).
@@ -2618,7 +2618,7 @@ mod tests {
         assert!(r.common_line_point.is_none());
     }
 
-    /// WR-739: iso circles in `z = 0` (first), in `y = 0` (its plane meets the first
+    /// WR-743: iso circles in `z = 0` (first), in `y = 0` (its plane meets the first
     /// along the X axis, which is saved as the common line), and then, last, in `z = 5`,
     /// parallel to the first plane and not coincident with it. That plane has no common
     /// line with the others, so there is no common axis (it stayed true: the comparison
@@ -2665,7 +2665,7 @@ mod tests {
     }
 }
 
-/// WR-739: nearly parallel iso-circle planes (`tilt` = |n1 x n2|) are one plane when every point of
+/// WR-743: nearly parallel iso-circle planes (`tilt` = |n1 x n2|) are one plane when every point of
 /// each circle is within `tol_3d` of the other circle's plane: that circle's centre offset from the
 /// other plane plus its own radius * tilt. Each circle is bounded by its own radius.
 fn circles_in_one_plane(

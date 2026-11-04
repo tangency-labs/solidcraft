@@ -1,4 +1,4 @@
-#### WR-739. `sm_TestForIsoCircles` takes the planes of two iso circles for intersecting when their normals differ by rounding, and the common-axis test refuses a small torus far from the origin
+#### WR-743. `sm_TestForIsoCircles` takes the planes of two iso circles for intersecting when their normals differ by rounding, and the common-axis test refuses a small torus far from the origin
 - **Severity:** Wrong result (a NURBS torus is not recognised as its analytic surface, so SolidCraft reports `a NURBS form that is not its analytic surface`)
 - **Area:** Surfaces / surface of revolution
 - **Location:** `source/SMLib/src/SmSurfOfRevolution.cpp`, `sm_TestForIsoCircles` (the common-axis check between iso circles), calling `smgu_IntersectTwoPlanes` (`source/SMLib/src/SmGeomUtility.cpp:3235`).
