@@ -7,13 +7,12 @@
 //! `widest_gap`, `common_angle`, `crates/step/src/topology.rs` `Builder::extent` and
 //! `face_extent`, and `crates/geom/src/brep/form.rs` `extent`, at a5b71ca2; MIT OR
 //! Apache-2.0), which samples each edge; here each edge's extremes are its
-//! stationary points. The computations are the kernel's own: the STEP
-//! parameterisations of [`Surface::evaluate_step_point`] (in closed form for planes,
-//! cones, cylinders, spheres and tori, and the angle of a surface of revolution),
-//! [`Surface::step_inversion`] and [`Surface::evaluate_step`] for the other kinds and
-//! a revolution's profile parameter, [`Curve::evaluate`] and the line's and
-//! ellipse's STEP evaluators for the edges, and [`LocalSolve1d::solve_by_bisection`]
-//! for the stationary points without a closed form.
+//! stationary points. The computations are the kernel's own: a point's parameters
+//! are [`Surface::step_inversion_unbounded`]'s, the rates [`Surface::evaluate_step`]'s
+//! where they have no closed form, the edges' pieces their exact NURB Bezier segments
+//! ([`create_bez_segments`]) or their lines and conic arcs, and the stationary points
+//! without a closed form are certified roots solved by
+//! [`LocalSolve1d::solve_by_bisection`].
 //!
 //! | Rust                 | SolidCraft                                                  |
 //! |----------------------|-------------------------------------------------------------|
@@ -22,17 +21,23 @@
 //! | [`WindowMargin`]     | `swept::MARGIN` (and step-brep's 5 %): ops' choice now      |
 //!
 //! Deviations: not a port. Recursion: halving a piece of an edge to decide its turn
-//! round a period stops at [`MAX_SPLIT_DEPTH`] levels.
+//! round a period stops at [`MAX_SPLIT_DEPTH`] levels; the root isolation is a loop
+//! over an explicit stack, at most [`MAX_ISOLATION_DEPTH`] halvings deep and
+//! [`MAX_ISOLATION_BRACKETS`] brackets long.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_NOT_WITHIN_TOLERANCE};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::local_solve1d::{EvalFunction, FunctionValue, LocalSolve1d};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
+use crate::nurbs::b_spline_surface::p1::LocationType;
 use crate::nurbs::b_spline_surface_n_lib::EvaluateFlags;
+use crate::nurbs::crv_basic::Curve as NurbCurve;
+use crate::nurbs::math::{CPoint, NOW};
+use crate::nurbs::nurbs_crv::create_bez_segments;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "surface::step_window::face_window";
@@ -48,6 +53,15 @@ pub const MAX_SPLIT_DEPTH: usize = 12;
 /// Halvings a piece of an edge always gets before its turn is read off its ends: a
 /// whole turn has equal ends, its quarters do not.
 const MIN_SPLIT_DEPTH: usize = 2;
+
+/// Halvings of a bracket in the certified root isolation ([`roots`]): past them the
+/// bracket is below the rounding of the piece's parameter (`2^-60`), and its middle
+/// stands for the roots in it.
+pub const MAX_ISOLATION_DEPTH: usize = 60;
+
+/// Brackets the certified root isolation of one polynomial may visit
+/// ([`roots`]); more is an error (`Unsupported`), never a silent loss.
+pub const MAX_ISOLATION_BRACKETS: usize = 1 << 16;
 
 /// Regula falsi steps for a stationary point without a closed form (each step keeps
 /// at most 85 % of the bracket, so 200 steps reach the parameter's rounding).
@@ -101,13 +115,22 @@ pub struct WindowMargin {
 /// of revolution (`((P - O) x P') . Z = 0`, a sine equation on a conic); a circle
 /// about the axis is an iso line, a line keeps its angle, and a curve in a plane
 /// through the axis keeps its angle and its profile parameter is monotone. The rest
-/// (other curve kinds; a torus's tube angle and a revolution's profile parameter off
-/// those cases; B-spline and other surfaces) are the sign changes of the parameter's
-/// rate along the edge, bracketed on the edge's knot spans (`2 (degree + 1)`
-/// brackets each) and solved by [`LocalSolve1d::solve_by_bisection`].
+/// (other curve kinds; a torus's tube angle, a revolution's profile parameter and an
+/// extrusion's parameters off those cases) are certified: on each exact Bezier piece
+/// of the edge (its NURB's segments, or its line and conic arcs) a polynomial whose
+/// roots include every stationary point (the rate's numerator through the chain rule:
+/// `X . P'` on a plane, `((P - O) x P') . Z` for the angle, `Z . P'` for a height or a
+/// latitude; for a tube angle the square that clears its root; for a profile or an
+/// extrusion parameter, where the point's meridian or cross-section coordinates are
+/// stationary) has its roots isolated by Descartes' rule of signs on its Bernstein
+/// coefficients, halving each bracket until it has no sign change or exactly one,
+/// which [`LocalSolve1d::solve_by_bisection`] solves. Extra roots are harmless (they
+/// only split a monotone piece); none is lost. Surfaces with no such polynomial
+/// (B-spline surfaces and the other kinds) are refused.
 ///
 /// **Units and parameterisations** are the kernel's STEP ones
-/// ([`Surface::evaluate_step_point`]): a plane's `O + u sx X + v sy Y`, a cone's or
+/// ([`Surface::evaluate_step_point`], read with [`Surface::step_inversion_unbounded`],
+/// whatever the surface's current domain): a plane's `O + u sx X + v sy Y`, a cone's or
 /// cylinder's angle in degrees and height along the axis, a sphere's longitude and
 /// latitude in degrees, a torus's angle about the axis and round the tube in degrees,
 /// a surface of revolution's angle in degrees and its profile's STEP parameter, and
@@ -141,13 +164,18 @@ pub struct WindowMargin {
 ///
 /// [`SolidError::InvalidInput`] for a `tol` or a margin that is negative or not
 /// finite, an empty loop, an edge interval that is not finite or ends below its start,
-/// an edge or vertex farther than `tol` from a plane, cone, cylinder, sphere or torus,
+/// an edge or vertex farther than `tol` from a plane, cone, cylinder, sphere, torus or
+/// surface of revolution,
 /// no edge loop on a surface that is not closed, a face whose loops wind round the
 /// angle more than once more one way than the other, or that reaches a side its
 /// surface does not close (a cylinder bounded by one circle).
-/// [`SolidError::Unsupported`] for a loop through a point on the axis along the axis.
-/// Those of [`Surface::step_inversion`], [`Surface::evaluate_step`],
-/// [`Surface::max_analytic_domain`] and the curves' evaluations.
+/// [`SolidError::Unsupported`] for a loop through a point on the axis along the axis,
+/// an edge without a closed form on a surface without a polynomial for its stationary
+/// points (a B-spline surface, an extrusion of a profile not across its direction), an
+/// edge curve without an exact NURB, and a root isolation past
+/// [`MAX_ISOLATION_BRACKETS`]. Those of [`Surface::step_inversion_unbounded`],
+/// [`Surface::evaluate_step`], [`Surface::max_analytic_domain`] and the curves'
+/// evaluations.
 pub fn face_window(
     k: &Kernel,
     surface: &Surface,
@@ -192,7 +220,7 @@ pub fn face_window(
         }
     }
     for &p in vertices {
-        let q = map.params(k, p, true)?;
+        let q = map.params(k, p)?;
         for (d, range) in window.iter_mut().enumerate() {
             if let (false, Some(x)) = (map.periodic(d), q.get(d)) {
                 range.add(x);
@@ -236,7 +264,6 @@ pub fn face_window(
         }
     }
 
-    let max = map.max_domain(k)?;
     let mut out = [Range::empty(), Range::empty()];
     for (d, o) in out.iter_mut().enumerate() {
         let r = window.get(d).copied().unwrap_or_default();
@@ -254,7 +281,7 @@ pub fn face_window(
                 hi = lo + PERIOD;
             }
         } else {
-            let (min, max) = map.limits(d, max.as_ref());
+            let (min, max) = map.limits(k, d)?;
             lo = lo.min((lo - m).max(min));
             hi = hi.max((hi + m).min(max));
         }
@@ -380,6 +407,25 @@ impl Frame {
         }
     }
 
+    /// A frame about the origin whose Z is the unit `z`.
+    fn across(z: Vec3) -> Self {
+        // X along the axis `z` is least along, made perpendicular
+        let pick = if z.x.abs() <= z.y.abs() && z.x.abs() <= z.z.abs() {
+            Vec3::X
+        } else if z.y.abs() <= z.z.abs() {
+            Vec3::Y
+        } else {
+            Vec3::Z
+        };
+        let x = (pick - pick.dot(z) * z).unitize().unwrap_or(Vec3::X);
+        Self {
+            o: Vec3::ZERO,
+            x,
+            y: z.cross(x),
+            z,
+        }
+    }
+
     /// The angle of `w` about Z from X, in degrees.
     fn angle(&self, w: Vec3) -> f64 {
         w.dot(self.y).atan2(w.dot(self.x)).to_degrees()
@@ -397,106 +443,114 @@ enum Along {
     /// A cone's or cylinder's height along the axis; the radius is `radius + v tan`.
     Height { radius: f64, tan: f64 },
     /// A sphere's latitude.
-    Latitude { radius: f64 },
-    /// A torus's angle round its tube.
-    Tube { major: f64, minor: f64 },
+    Latitude,
+    /// A torus's angle round its tube, about its major circle of radius `major`.
+    Tube { major: f64 },
     /// A surface of revolution's profile parameter, by the kernel's inversion;
     /// periodic for a conic profile.
     Profile { periodic: bool },
 }
 
-/// How a point's STEP parameters on the surface are computed.
-enum Map<'a> {
-    /// `O + u sx X + v sy Y`.
-    Plane {
-        frame: Frame,
-        scale: Point2,
-        tol: f64,
+/// The surface's shape, as far as the stationary points of its parameters along a
+/// curve depend on it.
+enum Shape {
+    /// A plane: u and v along its X and Y.
+    Plane { frame: Frame },
+    /// A surface of revolution: u the angle about Z (undefined on the axis), v by
+    /// `along`.
+    Revolved { frame: Frame, along: Along },
+    /// A linear extrusion along the unit `dir`: u the profile's parameter (periodic
+    /// for a conic profile), v along `dir`; `flat` when the profile lies in a plane
+    /// across `dir`.
+    Extruded {
+        dir: Vec3,
+        flat: bool,
+        periodic: bool,
     },
-    /// u the angle about Z (undefined on the axis), v by `along`.
-    Revolved {
-        frame: Frame,
-        along: Along,
-        surface: &'a Surface,
-        tol: f64,
-    },
-    /// The kernel's inversion in both directions, neither periodic.
-    Inverted { surface: &'a Surface, tol: f64 },
+    /// Any other kind: no polynomial for its parameters' stationary points.
+    Other,
+}
+
+/// The surface, the tolerance of its boundary and its shape.
+struct Map<'a> {
+    surface: &'a Surface,
+    tol: f64,
+    shape: Shape,
 }
 
 impl<'a> Map<'a> {
     fn of(surface: &'a Surface, tol: f64) -> Self {
-        let revolved = |frame, along| Map::Revolved {
-            frame,
-            along,
-            surface,
-            tol,
-        };
-        match surface.kind() {
-            SurfaceKind::Plane(s) => Map::Plane {
+        let shape = match surface.kind() {
+            SurfaceKind::Plane(s) => Shape::Plane {
                 frame: Frame::of(s.position()),
-                scale: Point2::new(s.uv_scale().x, s.uv_scale().y),
-                tol,
             },
             SurfaceKind::Cone(s) => {
                 let c = s.canonical();
-                revolved(
-                    Frame::of(&c.origin),
-                    Along::Height {
+                Shape::Revolved {
+                    frame: Frame::of(&c.origin),
+                    along: Along::Height {
                         radius: c.radius,
                         tan: c.semi_angle_deg.to_radians().tan(),
                     },
-                )
+                }
             }
-            SurfaceKind::Sphere(s) => revolved(
-                Frame::of(s.base().position()),
-                Along::Latitude { radius: s.radius() },
-            ),
-            SurfaceKind::Torus(s) => revolved(
-                Frame::of(s.base().position()),
-                Along::Tube {
+            SurfaceKind::Sphere(s) => Shape::Revolved {
+                frame: Frame::of(s.base().position()),
+                along: Along::Latitude,
+            },
+            SurfaceKind::Torus(s) => Shape::Revolved {
+                frame: Frame::of(s.base().position()),
+                along: Along::Tube {
                     major: s.major_radius(),
-                    minor: s.minor_radius(),
                 },
-            ),
-            SurfaceKind::SurfOfRevolution(s) => revolved(
-                Frame::of(s.position()),
-                Along::Profile {
+            },
+            SurfaceKind::SurfOfRevolution(s) => Shape::Revolved {
+                frame: Frame::of(s.position()),
+                along: Along::Profile {
                     periodic: matches!(s.gen_curve().map(Curve::kind), Some(CurveKind::Ellipse(_))),
                 },
-            ),
-            _ => Map::Inverted { surface, tol },
-        }
-    }
-
-    const fn surface(&self) -> Option<&'a Surface> {
-        match self {
-            Map::Plane { .. } => None,
-            Map::Revolved { surface, .. } | Map::Inverted { surface, .. } => Some(surface),
+            },
+            SurfaceKind::SurfOfExtrusion(s) => {
+                match (s.gen_curve(), s.extrusion_vector().unitize()) {
+                    (Some(profile), Ok(dir)) => Shape::Extruded {
+                        dir,
+                        flat: across(profile, dir),
+                        periodic: matches!(profile.kind(), CurveKind::Ellipse(_)),
+                    },
+                    _ => Shape::Other,
+                }
+            }
+            _ => Shape::Other,
+        };
+        Self {
+            surface,
+            tol,
+            shape,
         }
     }
 
     const fn periodic(&self, d: usize) -> bool {
-        match self {
-            Map::Revolved { along, .. } => {
+        match &self.shape {
+            Shape::Revolved { along, .. } => {
                 d == 0
                     || matches!(
                         along,
                         Along::Tube { .. } | Along::Profile { periodic: true }
                     )
             }
-            Map::Plane { .. } | Map::Inverted { .. } => false,
+            Shape::Extruded { periodic, .. } => d == 0 && *periodic,
+            Shape::Plane { .. } | Shape::Other => false,
         }
     }
 
     /// The window of a face without edge loops: the whole of a closed surface.
     fn whole(&self) -> Result<Extent2d> {
-        match self {
-            Map::Revolved {
-                along: Along::Latitude { .. },
+        match &self.shape {
+            Shape::Revolved {
+                along: Along::Latitude,
                 ..
             } => Ok(Extent2d::from_bounds(0.0, -90.0, PERIOD, 90.0)),
-            Map::Revolved {
+            Shape::Revolved {
                 along: Along::Tube { .. },
                 ..
             } => Ok(Extent2d::from_bounds(0.0, 0.0, PERIOD, PERIOD)),
@@ -507,22 +561,15 @@ impl<'a> Map<'a> {
         }
     }
 
-    fn max_domain(&self, k: &Kernel) -> Result<Option<Extent2d>> {
-        match self.surface() {
-            Some(s) => s.max_analytic_domain(k).map(Some),
-            None => Ok(None),
-        }
-    }
-
     /// How far a margin may move the ends of direction `d` (not periodic).
-    fn limits(&self, d: usize, max: Option<&Extent2d>) -> (f64, f64) {
-        match self {
-            Map::Plane { .. } => (f64::NEG_INFINITY, f64::INFINITY),
-            Map::Revolved {
-                along: Along::Latitude { .. },
+    fn limits(&self, k: &Kernel, d: usize) -> Result<(f64, f64)> {
+        Ok(match &self.shape {
+            Shape::Plane { .. } => (f64::NEG_INFINITY, f64::INFINITY),
+            Shape::Revolved {
+                along: Along::Latitude,
                 ..
             } => (-90.0, 90.0),
-            Map::Revolved {
+            Shape::Revolved {
                 along: Along::Height { radius, tan },
                 ..
             } => {
@@ -535,18 +582,16 @@ impl<'a> Map<'a> {
                     (f64::NEG_INFINITY, -radius / tan)
                 }
             }
-            _ => match max {
-                Some(m) => {
-                    let ivl = if d == 0 {
-                        m.u_interval()
-                    } else {
-                        m.v_interval()
-                    };
-                    (ivl.min(), ivl.max())
-                }
-                None => (f64::NEG_INFINITY, f64::INFINITY),
-            },
-        }
+            _ => {
+                let m = self.surface.max_analytic_domain(k)?;
+                let ivl = if d == 0 {
+                    m.u_interval()
+                } else {
+                    m.v_interval()
+                };
+                (ivl.min(), ivl.max())
+            }
+        })
     }
 
     /// The end of direction `d` (not periodic) that closes the surface on the side
@@ -558,12 +603,12 @@ impl<'a> Map<'a> {
         if d != 1 {
             return Err(open());
         }
-        match self {
-            Map::Revolved {
-                along: Along::Latitude { .. },
+        match &self.shape {
+            Shape::Revolved {
+                along: Along::Latitude,
                 ..
             } => Ok(if up { 90.0 } else { -90.0 }),
-            Map::Revolved {
+            Shape::Revolved {
                 along: Along::Height { radius, tan },
                 ..
             } => {
@@ -573,16 +618,16 @@ impl<'a> Map<'a> {
                 }
                 Ok(-radius / tan)
             }
-            Map::Revolved {
+            Shape::Revolved {
                 frame,
                 along: Along::Profile { .. },
-                surface,
-                tol,
             } => {
-                let m = surface.max_analytic_domain(k)?;
+                let m = self.surface.max_analytic_domain(k)?;
                 let v = if up { m.v_max() } else { m.v_min() };
-                let p = surface.evaluate_step_point(k, Point2::new(m.u_min(), v))?;
-                if frame.radial(p - frame.o).length() <= *tol {
+                let p = self
+                    .surface
+                    .evaluate_step_point(k, Point2::new(m.u_min(), v))?;
+                if frame.radial(p - frame.o).length() <= self.tol {
                     Ok(v)
                 } else {
                     Err(open())
@@ -592,80 +637,42 @@ impl<'a> Map<'a> {
         }
     }
 
-    /// The STEP parameters of `p` (u `None` on the axis of a surface of revolution);
-    /// with `check`, refused farther than the tolerance from an analytic surface.
-    fn params(&self, k: &Kernel, p: Point3, check: bool) -> Result<Params> {
-        let off = || SolidError::invalid_input(OP, "a boundary point off its surface");
-        match self {
-            Map::Plane { frame, scale, tol } => {
-                let w = p - frame.o;
-                if check && w.dot(frame.z).abs() > *tol {
-                    return Err(off());
-                }
+    /// The STEP parameters of `p`, the kernel's inversion without the surface's domain
+    /// ([`Surface::step_inversion_unbounded`]); u `None` at a pole of a surface of
+    /// revolution.
+    fn params(&self, k: &Kernel, p: Point3) -> Result<Params> {
+        match self.surface.step_inversion_unbounded(k, p, self.tol) {
+            Ok((uv, location)) => {
+                let pole =
+                    matches!(self.shape, Shape::Revolved { .. }) && location == LocationType::Pole;
                 Ok(Params {
-                    u: Some(w.dot(frame.x) / scale.x),
-                    v: w.dot(frame.y) / scale.y,
-                })
-            }
-            Map::Revolved {
-                frame,
-                along,
-                surface,
-                tol,
-            } => {
-                let w = p - frame.o;
-                let h = w.dot(frame.z);
-                let rho = frame.radial(w).length();
-                let u = (rho > *tol).then(|| frame.angle(w));
-                let (v, gap) = match *along {
-                    // the distance across the generator
-                    Along::Height { radius, tan } => {
-                        (h, (rho - (radius + h * tan)).abs() / tan.hypot(1.0))
-                    }
-                    Along::Latitude { radius } => {
-                        (h.atan2(rho).to_degrees(), (w.length() - radius).abs())
-                    }
-                    Along::Tube { major, minor } => (
-                        h.atan2(rho - major).to_degrees(),
-                        ((rho - major).hypot(h) - minor).abs(),
-                    ),
-                    Along::Profile { .. } => {
-                        let dom = surface.max_analytic_domain(k)?;
-                        let (uv, _) = surface.step_inversion(k, &dom, p, *tol, None)?;
-                        (uv.y, 0.0)
-                    }
-                };
-                if check && gap > *tol {
-                    return Err(off());
-                }
-                Ok(Params { u, v })
-            }
-            Map::Inverted { surface, tol } => {
-                let dom = surface.max_analytic_domain(k)?;
-                let (uv, _) = surface.step_inversion(k, &dom, p, *tol, None)?;
-                Ok(Params {
-                    u: Some(uv.x),
+                    u: (!pole).then_some(uv.x),
                     v: uv.y,
                 })
             }
+            Err(SolidError::Upstream {
+                code: SM_ERR_NOT_WITHIN_TOLERANCE,
+                ..
+            }) => Err(SolidError::invalid_input(
+                OP,
+                "a boundary point off its surface",
+            )),
+            Err(e) => Err(e),
         }
     }
 
     /// The rates of u and v along the tangent `dp` at `p` (whose parameters are `q`),
     /// each up to a positive factor.
     fn rates(&self, k: &Kernel, p: Point3, dp: Vec3, q: &Params) -> Result<[f64; 2]> {
-        match self {
-            Map::Plane { frame, scale, .. } => {
-                Ok([dp.dot(frame.x) / scale.x, dp.dot(frame.y) / scale.y])
-            }
-            Map::Revolved { frame, along, .. } => {
+        match &self.shape {
+            Shape::Revolved { frame, along } => {
                 let w = p - frame.o;
                 let rad = frame.radial(w);
                 let rho2 = rad.length_squared();
                 let du = w.cross(dp).dot(frame.z) / rho2;
                 let dv = match *along {
-                    Along::Height { .. } | Along::Latitude { .. } => dp.dot(frame.z),
-                    Along::Tube { major, .. } => {
+                    Along::Height { .. } | Along::Latitude => dp.dot(frame.z),
+                    Along::Tube { major } => {
                         let rho = rho2.sqrt();
                         let drho = rad.dot(dp) / rho;
                         (rho - major) * dp.dot(frame.z) - w.dot(frame.z) * drho
@@ -674,7 +681,7 @@ impl<'a> Map<'a> {
                 };
                 Ok([du, dv])
             }
-            Map::Inverted { .. } => self.chain(k, dp, q),
+            Shape::Plane { .. } | Shape::Extruded { .. } | Shape::Other => self.chain(k, dp, q),
         }
     }
 
@@ -682,9 +689,10 @@ impl<'a> Map<'a> {
     /// `(Su, Sv) . r = dp` with the STEP derivatives at `q`.
     fn chain(&self, k: &Kernel, dp: Vec3, q: &Params) -> Result<[f64; 2]> {
         let none = || SolidError::invalid_input(OP, "no surface derivative");
-        let surface = self.surface().ok_or_else(none)?;
         let uv = Point2::new(q.u.unwrap_or(0.0), q.v);
-        let d = surface.evaluate_step(k, uv, 1, 1, EvaluateFlags::default())?;
+        let d = self
+            .surface
+            .evaluate_step(k, uv, 1, 1, EvaluateFlags::default())?;
         let su = d.get(1).and_then(|r| r.first()).copied().ok_or_else(none)?;
         let sv = d.first().and_then(|r| r.get(1)).copied().ok_or_else(none)?;
         let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
@@ -695,6 +703,23 @@ impl<'a> Map<'a> {
         }
         Ok([(c * r1 - b * r2) / det, (a * r2 - b * r1) / det])
     }
+}
+
+/// Whether the curve `profile` lies in a plane across the unit `dir`: its NURB's
+/// control points, which bound it, at one height along `dir` (false without a NURB).
+fn across(profile: &Curve, dir: Vec3) -> bool {
+    let natural = profile.natural_interval();
+    let Ok(pieces) = Bezier::pieces(profile, natural.min(), natural.max(), false) else {
+        return false;
+    };
+    let points: Vec<Vec3> = pieces.iter().flat_map(Bezier::points).collect();
+    let (lo, hi) = points
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| {
+            (a.min(p.dot(dir)), b.max(p.dot(dir)))
+        });
+    let size = points.iter().fold(0.0_f64, |m, p| m.max(p.length()));
+    !points.is_empty() && hi - lo <= EFF_ZERO * (1.0 + size)
 }
 
 /// A point's STEP parameters.
@@ -771,7 +796,7 @@ impl<'a> EdgeCurve<'a> {
     }
 
     /// The parameters strictly between `from` and `to` where u or v is stationary (or
-    /// the curve meets the axis), in loop order.
+    /// the curve meets the axis), and the edge's middle, in loop order.
     fn stationary(&self, k: &Kernel, map: &Map<'_>) -> Result<Vec<f64>> {
         let (lo, hi) = (self.from.min(self.to), self.from.max(self.to));
         let mut ts = Vec::new();
@@ -789,8 +814,12 @@ impl<'a> EdgeCurve<'a> {
                         ts.push(t);
                     }
                 }
-                None => ts.extend(self.numeric(k, map, d, lo, hi)?),
+                None => ts.extend(self.certified(k, map, d, lo, hi)?),
             }
+        }
+        // the edge's middle too: an edge from pole to pole has an angle there only
+        if lo < hi {
+            ts.push(0.5 * (lo + hi));
         }
         ts.sort_by(f64::total_cmp);
         ts.dedup();
@@ -800,113 +829,491 @@ impl<'a> EdgeCurve<'a> {
         Ok(ts)
     }
 
-    /// The sign changes of direction `d`'s rate strictly between `lo` and `hi`,
-    /// bracketed on the knot spans and solved.
-    fn numeric(&self, k: &Kernel, map: &Map<'_>, d: usize, lo: f64, hi: f64) -> Result<Vec<f64>> {
-        if lo >= hi {
-            return Ok(Vec::new());
-        }
-        // the spans in the edge's parameter: a line's one, a conic's quarter turns (its
-        // NURB's arcs), else the curve's knot spans
-        let mut breaks = vec![lo];
-        let degree = match self.curve.kind() {
-            CurveKind::Line(_) => 1,
-            CurveKind::Ellipse(_) => {
-                push_every(&mut breaks, 0.0, PERIOD / 4.0, lo, hi);
-                2
-            }
-            _ => {
-                let (knots, _) = self.curve.knots(k, Some(&Extent1d::from_min_max(lo, hi)))?;
-                breaks.extend(knots.into_iter().filter(|t| *t > lo && *t < hi));
-                self.curve.degree().unwrap_or(3)
-            }
-        };
-        breaks.push(hi);
-        let pieces = 2 * (degree.clamp(1, 32) + 1);
-        let mut samples = Vec::new();
-        for w in breaks.windows(2) {
-            if let [a, b] = w {
-                samples.extend((0..pieces).map(|i| a + (b - a) * (i as f64) / (pieces as f64)));
+    /// The parameters strictly between `lo` and `hi` where direction `d` may be
+    /// stationary (every one where it is), without a closed form: the certified roots
+    /// ([`roots`]) of [`candidates`] on each exact Bezier piece of the curve, and the
+    /// pieces' ends.
+    fn certified(&self, k: &Kernel, map: &Map<'_>, d: usize, lo: f64, hi: f64) -> Result<Vec<f64>> {
+        let step = matches!(
+            self.curve.kind(),
+            CurveKind::Line(_) | CurveKind::Ellipse(_)
+        );
+        let mut ts = Vec::new();
+        for piece in Bezier::pieces(self.curve, lo, hi, step)? {
+            let c = candidates(map, &piece, d).ok_or(SolidError::Unsupported {
+                operation: OP,
+                reason: "stationary points on this kind of surface (no polynomial for them)",
+            })?;
+            // the piece's ends too: a root on a knot is no piece's interior root
+            for s in [0.0, 1.0].into_iter().chain(roots(k, &c)?) {
+                let t = piece.param(s);
+                if t > lo && t < hi {
+                    ts.push(t);
+                }
             }
         }
-        samples.push(hi);
-
-        let mut rate = Rate {
-            k,
-            map,
-            edge: self,
-            d,
-            sign: 1.0,
-        };
-        let mut roots = Vec::new();
-        let mut prev: Option<(f64, f64)> = None;
-        for t in samples {
-            let f = rate.value(t)?;
-            if let Some((pt, pf)) = prev {
-                roots.extend(rate.root((pt, pf), (t, f), lo, hi)?);
-            }
-            prev = Some((t, f));
-        }
-        Ok(roots)
+        Ok(ts)
     }
 }
 
-/// Direction `d`'s rate along an edge, for [`LocalSolve1d`] (times `sign`).
-struct Rate<'a, 'b> {
-    k: &'a Kernel,
-    map: &'a Map<'b>,
-    edge: &'a EdgeCurve<'a>,
-    d: usize,
+/// A Bezier piece of an edge's curve, exact: its homogeneous control points
+/// (`w P`, `w`) over `s` in `[0, 1]`, and how `s` maps to the edge's parameter.
+struct Bezier {
+    cp: Vec<[f64; 4]>,
+    param: PieceParam,
+}
+
+/// How a Bezier piece's `s` maps to the edge's parameter.
+#[derive(Debug, Clone, Copy)]
+enum PieceParam {
+    /// `t0 + s (t1 - t0)`: a line's STEP parameter, a spline's own.
+    Linear { t0: f64, t1: f64 },
+    /// A conic arc of at most a quarter turn about the angle `mid` (degrees), `half`
+    /// either side: the angle where `tan((t - mid) / 2) = (2 s - 1) tan(half / 2)`.
+    Arc { mid: f64, half: f64 },
+}
+
+impl Bezier {
+    /// The exact Bezier pieces of `curve` between its parameters `lo` and `hi`: in the
+    /// STEP parameter (`step`) a line's one segment and a conic's arcs of at most a
+    /// quarter turn, else the Bezier segments of the curve's NURB in its natural
+    /// parameter, cut to `lo..hi`.
+    fn pieces(curve: &Curve, lo: f64, hi: f64, step: bool) -> Result<Vec<Self>> {
+        if lo.partial_cmp(&hi) != Some(core::cmp::Ordering::Less) {
+            return Ok(Vec::new());
+        }
+        match (step, curve.kind()) {
+            (true, CurveKind::Line(l)) => {
+                let c = l.canonical();
+                let at = |t: f64| c.point + t * c.vector;
+                Ok(vec![Self {
+                    cp: vec![homogeneous(at(lo), 1.0), homogeneous(at(hi), 1.0)],
+                    param: PieceParam::Linear { t0: lo, t1: hi },
+                }])
+            }
+            (true, CurveKind::Ellipse(e)) => {
+                let c = e.canonical();
+                let (o, x, y) = (
+                    c.position.origin(),
+                    c.position.x_axis(),
+                    c.position.y_axis(),
+                );
+                let at = |deg: f64| {
+                    let r = deg.to_radians();
+                    o + c.radius_x * r.cos() * x + c.radius_y * r.sin() * y
+                };
+                // quarter turns at most (a conic's interval spans at most two turns)
+                let n = ((hi - lo) / (PERIOD / 4.0)).ceil().clamp(1.0, 8.0);
+                let step = (hi - lo) / n;
+                let mut out = Vec::new();
+                for i in 0..n as usize {
+                    let a = lo + step * i as f64;
+                    let half = 0.5 * step;
+                    let mid = a + half;
+                    let w = half.to_radians().cos();
+                    let corner = o
+                        + (c.radius_x * mid.to_radians().cos() * x
+                            + c.radius_y * mid.to_radians().sin() * y)
+                            / w;
+                    out.push(Self {
+                        cp: vec![
+                            homogeneous(at(a), 1.0),
+                            homogeneous(corner, w),
+                            homogeneous(at(a + step), 1.0),
+                        ],
+                        param: PieceParam::Arc { mid, half },
+                    });
+                }
+                Ok(out)
+            }
+            _ => {
+                let nurb = curve_nurb(curve)?;
+                let mut out = Vec::new();
+                for seg in create_bez_segments(&nurb).map_err(SolidError::nl_ser(OP))? {
+                    let (Some(&k0), Some(&k1)) = (seg.knots().first(), seg.knots().last()) else {
+                        continue;
+                    };
+                    let (a, b) = (lo.max(k0), hi.min(k1));
+                    if !(a < b && k0 < k1) {
+                        continue;
+                    }
+                    let cp: Vec<[f64; 4]> = seg.cpts().iter().map(|p| control(*p)).collect();
+                    let cp = cut(&cp, (a - k0) / (k1 - k0), (b - k0) / (k1 - k0));
+                    out.push(Self {
+                        cp,
+                        param: PieceParam::Linear { t0: a, t1: b },
+                    });
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    /// The piece's Euclidean control points (they bound it: its weights are positive).
+    fn points(&self) -> impl Iterator<Item = Vec3> + '_ {
+        self.cp
+            .iter()
+            .map(|c| Vec3::new(c[0] / c[3], c[1] / c[3], c[2] / c[3]))
+    }
+
+    /// The edge's parameter at the piece's `s`.
+    fn param(&self, s: f64) -> f64 {
+        match self.param {
+            PieceParam::Linear { t0, t1 } => t0 + s * (t1 - t0),
+            PieceParam::Arc { mid, half } => {
+                let q = (2.0 * s - 1.0) * (0.5 * half.to_radians()).tan();
+                mid + 2.0 * q.atan().to_degrees()
+            }
+        }
+    }
+
+    /// The Bernstein polynomials, over `s`, of the piece's homogeneous coordinates in
+    /// `frame` (`w (P - O)` along X, Y and Z) and of the numerator `w Q' - w' Q` of
+    /// its tangent (`P' = D / w^2`, the same direction) along X, Y and Z.
+    fn coordinates(&self, frame: &Frame) -> Coordinates {
+        let w: Vec<f64> = self.cp.iter().map(|c| c[3]).collect();
+        let along = |axis: Vec3| -> Vec<f64> {
+            self.cp
+                .iter()
+                .map(|c| (Vec3::new(c[0], c[1], c[2]) - c[3] * frame.o).dot(axis))
+                .collect()
+        };
+        let q = [along(frame.x), along(frame.y), along(frame.z)];
+        // the tangent's numerator is independent of the origin: Q - w O has it too
+        let dw = derivative(&w);
+        let d = q
+            .clone()
+            .map(|qi| sub(&product(&w, &derivative(&qi)), &product(&dw, &qi)));
+        Coordinates { w, q, d }
+    }
+}
+
+/// [`Bezier::coordinates`]: `w`, `q = w (P - O)` and the tangent numerator `d`, each
+/// along the frame's X, Y and Z, as Bernstein coefficients.
+struct Coordinates {
+    w: Vec<f64>,
+    q: [Vec<f64>; 3],
+    d: [Vec<f64>; 3],
+}
+
+fn homogeneous(p: Point3, w: f64) -> [f64; 4] {
+    [w * p.x, w * p.y, w * p.z, w]
+}
+
+/// A NURB control point as `[w x, w y, w z, w]` (weight 1 where it has none).
+fn control(c: CPoint) -> [f64; 4] {
+    if c.w == NOW {
+        [c.x, c.y, c.z, 1.0]
+    } else {
+        [c.x, c.y, c.z, c.w]
+    }
+}
+
+/// The NURB of a curve that has one exactly.
+fn curve_nurb(curve: &Curve) -> Result<NurbCurve> {
+    let none = || SolidError::Unsupported {
+        operation: OP,
+        reason: "an edge curve without an exact NURB",
+    };
+    let nurb = match curve.kind() {
+        CurveKind::BSpline(b) => b.gw_nurb().cloned(),
+        CurveKind::Ellipse(e) => e.base().gw_nurb().cloned(),
+        CurveKind::Parabola(p) => p.base().gw_nurb().cloned(),
+        CurveKind::Hyperbola(h) => h.base().gw_nurb().cloned(),
+        CurveKind::Line(l) => l.base_with_nurb()?.gw_nurb().cloned(),
+        _ => None,
+    };
+    nurb.ok_or_else(none)
+}
+
+/// The de Casteljau split of Bernstein (or homogeneous) coefficients at `s`.
+fn split<T: Copy + Lerp>(c: &[T], s: f64) -> (Vec<T>, Vec<T>) {
+    let mut work = c.to_vec();
+    let n = work.len();
+    let mut left = Vec::with_capacity(n);
+    let mut right = Vec::with_capacity(n);
+    for level in 0..n {
+        if let Some(&f) = work.first() {
+            left.push(f);
+        }
+        if let Some(&l) = work.get(n - 1 - level) {
+            right.push(l);
+        }
+        for i in 0..n - 1 - level {
+            if let (Some(&a), Some(&b)) = (work.get(i), work.get(i + 1)) {
+                if let Some(slot) = work.get_mut(i) {
+                    *slot = a.lerp(b, s);
+                }
+            }
+        }
+    }
+    right.reverse();
+    (left, right)
+}
+
+/// The coefficients of the part `s0..s1` of `c`.
+fn cut(c: &[[f64; 4]], s0: f64, s1: f64) -> Vec<[f64; 4]> {
+    let (_, right) = split(c, s0);
+    if s0 >= 1.0 {
+        return right;
+    }
+    let (left, _) = split(&right, (s1 - s0) / (1.0 - s0));
+    left
+}
+
+/// Linear interpolation, for [`split`].
+trait Lerp {
+    fn lerp(self, other: Self, s: f64) -> Self;
+}
+
+impl Lerp for f64 {
+    fn lerp(self, other: Self, s: f64) -> Self {
+        (1.0 - s) * self + s * other
+    }
+}
+
+impl Lerp for [f64; 4] {
+    fn lerp(self, other: Self, s: f64) -> Self {
+        let mut out = self;
+        for (o, (a, b)) in out.iter_mut().zip(self.iter().zip(other.iter())) {
+            *o = (1.0 - s) * a + s * b;
+        }
+        out
+    }
+}
+
+/// The Bernstein coefficients of the derivative (degree one lower; a constant's is
+/// the zero constant).
+fn derivative(c: &[f64]) -> Vec<f64> {
+    let n = c.len().saturating_sub(1);
+    if n == 0 {
+        return vec![0.0];
+    }
+    c.windows(2)
+        .map(|w| match w {
+            [a, b] => n as f64 * (b - a),
+            _ => 0.0,
+        })
+        .collect()
+}
+
+fn binomial(n: usize, r: usize) -> f64 {
+    (0..r).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64)
+}
+
+/// The Bernstein coefficients of a product.
+fn product(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let (m, n) = (a.len().saturating_sub(1), b.len().saturating_sub(1));
+    (0..=m + n)
+        .map(|k| {
+            let lo = k.saturating_sub(n);
+            let hi = k.min(m);
+            (lo..=hi)
+                .map(|i| {
+                    let (x, y) = (
+                        a.get(i).copied().unwrap_or(0.0),
+                        b.get(k - i).copied().unwrap_or(0.0),
+                    );
+                    binomial(m, i) * binomial(n, k - i) * x * y
+                })
+                .sum::<f64>()
+                / binomial(m + n, k)
+        })
+        .collect()
+}
+
+/// The Bernstein coefficients raised to degree `n` (at least theirs).
+fn elevate(c: &[f64], n: usize) -> Vec<f64> {
+    let m = c.len().saturating_sub(1);
+    if n <= m {
+        return c.to_vec();
+    }
+    product(c, &vec![1.0; n - m + 1])
+}
+
+fn combine(a: &[f64], b: &[f64], f: impl Fn(f64, f64) -> f64) -> Vec<f64> {
+    let n = a.len().max(b.len()).saturating_sub(1);
+    let (a, b) = (elevate(a, n), elevate(b, n));
+    a.iter().zip(b.iter()).map(|(x, y)| f(*x, *y)).collect()
+}
+
+fn sub(a: &[f64], b: &[f64]) -> Vec<f64> {
+    combine(a, b, |x, y| x - y)
+}
+
+fn add(a: &[f64], b: &[f64]) -> Vec<f64> {
+    combine(a, b, |x, y| x + y)
+}
+
+fn scaled(a: &[f64], s: f64) -> Vec<f64> {
+    a.iter().map(|x| s * x).collect()
+}
+
+/// The largest coefficient's size.
+fn size(c: &[f64]) -> f64 {
+    c.iter().fold(0.0_f64, |m, x| m.max(x.abs()))
+}
+
+/// Whether the polynomial is zero to the rounding of its coefficients.
+fn vanishes(c: &[f64], scale: f64) -> bool {
+    size(c) <= EFF_ZERO * scale
+}
+
+/// The polynomial at `s` (de Casteljau).
+fn value(c: &[f64], s: f64) -> f64 {
+    let (left, _) = split(c, s);
+    left.last().copied().unwrap_or(0.0)
+}
+
+/// The sign changes of the coefficients, those within `zero` of zero left out.
+fn variations(c: &[f64], zero: f64) -> usize {
+    let mut last: Option<bool> = None;
+    let mut n = 0;
+    for &x in c {
+        if x.abs() <= zero {
+            continue;
+        }
+        let pos = x > 0.0;
+        if last.is_some_and(|l| l != pos) {
+            n += 1;
+        }
+        last = Some(pos);
+    }
+    n
+}
+
+/// The roots in `(0, 1)` of the Bernstein polynomial `c`, certified: each bracket's
+/// coefficients bound the polynomial on it, and their sign changes bound the number of
+/// its roots there (Descartes' rule of signs in the Bernstein basis). A bracket
+/// without a change has no root; one with exactly one change has exactly one, solved
+/// by [`LocalSolve1d::solve_by_bisection`]; one with more is halved (de Casteljau).
+/// A bracket whose coefficients are zero to rounding, or that is halved
+/// [`MAX_ISOLATION_DEPTH`] times (below the parameter's rounding), gives its middle,
+/// which stands for its roots. More than [`MAX_ISOLATION_BRACKETS`] brackets is an
+/// error. A polynomial zero to rounding everywhere has no roots (it is constant).
+fn roots(k: &Kernel, c: &[f64]) -> Result<Vec<f64>> {
+    let scale = size(c);
+    if !scale.is_finite() {
+        return Err(SolidError::invalid_input(OP, "a rate not finite"));
+    }
+    let zero = EFF_ZERO * scale;
+    if scale == 0.0 || vanishes(c, scale) {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![(c.to_vec(), 0.0_f64, 1.0_f64, 0_usize)];
+    let mut brackets = 0_usize;
+    while let Some((b, s0, s1, depth)) = stack.pop() {
+        brackets += 1;
+        if brackets > MAX_ISOLATION_BRACKETS {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "the stationary points of an edge did not separate",
+            });
+        }
+        let mid = 0.5 * (s0 + s1);
+        if size(&b) <= zero {
+            out.push(mid);
+            continue;
+        }
+        let changes = variations(&b, zero);
+        if changes == 0 {
+            continue;
+        }
+        let (first, last) = (
+            b.first().copied().unwrap_or(0.0),
+            b.last().copied().unwrap_or(0.0),
+        );
+        if changes == 1 && first.abs() > zero && last.abs() > zero {
+            let mut f = PolyValue {
+                c,
+                sign: if first < 0.0 { 1.0 } else { -1.0 },
+            };
+            let (fl, fu) = (f.sign * first, f.sign * last);
+            let (s, _) = LocalSolve1d::new_with_kernel(k)
+                .solve_by_bisection(&mut f, ROOT_STEPS, s0, s1, fl, fu)?;
+            out.push(s);
+            continue;
+        }
+        if depth >= MAX_ISOLATION_DEPTH {
+            out.push(mid);
+            continue;
+        }
+        let (left, right) = split(&b, 0.5);
+        stack.push((right, mid, s1, depth + 1));
+        stack.push((left, s0, mid, depth + 1));
+    }
+    out.sort_by(f64::total_cmp);
+    Ok(out)
+}
+
+/// A Bernstein polynomial (times `sign`) for [`LocalSolve1d`].
+struct PolyValue<'a> {
+    c: &'a [f64],
     sign: f64,
 }
 
-impl Rate<'_, '_> {
-    fn value(&self, t: f64) -> Result<f64> {
-        let (p, dp) = self.edge.at(self.k, t, false)?;
-        let q = self.map.params(self.k, p, false)?;
-        let f = self
-            .map
-            .rates(self.k, p, dp, &q)?
-            .get(self.d)
-            .copied()
-            .unwrap_or(0.0);
-        // on the axis the angle's rate is undefined: a stationary point
-        Ok(if f.is_finite() { f } else { 0.0 })
-    }
-
-    /// The root between the samples `a` and `b` (`b` itself where its rate is zero), if
-    /// it is strictly inside `lo..hi`.
-    fn root(
-        &mut self,
-        (a, fa): (f64, f64),
-        (b, fb): (f64, f64),
-        lo: f64,
-        hi: f64,
-    ) -> Result<Option<f64>> {
-        let inside = |t: f64| (t > lo && t < hi).then_some(t);
-        if fb == 0.0 {
-            return Ok(inside(b));
-        }
-        if fa == 0.0 || (fa < 0.0) == (fb < 0.0) {
-            return Ok(None);
-        }
-        // regula falsi from the negative end
-        self.sign = if fa < 0.0 { 1.0 } else { -1.0 };
-        let (fl, fu) = (self.sign * fa, self.sign * fb);
-        let found = LocalSolve1d::new_with_kernel(self.k)
-            .solve_by_bisection(self, ROOT_STEPS, a, b, fl, fu);
-        self.sign = 1.0;
-        Ok(inside(found?.0))
-    }
-}
-
-impl EvalFunction for Rate<'_, '_> {
+impl EvalFunction for PolyValue<'_> {
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _signal_errors: bool) -> Result<()> {
-        out.f = self.sign * self.value(t)?;
+        out.f = self.sign * value(self.c, t);
         out.f_prime = 0.0;
         out.found_answer = false;
         Ok(())
     }
+}
+
+/// A polynomial over a Bezier piece whose roots include every parameter where
+/// direction `d` is stationary along it, or `None` where the surface has none.
+fn candidates(map: &Map<'_>, piece: &Bezier, d: usize) -> Option<Vec<f64>> {
+    let frame = match &map.shape {
+        Shape::Plane { frame } | Shape::Revolved { frame, .. } => *frame,
+        Shape::Extruded { dir, .. } => Frame::across(*dir),
+        Shape::Other => return None,
+    };
+    let Coordinates { w, q, d: t } = piece.coordinates(&frame);
+    let [qx, qy, qz] = &q;
+    let [tx, ty, tz] = &t;
+    // a component that vanishes on the piece is the next one's to give
+    let first_of = |a: Vec<f64>, b: Vec<f64>| {
+        let s = size(&a).max(size(&b));
+        if vanishes(&a, s) {
+            b
+        } else {
+            a
+        }
+    };
+    Some(match (&map.shape, d) {
+        // u and v along X and Y
+        (Shape::Plane { .. }, 0) => tx.clone(),
+        (Shape::Plane { .. }, _) => ty.clone(),
+        // the angle about Z: ((P - O) x P') . Z, times w^3
+        (Shape::Revolved { .. }, 0) => sub(&product(qx, ty), &product(qy, tx)),
+        (Shape::Revolved { along, .. }, _) => match along {
+            // the height, and the latitude (monotone in it): Z . P'
+            Along::Height { .. } | Along::Latitude => tz.clone(),
+            // the tube angle atan2(h, rho - R): its rate times w^4 is E - R w rho h'
+            // (E = rho^2 h' - h (rad . P'), all times w's powers); its roots are among
+            // those of E^2 - R^2 w^2 rho^2 h'^2
+            Along::Tube { major } => {
+                let rho2 = add(&product(qx, qx), &product(qy, qy));
+                let e = sub(
+                    &product(&rho2, tz),
+                    &product(qz, &add(&product(qx, tx), &product(qy, ty))),
+                );
+                let f = product(&product(&product(&w, &w), &rho2), &product(tz, tz));
+                sub(&product(&e, &e), &scaled(&f, major * major))
+            }
+            // the profile parameter: where it is stationary the point's meridian
+            // coordinates (rho, h) are, so h' or else rho rho' vanishes
+            Along::Profile { .. } => first_of(tz.clone(), add(&product(qx, tx), &product(qy, ty))),
+        },
+        // the profile parameter: stationary where the point's projection across the
+        // extrusion is, so its X component (else its Y) vanishes
+        (Shape::Extruded { .. }, 0) => first_of(tx.clone(), ty.clone()),
+        // along the extrusion: P' . dir, when the profile lies across it
+        (Shape::Extruded { flat: true, .. }, _) => tz.clone(),
+        (Shape::Extruded { flat: false, .. } | Shape::Other, _) => return None,
+    })
 }
 
 /// A direction's stationary parameters along a curve, in closed form.
@@ -944,10 +1351,10 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
         CurveKind::Line(l) => {
             let c = l.canonical();
             let (p, v) = (c.point, c.vector);
-            match map {
+            match &map.shape {
                 // linear in the parameter
-                Map::Plane { .. } => Some(Roots::Monotone),
-                Map::Revolved { frame, along, .. } => {
+                Shape::Plane { .. } => Some(Roots::Monotone),
+                Shape::Revolved { frame, along } => {
                     let w = p - frame.o;
                     // ((P - O) x V) . Z is constant along the line: zero when it lies in
                     // a plane through the axis
@@ -974,7 +1381,7 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
                         _ => None,
                     }
                 }
-                Map::Inverted { .. } => None,
+                Shape::Extruded { .. } | Shape::Other => None,
             }
         }
         CurveKind::Ellipse(e) => {
@@ -998,9 +1405,9 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
                     }
                 }
             };
-            match map {
-                Map::Plane { frame, .. } => Some(linear(if d == 0 { frame.x } else { frame.y })),
-                Map::Revolved { frame, along, .. } => {
+            match &map.shape {
+                Shape::Plane { frame } => Some(linear(if d == 0 { frame.x } else { frame.y })),
+                Shape::Revolved { frame, along } => {
                     let w = cx - frame.o;
                     let n = xa.cross(ya);
                     // ((P - O) x P') . Z = al cos t + be sin t + ga (per radian)
@@ -1021,7 +1428,7 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
                         return Some(sine_roots(al, be, ga));
                     }
                     match along {
-                        Along::Height { .. } | Along::Latitude { .. } => Some(linear(frame.z)),
+                        Along::Height { .. } | Along::Latitude => Some(linear(frame.z)),
                         // an iso circle, or the profile (the tube) itself
                         Along::Tube { .. } | Along::Profile { .. } if about || through => {
                             Some(Roots::Monotone)
@@ -1029,7 +1436,7 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
                         _ => None,
                     }
                 }
-                Map::Inverted { .. } => None,
+                Shape::Extruded { .. } | Shape::Other => None,
             }
         }
         _ => None,
@@ -1077,7 +1484,7 @@ fn loop_box(k: &Kernel, map: &Map<'_>, edges: &[BoundaryEdge<'_>]) -> Result<Loo
             nodes.push(Node {
                 edge: i,
                 t,
-                params: map.params(k, p, true)?,
+                params: map.params(k, p)?,
             });
         }
         curves.push(c);
@@ -1196,7 +1603,7 @@ fn nearest(x: f64) -> f64 {
 /// The angle about the axis of the direction `w` (a loop's tangent at a point on the
 /// axis, pointing into the piece).
 fn limit(map: &Map<'_>, w: Vec3) -> Result<f64> {
-    let Map::Revolved { frame, .. } = map else {
+    let Shape::Revolved { frame, .. } = &map.shape else {
         return Err(SolidError::invalid_input(
             OP,
             "an axis point on a surface without axis",
@@ -1228,7 +1635,7 @@ fn turn(
 ) -> Result<f64> {
     let tm = 0.5 * (ta + tb);
     let (p, dp) = e.at(k, tm, false)?;
-    let q = map.params(k, p, false)?;
+    let q = map.params(k, p)?;
     let rate = map.rates(k, p, dp, &q)?.get(d).copied().unwrap_or(0.0) * (tb - ta).signum();
     if rate == 0.0 || !rate.is_finite() {
         return Ok(nearest(xb - xa));
@@ -1520,6 +1927,25 @@ mod tests {
         assert_window(&w, [0.0, 360.0], [-20.0, 90.0]);
     }
 
+    /// A lune of the sphere r = 2 between the meridians at 0 and 90 degrees, each one
+    /// edge from pole to pole (up the one at 90, down the one at 0): every node of the
+    /// loop but the edges' middles is a pole: u = [0, 90], v = [-90, 90].
+    #[test]
+    fn a_lune_between_two_meridians_from_pole_to_pole() {
+        let k = k();
+        let east = circle(&k, Vec3::ZERO, Vec3::Y, Vec3::Z, 2.0);
+        let west = circle(&k, Vec3::ZERO, Vec3::X, Vec3::Z, 2.0);
+        let lune = vec![
+            edge(&east, -90.0, 90.0, true),
+            edge(&west, -90.0, 90.0, false),
+        ];
+        assert_window(
+            &window(&k, &sphere(&k), &[lune]),
+            [0.0, 90.0],
+            [-90.0, 90.0],
+        );
+    }
+
     fn frustum(k: &Kernel) -> Surface {
         Surface::from(
             Cone::create_canonical(k, &Axis2Placement::IDENTITY, 2.0, 1.0, 2.0, false, false)
@@ -1714,6 +2140,56 @@ mod tests {
         assert_window(&w, [0.0, 2.0], [0.0, 1.0]);
     }
 
+    /// A quartic Bezier on the XY plane, `x = t` and
+    /// `y = -K (t^4 / 4 - s1 t^3 / 3 + s2 t^2 / 2 - s3 t)`, so that
+    /// `y' = -K (t - a) (t - b) (t - c)` with a = 0.53, b = 0.57, c = 0.602: a narrow
+    /// bump whose top (a) and the dip after it (b) lie in one of the ten sampled
+    /// brackets of a quartic span (`[0.5, 0.6]`, the rate positive at both ends), with
+    /// a lower second top at c. The top at a is the highest point of the edge:
+    /// v = [min(y(0), y(1)), y(a)], u = [0, 1].
+    #[test]
+    fn two_stationary_points_close_together_on_a_spline() {
+        let k = k();
+        let s = Surface::from(Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap());
+        let (a, b, c, big) = (0.53, 0.57, 0.602, 1000.0);
+        let (s1, s2, s3) = (a + b + c, a * b + b * c + c * a, a * b * c);
+        let power = [0.0, big * s3, -big * s2 / 2.0, big * s1 / 3.0, -big / 4.0];
+        let y = |t: f64| power.iter().rev().fold(0.0, |acc, q| acc * t + q);
+        // the Bernstein coefficients of the power form
+        let choose =
+            |n: usize, r: usize| (0..r).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64);
+        let bernstein: Vec<f64> = (0..=4)
+            .map(|i| {
+                (0..=i)
+                    .map(|j| choose(i, j) / choose(4, j) * power[j])
+                    .sum()
+            })
+            .collect();
+        let points: Vec<Point3> = bernstein
+            .iter()
+            .enumerate()
+            .map(|(i, &yi)| p(i as f64 / 4.0, yi, 0.0))
+            .collect();
+        let bump = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 4,
+                control_points: &points,
+                form: BSplineCurveForm::PolylineForm,
+                knot_multiplicities: &[5, 5],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        assert!(y(a) > y(c) && y(a) > y(0.0) && y(a) > y(1.0));
+        let chord = segment(p(1.0, y(1.0), 0.0), p(0.0, 0.0, 0.0));
+        let w = window(&k, &s, &[vec![edge(&bump, 0.0, 1.0, true), along(&chord)]]);
+        assert_window(&w, [0.0, 1.0], [y(0.0).min(y(1.0)), y(a)]);
+    }
+
     /// `circle` as its rational B-spline (the kernel's NURB of it), over its natural
     /// interval.
     fn as_spline(c: &Curve) -> (Curve, Extent1d) {
@@ -1759,11 +2235,12 @@ mod tests {
         assert_window(&w, [0.0, 360.0], [-20.0, 90.0]);
     }
 
-    /// The closed forms of the plane, cone, cylinder, sphere and torus, and the
-    /// revolution's angle, are the kernel's STEP parameters: at points the kernel
-    /// evaluates at (u, v) they give (u, v) back.
+    /// [`Surface::step_inversion_unbounded`], which the window reads every point's
+    /// parameters with, inverts the kernel's STEP evaluation
+    /// ([`Surface::evaluate_step_point`]) on a plane with scales, a cone, a cylinder, a
+    /// sphere, a torus and a surface of revolution, to rounding.
     #[test]
-    fn the_parameters_are_the_kernels_step_parameters() {
+    fn the_unbounded_inversion_inverts_the_step_evaluation() {
         let k = k();
         let frame = Axis2Placement::new(
             p(1.0, 2.0, 3.0),
@@ -1803,23 +2280,21 @@ mod tests {
             for (fu, fv) in [(0.1, 0.2), (0.45, 0.5), (0.7, 0.9), (0.95, 0.3)] {
                 let u = dom.u_min().max(-1e3) + fu * (dom.u_max().min(1e3) - dom.u_min().max(-1e3));
                 let v = dom.v_min().max(-1e3) + fv * (dom.v_max().min(1e3) - dom.v_min().max(-1e3));
-                let q = map
-                    .params(
-                        &k,
-                        s.evaluate_step_point(&k, Point2::new(u, v)).unwrap(),
-                        true,
-                    )
-                    .unwrap();
-                let du = q.u.unwrap() - u;
-                let du = if map.periodic(0) { nearest(du) } else { du };
+                let point = s.evaluate_step_point(&k, Point2::new(u, v)).unwrap();
+                let (q, _) = s.step_inversion_unbounded(&k, point, TOL).unwrap();
+                let du = if map.periodic(0) {
+                    nearest(q.x - u)
+                } else {
+                    q.x - u
+                };
                 assert!(
                     du.abs() <= 1e-12 * (1.0 + u.abs()),
                     "surface {i}: u {u} -> {q:?}"
                 );
                 let dv = if map.periodic(1) {
-                    nearest(q.v - v)
+                    nearest(q.y - v)
                 } else {
-                    q.v - v
+                    q.y - v
                 };
                 assert!(
                     dv.abs() <= 1e-12 * (1.0 + v.abs()),
@@ -1827,6 +2302,82 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Outside a surface's current STEP domain the bounded inversion refuses a point
+    /// on the surface and the unbounded one answers: the cylinder r = 1 with v in
+    /// [0, 3] at z = 5 (u 180, v 5), the cone of `frustum` (v in [0, 2]) at the height
+    /// 3 (radius 0.5) and beyond its apex mirrored (the far nappe at height 6, radius
+    /// 1, gives v 6), the torus over a quarter at u 180, the plane far out.
+    #[test]
+    fn the_unbounded_inversion_answers_outside_the_domain() {
+        let k = k();
+        let mut cyl = Cone::create_canonical_cylinder(&k, &Axis2Placement::IDENTITY, 1.0).unwrap();
+        cyl.adjust_step_uv_domain(&k, &Extent2d::from_bounds(0.0, 0.0, 360.0, 3.0))
+            .unwrap();
+        let cyl = Surface::from(cyl);
+        let far = p(-1.0, 0.0, 5.0);
+        let dom = cyl.step_uv_domain();
+        assert!(cyl.step_inversion(&k, &dom, far, TOL, None).is_err());
+        let (uv, _) = cyl.step_inversion_unbounded(&k, far, TOL).unwrap();
+        assert_close(uv.x, 180.0);
+        assert_close(uv.y, 5.0);
+
+        let cone = frustum(&k);
+        let (uv, _) = cone
+            .step_inversion_unbounded(&k, round(0.5, 90.0, 3.0), TOL)
+            .unwrap();
+        assert_close(uv.x, 90.0);
+        assert_close(uv.y, 3.0);
+        let (uv, _) = cone
+            .step_inversion_unbounded(&k, round(1.0, 0.0, 6.0), TOL)
+            .unwrap();
+        assert_close(uv.y, 6.0);
+
+        let quarter = Extent2d::from_bounds(0.0, 0.0, 90.0, 360.0);
+        let torus = Surface::from(
+            Torus::create_canonical(
+                &k,
+                &Axis2Placement::IDENTITY,
+                3.0,
+                1.0,
+                TorusOptions::default(),
+                Some(&quarter),
+            )
+            .unwrap(),
+        );
+        let (uv, _) = torus
+            .step_inversion_unbounded(&k, p(-4.0, 0.0, 0.0), TOL)
+            .unwrap();
+        assert_close(nearest(uv.x - 180.0), 0.0);
+        assert_close(nearest(uv.y), 0.0);
+
+        let plane = Surface::from(Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap());
+        let (uv, _) = plane
+            .step_inversion_unbounded(&k, p(3e6, -2.0, 0.0), TOL)
+            .unwrap();
+        assert_close(uv.x, 3e6);
+        assert_close(uv.y, -2.0);
+        assert!(plane
+            .step_inversion_unbounded(&k, p(0.0, 0.0, 1.0), TOL)
+            .is_err());
+    }
+
+    /// A circle of radius 1 extruded by (0, 0, 3): the band over a quarter is u its
+    /// profile's angles [0, 90] and v the extrusion's [0, 1].
+    #[test]
+    fn an_extrusion_of_a_circle() {
+        let k = k();
+        let s = Surface::from(
+            crate::surface::surf_of_extrusion::SurfOfExtrusion::create_canonical(
+                &k,
+                level(&k, 0.0, 1.0),
+                Vec3::new(0.0, 0.0, 3.0),
+            )
+            .unwrap(),
+        );
+        let band = Band::new(&k, 0.0, 90.0);
+        assert_window(&window(&k, &s, &[band.outer()]), [0.0, 90.0], [0.0, 1.0]);
     }
 
     #[test]

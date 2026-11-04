@@ -31,6 +31,7 @@
 //! | [`Surface::intersect_with_plane`]                 | `IntersectWithPlane`                             |
 //! | [`Surface::reverse`], [`Surface::reparameterize`] | `Reverse`, `Reparameterize`                      |
 //! | [`Surface::split_at`], [`Surface::step_inversion`] | `SplitAt`, `STEPInversion`                      |
+//! | [`Surface::step_inversion_unbounded`]            | none (#2578: `STEPInversion` without the domain) |
 //! | [`Surface::swap_uv`], [`Surface::transform`], [`Surface::trim_with_domain`], [`Surface::trim_with_domain_with`] | `SwapUV`, `Transform`, `TrimWithDomain` |
 //! | [`Surface::trim_keeps_parameterization`]          | `TrimKeepsParameterization` (fork, WR-700)       |
 //! | [`Surface::knots`]                                | `GetKnots`                                       |
@@ -2841,6 +2842,67 @@ impl Surface {
                     |uv| s.convert_uv_from_nurbs_to_step(k, uv),
                 )?;
                 Ok((r.uv, r.location))
+            }
+        }
+    }
+
+    /// Not upstream (#2578): the STEP parameters of `point_on_surf` and its location,
+    /// like [`Self::step_inversion`] but without the surface's domain, for a caller that
+    /// is about to set it (a face's STEP window,
+    /// [`crate::surface::step_window::face_window`], whose result
+    /// [`Self::adjust_step_uv_domain`] takes). The analytic kinds invert in closed form
+    /// wherever the point is: a plane's projection
+    /// ([`Plane::project_point_to_uv_domain`]), a sphere's angles
+    /// ([`Sphere::step_inversion`] classified over its maximum analytic domain), and
+    /// the cone's, the torus's and the surface of revolution's sweep angle and
+    /// generator inversion ([`SurfOfRevolution::step_inversion_unbounded`]). The other
+    /// kinds, and those analytic kinds whose generator is not planar, search their
+    /// maximum analytic domain ([`Self::step_inversion`] over
+    /// [`Self::max_analytic_domain`]).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NOT_WITHIN_TOLERANCE` for a point farther than `tol_3d` from a plane,
+    /// sphere, cone, torus or surface of revolution; those of the kinds' inversions and
+    /// of [`Self::max_analytic_domain`].
+    pub fn step_inversion_unbounded(
+        &self,
+        k: &Kernel,
+        point_on_surf: Point3,
+        tol_3d: f64,
+    ) -> Result<(Point2, LocationType)> {
+        const OP: &str = "surface::surface::Surface::step_inversion_unbounded";
+        match self.kind() {
+            SurfaceKind::Plane(s) => {
+                let normal = s.position().z_axis();
+                if (point_on_surf - s.position().origin()).dot(normal).abs() > tol_3d {
+                    return Err(crate::surface::surf_of_revolution::p2::not_within_tolerance(OP));
+                }
+                Ok((
+                    s.project_point_to_uv_domain(point_on_surf),
+                    LocationType::Interior,
+                ))
+            }
+            SurfaceKind::Sphere(s) => {
+                let r = s.step_inversion(&s.max_analytic_domain(), point_on_surf, tol_3d, None);
+                if r.on_surface {
+                    Ok((r.uv, r.location))
+                } else {
+                    Err(crate::surface::surf_of_revolution::p2::not_within_tolerance(OP))
+                }
+            }
+            SurfaceKind::Cone(s) => s.step_inversion_unbounded(k, point_on_surf, tol_3d),
+            // (a torus read with a non-planar generator inverts through its own
+            // conversions: the general branch below)
+            SurfaceKind::Torus(s) if s.base().planar_generator => {
+                s.base().step_inversion_unbounded(k, point_on_surf, tol_3d)
+            }
+            SurfaceKind::SurfOfRevolution(s) => {
+                s.step_inversion_unbounded(k, point_on_surf, tol_3d)
+            }
+            _ => {
+                let domain = self.max_analytic_domain(k)?;
+                self.step_inversion(k, &domain, point_on_surf, tol_3d, None)
             }
         }
     }

@@ -33,6 +33,7 @@
 //! | [`Cone::step_linear_param_extent`]                | `GetSTEPLinearParamExtent`                       |
 //! | [`Cone::max_analytic_domain`]                     | `GetMaxAnalyticDomain` (both classes)            |
 //! | [`Cone::step_inversion`], [`ConeStepInversion`]   | `STEPInversion` (with `SmSurfOfRevolution::STEPInversion`, co-ported) |
+//! | [`Cone::step_inversion_unbounded`]                | none (#2578: `STEPInversion` without the domain) |
 //! | [`Cone::positive_point`], [`PositivePoint`]       | `GetPositivePoint`                               |
 //! | [`Cone::transform`]                               | `Transform`                                      |
 //! | [`Cone::read_from_db`]                            | `ReadFromDB` (both classes)                      |
@@ -1761,6 +1762,35 @@ impl Cone {
             inv.uv.y = 2.0 * pos.apex_param - inv.uv.y;
         }
         Ok(inv)
+    }
+
+    /// Not upstream (#2578): [`Self::step_inversion`] without the cone's domain
+    /// ([`SurfOfRevolution::step_inversion_unbounded`] on the base parts, the point
+    /// mirrored through the apex and back as there); a non-planar generator inverts
+    /// over the cone's maximum analytic domain.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfOfRevolution::step_inversion_unbounded`], of the apex and, for a
+    /// non-planar generator, of [`Self::step_inversion`]'s general branch.
+    pub fn step_inversion_unbounded(
+        &self,
+        k: &Kernel,
+        point_on_surf: Point3,
+        tol_3d: f64,
+    ) -> Result<(Point2, LocationType)> {
+        let pos = self.positive_point(k, point_on_surf)?;
+        let (mut uv, location) = if self.rev.planar_generator {
+            self.rev.step_inversion_unbounded(k, pos.point, tol_3d)?
+        } else {
+            let domain = self.rev.max_analytic_domain(k)?;
+            let r = self.rev_step_inversion(k, &domain, pos.point, tol_3d, None)?;
+            (r.uv, r.location)
+        };
+        if pos.negated {
+            uv.y = 2.0 * pos.apex_param - uv.y;
+        }
+        Ok((uv, location))
     }
 
     /// `SmSurfOfRevolution::STEPInversion` on the cone's base parts

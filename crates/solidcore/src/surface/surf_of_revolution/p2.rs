@@ -9,6 +9,7 @@
 //! |-------------------------------------------------------------|-------------------------------------------|
 //! | [`SurfOfRevolution::adjust_step_uv_domain`]                 | `AdjustSTEPUVDomain`                      |
 //! | [`SurfOfRevolution::step_inversion`]                        | `STEPInversion`                           |
+//! | [`SurfOfRevolution::step_inversion_unbounded`]              | none (#2578: `STEPInversion` without the domain) |
 //! | [`SurfOfRevolution::create_canonical`]                      | `CreateCanonical` (co-ported in `p1`)     |
 //! | [`SurfOfRevolution::make_nurb`]                             | `MakeNurb` (co-ported in `p1`)            |
 //! | [`SurfOfRevolution::create_offset_surface`]                 | `CreateOffsetSurface`                     |
@@ -52,7 +53,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
@@ -529,26 +530,8 @@ impl SurfOfRevolution {
         }
 
         // intersect rotated point with genCurve
-        let mut gen = self.gen()?.clone();
-        let mut ivl = gen_step_interval(&gen)?;
-        if self.is_out_of_bounds_enabled() {
-            ivl = gen_max_analytic_domain(k, &gen)?;
-            if let Some(b) = gen_base_mut(&mut gen) {
-                b.set_out_of_bounds_enabled(true);
-            }
-        }
-        let solutions = gen.global_point_solve_step::<NoHandle>(
-            k,
-            &ivl,
-            SolverOperation::Intersect,
-            sp.point,
-            tol_3d,
-            None,
-            None,
-            SolutionRequested::All,
-            None,
-            None,
-        )?;
+        let (gen, ivl, solutions) =
+            self.solve_on_generator(k, self.is_out_of_bounds_enabled(), sp.point, tol_3d)?;
 
         // error - rotated point not on GenCurve (told apart from failures by
         // `is_off_generator`; the public inversion answers it, with the fork's fix, as
@@ -587,6 +570,106 @@ impl SurfOfRevolution {
             location,
             inside: sp.inside,
         })
+    }
+
+    /// The generator's solutions at `point` (the point rotated into the generator's
+    /// plane), on a copy of the generator, over its STEP interval or, `beyond`, over
+    /// its maximum analytic domain with the copy's out-of-bounds flag on; with the copy
+    /// and the interval solved over.
+    ///
+    /// # Errors
+    ///
+    /// Those of the generator's interval and `GlobalPointSolveSTEP`.
+    fn solve_on_generator(
+        &self,
+        k: &Kernel,
+        beyond: bool,
+        point: Point3,
+        tol_3d: f64,
+    ) -> Result<(Curve, Extent1d, Vec<Solution<NoHandle>>)> {
+        let mut gen = self.gen()?.clone();
+        let mut ivl = gen_step_interval(&gen)?;
+        if beyond {
+            ivl = gen_max_analytic_domain(k, &gen)?;
+            if let Some(b) = gen_base_mut(&mut gen) {
+                b.set_out_of_bounds_enabled(true);
+            }
+        }
+        let solutions = gen.global_point_solve_step::<NoHandle>(
+            k,
+            &ivl,
+            SolverOperation::Intersect,
+            point,
+            tol_3d,
+            None,
+            None,
+            SolutionRequested::All,
+            None,
+            None,
+        )?;
+        Ok((gen, ivl, solutions))
+    }
+
+    /// Not upstream (#2578): [`Self::step_inversion`] without the surface's domain, for
+    /// a caller that is about to set it (a face's STEP window,
+    /// [`crate::surface::step_window::face_window`]). With a planar generator, the
+    /// point's sweep angle is taken whether or not it lies in the sweep interval (in
+    /// the interval's period, the lower angle on a seam), and its generator parameter
+    /// is the generator's closed-form inversion ([`Curve::step_inversion`]: lines,
+    /// conics, parabolas, hyperbolas, without a domain) or, for any other generator,
+    /// its solve over the generator's maximum analytic domain. A non-planar generator
+    /// runs [`Self::step_inversion`] over [`Self::max_analytic_domain`].
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NOT_WITHIN_TOLERANCE` when the point's rotation lies farther than
+    /// `tol_3d` from the generator; those of the start-plane transform, the generator's
+    /// inversion or solve, and (non-planar) [`Self::step_inversion`].
+    pub fn step_inversion_unbounded(
+        &self,
+        k: &Kernel,
+        point_on_surf: Point3,
+        tol_3d: f64,
+    ) -> Result<(Point2, LocationType)> {
+        if !self.planar_generator {
+            let domain = self.max_analytic_domain(k)?;
+            return self.step_inversion(k, &domain, point_on_surf, tol_3d, None);
+        }
+        let sp = self.transform_point_to_start_plane(point_on_surf, tol_3d, false)?;
+        let u = sp.angles_deg.first().copied().unwrap_or(0.0);
+        let (dist, _) = line_point_distance(
+            self.position.origin(),
+            self.position.z_axis(),
+            point_on_surf,
+        );
+        let location = if dist < tol_3d {
+            LocationType::Pole
+        } else if sp.angles_deg.len() > 1 {
+            LocationType::USeam
+        } else {
+            LocationType::Interior
+        };
+        let gen = self.gen()?;
+        let v = match gen.kind() {
+            CurveKind::Line(_)
+            | CurveKind::Ellipse(_)
+            | CurveKind::Parabola(_)
+            | CurveKind::Hyperbola(_) => {
+                let v = gen.step_inversion(k, sp.point)?;
+                if gen.evaluate_step_point(k, v)?.distance(sp.point) > tol_3d {
+                    return Err(not_within_tolerance(OP_STEP_INV));
+                }
+                v
+            }
+            _ => {
+                let (_, _, solutions) = self.solve_on_generator(k, true, sp.point, tol_3d)?;
+                let first = solutions
+                    .first()
+                    .ok_or_else(|| not_within_tolerance(OP_STEP_INV))?;
+                first.start.param(0)?
+            }
+        };
+        Ok((Point2::new(u, v), location))
     }
 
     // ---- offsets --------------------------------------------------------------------
