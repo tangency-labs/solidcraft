@@ -1492,6 +1492,9 @@ impl SolveApp {
                 }
             }
             Err(e) => {
+                // The native menu runs Undo and Redo before `logic` installs the frame scope, so
+                // the error would be translated with the thread default.
+                let _language = i18n::scope(&self.preferences.language);
                 let msg = friendly_error(id, e);
                 self.session.echo(msg.clone());
                 self.set_status(msg, true);
