@@ -17,6 +17,20 @@ harness/cpp            C++ reference build (build.sh -> bin/cpp) + shim/<unit>.c
 plan/                  units/<id>.toml, findings/<slug>.md, upstream-issues/<slug>.md (one file each), STATUS.md, order.md
 ```
 
+**What to work on first: a stable kernel for v1.1.0.** Work is chosen by priority, not first in,
+first out. The goal is a stable kernel: blends (fillets, chamfers, corners, Ends, setbacks), STEP
+read and write, and the operations a model is built with (booleans and their intersections,
+sweeps, offset and shell, the validity check), each giving the correct result or a named
+refusal, never a crash or a hang. Issues and PRs for that goal carry the `priority: high` label.
+1. Finish what is open before starting anything new: review, fix and land the open
+   `priority: high` PRs, then take an open `priority: high` issue.
+2. Only with no `priority: high` item you can take, work on anything else.
+3. Among them, the item that unblocks the most others goes first (a dependency, a layer others
+   build on); only between equals does the oldest go first.
+
+A new issue or PR that belongs to the goal gets `priority: high` when it is filed; ask the
+maintainers on it if you are unsure.
+
 ## 1. Hard rules
 
 **Read first.** Before changing an area, read its design doc and records: `docs/generic-blend.md`
@@ -176,7 +190,7 @@ Every ported file starts with:
 
 Unit list and states: `plan/units/<unit id>.toml`, one file per unit (format:
 `plan/modules.schema.md`, order: `plan/order.md`). **The [checklist](https://tangency-labs.github.io/solidcore/PROGRESS.md)** is generated
-from `main` by the Pages workflow (`harness/plan/progress.py`; not committed). **Any `todo` unit or unclaimed completion task can be claimed.** A claim reserves
+from `main` by the Pages workflow (`harness/plan/progress.py`; not committed). **Any `todo` unit or unclaimed completion task can be claimed**, after the `priority: high` work above. A claim reserves
 its stated scope, not every future change to the unit. Missing functions, back-edge
 wiring, exact runner imports, fixtures and demonstrated parity bugs remain useful
 work in `partial` and `green` units; inspect source and reports, not status alone.
