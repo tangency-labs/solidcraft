@@ -3098,9 +3098,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !environment::ring_input(app, ui, rect, &response) {
         let input = crate::navigation::handle(app, ui, input_rect, &response, crate::navigation::NavCaps::RENDER);
         let image_inside = input.inside && input.hover.is_some_and(|point| rect.contains(point));
-        let navigating = input.scroll != 0.0
-            || input.pinch != 1.0
-            || input.pan != egui::Vec2::ZERO
+        // The wheel, the trackpad and the pinch move the view under a pointer that stays
+        // where it is: the face under it keeps its highlight while the view moves (#2130).
+        // A mouse drag, the spin and an animated view own the pointer instead, and their
+        // hover goes off as before.
+        let view_moving = crate::navigation::view_moving(app, input.scroll, input.pinch, input.pan);
+        let navigating = view_moving
             || input.middle
             || input.secondary_down
             || (input.primary_nav.is_some() && input.primary_down)
@@ -3114,7 +3117,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
-        app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
+        // The view moved under a still pointer: the highlight under it stays on the face
+        // it was on instead of going off (#2130). It is picked again when the gesture ends.
+        if !(view_moving && image_inside) {
+            app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
+        }
         let assigning = assign::input(app, ui, &response, candidate.as_ref(), image_inside && !navigating && geometry_current);
         if !assigning && image_inside && !navigating {
             assign::hover_tooltip(app, &response, candidate.as_ref());
