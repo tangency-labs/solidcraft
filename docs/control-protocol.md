@@ -736,6 +736,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `look_at_speed`
 - `max_design_file_mb` (default 256): the largest design file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
+- `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)

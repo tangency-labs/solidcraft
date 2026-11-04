@@ -645,12 +645,25 @@ impl Backend for Remote {
         true
     }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
+        // This runs on the serve loop before a tool call, so it never waits: not behind a request
+        // still running (ask again on a later call), and one try with no retry, because a retry
+        // reconnects with READ_TIMEOUT and could block for minutes.
+        if self.outstanding.is_some() {
+            return Err("a request is still running in the app".into());
+        }
         if self.conn.is_none() {
             self.reconnect().map_err(|e| self.explain(&e))?;
         }
+        let line = self.request_line("mcp.options", json!({}));
         self.set_read_timeout(OPTIONS_TIMEOUT);
-        let r = self.call("mcp.options", json!({}));
+        let reply = self.roundtrip(&line);
         self.set_read_timeout(READ_TIMEOUT);
+        let reply = reply.map_err(|e| self.explain(&e))?;
+        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
+        let r = outcome(&v).map_err(|error| {
+            solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref())
+                .map_or_else(|| error.clone(), |t| t.explain_error(&error))
+        });
         match r {
             Ok(v) => Ok(Some(v)),
             // An app from before the setting (its agent chat refuses methods it doesn't know):
