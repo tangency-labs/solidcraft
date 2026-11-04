@@ -219,7 +219,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "loops_go_on_round_the_vertex",
     "loop_use_reports_open_gaps",
     "mark_lock_pair_advances_and_locks_second_context",
-    "masked_array_uses_bit_shift",
     "mirror_curve_keeps_euclidean_control_points",
     "new_edge_vertex_tolerance_covers_gap",
     "nurb_cylinder_inside_out_frame",

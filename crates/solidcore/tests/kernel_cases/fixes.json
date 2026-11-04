@@ -72,7 +72,6 @@
   "uv_trim_checks_on_surface",
   "curve_check_zero_speed_tangent_end",
   "loop_orientation_floor_from_loop_box",
-  "masked_array_uses_bit_shift",
   "conic_evaluate_uses_computed_second_deriv",
   "oscillating_skips_failed_guesses",
   "refine_cc_range_ends",
