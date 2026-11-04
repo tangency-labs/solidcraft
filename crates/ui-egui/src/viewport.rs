@@ -2917,7 +2917,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Woken snap points (a hole's centre, a line's middle) come first: right under the
     // pointer over anything (a line's middle lies on the line), further out unless an edge or a
     // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
-    let edge_near = beste.v.iter().map(|x| x.0).fold(curve_near, f32::min);
+    let edge_near = beste.v.iter().map(|x| x.0.0).fold(curve_near, f32::min);
     // Like a vertex, a woken point behind the nearest face or cut away by the section is not
     // picked; a centre inside its own face (a sphere's, a torus's) is, when that face is in front.
     let own_face_in_front = cap.is_none()

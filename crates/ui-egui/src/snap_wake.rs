@@ -77,11 +77,12 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
         app.viewport.woken = Woken::default();
         return;
     }
-    let curve = hits.iter().find_map(item_of).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
-    let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(item_of)) else { return };
+    // An edit, undo or redo sleeps the woken points, whatever is under the pointer now.
     if app.viewport.woken.revision != app.session.revision {
         app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
     }
+    let curve = hits.iter().find_map(item_of).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
+    let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(item_of)) else { return };
     if app.viewport.woken.has(&item) {
         return;
     }
