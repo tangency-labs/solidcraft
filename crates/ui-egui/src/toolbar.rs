@@ -2247,8 +2247,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(id) = toggle {
             crate::toolbar_custom::toggle(app, &tab, id);
         }
+        // A row's menu (its ⋯, or a right-click) opens over the drop-down, which stays open under
+        // it; picking an item or clicking elsewhere closes both.
         if let Some((at, id)) = menu {
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
     });

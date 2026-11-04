@@ -326,7 +326,7 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
     v.push(Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "star").with(json!({ "command": id })));
-    v.push(Item::action("ui.shortcutKey", "Change Keyboard Shortcut…", "").with(json!({ "command": id })));
+    v.push(Item::action("ui.shortcutKey", "Change Keyboard Shortcut…", "settings").with(json!({ "command": id })));
     v.push(Item::sep());
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
     v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": tab })));
