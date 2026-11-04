@@ -761,7 +761,18 @@ fn after_joints(s: &mut Session, p: &Value, id: u64, moved: Mat, cmd: &str) -> V
         path.push(id);
         Some(path)
     };
-    let why = path.and_then(|path| s.drag_group(&path).err()).map(|e| format!("{e}. ")).unwrap_or_default();
+    let why = path.and_then(|path| s.drag_group(&path).err()).map(|e| format!("{e}. ")).unwrap_or_else(|| {
+        // No one joint to blame (a hinge's stored value, say): name the joints on the part.
+        let on: Vec<&str> = s
+            .doc
+            .assembly
+            .joints
+            .iter()
+            .filter(|j| !j.suppressed && (j.a.occurrence == id || j.b.occurrence == id))
+            .map(|j| j.name.as_str())
+            .collect();
+        if on.is_empty() { String::new() } else { format!("Joints on {name}: {}. ", on.join(", ")) }
+    });
     let warning = format!(
         "{why}The joints put {name} back where they hold it. To move it, change the joint (joint.edit for its offset or angle, \
          joint.drive for a hinge or slider value), move what it is held to, or use joint.reach"
