@@ -87,7 +87,7 @@ fn flyout_icons(item: &Value, surface: &str) {
         }
         let icon = child["icon"].as_str().unwrap();
         assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
-        assert!(!solidcraft_ui_egui::icon_svg::resolve(icon).placeholder, "{surface}: submenu placeholder {icon}");
+        assert_eq!(child["placeholder"], false, "{surface}: submenu placeholder {icon}");
         flyout_icons(child, surface);
     }
 }

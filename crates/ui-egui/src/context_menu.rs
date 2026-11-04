@@ -2244,17 +2244,22 @@ pub fn describe(app: &SolveApp) -> Value {
         return json!({ "open": false, "pending": app.menu.pending.is_some() });
     };
     let radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
-    let describe_items = |items: Vec<Item>| {
+    /// A row with its `placeholder` flag, and a flyout's rows likewise.
+    fn describe_items(items: Vec<Item>) -> Vec<Value> {
         items
             .into_iter()
-            .map(|item| {
+            .map(|mut item| {
                 let placeholder = !item.icon.is_empty() && crate::icon_svg::resolve(&item.icon).placeholder;
+                let children = describe_items(std::mem::take(&mut item.children));
                 let mut value = json!(item);
                 value["placeholder"] = json!(placeholder);
+                if !children.is_empty() {
+                    value["children"] = json!(children);
+                }
                 value
             })
-            .collect::<Vec<_>>()
-    };
+            .collect()
+    }
     json!({
         "open": true,
         "at": [at.x, at.y],
