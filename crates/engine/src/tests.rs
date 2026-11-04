@@ -3550,6 +3550,18 @@ fn a_hole_made_with_a_hidden_body_replays_the_same() {
     }
 }
 
+/// #7520 (review): with every body hidden, a hole still drills all of them, as before.
+#[test]
+fn a_hole_with_every_body_hidden_drills_them_all() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "browser.visibility", json!({"items": ["Block", "Plate"], "visible": false}));
+    let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"})).unwrap();
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]));
+    assert!(s.doc.find_feature("Hole1").unwrap().participants.is_empty());
+}
+
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a
 /// neighbouring edge; an imported STEP's body and face colours survive a hole.
 #[test]

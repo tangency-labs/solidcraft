@@ -2913,7 +2913,8 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // hidden, it drills the shown ones, stored so showing the others later changes
             // nothing. The body whose face was picked is drilled though hidden (picked through
             // Select Other, or hidden with the dialog open): it is the one the hole is for.
-            if points.is_none()
+            if !shown.is_empty()
+                && points.is_none()
                 && let Some(body) = hidden_body_picked_at(s, position, &shown)
             {
                 shown.push(body);
