@@ -2930,11 +2930,65 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         return Ok(tools);
     }
     let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-    Ok(match kernel::union_apart(&bodies)? {
+    let one = match kernel::union_apart(&bodies)? {
+        Some(one) => Some(one),
+        // The kernel only compares the tools' boxes, so copies of a through hole close together
+        // on a circle (their boxes overlap) seem to meet (#9007). Their exact shapes may still
+        // be apart.
+        None if tools_clearly_apart(&bodies) => kernel::join_apart(&bodies).ok().flatten(),
+        None => None,
+    };
+    #[cfg(test)]
+    cost_tests::count(|c| c.cut_tools += one.as_ref().map_or(tools.len(), |_| 1));
+    Ok(match one {
         // Each piece's faces keep the names of the tool it is.
         Some(one) => vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())],
         None => tools,
     })
+}
+
+/// Most pairs of tools whose boxes meet that [`tools_clearly_apart`] tests.
+const MAX_CLOSE_TOOL_PAIRS: usize = 4096;
+
+/// Whether no two of `bodies` meet or touch, decided on their exact shapes. Only pairs whose
+/// exact boxes, grown by twice the bodies' tolerances (as [`kernel::apart`] grows them), meet
+/// are tested, by [`apart_by_union`]. `false` whenever that cannot be shown: a mesh body, a body
+/// without an exact box, too many pairs to test, a union that fails.
+fn tools_clearly_apart(bodies: &[Body]) -> bool {
+    if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
+        return false;
+    }
+    let Some(boxes) = bodies.iter().map(more::exact_box).collect::<Option<Vec<_>>>() else { return false };
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map_or(0.0, |b| b.min.x).total_cmp(&boxes.get(j).map_or(0.0, |b| b.min.x)));
+    let mut close = Vec::new();
+    for (k, &i) in order.iter().enumerate() {
+        let Some(a) = boxes.get(i) else { return false };
+        for &j in order.iter().skip(k + 1) {
+            let Some(b) = boxes.get(j) else { return false };
+            if b.min.x > a.max.x {
+                break;
+            }
+            if more::boxes_apart(&Some(*a), &Some(*b)) {
+                continue;
+            }
+            if close.len() == MAX_CLOSE_TOOL_PAIRS {
+                return false;
+            }
+            close.push((i, j));
+        }
+    }
+    close.into_iter().all(|(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b)))
+}
+
+/// Whether the exact union of `a` and `b` comes out in two pieces that share no face, edge or
+/// vertex. Crossing and nested bodies come out in one piece, touching ones in one or in two that
+/// share an edge or a face.
+fn apart_by_union(a: &Body, b: &Body) -> bool {
+    match kernel::boolean(a, b, BoolOp::Union) {
+        Ok(Some(u)) => u.record().material_regions().len() == 2 && u.region_contacts().is_ok_and(|c| c.is_empty()),
+        _ => false,
+    }
 }
 
 /// An intersect never deletes a body by accident (#5295): it is refused when nothing of a named
@@ -6169,7 +6223,6 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
     (Vec3::ZERO, Vec3::X)
 }
 
-/// Whether a copy has no material to cut in any of its eligible targets.
 /// The bodies a hole cuts: those its feature names, else its component's and its own (as
 /// `apply_traced` picks a cut's targets).
 fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
@@ -6199,18 +6252,120 @@ fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
     targets.iter().all(|b| more::boxes_apart(&tool_box, &b.body.exact_bounds().ok()))
 }
 
-fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
+/// The bodies a pattern's cut copies are checked against for missing them ([`copy_misses`]).
+fn miss_scope<'a>(st: &'a ModelState, f: &'a Feature, targets: &'a [String]) -> impl Iterator<Item = &'a ModelBody> + 'a {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     st.bodies
         .iter()
-        .filter(|b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
-        .all(|b| {
-            tools.iter().all(|t| {
-                // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
-                matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
-            })
+        .filter(move |b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
+}
+
+/// Whether a copy has no material to cut in any of its eligible targets.
+fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
+    miss_scope(st, f, targets).all(|b| {
+        tools.iter().all(|t| {
+            #[cfg(test)]
+            cost_tests::count(|c| c.miss_intersects += 1);
+            // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
+            matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
         })
+    })
+}
+
+/// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
+/// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
+/// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
+/// shows takes material from a target ([`shares_material`]) is not a miss, and skips it; only
+/// copies the test cannot place (in an earlier hole, on the edge, thinner than its samples) are
+/// intersected.
+fn count_copy_misses(
+    st: &ModelState,
+    f: &Feature,
+    targets: &[String],
+    copies: &[Traced],
+    instances: &[std::ops::Range<usize>],
+    axes: &[Vec<(Vec3, Vec3)>],
+) -> (usize, usize) {
+    let scope: Vec<&ModelBody> = miss_scope(st, f, targets).collect();
+    let (mut missed, mut total) = (0, 0);
+    for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
+        total += 1;
+        let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
+        let takes = tools.iter().any(|t| scope.iter().any(|b| shares_material(&b.body, &t.body, lines)));
+        if !takes && copy_misses(st, f, targets, tools) {
+            missed += 1;
+        }
+    }
+    (missed, total)
+}
+
+/// Whether some point lies in the material of both B-rep bodies `target` and `tool`, by their
+/// exact point classification (a point on either's boundary does not count). Tried along
+/// `lines` (a hole's axis: through the wall it drills into, however thin and slanted), along the
+/// axes of the tool's round faces (a cylinder's axis, the middle of a slot's ends) and along the
+/// three lines parallel to the axes through the middle of the box both exact boxes hold (the
+/// axis of a straight hole through a plate), within that box. `false` says nothing.
+fn shares_material(target: &Body, tool: &Body, lines: &[(Vec3, Vec3)]) -> bool {
+    if target.is_mesh() || tool.is_mesh() {
+        return false;
+    }
+    let (Some(a), Some(b)) = (more::exact_box(target), more::exact_box(tool)) else { return false };
+    let both = a.intersection(&b);
+    if both.is_empty() {
+        return false;
+    }
+    let c = both.center();
+    let mut all = lines.to_vec();
+    all.extend(round_face_axes(tool, MAX_PROBED_FACES));
+    all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
+    let inside = |b: &Body, p: Vec3| matches!(b.classify_point(p), Ok(kernel::PointClass::Inside));
+    all.iter().any(|&(o, d)| {
+        let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
+        (0..SAMPLES_PER_LINE).any(|k| {
+            let p = o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64);
+            inside(tool, p) && inside(target, p)
+        })
+    })
+}
+
+/// Points tried on each line by [`shares_material`].
+const SAMPLES_PER_LINE: usize = 16;
+/// Most faces of a tool whose surfaces [`shares_material`] looks along.
+const MAX_PROBED_FACES: usize = 32;
+
+/// The axes of the round faces among the first `max` faces of `body`, from their exact surfaces:
+/// a cylinder's, a cone's and a torus's axis, and the lines along X, Y and Z through a sphere's
+/// centre.
+fn round_face_axes(body: &Body, max: usize) -> Vec<(Vec3, Vec3)> {
+    let mut lines = Vec::new();
+    for face in 0..body.face_count().min(max) {
+        match kernel::face_surface(body, face) {
+            Some(kernel::FaceSurface::Cylinder { origin, axis, .. }) => lines.push((origin, Vec3::from(axis))),
+            Some(kernel::FaceSurface::Cone { apex, axis, .. }) => lines.push((apex, Vec3::from(axis))),
+            Some(kernel::FaceSurface::Torus { center, axis, .. }) => lines.push((center, Vec3::from(axis))),
+            Some(kernel::FaceSurface::Sphere { center, .. }) => lines.extend([(center, Vec3::X), (center, Vec3::Y), (center, Vec3::Z)]),
+            Some(kernel::FaceSurface::Plane { .. }) | None => {}
+        }
+    }
+    lines
+}
+
+/// The stretch of the line `o + t d` inside `b`, as the range of `t`; `None` when it misses.
+fn line_in_box(b: &solidcraft_geom::Aabb3, o: Vec3, d: Vec3) -> Option<(f64, f64)> {
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (o, d, min, max) in [(o.x, d.x, b.min.x, b.max.x), (o.y, d.y, b.min.y, b.max.y), (o.z, d.z, b.min.z, b.max.z)] {
+        if d.abs() < 1e-12 {
+            if o < min || o > max {
+                return None;
+            }
+        } else {
+            let (a, c) = ((min - o) / d, (max - o) / d);
+            lo = lo.max(a.min(c));
+            hi = hi.min(a.max(c));
+        }
+    }
+    (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
 }
 
 /// The deepest a pattern or mirror reaches through patterns and mirrors of features (#395).
@@ -6452,6 +6607,9 @@ fn replay(
         let targets = if present.is_empty() { targets } else { present };
         let mut copies = Vec::new();
         let mut instances = Vec::with_capacity(mats.len());
+        // Each hole copy's axes (spot and direction), where the check for copies that miss looks
+        // for material first.
+        let mut axes: Vec<Vec<(Vec3, Vec3)>> = Vec::new();
         if let FeatureKind::Hole { diameter, depth, hole, to, .. } = &src.kind {
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
@@ -6460,8 +6618,10 @@ fn replay(
             for (k, m) in mats.iter().enumerate() {
                 let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                 let start = copies.len();
+                let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {
                     let at = hole_on_surface(st, crate::apply_point(m, *p), d, hole_scope(src));
+                    on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
@@ -6472,6 +6632,7 @@ fn replay(
                     );
                 }
                 instances.push(start..copies.len());
+                axes.push(on);
             }
         } else if let FeatureKind::Rib { .. } = &src.kind {
             // A rib is built again at each copy of its sketch, against the bodies there (#4593):
@@ -6498,12 +6659,9 @@ fn replay(
             }
         }
         if op == Operation::Cut {
-            for instance in &instances {
-                if let Some(tools) = copies.get(instance.clone()) {
-                    total += 1;
-                    missed += usize::from(copy_misses(st, f, &targets, tools));
-                }
-            }
+            let (m, t) = count_copy_misses(st, f, &targets, &copies, &instances, &axes);
+            missed += m;
+            total += t;
         }
         // Copies of a cut through sheet metal are cut-outs of its flat pattern, as the cut is
         // (#6841): each machined into the sheets in turn, then cut from the other targets.
