@@ -1514,7 +1514,12 @@ fn woken_points_stand_for_their_item_only_where_its_snap_is() {
     let edge = edge_sel(&app.session, Vec3::new(10.0, 0.0, 10.0)).unwrap();
     let corner = Sel::Vertex { body: "Body1".into(), point: Vec3::new(0.0, 0.0, 10.0) };
     assert_eq!(woken_pick(&app, true, corner.clone()), corner, "nothing woken");
-    app.viewport.woken = crate::snap_wake::Woken { item: Some(edge.clone()), points: solidcraft_engine::snap::snap_points(&app.session, &edge) };
+    app.viewport.woken = crate::snap_wake::Woken {
+        item: Some(edge.clone()),
+        points: solidcraft_engine::snap::snap_points(&app.session, &edge),
+        revision: app.session.revision,
+        ..Default::default()
+    };
     assert_eq!(woken_pick(&app, true, corner.clone()), corner, "an end stays a point");
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
     // Another body's point at the same place stays that body's.
@@ -1529,6 +1534,11 @@ fn woken_points_stand_for_their_item_only_where_its_snap_is() {
     let mid = Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) };
     assert_eq!(woken_pick(&app, takes_snaps(&moved), mid.clone()), mid);
     let face = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
-    app.viewport.woken = crate::snap_wake::Woken { item: Some(face.clone()), points: solidcraft_engine::snap::snap_points(&app.session, &face) };
+    app.viewport.woken = crate::snap_wake::Woken {
+        item: Some(face.clone()),
+        points: solidcraft_engine::snap::snap_points(&app.session, &face),
+        revision: app.session.revision,
+        ..Default::default()
+    };
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
 }

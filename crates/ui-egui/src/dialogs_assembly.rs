@@ -737,13 +737,17 @@ pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
     let woken = &app.viewport.woken;
     // Only the woken item's own body: another body's point there is that body's.
     let of_body = |i: &&Sel| matches!(i, Sel::Edge { body: b, .. } | Sel::Face { body: b, .. } if b == body);
-    let Some(item) = woken.item.as_ref().filter(of_body).filter(|_| snaps && woken.points.iter().any(|p| p.at.dist(*point) <= tol)) else {
+    if !snaps || !woken.points.iter().any(|p| p.at.dist(*point) <= tol) {
         return sel;
-    };
-    match snap_of(&app.session, item) {
-        Some(s) if s.at.dist(*point) <= tol => item.clone(),
-        _ => sel,
     }
+    // The rim's item, or a face of its body crossed on the way to its centre.
+    [&woken.item, &woken.face]
+        .into_iter()
+        .flatten()
+        .filter(of_body)
+        .find(|item| snap_of(&app.session, item).is_some_and(|s| s.at.dist(*point) <= tol))
+        .cloned()
+        .unwrap_or(sel)
 }
 
 /// Whether a dialog's active input takes joint snaps (a joint's origin, a trace's point).
