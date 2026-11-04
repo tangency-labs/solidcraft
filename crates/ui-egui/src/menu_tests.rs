@@ -3,8 +3,9 @@
 use crate::test_support::sample_app;
 use egui::pos2;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::context_menu::{self, Item, Target};
 use crate::viewport::Hit;
@@ -143,7 +144,7 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
     app.run("sketch.finish", json!({})).unwrap();
     let (sketch, curve) = {
-        let st = app.session.world_state();
+        let st = app.session.world_state().unwrap();
         let ss = st.sketches.first().expect("the design has one sketch");
         (ss.feature, ss.sketch.curves.first().expect("the rectangle drew curves").id.clone())
     };
@@ -171,7 +172,7 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
 fn a_selected_face_keeps_the_body_menu_beside_a_sketch_curve() {
     let mut app = sample_app();
     let b = body(&app);
-    let sketch = app.session.world_state().sketches.first().expect("the sample design has sketches").feature;
+    let sketch = app.session.world_state().unwrap().sketches.first().expect("the sample design has sketches").feature;
     let items = json!([
         {"type": "face", "body": b, "index": 0, "point": [0, 0, 0]},
         {"type": "external_sketch_curve", "sketch": sketch, "id": "l1"},
@@ -773,7 +774,7 @@ fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
 fn menu_delete_items_use_the_same_path() {
     let mut app = sample_app();
     let b = body(&app);
-    let original_volume = solidcraft_engine::kernel::measure(&app.session.world_state().body(&b).unwrap().body).unwrap().volume;
+    let original_volume = solidcraft_engine::kernel::measure(&app.session.world_state().unwrap().body(&b).unwrap().body).unwrap().volume;
     let created = app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = app.session.doc.components[0].id;
     let transfer = created["components"][0]["feature"].as_u64().unwrap();
@@ -788,15 +789,15 @@ fn menu_delete_items_use_the_same_path() {
     assert!(crate::delete::confirm(&mut app, true));
     assert!(app.session.doc.components.is_empty());
     assert!(app.session.doc.feature(transfer).is_none());
-    let restored = app.session.world_state();
+    let restored = app.session.world_state().unwrap();
     assert_eq!(restored.bodies.len(), 1, "the original joined plate stays intact");
     let plate = restored.body(&b).unwrap();
     assert_eq!(plate.component, 0);
     assert!((solidcraft_engine::kernel::measure(&plate.body).unwrap().volume - original_volume).abs() < 1e-6);
-    assert!(plate.mesh().contains(solidcraft_engine::geom::Vec3::new(40.0, 35.0, 12.0)));
+    assert!(plate.mesh().contains(solidcore_record::Vec3::new(40.0, 35.0, 12.0)));
     let mut reopened = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
     reopened.refresh();
-    let reopened_state = reopened.world_state();
+    let reopened_state = reopened.world_state().unwrap();
     assert_eq!(reopened_state.bodies.len(), 1);
     assert_eq!(reopened_state.body(&b).unwrap().component, 0);
     assert!((solidcraft_engine::kernel::measure(&reopened_state.body(&b).unwrap().body).unwrap().volume - original_volume).abs() < 1e-6);
@@ -1176,14 +1177,14 @@ fn occurrence_moves_turn_about_their_origin_then_move() {
     let occ = app.session.doc.occurrences[0].id;
     app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
     let mut m = crate::browser::OccMove::new(occ);
-    m.pivot = Some(solidcraft_engine::geom::Vec3::new(5.0, 0.0, 0.0));
+    m.pivot = Some(solidcore_record::Vec3::new(5.0, 0.0, 0.0));
     m.translate = [10.0, 0.0, 0.0];
     m.angles = [0.0, 0.0, 90.0];
     crate::browser::apply_occurrence_move(&mut app, &m);
     let t = *app.session.pending_moves.get(&occ).unwrap();
     // The pivot lands 10 mm along X; X turns into Y.
-    let p = solidcraft_engine::doc::apply_point(&t, solidcraft_engine::geom::Vec3::new(5.0, 0.0, 0.0));
-    let x = solidcraft_engine::doc::apply_vector(&t, solidcraft_engine::geom::Vec3::X);
+    let p = solidcraft_engine::doc::apply_point(&t, solidcore_record::Vec3::new(5.0, 0.0, 0.0));
+    let x = solidcraft_engine::doc::apply_vector(&t, solidcore_record::Vec3::X);
     assert!((p.x - 15.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
     assert!((x.y - 1.0).abs() < 1e-9, "{x:?}");
     // Changing the values again starts from where it was, not from the last move.
@@ -1288,8 +1289,8 @@ fn construction_plane_row_opens_its_menu() {
 /// starts the sketch on that plane.
 #[test]
 fn right_click_on_a_plane_offers_a_sketch_on_it() {
-    use solidcraft_engine::geom::Vec3;
-    let normal = |h: &crate::scenario::Harness| h.app.session.world_state().sketches.first().map(|s| s.plane.normal()).unwrap_or_default();
+    use solidcore_record::Vec3;
+    let normal = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().sketches.first().map(|s| s.plane.normal()).unwrap_or_default();
     for (plane, axis) in [("XY", Vec3::Z), ("XZ", Vec3::Y), ("YZ", Vec3::X)] {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -1336,7 +1337,7 @@ fn right_click_on_a_plane_offers_a_sketch_on_it() {
     let id = h.app.session.doc.find_feature("Cut").map(|f| f.id).unwrap();
     act(&mut h.app, &Target::Plane { id }, "Create Sketch");
     h.frames(3);
-    let sketch = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.origin.z));
+    let sketch = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().unwrap().sketch(s).map(|s| s.plane.origin.z));
     assert_eq!(sketch, Some(25.0), "the sketch is on the construction plane");
 }
 
@@ -1390,7 +1391,7 @@ fn empty_space_leads_with_create_sketch() {
 /// Create Sketch from a right-click on empty space sketches on the next plane clicked (#3032).
 #[test]
 fn create_sketch_from_empty_space_sketches_on_the_plane_clicked_next() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.settle();
@@ -1405,7 +1406,7 @@ fn create_sketch_from_empty_space_sketches_on_the_plane_clicked_next() {
     let p = h.at(&json!({"plane": "XY"})).unwrap();
     h.call("ui.click", json!({"x": p[0], "y": p[1]}));
     h.frames(3);
-    let normal = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.normal()));
+    let normal = h.app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&h.app.session).sketch(s).map(|s| s.plane.normal()));
     assert!(normal.is_some_and(|n| n.dot(Vec3::Z).abs() > 0.999), "sketching on XY: {normal:?}");
 }
 
@@ -1482,14 +1483,15 @@ fn typing_a_new_body_name_and_enter_renames_it() {
 
 #[test]
 fn contribution_picked_faces_open_their_own_feature_after_later_modifiers() {
-    use solidcraft_engine::{Sel, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     for expected in [1, 2, 3] {
         let mut app = SolveApp::new(Session::default(), Services::default());
         app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
         app.run("solid.hole", json!({"position":[20,15,20],"diameter":8})).unwrap();
         app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2})).unwrap();
         app.run("solid.hole", json!({"position":[32,20,20],"diameter":4})).unwrap();
-        let state = app.session.world_state();
+        let state = app.session.world_state().unwrap();
         let b = state.body("Plate").unwrap();
         let names = solidcraft_engine::doc::naming::face_names(b);
         let index = names.iter().position(|n| n.starts_with(&format!("F{expected}:"))).unwrap();
@@ -1526,8 +1528,7 @@ fn contribution_picked_faces_open_their_own_feature_after_later_modifiers() {
 fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
-    app.session.selection =
-        vec![solidcraft_engine::Sel::Face { body: "Plate".into(), index: usize::MAX, point: solidcraft_engine::geom::Vec3::ZERO }];
+    app.session.selection = vec![solidcraft_engine::Sel::Face { body: "Plate".into(), index: usize::MAX, point: solidcore_record::Vec3::ZERO }];
     let items = context_menu::items(&app, &Target::Viewport);
     assert!(!find(&items, "Edit Feature").enabled);
     assert!(!find(&items, "Find in Timeline").enabled);

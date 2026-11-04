@@ -514,6 +514,19 @@ impl Renderer {
         paint_jobs: &[epaint::ClippedPrimitive],
         screen_descriptor: &ScreenDescriptor,
     ) {
+        self.render_with_mesh_offset(render_pass, paint_jobs, screen_descriptor, 0);
+    }
+
+    /// SolidCraft: continue an uploaded frame in another render pass. `mesh_offset`
+    /// counts every preceding mesh, including meshes with an empty clip rectangle.
+    /// Callbacks consume no mesh buffer slice. The caller preserves primitive order.
+    pub fn render_with_mesh_offset(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        paint_jobs: &[epaint::ClippedPrimitive],
+        screen_descriptor: &ScreenDescriptor,
+        mesh_offset: usize,
+    ) {
         profiling::function_scope!();
 
         if self.skip_frame {
@@ -527,8 +540,8 @@ impl Renderer {
         // run.
         let mut needs_reset = true;
 
-        let mut index_buffer_slices = self.index_buffer.slices.iter();
-        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter();
+        let mut index_buffer_slices = self.index_buffer.slices.iter().skip(mesh_offset);
+        let mut vertex_buffer_slices = self.vertex_buffer.slices.iter().skip(mesh_offset);
 
         for epaint::ClippedPrimitive {
             clip_rect,

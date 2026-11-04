@@ -12,9 +12,10 @@
 //! geometry cannot reach stop short at the edge of that stretch and go on past it. It steps only
 //! when the move is long next to the dragged geometry, so a normal mouse frame is a single solve.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, Sketch, conic_rho_from_point};
 
 use super::{Ent, Left, counted_solve};

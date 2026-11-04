@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4322"
+ ],
+ "what": "a 6x7 rectangle with one corner exactly on the slanted top edge of a triangular prism, joined 10 mm up: 'profile loop is not closed' on 0.17",
+ "source": "analytic",
+ "method": "triangle (0,0),(40,0),(20,30) x 10 = 6000; the rectangle (10,8)-(16,15) lies on the top face with its corner (10,15) on the edge y = 1.5x: + 6*7*10 = 420. V = 6420 (the triage's numbers)",
+ "body_count": 1,
+ "volume_mm3": 6420.0
+}

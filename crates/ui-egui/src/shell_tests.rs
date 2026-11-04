@@ -55,7 +55,7 @@ fn both_modes_keep_their_geometry_and_fit_clear_of_covered_rects() {
             assert!(!layout.drawable.intersect(covered).is_positive(), "{layout:?} {covered:?}");
         }
         let projection = crate::viewport::projection(&h.app, viewport);
-        for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(40.0, 30.0, 20.0)] {
+        for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(40.0, 30.0, 20.0)] {
             assert!(layout.drawable.contains(projection.to_screen(point).unwrap()));
         }
         h.app.start("solid.extrude");
@@ -108,7 +108,7 @@ fn floating_sketch_palette_and_compass_share_measured_clearance() {
             assert!(layout.viewport.expand(1.0).contains_rect(palette), "{palette:?} {layout:?}");
             assert!(palette.contains(crate::scenario::handle_at("sketch_palette:look_at").unwrap()));
             let proj = crate::viewport::projection(&h.app, layout.viewport);
-            for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(20.0, 0.0, 0.0)] {
+            for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(20.0, 0.0, 0.0)] {
                 assert!(layout.drawable.contains(proj.to_screen(point).unwrap()), "{layout:?}");
             }
             if width > 1000.0 {
@@ -576,7 +576,9 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let overlap = sheet.intersect(preferences);
         assert!(overlap.is_positive(), "Preferences overlaps the feature dialog");
         assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences receives input above the sheet");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
+        let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
+        assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences owns its Cancel target");
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(h.app.dialog.is_none());

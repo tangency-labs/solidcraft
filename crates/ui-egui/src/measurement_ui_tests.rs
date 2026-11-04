@@ -3,6 +3,7 @@ use crate::dialogs::Kind;
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 fn result(h: &Harness) -> &Value {
     match &h.app.dialog.as_ref().unwrap().kind {
@@ -31,9 +32,9 @@ fn measure_starts_with_selected_vertices_edges_and_faces() {
                 .map(|point| match kind {
                     "vertex" => json!({"type":kind,"body":"Box","point":point}),
                     _ => {
-                        let st = h.app.session.world_state();
+                        let st = crate::open_meshing::session_world(&h.app.session);
                         let mesh = st.body("Box").unwrap().mesh();
-                        let point = solidcraft_engine::geom::Vec3::from(point);
+                        let point = solidcore_record::Vec3::from(point);
                         let index = if kind == "edge" {
                             mesh.edges.iter().position(|e| e.windows(2).any(|w| point.dist_to_segment(w[0], w[1]) < 1e-6)).unwrap()
                         } else {
@@ -119,6 +120,60 @@ fn painted_text(h: &mut Harness) -> Vec<String> {
     output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_string()) } else { None }).collect()
 }
 
+/// A point's complete position must be painted, not merely retained in an ellipsized galley.
+#[test]
+fn point_coordinates_are_not_truncated_in_the_measure_panel() {
+    for layout in ["floating", "compact"] {
+        for decimals in [2, 8] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.length_decimals = decimals;
+            h.call("ui.set", json!({"layout":layout}));
+            let point = [-99.56, -75.0, 12.345678];
+            h.app.run("solid.box", json!({"corner":point,"length":1,"width":1,"height":1,"body_name":"Box"})).unwrap();
+            h.app.session.selection = vec![Sel::Vertex { body: "Box".into(), point: point.into() }];
+            h.app.start("inspect.measure");
+            h.call("ui.view", json!({"view":"fit"}));
+            h.frames(6);
+            let line = crate::quick_measure::item_lines(&h.app, &result(&h)["items"][0]).remove(0);
+            h.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&h.ctx);
+            let mut textures = std::collections::HashMap::new();
+            let mut last = None;
+            for frame in 0..6 {
+                let mut output = h.ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+                        time: Some(frame as f64 / 60.0),
+                        ..Default::default()
+                    },
+                    |ui| h.app.ui(ui),
+                );
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+                last = Some(output);
+            }
+            let output = last.unwrap();
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_MEASURE_EVIDENCE") {
+                let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+                let image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), output.pixels_per_point, bounds, &textures);
+                std::fs::create_dir_all(&dir).unwrap();
+                image.save(std::path::Path::new(&dir).join(format!("coordinates-{layout}-{decimals}.png"))).unwrap();
+            }
+            let painted = output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text().contains(&line) => Some((s.clip_rect, t)),
+                    _ => None,
+                })
+                .expect("the position is painted");
+            assert!(!painted.1.galley.elided, "{layout}, {decimals} decimals: {line}");
+            assert!(painted.0.expand(1.0).contains_rect(painted.1.visual_bounding_rect()), "the complete position stays inside its clip");
+        }
+    }
+}
+
 fn component_rects() -> Vec<egui::Rect> {
     ["measure:label", "measure:label:x", "measure:label:y", "measure:label:z"].into_iter().map(|key| crate::scenario::rect_of(key).unwrap()).collect()
 }
@@ -139,9 +194,26 @@ fn measure_dialog_shows_the_obtuse_corner_of_selected_lines() {
     }
 }
 
+/// A datum plane and the origin's axis measure against points: the shapes run on, so the
+/// distances are exact rather than sampled.
+#[test]
+fn a_datum_plane_and_a_point_measure_their_distance() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    h.app.session.selection = vec![Sel::Plane { name: "XY".into() }, Sel::Vertex { body: "Box".into(), point: [5.0, 5.0, 10.0].into() }];
+    h.app.start("inspect.measure");
+    h.settle();
+    let d = result(&h)["distance_mm"].as_f64().unwrap();
+    assert!((d - 10.0).abs() < 1e-9, "{d}");
+}
+
 #[test]
 fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
     h.app.home.open = false;
     h.app.set_origin_shown(false);
     h.app.ui.show_browser = false;

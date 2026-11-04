@@ -1,13 +1,16 @@
 //! Sketch commands: create/edit/finish sketches, draw curves, constraints and dimensions.
 
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::{FeatureKind, PlaneRef, expr::Kind};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, PointExprs, Sketch, SolveReport, TwoCircles, solve, solve_with};
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec3};
-use crate::{EngineError, Result, Session, SketchEntry};
+use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session, SketchEntry, Snapshot};
 
 #[path = "sketch_dimensioned.rs"]
 mod dimensioned;
@@ -33,18 +36,28 @@ macro_rules! model_operand_doc {
     };
 }
 
+const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
+const EXIT_CONTRACT: TypedContract<ExitParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
         .icon("sketch")
         .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
-    CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("sketch").params("sketch: id or name"),
-    CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
-    CommandSpec::new("sketch.cancel", "Cancel Sketch", cancel_sketch)
+    CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
+        .noundo().icon("sketch")
+        .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
+        .params("sketch: id or name; restore_marker?: nonnegative timeline position or null (end). When provided, temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omit to leave the timeline in place"),
+    CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
+        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
+        .contract(&EXIT_CONTRACT).output(output_schema_for::<FinishResult>)
+        .params("restore_marker?: bool (default true); false transfers the temporary marker directly to another editor without rebuilding the intervening timeline"),
+    CommandSpec::new("sketch.cancel", "Cancel Sketch", crate::checked!("sketch.cancel", cancel_sketch))
         .at("SKETCH", "FINISH SKETCH")
         .icon("sketch_cancel")
         .enabled(in_sketch)
-        .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead)"),
+        .contract(&EXIT_CONTRACT).output(output_schema_for::<CancelResult>)
+        .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead). restore_marker?: bool (default true); false transfers the temporary marker to another editor"),
     CommandSpec::new("sketch.line", "Line", draw_line)
         .at("SKETCH", "CREATE")
         .icon("line")
@@ -69,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("rect_rounded")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: opposite corners [x,y]; radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", rect_center)
         .at("SKETCH", "CREATE")
         .icon("rect_center")
@@ -174,7 +187,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_concentric")
         .enabled(in_sketch)
-        .params(concat!("a, b: circles/arcs", model_operand_doc!())),
+        .params(concat!("a, b: two circles/arcs, or a circle/arc and a sketch point (including origin), in either order; the point and the curve's centre become coincident", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.collinear", "Collinear", c_collinear)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_collinear")
@@ -325,7 +338,7 @@ pub(super) fn edit_solved<T>(
     };
     sketch_store::checked(&sk)?;
     sketch_store::write(&mut doc, id, sk)?;
-    *s.doc_mut() = doc;
+    s.set_doc(doc);
     Ok((out, rep))
 }
 
@@ -468,10 +481,13 @@ pub(super) mod solve_counts {
 }
 
 /// How close (mm) a new point must land to an existing one to be connected to it.
-const CONNECT_TOL: f64 = 1e-6;
+pub(super) const CONNECT_TOL: f64 = 1e-6;
 
 /// New points (index `first` on) that land on an existing point, the origin included, get a
 /// coincident constraint to it, as when a click snaps there; `connect: false` leaves them free.
+/// A point placed by parameter expressions is never tied: it follows its expressions, and a
+/// Coincident to where the expressions happened to come to at draw time conflicts with the
+/// next parameter change (#10703).
 fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String>> {
     if !bool_(p, "connect").unwrap_or(true) {
         return Ok(Vec::new());
@@ -481,6 +497,9 @@ fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String
     old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     let mut ties = Vec::new();
     for q in first..sk.points.len() {
+        if sk.points.get(q).is_some_and(|pt| pt.exprs.is_some()) {
+            continue;
+        }
         let Some(at) = sk.point(q) else { continue };
         let from = old.partition_point(|(o, _)| o.x < at.x - CONNECT_TOL);
         let hit =
@@ -940,6 +959,16 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    let restore_marker = p
+        .get("restore_marker")
+        .map(|v| {
+            serde_json::from_value::<Option<usize>>(v.clone())
+                .map_err(|_| bad("sketch.edit", "`restore_marker` must be a nonnegative timeline position or null"))
+        })
+        .transpose()?;
+    if restore_marker.flatten().is_some_and(|m| m > s.doc.features.len()) {
+        return Err(bad("sketch.edit", "`restore_marker` is past the end of the timeline"));
+    }
     let key = match p.get("sketch") {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
@@ -961,7 +990,16 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
     if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
-        s.sketch_entry = Some(SketchEntry { sketch: id, ..entry_point(s) });
+        s.sketch_entry = Some(SketchEntry { sketch: id, restore_marker, ..entry_point(s) });
+        if restore_marker.is_some()
+            && let Some(index) = s.doc.feature_index(id)
+        {
+            let marker = (index + 1 < s.doc.features.len()).then_some(index + 1);
+            if s.doc.marker != marker {
+                s.doc_mut().marker = marker;
+            }
+            s.selection.clear();
+        }
     }
     s.active_sketch = Some(id);
     s.revision += 1;
@@ -970,15 +1008,32 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The design and undo history as they are now, where a sketch is entered (its id set after).
 fn entry_point(s: &Session) -> SketchEntry {
-    SketchEntry { sketch: 0, doc: s.doc.clone(), undo_len: s.undo.len(), undo_top: s.undo.last().map(|snap| snap.doc.clone()) }
+    SketchEntry {
+        sketch: 0,
+        doc: s.doc.clone(),
+        undo_len: s.undo.len(),
+        undo_top: s.undo.last().map(|snap| snap.doc.clone()),
+        restore_marker: None,
+        pending_moves: s.pending_moves.clone(),
+        visibility: s.visibility.clone(),
+    }
+}
+
+fn restore_on_exit(cmd: &str, p: &Value) -> Result<bool> {
+    match p.get("restore_marker") {
+        None => Ok(true),
+        Some(Value::Bool(restore)) => Ok(*restore),
+        _ => Err(bad(cmd, "`restore_marker` must be a boolean")),
+    }
 }
 
 /// Cancel Sketch (#3838): the design as it was when the open sketch was entered. The entry is
 /// used only while the undo history still runs through it: the same steps before it, and every
 /// step since taken in this sketch. Otherwise the steps since can't be told apart from others,
 /// and Undo is the way back.
-fn cancel_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
+fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.cancel";
+    let restore = restore_on_exit(cmd, p)?;
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let entry = s.sketch_entry.clone().filter(|entry| entry.sketch == id);
     let current = entry.filter(|entry| {
@@ -998,21 +1053,82 @@ fn cancel_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the undo history no longer leads back to where this sketch was opened: use Undo to go back"));
     };
     let created = entry.doc.feature(id).is_none();
+    let marker = if restore { entry.restore_marker.unwrap_or(entry.doc.marker) } else { s.doc.marker };
     // As Undo does: the session evaluates the design it is given.
+    // Undo of Cancel reopens this edit, so retain its return position for a later Finish.
+    s.sketch_entry = entry.restore_marker.map(|_| entry.clone());
     s.doc = entry.doc;
+    let marker = marker.filter(|m| *m < s.doc.features.len());
+    if s.doc.marker != marker {
+        s.doc_mut().marker = marker;
+    }
     s.active_sketch = None;
-    s.sketch_entry = None;
     s.selection.clear();
     s.revision += 1;
     Ok(json!({"sketch": id, "removed": created}))
 }
 
-fn finish_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
+fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    let restore = restore_on_exit("sketch.finish", p)?;
     let id = s.active_sketch.take();
-    s.sketch_entry = None;
-    s.revision += 1;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
+    if let Some(entry) = s.sketch_entry.take().filter(|entry| Some(entry.sketch) == id)
+        && let Some(marker) = entry.restore_marker
+    {
+        finish_edit_history(s, &entry, marker);
+        if restore {
+            let marker = marker.filter(|m| *m < s.doc.features.len());
+            if s.doc.marker != marker {
+                s.doc_mut().marker = marker;
+            }
+        }
+        s.selection.clear();
+    }
+    s.revision += 1;
     Ok(json!({"sketch": id, "profiles": profiles}))
+}
+
+/// Fold only the steps still belonging to this edit. Its snapshots describe the complete
+/// design, never the temporary marker. The anchor may have moved when the undo limit trimmed
+/// older steps; if it is gone, only a stack entirely from this sketch can be folded safely.
+fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
+    use std::sync::Arc;
+    let start = match &entry.undo_top {
+        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
+        None => Some(0),
+    }
+    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0));
+    let Some(start) =
+        start.filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
+    else {
+        return;
+    };
+    let mut before = (*entry.doc).clone();
+    before.marker = marker.filter(|m| *m < before.features.len());
+    let mut after = (*s.doc).clone();
+    after.marker = marker.filter(|m| *m < after.features.len());
+    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
+    s.undo.truncate(start);
+    if changed {
+        s.undo.push(Snapshot {
+            label: "Edit Sketch".into(),
+            doc: Arc::new(before),
+            active_sketch: None,
+            pending_moves: entry.pending_moves.clone(),
+            visibility: entry.visibility.clone(),
+        });
+        if s.undo.len() > crate::MAX_UNDO {
+            s.undo.remove(0);
+        }
+    }
+    // Redo of a step undone while editing must not reopen a finished temporary rollback.
+    for snap in &mut s.redo {
+        if snap.active_sketch == Some(entry.sketch) {
+            let doc = Arc::make_mut(&mut snap.doc);
+            doc.marker = marker.filter(|m| *m < doc.features.len());
+            snap.active_sketch = None;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1055,7 +1171,8 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
         for i in 0..segs {
             let j = (i + 1) % n;
             let (Some(a), Some(b)) = (args.get(i), args.get(j)) else { continue };
-            if a.pos().dist(b.pos()) < 1e-9 {
+            // Ends closer than this would both be connected to one point (#11001).
+            if a.pos().dist(b.pos()) < CONNECT_TOL {
                 return Err(bad(cmd, "zero-length line"));
             }
             let id = ids.get(i).map(String::as_str);
@@ -1297,7 +1414,9 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
 /// fillet run in a scratch session that replaces the design only when both succeed.
 fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.rounded";
-    let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
+    // The corners may be typed as expressions: `sketch.rectangle.two_point` below places them, so
+    // here they are only worked out to check the radius against the sides.
+    let ((a, _), (b, _)) = (corner_arg(&s.doc, p, "p0", cmd)?, corner_arg(&s.doc, p, "p1", cmd)?);
     let r_expr = req_expr(cmd, p, "radius")?;
     let r = s.doc.eval(&r_expr, Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
     if !(r > 1e-9 && r < 1e8) {
@@ -2454,11 +2573,21 @@ fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
-    let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.concentric", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.concentric", |sk| {
-        two_curves(sk, p, "sketch.constraint.concentric")
-            .and_then(|ab| two_different("sketch.constraint.concentric", ab))
-            .map(|(a, b)| ConstraintKind::Concentric { a, b })
+    let cmd = "sketch.constraint.concentric";
+    let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
+    constrain(s, p, cmd, |sk| {
+        let centre = |key: &str| {
+            let curve = sk.curves.get(sk.curve_index(p.get(key)?.as_str()?)?)?;
+            match curve.kind {
+                CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                _ => None,
+            }
+        };
+        let point = |key: &str| sk.resolve_point(p.get(key)?.as_str()?);
+        if let Some((p, q)) = centre("a").zip(point("b")).or_else(|| centre("b").zip(point("a"))) {
+            return Ok(ConstraintKind::Coincident { p, q });
+        }
+        two_curves(sk, p, cmd).and_then(|ab| two_different(cmd, ab)).map(|(a, b)| ConstraintKind::Concentric { a, b })
     })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3172,7 +3301,7 @@ fn diameter_about(sk: &Sketch, l: usize, ty: &str) -> bool {
 
 fn arc_len(sk: &Sketch, c: usize) -> Option<f64> {
     match sk.segs(c).first()? {
-        solidcraft_geom::Seg2::Arc { radius, sweep, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
+        solidcore_record::Seg2::Arc { radius, sweep, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
         _ => None,
     }
 }

@@ -1,10 +1,12 @@
 //! Physical properties of an assembly placement, with original body material assignments.
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Mat};
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
-use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::params::bad;
 use crate::{Result, Session};
@@ -35,13 +37,7 @@ fn linear(m: &Mat) -> Tensor3 {
 }
 
 fn placed_doc(s: &Session) -> Document {
-    let mut doc = (*s.doc).clone();
-    for occurrence in &mut doc.occurrences {
-        if let Some(transform) = s.pending_moves.get(&occurrence.id) {
-            occurrence.transform = *transform;
-        }
-    }
-    doc
+    s.design_document().into_owned()
 }
 
 /// A property total must cover the entire assembly. The display traversal intentionally
@@ -216,7 +212,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let selected_placements = if selected.is_empty() {
         subtree(doc, (0, Vec::new(), solidcraft_doc::IDENTITY), descendants, cmd)?
     } else {
-        let placement = s.occurrence_placement(selected).map_err(|e| bad(cmd, e.to_string()))?;
+        let placement = s.occurrence_placement_with(selected, &s.uncaptured_moves()).map_err(|e| bad(cmd, e.to_string()))?;
         subtree(doc, (placement.component, selected.to_vec(), placement.world), descendants, cmd)?
     };
     // Each component's bodies (with their index in the model), the timeline looked up once rather

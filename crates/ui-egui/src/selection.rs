@@ -3,8 +3,9 @@
 //! selection. The pure parts are unit tested; the viewport uses them.
 
 use egui::{Pos2, Rect};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
@@ -43,7 +44,7 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
 }
 
 /// The current middle of a finite straight sketch edge.
-pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcraft_engine::geom::Vec2> {
+pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcore_record::Vec2> {
     let curve = sk.curves.get(line)?;
     if curve.infinite {
         return None;
@@ -126,7 +127,9 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
-            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 => Some(curve_pick(id, *sketch, active)),
+            // A straight sketch line stands for an axis only in an input that takes axes for
+            // what they are: an input that takes curves too (Measure) takes the line as its curve.
+            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchCurve { sketch, id, .. } if a & SKETCH_LINES != 0 => Some(Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }),
             Hit::SketchCurve { sketch, id, .. } if a & CURVES != 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),

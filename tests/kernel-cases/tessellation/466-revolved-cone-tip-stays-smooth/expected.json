@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#466"
+ ],
+ "what": "a six-line profile revolved a full turn about its first line, with a cone ending in a point: the tip came out with dents every 120 degrees instead of a smooth cone (rebuilt as a pencil-like profile with a collinear frustum and tip; the original design is not in the report)",
+ "source": "analytic",
+ "method": "Profile (x radius, y along the axis): (0,0)-(0,40) on the axis, (0,40)-(10,40), (10,40)-(10,25), (10,25)-(10,15), (10,15)-(4,6), (4,6)-(0,0), revolved 360 degrees about the Y axis. Cylinder R=10 from y=15 to 40: pi 100 25 = 2500 pi. Cone from r=10 at y=15 to r=4 at y=6 then on to the point at y=0 (the two cone lines are collinear, slope 2/3): frustum pi 9/3 (100 + 40 + 16) = 468 pi, tip pi 16 6/3 = 32 pi. V = 3000 pi = 9424.7780 mm3. Area: top disc 100 pi + cylinder 2 pi 10 25 + frustum pi (10+4) sqrt(81+36) + tip pi 4 sqrt(16+36) = 2451.3143 mm2. The dents are a meshing defect this rig can only see through the exact solid's volume and area (no mesh grading field).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 9424.778,
+ "area_mm2": 2451.3143,
+ "bbox": {
+  "min": [
+   -10,
+   0,
+   -10
+  ],
+  "max": [
+   10,
+   40,
+   10
+  ]
+ }
+}

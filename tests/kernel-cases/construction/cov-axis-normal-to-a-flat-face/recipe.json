@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.axis.normal_to_face",
+   "params": {
+    "face": {
+     "face": [
+      10,
+      10,
+      20
+     ]
+    },
+    "point": {
+     "point": [
+      12,
+      7,
+      30
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

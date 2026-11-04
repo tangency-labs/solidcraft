@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 use crate::Session;
@@ -23,6 +24,59 @@ fn new_sketch() -> Session {
 
 fn sketch(s: &Session) -> solidcraft_sketch::Sketch {
     s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.clone()
+}
+
+#[test]
+fn concentric_centres_a_circle_or_arc_on_a_point_in_either_order() {
+    for arc in [false, true] {
+        for origin in [false, true] {
+            for reverse in [false, true] {
+                let mut s = new_sketch();
+                let made = if arc {
+                    run(&mut s, "sketch.arc.center_point", json!({"center": [20, 10], "start": [25, 10], "end": [20, 15]}))
+                } else {
+                    run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": 5}))
+                };
+                let curve = ids(&made["curves"])[0].clone();
+                let (point, expected) = if origin {
+                    ("origin", Vec2::new(0.0, 0.0))
+                } else {
+                    run(&mut s, "sketch.point", json!({"point": [-7, 4], "id": "target"}));
+                    run(&mut s, "sketch.constraint.fix", json!({"entity": "target"}));
+                    ("target", Vec2::new(-7.0, 4.0))
+                };
+                let before = s.doc.to_json();
+                let undo = s.undo.len();
+                let params = if reverse { json!({"a": point, "b": curve}) } else { json!({"a": curve, "b": point}) };
+                let result = run(&mut s, "sketch.constraint.concentric", params);
+                let sk = sketch(&s);
+                let index = sk.curve_index(&curve).unwrap();
+                assert!(sk.center(index).unwrap().dist(expected) < 1e-6, "arc={arc}, origin={origin}, reverse={reverse}");
+                assert!((sk.radius(index).unwrap() - 5.0).abs() < 1e-6);
+                assert!(matches!(
+                    sk.constraints.iter().find(|c| c.id == result["constraint"].as_str().unwrap()).unwrap().kind,
+                    ConstraintKind::Coincident { .. }
+                ));
+                assert_eq!(s.undo.len(), undo + 1);
+                run(&mut s, "edit.undo", json!({}));
+                assert_eq!(s.doc.to_json(), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn concentric_rejects_invalid_point_pairs_without_changing_the_sketch() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": 5, "id": "circle"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [20, 20]], "ids": ["line"]}));
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    for (a, b) in [("line", "origin"), ("origin", "line"), ("origin", "circle.center"), ("circle", "circle.center"), ("circle", "missing")] {
+        assert!(s.execute("sketch.constraint.concentric", &json!({"a": a, "b": b})).is_err(), "{a}, {b}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
 }
 
 #[test]
@@ -129,7 +183,7 @@ fn curvature_polygon_arc_length_linear_diameter() {
     let sk = sketch(&s);
     let ai = sk.curve_index(&a).unwrap();
     let len = match sk.segs(ai)[0] {
-        solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep,
+        solidcore_record::Seg2::Arc { radius, sweep, .. } => radius * sweep,
         _ => 0.0,
     };
     assert!((len - 20.0).abs() < 1e-6, "{len}");
@@ -1654,7 +1708,7 @@ fn an_arc_and_its_end_point_dimension_the_arc_length() {
     let arc_length = |s: &Session, a: &str| {
         let sk = sketch(s);
         match sk.segs(sk.curve_index(a).unwrap())[0] {
-            solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            solidcore_record::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
             _ => f64::NAN,
         }
     };

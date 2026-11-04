@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#561",
+  "tangency-labs/solidcraft#677"
+ ],
+ "what": "the end cap of a mitred swept bar (8 x 5 section, 30 up then 40 across) extruded 6 mm further along the path",
+ "source": "analytic",
+ "method": "bar V = 40 * 70 = 2800 (mitred, see 96); the end cap is the plane x = 40, 8 high (z 26..34) and 5 wide: extruding it outward 6 mm adds 8 * 5 * 6 = 240: V = 3040.",
+ "body_count": 1,
+ "volume_mm3": 3040.0
+}

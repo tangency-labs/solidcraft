@@ -48,6 +48,16 @@ In the floating layout, Assistant fills the viewport height in the shared rounde
 space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
 clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
 
+After clicking in Assistant, keyboard input stays in the chat, including when selecting text
+in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
+pointer back over the model does not change this: click outside Assistant to return the
+keyboard to CAD. Closing or minimising the panel also releases it.
+
+To select more of the conversation than fits in the panel, drag the selection to its top or
+bottom edge and hold it there: the conversation scrolls, faster the further past the edge you
+go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
+all of it.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick
@@ -75,10 +85,22 @@ clicks and scrolling over the panel stay in the chat. The docked layout retains 
   the last model choice for each agent and puts it back on the next session when still available.
   An endpoint's agent also keeps it as its default model. An agent that reports no choices shows
   no drop-down. When these model lists include more than one provider (Hermes and OpenCode name
-  each model `Provider · model`, or say `Provider: …` in its description), a provider drop-down
-  comes first and the model drop-down lists only that provider's models, without the provider in
-  front. It opens on the provider of the model in use; picking another provider changes nothing
-  until one of its models is chosen. Models with no provider named are listed under *Other*.
+  each model `Provider · model`, or say `Provider: …` in its description), the picker groups the
+  models under their providers, each a header with the count of its models that a click folds or
+  opens: the provider of the model in use starts open and the others folded, a search opens every
+  provider with a match, and a provider folded by hand stays folded until the picker closes. Models
+  with no provider named are listed under *Other*. An endpoint whose listing names its models
+  `Vendor: Model` under ids `vendor/model` (OpenRouter) is grouped by vendor the same way; its rows
+  read the model's name, and the id stays in the tooltip and in the search.
+- **Picking a model.** Every model picker opens on a search box over the list the agent or endpoint
+  gave at this connection: SolidCraft has no list of its own. The search covers ids, names and
+  descriptions, and Enter takes the exact match or the first one shown. A model that isn't listed
+  can be typed: **Use custom: …** takes what is in the box, for an endpoint, an ACP agent with a
+  model option, or an older agent that listed models. An endpoint takes it as it is and keeps it as
+  its default model. An agent may refuse it: its model stays as it was and the chat says why. Only
+  an endpoint keeps a typed model for the next session; an agent gets it back only if it then
+  lists it. An endpoint that can't list its models (it has no such address, or refuses the key)
+  still shows its configured model, and the popup says why there are no others.
 - **Reasoning effort is not permissions.** The agent's thinking setting does not change
   SolidCraft's Ask / Edits / All approval policy. Reasoning options belong to the current session;
   changing them here does not rewrite OpenCode's configuration or another OpenCode session.
@@ -155,7 +177,9 @@ messages go as one prompt, in order, when the turn ends normally.
   short note that the agent's previous step was interrupted. What the interrupted message changed
   undoes as one step, like any other message.
 - **Stop** (the square next to the input, or **Esc** in the input) stops the agent and keeps
-  the queue: the bubbles wait for **Send**.
+  the queue: the bubbles wait for **Send**. If an external ACP agent does not finish its cancelled
+  prompt within five seconds, SolidCraft disconnects it and stops its process in the background.
+  Completed design changes stay undoable, and the queue stays put. Reconnect to start a new agent session.
 - **New chat** (the header button, **Ctrl+Shift+L** / **Cmd+Shift+L** with the chat focused)
   stops what runs, clears the conversation, the queue and the files on the chips, and starts a
   fresh session on the same agent, keeping the agent and its mode. It asks first when a message
@@ -176,6 +200,13 @@ shows its **version** (from `--version`, given three seconds) and whether a **lo
 Version checks and agent sessions also use those folders on their `PATH`, so adapters can find
 runtimes such as Node when SolidCraft is opened from Finder or the Dock. Existing absolute
 `PATH` entries keep their order; no shell startup files are run.
+If a detected Node adapter fails with `SyntaxError: Unexpected token 'with'` on an older Node,
+SolidCraft checks these folders for a Node version that supports import attributes. For an
+adapter with an `env node` shebang, it retries with that Node and keeps the same interpreter
+for the chat session, including programs the adapter starts. These extra checks run in the
+background with a shared three-second limit for finding Node. Working adapters keep their
+original launch command. If no suitable Node is found, the agent's error names the old version
+and asks you to update Node and press **Refresh**.
 SolidCraft only checks whether the agent's own login file (`~/.claude/.credentials.json`,
 `~/.codex/auth.json`, `~/.gemini/oauth_creds.json`, …) or one of its key variables exists. It never
 reads the file and never starts the agent to find out. On macOS Claude Code keeps its login in
@@ -246,16 +277,27 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`) or a custom URL, the model name, and an optional key.
+  `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mammouth AI
+  `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
+  `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
   each conversation request carrying the session header Go asks for, so one
   preset covers every model.
   A model the list does not know is retried on the next protocol when Go names
   the mismatch.
+  For OpenClaw, turn on its chat endpoint (`gateway.http.endpoints.chatCompletions.enabled` in its
+  config) and use its gateway token as the key; the models it lists are its agents, such as `openclaw/default`.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
+- The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
+  (OpenRouter does), once you leave the address and key fields; opening it asks again after a
+  failure. You can also type a model.
+- An endpoint's card under Preferences → AI → **Agents** has the same **Model** picker. While the
+  agent isn't running, opening the picker lists the models (just viewing the page asks nothing),
+  and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
+  model at once.
 - The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
   Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks an
   OpenAI-compatible endpoint for its models; an Anthropic-compatible one gets a short message,
@@ -391,9 +433,12 @@ per agent, with **Reset**.
 
 These settings cover SolidCraft's tools. A coding agent's own tools (its shell, its file edits)
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before
-using one of SolidCraft's tools, SolidCraft answers for you, since its own gate checks the call,
-and notes it in the chat as *Auto-allowed*. With **Allow everything**, or after **Always allow**,
-the agent's other questions are answered the same way and noted too.
+using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
+(`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
+and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
+a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to the agent
+yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
 `dir`, `output`, …), or `path` and `source` when the value reads like a file name (a separator, `~`,
@@ -478,3 +523,5 @@ the agent and puts your permission setting back.
 - `--markdown` writes the issue's comment template filled in; add the quantization, download
   size, and runtime before you post it. `--json` keeps each task's failed rules, conversation, and
   design before and after. Both files are rewritten after every task.
+
+The show/hide shortcut defaults to Ctrl+Shift+A (Cmd+Shift+A on macOS). Change, clear or reset **Toggle Assistant** (`ui.assistant`) in Preferences → Shortcuts. The binding is saved with the other keyboard shortcuts; the assistant button tooltip follows it. Disabling AI features also disables the toggle.

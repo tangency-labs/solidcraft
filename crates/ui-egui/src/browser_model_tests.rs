@@ -29,7 +29,7 @@ fn pending_and_reverted_moves_replace_cached_transforms() {
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0],"capture":false})).unwrap();
     let moved = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&first, &moved));
-    assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcraft_engine::geom::Vec3::ZERO).x - 20.0).abs() < 1e-9);
+    assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcore_record::Vec3::ZERO).x - 20.0).abs() < 1e-9);
     h.app.run("component.revert_position", json!({"occurrences":[occurrence]})).unwrap();
     let reverted = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&moved, &reverted));
@@ -95,16 +95,25 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     let (one, two) = (super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy]));
     h.app.tree.collapsed.extend([one.clone(), two.clone(), format!("{two}/bodies")]);
     h.frames(2);
-    assert!(!h.app.tree.order.contains(&format!("b:{second}")), "the body's row is closed away");
-    let face = Sel::Face { body: second.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(55.0, 5.0, 10.0) };
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{second}")),
+        "the body's row is closed away"
+    );
+    let face = Sel::Face { body: second.clone(), index: 0, point: solidcore_record::Vec3::new(55.0, 5.0, 10.0) };
     crate::viewport::select(&mut h.app, Some(face), false, false);
     assert_eq!(h.app.tree.reveal.as_deref(), Some(second.as_str()));
     h.frames(2);
     assert!(h.app.tree.reveal.is_none(), "revealed");
     assert!(!h.app.tree.collapsed.contains(&two) && !h.app.tree.collapsed.contains(&format!("{two}/bodies")));
     assert!(h.app.tree.collapsed.contains(&one), "the other placement stays as it was");
-    assert!(h.app.tree.order.contains(&format!("b:{second}")), "the row is drawn");
-    assert!(!h.app.tree.order.contains(&format!("b:{first}")), "the other placement's row stays closed away");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{second}")),
+        "the row is drawn"
+    );
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{first}")),
+        "the other placement's row stays closed away"
+    );
 }
 
 /// Hovering a placement row lights its whole subtree: the subtree is walked once per model, not
@@ -207,9 +216,9 @@ fn render_browser_swatch_resolves_face_body_component_then_physical_material() {
     assert_eq!(swatch(&h).name, "ABS - Red");
     h.app.run("appearance.assign", json!({"bodies":["Body1"],"appearance":"ABS - Blue"})).unwrap();
     assert_eq!(swatch(&h).name, "ABS - Blue");
-    let point = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 5.0);
+    let point = solidcore_record::Vec3::new(0.0, 5.0, 5.0);
     h.app.run("appearance.assign", json!({"body":"Body1","faces":[point],"appearance":"ABS - Red"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let body = state.body("Body1").unwrap();
     let face = solidcraft_engine::doc::appearance::face_index_at(body, point).unwrap();
     h.app.run("select.set", json!({"items":[Sel::Face{body:"Body1".into(),index:face,point}]})).unwrap();
@@ -234,6 +243,15 @@ fn body_names(app: &crate::SolveApp) -> Vec<String> {
                 })
                 .collect()
         })
+        .unwrap_or_default()
+}
+
+/// The bodies the open Move/Copy would move, a picked component's bodies included.
+fn move_bodies(app: &crate::SolveApp) -> Vec<String> {
+    let Some(d) = app.dialog.as_ref() else { return Vec::new() };
+    crate::dialogs_move::params(app, d)
+        .ok()
+        .and_then(|p| p["bodies"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
         .unwrap_or_default()
 }
 
@@ -309,7 +327,7 @@ fn browser_move_copy_takes_a_component_clicked_in_the_tree() {
     open_move(&mut h);
     h.frames(2);
     click(&mut h, &format!("row:occurrence:{occurrence}"));
-    assert_eq!(body_names(&h.app), owned, "the component's bodies are the Move/Copy selection");
+    assert_eq!(move_bodies(&h.app), owned, "the component's bodies are the Move/Copy selection");
     assert!(h.app.tree.occurrence_move.is_none(), "the open body dialog stays; this click does not switch to component Move");
 
     h.app.dialog = None;
@@ -318,7 +336,7 @@ fn browser_move_copy_takes_a_component_clicked_in_the_tree() {
     click(&mut h, "row:Untitled");
     assert_eq!(h.app.tree.picked_components, vec![0]);
     h.app.start("solid.move");
-    let names = body_names(&h.app);
+    let names = move_bodies(&h.app);
     assert!(names.iter().any(|n| owned.contains(n)), "Move/Copy starts from the component picked in the tree: {names:?}");
 }
 
@@ -490,4 +508,62 @@ fn a_design_saved_before_nested_groups_keeps_its_browser_order() {
         let rows = super::arrange(&h.app.session.doc, 0, "bodies", "c0", super::entries(&h.app, 0, "bodies"));
         assert_eq!(drawn(&rows), expected, "groups {groups:?}, saved order {saved:?}");
     }
+}
+
+/// #9274: placements start closed, so a large assembly opens as a short list. Opening one shows
+/// its own placements still closed, and closing and reopening it leaves them as they were.
+/// Expand All opens them, and the "Components start open" preference opens every one as before.
+#[test]
+fn placements_start_closed_and_the_preference_opens_them_as_before() {
+    fn drawn(h: &mut crate::scenario::Harness) -> Vec<(Vec<u64>, bool)> {
+        h.frames(2);
+        super::drawn_occurrences().into_iter().map(|(path, _, _, open)| (path, open)).collect()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let sub = h.app.run("component.create", json!({"name":"Sub"})).unwrap();
+    let outer = vec![sub["occurrence"].as_u64().unwrap()];
+    let leaf = h.app.run("component.create", json!({"name":"Leaf"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let inner = vec![outer[0], leaf];
+    let fold = format!("fold:occurrence:{}", outer[0]);
+
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)], "only the top placement is listed, closed");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), false)], "the placement inside stays closed");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)]);
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), false)], "reopening shows it as it was");
+
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner.clone(), true)], "Expand All opens every placement");
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    assert_eq!(drawn(&mut h), [(outer.clone(), false)], "Collapse All closes them again");
+
+    h.app.tree.collapsed.clear();
+    h.app.tree.expanded.clear();
+    h.call("ui.prefs", json!({"browser_components_open": true}));
+    assert!(h.app.preferences.browser_components_open);
+    assert_eq!(drawn(&mut h), [(outer.clone(), true), (inner, true)], "the preference opens every placement, as before #9274");
+    click(&mut h, &fold);
+    assert_eq!(drawn(&mut h), [(outer, false)], "and its arrow still closes one");
+}
+
+/// #9274: Find in Browser opens the placements, closed from the start, down to the body's row.
+#[test]
+fn find_in_browser_opens_placements_that_start_closed() {
+    let (mut h, _, occurrence) = fixture();
+    h.app.ui.show_browser = true;
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    h.frames(2);
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true), "the placement starts closed");
+    super::reveal_body(&mut h.app, &body);
+    h.frames(3);
+    assert!(super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true));
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
+        "the body's row is drawn"
+    );
 }

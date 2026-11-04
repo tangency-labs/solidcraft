@@ -5,7 +5,8 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::Sketch;
 
 use crate::SolveApp;
@@ -35,13 +36,80 @@ pub struct LineChain {
     rest: Option<(Pos2, f64)>,
     /// Just switched back to lines: says so until the pointer leaves.
     back_to_lines: bool,
+    /// Where each segment started and the curve the chain was on there, oldest first: where it
+    /// goes back to when Undo takes that segment away (#10016).
+    back: Vec<((Vec2, Option<String>), Option<String>)>,
 }
 
 impl LineChain {
-    /// Curve `id` now ends the chain, with the pointer still on its end.
-    pub fn placed(&mut self, id: &str) {
-        *self = LineChain { curve: Some(id.to_string()), ..LineChain::default() };
+    /// Curve `id`, drawn from `start`, now ends the chain, with the pointer still on its end.
+    pub fn placed(&mut self, id: &str, start: (Vec2, Option<String>)) {
+        let mut back = std::mem::take(&mut self.back);
+        back.push((start, self.curve.take()));
+        *self = LineChain { curve: Some(id.to_string()), back, ..LineChain::default() };
     }
+}
+
+/// Undo can take away the segment a chain is drawing on from (#10016). The chain then goes back to
+/// the end of the last segment still there, or to where it began (as lines: there is nothing to
+/// be tangent to), and ends if that point has gone too. Clicking on from a point that no longer
+/// exists would only be refused.
+pub fn rejoin(app: &SolveApp, t: &mut Tool) {
+    if t.cmd != LINE && !in_arc_mode(t) {
+        return;
+    }
+    let Some((point, Some(current))) = t.pts.last().cloned() else { return };
+    let Ok(state) = app.session.world_state() else { return };
+    let Some(ss) = app.session.active_sketch.and_then(|id| state.sketch(id)) else { return };
+    let at = |id: &str, point| chain_point(&ss.sketch, id, point);
+    if at(&current, point).is_some() {
+        return;
+    }
+    let mut back = std::mem::take(&mut t.chain.back);
+    let mut to = None;
+    while let Some(((point, id), curve)) = back.pop() {
+        match id {
+            None => to = Some(((point, None), curve)),
+            Some(id) => match at(&id, point) {
+                Some(point) => to = Some(((point, Some(id)), curve)),
+                None => continue,
+            },
+        }
+        break;
+    }
+    let (pts, curve) = to.map_or((Vec::new(), None), |(point, curve)| (vec![point], curve));
+    if curve.is_none()
+        && t.cmd != LINE
+        && let Some(line) = Tool::for_command(LINE)
+    {
+        *t = line;
+    }
+    t.pts = pts;
+    t.lined.clear();
+    crate::sketch_dims::reset(t);
+    t.chain = LineChain { curve, back, ..LineChain::default() };
+}
+
+/// A drawing snap has no point id until the command materializes it. Keep its picked position
+/// while its source curves remain, including when Undo returns to the start of the chain.
+/// Model-vertex snaps are resolved by the drawing command, not by the sketch's point lookup.
+fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
+    if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
+        return Some(point);
+    }
+    let exists = if let Some(curve) = id.strip_prefix("mid:") {
+        sketch.curve_index(curve).is_some()
+    } else if let Some(snap) = id.strip_prefix("on:") {
+        let (curve, _) = snap.rsplit_once(':')?;
+        sketch.curve_index(curve).is_some()
+    } else if let Some(snap) = id.strip_prefix("x:") {
+        let (curves, _) = snap.rsplit_once(':')?;
+        let (a, b) = curves.split_once('+')?;
+        sketch.curve_index(a).is_some() && sketch.curve_index(b).is_some()
+    } else {
+        id.starts_with("vertex:")
+    };
+    exists.then_some(picked)
 }
 
 /// Whether the tool is a Line tool's chain drawing tangent arcs, not the Tangent Arc tool itself.
@@ -64,7 +132,7 @@ pub fn follow_pointer(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj, poin
         return;
     }
     let screen = {
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         let plane = app.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| ss.plane);
         let last = app.tool.as_ref().and_then(|t| t.pts.first()).map(|p| p.0);
         plane.zip(last).and_then(|(plane, last)| proj.to_screen(plane.to_world(last)))
@@ -108,7 +176,7 @@ fn switch(app: &mut SolveApp) {
     let Some(mut next) = next else { return };
     next.pts = old.pts.clone();
     next.hover = old.hover.clone();
-    next.chain = LineChain { curve: old.chain.curve.clone(), back_to_lines: !to_arc, ..LineChain::default() };
+    next.chain = LineChain { curve: old.chain.curve.clone(), back_to_lines: !to_arc, back: old.chain.back.clone(), ..LineChain::default() };
     app.tool = Some(next);
     let hint = if to_arc { app.tr("ui.line_arc_hint").to_string() } else { crate::tools::hint(LINE) };
     app.set_status(hint, false);
@@ -132,15 +200,18 @@ pub fn place_arc(app: &mut SolveApp, tool: &mut Tool, end: &(Vec2, Option<String
     // On an existing point the arc ends on that point, so an outline closes. The other snaps
     // (a midpoint, a place on a curve) name no point: their coordinates.
     let on_point = |id: &&String| {
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         app.session.active_sketch.and_then(|s| state.sketch(s)).is_some_and(|ss| ss.sketch.resolve_point(id).is_some())
     };
     let to = end.1.as_ref().filter(on_point).map_or_else(|| json!([end.0.x, end.0.y]), |id| json!(id));
     // A failure (the end straight ahead) has said why in the status line; the chain stays as it is.
     let made = crate::tools::draw(app, tool, json!({"start": start, "curve": curve, "end": to}));
     if let Some(id) = made.as_ref().ok().and_then(|v| v["curves"].get(0)).and_then(Value::as_str) {
+        let drawn_from = tool.pts.first().cloned();
         tool.pts = vec![(end.0, Some(format!("{id}.end")))];
-        tool.chain.placed(id);
+        if let Some(start) = drawn_from {
+            tool.chain.placed(id, start);
+        }
     }
 }
 

@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "an axis square to a box's top through a point above it",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the top is z = 20, normal Z; through (12,7,30) square to it: the line x 12, y 7 along Z",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     12,
+     7,
+     20
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

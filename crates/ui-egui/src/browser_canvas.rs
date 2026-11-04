@@ -4,8 +4,9 @@
 
 use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::browser::panel_pos;
@@ -170,6 +171,7 @@ fn on_image(c: &Canvas, p: Vec2) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     fn canvas(h: &mut crate::scenario::Harness) -> u64 {
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
@@ -183,6 +185,7 @@ mod tests {
     #[test]
     fn edit_canvas_is_a_card_whose_close_keeps_the_live_edits() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
         h.app.home.open = false;
         let id = canvas(&mut h);
         h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, false));
@@ -235,8 +238,8 @@ mod tests {
         let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
-        let sa = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(ax, c.center.y))).expect("point A on screen");
-        let sb = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(bx, c.center.y))).expect("point B on screen");
+        let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");
+        let sb = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(bx, c.center.y))).expect("point B on screen");
         assert!(super::click(&mut h.app, &proj, sa), "first click sets A");
         let panel = h.app.tree.canvas_panel.as_ref().unwrap();
         assert_eq!(panel.next, 1);
@@ -246,7 +249,7 @@ mod tests {
         assert_eq!(panel.next, 0);
         assert!((panel.b[0] - bx).abs() < 0.5, "{:?}", panel.b);
         let before = panel.a;
-        let miss = plane.to_world(solidcraft_engine::geom::Vec2::new(c.center.x + 500.0, c.center.y));
+        let miss = plane.to_world(solidcore_record::Vec2::new(c.center.x + 500.0, c.center.y));
         if let Some(sm) = proj.to_screen(miss) {
             assert!(!super::click(&mut h.app, &proj, sm));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);

@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#757",
+  "tangency-labs/solidcraft#843"
+ ],
+ "what": "a slanted line (from (20,0,0) to (30,0,10)) swept as a surface round a quarter circle of radius 20 about Z",
+ "source": "analytic",
+ "method": "the profile lies in a plane through the Z axis and the path is a circle about that axis, so the sheet is a quarter of a cone frustum wall: A = (1/4) pi (r1 + r2) slant = (1/4) pi 50 sqrt(200) = 555.4; one face; open (valid false); bbox x, y 0..30, z 0..10.",
+ "valid": false,
+ "area_mm2": 555.3603672697958,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   30,
+   30,
+   10
+  ]
+ }
+}

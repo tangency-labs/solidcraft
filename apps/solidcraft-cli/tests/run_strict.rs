@@ -65,7 +65,10 @@ fn allow_errors_writes_anyway_and_a_saved_design_keeps_failing() {
     let output = cli().arg("run").arg(dir.broken_script()).arg("--allow-errors").arg("--out").arg(&step).arg("--save").arg(&saved).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let measured: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(measured["total"]["volume_mm3"], json!(4000.0), "the box without its fillet");
+    // SMLib integrates the volume (a relative accuracy of 1e-4 asked for; a box comes out within
+    // a few units in the last place), so the box's 4000 mm³ is checked to 1e-9, not to the bit.
+    let volume = measured["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 4000.0).abs() < 4000.0 * 1e-9, "the box without its fillet: {volume}");
     assert!(std::fs::metadata(&step).unwrap().len() > 0);
     // The saved design still holds the failing feature: running it fails too, `eval` reports it.
     let again = dir.0.join("again.step");

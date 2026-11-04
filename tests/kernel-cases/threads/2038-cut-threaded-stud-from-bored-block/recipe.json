@@ -1,0 +1,65 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -20,
+     -20,
+     0
+    ],
+    "length": 40,
+    "width": 40,
+    "height": 14,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     0,
+     14
+    ],
+    "diameter": 19.2
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10.5,
+    "height": 24,
+    "base": [
+     0,
+     0,
+     -5
+    ],
+    "operation": "new",
+    "body_name": "Stud"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     10.5,
+     0,
+     10
+    ],
+    "designation": "M21x1.8",
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Block",
+    "tools": [
+     "Stud"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

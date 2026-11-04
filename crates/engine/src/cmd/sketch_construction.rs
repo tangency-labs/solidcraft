@@ -2,10 +2,11 @@
 //! analytic solutions.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
-use super::sketch::{add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};
+use super::sketch::{CONNECT_TOL, add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, expr, num, str_, vec2};
 use crate::schema::sketch_create::{ConstructionLineParams, ConstructionLineResult};
@@ -24,7 +25,7 @@ macro_rules! variant {
         .enabled(in_sketch)
         .contract(&CONTRACT)
         .output(output_schema_for::<ConstructionLineResult>)
-        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular). Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
+        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular); construction?: false makes that segment a normal line. Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
     };
 }
 
@@ -260,6 +261,10 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         let first_new = sk.points.len();
         let at = req_parg(sk, doc, &p, "at", CMD)?;
         let through = if mode == "free" { Some(req_parg(sk, doc, &p, "through", CMD)?) } else { None };
+        // A through-point next to the start leaves a line whose direction no constraint holds (#11001).
+        if through.as_ref().is_some_and(|q| q.pos().dist(at.pos()) < CONNECT_TOL) {
+            return Err(bad(CMD, "the through point must lie away from the start point"));
+        }
         let mut params = p.clone();
         params["at"] = json!([at.pos().x, at.pos().y]);
         let angle_expression = if mode == "angle" {
@@ -306,6 +311,14 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
                 Some((e, value))
             }
         };
+        let construction = match p.get("construction") {
+            None | Some(Value::Null) => true,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(bad(CMD, "`construction` must be a boolean")),
+        };
+        if !construction && length.is_none() {
+            return Err(bad(CMD, "only a line with a `length` can be a normal line: an infinite line is construction geometry"));
+        }
         let solutions = construction_line_solutions(sk, &params, mode)?;
         let choice = construction_line_choice(&solutions, &params)?;
         let chosen = solutions.get(choice).ok_or_else(|| bad(CMD, "no solution"))?;
@@ -331,7 +344,7 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         let l = sk.add_line(start, end, start_ref, through.as_ref().and_then(|q| q.idx()), None)?;
         if let Some(c) = sk.curves.get_mut(l) {
             c.infinite = length.is_none();
-            c.construction = true;
+            c.construction = construction;
         }
         let mut cons = Vec::new();
         let kind = match (mode, reference) {

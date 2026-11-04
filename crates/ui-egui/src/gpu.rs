@@ -489,6 +489,7 @@ fn offscreen(
         sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        hatch: Default::default(),
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -671,18 +672,122 @@ mod tests {
     #[test]
     fn blur_radius_schedule_and_hostile_values() {
         use crate::blur::{schedule, validate_radius};
-        for radius in [f32::NAN, f32::INFINITY, -1.0, 40.01] {
+        for radius in [f32::NAN, f32::INFINITY, -1.0, 60.01] {
             assert!(validate_radius(radius).is_err());
             assert!(schedule(radius).is_none());
         }
         assert!(schedule(0.0).is_none());
-        for (radius, steps) in [(1.0, 2), (8.0, 2), (9.0, 3), (18.0, 3), (19.0, 4), (30.0, 4), (31.0, 5), (40.0, 5)] {
+        for (radius, steps) in [(1.0, 2), (8.0, 2), (9.0, 3), (18.0, 3), (19.0, 4), (30.0, 4), (31.0, 5), (40.0, 5), (60.0, 5)] {
             let (actual, offset) = schedule(radius).unwrap();
             assert_eq!(actual, steps);
             assert!(offset.is_finite() && offset > 0.0);
             let variance = (35.0 / 18.0) * (4.0_f32.powi(steps as i32) - 1.0);
             assert!((offset * variance.sqrt() - radius / 2.0).abs() < 0.0001);
         }
+        for cap in 2..=5 {
+            let (steps, offset) = crate::blur::schedule_capped(40.0, cap).unwrap();
+            assert_eq!(steps, cap);
+            let variance = (35.0 / 18.0) * (4.0_f32.powi(steps as i32) - 1.0);
+            assert!((offset * variance.sqrt() - 20.0).abs() < 0.0001, "tier cap must preserve target radius");
+        }
+    }
+
+    #[test]
+    fn blur_guard_threshold_idle_minimum_and_session_undo() {
+        let mut guard = crate::blur::Guard::default();
+        let radius = 40.0;
+        for _ in 0..59 {
+            guard.observe(radius, 23.0, true);
+        }
+        assert_eq!((guard.cap, guard.streak, guard.notice), (5, 59, false));
+        guard.observe(radius, 23.0, false); // idle, unavailable, hidden or no actual paint
+        assert_eq!((guard.cap, guard.streak), (5, 0));
+        for _ in 0..59 {
+            guard.observe(radius, 23.0, true);
+        }
+        guard.observe(radius, 22.0, true); // strictly over budget
+        assert_eq!((guard.cap, guard.streak), (5, 0));
+        for _ in 0..59 {
+            guard.observe(radius, 23.0, true);
+        }
+        assert_eq!(guard.cap, 5);
+        guard.observe(radius, 23.0, true);
+        assert_eq!((guard.cap, guard.notice), (4, true));
+        guard.notice = false; // Dismiss does not stop later reductions or reannounce.
+        for _ in 0..180 {
+            guard.observe(radius, 23.0, true);
+        }
+        assert_eq!((guard.cap, guard.streak, guard.notice), (2, 0, false));
+        assert_eq!(crate::blur::schedule_capped(radius, guard.cap).unwrap().0, 2);
+        assert_eq!(radius, 40.0, "quality guard never turns radius down or off");
+        guard.undo();
+        assert_eq!((guard.cap, guard.notice, guard.opted_out), (5, false, true));
+        guard.reset(); // theme/radius changes do not revoke the session opt-out
+        for _ in 0..120 {
+            guard.observe(18.0, 23.0, true);
+        }
+        assert_eq!(guard.cap, 5);
+        for radius in [0.0, 1.0, 8.0] {
+            let mut guard = crate::blur::Guard::default();
+            for _ in 0..120 {
+                guard.observe(radius, 23.0, true);
+            }
+            assert_eq!((guard.cap, guard.notice), (5, false));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_guard_requires_consecutive_visible_actual_paints() {
+        let ctx = egui::Context::default();
+        let mut session = crate::blur::Session::default();
+        let mut time = 0.0;
+        let mut feed =
+            |session: &mut crate::blur::Session, rendered: bool, continuous: bool, visible: bool, available: bool, revision: u64, radius: f32| {
+                time += 0.023;
+                let mut raw = egui::RawInput { time: Some(time), ..Default::default() };
+                raw.viewports.entry(egui::ViewportId::ROOT).or_default().occluded = Some(!visible);
+                let _ = ctx.run_ui(raw, |ui| {
+                    ui.ctx().request_repaint(); // Deterministic harness only; product never does this for sampling.
+                    let paint = rendered.then(|| crate::blur::PaintedFrame {
+                        frame: ui.ctx().cumulative_frame_nr().saturating_sub(1),
+                        interval_ms: Some(23.0),
+                        continuous,
+                    });
+                    session.sample(ui.ctx(), revision, radius, available, paint);
+                    session.sample(ui.ctx(), revision, radius, available, paint); // egui re-pass duplicate
+                });
+            };
+        feed(&mut session, false, true, true, true, 1, 40.0);
+        feed(&mut session, false, true, true, true, 1, 40.0);
+        for _ in 0..59 {
+            feed(&mut session, true, true, true, true, 1, 40.0);
+        }
+        assert_eq!((session.guard.cap, session.guard.streak), (5, 59));
+        for (rendered, continuous, visible, available) in
+            [(false, true, true, true), (true, false, true, true), (true, true, false, true), (true, true, true, false)]
+        {
+            feed(&mut session, rendered, continuous, visible, available, 1, 40.0);
+            assert_eq!((session.guard.cap, session.guard.streak), (5, 0));
+            feed(&mut session, true, true, true, true, 1, 40.0);
+            assert_eq!(session.guard.streak, 1);
+        }
+        feed(&mut session, true, true, true, true, 2, 40.0); // theme contents changed
+        assert_eq!(session.guard.streak, 0);
+        feed(&mut session, true, true, true, true, 2, 18.0); // radius changed
+        assert_eq!(session.guard.streak, 0);
+        for _ in 0..59 {
+            feed(&mut session, true, true, true, true, 2, 18.0);
+        }
+        assert_eq!((session.guard.cap, session.guard.streak), (5, 59));
+        feed(&mut session, true, true, true, true, 2, 18.0);
+        assert_eq!((session.guard.cap, session.guard.notice), (2, true));
+        session.guard.undo();
+        feed(&mut session, true, true, true, true, 3, 40.0);
+        for _ in 0..100 {
+            feed(&mut session, true, true, true, true, 3, 40.0);
+        }
+        assert_eq!((session.guard.cap, session.guard.opted_out), (5, true));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -716,6 +821,11 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     impl BlurFixture {
+        fn radius(&mut self, radius: f32) {
+            // Explicit PR5 rendering harness activation, independent of theme declarations.
+            self.app.blur_session.harness_radius = Some(radius);
+            self.app.blur.set_radius(radius).unwrap();
+        }
         fn new(srgb: bool, policy: crate::blur::FixturePolicy) -> Option<Self> {
             use super::*;
             let Some((adapter, device, queue)) = offscreen_device() else {
@@ -732,7 +842,7 @@ mod tests {
             app.preferences.ambient_occlusion = false;
             app.cpu_meshing = true;
             app.cam.distance = 110.0;
-            app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 15.0, 12.5);
+            app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
             let scene = GpuTarget { depth: Some(solidcraft_gpu::depth_format(&device, true)), ..window };
             let view = Renderer::with_window_target(&device, scene, window, None);
@@ -740,6 +850,11 @@ mod tests {
             app.viewport.draw_stats = Some(view.stats());
             renderer.write().callback_resources.insert(view);
             app.blur = crate::blur::fixture_state(&adapter, &device, &queue, &renderer, format, policy);
+            assert_eq!(
+                app.blur.software_adapter(),
+                adapter.get_info().device_type == wgpu::DeviceType::Cpu,
+                "fixture must retain real adapter identity"
+            );
             if policy == crate::blur::FixturePolicy::Rendering {
                 assert_eq!(app.blur.capability(), crate::blur::Capability::Available, "blur fixture requires real rendering capabilities");
             }
@@ -901,17 +1016,167 @@ mod tests {
         }
         let unavailable = Capability::Unavailable("software adapter (gpu-software)");
         assert_eq!(f.app.blur.capability(), unavailable);
-        f.app.blur.set_radius(18.0).unwrap();
+        f.radius(18.0);
         for _ in 0..6 {
             f.frame();
+            assert_eq!(f.app.blur.radius(), 18.0, "each prepared fallback frame retains the requested radius");
         }
         assert_eq!(f.app.blur.capability(), unavailable);
+        assert_eq!(f.app.blur.radius(), 18.0, "production fallback preserves the actual requested radius through prepare_blur");
+        assert_eq!(f.app.blur_session.harness_radius, Some(18.0));
+        assert_eq!(crate::prefs::blur_availability(&f.app), crate::theme_options::Availability::Unavailable("prefs.blur_software"));
         let counts = f.app.blur.counters();
         assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
         assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
         assert_eq!(counts.live_bytes, 0);
         assert!(f.app.blur.source_texture().is_none());
         assert!(f.renderer.read().frame_compositor.is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_offered_zero_has_no_effect_work() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Production) else { return };
+        assert!(f.app.blur_session.harness_radius.is_none(), "zero must come from the declared theme option");
+        crate::prefs::control(
+            &mut f.app,
+            &serde_json::json!({"theme_import":{
+                "format":"solidcraft-theme/1", "name":"Zero blur", "base":"dark",
+                "options":[{"id":"blur","type":"range","default":0}]
+            }}),
+        )
+        .unwrap();
+        for _ in 0..6 {
+            f.frame();
+        }
+        assert!(crate::theme::blur_intent(&f.ctx).offered);
+        assert_eq!(crate::theme::blur_intent(&f.ctx).radius, 0.0);
+        assert_eq!(f.app.blur.radius(), 0.0);
+        assert!(f.app.blur_session.harness_radius.is_none());
+        let counters = serde_json::to_value(f.app.blur.counters()).unwrap();
+        for (name, count) in counters.as_object().unwrap() {
+            assert_eq!(count, 0, "{name}");
+        }
+        assert!(f.renderer.read().frame_compositor.is_none());
+        assert!(f.app.blur.painted_frame().is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_search_picker_popup_and_tooltips_keep_native_backing() {
+        use crate::ui_kit::{SearchChoice, SearchPicker};
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        f.radius(18.0);
+        let heading = "Long provider heading ".repeat(4);
+        let note = "Long discovery note ".repeat(20);
+        for target in ["choice", "group", "heading", "note"] {
+            let ctx = crate::fonts::test_context();
+            ctx.global_style_mut(|s| {
+                s.visuals.window_fill = egui::Color32::from_rgba_unmultiplied(40, 60, 80, 180);
+                s.interaction.tooltip_delay = 0.0;
+                s.interaction.show_tooltips_only_when_still = false;
+                s.animation_time = 0.0;
+            });
+            let choices = [
+                SearchChoice { value: "one", label: "One", tip: "First choice detail", group: Some(&heading) },
+                SearchChoice { value: "two", label: "Two", tip: "Second choice detail", group: (target != "heading").then_some("Other") },
+            ];
+            let mut widget = egui::Id::NULL;
+            let mut time = 0.0;
+            let mut frame = |events| {
+                // Native tooltips suppress movement just after a click for 100 ms.
+                // Advance deterministic input time beyond that grace period; never
+                // depend on the machine's speed to make a hover eligible.
+                time += 0.25;
+                crate::scenario::clear_handles();
+                crate::test_support::frame(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                        events,
+                        time: Some(time),
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let _blur = f.app.blur.begin(ui.ctx(), true);
+                        ui.set_width(300.0);
+                        crate::ui_kit::scope(ui, |ui| {
+                            let result = crate::ui_kit::search_picker(
+                                ui,
+                                SearchPicker {
+                                    id: "blur_picker",
+                                    handles: "blur:picker",
+                                    current: "One",
+                                    current_value: "one",
+                                    hint: "Search",
+                                    choices: &choices,
+                                    custom: false,
+                                    note: Some(&note),
+                                    open_group: None,
+                                    enabled: true,
+                                },
+                            );
+                            widget = result.response.id;
+                            assert!(result.inner.is_none(), "hovering must not pick a value");
+                        });
+                    },
+                )
+            };
+            frame(vec![]);
+            let at = crate::scenario::handle_at("blur:picker").unwrap();
+            frame(crate::test_support::pointer(at, true));
+            frame(crate::test_support::pointer(at, false));
+            let mut output = frame(vec![]);
+            let at = match target {
+                "choice" => crate::scenario::handle_at("blur:picker:one").unwrap(),
+                "group" => crate::scenario::handle_at(&format!("blur:picker:group:{heading}")).unwrap(),
+                _ => output
+                    .shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if t.galley.job.text.starts_with(if target == "note" { "Long discovery" } else { "Long provider" }) => {
+                            Some(t.pos + t.galley.rect.center().to_vec2())
+                        }
+                        _ => None,
+                    })
+                    .expect("picker heading or note has visible text"),
+            };
+            for _ in 0..4 {
+                output = frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            let mut leaves = Vec::new();
+            for clipped in &output.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| leaves.push(shape.clone()));
+            }
+            let markers: Vec<_> = leaves
+                .iter()
+                .enumerate()
+                .filter_map(|(i, shape)| match shape {
+                    egui::Shape::Callback(cb) => Some((i, cb.rect)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(markers.len(), 2, "{target}: popup and tooltip both have backing markers");
+            let popup = ctx.read_response(widget.with("popup")).unwrap().rect;
+            assert_eq!(markers[0].1, popup, "the marker covers popup padding and scrollbars");
+            assert!(
+                leaves
+                    .iter()
+                    .skip(markers[0].0 + 1)
+                    .find(|shape| !matches!(shape, egui::Shape::Noop))
+                    .is_some_and(|shape| matches!(shape, egui::Shape::Rect(_))),
+                "backing precedes native popup chrome"
+            );
+            assert!(ctx.memory(|m| m.has_focus(egui::Id::new("blur_picker").with("search"))), "native search focus survives hover");
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn assert_backdrop_passes(before: crate::blur::Counters, after: crate::blur::Counters, steps: usize) {
+        let markers = after.markers_drawn - before.markers_drawn;
+        assert!(markers > 0, "the fixture must paint a visible backing boundary");
+        assert_eq!(after.blur_passes - before.blur_passes, 2 * steps as u64 * markers, "each backing boundary filters the preceding UI");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -936,7 +1201,7 @@ mod tests {
                 f.app.blur.set_surface_alpha(Some(180));
                 f.app.cam = original_camera;
                 f.app.preferences.viewport_background = original_background;
-                f.app.blur.set_radius(0.0).unwrap();
+                f.radius(0.0);
                 for _ in 0..3 {
                     f.frame();
                 }
@@ -948,19 +1213,27 @@ mod tests {
                 for radius in [8.0, 18.0, 40.0] {
                     f.app.cam = original_camera;
                     f.app.preferences.viewport_background = original_background;
-                    f.app.blur.set_radius(radius).unwrap();
+                    f.radius(radius);
                     for _ in 0..3 {
                         f.frame();
                     }
                     let before = f.app.blur.counters();
+                    assert_eq!(
+                        crate::prefs::blur_availability(&f.app),
+                        crate::theme_options::Availability::Available,
+                        "positive rendering fixtures must pass the shared app-aware capability policy"
+                    );
+                    assert_eq!(f.app.blur.radius(), radius);
+                    assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
                     let source = f.pixels(true);
+                    let resting = f.pixels(false);
                     f.frame();
                     let after = f.app.blur.counters();
                     assert_eq!(before.source_passes, after.source_passes, "resting source");
-                    assert_eq!(before.blur_passes, after.blur_passes, "resting chain");
+                    assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
                     assert!(after.cache_hits > before.cache_hits);
-                    assert!(after.markers_drawn > before.markers_drawn);
                     assert_eq!(f.pixels(true), source);
+                    assert_eq!(f.pixels(false), resting, "resting ordered composition is stable");
                     // Change panels only: the immutable source must be byte-identical.
                     f.app.blur.set_surface_alpha(Some(120));
                     f.frame();
@@ -984,7 +1257,7 @@ mod tests {
                     f.frame();
                     let after = f.app.blur.counters();
                     assert_eq!(after.source_passes, before.source_passes + 1);
-                    assert_eq!(after.blur_passes - before.blur_passes, 2 * crate::blur::schedule(radius).unwrap().0 as u64);
+                    assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
                     f.app.cam = original_camera;
                     f.frame();
                     f.app.preferences.viewport_background = Some([3, 37, 93]);
@@ -996,7 +1269,21 @@ mod tests {
                     f.app.preferences.viewport_background = original_background;
                     f.frame();
                 }
-                f.app.blur.set_radius(0.0).unwrap();
+                let before = f.app.blur.counters();
+                f.app.blur_session.guard.cap = 3; // Explicit deterministic quality input in this GPU fixture.
+                f.frame();
+                let reduced = f.app.blur.counters();
+                assert_eq!(f.app.blur.radius(), 40.0);
+                assert_eq!(reduced.source_passes, before.source_passes + 1, "tier change invalidates the source cache");
+                assert_backdrop_passes(before, reduced, 3);
+                f.frame();
+                let cached = f.app.blur.counters();
+                assert_eq!(cached.source_passes, reduced.source_passes, "reduced tier has its own stable source cache");
+                assert_backdrop_passes(reduced, cached, 3);
+                f.app.blur_session.guard.cap = 5;
+                f.frame();
+                assert_backdrop_passes(cached, f.app.blur.counters(), 5);
+                f.radius(0.0);
                 for _ in 0..2 {
                     f.frame();
                 }
@@ -1035,7 +1322,7 @@ mod tests {
         f.app.blur.set_surface_alpha(Some(180));
         let mut rows = Vec::new();
         for radius in [0.0, 18.0, 0.0] {
-            f.app.blur.set_radius(radius).unwrap();
+            f.radius(radius);
             for _ in 0..6 {
                 f.frame();
             }
@@ -1044,7 +1331,17 @@ mod tests {
             times.sort_by(f64::total_cmp);
             let after = f.app.blur.counters();
             assert_eq!(after.source_passes, before.source_passes);
-            assert_eq!(after.blur_passes, before.blur_passes);
+            if radius == 0.0 {
+                assert_eq!(after.blur_passes, before.blur_passes);
+                assert_eq!(after.markers_drawn, before.markers_drawn);
+            } else {
+                assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
+                assert_eq!(after.cache_hits - before.cache_hits, 30, "all resting sources are cached");
+            }
+            assert_eq!(after.textures_created, before.textures_created);
+            assert_eq!(after.buffers_created, before.buffers_created);
+            assert_eq!(after.bind_groups_created, before.bind_groups_created);
+            assert_eq!(after.pipelines_created, before.pipelines_created);
             rows.push(serde_json::json!({"radius_px":radius, "samples":times.len(), "min_ms":times[0],
                 "median_ms":(times[14] + times[15]) / 2.0, "max_ms":times[29], "before":before, "after":after}));
         }
@@ -1060,7 +1357,7 @@ mod tests {
     fn blur_suspend_releases_targets() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.app.blur.set_surface_alpha(Some(180));
-        f.app.blur.set_radius(18.0).unwrap();
+        f.radius(18.0);
         for _ in 0..3 {
             f.frame();
         }
@@ -1069,7 +1366,7 @@ mod tests {
         assert_eq!(f.app.blur.counters().live_bytes, 0);
         f.frame();
         assert!(f.app.blur.counters().live_textures > 0);
-        f.app.blur.set_radius(0.0).unwrap();
+        f.radius(0.0);
         assert_eq!(f.app.blur.counters().live_textures, 0);
         assert_eq!(f.app.blur.counters().live_bind_groups, 0);
         assert_eq!(f.app.blur.counters().live_pipelines, 0);
@@ -1080,7 +1377,7 @@ mod tests {
     #[test]
     fn blur_late_layer_transform_moves_source_and_invalidates_cache() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.blur.set_radius(18.0).unwrap();
+        f.radius(18.0);
         f.app.blur.set_surface_alpha(Some(180));
         for _ in 0..6 {
             f.frame();
@@ -1100,12 +1397,12 @@ mod tests {
         assert_eq!(f.app.blur.source_geometry().unwrap(), local.map(|r| transform.mul_rect(r)), "viewport, clip and background all transform once");
         let after = f.app.blur.counters();
         assert_eq!(after.source_passes, before.source_passes + 1);
-        assert_eq!(after.blur_passes, before.blur_passes + 6);
+        assert_backdrop_passes(before, after, 3);
         assert_eq!(after.textures_created, before.textures_created, "placement changes reuse storage");
         assert_eq!(&f.pixels(true)[offset..offset + 4], &outside, "old location is outside the transformed clip");
         f.frame();
         assert_eq!(f.app.blur.counters().source_passes, after.source_passes, "unchanged transformed placement is cached");
-        assert_eq!(f.app.blur.counters().blur_passes, after.blur_passes);
+        assert_backdrop_passes(after, f.app.blur.counters(), 3);
         // A forced miss must still paint at the transformed location, not merely hash it.
         f.app.cam.yaw += 0.1;
         f.frame();
@@ -1199,7 +1496,7 @@ mod tests {
         let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
         let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
         assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
-        assert!(!lost.probe(&queue), "a working device isn't lost");
+        assert!(!lost.probe(&device, &queue), "a working device isn't lost");
 
         // egui's renderer is made with the window, before any loss (made on a lost device, its
         // uniform buffer's `create_buffer_init` panics).
@@ -1207,7 +1504,7 @@ mod tests {
 
         device.destroy();
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        assert!(lost.is_lost() && lost.probe(&queue), "the lost callback marked the device");
+        assert!(lost.is_lost() && lost.probe(&device, &queue), "the lost callback marked the device");
         assert!(lost.reason().is_some_and(|r| r.starts_with("Destroyed")), "{:?}", lost.reason());
 
         // The next frame's uploads, as the painter would make them were it not skipping: wgpu
@@ -1219,5 +1516,40 @@ mod tests {
         // A save's thumbnail still comes: from the CPU rasterizer.
         let picture = super::picture(&capturer, &scene, &cam, 16, 16).unwrap();
         assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
+    }
+
+    /// The probe runs before every frame's uploads, so on a working device it must cost nothing
+    /// visible: no error for any scope or handler, and the uploads after it go through. On a
+    /// reset D3D12 device an empty submission went through and the upload after it panicked
+    /// inside wgpu (#6528); the probe now opens a command list, the driver call that upload's
+    /// queue write would make first. A driver reset can't be made here: `destroy` loses the
+    /// device in wgpu itself, before any driver call.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_lost_device_probe_is_clean_on_a_working_device() {
+        use egui_wgpu::wgpu;
+        let Some((adapter, device, queue)) = super::offscreen_device() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let lost = egui_wgpu::DeviceLost::watch(&device);
+        let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
+        let mut renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
+        let image = egui::ImageData::Color(std::sync::Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::WHITE)));
+        let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
+        let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
+        for frame in 0..3 {
+            // As the painter: the probe, then the frame's first queue write.
+            let (was_lost, error) = egui_wgpu::capture_errors(&device, || {
+                let was_lost = lost.probe(&device, &queue);
+                renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
+                was_lost
+            });
+            assert!(!was_lost && error.is_none(), "frame {frame}: lost {was_lost}, {error:?}");
+            // A save's thumbnail, which probes too, still comes from the GPU.
+            assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
+        }
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
     }
 }

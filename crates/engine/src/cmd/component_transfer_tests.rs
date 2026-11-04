@@ -24,10 +24,10 @@ fn recorded_assignment_preserves_sample_joined_material_and_timeline() {
     let index = s.doc.feature_index(feature).unwrap();
     s.doc_mut().marker = Some(index);
     s.refresh();
-    assert_eq!(s.world_state().body("Plate").unwrap().component, 0);
+    assert_eq!(s.world_state().unwrap().body("Plate").unwrap().component, 0);
     s.doc_mut().marker = None;
     s.refresh();
-    assert_eq!(s.world_state().body("Plate").unwrap().component, to);
+    assert_eq!(s.world_state().unwrap().body("Plate").unwrap().component, to);
 }
 
 #[test]
@@ -39,19 +39,19 @@ fn transformed_pending_destination_repeated_transfer_preserves_world_pose() {
     let occurrence = created["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,20,0],"angle":90,"axis":[0,0,1],"capture":false}));
     run(&mut s, "component.move_bodies", json!({"component":to,"bodies":["Block"]}));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let bounds = state.body("Block").unwrap().mesh().bounds();
     assert!(bounds.min.dist(Vec3::ZERO) < 1e-6);
     assert!(bounds.max.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6);
     assert!(!s.pending_moves.contains_key(&occurrence));
     let mut destination_reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     destination_reopened.refresh();
-    assert!(destination_reopened.world_state().body("Block").unwrap().mesh().bounds().min.dist(Vec3::ZERO) < 1e-6);
+    assert!(destination_reopened.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(Vec3::ZERO) < 1e-6);
     run(&mut s, "component.move_bodies", json!({"component":0,"bodies":["Block"]}));
-    assert!(s.world_state().body("Block").unwrap().mesh().bounds().min.dist(Vec3::ZERO) < 1e-6);
+    assert!(s.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(Vec3::ZERO) < 1e-6);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
-    assert!(reopened.world_state().body("Block").unwrap().mesh().bounds().min.dist(Vec3::ZERO) < 1e-6);
+    assert!(reopened.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(Vec3::ZERO) < 1e-6);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn failed_transfer_cannot_change_evaluated_world_owner() {
         .unwrap();
     s.refresh();
     assert!(s.model.result(id).unwrap().error.is_some());
-    assert_eq!(s.world_state().body("Block").unwrap().component, 0);
+    assert_eq!(s.world_state().unwrap().body("Block").unwrap().component, 0);
 }
 
 #[test]
@@ -142,18 +142,18 @@ fn transferred_thread_follows_body_frame_without_changing_world_axis() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius":4,"height":20,"body_name":"Shaft"}));
     run(&mut s, "solid.thread", json!({"face":[4,0,10],"designation":"M8"}));
-    let before = s.world_state().threads[0].clone();
+    let before = s.world_state().unwrap().threads[0].clone();
     let c = run(&mut s, "component.create", json!({"name":"Threaded","grounded":false}));
     let to = c["component"].as_u64().unwrap();
     let occurrence = c["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,20,10],"axis":[1,0,0],"angle":90,"capture":true}));
     run(&mut s, "component.move_bodies", json!({"component":to,"bodies":["Shaft"]}));
-    let after = s.world_state().threads[0].clone();
+    let after = s.world_state().unwrap().threads[0].clone();
     assert!(after.axis_point.dist(before.axis_point) < 1e-6);
     assert!(after.axis.dist(*before.axis) < 1e-6);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
-    assert!(reopened.world_state().threads[0].axis.dist(*before.axis) < 1e-6);
+    assert!(reopened.world_state().unwrap().threads[0].axis.dist(*before.axis) < 1e-6);
 }
 
 #[test]
@@ -178,10 +178,10 @@ fn inherited_component_appearance_and_legacy_assignment_survive_transfer() {
     legacy.refresh();
     assert!(!legacy.model.state().body("Old").unwrap().transferred);
     run(&mut legacy, "component.move_bodies", json!({"component":0,"bodies":["Old"]}));
-    assert!((legacy.world_state().body("Old").unwrap().mesh().bounds().min.x - 7.0).abs() < 1e-6);
+    assert!((legacy.world_state().unwrap().body("Old").unwrap().mesh().bounds().min.x - 7.0).abs() < 1e-6);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&legacy.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
-    assert!((reopened.world_state().body("Old").unwrap().mesh().bounds().min.x - 7.0).abs() < 1e-6);
+    assert!((reopened.world_state().unwrap().body("Old").unwrap().mesh().bounds().min.x - 7.0).abs() < 1e-6);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn earlier_selected_cylinder_emboss_keeps_source_frame_after_transfer_and_edit()
     run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-2,5],"p1":[2,10]}));
     run(&mut s, "sketch.finish", json!({}));
     let emboss = run(&mut s, "solid.emboss", json!({"sketch":"Badge","face":[30,10,7.5],"depth":1}))["feature"].as_u64().unwrap();
-    let before = solidcraft_kernel::measure(&s.world_state().body("Sleeve").unwrap().body).unwrap().volume;
+    let before = solidcraft_kernel::measure(&s.world_state().unwrap().body("Sleeve").unwrap().body).unwrap().volume;
     run(&mut s, "component.activate", json!({"component":0}));
     let destination = run(&mut s, "component.create", json!({"name":"Destination"}));
     let to = destination["component"].as_u64().unwrap();
@@ -220,10 +220,10 @@ fn earlier_selected_cylinder_emboss_keeps_source_frame_after_transfer_and_edit()
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
     assert!(reopened.doc.features.iter().all(|feature| reopened.model.result(feature.id).is_some_and(|result| result.error.is_none())));
-    assert!((solidcraft_kernel::measure(&reopened.world_state().body("Sleeve").unwrap().body).unwrap().volume - before).abs() < 1e-5);
+    assert!((solidcraft_kernel::measure(&reopened.world_state().unwrap().body("Sleeve").unwrap().body).unwrap().volume - before).abs() < 1e-5);
     let depth = reopened.doc.feature(emboss).unwrap().param_names[0].clone();
     run(&mut reopened, "parameters.change", json!({"name":depth,"expression":"2 mm"}));
-    assert!(solidcraft_kernel::measure(&reopened.world_state().body("Sleeve").unwrap().body).unwrap().volume > before);
+    assert!(solidcraft_kernel::measure(&reopened.world_state().unwrap().body("Sleeve").unwrap().body).unwrap().volume > before);
 }
 
 #[test]
@@ -235,16 +235,16 @@ fn transfer_undo_redo_restores_original_pending_source_world_pose() {
     run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Block"}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false}));
     let pending = s.pending_moves.clone();
-    let before = s.world_state().body("Block").unwrap().mesh().bounds();
+    let before = s.world_state().unwrap().body("Block").unwrap().mesh().bounds();
     run(&mut s, "component.move_bodies", json!({"component":0,"bodies":["Block"]}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.pending_moves, pending);
-    assert_eq!(s.world_state().body("Block").unwrap().component, source);
-    assert!(s.world_state().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
+    assert_eq!(s.world_state().unwrap().body("Block").unwrap().component, source);
+    assert!(s.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
     run(&mut s, "edit.redo", json!({}));
     assert!(s.pending_moves.is_empty());
-    assert_eq!(s.world_state().body("Block").unwrap().component, 0);
-    assert!(s.world_state().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
+    assert_eq!(s.world_state().unwrap().body("Block").unwrap().component, 0);
+    assert!(s.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
 }
 
 #[test]
@@ -256,15 +256,15 @@ fn transfer_checkpoint_restores_pending_world_pose_and_history() {
     run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Block"}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false}));
     let pending = s.pending_moves.clone();
-    let before = s.world_state().body("Block").unwrap().mesh().bounds();
+    let before = s.world_state().unwrap().body("Block").unwrap().mesh().bounds();
     let undo_count = s.undo.len();
     let checkpoint = s.checkpoint();
     run(&mut s, "component.move_bodies", json!({"component":0,"bodies":["Block"]}));
     s.restore_checkpoint(checkpoint).unwrap();
     assert_eq!(s.pending_moves, pending);
     assert_eq!(s.undo.len(), undo_count);
-    assert_eq!(s.world_state().body("Block").unwrap().component, source);
-    assert!(s.world_state().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
+    assert_eq!(s.world_state().unwrap().body("Block").unwrap().component, source);
+    assert!(s.world_state().unwrap().body("Block").unwrap().mesh().bounds().min.dist(before.min) < 1e-6);
 }
 
 #[test]
@@ -312,6 +312,7 @@ fn block_and_part() -> (Session, u64) {
 /// The lowest corner of every body in the world, rounded.
 fn world_corners(s: &Session) -> Vec<Vec<f64>> {
     s.world_state()
+        .unwrap()
         .bodies
         .iter()
         .map(|b| {
