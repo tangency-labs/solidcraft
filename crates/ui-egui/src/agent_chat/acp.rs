@@ -230,11 +230,11 @@ pub fn wsl_path(path: &std::path::Path) -> std::path::PathBuf {
 /// control_auth and therefore keeps authentication aligned with the exact token_path for this port.
 fn bridge_env(xdg_data_home: Option<std::ffi::OsString>, control_dir: Option<std::path::PathBuf>) -> Value {
     let mut env = Vec::with_capacity(2);
-    if let Some(value) = xdg_data_home {
-        env.push(json!({"name": "XDG_DATA_HOME", "value": value.to_string_lossy()}));
+    if let Some(value) = xdg_data_home.as_deref().and_then(|value| value.to_str()) {
+        env.push(json!({"name": "XDG_DATA_HOME", "value": value}));
     }
-    if let Some(value) = control_dir {
-        env.push(json!({"name": "SOLIDCRAFT_CONTROL_DIR", "value": value.to_string_lossy()}));
+    if let Some(value) = control_dir.as_deref().and_then(|value| value.to_str()) {
+        env.push(json!({"name": "SOLIDCRAFT_CONTROL_DIR", "value": value}));
     }
     Value::Array(env)
 }
@@ -860,6 +860,21 @@ mod tests {
         );
         assert_eq!(bridge_env(None, None), json!([]));
         assert!(env.to_string().find("token").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bridge_environment_omits_non_utf8_paths_and_preserves_valid_entries() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let invalid = std::ffi::OsString::from_vec(vec![b'/', 0xff]);
+
+        assert_eq!(
+            bridge_env(Some(invalid.clone()), Some("/valid/control".into())),
+            json!([{"name": "SOLIDCRAFT_CONTROL_DIR", "value": "/valid/control"}])
+        );
+
+        assert_eq!(bridge_env(Some("/valid/data".into()), Some(invalid.into())), json!([{"name": "XDG_DATA_HOME", "value": "/valid/data"}]));
     }
 
     #[test]
