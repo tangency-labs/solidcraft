@@ -148,11 +148,12 @@ def main():
             "preserve historical value after reopen as pending design decision")
     require(items[3]["drawing_expected"]["after_every_save_reopen"] is True,
             "save/reopen checks are required")
-    # The two native extensions on top of the four recipes: each names its edits as real design
+    # The native extensions on top of the four recipes: each names its edits as real design
     # commands, uses W19d's status words, and its Rust test is in the dimension test file.
     tests = (ROOT / "crates/engine/src/cmd/drawing_dimension_tests.rs").read_text(encoding="utf-8")
     extensions = data["early_native_extensions"]
-    require([e["id"] for e in extensions] == ["W23A-R1-WIDTH", "W23A-SUPPRESSED-BORE"], "native extension identities changed")
+    require([e["id"] for e in extensions] == ["W23A-R1-WIDTH", "W23A-SUPPRESSED-BORE", "W23A-FIVE-DIMENSIONS", "W23A-R2-CENTRES",
+                                              "W23A-SHEET", "W23A-FILLETED-CORNERS"], "native extension identities changed")
     for e in extensions:
         require(e["runtime_status"] == "NATIVE_ENGINE_TEST", e["id"] + " is an engine test, not a drawing or UI run")
         require(all(a["session"] == "design" for a in e["source_actions"]), e["id"] + ": model edits are design commands")
@@ -163,6 +164,22 @@ def main():
     require([a["command"] for a in extensions[1]["source_actions"]] == ["timeline.suppress", "timeline.suppress", "timeline.delete"],
             "suppress, unsuppress, then delete Bore1")
     require(all(a["params"]["feature"] == "Bore1" for a in extensions[1]["source_actions"]), "the suppressed bore is Bore1")
+    # The four plate cases: each of the plate's parameters with the value its dimension must read,
+    # Bore1 for every feature edit, and only edits the plate's script can make.
+    parameters = {"bore1_d": "12 mm", "bore2_d": "8 mm", "width": "100 mm", "length": "120 mm"}
+    for e in extensions[2:]:
+        for a in e["source_actions"]:
+            if a["command"] == "parameters.change":
+                require(parameters.get(a["params"]["name"]) == a["params"]["expression"], e["id"] + ": unexpected parameter edit")
+            elif a["command"] in ("timeline.suppress", "timeline.delete"):
+                require(a["params"]["feature"] == "Bore1", e["id"] + ": the edited feature is Bore1")
+            elif a["command"] == "solid.fillet":
+                require(a["params"]["body"] == "Plate", e["id"] + ": the fillet is on the plate")
+            else:
+                require(a["command"] in ("edit.undo", "edit.redo"), e["id"] + ": unexpected command " + a["command"])
+    five = [a["params"]["name"] for a in extensions[2]["source_actions"] if a["command"] == "parameters.change"]
+    require(five == list(parameters), "every parameter of the plate is changed once")
+    require(any("50" in c and "40" in c and "30" in c for c in extensions[3]["checks"]), "centre to centre: 50, 40 and 30")
     print("STATIC CONTRACT PASS: four W23a recipes match source oracle metadata.")
     print("DRAWING E2E AND EARLY W19d/W20a DIMENSION INSPECTION: NOT RUN (static only).")
 

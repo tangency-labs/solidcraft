@@ -620,6 +620,88 @@
       ],
       "implemented_rust_tests": ["a_suppressed_bore_says_so_and_its_dimension_comes_back"],
       "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-FIVE-DIMENSIONS",
+      "goal": "the plate's five dimensions (Bore1 Ø, Bore2 Ø, width, length, Bore1's centre to Bore2's) each follow only the parameter that drives them, and come back on undo",
+      "requires": ["R1 faces dimension (#11871)", "a circle's centre as a corner (#9249)"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "bore1_d", "expression": "12 mm"}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "bore2_d", "expression": "8 mm"}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "width", "expression": "100 mm"}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "length", "expression": "120 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "edit.redo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "the plate reads Ø10, Ø10, 80, 100 and 50",
+        "each change alone moves only its own dimension (Ø12, Ø8, 100 or 120), and its undo gives the plate back with the authored drawing unchanged",
+        "all four at once read Ø12, Ø8, 100, 120 and 50; four undos give the plate back, four redos all four again",
+        "dimension.record.kind stays identical to the authored reference after every edit"
+      ],
+      "implemented_rust_tests": ["the_plates_five_dimensions_follow_each_parameter_and_its_undo"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-R2-CENTRES",
+      "goal": "Bore1's centre to Bore2's, each centre named by its rim (R2 at engine level): 50 aligned, 40 across and 30 up the top view, through a resize, suppress, delete, undo, redo and reopen",
+      "requires": ["a circle's centre as a corner (#9249)", "suppressed and failed references (#11823)"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "bore1_d", "expression": "12 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": true}, "session": "design"},
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": false}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "edit.redo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "centres_1_2 reads 50 aligned, 40 horizontal and 30 vertical, and a new Bore1 diameter moves none of them",
+        "Bore1 suppressed: all three read suppressed",
+        "Bore1 deleted: all three are lost with last_good 50, 40 and 30 and read no value, while Bore2 reads Ø10",
+        "undo reads them again; after redo they stay lost with their last values through save and reopen",
+        "dimension.record.kind stays identical to the authored reference after every edit"
+      ],
+      "implemented_rust_tests": ["the_bores_centres_stay_put_and_a_lost_bore_takes_its_centre_dimensions"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-SHEET",
+      "goal": "the plate's sheet as drawing.scene, drawing.status and drawing.export draw it (lines and arrowheads; the sheet has no text yet) follows the model and comes back on undo",
+      "requires": ["dimensions on the sheet (#11867)", "drawing.scene, drawing.status and drawing.export"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "bore1_d", "expression": "12 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "length", "expression": "120 mm"}, "session": "design"}
+      ],
+      "checks": [
+        "the top view at 1:2 sits round (150, 180), 50 x 40, with all five dimensions drawn; the width's arrowheads 40 apart, the length's 50 and the centres' 25",
+        "Bore1 at Ø12 redraws the view and Bore1's dimension; the others stay where they were",
+        "Bore1 deleted: its two dimensions are left out and listed lost by drawing.scene and drawing.status; the other three stay where they were and the sheet still exports",
+        "each undo draws the sheet as it was within 1e-9 mm and exports the same SVG",
+        "the length at 120 widens the view to 60 round the same place and the length's arrowheads to 60; a save and reopen draws the same sheet"
+      ],
+      "implemented_rust_tests": ["the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-FILLETED-CORNERS",
+      "goal": "fillets that take the plate's corners leave its faces, bores and centres measured",
+      "requires": ["R1 faces dimension (#11871)"],
+      "source_actions": [
+        {"command": "solid.fillet", "params": {"body": "Plate", "radius": 5, "edges": [[0, 0, 10]]}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "solid.fillet", "params": {"body": "Plate", "radius": 2, "edges": [[50, 0, 20]]}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "with either fillet, and after its undo, the five read Ø10, Ø10, 80, 100 and 50",
+        "dimension.record.kind stays identical to the authored reference"
+      ],
+      "implemented_rust_tests": ["fillets_on_the_plates_corners_leave_its_five_dimensions_read"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
     }
   ],
   "not_tested": [
