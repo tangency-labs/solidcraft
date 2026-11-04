@@ -404,7 +404,7 @@ mod tests {
         s.run_script(&crate::sample::script()).unwrap();
         let lip = json!({"body": "Plate", "face": [51.89, 45.2, 8.0], "width": "1.5 mm", "height": "3.5 mm", "side": "inside", "type": "lip"});
         let e = s.execute("plastic.lip", &lip).unwrap_err().to_string();
-        assert!(e.contains("rim face") && e.contains("2 openings alike"), "{e}");
+        assert!(e.contains("one clear opening") && e.contains("2 openings alike"), "{e}");
         // The boss alone, no holes: its foot is not an opening either.
         let mut b = Session::default();
         run(&mut b, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
