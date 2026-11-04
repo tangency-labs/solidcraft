@@ -129,13 +129,19 @@ fn browser_rows_start_closed_closes_placements_even_with_components_start_open()
     let row = format!("b:{body}");
     h.app.ui.show_browser = true;
     h.frames(2);
-    assert!(h.app.tree.order.contains(&row), "the placement starts open and lists its body");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row),
+        "the placement starts open and lists its body"
+    );
     assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
     h.frames(2);
-    assert!(!h.app.tree.order.contains(&row), "with the preference on, the placement starts closed");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row),
+        "with the preference on, the placement starts closed"
+    );
     assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": false}))["ok"], true);
     h.frames(2);
-    assert!(h.app.tree.order.contains(&row), "off again, it is open again");
+    assert!(h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row), "off again, it is open again");
 }
 
 /// #8768: while the Browser's rows start closed (Preferences › Layout), a pick in the 3D view
@@ -153,14 +159,18 @@ fn a_pick_in_the_viewport_leaves_the_browser_alone_while_its_rows_start_closed()
     // Both placements open by hand, their Bodies folders closed as they start.
     h.app.tree.expanded.extend([super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy])]);
     h.frames(2);
-    let (collapsed, expanded, order) = (h.app.tree.collapsed.clone(), h.app.tree.expanded.clone(), h.app.tree.order.clone());
+    let (collapsed, expanded, order) = (
+        h.app.tree.collapsed.clone(),
+        h.app.tree.expanded.clone(),
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.clone(),
+    );
     let point = solidcore_record::Vec3::new(55.0, 5.0, 10.0);
     crate::viewport::select(&mut h.app, Some(Sel::Face { body: second.clone(), index: 0, point }), false, false);
     assert!(h.app.tree.reveal.is_none(), "nothing to scroll to");
     h.frames(3);
     assert!(!h.app.session.selection.is_empty(), "the face is picked");
     assert_eq!((&h.app.tree.collapsed, &h.app.tree.expanded), (&collapsed, &expanded), "every row stays open or closed as it was");
-    assert_eq!(h.app.tree.order, order, "the same rows are drawn");
+    assert_eq!(h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order, order, "the same rows are drawn");
     h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
     let lit = super::Lit::of(&mut h.app);
     assert!(lit.paths.is_empty(), "no row above the picked or hovered body is marked: {:?}", lit.paths);
@@ -188,12 +198,18 @@ fn with_rows_starting_closed_a_designs_folders_open_with_their_arrow_or_find_in_
     let body_row = "b:Block".to_string();
     assert!(drawn("Bodies") && drawn("Sketches"), "the folders are listed");
     assert!(!super::is_open(&h.app, "c0/bodies", false) && !super::is_open(&h.app, "c0/sketches", false));
-    assert!(!h.app.tree.order.contains(&body_row), "the body's row is closed away");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&body_row),
+        "the body's row is closed away"
+    );
     assert!(!drawn("Sketch1"), "so is the sketch's");
     click(&mut h, "fold:Sketches");
     h.frames(1);
     assert!(drawn("Sketch1"), "the arrow opens the Sketches folder");
-    assert!(!h.app.tree.order.contains(&body_row), "the Bodies folder stays closed");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&body_row),
+        "the Bodies folder stays closed"
+    );
 
     crate::context_menu::run_item(
         &mut h.app,
@@ -202,7 +218,10 @@ fn with_rows_starting_closed_a_designs_folders_open_with_their_arrow_or_find_in_
     );
     h.frames(2);
     assert!(super::is_open(&h.app, "c0/bodies", false), "Find in Browser opens the Bodies folder");
-    assert!(h.app.tree.order.contains(&body_row) && h.app.tree.reveal.is_none(), "and scrolls to the body's row");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&body_row) && h.app.tree.reveal.is_none(),
+        "and scrolls to the body's row"
+    );
 }
 
 /// Hovering a placement row lights its whole subtree: the subtree is walked once per model, not

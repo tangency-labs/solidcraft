@@ -833,7 +833,10 @@ mod tests {
         assert_eq!(opened, rows[3..6].iter().collect::<Vec<_>>(), "only the rows down to the body open");
         h.frames(2);
         assert!(h.app.tree.reveal.is_none(), "the body row was drawn and scrolled to");
-        assert!(h.app.tree.order.contains(&format!("b:{plate}")) && !h.app.tree.order.contains(&format!("b:{first_plate}")));
+        assert!(
+            h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{plate}"))
+                && !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{first_plate}"))
+        );
         h.app.viewport.hover = None;
         assert_eq!(Lit::of(&mut h.app).paths, std::slice::from_ref(&second), "the rows above the found body are marked");
         assert!(!h.app.tree.model.as_ref().unwrap().body_paths_walked(), "from the path found once");
@@ -855,7 +858,10 @@ mod tests {
         );
         assert!(row_open(&h.app, "c0"));
         h.frames(2);
-        assert!(h.app.tree.reveal.is_none() && h.app.tree.order.contains(&format!("b:{pin_body}")));
+        assert!(
+            h.app.tree.reveal.is_none()
+                && h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{pin_body}"))
+        );
         h.app.viewport.hover = None;
         assert_eq!(Lit::of(&mut h.app).paths, std::slice::from_ref(&pin));
         h.app.run("select.clear", json!({})).unwrap();
