@@ -166,6 +166,9 @@ pub struct ViewportState {
     pub woken_centre: Option<(u64, String)>,
     /// The centre or midpoint most recently hovered for visual H/V tracking.
     pub(crate) tracking: crate::inference::Tracking,
+
+    /// Snap points woken by the last edge or face hovered (`snap_wake`).
+    pub woken: crate::snap_wake::Woken,
     pub mouse: Option<Pos2>,
     /// Box selection being dragged.
     pub boxsel: Option<BoxSel>,
@@ -2364,6 +2367,9 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
+    for p in &app.viewport.woken.points {
+        [p.at.x, p.at.y, p.at.z].map(f64::to_bits).hash(&mut h);
+    }
     app.view_fov().to_bits().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
@@ -2633,6 +2639,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
     }
     let before_curves = hits.len();
+    let curve_near = bestc.v.iter().map(|x| x.0.1).fold(f32::INFINITY, f32::min);
     hits.extend(bestc.hits());
     if let Some((_, far)) = woken_far
         && hits.len() == before_curves
@@ -2776,6 +2783,17 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             bestv.offer(dd, Hit::Vertex { body: String::new(), point: Vec3::ZERO });
         }
     }
+    // Woken snap points (a hole's centre, a line's middle) come first: right under the
+    // pointer over anything (a line's middle lies on the line), further out unless an edge or a
+    // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
+    let edge_near = beste.v.iter().map(|x| x.0).fold(curve_near, f32::min);
+    // Like a vertex, a woken point behind the nearest face or cut away by the section is not picked.
+    let woken: Vec<Hit> = crate::snap_wake::hits(app, proj, pos)
+        .into_iter()
+        .filter(|(dd, h)| (*dd < crate::snap_wake::ON || *dd < edge_near) && matches!(h, Hit::Vertex { point, .. } if visible(*point, slack)))
+        .map(|x| x.1)
+        .collect();
+    hits.splice(0..0, woken);
     hits.extend(bestv.hits());
     hits.extend(beste.hits());
     // Origin axes.
@@ -3299,9 +3317,11 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
 pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
-        return hits
-            .iter()
-            .find_map(|h| d.candidate_on(&app.session, h, snap.as_ref()).map(|s| (h.clone(), crate::dialogs_move::component_pick(app, h, s))));
+        let snaps = d.active_input().is_some_and(|i| i.accept == crate::dialogs_assembly::SNAPS);
+        return hits.iter().find_map(|h| {
+            d.candidate_on(&app.session, h, snap.as_ref())
+                .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
+        });
     }
     hits.iter().filter(|h| pick_allowed(app, h)).find_map(|h| hit_candidate(app, h))
 }
@@ -3312,9 +3332,13 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
         // The face under the cursor is looked up once for every sketch point a face place may
         // snap to, before Select Other caps its rows.
         let snap = d.face_snap(&app.session, hits);
+        let snaps = d.active_input().is_some_and(|i| i.accept == crate::dialogs_assembly::SNAPS);
         return hits
             .iter()
-            .filter_map(|h| d.candidate_on(&app.session, h, snap.as_ref()).map(|s| (h.clone(), crate::dialogs_move::component_pick(app, h, s))))
+            .filter_map(|h| {
+                d.candidate_on(&app.session, h, snap.as_ref())
+                    .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
+            })
             .collect();
     }
     hits.iter().filter(|h| pick_allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
@@ -3396,12 +3420,22 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         return;
     }
     let sel = crate::dialogs_move::from_shown(app, sel);
+    // A joint origin picked among a hovered face's points remembers the face (#11476).
+    let snaps = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept == crate::dialogs_assembly::SNAPS);
+    let from_face = crate::dialogs_assembly::face_point_source(app, snaps, &sel);
     let Some(mut d) = app.dialog.take() else { return };
+    let target = d.active;
     // With holes moving by clicking (Preferences), a Single hole picked again on its face moves there.
     if app.preferences.hole_moves && crate::hole_place::pick_moves(&mut d, &app.session, &sel) {
         d.focus = true;
     } else {
-        d.pick(&app.session, sel);
+        d.pick(&app.session, sel.clone());
+    }
+    if let Some(input) = d.inputs.get_mut(target) {
+        input.from_face.retain(|(x, ..)| x != &sel && input.items.contains(x));
+        if let Some((kind, from)) = from_face.filter(|_| input.items.contains(&sel)) {
+            input.from_face.push((sel, kind, from));
+        }
     }
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
         *sketch = match hit {
@@ -3626,6 +3660,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
     hover_drawn(&app.viewport.hover).hash(&mut h);
+    hover_drawn(&crate::snap_wake::lit_face(app)).hash(&mut h);
     hovered_body(app).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
@@ -4263,8 +4298,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
     }
-    // Hover (pre-highlight).
-    match hover {
+    // Hover (pre-highlight). In a joint origin input, the face whose point or edge is under the
+    // pointer is lit: the face a pick there lies on (#11476).
+    let lit = crate::snap_wake::lit_face(app);
+    match lit.as_ref().or(hover) {
         Some(Hit::Face { body, index, .. })
             if body_hover.as_ref() != Some(body)
                 && !replaced(body)
@@ -4555,6 +4592,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     wake_centre(app, &hits);
+
+    let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
+        ui.input(|i| i.modifiers),
+        crate::tool_modifiers::Platform::of(ui.ctx()),
+    ));
+    crate::snap_wake::update(app, keep, hover.filter(|_| inside).map(|p| (&proj, p)), &hits);
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
@@ -6402,6 +6445,7 @@ fn origin_hidden_by_body(app: &SolveApp, proj: &Proj) -> bool {
 
 /// Screen-space dots: the origin point, and hovered or selected body vertices.
 fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    crate::snap_wake::draw(app, painter, proj);
     let t = Tokens::get();
     if origin_point_shown(app)
         && !origin_hidden_by_body(app, proj)
