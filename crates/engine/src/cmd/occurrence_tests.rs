@@ -544,6 +544,23 @@ fn isolate_nested_child_hides_ancestor_material_and_sibling() {
 /// #7896: isolating a body hides its own component's other bodies one by one and every other
 /// placement as a placement, so the Browser row of a component shows it is off and its eye
 /// brings it back. A second placement of the body's own component is another placement.
+/// #7896: isolating a body inside a hidden Bodies folder or group shows that folder and group
+/// again, so the body is visible; the folder's other bodies stay hidden.
+#[test]
+fn isolate_shows_the_hidden_folder_and_group_a_picked_body_is_in() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Kept"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Other","operation":"new"}));
+    let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": ["Kept"], "name": "Held"}));
+    let group = group["group"].as_u64().or_else(|| group["id"].as_u64()).expect("the group's id");
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies", format!("c0/g{group}")], "visible": false}));
+    assert!(!s.body_visible("Kept") && !s.body_visible("Other"));
+    run(&mut s, "browser.visibility", json!({"items": ["Kept"], "visible": true, "isolate": true}));
+    assert!(s.body_visible("Kept"), "the picked body shows: {:?}", s.visibility.hidden_folders);
+    assert!(!s.body_visible("Other"), "the folder's other body stays hidden");
+    assert!(s.visibility.hidden_folders.is_empty(), "{:?}", s.visibility.hidden_folders);
+}
+
 #[test]
 fn isolate_bodies_hides_other_components_as_components() {
     let mut s = Session::default();
