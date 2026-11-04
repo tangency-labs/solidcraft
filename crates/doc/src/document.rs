@@ -1927,6 +1927,10 @@ pub enum FeatureKind {
         body: BodyName,
         #[walk(length = "Tolerance")]
         tolerance: Expr,
+        /// Name new conversions from their exact source mesh and reconstruction tolerance.
+        /// Absent in older records: keep their geometry-derived names and original body owner.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        source_bound_names: bool,
     },
     /// Mesh bodies imported from a 3MF or STL file, embedded in the design.
     MeshImport {
