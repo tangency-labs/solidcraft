@@ -1152,16 +1152,26 @@ const PERSISTENT_COMMANDS: &[&str] = &[
     "inspect.zebra",
 ];
 
+/// Component Colors is a plain on/off display setting: it shows pressed like the effects above,
+/// but is no status item (nothing to clear with Esc), so it stays out of the list.
+const COMPONENT_COLORS: &str = "inspect.colored_components";
+
 fn persistent_command(id: &str) -> bool {
-    PERSISTENT_COMMANDS.contains(&id)
+    PERSISTENT_COMMANDS.contains(&id) || id == COMPONENT_COLORS
 }
 
 fn persistent_available(app: &SolveApp, id: &str) -> bool {
     persistent_command(id) && (id != "inspect.section" || app.preferences.viewport_section_status)
 }
 
-fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
-    app.preferences.persistent_ribbon_pressed && persistent_available(app, id) && app.session.status_items().iter().any(|item| item.command == id)
+pub(crate) fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
+    app.preferences.persistent_ribbon_pressed
+        && persistent_available(app, id)
+        && if id == COMPONENT_COLORS {
+            app.session.colored_components.is_some()
+        } else {
+            app.session.status_items().iter().any(|item| item.command == id)
+        }
 }
 
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
@@ -1171,7 +1181,7 @@ pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine
 }
 
 fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, enabled: bool) -> Option<String> {
-    (enabled && persistent_pressed(app, command.id)).then(|| {
+    (enabled && command.id != COMPONENT_COLORS && persistent_pressed(app, command.id)).then(|| {
         let name = persistent_button_name(app, command);
         crate::i18n::Locale::for_language(&app.preferences.language).format("ui.viewport_status_clear_hint", &[("name", &name)])
     })

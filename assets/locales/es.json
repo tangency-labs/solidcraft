@@ -939,8 +939,6 @@
   "cmd.inspect_accessibility": "Análisis de accesibilidad",
   "cmd.inspect_center_of_mass": "Centro de masas",
   "cmd.inspect_clearance": "Holgura",
-  "cmd.inspect_colored_components": "Activar colores de componente",
-  "cmd.inspect_colored_components_disable": "Desactivar colores de componente",
   "cmd.inspect_compare": "Comparar cuerpos",
   "cmd.inspect_continuity": "Análisis de continuidad",
   "cmd.inspect_curvature_comb": "Análisis de peine de curvatura",

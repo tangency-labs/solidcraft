@@ -419,26 +419,28 @@ fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() 
     h.frames(3);
     let command = solidcraft_engine::find_command("inspect.colored_components").unwrap();
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
     h.step(&json!({"click": {"handle": "tab:INSPECT"}})).unwrap();
     h.frames(2);
     let original_key = super::scene_key(&h.app);
     h.step(&json!({"click": {"handle": "panel:INSPECT:CHECK"}})).unwrap();
     h.frames(2);
-    assert!(h.widget("Enable Component Colors").is_some());
+    assert!(h.widget("Component Colors").is_some());
+    assert!(!crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_some());
     assert!(h.app.dialog.is_none());
     assert_ne!(super::scene_key(&h.app), original_key);
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Disable Component Colors", "colored_components_off"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
     h.step(&json!({"click": {"handle": "panel:INSPECT:CHECK"}})).unwrap();
     h.frames(2);
-    assert!(h.widget("Disable Component Colors").is_some());
+    assert!(h.widget("Component Colors").is_some());
+    assert!(crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_none());
     let info = command.info(&h.app.session);
-    assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+    assert_eq!((info.label, info.icon), ("Component Colors", "colored_components"));
 }
 
 /// Every shape the last frame painted in `colour`: point squares, glyph outlines, dimension

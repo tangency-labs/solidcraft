@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "Toegankelijkheidsanalyse",
   "cmd.inspect_center_of_mass": "Zwaartepunt",
   "cmd.inspect_clearance": "Speling",
-  "cmd.inspect_colored_components": "Componentkleuren inschakelen",
-  "cmd.inspect_colored_components_disable": "Componentkleuren uitschakelen",
   "cmd.inspect_compare": "Lichamen vergelijken",
   "cmd.inspect_compare_picture": "Afbeelding vergelijken",
   "cmd.inspect_continuity": "Continuïteitsanalyse",

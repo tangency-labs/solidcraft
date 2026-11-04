@@ -963,8 +963,6 @@
   "cmd.inspect_analysis": "Phân tích khung nhìn",
   "cmd.inspect_center_of_mass": "Trọng tâm",
   "cmd.inspect_clearance": "Khoảng cách an toàn",
-  "cmd.inspect_colored_components": "Bật màu cụm chi tiết",
-  "cmd.inspect_colored_components_disable": "Tắt màu cụm chi tiết",
   "cmd.inspect_compare": "So sánh các thân khối",
   "cmd.inspect_compare_picture": "So sánh với ảnh tham chiếu",
   "cmd.inspect_continuity": "Phân tích độ liên tục mặt",

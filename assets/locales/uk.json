@@ -947,8 +947,6 @@
   "cmd.inspect_accessibility": "Аналіз доступності",
   "cmd.inspect_center_of_mass": "Центр мас",
   "cmd.inspect_clearance": "Зазор",
-  "cmd.inspect_colored_components": "Увімкнути кольори компонентів",
-  "cmd.inspect_colored_components_disable": "Вимкнути кольори компонентів",
   "cmd.inspect_compare": "Порівняти тіла",
   "cmd.inspect_continuity": "Аналіз неперервності",
   "cmd.inspect_curvature_comb": "Аналіз гребеня кривизни",

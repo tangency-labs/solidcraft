@@ -60,7 +60,7 @@ mod occurrence_tests;
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
-        .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+        .params("component: id or name; saves the next identification colour and turns Component Colors on; shared by every instance, separate from appearances"),
     CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
         .icon("eye").doc_only()
         .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),

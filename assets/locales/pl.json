@@ -934,8 +934,6 @@
   "cmd.inspect_accessibility": "Analiza dostępności",
   "cmd.inspect_center_of_mass": "Środek masy",
   "cmd.inspect_clearance": "Prześwit",
-  "cmd.inspect_colored_components": "Włącz kolory komponentów",
-  "cmd.inspect_colored_components_disable": "Wyłącz kolory komponentów",
   "cmd.inspect_compare": "Porównaj bryły",
   "cmd.inspect_continuity": "Analiza ciągłości",
   "cmd.inspect_curvature_comb": "Analiza grzebienia krzywizny",

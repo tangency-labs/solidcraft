@@ -935,8 +935,6 @@
   "cmd.inspect_accessibility": "Saavutettavuusanalyysi",
   "cmd.inspect_center_of_mass": "Massakeskipiste",
   "cmd.inspect_clearance": "Välys",
-  "cmd.inspect_colored_components": "Ota komponenttivärit käyttöön",
-  "cmd.inspect_colored_components_disable": "Poista komponenttivärit käytöstä",
   "cmd.inspect_compare": "Vertaa kappaleita",
   "cmd.inspect_continuity": "Jatkuvuusanalyysi",
   "cmd.inspect_curvature_comb": "Kaarevuuskampa-analyysi",

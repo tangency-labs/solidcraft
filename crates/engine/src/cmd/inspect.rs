@@ -27,7 +27,7 @@ mod appearance_chain;
 pub(super) mod appearance_gestures;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.colored_components", "Enable Component Colors", colored_components)
+    CommandSpec::new("inspect.colored_components", "Component Colors", colored_components)
         .at("SOLID", "INSPECT").icon("colored_components").noundo()
         .params("enabled?: bool (omitted: toggle); temporary component colours, without changing appearances"),
     CommandSpec::new("inspect.measure", "Measure", measure)

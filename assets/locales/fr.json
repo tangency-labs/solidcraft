@@ -956,8 +956,6 @@
   "cmd.inspect_accessibility": "Analyse d'accessibilité",
   "cmd.inspect_center_of_mass": "Centre de gravité",
   "cmd.inspect_clearance": "Jeu",
-  "cmd.inspect_colored_components": "Activer les couleurs des composants",
-  "cmd.inspect_colored_components_disable": "Désactiver les couleurs des composants",
   "cmd.inspect_compare": "Comparer les corps",
   "cmd.inspect_compare_picture": "Comparer les images",
   "cmd.inspect_continuity": "Analyse de continuité",

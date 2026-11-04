@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "Analýza přístupnosti",
   "cmd.inspect_center_of_mass": "Těžiště",
   "cmd.inspect_clearance": "Vůle",
-  "cmd.inspect_colored_components": "Zapnout barvy komponent",
-  "cmd.inspect_colored_components_disable": "Vypnout barvy komponent",
   "cmd.inspect_compare": "Porovnat tělesa",
   "cmd.inspect_compare_picture": "Porovnat obrázek",
   "cmd.inspect_continuity": "Analýza spojitosti",
