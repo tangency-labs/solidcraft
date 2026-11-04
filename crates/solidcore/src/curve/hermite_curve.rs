@@ -297,8 +297,16 @@ impl HermiteCurve {
     /// `1.1 * EFF_ZERO * (1 + max |coordinate of the position|)` is replaced by the
     /// second derivative scaled to that length (negated in the upper half of the
     /// domain), when the second derivative is longer than that.
-    #[must_use]
-    pub fn evaluate(&self, param: f64, num_derivs: usize, non_zero_tangents: bool) -> Vec<Vec3> {
+    ///
+    /// # Errors
+    /// Returns invalid input when the derivative order exceeds the curve evaluation bound.
+    pub fn evaluate(
+        &self,
+        param: f64,
+        num_derivs: usize,
+        non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        crate::curve::check_eval_derivs(num_derivs, "curve::hermite_curve::evaluate")?;
         // Derivatives above the third stay zero.
         let mut out = vec![Vec3::ZERO; num_derivs.saturating_add(1)];
 
@@ -341,7 +349,7 @@ impl HermiteCurve {
                     // make sure 2nd order derivatives are available
                     if num_derivs < 2 {
                         // recurse so the next section sets the 1st derivative
-                        let vals = self.evaluate(param, 2, true);
+                        let vals = self.evaluate(param, 2, true)?;
 
                         // save the 1st derivative
                         if let (Some(o), Some(v)) = (out.get_mut(1), vals.get(1)) {
@@ -370,7 +378,7 @@ impl HermiteCurve {
                 }
             }
         }
-        out
+        Ok(out)
     }
 
     /// The point at `param` (`EvaluatePoint`).
@@ -533,6 +541,52 @@ impl HermiteCurve {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hermite_trait_rejects_order_above_evaluation_bound() {
+        use crate::curve::curve::p2::CurveEvaluate;
+        let h = HermiteCurve::new(Vec3::ZERO, Vec3::X, Vec3::X, Vec3::X, 3);
+        let result = CurveEvaluate::evaluate(&h, &Kernel::default(), 0.5, 65, false, false);
+        assert!(matches!(
+            result,
+            Err(crate::error::SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn hermite_direct_bound_and_values() {
+        use crate::error::SolidError;
+        let k = Kernel::default();
+        for tangent in [Vec3::X, Vec3::ZERO] {
+            let h = HermiteCurve::new(Vec3::ZERO, tangent, Vec3::new(2.0, 3.0, 4.0), Vec3::X, 3);
+            for nonzero in [false, true] {
+                let full = h.evaluate(0.0, 64, nonzero).unwrap();
+                assert_eq!(full.len(), 65);
+                assert!(full[4..].iter().all(|v| *v == Vec3::ZERO));
+                for n in [0, 1, 2, 3, 5] {
+                    let values = h.evaluate(0.0, n, nonzero).unwrap();
+                    for (a, b) in values.iter().zip(&full) {
+                        assert_eq!(
+                            (a.x.to_bits(), a.y.to_bits(), a.z.to_bits()),
+                            (b.x.to_bits(), b.y.to_bits(), b.z.to_bits())
+                        );
+                    }
+                }
+                for n in [65, usize::MAX] {
+                    assert!(matches!(
+                        h.evaluate(0.0, n, nonzero),
+                        Err(SolidError::InvalidInput { .. })
+                    ));
+                    assert!(matches!(
+                        Curve::from(h).evaluate(&k, 0.0, n, false, nonzero),
+                        Err(SolidError::InvalidInput {
+                            operation: "curve::curve::p2::Curve::evaluate",
+                            ..
+                        })
+                    ));
+                }
+            }
+        }
+    }
     use super::*;
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
@@ -577,9 +631,9 @@ mod tests {
         let h = sample();
         assert_eq!(h.evaluate_point(0.0), h.start_point());
         assert_eq!(h.evaluate_point(1.0), h.end_point());
-        let e = h.evaluate(1.0, 1, false);
+        let e = h.evaluate(1.0, 1, false).unwrap();
         assert_eq!(e[1], h.end_derivative());
-        let e = h.evaluate(0.0, 5, false);
+        let e = h.evaluate(0.0, 5, false).unwrap();
         assert_eq!(e.len(), 6);
         assert_eq!(e[1], h.start_derivative());
         assert_eq!(e[4], Vec3::ZERO);
@@ -620,9 +674,9 @@ mod tests {
     fn zero_tangent_is_fixed() {
         // D1 = 0: the tangent at 0 is replaced by a tiny vector along H''(0).
         let h = HermiteCurve::new(Vec3::ZERO, Vec3::ZERO, Vec3::X, Vec3::X, 3);
-        let e = h.evaluate(0.0, 1, true);
+        let e = h.evaluate(0.0, 1, true).unwrap();
         assert!(e[1].length() > 0.0 && e[1].x > 0.0);
-        assert_eq!(h.evaluate(0.0, 1, false)[1], Vec3::ZERO);
+        assert_eq!(h.evaluate(0.0, 1, false).unwrap()[1], Vec3::ZERO);
     }
 
     #[test]
@@ -681,7 +735,7 @@ mod tests {
 
             for num_derivs in [4, 5, 6, 10] {
                 for non_zero_tangents in [false, true] {
-                    let out = h.evaluate(u, num_derivs, non_zero_tangents);
+                    let out = h.evaluate(u, num_derivs, non_zero_tangents).unwrap();
                     assert_eq!(out.len(), num_derivs + 1);
                     assert_eq!(out[0], expected_0);
                     assert_eq!(out[1], expected_1);
@@ -704,7 +758,7 @@ mod tests {
         let second = 2.0 * c0;
         let expected_fixed_d1 = (new_len / second.length()) * second;
         for num_derivs in [4, 5, 6, 10] {
-            let out = h_zero_start.evaluate(0.0, num_derivs, true);
+            let out = h_zero_start.evaluate(0.0, num_derivs, true).unwrap();
             assert_eq!(out.len(), num_derivs + 1);
             assert_eq!(out[0], p1);
             assert_eq!(out[1], expected_fixed_d1);
@@ -731,7 +785,7 @@ mod tests {
         let k = Kernel::default();
         let out = curve.evaluate(&k, 0.4, 5, true, false).unwrap();
         assert_eq!(out.len(), 6);
-        assert_eq!(&out[..4], h.evaluate(0.4, 3, false).as_slice());
+        assert_eq!(&out[..4], h.evaluate(0.4, 3, false).unwrap().as_slice());
         assert_eq!(out[4], Vec3::ZERO);
         assert_eq!(out[5], Vec3::ZERO);
 

@@ -694,7 +694,7 @@ fn bspline_state(o: &mut Vec<f64>, b: &BSplineCurve) {
     }
 }
 
-fn state(o: &mut Vec<f64>, c: &Curve) {
+fn state(o: &mut Vec<f64>, c: &Curve) -> Result<(), HarnessError> {
     match c.kind() {
         CurveKind::BSpline(b) => bspline_state(o, b),
         // an SmBSplineCurve (the shim's IsKindOf(SmBSplineCurve_TYPE))
@@ -713,8 +713,8 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
         }
         CurveKind::Hermite(h) => {
             o.extend([1.0, h.dim() as f64]);
-            let a = h.evaluate(0.0, 1, false);
-            let e = h.evaluate(1.0, 1, false);
+            let a = h.evaluate(0.0, 1, false).map_err(|e| harness(e.to_string()))?;
+            let e = h.evaluate(1.0, 1, false).map_err(|e| harness(e.to_string()))?;
             for v in a.iter().take(2).chain(e.iter().take(2)) {
                 pv(o, *v);
             }
@@ -744,6 +744,7 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
         | CurveKind::TangentField(_)
         | CurveKind::Line(_) => o.push(-1.0),
     }
+    Ok(())
 }
 
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
@@ -1025,8 +1026,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut c = c_ref()?.clone();
             let nc = tri!(o, c.create_by_split_curve(&k, *t));
             o.push(0.0);
-            state(&mut o, &c);
-            state(&mut o, &nc);
+            state(&mut o, &c)?;
+            state(&mut o, &nc)?;
         }
         OpIn::ConvertT { t } => {
             let c = c_ref()?;
@@ -1049,7 +1050,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Copy => {
             let nc = tri!(o, c_ref()?.copy(&Kernel::default()));
             o.push(0.0);
-            state(&mut o, &nc);
+            state(&mut o, &nc)?;
         }
         OpIn::Trim { a, b: bb } => {
             let mut c = c_ref()?.clone();
@@ -1062,7 +1063,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 },
             };
             o.extend([st, ivl.min(), ivl.max()]);
-            state(&mut o, &c);
+            state(&mut o, &c)?;
         }
         OpIn::Transform {
             origin,
@@ -1080,7 +1081,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 },
             };
             o.push(st);
-            state(&mut o, &c);
+            state(&mut o, &c)?;
         }
         OpIn::EditParam { a, b: bb } => {
             let mut c = c_ref()?.clone();
@@ -1092,7 +1093,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 },
             };
             o.push(st);
-            state(&mut o, &c);
+            state(&mut o, &c)?;
         }
         OpIn::Reverse { a, b: bb } => {
             let mut c = c_ref()?.clone();
@@ -1103,7 +1104,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     Ok(s) => o.push(s),
                 },
             }
-            state(&mut o, &c);
+            state(&mut o, &c)?;
         }
         OpIn::Convert2d => {
             let mut c = c_ref()?.clone();
@@ -1115,7 +1116,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 },
             };
             o.push(st);
-            state(&mut o, &c);
+            state(&mut o, &c)?;
         }
         OpIn::Analytic { a, b: bb } => {
             let r = tri!(
@@ -1190,7 +1191,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             match Curve::read_from_db(&Kernel::default(), *curve_type, &mut db, *dim, *version) {
                 Ok(c) => {
                     o.extend([0.0, 1.0]);
-                    state(&mut o, &c);
+                    state(&mut o, &c)?;
                 }
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
@@ -1210,7 +1211,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Ok(r) => {
                     o.extend([0.0, b(r.is_some())]);
                     if let Some(c) = r {
-                        state(&mut o, &Curve::from(c));
+                        state(&mut o, &Curve::from(c))?;
                     }
                 }
                 Err(e) => match deferred_or_status(e) {

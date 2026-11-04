@@ -609,7 +609,7 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
-fn base_state(o: &mut Vec<f64>, c: &Curve) {
+fn base_state(o: &mut Vec<f64>, c: &Curve) -> Result<(), HarnessError> {
     match c.kind() {
         CurveKind::BSpline(bs) => {
             o.extend([0.0, bs.dim() as f64]);
@@ -626,23 +626,24 @@ fn base_state(o: &mut Vec<f64>, c: &Curve) {
         }
         CurveKind::Hermite(h) => {
             o.extend([1.0, h.dim() as f64]);
-            let a = h.evaluate(0.0, 1, false);
-            let e = h.evaluate(1.0, 1, false);
+            let a = h.evaluate(0.0, 1, false).map_err(|e| harness(e.to_string()))?;
+            let e = h.evaluate(1.0, 1, false).map_err(|e| harness(e.to_string()))?;
             for v in a.iter().take(2).chain(e.iter().take(2)) {
                 pv(o, *v);
             }
         }
         _ => o.push(-1.0),
     }
+    Ok(())
 }
 
-fn state(o: &mut Vec<f64>, c: &ProjectedCurve) {
+fn state(o: &mut Vec<f64>, c: &ProjectedCurve) -> Result<(), HarnessError> {
     pv(o, c.proj_point());
     pv(o, c.proj_vec());
     pv(o, c.aux_data());
     o.push(f64::from(c.proj_type() as i32));
     o.push(f64::from(c.owns_curve() as i32));
-    base_state(o, c.curve());
+    base_state(o, c.curve())
 }
 
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
@@ -699,7 +700,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             ProjectedCurve::read_from_db(&Kernel::default(), &mut db, d.version)
         );
         o.push(0.0);
-        state(&mut o, &c);
+        state(&mut o, &c)?;
         o.push(c.type_code() as f64);
         return Ok(to_output(&o));
     }
@@ -719,7 +720,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             };
             let ivl = c.natural_interval();
             o.push(ctor_status);
-            state(&mut o, pc);
+            state(&mut o, pc)?;
             o.push(c.type_code() as f64);
             o.push(c.dim() as f64);
             let deg = tri!(o, c.degree());
@@ -738,7 +739,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(d) => return Ok(*d),
             };
             o.push(s);
-            state(&mut o, &pc);
+            state(&mut o, &pc)?;
         }
         OpIn::Eval {
             t,
@@ -852,7 +853,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Err(harness("not a projected curve"));
             };
             o.push(ctor_status);
-            state(&mut o, copy);
+            state(&mut o, copy)?;
             o.push(b(shared));
             let CurveKind::Projected(orig) = c.kind() else {
                 return Err(harness("not a projected curve"));
@@ -931,10 +932,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 fn projected_state(o: &mut Vec<f64>, c: &Curve) -> Result<(), HarnessError> {
     match c.kind() {
-        CurveKind::Projected(p) => {
-            state(o, p);
-            Ok(())
-        }
+        CurveKind::Projected(p) => state(o, p),
         _ => Err(harness("not a projected curve")),
     }
 }

@@ -574,7 +574,7 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
     o.extend([v.x, v.y, v.z]);
 }
 
-fn put_curve(o: &mut Vec<f64>, c: &Curve) {
+fn put_curve(o: &mut Vec<f64>, c: &Curve) -> Result<(), HarnessError> {
     match c.kind() {
         CurveKind::BSpline(bs) => {
             o.extend([0.0, bs.dim() as f64]);
@@ -591,8 +591,8 @@ fn put_curve(o: &mut Vec<f64>, c: &Curve) {
         }
         CurveKind::Hermite(h) => {
             o.extend([1.0, h.dim() as f64]);
-            let a = h.evaluate(0.0, 1, false);
-            let e = h.evaluate(1.0, 1, false);
+            let a = h.evaluate(0.0, 1, false).map_err(|e| harness(e.to_string()))?;
+            let e = h.evaluate(1.0, 1, false).map_err(|e| harness(e.to_string()))?;
             for v in a.iter().take(2).chain(e.iter().take(2)) {
                 pv(o, *v);
             }
@@ -600,6 +600,7 @@ fn put_curve(o: &mut Vec<f64>, c: &Curve) {
         // other kinds never are the base curve here
         _ => o.push(-1.0),
     }
+    Ok(())
 }
 
 fn put_cache(o: &mut Vec<f64>, c: &CrvInVolume) {
@@ -610,11 +611,11 @@ fn put_cache(o: &mut Vec<f64>, c: &CrvInVolume) {
     o.extend(c.conts().iter().map(|&k| f64::from(k as i32)));
 }
 
-fn put_state(o: &mut Vec<f64>, c: &CrvInVolume) {
+fn put_state(o: &mut Vec<f64>, c: &CrvInVolume) -> Result<(), HarnessError> {
     o.push(c.owner_flag() as f64);
     o.push(b(c.in_param_space()));
     put_cache(o, c);
-    put_curve(o, c.curve());
+    put_curve(o, c.curve())
 }
 
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
@@ -674,7 +675,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
         };
         o.extend([0.0, 1.0]);
-        put_state(&mut o, &c);
+        put_state(&mut o, &c)?;
         return Ok(to_output(&o));
     }
     if let OpIn::Exact {
@@ -712,7 +713,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 b(x.owns_volume()),
             ]);
             o.extend(types.iter().map(|&t| b(c.is_kind_of(t))));
-            put_state(&mut o, x);
+            put_state(&mut o, x)?;
         }
         OpIn::Eval {
             t,
@@ -781,7 +782,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let c = Curve::from(civ);
             let d = tri!(o, c.copy(&Kernel::default()));
             o.push(0.0);
-            put_state(&mut o, civ_of(&d)?);
+            put_state(&mut o, civ_of(&d)?)?;
             let eq = tri!(o, d.approx_eq(&k, &c));
             o.push(b(eq));
         }
@@ -792,7 +793,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let c = Curve::from(civ);
             let d = c.clone();
             o.push(0.0);
-            put_state(&mut o, civ_of(&d)?);
+            put_state(&mut o, civ_of(&d)?)?;
             let eq = tri!(o, d.approx_eq(&k, &c));
             o.push(b(eq));
         }
@@ -802,7 +803,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
             });
-            put_state(&mut o, &civ);
+            put_state(&mut o, &civ)?;
         }
         OpIn::Reverse { a, b: bb } => {
             let r =
@@ -814,7 +815,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             if let Ok(nv) = r {
                 o.extend([nv.min(), nv.max()]);
             }
-            put_state(&mut o, &civ);
+            put_state(&mut o, &civ)?;
         }
         OpIn::Trim { a, b: bb, mode } => {
             let mode = match mode {
@@ -829,7 +830,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(d) => return Ok(*d),
             });
             o.extend([ivl.min(), ivl.max()]);
-            put_state(&mut o, &civ);
+            put_state(&mut o, &civ)?;
         }
         OpIn::Transform {
             origin,
@@ -843,7 +844,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
             });
-            put_state(&mut o, &civ);
+            put_state(&mut o, &civ)?;
         }
         OpIn::ReadDb { .. } | OpIn::Exact { .. } | OpIn::AssertValid { .. } => return Err(harness("static op")),
     }

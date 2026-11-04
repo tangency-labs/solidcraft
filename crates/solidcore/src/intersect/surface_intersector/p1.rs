@@ -2137,7 +2137,7 @@ pub fn is_point_on_tsect_curve(
         let t = sol.start.parameters[0];
         if dist <= tol {
             // crPointToTest has a direction: check that too.  [B401]
-            let pv = herm_3d.evaluate(t, 1, true);
+            let pv = herm_3d.evaluate(t, 1, true)?;
             let tangent = pv.get(1).copied().unwrap_or(Vec3::ZERO);
             if point_to_test.crv_deriv().dot(tangent) < 0.0 {
                 return Ok(true);
