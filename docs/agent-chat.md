@@ -222,10 +222,15 @@ doesn't change the last known login state.
 | Codex | `npm install -g @agentclientprotocol/codex-acp` |
 | Google Antigravity | Google's ACP server, a separate download from Google's `agy` command (which has no ACP mode): take the zip for your system from the [ACP registry](https://agentclientprotocol.com/registry), unzip it and put `agy_acp_server.par` (`agy_acp_server.exe` on Windows) on your `PATH`. The zip also holds `localharness_external`: leave the two together. It signs in itself (browser). |
 | OpenCode | `npm install -g opencode-ai` (`opencode acp`) |
+| Mistral Vibe | `uv tool install mistral-vibe` (`vibe-acp`) |
 | XAI Grok | [Grok Build installer](https://docs.x.ai/build/overview), then `grok login` (`grok agent stdio` speaks ACP) |
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+
+For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
+prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
+See [Mistral's ACP setup guide](https://docs.mistral.ai/vibe/code/use-vibe-in-other-ides).
 **Refresh** looks again after you install one. An agent whose program is there but fails its
 `--version` check without printing a version (an install that didn't finish, such as an npm
 install whose setup script didn't run, or a program built for another kind of computer) is
