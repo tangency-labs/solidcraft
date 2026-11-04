@@ -2532,6 +2532,8 @@
   "prefs.search": "Einstellungen suchen",
   "prefs.search_empty": "Keine passenden Einstellungen",
   "prefs.select": "Auswählen",
+  "prefs.select_hidden_edges": "Verdeckte Kanten in der schattierten Ansicht mit verdeckten Kanten auswählen",
+  "prefs.select_hidden_edges_help": "Kanten durch Flächen auswählen, wenn die schattierte Ansicht mit verdeckten Kanten aktiv ist, auch zum Verrunden. Aus behält das Auswahlverhalten von v0.30.1 bei. Ausgeblendete Körper bleiben ausgeschlossen.",
   "prefs.select_one_item": "Ein Element auswählen",
   "prefs.select_other_hidden": "Verborgene Geometrie mit „Andere auswählen“ auswählen",
   "prefs.select_other_hidden_help": "Ein: Verborgene Körper, Skizzen und verdeckte Kanten nahe dem Zeiger einbeziehen. Aus: Die ursprüngliche Liste sichtbarer Geometrie direkt unter dem Zeiger verwenden.",

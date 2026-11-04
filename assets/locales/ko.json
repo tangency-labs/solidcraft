@@ -1890,6 +1890,8 @@
   "prefs.search": "설정 검색",
   "prefs.search_empty": "일치하는 설정이 없습니다",
   "prefs.select": "선택",
+  "prefs.select_hidden_edges": "숨은 모서리가 표시된 음영 뷰에서 숨은 모서리 선택",
+  "prefs.select_hidden_edges_help": "숨은 모서리가 표시된 음영 뷰에서 면 뒤의 모서리를 선택하여 필렛에 사용할 수 있습니다. 끄면 v0.30.1의 선택 동작을 유지합니다. 숨긴 바디는 선택되지 않습니다.",
   "prefs.select_one_item": "항목 하나 선택",
   "prefs.select_other_hidden": "다른 항목 선택으로 숨겨진 형상 선택",
   "prefs.select_other_hidden_help": "켜짐: 포인터 근처의 숨겨진 바디, 스케치 및 가려진 모서리를 포함합니다. 꺼짐: 포인터 바로 아래에 보이는 형상만 포함하는 기존 목록을 사용합니다.",

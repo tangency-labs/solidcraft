@@ -2556,6 +2556,8 @@
   "prefs.section_hatch_by_part": "按零件",
   "prefs.section_hatch_one": "单一样式",
   "prefs.select": "选择",
+  "prefs.select_hidden_edges": "在带隐藏边线的着色视图中选择隐藏边",
+  "prefs.select_hidden_edges_help": "在带隐藏边线的着色视图中，可穿过面选择边并用于圆角。关闭时保留v0.30.1的选择行为。隐藏的实体仍不可选择。",
   "prefs.select_one_item": "选择一个项目",
   "prefs.select_other_hidden": "使用“选择其他”选择隐藏几何体",
   "prefs.select_other_hidden_help": "开启：包括指针附近的隐藏实体、草图和被遮挡的边。关闭：恢复原来的列表，仅包含指针正下方的可见几何体。",

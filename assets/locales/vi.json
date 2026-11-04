@@ -2556,6 +2556,8 @@
   "prefs.section_hatch_by_part": "Theo chi tiết",
   "prefs.section_hatch_one": "Một kiểu",
   "prefs.select": "Chọn",
+  "prefs.select_hidden_edges": "Chọn cạnh bị che trong chế độ tô bóng có cạnh ẩn",
+  "prefs.select_hidden_edges_help": "Cho phép chọn cạnh xuyên qua bề mặt khi dùng chế độ tô bóng có cạnh ẩn, kể cả cho lệnh Fillet. Tắt để giữ cách chọn của v0.30.1. Các khối đã ẩn vẫn không thể chọn.",
   "prefs.select_one_item": "Chọn một mục",
   "prefs.select_other_hidden": "Chọn hình học ẩn bằng Chọn đối tượng khác",
   "prefs.select_other_hidden_help": "Bật: bao gồm các khối, bản phác thảo ẩn và cạnh bị che gần con trỏ. Tắt: dùng danh sách ban đầu chỉ gồm hình học đang hiển thị ngay dưới con trỏ.",

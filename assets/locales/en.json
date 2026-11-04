@@ -2556,6 +2556,8 @@
   "prefs.section_hatch_by_part": "By part",
   "prefs.section_hatch_one": "One style",
   "prefs.select": "Select",
+  "prefs.select_hidden_edges": "Select hidden edges in Shaded with hidden edges",
+  "prefs.select_hidden_edges_help": "Select edges through faces when Shaded with hidden edges is active, including for Fillet. Off keeps v0.30.1 selection behavior. Hidden bodies stay unselectable.",
   "prefs.select_one_item": "Select one item",
   "prefs.select_other_hidden": "Select hidden geometry with Select Other",
   "prefs.select_other_hidden_help": "On: include hidden bodies, sketches and occluded edges near the pointer. Off: use the original list of visible geometry under the pointer.",

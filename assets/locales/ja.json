@@ -2556,6 +2556,8 @@
   "prefs.section_hatch_by_part": "部品ごと",
   "prefs.section_hatch_one": "単一スタイル",
   "prefs.select": "選択",
+  "prefs.select_hidden_edges": "隠線表示で隠れた辺を選択する",
+  "prefs.select_hidden_edges_help": "「Shaded with hidden edges」で面の向こうの辺を選択し、Filletにも使用できます。オフではv0.30.1相当の選択動作になります。非表示のボディは選択対象になりません。",
   "prefs.select_one_item": "項目を 1 つ選択",
   "prefs.select_other_hidden": "「他を選択」で非表示のジオメトリを選択",
   "prefs.select_other_hidden_help": "オン: ポインター付近の非表示のボディやスケッチ、遮られたエッジを含めます。オフ: ポインター直下の表示中のジオメトリだけを元のリストに表示します。",

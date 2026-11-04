@@ -87,6 +87,7 @@
   "prefs.max_file_size_web": "The web app opens STEP and import files up to 512 MB and designs up to 256 MB: a browser tab can't hold larger files. The desktop app can raise these limits.",
   "prefs.megabytes": "MB",
   "prefs.network_locations_note": "For organisations that keep designs on file servers. Off: only servers you allow.",
+  "prefs.select_hidden_edges_help": "Select edges through faces when Shaded with hidden edges is active, including for Fillet. Off keeps v0.30.1 selection behaviour. Hidden bodies stay unselectable.",
   "prefs.sketch.center_arc": "Centre-point arc follows the cursor",
   "prefs.sketch.conflict_colour": "Conflict colour",
   "prefs.sketch.tracking_guides": "Centre and midpoint guides",
