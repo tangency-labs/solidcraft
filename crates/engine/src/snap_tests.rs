@@ -305,3 +305,17 @@ fn a_washer_far_from_the_origin_keeps_both_its_rims() {
     radii.sort_by(f64::total_cmp);
     assert!(radii.len() == 2 && (radii[0] - 4.0).abs() < 1e-6 && (radii[1] - 4.05).abs() < 1e-6, "one centre per rim: {radii:?} in {got:?}");
 }
+
+#[test]
+fn nearby_holes_far_from_the_origin_keep_a_centre_each() {
+    // Two Ø0.02 holes whose centres are 0.05 apart, 60 m out: a tolerance that grew with the
+    // distance from the origin like the radii's would make them one.
+    let rim = |c: Vec3| crate::snap::SnapSource { edge: Some(c + Vec3::new(0.01, 0.0, 0.0)), ..crate::snap::SnapSource::default() };
+    let (a, b) = (Vec3::new(60000.0, 0.0, 5.0), Vec3::new(60000.05, 0.0, 5.0));
+    let found = vec![(a, SnapKind::Centre, rim(a)), (b, SnapKind::Centre, rim(b))];
+    let got = crate::snap::merged(found, "Body1");
+    assert_eq!(got.iter().map(|(p, _)| p.at).collect::<Vec<_>>(), [a, b], "{got:?}");
+    // A point found twice, rounded a little differently, is still one.
+    let twice = vec![(a, SnapKind::End, rim(a)), (a + Vec3::new(1e-9, 0.0, 0.0), SnapKind::End, rim(a))];
+    assert_eq!(crate::snap::merged(twice, "Body1").len(), 1);
+}

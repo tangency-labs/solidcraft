@@ -67,15 +67,21 @@ pub struct SnapSource {
     pub edge: Option<Vec3>,
 }
 
-/// Points of one kind closer than this (relative to the item's size) are one snap point.
+/// Two round edges' radii closer than this (relative to the radii) are one circle.
 const SAME: f64 = 1e-6;
+
+/// Points of one kind closer than this (relative to how far from the origin they are) are one
+/// place: well above the rounding of coordinates there and of a circle fitted to an imported
+/// edge, so a point found twice is one, and far below any feature, so distinct points stay apart
+/// far from the origin too (0.06 µm at 60 m, where `SAME` would be 0.06 mm).
+const SAME_PLACE: f64 = 1e-9;
 
 /// The most edges of one face whose points a flat face offers: a face with more (an imported
 /// lattice) offers those of its first edges.
 const MAX_OUTLINE_EDGES: usize = 4096;
 
 /// A point found on an item, its kind and where it came from.
-type Found = (Vec3, SnapKind, SnapSource);
+pub(crate) type Found = (Vec3, SnapKind, SnapSource);
 
 /// The snap points `sel` offers: none for things with no points to offer (a body, a plane).
 pub fn snap_points(s: &Session, sel: &Sel) -> Vec<SnapPoint> {
@@ -97,11 +103,16 @@ pub fn snap_points_from(s: &Session, sel: &Sel) -> Vec<(SnapPoint, SnapSource)> 
         Sel::Face { .. } => face_points(s, sel),
         _ => Vec::new(),
     };
+    merged(found, &body)
+}
+
+/// The points found on an item as snap points, a point found twice kept once.
+pub(crate) fn merged(found: Vec<Found>, body: &str) -> Vec<(SnapPoint, SnapSource)> {
     // A round edge's centre with the radius its rim has (the rim point is on the circle).
     let radius = |at: Vec3, from: &SnapSource| from.edge.map(|rim| rim.dist(at));
     let mut out: Vec<(SnapPoint, SnapSource)> = Vec::new();
     for (at, kind, from) in found {
-        let tol = SAME * (1.0 + at.len());
+        let tol = SAME_PLACE * (1.0 + at.len());
         // Only points of one kind are one point: a hole centred on its face is both the face's
         // centre and the hole's, and only the hole's keeps its rim. Centres are one point only
         // on one circle: a washer's two rims keep a centre each, while the pieces the kernel
@@ -117,7 +128,7 @@ pub fn snap_points_from(s: &Session, sel: &Sel) -> Vec<(SnapPoint, SnapSource)> 
         let same =
             |(p, f): &(SnapPoint, SnapSource)| p.kind == kind && p.at.dist(at) <= tol && (kind != SnapKind::Centre || one_circle(radius(p.at, f)));
         if at.is_finite() && !out.iter().any(same) {
-            out.push((SnapPoint { at, kind, body: body.clone() }, from));
+            out.push((SnapPoint { at, kind, body: body.to_string() }, from));
         }
     }
     out
