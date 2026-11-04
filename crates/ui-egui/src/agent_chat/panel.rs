@@ -1056,6 +1056,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.spacing_mut().item_spacing.y = Tokens::get().space_10;
                 conversation(app, ui);
             });
+            // Last, so the scroll goes to this area and not to one nested in the conversation.
+            scroll_while_selecting(ui);
         });
     if esc || stop_clicked {
         cancel(app);
@@ -1678,6 +1680,40 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
     }
 }
 
+/// A text selection dragged near or past the top or bottom of the conversation scrolls it, faster
+/// the further out, so a long answer can be selected in one drag (#11527). Only a drag towards
+/// that edge does: a click, a double click or a held press on a line by the edge, or a drag from
+/// there into the conversation, scrolls nothing. `ui`: the conversation's scroll area, once its
+/// content is drawn.
+#[cfg(not(target_arch = "wasm32"))]
+fn scroll_while_selecting(ui: &egui::Ui) {
+    // Scrolling starts this far inside the edge, and goes this many points a second for each
+    // point further out, up to four times as far out; once the pointer has moved more than
+    // `TOWARDS` that way since the press.
+    const EDGE: f32 = 32.0;
+    const SPEED: f32 = 16.0;
+    const TOWARDS: f32 = 8.0;
+    let view = ui.clip_rect();
+    let pointer = ui.input(|i| i.pointer.press_origin().filter(|p| i.pointer.primary_down() && view.contains(*p)).zip(i.pointer.latest_pos()));
+    let Some((from, at)) = pointer else {
+        return;
+    };
+    if !ui.ctx().plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection() {
+        return;
+    }
+    let content = ui.min_rect();
+    let out = if at.y < view.top() + EDGE && from.y - at.y > TOWARDS && content.top() < view.top() - 0.5 {
+        at.y - (view.top() + EDGE)
+    } else if at.y > view.bottom() - EDGE && at.y - from.y > TOWARDS && content.bottom() > view.bottom() + 0.5 {
+        at.y - (view.bottom() - EDGE)
+    } else {
+        return;
+    };
+    let step = out.clamp(-4.0 * EDGE, 4.0 * EDGE) * SPEED * ui.input(|i| i.stable_dt).min(0.1);
+    // A positive delta moves the content down, showing what is above.
+    ui.scroll_with_delta_animation(vec2(0.0, -step), egui::style::ScrollAnimation::none());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -1696,7 +1732,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
                     }
                     if !pictures.is_empty() {
                         if let Some(at) = picture_strip(ui, n, pictures) {
@@ -1720,7 +1756,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Item::Agent { thought, text } => {
                 if *thought {
-                    ui.add(egui::Label::new(RichText::new(text).italics().color(t.text_dim)).selectable(true).wrap());
+                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap());
                 } else {
                     let before = ui.cursor();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
@@ -1801,7 +1837,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        ui.add(egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).selectable(true).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap());
                     });
                     match given {
                         Some(true) => {
@@ -1910,7 +1946,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 _ => {
                     if !p.text.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(&p.text).color(t.text)).selectable(true).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap());
                     }
                     if p.image {
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(crate::theme::Tokens::get().font_small));
