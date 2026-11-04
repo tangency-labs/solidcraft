@@ -352,6 +352,19 @@ fn a_tangent_to_an_ellipse_or_a_conic_touches_and_never_crosses() {
     assert!(solve_holding(&mut sk, &Hold { points: vec![ca, cb, apex, end], radii: vec![] }).ok());
     let (a, b) = line_pts(&sk, l);
     assert_touches("the line on the conic dragged", freeform_gap_range(&sk, k, side(a, b)));
+
+    // A line that crosses the arch from end to end (x = 20 through the apex's span): the gap is
+    // monotone and ~0 at the crossing, which is not a touch.
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(20.0, -10.0), v(20.0, 40.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    // The solver may report it cannot do it, but it must never call the crossing a touch.
+    if solve(&mut sk).ok() {
+        let (a, b) = line_pts(&sk, l);
+        assert_touches("the line across the conic", freeform_gap_range(&sk, k, side(a, b)));
+    }
 }
 
 #[test]

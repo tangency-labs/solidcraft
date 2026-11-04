@@ -511,7 +511,11 @@ fn touch_gap(gaps: &[f64], closed: bool) -> f64 {
             best = Some(v);
         }
     }
-    best.unwrap_or_else(|| gaps.iter().copied().fold(f64::INFINITY, |m, x| if x.abs() < m.abs() { x } else { m }))
+    best.unwrap_or_else(|| {
+        // No interior extremum: the gap is monotone, so its extremum is at an end of the curve.
+        let (first, last) = (gaps[0], gaps[gaps.len() - 1]);
+        if first.abs() <= last.abs() { first } else { last }
+    })
 }
 
 fn line_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
