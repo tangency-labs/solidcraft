@@ -205,6 +205,28 @@ fn framed(s: &Session, d: &Dialog, at: Vec3, edges: [Option<Vec3>; 2]) -> Option
     })
 }
 
+/// Let go of the reference edges the place cannot be measured from any more (after a move to
+/// another body, say), as the command would refuse them; the others are kept and measured again.
+pub(crate) fn keep_reachable(s: &Session, d: &mut Dialog) {
+    let Some(at) = place(d) else { return };
+    let Some(dir) = direction(s, d, at) else { return };
+    let world = crate::open_meshing::session_world(s);
+    for (k, edge) in edges(d).into_iter().enumerate() {
+        let Some(p) = edge else { continue };
+        if reference_frame(&world, at, dir, &[(p, None)], true).is_ok() {
+            continue;
+        }
+        if let Some(inp) = REFERENCES.get(k).and_then(|label| d.inputs.iter_mut().find(|i| i.label == *label)) {
+            inp.items.clear();
+        }
+        if let Some(refs) = refs_mut(d) {
+            refs.distance[k].clear();
+            refs.exact[k] = None;
+            refs.shown[k] = None;
+        }
+    }
+}
+
 /// The face input's item the reference edges place: the first face pick (see [`place`]). The
 /// edges place that one hole only; OK refuses them with more than one.
 fn place_item(d: &Dialog) -> Option<usize> {
