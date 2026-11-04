@@ -2194,11 +2194,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             for c in cmds {
                                 let info = crate::render_workspace::interactive_command_info(app, c);
                                 let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
-                                let response = if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
+                                let large = app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid;
+                                let persistent = persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed;
+                                let response = if large || persistent {
                                     let mut item = ui_kit::MenuItem::new(c.id, info.label, info.icon);
                                     item.shortcut = &shortcut;
                                     item.enabled = info.enabled;
-                                    item.checked = Some(persistent_pressed(app, c.id));
+                                    item.large = large;
+                                    item.checked = persistent.then(|| persistent_pressed(app, c.id));
                                     item.show(ui)
                                 } else {
                                     ui_kit::command_menu_button(ui, c.id, info.label, info.icon, &shortcut, info.enabled)
@@ -2446,14 +2449,31 @@ fn dropdown_row_id(id: &str) -> egui::Id {
 /// How wide a panel drop-down's rows are: the widest label and shortcut, at least 200.
 fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) -> f32 {
     let t = Tokens::get();
-    let font = FontId::proportional(t.font_button);
+    let large = app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid;
+    if large {
+        let width = cmds
+            .iter()
+            .map(|c| {
+                let info = crate::render_workspace::interactive_command_info(app, c);
+                let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
+                let mut item = ui_kit::MenuItem::new(c.id, info.label, info.icon);
+                item.shortcut = &shortcut;
+                item.large_width(ui, 26.0)
+            })
+            .fold(200.0, f32::max);
+        let margin = ui_kit::Menu::frame().total_margin();
+        let limit = (ui.ctx().content_rect().width() - margin.left - margin.right - ui.spacing().scroll.allocated_width()).max(0.0);
+        return width.min(limit);
+    }
+    let font = FontId::proportional(if large { t.font_label } else { t.font_button });
     cmds.iter()
         .map(|c| {
             let label = ui.painter().layout_no_wrap(app.tr_label(c.info(&app.session).label).to_string(), font.clone(), t.text).size().x;
             let key = crate::keymap::display_for(app, c.id)
                 .map(|k| ui.painter().layout_no_wrap(k.to_string(), FontId::monospace(t.font_button), t.text).size().x + 24.0)
                 .unwrap_or(0.0);
-            6.0 + 20.0 + 8.0 + label + key + 30.0
+            let icon_room = if large { t.space_16 * 2.0 + t.space_8 + t.space_2 } else { 6.0 + 20.0 + 8.0 };
+            icon_room + label + key + 30.0
         })
         .fold(200.0, f32::max)
 }
@@ -2591,7 +2611,9 @@ fn dropdown_row(
 ) -> RowAction {
     let t = Tokens::get();
     let info = crate::render_workspace::interactive_command_info(app, c);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
+    let large = app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid;
+    let height = if large { t.space_16 * 2.0 + t.space_8 } else { ROW_H };
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     // Every row drags onto the toolbar (to pin it there); enabled rows also start their command.
     let sense = if info.enabled { Sense::click_and_drag() } else { Sense::drag() };
     let resp = ui.interact(rect, dropdown_row_id(c.id), sense);
@@ -2623,7 +2645,11 @@ fn dropdown_row(
     row.highlighted = hot || revealed.is_some();
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
     row.shortcut = &shortcut;
-    row.paint(ui, rect, &resp, 26.0);
+    if large {
+        row.paint_large(ui, rect, &resp, 26.0);
+    } else {
+        row.paint(ui, rect, &resp, 26.0);
+    }
     if let Some(strength) = revealed {
         paint_reveal(ui.painter(), rect, &crate::theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
         crate::scenario::publish_rect("ribbon:reveal", rect);
@@ -3080,6 +3106,7 @@ fn sketch_create_menu(
                 // The row translates its own label.
                 let mut item = crate::ui_kit::MenuItem::new(f.label, f.label, first.icon);
                 item.submenu = true;
+                item.large = app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid;
                 let response = crate::ui_kit::Menu::item_button(ui, &item, |ui| {
                     dropdown_keys(app, ui, &variants);
                     let variants_w = dropdown_width(app, ui, &variants);
@@ -4749,6 +4776,23 @@ mod dropdown_tests {
         let (_, list) = open(&mut h);
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!h.app.preferences.ribbon_icon_grid, "the list stays the default");
+        assert!(!h.app.preferences.ribbon_large_list_icons);
+        h.call("ui.prefs", json!({"ribbon_large_list_icons": true}));
+        let (_, large_list) = open(&mut h);
+        assert_eq!(
+            list.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            large_list.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            "large list keeps every command in the same order"
+        );
+        for pair in large_list.windows(2) {
+            assert_eq!(pair[0].1.x, pair[1].1.x, "large list keeps one column");
+            assert!((pair[0].1.y - pair[1].1.y).abs() >= 39.9, "large icons have room between rows");
+        }
+        let saved = serde_json::to_string(&h.app.preferences).unwrap();
+        let restored: crate::prefs::Prefs = serde_json::from_str(&saved).unwrap();
+        assert!(restored.ribbon_large_list_icons, "large list selection survives saving");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.call("ui.prefs", json!({"ribbon_large_list_icons": false}));
         h.call("ui.prefs", json!({"ribbon_icon_grid": true}));
         assert!(h.app.preferences.ribbon_icon_grid);
         let (menu, grid) = open(&mut h);
