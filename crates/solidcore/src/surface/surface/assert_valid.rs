@@ -112,6 +112,7 @@ use crate::curve::curve::p2::TANGENT_FIELD_TYPE;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
 use crate::error::{ignore_status, Result, SolidError};
+use crate::eval::collapse;
 use crate::geom::a_object;
 use crate::geom::assert_array::labels::{
     AXIS2_PLACEMENT_TYPE, B_SPLINE_SURFACE_TYPE, CONE_TYPE, CRV_ON_SURF_TYPE, CYLINDER_TYPE,
@@ -1148,35 +1149,23 @@ pub fn grid_has_non_monotonic_points_to_rounding(
     grid_non_monotonic(points, row_size, closed_col, closed_row, Zero::Rounding)
 }
 
-/// `u`, the unit roundoff of `f64`.
-const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
-
-/// `gamma_k = k u / (1 - k u)`: the relative error bound of `k` rounded operations in a
-/// chain (Higham, the standard model).
-fn gamma(k: usize) -> f64 {
-    #[allow(clippy::cast_precision_loss)]
-    let ku = k as f64 * UNIT_ROUNDOFF;
-    ku / (1.0 - ku)
-}
-
 /// A bound on the rounding of the step from `p0` to `p1`, both Euclidean control points of
 /// a net: within it the step is no step.
 ///
 /// The bound is the one the pole classifier of the layer split certifies, `eval::collapse`
-/// of tangency-labs/solidcore#2629 (`crates/solidcore/src/eval/collapse.rs`, not on main
-/// yet): `Hom::euclid` returns each Euclidean point `P = x / w` with a bound
+/// (`crates/solidcore/src/eval/collapse.rs`), whose `u` and `gamma_k` this uses:
+/// `Hom::euclid` returns each Euclidean point `P = x / w` with a bound
 /// `e = (sqrt(3) ex + |P| ew) / (|w| - ew) + 2 u |P|` on its rounding, from the error
 /// `(ex, ew)` of the homogeneous point it comes from, and a step is zero when
 /// `|P1 - P0| <= e0 + e1 + gamma_3 (|P0| + |P1|)`, the last term covering the subtraction.
 /// A net read off a surface (`GetControlPointNet`) divides the stored homogeneous points,
-/// which are exact as stored, so `ex = ew = 0` and `e = 2 u |P|` per point. The weight is
+/// which are exact as stored, so `ex = ew = 0` and `e = 2 u |P|` per point: the
+/// homogeneous half of `Hom::euclid` has nothing to contribute here. The weight is
 /// in the bound through `|P| = |x| / |w|`, which a bound on the coordinates alone misses
 /// (a sphere's pole rows carry `w = sqrt(2) / 2`).
-///
-/// Once #2629 is in, this is `collapse::gamma` and `Hom` (#2560).
 fn step_within_rounding(p0: Point3, p1: Point3) -> f64 {
     let (l0, l1) = (p0.length(), p1.length());
-    2.0 * UNIT_ROUNDOFF * (l0 + l1) + gamma(3) * (l0 + l1)
+    2.0 * collapse::UNIT * (l0 + l1) + collapse::gamma(3) * (l0 + l1)
 }
 
 /// How the monotonicity pass recognises a step too short to carry a direction, and what
