@@ -1,6 +1,7 @@
 use super::super::{Executor, JobOptions, Task, open_headless};
 use super::*;
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 use solidcraft_render::{
     Camera, ProductMesh, ProductScene, StandardView,
     job::{CancelToken, ImageRequest, ImageWork, TaskPoll},

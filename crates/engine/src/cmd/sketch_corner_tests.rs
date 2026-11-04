@@ -3,6 +3,7 @@
 //! corner (a clear error that leaves the sketch as it was).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -96,6 +97,59 @@ fn fillet_and_chamfer_corners() {
     run(&mut s, "sketch.chamfer.equal_distance", json!({"a": c[0], "b": c[1], "distance": 4}));
     assert!(solved(&s));
     assert!((area(&s) - (a0 - 8.0)).abs() < 1e-6, "{}", area(&s));
+}
+
+/// Each chamfer cuts several corners at once (`points`), as a fillet rounds them: every corner
+/// alike, in one edit, and a corner that can't be cut, or is named twice, refuses them all.
+#[test]
+fn chamfers_cut_several_corners() {
+    let corners = json!(["l1.start", "l1.end", "l2.end", "l3.end"]);
+    for (cmd, sizes, cut) in [
+        ("sketch.chamfer.equal_distance", json!({"distance": 4}), 8.0),
+        ("sketch.chamfer.two_distance", json!({"distance": 2, "distance2": 6}), 6.0),
+        ("sketch.chamfer.distance_angle", json!({"distance": 3, "angle": 45}), 4.5),
+    ] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        let mut p = sizes.clone();
+        p["points"] = corners.clone();
+        let out = run(&mut s, cmd, p);
+        assert_eq!(curves(&out).len(), 4, "{cmd}: {out}");
+        assert_eq!(sk(&s).curves.len(), 8, "{cmd}");
+        assert!(solved(&s), "{cmd}");
+        assert!((area(&s) - (1200.0 - 4.0 * cut)).abs() < 1e-6, "{cmd}: {}", area(&s));
+    }
+    // A corner named by its two lines, beside one named by its point.
+    let mut s = new_sketch();
+    let c = curves(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})));
+    run(&mut s, "sketch.chamfer.equal_distance", json!({"points": [{"a": c[0], "b": c[1]}, "l3.end"], "distance": 4}));
+    assert!((area(&s) - (1200.0 - 2.0 * 8.0)).abs() < 1e-6, "{}", area(&s));
+    // Two lines that share no end are brought to where they meet, beside a corner they already
+    // make; named again by its point once they meet, that corner is listed twice.
+    let mut s = new_sketch();
+    let la = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+    let lb = curves(&run(&mut s, "sketch.line", json!({"points": [[20, 5], [20, 20]], "connect": false})))[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [format!("{lb}.end"), [0, 20]]}));
+    let e = s.execute("sketch.chamfer.equal_distance", &json!({"points": [{"a": la, "b": lb}, format!("{la}.end")], "distance": 4}));
+    assert!(e.unwrap_err().to_string().contains("listed twice"));
+    assert_eq!(sk(&s).curves.len(), 3);
+    let out = run(&mut s, "sketch.chamfer.equal_distance", json!({"points": [{"a": la, "b": lb}, format!("{lb}.end")], "distance": 4}));
+    assert_eq!(curves(&out).len(), 2, "{out}");
+    assert!(solved(&s));
+    let refused = [
+        // 20 mm back from both ends of a 30 mm side: the second corner doesn't fit.
+        json!({"points": corners, "distance": 20}),
+        // One corner by both of its lines' ends: cut once, the second name would be a new corner.
+        json!({"points": ["l1.end", "l2.start"], "distance": 4}),
+        json!({"points": [], "distance": 1}),
+    ];
+    for p in refused {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        assert!(s.execute("sketch.chamfer.equal_distance", &p).is_err(), "{p}");
+        assert_eq!(sk(&s).curves.len(), 4, "{p}");
+        assert!((area(&s) - 1200.0).abs() < 1e-6, "{p}");
+    }
 }
 
 /// A chamfer where the two lines have no corner is refused, as a fillet there is: two lines
@@ -246,9 +300,9 @@ fn a_fillet_keeps_the_dimensions_of_its_corner_on_a_virtual_sharp() {
     // The virtual corner sits where the corner was, and the part keeps its size.
     let k = sk(&s);
     let vc = k.point(k.point_index(&corner).unwrap()).unwrap();
-    assert!(vc.dist(solidcraft_geom::Vec2::new(0.0, 100.0)) < 1e-6, "{vc:?}");
+    assert!(vc.dist(solidcore_record::Vec2::new(0.0, 100.0)) < 1e-6, "{vc:?}");
     let top_end = k.point(k.resolve_point("top.end").unwrap()).unwrap();
-    assert!(top_end.dist(solidcraft_geom::Vec2::new(-80.0, 100.0)) < 1e-6, "{top_end:?}");
+    assert!(top_end.dist(solidcore_record::Vec2::new(-80.0, 100.0)) < 1e-6, "{top_end:?}");
     let (lo, hi) = k.bounds().unwrap();
     assert!((hi.x - lo.x - 80.0).abs() < 1e-6 && (hi.y - lo.y - 100.0).abs() < 1e-6, "{lo:?} {hi:?}");
     // It is drawn with extension lines from both lines' ends to it.
@@ -304,7 +358,7 @@ fn a_fillet_of_a_nearly_straight_or_folded_corner_with_dimensions_does_not_panic
 /// by other geometry and a dimensioned length are refused, and change nothing.
 #[test]
 fn a_fillet_or_chamfer_brings_two_separate_lines_to_where_they_meet() {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_sketch::CurveKind;
     let lines = |s: &mut Session, a: [[f64; 2]; 2], b: [[f64; 2]; 2]| {
         let la = curves(&run(s, "sketch.line", json!({"points": a, "connect": false})))[0].clone();

@@ -5,8 +5,8 @@
 //! changing anything, so the UI can ask first.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_};
@@ -597,7 +597,7 @@ mod tests {
         run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 3, "id": "hole"}));
         let index = {
             let st = s.model.state();
-            solidcraft_sketch::profile_at_point(&st.sketch(sk).unwrap().profiles, solidcraft_geom::Vec2::new(30.0, 10.0)).unwrap()
+            solidcraft_sketch::profile_at_point(&st.sketch(sk).unwrap().profiles, solidcore_record::Vec2::new(30.0, 10.0)).unwrap()
         };
         let before = curves(&s, sk);
         assert_eq!(before.len(), 5, "four lines and a circle: {before:?}");

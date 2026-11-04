@@ -1,0 +1,41 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 12.5,
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [],
+    "thickness": 2.5
+   }
+  }
+ ]
+}

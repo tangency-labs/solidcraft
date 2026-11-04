@@ -7,6 +7,7 @@ mod assistant_entry;
 mod checks;
 mod choice;
 mod color;
+mod compare;
 mod confirm;
 pub mod container;
 mod details;
@@ -27,6 +28,12 @@ mod navigation_settings;
 pub(crate) mod panel;
 mod preferences;
 mod preferences_assistant;
+#[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
+mod preferences_cards;
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+mod preferences_figure_data;
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+mod preferences_figure_ops;
 mod preferences_figures;
 mod preferences_layout;
 mod preferences_navigation;
@@ -57,8 +64,9 @@ pub(crate) use checks::tests::{raster as test_raster, textures_update as test_te
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
+pub(crate) use compare::*;
 pub(crate) use confirm::{Confirm, Tone};
-pub use container::{Container, DockEdges, Edge, Surface};
+pub use container::{BackingTooltipExt, Container, DockEdges, Edge, Surface};
 pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
@@ -83,6 +91,13 @@ pub use panel::{DialogButtons, Window};
 pub(crate) use panel::{collapsible_header, header};
 pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
+#[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
+pub(crate) use preferences_cards::*;
+pub(crate) use preferences_figure_data::{
+    paint_aa_2x, paint_aa_4x, paint_aa_8x, paint_aa_off, paint_ao_on, paint_frame_rate, paint_quick_measure, paint_tess_coarse, paint_tess_fine,
+    paint_tess_normal, paint_tess_ultra, paint_vertex_markers, paint_view_angles, paint_view_grid, paint_view_perspective, paint_view_shadow,
+};
+pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;
 pub(crate) use radial::{RADIAL_RADIUS, radial_menu};
@@ -127,3 +142,7 @@ pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt:
     ui.data_mut(|data| data.insert_temp(id, fits));
     fits
 }
+
+// Share the existing CPU rasteriser with page-level artwork regressions.
+#[cfg(test)]
+pub(crate) use checks::tests::raster as raster_test_shapes;

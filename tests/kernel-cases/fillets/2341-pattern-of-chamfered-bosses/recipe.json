@@ -1,0 +1,157 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     84.0,
+     84.0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 3.0,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Boss"
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     4.0,
+     4.0
+    ],
+    "p1": [
+     38.0,
+     38.0
+    ],
+    "radius": 4.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 4.0,
+    "direction": "negative",
+    "operation": "join",
+    "name": "BossX",
+    "profiles": "all"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      21.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "distance": 1.0,
+    "name": "Root"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      21.0,
+      4.0,
+      -4.0
+     ],
+     [
+      38.0,
+      21.0,
+      -4.0
+     ],
+     [
+      21.0,
+      38.0,
+      -4.0
+     ],
+     [
+      4.0,
+      21.0,
+      -4.0
+     ],
+     [
+      5.17157287525381,
+      5.17157287525381,
+      -4.0
+     ],
+     [
+      36.82842712474619,
+      5.17157287525381,
+      -4.0
+     ],
+     [
+      36.82842712474619,
+      36.82842712474619,
+      -4.0
+     ],
+     [
+      5.17157287525381,
+      36.82842712474619,
+      -4.0
+     ]
+    ],
+    "distance": 0.8,
+    "name": "Tip"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "BossX",
+     "Root",
+     "Tip"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 2,
+    "spacing1": 42.0,
+    "dir2": [
+     0,
+     1,
+     0
+    ],
+    "count2": 2,
+    "spacing2": 42.0
+   }
+  }
+ ]
+}

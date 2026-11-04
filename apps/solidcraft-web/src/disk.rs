@@ -467,7 +467,7 @@ mod web {
 
     async fn open_db() -> Result<IdbDatabase, String> {
         let factory = web_sys::window().ok_or("no window")?.indexed_db().map_err(err)?.ok_or("this browser has no IndexedDB")?;
-        let request: IdbOpenDbRequest = factory.open_with_u32(DB, 1).map_err(err)?;
+        let request: IdbOpenDbRequest = factory.open_with_u32(&crate::channel::key(DB), 1).map_err(err)?;
         let target = request.clone();
         let upgrade = Closure::once_into_js(move || {
             if let Ok(db) = target.result().and_then(|r| r.dyn_into::<IdbDatabase>()) {

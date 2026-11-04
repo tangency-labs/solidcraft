@@ -1,7 +1,7 @@
 //! Rest: the marker moves the pad, the ring turns a rectangular one in 5° steps, pulled onto the
 //! face's compass points when near one (Alt or Ctrl held: free), kept as the command's `along`.
 
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::{Spec, Turn, angle_of, circle, dir_at, len, pt, pulled, rect, vec3_of};
 use crate::SolveApp;

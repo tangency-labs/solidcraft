@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a surface loft between a circle r 10 at z 0 and a circle r 5 at z 10: ruled between two sections, a cone frustum",
+ "source": "analytic",
+ "method": "two sections loft ruled: corresponding points joined by lines, which for coaxial circles is the frustum; A = pi (10 + 5) sqrt(5^2 + 10^2) = 526.861; one face, 2 free circles",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 2,
+ "area_mm2": 526.8611048280544,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   10
+  ]
+ }
+}

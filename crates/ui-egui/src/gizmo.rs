@@ -4,10 +4,12 @@
 //! round steps at the current zoom, angles to 5°; hold Alt or Ctrl for a free drag), so the caller
 //! adds it to the values it had when the drag started.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, vec2};
-use solidcraft_engine::geom::{Ring, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Ring;
 
 use crate::theme::Tokens;
 use crate::viewport::{Proj, projected_polygon};

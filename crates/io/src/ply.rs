@@ -5,7 +5,7 @@
 //! and property (normals, intensity, edges, …) is passed over. The file is untrusted: counts are
 //! checked against its size and capped.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::threemf::MeshObject;
 use crate::{IoError, Result};

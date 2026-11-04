@@ -471,7 +471,7 @@ fn navigation_context_menus_customise_hide_reset_and_remove() {
         match action {
             "customise" => {
                 assert!(h.app.prefs_window.open);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_INTERFACE);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_LAYOUT);
                 assert!(crate::scenario::rect_of("prefs:navbar:preview").is_some());
             }
             "hide" => assert!(!h.app.ui.show_navigation_bar),
@@ -494,7 +494,7 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
     }
     assert_eq!((NAV_BORDER, NAV_PADDING, NAV_GAP, NAV_BOTTOM, NAV_EDGE), (1.0, 3.0, 2.0, 7.0, 12.0));
     assert_eq!((NAV_SEPARATOR, NAV_SEPARATOR_HEIGHT, NAV_MENU_LEFT, NAV_MENU_RIGHT, NAV_MENU_GAP, NAV_CHEVRON), (9.0, 18.0, 7.0, 6.0, 5.0, 12.0));
-    assert_eq!((NAV_STAGE_HEIGHT, NAV_STAGE_INSET, NAV_TILE_HEIGHT, NAV_TILE_ADD), (58.0, 12.0, 32.0, 22.0));
+    assert_eq!((NAV_STAGE_HEIGHT, NAV_STAGE_INSET, NAV_TILE_HEIGHT, NAV_TILE_ADD), (96.0, 12.0, 32.0, 22.0));
     assert_eq!(
         (NAV_MARKER_HEIGHT, NAV_GHOST_OPACITY, NAV_TILE_DRAG_OPACITY, NAV_IDLE_OPACITY, NAV_FADE_SECONDS, NAV_TOOLTIP_DELAY),
         (24.0, 0.7, 0.55, 0.45, 0.12, 0.8)
@@ -589,7 +589,9 @@ fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_positi
             let bar = NavigationBar { size, ..bar.clone() };
             let preview = editor_layout(stage, &bar, |_| 0.0);
             let live = measure(stage, &bar, NavCaps::MODEL, |_| 0.0);
-            assert_eq!(preview.rect.center().y, stage.center().y);
+            assert_eq!(preview.rect.bottom(), stage.bottom() - NAV_BORDER - NAV_STAGE_INSET);
+            let top = editor_layout(stage, &NavigationBar { edge: crate::navigation_bar::Edge::Top, ..bar.clone() }, |_| 0.0);
+            assert_eq!(top.rect.top(), stage.top() + NAV_BORDER + NAV_STAGE_INSET);
             assert_eq!(preview.rect.height(), NavigationMetrics::for_size(size).height());
             match position {
                 Position::Centre => assert_eq!(preview.rect.center().x, stage.center().x),

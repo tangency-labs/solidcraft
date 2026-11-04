@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#771",
+  "tangency-labs/solidcraft#1806"
+ ],
+ "what": "a circle of radius 5 swept 20 mm up a straight path with one guide rail from its point (5,0,0) to (10,0,20)",
+ "source": "analytic",
+ "method": "the profile is scaled by the rail distance from the path, 5 at the start and 10 at the end, linearly: a cone frustum, V = h/3 (A1 + A2 + sqrt(A1 A2)) = 20/3 pi (25 + 100 + 50) = 3665.2.",
+ "body_count": 1,
+ "volume_mm3": 3665.191429188092,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   20
+  ]
+ }
+}

@@ -3,7 +3,8 @@
 mod four_bar;
 
 use serde_json::json;
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 #[test]
 fn angular_drag_keeps_the_horizontal_construction_line() {

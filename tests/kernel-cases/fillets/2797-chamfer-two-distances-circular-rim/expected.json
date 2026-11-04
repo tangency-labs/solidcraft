@@ -1,0 +1,16 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2797",
+  "tangency-labs/solidcraft#3300",
+  "tangency-labs/solidcraft#2893"
+ ],
+ "what": "a Two Distances chamfer (1 mm on the top face, 0.5 mm down the wall) on the circular rim between a plane and a cylinder",
+ "source": "analytic",
+ "method": "cylinder R3 height 2; chamfer of the top rim with distance 1 along the first face (the top face, the one facing up) and distance2 0.5 along the wall. Both legs lie in the meridian plane (the wall generatrix is straight), so the removed ring is the right triangle (legs 1 and 0.5) revolved once about the axis at its centroid radius R - d1/3 (Pappus): V = pi*9*2 - 0.5*1*0.5*2*pi*(3 - 1/3) = 52.3599.",
+ "body_count": 1,
+ "volume_mm3": 52.35987755982988,
+ "faces": 4,
+ "continuity": {
+  "order": "g0"
+ }
+}

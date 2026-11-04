@@ -223,7 +223,7 @@ fn target(app: &SolveApp, name: &str) -> Option<Target> {
     if !valid_name(name) || app.session.model.is_stale() {
         return None;
     }
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let mut matches = world.bodies.iter().filter(|body| app.session.body_visible(&body.name)).enumerate().filter(|(_, body)| body.name == name);
     let (ordinal, body) = matches.next()?;
     if matches.next().is_some() {
@@ -256,6 +256,25 @@ pub(super) fn revalidate(app: &mut SolveApp, name: &str) -> Result<(), String> {
         binding.document = document;
     }
     Ok(())
+}
+
+pub(super) fn refresh_render_revision(app: &mut SolveApp) {
+    let mut sources = super::setups::SourceCache::default();
+    let eligible: Vec<String> = app
+        .render_workspace
+        .view
+        .cpu
+        .bindings
+        .iter()
+        .filter(|(name, binding)| sources.same_model_source(app, &binding.document) && target(app, name).as_ref() == Some(&binding.target))
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in eligible {
+        if let Some(binding) = app.render_workspace.view.cpu.bindings.get_mut(&name) {
+            binding.revision = app.session.revision;
+            binding.document = std::sync::Arc::downgrade(&app.session.doc);
+        }
+    }
 }
 
 /// A removed, hidden or ambiguous body never silently becomes a different target.
@@ -416,7 +435,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::bounded_cell_editor(ui, ui.id().with("cpu_body_filter"), &mut app.render_workspace.view.cpu.body_filter, &hint, false, 128);
     let selected = app.render_workspace.view.cpu.selected_body.clone();
     let label = selected.clone().unwrap_or_else(|| app.tr("render.cpu_body_choose").to_string());
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let filter = app.render_workspace.view.cpu.body_filter.to_lowercase();
     let candidates: Vec<_> = world
         .bodies
