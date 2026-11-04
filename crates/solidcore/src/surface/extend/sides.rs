@@ -17,12 +17,14 @@
 //! Two more rules (owner, 2026-11-04):
 //! - **Unbounded.** A plane's side at `+-INFINITE_PARAMETER` (the kernel's infinite plane) is
 //!   left: the plane has no side there to extend past.
-//! - **Analytic kinds as themselves.** A cone, sphere, torus or surface of revolution is
-//!   extended as its own exact shape whatever the continuity asked
-//!   ([`Surface::extended_by_distance`] Natural, [`Surface::continued`] for the analytic
-//!   labels): round its axis is a closed direction, so a side round the axis is left; along
-//!   the generator it is extended up to its apex, pole or full turn where the distance asked
-//!   runs past it (the refusal's named distance, the longest that works), and said so.
+//! - **Analytic kinds as themselves.** A cone, sphere or torus is extended as its own exact
+//!   shape whatever the continuity asked ([`Surface::continued`], Natural): along the
+//!   generator up to its apex, pole or full turn where the distance asked runs past it (the
+//!   refusal's named distance, the longest that works), and said so. A surface of
+//!   revolution is extended along its generator as asked, on its B-spline form row by row:
+//!   its rows are one generator turned and weighted, every construction here commutes with
+//!   both, so the result is the revolution of the generator extended. Round the axis is a
+//!   closed direction for all of them, so a side round the axis is left.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -138,11 +140,13 @@ impl Surface {
                 *done = SideExtension::AroundAxis;
                 continue;
             }
-            let how = if revolution.is_some() {
-                Continuity::Natural
-            } else {
-                how
-            };
+            // an analytic label is extended as itself (Natural, its continuation); a
+            // revolution's B-spline form row by row as asked, which is again a revolution
+            // (its rows are one generator turned and weighted, and every construction
+            // commutes with both)
+            let analytic =
+                revolution.is_some() && !matches!(carrier.kind(), SurfaceKind::SurfOfRevolution(_));
+            let how = if analytic { Continuity::Natural } else { how };
             let (grown, capped) = match surface.extended_by_distance(k, &dom, side, how, distance) {
                 Ok(g) => (g, false),
                 // as itself up to its apex, pole or turn: the longest distance that works
@@ -151,7 +155,7 @@ impl Surface {
                         ExtendRefusal::PastApex | ExtendRefusal::PastPole | ExtendRefusal::OverATurn,
                     distance: Some(limit),
                     ..
-                }) if revolution.is_some() && limit > 0.0 && limit < distance => (
+                }) if analytic && limit > 0.0 && limit < distance => (
                     surface.extended_by_distance(k, &dom, side, how, limit)?,
                     true,
                 ),
