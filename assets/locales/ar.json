@@ -4808,6 +4808,7 @@
   "ui.default_modelling_orientation": "اتجاه النمذجة الافتراضي",
   "ui.delete": "حذف",
   "ui.delete_select_first": "حدّد أولًا ما تريد حذفه: الميزات أو الأجسام أو المكوّنات أو هندسة الرسم",
+  "ui.dependents_select_first": "حدّد أولًا ما تريد سرد معتمداته",
   "ui.depth": "العمق",
   "ui.design": "التصميم",
   "ui.design_properties.author": "المؤلف",

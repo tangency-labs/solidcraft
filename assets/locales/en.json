@@ -4808,6 +4808,7 @@
   "ui.default_modelling_orientation": "Default modeling orientation",
   "ui.delete": "Delete",
   "ui.delete_select_first": "Select what to delete first: features, bodies, components or sketch geometry",
+  "ui.dependents_select_first": "Select what to list the dependents of first",
   "ui.depth": "Depth",
   "ui.design": "Design",
   "ui.design_properties.author": "Author",

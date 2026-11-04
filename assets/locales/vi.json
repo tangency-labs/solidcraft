@@ -4808,6 +4808,7 @@
   "ui.default_modelling_orientation": "Hướng mô hình hóa mặc định",
   "ui.delete": "Xóa",
   "ui.delete_select_first": "Hãy chọn trước những gì cần xóa: tính năng, khối, thành phần hoặc hình học phác thảo",
+  "ui.dependents_select_first": "Hãy chọn trước đối tượng để liệt kê các phần phụ thuộc của nó",
   "ui.depth": "Độ sâu",
   "ui.design": "Thiết kế",
   "ui.design_properties.author": "Tác giả",

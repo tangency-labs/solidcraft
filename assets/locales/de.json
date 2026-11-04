@@ -4783,6 +4783,7 @@
   "ui.default_modelling_orientation": "Standard-Modellierungsorientierung",
   "ui.delete": "Löschen",
   "ui.delete_select_first": "Wählen Sie zuerst aus, was gelöscht werden soll: Features, Körper, Komponenten oder Skizzengeometrie",
+  "ui.dependents_select_first": "Wählen Sie zuerst aus, wessen Abhängige aufgelistet werden sollen",
   "ui.depth": "Tiefe",
   "ui.design": "Design",
   "ui.design_properties.author": "Autor",

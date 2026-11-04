@@ -4808,6 +4808,7 @@
   "ui.default_modelling_orientation": "כיוון מידול ברירת מחדל",
   "ui.delete": "מחיקה",
   "ui.delete_select_first": "בחרו קודם מה למחוק: תכונות, גופים, רכיבים או גאומטריית סקיצה",
+  "ui.dependents_select_first": "בחרו קודם מה להציג את התלויים שלו",
   "ui.depth": "עומק",
   "ui.design": "תכן",
   "ui.design_properties.author": "מחבר",

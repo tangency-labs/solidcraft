@@ -3585,6 +3585,7 @@
   "ui.default_modelling_orientation": "기본 모델링 방향",
   "ui.delete": "삭제",
   "ui.delete_select_first": "먼저 삭제할 항목을 선택하세요: 피처, 바디, 컴포넌트 또는 스케치 형상",
+  "ui.dependents_select_first": "먼저 종속 항목을 표시할 대상을 선택하세요",
   "ui.depth": "깊이",
   "ui.design": "디자인",
   "ui.design_properties.author": "작성자",

@@ -4808,6 +4808,7 @@
   "ui.default_modelling_orientation": "モデリングのデフォルト方向",
   "ui.delete": "削除",
   "ui.delete_select_first": "先に削除するものを選択してください: フィーチャ、ボディ、コンポーネント、スケッチ ジオメトリ",
+  "ui.dependents_select_first": "先に、依存先を表示する対象を選択してください",
   "ui.depth": "深さ",
   "ui.design": "デザイン",
   "ui.design_properties.author": "作成者",
