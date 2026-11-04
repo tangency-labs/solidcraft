@@ -4127,8 +4127,11 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
     // Keep small scroll steps so a target cannot be skipped on a long Preferences page.
     for _ in 0..32 {
         let page = crate::scenario::rect_of("dialog:page_body").expect("preference body");
+        // Scroll offsets are pixel-rounded: the final item can extend a fraction
+        // of a point beyond the viewport even at the maximum scroll offset.
+        // Match the tolerance used by the colour-vision sample geometry checks.
         let visible = crate::scenario::rect_of(handle)
-            .map(|r| page.contains_rect(r))
+            .map(|r| page.expand(1.0).contains_rect(r))
             .unwrap_or_else(|| crate::scenario::handle_at(handle).is_some_and(|p| page.shrink(crate::theme::Tokens::get().space_16).contains(p)));
         if visible {
             return;

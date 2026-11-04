@@ -23,7 +23,7 @@ fn glyph(p: &Painter, r: Rect, kind: ThemeGlyph, ink: Color32) {
         return;
     }
     let scale = r.width().min(r.height()) / 24.0;
-    let origin = r.center() - vec2(12.0, 12.0) * scale;
+    let origin = r.center() - egui::Vec2::splat(Tokens::get().space_12) * scale;
     let at = |x, y| origin + vec2(x, y) * scale;
     let line = |points: &[[f32; 2]], width| {
         p.add(egui::Shape::line(points.iter().map(|[x, y]| at(*x, *y)).collect(), Stroke::new(width * scale, ink)));
@@ -91,7 +91,7 @@ fn glyph(p: &Painter, r: Rect, kind: ThemeGlyph, ink: Color32) {
         ThemeGlyph::Grid => {
             for x in [3.0, 13.0] {
                 for y in [3.0, 13.0] {
-                    p.rect_filled(Rect::from_min_size(at(x, y), vec2(8.0, 8.0) * scale), 1.5 * scale, ink);
+                    p.rect_filled(Rect::from_min_size(at(x, y), egui::Vec2::splat(Tokens::get().space_8) * scale), 1.5 * scale, ink);
                 }
             }
         }
@@ -485,14 +485,10 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
         offset = out.state.offset.x;
         let r = out.inner_rect;
         let hovered = ui.rect_contains_pointer(r);
-        let wheel = ui.input(|i| i.smooth_scroll_delta);
-        let horizontal_wheel = hovered && wheel.x != 0.0 && wheel.x.abs() > wheel.y.abs();
+        let wheel = if hovered { crate::navigation::take_horizontal_wheel(ui, offset, max) } else { 0.0 };
+        let horizontal_wheel = wheel != 0.0;
         if horizontal_wheel {
-            let next = (offset - wheel.x).clamp(0.0, max);
-            if next != offset {
-                offset = next;
-                ui.input_mut(|i| i.smooth_scroll_delta.x = 0.0);
-            }
+            offset = (offset - wheel).clamp(0.0, max);
         }
         let time_key = key.with("last_scroll");
         let now = ui.input(|i| i.time);
