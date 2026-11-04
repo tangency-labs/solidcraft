@@ -1247,7 +1247,7 @@ impl Default for Slider {
 
 /// The only slider element, including stepped preferences and editor-free timeline controls.
 /// Native input, keyboard routing, enabled state and accessibility; one token-painted track/thumb.
-/// Tokens: control_height, space_24/8/4/2, dialog_body/rule, control_fill, form_primary.
+/// Tokens: control_height, space_24/8/4/2, dialog_rule, control_fill, form_primary.
 pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, options: Slider) -> Response {
     if crate::prefs_search::suppress_chrome(ui) {
         return crate::prefs_search::hidden_response(ui);
@@ -1272,7 +1272,8 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
             t.space_4
         };
         ui.spacing_mut().slider_width = dimension(ui.available_width() - reserved);
-        let mut widget = egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle);
+        let mut widget =
+            egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle).trailing_fill(false);
         if options.off_endpoint {
             // Blur's step is an editing affordance, not a persisted/API quantisation rule.
             widget = widget.clamping(egui::SliderClamping::Edits);
@@ -1286,20 +1287,59 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         if options.integer {
             widget = widget.integer();
         }
+        let layer = ui.layer_id();
+        let paint_start = ui.ctx().graphics(|graphics| graphics.get(layer).map_or(egui::layers::ShapeIdx(0), |list| list.next_idx()));
         let response = ui.add(widget);
+        let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
+        // egui 0.36.2 paints the rail, then the circular handle, then the value editor.
+        // Suppress only a positively identified pair added by this widget. A backing
+        // rectangle would flatten translucent/blurred parents. Unexpected painting
+        // (including an invisible or clipped widget) keeps the native shapes intact.
+        ui.ctx().graphics_mut(|graphics| {
+            let Some(list) = graphics.get_mut(layer) else { return };
+            let paint_end = list.next_idx();
+            if paint_end.0.saturating_sub(paint_start.0) < 2 {
+                return;
+            }
+            let handle_idx = egui::layers::ShapeIdx(paint_start.0 + 1);
+            let rail_height = ui.spacing().slider_rail_height.max(0.0);
+            let native_radius = slider.height() / 2.5;
+            let native_range = slider.x_range().shrink(native_radius);
+            let mut rail_matches = false;
+            let mut handle_matches = false;
+            // Indexed reads via mutate_shape are bounded and allocate nothing; do not
+            // scan the layer's earlier parent/sibling paints looking for a match.
+            list.mutate_shape(paint_start, |entry| {
+                if let egui::Shape::Rect(rail) = &entry.shape {
+                    let expected = egui::Rect::from_center_size(slider.center(), vec2(slider.width(), rail_height));
+                    rail_matches = entry.clip_rect == ui.clip_rect()
+                        && (rail.rect.min - expected.min).length_sq() < 0.0001
+                        && (rail.rect.max - expected.max).length_sq() < 0.0001
+                        && rail.stroke == egui::Stroke::NONE;
+                }
+            });
+            list.mutate_shape(handle_idx, |entry| {
+                if let egui::Shape::Circle(handle) = &entry.shape {
+                    handle_matches = entry.clip_rect == ui.clip_rect()
+                        && (handle.center.y - slider.center().y).abs() < 0.01
+                        // egui's handle range reverses when the control is narrower
+                        // than its diameter; either endpoint still belongs to it.
+                        && handle.center.x >= native_range.min.min(native_range.max) - 0.01
+                        && handle.center.x <= native_range.min.max(native_range.max) + 0.01
+                        && (handle.radius - native_radius).abs() < 0.01;
+                }
+            });
+            if rail_matches && handle_matches {
+                list.mutate_shape(paint_start, |entry| entry.shape = egui::Shape::Noop);
+                list.mutate_shape(handle_idx, |entry| entry.shape = egui::Shape::Noop);
+            }
+        });
         if ui.ctx().memory(|memory| memory.focused()).is_some_and(|id| {
             ui.ctx().read_response(id).is_some_and(|focused| response.rect.contains(focused.rect.center()))
                 || egui::TextEdit::load_state(ui.ctx(), id).is_some()
         }) {
             crate::prefs_search::note_key_sink(ui.ctx());
         }
-        let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
-        let mut background = ui.painter().clone();
-        background.set_opacity(if ui.is_visible() { 1.0 } else { 0.0 });
-        // At the top of the range egui's own handle reaches `slider.right()` exactly, and a fill
-        // that stops there leaves its last column showing beside the editor (#5708). The gap
-        // before the editor is `item_spacing.x`, so a pixel past the edge covers nothing else.
-        background.rect_filled(slider.with_max_x(slider.right() + 1.0), 0.0, t.dialog_body);
         // Match egui's native input range (handle_radius = thickness / 2.5), so the
         // painted thumb stays under the pointer even at the two ends of the range.
         let input_radius = ui.text_style_height(&egui::TextStyle::Body).max(ui.spacing().interact_size.y) / 2.5;
