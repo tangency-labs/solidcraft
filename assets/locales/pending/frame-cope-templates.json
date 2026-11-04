@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.frame_cope": "Cope Round Tube",
+    "cmd.frame_export_cope_dxf": "Export Cope Template as DXF"
+  },
+  "ar": {
+    "cmd.frame_cope": "قص نهاية الأنبوب الدائري للتعشيق",
+    "cmd.frame_export_cope_dxf": "تصدير قالب التعشيق بصيغة DXF"
+  },
+  "de": {
+    "cmd.frame_cope": "Rundrohr ausklinken",
+    "cmd.frame_export_cope_dxf": "Ausklinkschablone als DXF exportieren"
+  },
+  "he": {
+    "cmd.frame_cope": "חיתוך התאמה לצינור עגול",
+    "cmd.frame_export_cope_dxf": "ייצוא תבנית חיתוך התאמה כ-DXF"
+  },
+  "ja": {
+    "cmd.frame_cope": "丸管の端部を切り欠き",
+    "cmd.frame_export_cope_dxf": "切り欠き型紙を DXF としてエクスポート"
+  },
+  "ko": {
+    "cmd.frame_cope": "원형 튜브 끝단 맞춤 절단",
+    "cmd.frame_export_cope_dxf": "맞춤 절단 템플릿을 DXF로 내보내기"
+  },
+  "vi": {
+    "cmd.frame_cope": "Cắt khớp đầu ống tròn",
+    "cmd.frame_export_cope_dxf": "Xuất mẫu cắt khớp dưới dạng DXF"
+  },
+  "zh": {
+    "cmd.frame_cope": "圆管端部相贯切口",
+    "cmd.frame_export_cope_dxf": "将相贯切口模板导出为 DXF"
+  }
+}

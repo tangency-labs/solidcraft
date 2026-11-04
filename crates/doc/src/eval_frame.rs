@@ -21,11 +21,12 @@ const MAX_PROFILE_PIECES: usize = 256;
 /// Evaluate a `FrameMember` feature: one body per selected curve, or one for a continuous path.
 /// Bodies use [`member_names`], or positional names for a copy whose `body_names` were set.
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    let FeatureKind::FrameMember { body_name, names, continuous, .. } = &f.kind else {
+    let FeatureKind::FrameMember { body_name, names, continuous, profile, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let Layout { paths, regions, description, at, turn } = layout(doc, vals, f, st)?;
     let mut made = Vec::with_capacity(paths.len());
+    let mut round = Vec::with_capacity(paths.len());
     for path in &paths {
         let first = path.first().ok_or_else(|| DocError::Invalid("a member path is empty".into()))?;
         let plane = stock::section_plane(&first.geometry, at, turn).map_err(|e| path_error(path, e))?;
@@ -43,21 +44,30 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
             stock::check_bend_clearance(&geometry, region, at, turn).map_err(|e| path_error(path, e))?;
             kernel::sweep(&plane, region, &path.iter().map(path_segment).collect::<Vec<_>>())?
         };
+        round.push(round_record(vals, profile, at, turn, path)?);
         made.push(crate::lineage::numbered_tool(body));
     }
     if !f.body_names.is_empty() {
         // A copy (pasted, or in a copied component) names its members by position, as any
         // feature's bodies.
-        for (k, t) in made.into_iter().enumerate() {
+        for (k, (t, record)) in made.into_iter().zip(round).enumerate() {
             let name = new_name(st, f, k);
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
+            let mut body = ModelBody::traced_new(name, t, f.id);
+            if let Some(record) = record {
+                body.certify_round_member(record);
+            }
+            st.bodies.push(body);
         }
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
     let ids = path_keys(&paths, *continuous);
-    for (name, t) in member_names(st, &ids, names, &base).into_iter().zip(made) {
-        st.bodies.push(ModelBody::traced_new(name, t, f.id));
+    for ((name, t), record) in member_names(st, &ids, names, &base).into_iter().zip(made).zip(round) {
+        let mut body = ModelBody::traced_new(name, t, f.id);
+        if let Some(record) = record {
+            body.certify_round_member(record);
+        }
+        st.bodies.push(body);
     }
     Ok(())
 }
@@ -136,6 +146,106 @@ pub(crate) fn member_section(
     let plane = stock::section_plane(&piece.geometry, at, turn).map_err(|e| path_error(path, e))?;
     let region = regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
     Ok((plane, length, region))
+}
+
+/// Nominal section and terminal datums, from the same transport the sweep uses.
+fn round_record(
+    vals: &BTreeMap<String, Value>,
+    profile: &MemberProfile,
+    at: Vec2,
+    turn: f64,
+    path: &[Piece],
+) -> Result<Option<crate::frame_cope::RoundMember>> {
+    use crate::frame_cope::{Bounds, RoundMember, Terminal};
+    use solidcore_ops::frame_member::Segment;
+    use solidcore_ops::tube_cope;
+    let MemberProfile::Library { profile } = profile else { return Ok(None) };
+    let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
+    // An off-centre circular profile sweeps about a different centreline at a bend.
+    if at.x.abs() > 1e-9 || at.y.abs() > 1e-9 {
+        return Ok(None);
+    }
+    let radius = diameter / 2.0;
+    let fail = |e: &dyn std::fmt::Display| DocError::Invalid(format!("the member's cope datum could not be placed: {e}"));
+    let pieces: Vec<solidcore_ops::frame_member::Piece> = path.iter().map(|p| p.geometry).collect();
+    let bounds: Vec<Bounds> = pieces
+        .iter()
+        .map(|p| match p.data().segment {
+            Segment::Line { a, b } => tube_cope::line_box(a, b, radius).into(),
+            Segment::Arc { a, center, .. } => tube_cope::arc_box(a, center, radius).into(),
+        })
+        .collect();
+    let [first, last] = match (pieces.first(), pieces.last()) {
+        (Some(f), Some(l)) => [f, l],
+        _ => return Err(DocError::Invalid("empty member path".into())),
+    };
+    let [start_plane, end_plane] = solidcore_ops::frame_member::terminal_planes(&pieces, Vec2::ZERO, turn).map_err(|e| fail(&e))?;
+    let start = match first.line_length().map_err(|e| fail(&e))? {
+        Some(length) => {
+            Some(Terminal::new(tube_cope::terminal_at(&start_plane, length, false).map_err(|e| fail(&e))?, bounds.iter().skip(1).copied().collect()))
+        }
+        None => None,
+    };
+    let end = match last.line_length().map_err(|e| fail(&e))? {
+        Some(length) => Some(Terminal::new(
+            tube_cope::terminal_at(&end_plane, length, true).map_err(|e| fail(&e))?,
+            bounds.iter().take(bounds.len().saturating_sub(1)).copied().collect(),
+        )),
+        None => None,
+    };
+    let straight = pieces.len() == 1 && start.is_some();
+    Ok(Some(RoundMember { radius, wall, start, end, straight, cuts: Vec::new() }))
+}
+
+/// The mating member's bore is filled for the cut: a cope meets its outside wall and must
+/// never retain the disconnected stub a subtraction of hollow stock would leave inside it.
+pub(super) fn cope(doc: &Document, f: &Feature, st: &mut ModelState) -> Result<()> {
+    use crate::frame_cope::{Cylinder, End, MAX_CUTTERS, Mate};
+    let FeatureKind::FrameCope { member, tools, end } = &f.kind else { return Err(DocError::Invalid("not a cope".into())) };
+    if tools.is_empty() || tools.len() > MAX_CUTTERS {
+        return Err(DocError::Invalid("a cope needs 1..16 mating members".into()));
+    }
+    let mb = st.body(member).ok_or_else(|| DocError::Unknown(format!("member {member}")))?.clone();
+    let mut data = mb.round_member()?.clone();
+    if doc.body_offsets.contains_key(member.as_ref()) {
+        return Err(DocError::Invalid("not supported yet: cope of an offset member".into()));
+    }
+    let mut seen = HashSet::new();
+    let mut cylinders = Vec::new();
+    let mut mates = Vec::new();
+    for name in tools {
+        if name == member || !seen.insert(name.as_ref()) {
+            return Err(DocError::Invalid("cope members must be distinct".into()));
+        }
+        let tool = st.body(name).ok_or_else(|| DocError::Unknown(format!("member {name}")))?;
+        if tool.component != mb.component || doc.body_offsets.contains_key(name.as_ref()) {
+            return Err(DocError::Invalid("not supported yet: cope members must share a component and have no body offsets".into()));
+        }
+        let mate = tool.round_member()?;
+        if !mate.straight {
+            return Err(DocError::Invalid(format!("not supported yet: a mating member must be straight; `{}` bends", name.as_ref())));
+        }
+        // A mate may already be coped at its ends; prepare refuses a joint that reaches one.
+        let reach = |at: End| mate.cuts.iter().filter(|c| c.end == at).map(|c| c.depth_bound).fold(0.0, f64::max);
+        let terminal = mate.terminal(End::Start)?;
+        cylinders.push(Cylinder { origin: terminal.origin, axis: terminal.axis, radius: mate.radius, length: terminal.length });
+        mates.push(Mate { name: name.as_ref().to_string(), start: reach(End::Start), end: reach(End::End) });
+    }
+    let cut = data.prepare(*end, cylinders, &mates)?;
+    let mut traced = mb.traced();
+    for c in &cut.cylinders {
+        let tool = crate::lineage::numbered_tool(kernel::cylinder(c.origin, c.axis, c.radius, c.length)?);
+        let result = kernel::boolean(&traced.body, &tool.body, kernel::BoolOp::Cut)?
+            .ok_or_else(|| DocError::Invalid("the cope removed the whole member".into()))?;
+        traced = crate::lineage::Traced::step(result, &[&traced, &tool]);
+    }
+    data.cuts.push(cut);
+    let mut body = ModelBody::traced_new(mb.name.clone(), traced, mb.feature);
+    body.component = mb.component;
+    body.certify_round_member(data);
+    let slot = st.bodies.iter_mut().find(|b| b.name == mb.name).ok_or(DocError::Unknown(mb.name))?;
+    *slot = body;
+    Ok(())
 }
 
 /// The body name of the member on each of `lines`: its own name from `pinned` (by line id) when no

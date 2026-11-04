@@ -41,6 +41,8 @@ type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), 
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
+    /// Physical round-member data, valid only for the exact shape it certifies.
+    pub(crate) round_member: Option<Arc<crate::frame_cope::CertifiedMember>>,
     pub name: String,
     /// Definition identity for a computed placement; never parsed from its display name.
     pub source_name: Option<String>,
@@ -207,6 +209,7 @@ impl ModelBody {
 
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
+            round_member: None,
             name,
             source_name: None,
             source_transform: crate::IDENTITY,
@@ -3298,6 +3301,12 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             frame = st.and_then(|st| st.body(body)).map(|b| body_world(doc, b));
             reads.placed_body(st, body);
             reads.placed_body(st, &tool.body);
+        }
+        FeatureKind::FrameCope { member, tools, .. } => {
+            reads.placed_body(st, member);
+            for tool in tools {
+                reads.placed_body(st, tool);
+            }
         }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
@@ -12269,6 +12278,7 @@ fn eval_feature_kind(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
+        FeatureKind::FrameCope { .. } => frame_member::cope(doc, f, st),
         FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
             let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));

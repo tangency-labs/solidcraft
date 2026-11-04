@@ -20,16 +20,21 @@ use super::{CommandSpec, in_sketch, not_in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
-    CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult, ProfileOut,
-    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo,
+    CopeDxfParams, CopeDxfResult, CopeParams, CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo,
+    ProfileListParams, ProfileListResult, ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+#[path = "frame_cope.rs"]
+mod cope;
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod tests;
 
+const COPE_CONTRACT: TypedContract<CopeParams> = TypedContract::new();
+const COPE_DXF_CONTRACT: TypedContract<CopeDxfParams> = TypedContract::new();
 const MEMBER_CONTRACT: TypedContract<FrameMemberParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<ProfileListParams> = TypedContract::new();
 const PROPERTIES_CONTRACT: TypedContract<ProfilePropertiesParams> = TypedContract::new();
@@ -43,6 +48,19 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("frame.cope", "Cope Round Tube", crate::checked!("frame.cope", cope::run))
+        .icon("frame_cope")
+        .enabled(not_in_sketch)
+        .contract(&COPE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("member: round-tube frame member; tools: 1..16 distinct straight round-tube members in the same component (a mate already coped at its ends is allowed when this joint is clear of those copes); end: start|end (original path). Retained cut to mating outside cylinders, filling their bores for the cut. Axes must meet the endpoint, mate OD >= member OD; joint sine >= 0.001. Refuses cap/bend interference or other body edits. name?: feature name. Edit with timeline.redefine; undoable; follows upstream edits and body renames."),
+    CommandSpec::new("frame.export_cope_dxf", "Export Cope Template as DXF", crate::checked!("frame.export_cope_dxf", cope::export))
+        .icon("dxf")
+        .noundo()
+        .enabled(not_in_sketch)
+        .contract(&COPE_DXF_CONTRACT)
+        .output(output_schema_for::<CopeDxfResult>)
+        .params("member: retained round-tube member; end: start|end; seam?: angle expression (default 0, relative to terminal x); tolerance?: 0.001..1 mm (default 0.01, bounded flat/wrapped interpolation error); path?: DXF destination (scoped write, otherwise dxf text). 1:1 mm, outer circumference; positive station into surviving stock from original endpoint; right-hand wrap about that inward axis. Open profile with both seam copies; datum, member/end labels and 100 mm scale check. At most 65536 segments; increase tolerance if refused. Returns physical datum, profile and drawing metadata. Does not alter the design."),
     CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member))
         .at("WELDMENTS", "CREATE")
         .icon("frame_member")
