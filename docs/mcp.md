@@ -233,7 +233,7 @@ Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 ```json
 {
   "mcpServers": {
-    "solidcraft": { "command": "/path/to/solidcraft-cli", "args": ["mcp", "--connect", "127.0.0.1:7878"] }
+    "solidcraft": { "command": "/path/to/solidcraft-cli", "args": ["mcp", "--connect", "127.0.0.1:27878"] }
   }
 }
 ```
