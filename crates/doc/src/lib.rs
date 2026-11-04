@@ -27,6 +27,7 @@ pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
+mod driven;
 pub mod end_cap;
 mod eval;
 pub mod expr;
@@ -98,6 +99,7 @@ pub use assembly::{
     apply_point, apply_vector, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
+pub use driven::{DrivenIndex, DrivenParam, is_driven_problem};
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,

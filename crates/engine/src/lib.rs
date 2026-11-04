@@ -1664,6 +1664,9 @@ impl Session {
         // after the refresh below (the same checks `settle` runs on an edit's own solve).
         let solved_geometry: std::collections::BTreeMap<u64, solidcraft_sketch::Sketch> =
             self.model.results.iter().filter_map(|r| r.state.sketch(r.id).map(|k| (r.id, k.sketch.clone()))).collect();
+        // Features a driven dimension failed already (#5582): only a new such failure refuses.
+        let driven_failing: std::collections::BTreeSet<u64> =
+            self.model.results.iter().filter(|r| r.error.as_deref().is_some_and(solidcraft_doc::is_driven_problem)).map(|r| r.id).collect();
         // Quantity changes alter topology, so store the regenerated instances in the same
         // transaction as the parameter edit. Later picks and undo must see those same ids.
         let mut updated: Vec<_> = self
@@ -1690,6 +1693,13 @@ impl Session {
             *self.doc_mut().sketch_mut(id)? = sketch;
         }
         self.refresh();
+        // A value that makes a feature use a driven dimension of a later sketch, or a dimension
+        // depend on itself through one, is refused (#5582).
+        if let Some(r) =
+            self.model.results.iter().find(|r| !driven_failing.contains(&r.id) && r.error.as_deref().is_some_and(solidcraft_doc::is_driven_problem))
+        {
+            return Err(EngineError::Other(format!("{}: {}; the values were not changed", r.name, r.error.as_deref().unwrap_or_default())));
+        }
         for r in &self.model.results {
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
             if own_values(&k.sketch) == *before {
