@@ -42,12 +42,12 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
             let Some(Sel::Face { body, index, .. }) = d.inputs.first()?.items.get(key) else { return None };
             let n = crate::dialogs::planar_face(s, body, *index)
                 .map(|(_, n)| n)
-                .or_else(|| d.extra.get("direction").and_then(vec3_of))
                 .or_else(|| {
                     // A curved face: its normal where the hole is.
                     let m = crate::open_meshing::session_world(s).body(body)?.mesh();
                     crate::dialogs_assembly::face_normal_near(&m, u32::try_from(*index).ok()?, base)
                 })
+                .or_else(|| d.extra.get("direction").and_then(vec3_of))
                 .and_then(|n| n.normalized())?;
             Some(Place { key, base, n })
         })
