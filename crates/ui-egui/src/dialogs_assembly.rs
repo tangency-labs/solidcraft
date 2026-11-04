@@ -730,16 +730,25 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
 /// woke it when that item's own snap is there (a hole's centre, an edge's middle, a face's
 /// centre): the joint keeps it by name, as a pick of the item itself would. Any other woken point
 /// (an arc's end, a cylinder's far end) stays a point.
-pub(crate) fn woken_pick(app: &SolveApp, sel: Sel) -> Sel {
-    let Sel::Vertex { point, .. } = &sel else { return sel };
-    let snaps = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept == SNAPS);
+/// `snaps`: whether the dialog's active input takes joint snaps ([`takes_snaps`]).
+pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
+    let Sel::Vertex { body, point } = &sel else { return sel };
     let tol = 1e-4 * (1.0 + point.len());
     let woken = &app.viewport.woken;
-    let Some(item) = woken.item.as_ref().filter(|_| snaps && woken.points.iter().any(|p| p.at.dist(*point) <= tol)) else { return sel };
+    // Only the woken item's own body: another body's point there is that body's.
+    let of_body = |i: &&Sel| matches!(i, Sel::Edge { body: b, .. } | Sel::Face { body: b, .. } if b == body);
+    let Some(item) = woken.item.as_ref().filter(of_body).filter(|_| snaps && woken.points.iter().any(|p| p.at.dist(*point) <= tol)) else {
+        return sel;
+    };
     match snap_of(&app.session, item) {
         Some(s) if s.at.dist(*point) <= tol => item.clone(),
         _ => sel,
     }
+}
+
+/// Whether a dialog's active input takes joint snaps (a joint's origin, a trace's point).
+pub(crate) fn takes_snaps(d: &Dialog) -> bool {
+    d.active_input().is_some_and(|i| i.accept == SNAPS)
 }
 
 /// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
@@ -1743,7 +1752,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
     // The snap under the cursor (found again only when the hovered item changes).
     let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS);
-    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting).map(|s| woken_pick(app, s));
+    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting).map(|s| woken_pick(app, accepting, s));
     match under {
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);

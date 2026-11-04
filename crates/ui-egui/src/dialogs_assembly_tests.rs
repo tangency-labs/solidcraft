@@ -1513,11 +1513,22 @@ fn woken_points_stand_for_their_item_only_where_its_snap_is() {
     app.start("joint.create");
     let edge = edge_sel(&app.session, Vec3::new(10.0, 0.0, 10.0)).unwrap();
     let corner = Sel::Vertex { body: "Body1".into(), point: Vec3::new(0.0, 0.0, 10.0) };
-    assert_eq!(woken_pick(&app, corner.clone()), corner, "nothing woken");
+    assert_eq!(woken_pick(&app, true, corner.clone()), corner, "nothing woken");
     app.viewport.woken = crate::snap_wake::Woken { item: Some(edge.clone()), points: solidcraft_engine::snap::snap_points(&app.session, &edge) };
-    assert_eq!(woken_pick(&app, corner.clone()), corner, "an end stays a point");
-    assert_eq!(woken_pick(&app, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
+    assert_eq!(woken_pick(&app, true, corner.clone()), corner, "an end stays a point");
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
+    // Another body's point at the same place stays that body's.
+    let other = Sel::Vertex { body: "Body2".into(), point: Vec3::new(10.0, 0.0, 10.0) };
+    assert_eq!(woken_pick(&app, true, other.clone()), other, "a point of another body");
+    // The dialog the caller has decides, not the app's: one whose input doesn't take snaps keeps
+    // the point.
+    let mut moved = app.dialog.clone().unwrap();
+    assert!(takes_snaps(&moved));
+    moved.inputs[0].accept = FACES;
+    assert!(!takes_snaps(&moved));
+    let mid = Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) };
+    assert_eq!(woken_pick(&app, takes_snaps(&moved), mid.clone()), mid);
     let face = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
     app.viewport.woken = crate::snap_wake::Woken { item: Some(face.clone()), points: solidcraft_engine::snap::snap_points(&app.session, &face) };
-    assert_eq!(woken_pick(&app, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
 }
