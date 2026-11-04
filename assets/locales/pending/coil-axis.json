@@ -1,7 +1,10 @@
 {
+  "ar": { "Axis (optional)": "المحور (اختياري)", "Reverse direction": "عكس الاتجاه" },
   "de": { "Axis (optional)": "Achse (optional)", "Reverse direction": "Richtung umkehren" },
   "en": { "Axis (optional)": "Axis (optional)", "Reverse direction": "Reverse direction" },
+  "he": { "Axis (optional)": "ציר (אופציונלי)", "Reverse direction": "היפוך כיוון" },
   "ja": { "Axis (optional)": "軸 (オプション)", "Reverse direction": "向きを反転" },
   "ko": { "Axis (optional)": "축 (선택 사항)", "Reverse direction": "방향 반전" },
+  "vi": { "Axis (optional)": "Trục (tùy chọn)", "Reverse direction": "Đảo ngược hướng" },
   "zh": { "Axis (optional)": "轴（可选）", "Reverse direction": "反转方向" }
 }
