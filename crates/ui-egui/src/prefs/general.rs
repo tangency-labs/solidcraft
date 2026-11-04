@@ -11,32 +11,42 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::row(ui, app.tr("prefs.interface_language"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 11.0 + t.space_16, |ui| {
-                        ui_kit::dropdown_menu(
-                            ui,
-                            "pref_language",
-                            &if app.preferences.language == crate::i18n::SYSTEM {
-                                app.tr("prefs.language_system").to_owned()
-                            } else {
-                                crate::i18n::Locale::for_language(&app.preferences.language).display_name().into_owned()
-                            },
-                            |ui| {
-                                if ui_kit::list_picker(
-                                    ui,
-                                    crate::i18n::SYSTEM,
-                                    app.tr("prefs.language_system"),
-                                    app.preferences.language == crate::i18n::SYSTEM,
-                                )
-                                .clicked()
+                        let lang = &app.preferences.language;
+                        let current_name = if lang == crate::i18n::SYSTEM {
+                            app.tr("prefs.language_system").to_owned()
+                        } else if cfg!(target_arch = "wasm32")
+                            && crate::fonts::needs_cjk_font(lang)
+                            && crate::web_fonts::WebFace::for_language(lang).is_some_and(|f| !crate::web_fonts::stored_faces(ui.ctx()).contains(f))
+                        {
+                            match lang.as_str() {
+                                "ja" => "Japanese".into(),
+                                "ko" => "Korean".into(),
+                                "zh" => "Simplified Chinese".into(),
+                                "zh-TW" => "Traditional Chinese".into(),
+                                _ => crate::i18n::Locale::for_language(lang).display_name().into_owned(),
+                            }
+                        } else {
+                            crate::i18n::Locale::for_language(lang).display_name().into_owned()
+                        };
+                        ui_kit::dropdown_menu(ui, "pref_language", &current_name, |ui| {
+                            if ui_kit::list_picker(
+                                ui,
+                                crate::i18n::SYSTEM,
+                                app.tr("prefs.language_system"),
+                                app.preferences.language == crate::i18n::SYSTEM,
+                            )
+                            .clicked()
+                            {
+                                app.preferences.language = crate::i18n::SYSTEM.into();
+                            }
+                            for locale in crate::i18n::LOCALES {
+                                if crate::locale_labels::list_picker_locale(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id)
+                                    .clicked()
                                 {
-                                    app.preferences.language = crate::i18n::SYSTEM.into();
+                                    app.preferences.language = locale.id.into();
                                 }
-                                for locale in crate::i18n::LOCALES {
-                                    if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
-                                        app.preferences.language = locale.id.into();
-                                    }
-                                }
-                            },
-                        );
+                            }
+                        });
                     });
                 });
             });
