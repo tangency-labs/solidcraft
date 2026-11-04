@@ -9,8 +9,10 @@ including `s30_pattern_a_hole`, remain complementary end-to-end coverage.
 
 The Design preferences option **Keep Tab inside dialogs** is on by default.
 Turning it off restores native Tab traversal and Tab/Shift+Tab cycling the
-floating Move editor through its axes. Other activation keys are unchanged.
-Outside feature forms, Enter retains native checkbox and segment activation.
+floating Move editor through its axes. It also restores native expression-field
+selection and native Enter activation for feature-form checkboxes, segments,
+and closed dropdowns. Outside feature forms, these controls retain native
+Enter activation.
 Outside dialog focus loops, section headings retain native keyboard activation.
 Turning off the preference restores native Tab access to selection clear and remove actions.
 

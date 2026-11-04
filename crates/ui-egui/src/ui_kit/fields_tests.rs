@@ -89,27 +89,38 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
 
 #[test]
 fn tab_visits_expression_fields_in_row_order() {
-    let ctx = crate::fonts::test_context();
-    let mut first = "1".to_string();
-    let mut second = "20 mm".to_string();
-    let mut draw = |ui: &mut Ui| {
-        row(ui, "First value", |ui| {
-            field(ui, &mut first);
-        });
-        section(ui, "direction2", "Direction 2", true, |ui| {
-            row(ui, "Second value", |ui| {
-                field(ui, &mut second);
+    for enabled in [false, true] {
+        let ctx = crate::fonts::test_context();
+        crate::dialog_focus::configure(&ctx, enabled, None);
+        let mut first = "1".to_string();
+        let mut second = "20 mm".to_string();
+        let second_id = std::cell::Cell::new(None);
+        let mut draw = |ui: &mut Ui| {
+            crate::dialog_focus::scope(ui, egui::Id::new("expression_fields"), |ui| {
+                row(ui, "First value", |ui| {
+                    field(ui, &mut first);
+                });
+                section(ui, "direction2", "Direction 2", true, |ui| {
+                    row(ui, "Second value", |ui| {
+                        second_id.set(Some(checked_field(ui, &mut second, "", false).1.id));
+                    });
+                });
             });
-        });
-    };
-    frame(&ctx, vec![], &mut draw);
-    let first_pos = scenario::handle_at("dialog:First value").unwrap();
-    frame(&ctx, pointer(first_pos, true), &mut draw);
-    frame(&ctx, pointer(first_pos, false), &mut draw);
-    frame(&ctx, key(egui::Key::Tab), &mut draw);
-    frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
-    assert_eq!(first, "1");
-    assert_eq!(second, "2 mm");
+        };
+        frame(&ctx, vec![], &mut draw);
+        let first_pos = scenario::handle_at("dialog:First value").unwrap();
+        frame(&ctx, pointer(first_pos, true), &mut draw);
+        frame(&ctx, pointer(first_pos, false), &mut draw);
+        let second_focused = || second_id.get().is_some_and(|id| ctx.memory(|m| m.has_focus(id)));
+        frame(&ctx, key(egui::Key::Tab), &mut draw);
+        if !enabled {
+            frame(&ctx, key(egui::Key::Tab), &mut draw);
+        }
+        frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
+        assert!(second_focused(), "the second editor owns focus after Tab with the preference set to {enabled}");
+        assert_eq!(first, "1");
+        assert_eq!(second, if enabled { "2 mm" } else { "20 mm2" });
+    }
 }
 
 #[test]

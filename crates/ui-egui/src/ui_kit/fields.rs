@@ -818,6 +818,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     // Keyboard focus selects a plain number without its unit, or the whole expression.
     if completion
+        && crate::dialog_focus::navigation_enabled(ui.ctx())
         && response.gained_focus()
         && !ui.input(|i| i.pointer.any_down() || i.pointer.any_released())
         && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id)
@@ -1071,7 +1072,7 @@ pub(crate) fn with_feature_form<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) 
 }
 
 pub(super) fn feature_form_active(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("feature_form_enter_to_apply"))).unwrap_or(false)
+    crate::dialog_focus::navigation_enabled(ctx) && ctx.data(|d| d.get_temp::<bool>(egui::Id::new("feature_form_enter_to_apply"))).unwrap_or(false)
 }
 
 /// A closed value dropdown leaves Enter for OK; an open popup owns its own keys.
