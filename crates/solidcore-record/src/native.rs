@@ -98,11 +98,13 @@ pub fn write_value(value: &Value, out: &mut Vec<u8>) -> Result<()> {
     binary::write(value, out, 0)
 }
 
-/// The record's structure ([`Brep::validate`]), metadata agreement and finite nonnegative runtime size.
+/// The record's structure ([`Brep::validate`]), metadata agreement and finite metadata and
+/// runtime values, including a nonnegative runtime size.
 pub fn check(saved: &Saved) -> Result<()> {
     saved.solid.validate().map_err(invalid)?;
     let (faces, edges) = (saved.solid.faces.len(), saved.solid.edges.len());
     let size = saved.runtime.size;
+    let coarse_missing = saved.runtime.coarse_missing;
     let saved = &saved.metadata;
     if saved.version != envelope::VERSION {
         return Err(invalid("metadata version"));
@@ -149,7 +151,92 @@ pub fn check(saved: &Saved) -> Result<()> {
     if !(size.is_finite() && size >= 0.0) {
         return Err(invalid("runtime values"));
     }
+    if coarse_missing.is_some_and(|(value, _)| !value.is_finite())
+        || saved.boundaries.as_ref().is_some_and(|boundaries| {
+            boundaries
+                .iter()
+                .flatten()
+                .flatten()
+                .any(|x| !x.is_finite())
+        })
+        || saved.face_sources.as_ref().is_some_and(|sources| {
+            sources
+                .iter()
+                .flatten()
+                .any(|source| !source_finite(source))
+        })
+    {
+        return Err(invalid("non-finite metadata"));
+    }
     Ok(())
+}
+
+fn plane_finite(plane: &envelope::Plane) -> bool {
+    plane
+        .origin
+        .iter()
+        .chain(&plane.x_axis)
+        .chain(&plane.y_axis)
+        .all(|v| v.is_finite())
+}
+
+fn segment_finite(segment: &envelope::Segment) -> bool {
+    use envelope::Segment;
+    match segment {
+        Segment::Line { start, end } => start.iter().chain(end).all(|v| v.is_finite()),
+        Segment::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => center
+            .iter()
+            .chain([radius, start, sweep])
+            .all(|v| v.is_finite()),
+        Segment::Cubic { points } => points.iter().flatten().all(|v| v.is_finite()),
+        Segment::Conic {
+            points,
+            middle_weight,
+        } => middle_weight.is_finite() && points.iter().flatten().all(|v| v.is_finite()),
+        Segment::Bezier { points } => points.iter().flatten().all(|v| v.is_finite()),
+    }
+}
+
+// PlanarShell has one child, so walk the borrowed chain without recursion or a depth limit.
+fn source_finite(mut source: &envelope::FaceSource) -> bool {
+    use envelope::FaceSource;
+    loop {
+        match source {
+            FaceSource::ExtrusionSide { segment, plane, .. } => {
+                return segment_finite(segment) && plane.as_ref().is_none_or(plane_finite);
+            }
+            FaceSource::CertifiedExtrusionSide { plane, .. } => {
+                return plane.as_ref().is_none_or(plane_finite);
+            }
+            FaceSource::ExtrusionCap { region, plane, .. } => {
+                return plane_finite(plane)
+                    && region
+                        .outer
+                        .iter()
+                        .chain(region.holes.iter().flatten())
+                        .all(segment_finite);
+            }
+            FaceSource::CertifiedExtrusionCap { plane, .. }
+            | FaceSource::CylinderCap { plane, .. }
+            | FaceSource::BoxFace { plane, .. } => return plane_finite(plane),
+            FaceSource::PlanarShell {
+                source: child,
+                plane,
+                ..
+            } => {
+                if !plane_finite(plane) {
+                    return false;
+                }
+                source = child;
+            }
+            FaceSource::Imported { .. } => return true,
+        }
+    }
 }
 
 // The binary reader bounds allocation before deserialization. Geometry semantics
@@ -226,6 +313,431 @@ mod tests {
                 size: 2.5,
                 coarse_missing: None,
             },
+        }
+    }
+
+    #[test]
+    fn nonfinite_boundary_is_refused() {
+        let mut saved = point();
+        saved.metadata.boundaries = Some(vec![vec![[f64::NAN, 0.0, 0.0]]]);
+        assert!(check(&saved).is_err());
+        assert!(encode(&saved).is_err());
+    }
+
+    // The single square sheet recipe from brep::tests::faceted.
+    fn sheet() -> Saved {
+        use crate::brep::{
+            Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Surface,
+        };
+        let points = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+        let mut saved = point();
+        saved.solid.vertices = points
+            .iter()
+            .map(|&point| Vertex {
+                point,
+                tolerance: 1e-7,
+            })
+            .collect();
+        saved.solid.edges = (0..4)
+            .map(|i| Edge {
+                nurbs: None,
+                curve: Curve::Line {
+                    start: points[i],
+                    end: points[(i + 1) % 4],
+                },
+                interval: [0., 1.],
+                vertices: [i as u32, ((i + 1) % 4) as u32],
+                tolerance: 1e-7,
+                uses: vec![EdgeUseRef {
+                    face: 0,
+                    r#loop: 0,
+                    position: i as u32,
+                    upper: false,
+                }],
+            })
+            .collect();
+        saved.solid.faces = vec![Face {
+            nurbs: None,
+            surface: Surface::Plane {
+                origin: points[0],
+                u_axis: points[1],
+                v_axis: points[2],
+            },
+            domain: [[-10., 10.], [-10., 10.]],
+            loops: vec![Loop::Edges {
+                edges: (0..4)
+                    .map(|i| OrientedEdge {
+                        edge: i,
+                        forward: true,
+                        pcurve: Curve2::Spline {
+                            knots: vec![0., 0., 1., 1.],
+                            points: vec![[0., 0.], [1., 1.]],
+                        },
+                    })
+                    .collect(),
+            }],
+        }];
+        saved.solid.shells = vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: vec![],
+        }];
+        saved.solid.validate().unwrap();
+        saved
+    }
+
+    fn plane() -> envelope::Plane {
+        envelope::Plane {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        }
+    }
+
+    fn assert_source_refused(source: envelope::FaceSource) {
+        let mut saved = sheet();
+        saved.metadata.face_sources = Some(vec![Some(source)]);
+        assert_eq!(
+            check(&saved).err().unwrap().to_string(),
+            "native B-rep: non-finite metadata"
+        );
+        assert!(encode(&saved).is_err());
+    }
+
+    #[test]
+    fn nonfinite_metadata_fields_are_refused() {
+        use envelope::{FaceSource as F, Segment as S};
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for coordinate in 0..3 {
+                let mut saved = point();
+                let mut p = [0.; 3];
+                p[coordinate] = bad;
+                saved.metadata.boundaries = Some(vec![vec![p]]);
+                assert!(check(&saved).is_err());
+                assert!(encode(&saved).is_err());
+                for field in 0..3 {
+                    let mut p = plane();
+                    match field {
+                        0 => p.origin[coordinate] = bad,
+                        1 => p.x_axis[coordinate] = bad,
+                        _ => p.y_axis[coordinate] = bad,
+                    }
+                    assert_source_refused(F::BoxFace {
+                        producer: None,
+                        axis: 0,
+                        high: false,
+                        plane: p,
+                    });
+                }
+            }
+            let mut saved = point();
+            saved.runtime.coarse_missing = Some((bad, 0));
+            assert!(check(&saved).is_err());
+            assert!(encode(&saved).is_err());
+            let mut segments = Vec::new();
+            for i in 0..2 {
+                let mut p = [0.; 2];
+                p[i] = bad;
+                segments.push(S::Line {
+                    start: p,
+                    end: [0.; 2],
+                });
+                segments.push(S::Line {
+                    start: [0.; 2],
+                    end: p,
+                });
+                segments.push(S::Arc {
+                    center: p,
+                    radius: 1.,
+                    start: 0.,
+                    sweep: 1.,
+                });
+                for n in 0..4 {
+                    let mut points = [[0.; 2]; 4];
+                    points[n][i] = bad;
+                    segments.push(S::Cubic { points });
+                }
+                for n in 0..3 {
+                    let mut points = [[0.; 2]; 3];
+                    points[n][i] = bad;
+                    segments.push(S::Conic {
+                        points,
+                        middle_weight: 1.,
+                    });
+                }
+                segments.push(S::Bezier { points: vec![p] });
+            }
+            segments.extend([
+                S::Arc {
+                    center: [0.; 2],
+                    radius: bad,
+                    start: 0.,
+                    sweep: 1.,
+                },
+                S::Arc {
+                    center: [0.; 2],
+                    radius: 1.,
+                    start: bad,
+                    sweep: 1.,
+                },
+                S::Arc {
+                    center: [0.; 2],
+                    radius: 1.,
+                    start: 0.,
+                    sweep: bad,
+                },
+                S::Conic {
+                    points: [[0.; 2]; 3],
+                    middle_weight: bad,
+                },
+            ]);
+            for segment in segments {
+                assert_source_refused(F::ExtrusionSide {
+                    segment: segment.clone(),
+                    plane: None,
+                    coalesced: false,
+                });
+                assert_source_refused(F::ExtrusionCap {
+                    high: false,
+                    plane: plane(),
+                    region: envelope::Region {
+                        outer: vec![],
+                        holes: vec![vec![segment]],
+                    },
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn source_variants_and_finite_bytes() {
+        use envelope::FaceSource as F;
+        let imported = || F::Imported {
+            item: 1,
+            face: 2,
+            payload_sha256: None,
+            producer: None,
+        };
+        let variants = vec![
+            F::ExtrusionSide {
+                segment: envelope::Segment::Bezier {
+                    points: vec![[-0., 1e-300]],
+                },
+                plane: Some(plane()),
+                coalesced: false,
+            },
+            F::CertifiedExtrusionSide {
+                producer: 0,
+                sketch: 0,
+                curve: String::new(),
+                plane: Some(plane()),
+            },
+            F::ExtrusionCap {
+                high: false,
+                region: envelope::Region {
+                    outer: vec![],
+                    holes: vec![],
+                },
+                plane: plane(),
+            },
+            F::CertifiedExtrusionCap {
+                producer: 0,
+                sketch: 0,
+                high: false,
+                outer: vec![],
+                holes: vec![],
+                plane: plane(),
+            },
+            F::CylinderCap {
+                producer: 0,
+                high: false,
+                plane: plane(),
+            },
+            F::BoxFace {
+                producer: None,
+                axis: 0,
+                high: false,
+                plane: plane(),
+            },
+            F::PlanarShell {
+                producer: None,
+                source: Box::new(imported()),
+                inner: false,
+                plane: plane(),
+            },
+            imported(),
+        ];
+        for source in variants {
+            let mut saved = sheet();
+            saved.metadata.boundaries = Some(vec![vec![[-0., 1e-300, 1e12]]]);
+            saved.runtime.coarse_missing = Some((-0., 0));
+            saved.metadata.face_sources = Some(vec![Some(source)]);
+            let bytes = encode(&saved).unwrap();
+            let mut value_bytes = MAGIC.to_vec();
+            write_value(&serde_json::to_value(&saved).unwrap(), &mut value_bytes).unwrap();
+            assert_eq!(bytes, value_bytes);
+            let back = decode(&bytes).unwrap();
+            for (a, b) in saved.metadata.boundaries.as_ref().unwrap()[0][0]
+                .iter()
+                .zip(back.metadata.boundaries.as_ref().unwrap()[0][0])
+            {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+            assert_eq!(
+                back.runtime.coarse_missing.unwrap().0.to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            assert_eq!(encode(&back).unwrap(), bytes);
+        }
+        let mut bad = plane();
+        bad.origin[0] = f64::NAN;
+        for source in [
+            F::CertifiedExtrusionSide {
+                producer: 0,
+                sketch: 0,
+                curve: String::new(),
+                plane: Some(bad.clone()),
+            },
+            F::CertifiedExtrusionCap {
+                producer: 0,
+                sketch: 0,
+                high: false,
+                outer: vec![],
+                holes: vec![],
+                plane: bad.clone(),
+            },
+            F::CylinderCap {
+                producer: 0,
+                high: false,
+                plane: bad.clone(),
+            },
+            F::PlanarShell {
+                producer: None,
+                source: Box::new(imported()),
+                inner: false,
+                plane: bad,
+            },
+        ] {
+            assert_source_refused(source);
+        }
+        for depth in [40, 60] {
+            let mut source = F::ExtrusionSide {
+                segment: envelope::Segment::Line {
+                    start: [f64::NAN, 0.],
+                    end: [0.; 2],
+                },
+                plane: None,
+                coalesced: false,
+            };
+            for _ in 0..depth {
+                source = F::PlanarShell {
+                    producer: None,
+                    source: Box::new(source),
+                    inner: false,
+                    plane: plane(),
+                };
+            }
+            let mut saved = sheet();
+            saved.metadata.face_sources = Some(vec![Some(source)]);
+            assert!(check(&saved).is_err());
+            let mut source = saved
+                .metadata
+                .face_sources
+                .take()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .unwrap();
+            while let F::PlanarShell { source: child, .. } = source {
+                source = *child;
+            }
+        }
+    }
+
+    #[test]
+    fn existing_errors_precede_nonfinite_metadata() {
+        let mut saved = point();
+        saved.metadata.boundaries = Some(vec![vec![[f64::NAN, 0., 0.]]]);
+        saved.solid.version = 0;
+        assert!(check(&saved).unwrap_err().to_string() != "native B-rep: non-finite metadata");
+        saved.solid.version = crate::brep::VERSION;
+        saved.metadata.version = 0;
+        assert_eq!(check(&saved).unwrap_err().0, "metadata version");
+        saved.metadata.version = envelope::VERSION;
+        saved.metadata.face_sources = Some(vec![None]);
+        assert_eq!(check(&saved).unwrap_err().0, "face source count");
+        saved.metadata.face_sources = None;
+        saved.metadata.history = Some(envelope::History {
+            operands: 0,
+            faces: vec![],
+            edges: vec![envelope::EdgeHistory {
+                faces: vec![],
+                origins: vec![],
+            }],
+        });
+        assert_eq!(check(&saved).unwrap_err().0, "history topology");
+        saved.metadata.history = None;
+        saved.metadata.color = Some([2., 0., 0.]);
+        assert_eq!(check(&saved).unwrap_err().0, "colour");
+        saved.metadata.color = None;
+        saved.metadata.paint = Some(envelope::Paint {
+            opacity: -1.,
+            faces: vec![],
+        });
+        assert_eq!(check(&saved).unwrap_err().0, "face paint");
+        saved.metadata.paint = None;
+        saved.runtime.size = -1.;
+        assert_eq!(check(&saved).unwrap_err().0, "runtime values");
+    }
+
+    #[test]
+    fn finite_writer_limits_and_empty_metadata() {
+        use envelope::FaceSource as F;
+        let mut saved = point();
+        saved.metadata.color = None;
+        saved.metadata.boundaries = Some(vec![]);
+        saved.metadata.face_sources = Some(vec![]);
+        let bytes = encode(&saved).unwrap();
+        assert_eq!(encode(&decode(&bytes).unwrap()).unwrap(), bytes);
+        saved.metadata.boundaries = Some(vec![vec![[1e13, 0., 0.]]]);
+        assert!(check(&saved).is_ok());
+        assert_eq!(encode(&saved).unwrap_err().0, "non-finite metadata");
+        for depth in [40, 60] {
+            let mut source = F::Imported {
+                item: 0,
+                face: 0,
+                payload_sha256: None,
+                producer: None,
+            };
+            for _ in 0..depth {
+                source = F::PlanarShell {
+                    producer: None,
+                    source: Box::new(source),
+                    inner: false,
+                    plane: plane(),
+                };
+            }
+            let mut saved = sheet();
+            saved.metadata.face_sources = Some(vec![Some(source)]);
+            assert!(check(&saved).is_ok());
+            if depth == 40 {
+                assert!(encode(&saved).is_ok());
+            } else {
+                assert_eq!(encode(&saved).err().unwrap().0, "nesting");
+            }
+            let mut source = saved
+                .metadata
+                .face_sources
+                .take()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .unwrap();
+            while let F::PlanarShell { source: child, .. } = source {
+                source = *child;
+            }
         }
     }
 
