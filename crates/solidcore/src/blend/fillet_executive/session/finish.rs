@@ -27,6 +27,9 @@
 //! edges, edge uses and faces under the session's kernel identities is rebound to the
 //! target's naming, as the piecewise merge does (owners are pointers upstream;
 //! tangency-labs/solidcore#423).
+//! A failing `CreateFilletBrep` (or one that makes no faces) that noted no error notes
+//! `SM_FILERR_EDGE_PROBLEM` with what failed, and the caller's error info gets it (not
+//! upstream, #11360: upstream leaves code 0 and the default comment there).
 //! No public API entry point reaches `DoPiecewiseMerge` or a live-session
 //! `IntersectInsertRelate` (global merge): `SetFilletParameters` resets both flags;
 //! [`FilletSession::set_do_piecewise_merge`] selects the piecewise merge after it.
@@ -642,6 +645,17 @@ impl FilletSession<'_> {
         Ok(())
     }
 
+    /// Notes `SM_FILERR_EDGE_PROBLEM` with `comment` where nothing is noted yet (not upstream,
+    /// #11360): upstream's `DoFilleting` returns `FILEXEC_ERR` after a failing
+    /// `CreateFilletBrep` whatever the step noted, and a step that fails without noting (the
+    /// rollover's `SM_ERR_NULL_POINTER`) left the caller a failure with code 0 and no comment.
+    fn note_unnoted(&mut self, comment: &str) {
+        if self.executive.error.code == FilletErrorType::Ok as i32 {
+            self.executive.error.code = FilletErrorType::EdgeProblem as i32;
+            self.executive.error.comment = comment.into();
+        }
+    }
+
     /// `DoFilletingSteps` (the fork's name for upstream's `DoFilleting` body): see
     /// [`Self::do_filleting`].
     fn do_filleting_steps(
@@ -678,7 +692,17 @@ impl FilletSession<'_> {
             None
         };
         self.with_filleting_context(k, |session, k| {
-            if ignore(session.create_fillet_brep(k, error_out.as_deref_mut()))?.is_none() {
+            let made = session.create_fillet_brep(k, error_out.as_deref_mut());
+            if let Err(error) = &made {
+                // (not upstream, #11360) a failure never leaves the error info unset: a step
+                // that failed without noting why (a rollover's missing classification) notes
+                // its own status
+                session.note_unnoted(&format!("Fillet Surface Computation Failure: {error}"));
+            }
+            if ignore(made)?.is_none() {
+                if let Some(output) = error_out.as_deref_mut() {
+                    output.assign(&session.executive.error);
+                }
                 return Err(failure());
             }
             let faces = session
@@ -689,6 +713,11 @@ impl FilletSession<'_> {
                 .transpose()?
                 .map_or(0, |faces| faces.len());
             if faces < 1 {
+                session
+                    .note_unnoted("Fillet Surface Computation Failure: no fillet faces were made");
+                if let Some(output) = error_out {
+                    output.assign(&session.executive.error);
+                }
                 return Err(failure());
             }
             if k.fixes.fillet_refuse_crossing_rails {
