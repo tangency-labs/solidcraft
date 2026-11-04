@@ -112,9 +112,17 @@ fn part_commands_reply_with_their_schemas() {
     matches(&resized, &run(&mut s, "parts.resize", json!({"component": screw, "sise": "M6"})), true);
 }
 
-/// A list of hole picks must start with a list (a point's own list), not an object, as the parser reads it.
+/// A list of hole picks starts with a point (a list of three numbers), not an object and not a
+/// shorter list; a single point or a list of points is fine.
 #[test]
-fn hole_picks_schema_requires_a_first_list() {
-    let schema = serde_json::to_string(&input_schema_for::<PartsInsertParams>()).unwrap();
-    assert!(schema.contains(r#""prefixItems":[{"type":"array"}]"#), "{schema}");
+fn hole_picks_schema_requires_a_first_point() {
+    let root = serde_json::to_value(input_schema_for::<PartsInsertParams>()).unwrap();
+    let at = &root["properties"]["at"];
+    let ok = |v: Value| conforms(&root, at, &v);
+    assert!(ok(json!([[1, 2, 3]])));
+    assert!(ok(json!([1, 2, 3])));
+    assert!(ok(json!([[1, 2, 3], [4, 5, 6]])));
+    assert!(!ok(json!([[1, 2]])));
+    assert!(!ok(json!([[1, 2, 3], [1, 2]])));
+    assert!(!ok(json!([{"x": 1}])));
 }
