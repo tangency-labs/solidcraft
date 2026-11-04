@@ -69,6 +69,9 @@ pub struct ModelBody {
     pub component: u64,
     /// A timeline transfer has converted this body into its evaluated owner's frame.
     pub transferred: bool,
+    /// For a piece a cut or intersect split off a body (past its first, which keeps the body's
+    /// name): that body's name, so the piece can take its material and look.
+    pub split_from: Option<String>,
     /// The look it was imported with, carried through later features.
     pub imported: Option<Arc<crate::appearance::ImportedLook>>,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
@@ -110,6 +113,7 @@ impl ModelBody {
             made: Default::default(),
             component: 0,
             transferred: false,
+            split_from: None,
             imported: None,
             bytes: 0,
             source_key: 0,
@@ -3460,7 +3464,11 @@ fn named_pieces_of(
             (name, feature)
         };
         taken.insert(name.clone());
-        out.push(ModelBody::new(name, p, made_by).with_lineage(lineage));
+        let mut piece = ModelBody::new(name, p, made_by).with_lineage(lineage);
+        if k > 0 {
+            piece.split_from = Some(mb.name.clone());
+        }
+        out.push(piece);
     }
     out
 }
