@@ -163,6 +163,20 @@ fn state_for_sketch<'a>(
     }
 }
 
+/// What a 3D constraint of sketch `id` is resolved against (#10616): the parameter values, the
+/// model before the sketch in the frame its links resolve in, and the sketch's plane.
+pub(super) fn wire_context(
+    s: &Session,
+    id: u64,
+) -> Option<(std::collections::BTreeMap<String, solidcraft_doc::expr::Value>, solidcraft_doc::ModelState, Plane)> {
+    let doc = placed_candidate(s, &s.doc);
+    let (vals, _) = doc.param_values();
+    let before = s.model.state_before(id);
+    let st = state_for_sketch(s, &doc, id, &before).ok()?.into_owned();
+    let plane = sketch_plane(&doc, id, &st).ok()?;
+    Some((vals, st, plane))
+}
+
 /// Keep candidate feature edits while overlaying uncommitted occurrence placements.
 fn placed_candidate<'a>(s: &Session, doc: &'a Document) -> std::borrow::Cow<'a, Document> {
     if s.pending_moves.is_empty() {
@@ -190,7 +204,9 @@ fn owner_frame(s: &Session, doc: &Document, comp: u64) -> solidcraft_doc::Mat {
 /// edit's solve the other side to keep. A sketch that does not solve that way keeps its stored
 /// geometry, with the links moved.
 pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> Vec<String> {
-    if sk.links.is_empty() {
+    // A 3D sketch's curves may be held to its 2D geometry and to model planes (#10616): their
+    // places are refreshed with the links.
+    if sk.links.is_empty() && sk.wires.is_empty() {
         return Vec::new();
     }
     #[cfg(test)]

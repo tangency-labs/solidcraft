@@ -1114,7 +1114,7 @@ pub struct Model {
 fn param_names(f: &Feature) -> Vec<String> {
     let mut names: Vec<String> = f.kind.expressions().iter().flat_map(|e| expr::references(e)).collect();
     if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-        names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+        names.extend(sketch.dimension_params().into_iter().cloned());
         names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
         names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
         names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
@@ -1272,6 +1272,7 @@ fn feature_json(f: &Feature, steps: &StepDigests) -> String {
 /// upgraded topology, refreshed links) stays out of the stored sketch. A `solved` that does not
 /// match `stored` entity for entity is not adopted.
 fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sketch::Sketch) -> bool {
+    adopt_wires(stored, solved);
     if stored.patterns != solved.patterns {
         // Rebuild authored copies without storing topology derived from links or offsets.
         let mut updated = stored.clone();
@@ -1315,6 +1316,24 @@ fn adopt_solution(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sk
         }
     }
     true
+}
+
+/// [`adopt_solution`] for the drawn 3D curves, apart from the planar sketch (whose entities may
+/// not pair up): where their constraints solved them for the new values, and those constraints
+/// (their values, the places fixed points' expressions give) (#10608).
+fn adopt_wires(stored: &mut solidcraft_sketch::Sketch, solved: &solidcraft_sketch::Sketch) {
+    for w in stored.wires.iter_mut().filter(|w| w.link.is_none()) {
+        if let Some(s) = solved.wires.iter().find(|s| s.id == w.id && s.link.is_none()) {
+            w.fit.clone_from(&s.fit);
+            w.pts.clone_from(&s.pts);
+            w.arc = s.arc;
+        }
+    }
+    if stored.wire_constraints.len() == solved.wire_constraints.len()
+        && stored.wire_constraints.iter().zip(&solved.wire_constraints).all(|(a, b)| a.id == b.id)
+    {
+        stored.wire_constraints.clone_from(&solved.wire_constraints);
+    }
 }
 
 impl Document {
@@ -1938,6 +1957,9 @@ impl Model {
                 && doc.sketch(s.feature).is_ok_and(|stored| {
                     stored.driving_values() != s.sketch.driving_values()
                         || stored.patterns != s.sketch.patterns
+                        // 3D dimensions and 3D points placed by expressions (#10608).
+                        || stored.wire_constraints != s.sketch.wire_constraints
+                        || stored.wires.iter().zip(&s.sketch.wires).any(|(a, b)| a.link.is_none() && a.id == b.id && a.fit != b.fit)
                         || s.sketch.points.iter().zip(&stored.points).any(|(p, q)| p.link.is_some() && p.id == q.id && p.pos != q.pos)
                 })
         })
@@ -6886,12 +6908,17 @@ fn eval_feature(
             // The stored sketch is solved for its stored values, with its links where they
             // were stored: a link that moved must not change the side a dimension from it is on.
             let stored = sk.driving_values();
-            let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+            let mut report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+            doc.discount_traces(f.id, &sk, &mut report);
             if !report.keeps_orientation() {
                 warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
             } else {
                 // The solve may have moved the curve a text runs along.
                 warns.extend(crate::project::relay_path_texts(&mut sk));
+            }
+            // 3D constraints that fail leave the 3D curves where they were (#10608).
+            if let Some(w) = report.wires.as_ref().filter(|w| !w.ok) {
+                warns.push(w.failure(|f| format!("the 3D sketch constraints conflict ({f})")));
             }
             if !warns.is_empty() {
                 *warning = Some(warns.join("; "));

@@ -723,6 +723,17 @@ pub struct SketchView {
     pub three_d: bool,
 }
 
+/// Where a sketch's 2D geometry lies for its 3D curves ([`Sketch::frame`]): derived from the
+/// model each time the sketch's links are refreshed, so two sketches compare equal whatever it is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SketchFrame(pub Option<solidcore_record::Plane>);
+
+impl PartialEq for SketchFrame {
+    fn eq(&self, _: &SketchFrame) -> bool {
+        true
+    }
+}
+
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
@@ -743,6 +754,19 @@ pub struct Sketch {
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Constraints among the drawn 3D curves' fit points, solved after the planar sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wire_constraints: Vec<crate::wire_solve::WireConstraint>,
+    /// The drawn 3D curves that met were joined (once, at the sketch's first 3D constraint or
+    /// the first curve drawn after it could take one): later edits join only new curves, so a
+    /// joint deleted stays deleted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wires_joined: bool,
+    /// The plane the 2D geometry lies on, in the drawn 3D curves' component coordinates, as the
+    /// document last resolved it (#10616): a 3D point on a 2D point or curve is placed through it.
+    /// Not saved; set when the sketch's links are refreshed.
+    #[serde(skip)]
+    pub frame: SketchFrame,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
@@ -775,6 +799,9 @@ impl Sketch {
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
+            wire_constraints: Vec::new(),
+            wires_joined: false,
+            frame: SketchFrame(None),
             equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
@@ -798,6 +825,7 @@ impl Sketch {
             .saturating_add(self.patterns.len())
             .saturating_add(self.links.len())
             .saturating_add(self.wires.len())
+            .saturating_add(self.wire_constraints.len())
             .saturating_add(
                 self.offsets.iter().filter_map(|r| r.topology.as_ref()).fold(0usize, |n, r| n.saturating_add(r.roles.len()).saturating_add(1)),
             )
@@ -814,6 +842,7 @@ impl Sketch {
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
+            .chain(self.wire_constraints.iter().map(|c| c.id.as_str()))
             .collect();
         for topology in self.offsets.iter().filter_map(|r| r.topology.as_ref()) {
             taken.insert(topology.id.as_str());
@@ -836,6 +865,7 @@ impl Sketch {
             || self.patterns.iter().any(|p| p.id == id)
             || self.links.iter().any(|l| l.id == id)
             || self.wires.iter().any(|w| w.id == id)
+            || self.wire_constraints.iter().any(|c| c.id == id)
             || self.offsets.iter().filter_map(|r| r.topology.as_ref()).any(|r| r.id == id || r.roles.iter().any(|role| role.output == id))
     }
 

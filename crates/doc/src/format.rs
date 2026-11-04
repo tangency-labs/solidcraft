@@ -773,10 +773,20 @@ pub fn read(s: &str) -> Result<Document> {
         return Err(DocError::Invalid("damaged design: duplicate feature, component or occurrence id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
+    // A 3D constraint that no longer checks out (it names a fit point its curve no longer has)
+    // is dropped rather than refusing the design (#10608); damaged ids still refuse it.
+    for feature in &mut d.features {
+        if let crate::FeatureKind::Sketch { sketch, .. } = &mut feature.kind
+            && sketch.validate_wires().is_ok()
+        {
+            sketch.prune_wire_constraints();
+        }
+    }
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;

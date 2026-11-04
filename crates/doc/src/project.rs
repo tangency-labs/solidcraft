@@ -1108,7 +1108,89 @@ fn refresh_links_in(
             }
         }
     }
+    warn.extend(refresh_wire_targets(doc, vals, st, plane, sk));
     Ok(warn)
+}
+
+/// Where the fixed geometry the sketch's 3D constraints are held to is now (#10616): the sketch's
+/// own plane, through which a 3D point is held to a 2D point or curve, and each model plane a 3D
+/// constraint is held to. A named plane is resolved like any plane reference; a face by its
+/// persistent face name, then its exact plane (`Body::planar_face`). A model plane that cannot be
+/// resolved stays unresolved, its constraint does not solve, and a warning says why.
+pub fn refresh_wire_targets(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Vec<String> {
+    sk.frame = solidcraft_sketch::SketchFrame(Some(*plane));
+    let mut warn = Vec::new();
+    for c in &mut sk.wire_constraints {
+        let id = c.id.clone();
+        let Some(solidcraft_sketch::PlaneOf::Model(m)) = c.kind.plane_mut() else { continue };
+        if let Err(why) = resolve_model_plane(doc, vals, st, m) {
+            warn.push(format!("3D constraint {id}: {why}"));
+        }
+    }
+    warn
+}
+
+/// Resolve a model plane a 3D constraint is held to (see [`refresh_wire_targets`]); an error
+/// says why it could not be, and leaves it unresolved.
+pub fn resolve_model_plane(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    m: &mut solidcraft_sketch::ModelPlane,
+) -> std::result::Result<(), String> {
+    {
+        let (source, face_name) = (m.source.clone(), m.face_name.clone());
+        let resolved = match &source {
+            LinkSource::Plane { name } => {
+                let pr = if Plane::named(name.as_str()).is_some() {
+                    PlaneRef::Origin { name: name.clone() }
+                } else {
+                    let feature = doc.find_feature(name.as_str()).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
+                    PlaneRef::Construction { feature }
+                };
+                doc.resolve_plane_in(vals, &pr, 0, Some(st)).map_err(|_| format!("the plane {name} no longer exists"))
+            }
+            LinkSource::Face { body, at } => match &face_name {
+                Some(name) => st
+                    .body(body.as_str())
+                    .and_then(|target| crate::naming::face_on_body(target, name, *at).and_then(|(index, _)| target.body.planar_face(index)))
+                    .ok_or_else(|| format!("the planar face {name} of {body} no longer exists")),
+                None => Err(format!("the face of {body} has no name to find it by")),
+            },
+            other => Err(format!("{} is not a plane", other.describe())),
+        };
+        m.resolved = resolved.as_ref().ok().copied();
+        resolved.map(|_| ())
+    }
+}
+
+/// The planar face of the model a 3D constraint is held to, picked through `at` (#10616): of
+/// the bodies (`body`, or all), the planar faces whose exact plane passes through `at`, where `at`
+/// lies on the body's surface (SMLib's classification). Decided exactly, on the B-rep's planes:
+/// every face found must lie on one plane, else the pick is refused (a point on an edge between
+/// two planar faces). Returns the body, the face's persistent name and its plane.
+pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::result::Result<(String, String, Plane), String> {
+    let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
+    for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
+        let tol = (b.body.size() * 1e-9).max(1e-6);
+        if !matches!(b.body.classify_point(at), Ok(solidcraft_kernel::PointClass::OnBoundary)) {
+            continue;
+        }
+        for i in 0..b.body.face_count() {
+            if let Some(p) = b.body.planar_face(i).filter(|p| p.height(at).abs() <= tol) {
+                found.push((b.name.clone(), i, p, b));
+            }
+        }
+    }
+    let Some((name, index, plane, b)) = found.first() else {
+        return Err("no planar face of the model passes through that point".into());
+    };
+    let same = |p: &Plane| p.normal().cross(plane.normal()).len() <= 1e-9 && plane.height(p.origin).abs() <= 1e-6;
+    if !found.iter().all(|(_, _, p, _)| same(p)) {
+        return Err("that point lies where faces on different planes meet: pick a point inside one planar face".into());
+    }
+    let face = crate::naming::face_names(b).get(*index).cloned().ok_or_else(|| "that face has no name to keep it by".to_string())?;
+    Ok((name.clone(), face, *plane))
 }
 
 // ---------------------------------------------------------------------------------------------

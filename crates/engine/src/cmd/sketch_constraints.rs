@@ -382,6 +382,9 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.toggle_driven";
     let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
     let want = crate::params::bool_(p, "driven");
+    if let Some(reply) = super::sketch_3d::toggle_driven_3d(s, p, cmd, &cid, want)? {
+        return Ok(reply);
+    }
     let mut before = None;
     let (driven, info) = edit(s, p, cmd, true, |sk, doc| {
         let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
@@ -545,7 +548,7 @@ fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
             })
         })
         .collect();
-    Ok(json!({"sketch": id, "glyphs": list, "dof": ss.report.dof, "fully_constrained": ss.report.fully_constrained(), "conflicts": failing}))
+    Ok(json!({"sketch": id, "glyphs": list, "dof": ss.report.shown_dof(), "fully_constrained": ss.report.shown_dof() == 0, "conflicts": failing}))
 }
 
 /// Snap inference for a click at `at`: the nearest sketch point (coincident), the midpoint of a
