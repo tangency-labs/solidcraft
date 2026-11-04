@@ -1,0 +1,20 @@
+{
+  "en": {
+    "prefs.picker.carousel": "Carousel",
+    "prefs.picker.change": "Change",
+    "prefs.picker.clear": "Clear filters",
+    "prefs.picker.day": "Day theme",
+    "prefs.picker.empty": "No theme matches these filters.",
+    "prefs.picker.follow": "Follow system",
+    "prefs.picker.grid": "Grid",
+    "prefs.picker.high": "High contrast",
+    "prefs.picker.high_note": "{source} · High contrast",
+    "prefs.picker.hint": "Switches with your operating system.",
+    "prefs.picker.import": "Import theme file…",
+    "prefs.picker.imported": "Imported",
+    "prefs.picker.night": "Night theme",
+    "prefs.picker.one": "One theme",
+    "prefs.picker.pick": "Pick from below",
+    "prefs.picker.standard": "Standard"
+  }
+}
