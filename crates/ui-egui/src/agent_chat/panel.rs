@@ -2107,7 +2107,7 @@ fn user_text(
 ) -> Option<Vec<solidcraft_engine::Sel>> {
     let t = Tokens::get();
     if context.groups.is_empty() {
-        ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
+        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
         return None;
     }
     let look = |id: u32| {
@@ -2119,7 +2119,8 @@ fn user_text(
     };
     let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
     let galley = ui.fonts_mut(|f| f.layout_job(pills::job(text, &font, t.text, ui.available_width(), &look)));
-    let response = ui.add(egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))).selectable(true));
+    // Through the conversation's selectable label, so it stays in a selection scrolled out of view.
+    let response = super::markdown_view::selectable(ui, egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))));
     // Where each pill is, for tests and scripts.
     for span in pills::spans(text) {
         let row = galley.pos_from_cursor(egui::text::CCursor::new(span.start + 2));
