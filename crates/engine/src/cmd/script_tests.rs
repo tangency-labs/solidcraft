@@ -374,3 +374,32 @@ fn add_resolves_legacy_seed_and_plane_names() {
     assert_eq!(kind["features"], json!([0]), "{kind}");
     assert_eq!(kind["plane"], json!({"type": "construction", "feature": 0}), "{kind}");
 }
+
+#[test]
+fn a_3d_sketch_with_dimensions_and_constraints_replays() {
+    // #10608: a 3D path whose run is dimensioned by parameter `run`, the rise held along Z.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [100, 0, 0], [100, 0, 60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "value": "run = 120"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut t = replay(&script(&mut s));
+    let sketch = |s: &Session| {
+        s.doc.features.iter().find_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { sketch, .. } => Some(sketch.clone()),
+            _ => None,
+        })
+    };
+    let (was, now) = (sketch(&s).unwrap(), sketch(&t).unwrap());
+    assert_eq!(now.wire_constraints, was.wire_constraints);
+    assert_eq!(now.wires, was.wires);
+    // The parameter still drives the replayed path.
+    run(&mut t, "parameters.change", json!({"name": "run", "expression": "150 mm"}));
+    let end = sketch(&t).unwrap().wires.iter().find(|w| w.id == a).unwrap().fit[1];
+    assert!((end.x - 150.0).abs() < 1e-6, "{end:?}");
+}
