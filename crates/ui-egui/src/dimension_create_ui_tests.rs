@@ -2010,3 +2010,20 @@ fn a_typed_value_does_not_light_a_selected_design_curve() {
     crate::dim_view::cancel();
     assert!(!crate::viewport::build_highlight(&h.app).overlay.is_empty(), "lit once the value is let go");
 }
+
+/// The Dimension tool's "x, y" readout gives the design's coordinates: while a value is typed it
+/// is not drawn, as the hover highlight is not.
+#[test]
+fn a_typed_value_hides_the_pointer_readout() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"move":{"world":[10,5,0]}})).unwrap();
+    h.frames(1);
+    assert!(crate::scenario::rect_of("viewport:readout").is_some(), "the readout is drawn while only pointing");
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    h.step(&json!({"move":{"world":[12,6,0]}})).unwrap();
+    h.frames(1);
+    assert!(crate::scenario::rect_of("viewport:readout").is_none(), "no readout while the value is typed");
+    crate::dim_view::cancel();
+}
