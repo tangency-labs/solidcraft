@@ -36,6 +36,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -496,4 +497,132 @@ fn block_cylinder_arc_piece_is_capped_at_the_seam() {
     blend(&mut k, &mut b, Kind::Round, &[at_pick], 2.0).unwrap();
     let ((faces, _, _), _) = measured(&mut k, &mut b);
     assert_eq!(faces, 9, "the round and its cap");
+}
+
+/// tangency-labs/solidcore#2679 (`fillet_blend_corner`): fillets/1207 with the r3 round's end
+/// arc on the end face (the edge the r1 round runs on into at y = 17) carrying a tangent
+/// field (`SmTangentField`) as its curve. The field passes the smooth vertex's tests (its
+/// derivative there runs on along the blended edge), but its values are cross tangents, not
+/// points, and it gives no second or third derivative: the run-on cannot be decided from it,
+/// and the End at the smooth vertex keeps its cap, as before #2657 (9 faces). On #2657 the
+/// failed evaluation failed the round (`SM_ERR`). The body is not checked a solid: the arc's
+/// curve is a field of vectors, not the arc, so nothing that reads its points can mate it.
+/// (A composite curve never gets this far: the smooth vertex's own tangent test, which
+/// evaluates the edge's curve, already refuses it.)
+#[test]
+fn a_tangent_field_edge_at_the_smooth_vertex_keeps_the_cap() {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::edgeuse::p1 as eu1;
+    let mut k = solidcraft_kernel();
+    let mut b = boxed(&mut k, 20.0, 20.0, 20.0);
+    blend(&mut k, &mut b, Kind::Round, &[[10.0, 20.0, 20.0]], 3.0).unwrap();
+    // the r3 round's end arc on x = 0, from (0, 17, 20) to (0, 20, 17)
+    let v = Point3::new(0.0, 17.0, 20.0);
+    let arc = *b
+        .edge_list()
+        .iter()
+        .find(|&&e| {
+            let ends: Vec<Point3> = edge::vertices(&b, e, None)
+                .unwrap()
+                .into_iter()
+                .map(|w| b.vertex(w.unwrap()).unwrap().point)
+                .collect();
+            ends.iter().any(|p| p.distance(v) < 1e-9)
+                && ends
+                    .iter()
+                    .any(|p| p.distance(Point3::new(0.0, 20.0, 17.0)) < 1e-9)
+        })
+        .unwrap();
+    let plane = edge::edgeuses(&b, arc, None, None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|eu| eu1::face(&b, eu).unwrap())
+        .find_map(|f| {
+            let s = b.face(f).unwrap().surface.clone()?;
+            matches!(s.kind(), SurfaceKind::Plane(_)).then_some(s)
+        })
+        .unwrap();
+    let ivl = edge::interval(&b, arc).unwrap();
+    let at_start = edge::start_vertex(&b, arc).unwrap()
+        == b.vertices()
+            .ids()
+            .find(|&w| b.vertex(w).unwrap().point.distance(v) < 1e-9);
+    // a UV line spanning the edge's interval with room past each end, so the edge's
+    // ends are inside the field (not its stored end values)
+    let (lo, hi) = (ivl.min() - 1.0, ivl.max() + 1.0);
+    let uv = Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 1,
+            control_points: &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[2, 2],
+            knots: &[lo, hi],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    );
+    // the field's derivative is along end - start: +y (into the arc from V) at its start,
+    // so the edge leaves V the way the arc does
+    let y = Vec3::new(0.0, 1.0, 0.0);
+    let (start, end) = if at_start { (-y, y) } else { (y, -y) };
+    let field =
+        TangentFieldCurve::new(&k, uv, plane, TangentDirType::Interpolate, start, end, None)
+            .unwrap();
+    b.edge_mut(arc).unwrap().curve = Some(Curve::new(CurveKind::TangentField(Box::new(field))));
+    let r = blend(&mut k, &mut b, Kind::Round, &[[0.0, 8.5, 20.0]], 1.0);
+    assert_eq!(r, Ok(()), "the round builds");
+    assert_eq!(b.faces().ids().count(), 9, "capped at the smooth vertex");
+}
+
+/// tangency-labs/solidcore#2680's review (`fillet_blend_corner`): the run-on check passes a
+/// cancel through, not as an undecided run-on. fillets/1207's vertex (0, 17, 20) after the r3
+/// round, the end face's top edge blended there: uncancelled, the edge running on into the
+/// r3 round's end arc is no smooth-vertex End (the run-on leaves the part); with the
+/// kernel's token cancelled, the check returns the cancel it observes.
+#[test]
+fn a_cancel_during_the_run_on_check_comes_back() {
+    use solidcore::blend::blend_corner::end::end_at_smooth_vertex;
+    use solidcore::topology::vertex;
+    use solidcore::{CancelToken, SolidError};
+    let mut k = solidcraft_kernel();
+    let mut b = boxed(&mut k, 20.0, 20.0, 20.0);
+    blend(&mut k, &mut b, Kind::Round, &[[10.0, 20.0, 20.0]], 3.0).unwrap();
+    let v = b
+        .vertices()
+        .ids()
+        .find(|&w| {
+            b.vertex(w)
+                .unwrap()
+                .point
+                .distance(Point3::new(0.0, 17.0, 20.0))
+                < 1e-9
+        })
+        .unwrap();
+    let blended = pick(&k, &b, [0.0, 8.5, 20.0]);
+    let fil_eu = edge::edgeuses(&b, blended, None, None).unwrap()[0];
+    let all_eus: Vec<_> = vertex::edges(&b, v, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| edge::edgeuses(&b, e, None, None).unwrap()[0])
+        .collect();
+    let smooth = end_at_smooth_vertex(&k, &mut b, v, fil_eu, &all_eus, 0.01, &[]);
+    assert!(matches!(smooth, Ok(false)), "{smooth:?}");
+    let token = CancelToken::new();
+    token.cancel();
+    k.set_cancel_token(token);
+    let cancelled = end_at_smooth_vertex(&k, &mut b, v, fil_eu, &all_eus, 0.01, &[]);
+    assert!(
+        matches!(
+            cancelled,
+            Err(SolidError::Cancelled {
+                operation: "blend::blend_corner::end"
+            })
+        ),
+        "{cancelled:?}"
+    );
 }
