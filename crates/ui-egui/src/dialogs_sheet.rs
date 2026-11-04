@@ -569,7 +569,10 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "sheet.export_bend_table" => "csv",
         _ => return false,
     };
-    if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
+    let state = app.session.model.state();
+    let last = state.surface_sheets.last().map(|sheet| sheet.body.clone()).or_else(|| state.sheets.last().map(|sheet| sheet.body.clone()));
+    drop(state);
+    if let Some(body) = last {
         export_flat(app, &body, extension);
     } else {
         // Let the command report its ordinary "no sheet body" error without opening a picker.

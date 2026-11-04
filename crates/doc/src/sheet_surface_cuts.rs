@@ -27,7 +27,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcore_record::{Plane, Region2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Vec2};
 use solidcraft_develop::{Cut, Development, Fold, JointKind, Rigid2, Rigid3, Surface, develop};
 use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
@@ -84,7 +84,12 @@ fn on_panel(b: &Body, q: &Query, frame: &Rigid3, t: f64, own: &Region2, tol: f64
         let Some(region) = crate::sheet_surface_convert::face_region(b, q, &at, face_out, f, tol) else {
             return err(format!("a face of the sheet's body at depth {depth:.3} can't be read"));
         };
-        let mine = planar_regions_boolean(&[region], std::slice::from_ref(own), BoolOp::Intersect, tol)?;
+        // A face that is the panel's own outline with holes in it needs no boolean to keep to it.
+        let mine = if inside_by_loops(std::slice::from_ref(&region), std::slice::from_ref(own), tol) {
+            vec![region]
+        } else {
+            planar_regions_boolean(&[region], std::slice::from_ref(own), BoolOp::Intersect, tol)?
+        };
         if mine.is_empty() {
             continue;
         }
@@ -102,12 +107,35 @@ fn on_panel(b: &Body, q: &Query, frame: &Rigid3, t: f64, own: &Region2, tol: f64
     Ok(out)
 }
 
-/// The regions' union, their loops closed within `tol`.
+/// The regions' union, their loops closed within `tol`. The regions are faces of a body, which
+/// never overlap: the same region twice (a panel's two faces) is once, and regions apart from
+/// each other (a piece inside another's hole) are their own union.
 fn union(regions: Vec<Region2>, tol: f64) -> Result<Vec<Region2>> {
-    let mut it = regions.into_iter();
+    let mut kept: Vec<Region2> = Vec::new();
+    for r in regions {
+        if !kept.iter().any(|k| same_regions(std::slice::from_ref(k), std::slice::from_ref(&r), tol)) {
+            kept.push(r);
+        }
+    }
+    if kept.len() <= 1 || apart(&kept, tol) {
+        return Ok(kept);
+    }
+    let mut it = kept.into_iter();
     let Some(first) = it.next() else { return Ok(Vec::new()) };
     let rest: Vec<Region2> = it.collect();
     Ok(planar_regions_boolean(&[first], &rest, BoolOp::Union, tol)?)
+}
+
+/// Whether no two of `regions` come within `tol` of each other by their boxes: each pair's
+/// outlines' boxes are apart, or one lies inside the box of a hole of the other.
+fn apart(regions: &[Region2], tol: f64) -> bool {
+    let bounds = |l: &Loop2| l.polyline(1e-3).bounds().inflated(tol);
+    let boxes: Vec<(solidcraft_geom::Aabb2, Vec<solidcraft_geom::Aabb2>)> = regions.iter().map(|r| (bounds(&r.outer), r.holes.iter().map(bounds).collect())).collect();
+    let clear = |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y;
+    let within = |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| b.min.x < a.min.x && a.max.x < b.max.x && b.min.y < a.min.y && a.max.y < b.max.y;
+    boxes.iter().enumerate().all(|(i, (a, ah))| {
+        boxes.iter().skip(i + 1).all(|(b, bh)| clear(a, b) || bh.iter().any(|h| within(a, h)) || ah.iter().any(|h| within(b, h)))
+    })
 }
 
 fn area(regions: &[Region2]) -> f64 {
@@ -116,6 +144,69 @@ fn area(regions: &[Region2]) -> f64 {
 
 fn perimeter(regions: &[Region2]) -> f64 {
     regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).flat_map(|l| &l.segs).map(|s| s.length()).sum()
+}
+
+/// Whether loops `a` and `b` are one loop, within `tol`: as many pieces, starting at the same
+/// points, as long.
+fn same_loop(a: &Loop2, b: &Loop2, tol: f64) -> bool {
+    if a.segs.len() != b.segs.len() {
+        return false;
+    }
+    let length = |l: &Loop2| l.segs.iter().map(|s| s.length()).sum::<f64>();
+    (length(a) - length(b)).abs() <= tol * a.segs.len().max(1) as f64
+        && a.segs.iter().all(|s| b.segs.iter().any(|t| t.start().dist(s.start()) <= tol || t.end().dist(s.start()) <= tol))
+}
+
+/// Whether regions `a` and `b` are the same regions, loop for loop.
+fn same_regions(a: &[Region2], b: &[Region2], tol: f64) -> bool {
+    let same = |x: &Region2, y: &Region2| {
+        x.holes.len() == y.holes.len() && same_loop(&x.outer, &y.outer, tol) && x.holes.iter().all(|h| y.holes.iter().any(|k| same_loop(h, k, tol)))
+    };
+    a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| same(x, y)))
+}
+
+/// Whether every region of `a` lies in a region of `b` by their loops (so `a` ∩ `b` is `a`): its
+/// outline is that region's and it has each of that region's holes, or it lies in a new hole of
+/// one that does (a piece a cut left inside it, as faces of one body never overlap).
+fn inside_by_loops(a: &[Region2], b: &[Region2], tol: f64) -> bool {
+    let holds = |x: &Region2, y: &Region2| same_loop(&x.outer, &y.outer, tol) && y.holes.iter().all(|k| x.holes.iter().any(|h| same_loop(h, k, tol)));
+    let new_hole_at = |p: Vec2| {
+        a.iter().any(|x| {
+            b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| h.ccw().contains(p) && !y.holes.iter().any(|k| same_loop(h, k, tol))))
+        })
+    };
+    a.iter().all(|x| b.iter().any(|y| holds(x, y)) || x.outer.segs.first().is_some_and(|s| new_hole_at(s.start())))
+}
+
+/// What `footprint` loses to `near` (`footprint` − `near`), read off their loops where `near` is
+/// `footprint` with holes cut in it and pieces left inside them: each new hole is a region gone,
+/// less the pieces inside it. None where the loops don't say so (a cut through an outline).
+fn gone_by_loops(footprint: &[Region2], near: &[Region2], tol: f64) -> Option<Vec<Region2>> {
+    let mut gone: Vec<Region2> = Vec::new();
+    let mut islands: Vec<&Region2> = Vec::new();
+    let mut matched = vec![false; footprint.len()];
+    for x in near {
+        let Some(k) = footprint.iter().position(|y| same_loop(&x.outer, &y.outer, tol)) else {
+            islands.push(x);
+            continue;
+        };
+        let y = footprint.get(k)?;
+        if !y.holes.iter().all(|k| x.holes.iter().any(|h| same_loop(h, k, tol))) {
+            return None;
+        }
+        matched[k] = true;
+        gone.extend(x.holes.iter().filter(|h| !y.holes.iter().any(|k| same_loop(h, k, tol))).map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }));
+    }
+    if !matched.iter().all(|m| *m) {
+        return None;
+    }
+    // Each piece left inside a new hole is a hole of what is gone there.
+    for island in islands {
+        let at = island.outer.segs.first()?.start();
+        let g = gone.iter_mut().find(|g| g.outer.contains(at))?;
+        g.holes.push(island.outer.ccw().reversed());
+    }
+    Some(gone)
 }
 
 /// Whether region `g` reaches within `near` of the outline of any of `of`.
@@ -164,6 +255,10 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
     let mut out = Vec::new();
     for i in 0..after.surface_sheets.len() {
         let Some(sk) = after.surface_sheets.get(i).cloned() else { continue };
+        // A sheet the feature changed itself (a cut read straight into it) has its body already.
+        if before.surface_sheets.iter().any(|b| b.body == sk.body && (b.sheet != sk.sheet || b.loose != sk.loose)) {
+            continue;
+        }
         let (Some(was), Some(now)) = (before.body(&sk.body), after.body(&sk.body)) else { continue };
         if was.body.same_shape(&now.body) {
             continue;
@@ -369,10 +464,22 @@ pub struct Loose {
 /// pieces parted from it. What goes through clear of the region's outline and holes is a hole of
 /// it as it is, its curves kept.
 fn left(region: &Region2, through: &[Region2], name: &str, holders: &[Vec2], tol: f64) -> std::result::Result<(Region2, Vec<Region2>), String> {
-    if !through.is_empty() && through.iter().all(|t| holds_clear(region, t)) {
+    let outline = |t: &Region2| Region2 { outer: t.outer.clone(), holes: Vec::new() };
+    if !through.is_empty() && through.iter().all(|t| holds_clear(region, &outline(t))) {
         let mut out = region.clone();
         out.holes.extend(through.iter().map(|t| t.outer.ccw().reversed()));
-        return Ok((out, Vec::new()));
+        // What a cut goes round (a letter's counter) is parted from the panel, with any other
+        // cut inside it a hole of it.
+        let parted = through
+            .iter()
+            .flat_map(|t| &t.holes)
+            .map(|h| {
+                let outer = h.ccw();
+                let holes = through.iter().filter(|o| o.outer.segs.first().is_some_and(|g| outer.contains(g.start()))).map(|o| o.outer.ccw().reversed()).collect();
+                Region2 { outer, holes }
+            })
+            .collect();
+        return Ok((out, parted));
     }
     let mut left = planar_regions_boolean(std::slice::from_ref(region), through, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
     if left.len() <= 1 {
@@ -518,7 +625,12 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
         let seen = |own: &[Region2], floors: &[(f64, Region2)]| union(own.iter().cloned().chain(floors.iter().map(|x| x.1.clone())).collect(), tol);
         // Within the flat material only: past it (toward a sharp corner the body was drawn with)
         // the two faces of a bend's panels end apart.
-        let within = |r: Vec<Region2>| planar_regions_boolean(&r, &footprint, BoolOp::Intersect, tol).map_err(|e| e.to_string());
+        let within = |r: Vec<Region2>| {
+            if inside_by_loops(&r, &footprint, tol) {
+                return Ok(r);
+            }
+            planar_regions_boolean(&r, &footprint, BoolOp::Intersect, tol).map_err(|e| e.to_string())
+        };
         let near = within(seen(&after.near, &after.near_floors).map_err(|e| e.to_string())?)?;
         let far = within(seen(&after.far, &after.far_floors).map_err(|e| e.to_string())?)?;
         // Square walls: each face sees material wherever the other does.
@@ -540,11 +652,15 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             Ok(kept)
         };
         let (near_floors, far_floors) = (floors(after.near_floors)?, floors(after.far_floors)?);
-        let square = off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack;
+        // Faces with the same loops see material at the same places: square walls.
+        let square = same_regions(&near, &far, tol) || (off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack);
         // Through: the flat material no face sees any longer, or, where the walls are not
         // square, their shadow.
         let through = if square {
-            let gone = planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
+            let gone = match gone_by_loops(&footprint, &near, tol) {
+                Some(gone) => gone,
+                None => planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?,
+            };
             gone.into_iter().filter(|g| ours(g)).collect()
         } else if strict && !here.is_empty() {
             taken.shadowed = true;

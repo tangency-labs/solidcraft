@@ -168,11 +168,12 @@ fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     let out = run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
     assert!(out["warning"].is_null(), "{out}");
     assert!((flat(&mut s)["thickness"].as_f64().unwrap_or(0.0) - t).abs() < 1e-9);
-    // Four 90° bends up, each as long as the base is between its setbacks (R + T at either end).
+    // Four 90° bends, down as the flat is read from the outside it was converted from (toward the
+    // material), each as long as the base is between its setbacks (R + T at either end).
     let mut rows = bend_rows(&mut s);
     rows.sort_by(|a, b| a.2.total_cmp(&b.2));
     let want = [52.0, 52.0, 92.0, 92.0];
-    assert!(rows.len() == 4 && rows.iter().zip(want).all(|(row, l)| row.0 == 90 && row.1 == "up" && (row.2 - l).abs() < 1e-6), "{rows:?}");
+    assert!(rows.len() == 4 && rows.iter().zip(want).all(|(row, l)| row.0 == 90 && row.1 == "down" && (row.2 - l).abs() < 1e-6), "{rows:?}");
     let allowance = flat(&mut s)["bends"][0]["allowance"].as_f64().unwrap_or(0.0);
     assert!((allowance - FRAC_PI_2 * (r + k * t)).abs() < 1e-9, "{allowance}");
     // The envelope stays: the sharp edges became bends inside it.
@@ -199,7 +200,7 @@ fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     let dxf = run(&mut s, "sheet.export_dxf", json!({}));
     assert_eq!(dxf["bends"], 4);
     let lines: Vec<&str> = dxf["dxf"].as_str().unwrap_or_default().lines().collect();
-    assert_eq!(lines.windows(2).filter(|w| w[0].trim() == "8" && w[1].trim() == "BEND_UP").count(), 4, "four bend lines");
+    assert_eq!(lines.windows(2).filter(|w| w[0].trim() == "8" && w[1].trim() == "BEND_DOWN").count(), 4, "four bend lines");
     assert_eq!(run(&mut s, "sheet.export_bend_table", json!({"format": "json"}))["bends"], 4);
 }
 
@@ -225,7 +226,7 @@ fn bends_picked_inside_and_a_fixed_face_inside_give_the_same_sheet() {
     rule(&mut b, "Test", t, k, r, gap);
     tray(&mut b, t);
     run(&mut b, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [50, 30, 2], "bends": BOTTOM_EDGES}));
-    assert!(bend_rows(&mut b).iter().all(|row| row.0 == 90 && row.1 == "down"), "{:?}", bend_rows(&mut b));
+    assert!(bend_rows(&mut b).iter().all(|row| row.0 == 90 && row.1 == "up"), "{:?}", bend_rows(&mut b));
     let ba = FRAC_PI_2 * (r + k * t);
     let inside = (96.0 + 2.0 * 28.0 - 4.0 * r + 2.0 * ba, 56.0 + 2.0 * 28.0 - 4.0 * r + 2.0 * ba);
     assert!(same_size(flat_size(&mut b), inside, 1e-6) && same_size(inside, f, 1e-6), "{:?} {inside:?} {f:?}", flat_size(&mut b));
@@ -270,7 +271,7 @@ fn a_trapezoid_section_unfolds_through_72_and_108_degree_bends() {
     let bends = trapezoid_section(&mut s, t);
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [0, 0, 150], "bends": bends}));
     let rows = bend_rows(&mut s);
-    assert!(rows.len() == 4 && rows.iter().all(|row| row.1 == "up" && (row.2 - 300.0).abs() < 1e-9), "{rows:?}");
+    assert!(rows.len() == 4 && rows.iter().all(|row| row.1 == "down" && (row.2 - 300.0).abs() < 1e-9), "{rows:?}");
     assert_eq!((rows.iter().filter(|row| row.0 == 72).count(), rows.iter().filter(|row| row.0 == 108).count()), (2, 2), "{rows:?}");
     let (a72, a108) = (72f64.to_radians(), 108f64.to_radians());
     let across = 200.0 + 2.0 * 40.0 + 2.0 * 15.0 - 2.0 * deduction(a72, r, t, k) - 2.0 * deduction(a108, r, t, k);
@@ -302,7 +303,7 @@ fn a_z_section_bends_up_at_one_edge_and_down_at_the_other() {
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [30, 0, 50], "bends": bends}));
     let mut directions: Vec<String> = bend_rows(&mut s).into_iter().map(|row| row.1).collect();
     directions.sort();
-    assert_eq!(directions, ["down", "up"]);
+    assert_eq!(directions, ["up", "down"]);
     // Outside setbacks R + T at the first bend, inside setbacks R at the second, and a 90°
     // allowance for each: 60 + 40 + 30 - 2 (R + T) - 2 R + π (R + K T) = 128.2832.
     let across = 130.0 - 2.0 * (r + t) - 2.0 * r + PI * (r + k * t);
@@ -337,7 +338,7 @@ fn a_tapered_tray_converts_with_72_degree_walls_and_slanted_corners() {
         json!({"mode": "thicken", "body": "Tray", "face": [100, 60, 0], "bends": [[100, 0, 0], [200, 60, 0], [100, 120, 0], [0, 60, 0]]}),
     );
     let rows = bend_rows(&mut s);
-    assert!(rows.len() == 4 && rows.iter().all(|row| row.0 == 72 && row.1 == "up"), "{rows:?}");
+    assert!(rows.len() == 4 && rows.iter().all(|row| row.0 == 72 && row.1 == "down"), "{rows:?}");
     let slant = 40.0 / 72f64.to_radians().sin();
     let bd = deduction(72f64.to_radians(), r, t, k);
     assert!(same_size(flat_size(&mut s), (200.0 + 2.0 * slant - 2.0 * bd, 120.0 + 2.0 * slant - 2.0 * bd), 1e-6), "{:?}", flat_size(&mut s));
@@ -429,7 +430,7 @@ fn bend_edges_changed_in_an_edit_are_the_ones_bent() {
     // across. (By the names of the first two edges it would be the front and the right wall.)
     run(&mut s, "timeline.edit", json!({"feature": made["feature"], "set": {"bends": [BOTTOM_EDGES[0], BOTTOM_EDGES[2]]}}));
     let rows = bend_rows(&mut s);
-    assert!(rows.len() == 2 && rows.iter().all(|row| row.0 == 90 && row.1 == "up" && (row.2 - 100.0).abs() < 1e-6), "{rows:?}");
+    assert!(rows.len() == 2 && rows.iter().all(|row| row.0 == 90 && row.1 == "down" && (row.2 - 100.0).abs() < 1e-6), "{rows:?}");
     let across = 120.0 - 2.0 * deduction(FRAC_PI_2, r, t, k);
     assert!(same_size(flat_size(&mut s), (100.0, across), 1e-6), "{:?} vs {across}", flat_size(&mut s));
     // Its end walls are no faces of the sheet any more: the channel is open at both ends.
@@ -1345,7 +1346,7 @@ fn holes_and_a_slot_in_a_channels_faces_land_where_the_bends_put_them() {
     run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": 3, "operation": "cut"}));
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [50, 0, 5], "bends": bends}));
     let rows = bend_rows(&mut s);
-    assert!(rows.len() == 2 && rows.iter().all(|row| row.0 == 90 && row.1 == "up" && (row.2 - 40.0).abs() < 1e-9), "{rows:?}");
+    assert!(rows.len() == 2 && rows.iter().all(|row| row.0 == 90 && row.1 == "down" && (row.2 - 40.0).abs() < 1e-9), "{rows:?}");
     // T 2, R 2, K 0.4: BA = π/2 (R + K T) = 1.4 π, BD = 2 (R + T) - BA = 8 - 1.4 π = 3.6018; the
     // flat is the outside lengths less a BD per bend.
     let bd = deduction(FRAC_PI_2, r, t, k);
@@ -1676,7 +1677,7 @@ fn a_bend_ends_where_its_wall_ends_with_the_rules_bend_relief_beside_it() {
     let edge = 26.0 + ba - 4.0;
     // The wall in the middle, picked from the outside or the inside: the same sheet, the reliefs
     // x 18 … 20 and 60 … 62, through the plate's edge to 1 past the bend line.
-    for (face, bend, way) in [([40.0, 25.0, 0.0], [40.0, 0.0, 0.0], "up"), ([40.0, 25.0, 2.0], [40.0, 2.0, 2.0], "down")] {
+    for (face, bend, way) in [([40.0, 25.0, 0.0], [40.0, 0.0, 0.0], "down"), ([40.0, 25.0, 2.0], [40.0, 2.0, 2.0], "up")] {
         let mut s = Session::default();
         rule(&mut s, "Test", t, k, r, 0.5);
         bracket(&mut s, 20.0, 60.0, 2.0);

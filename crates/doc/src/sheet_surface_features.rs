@@ -94,7 +94,7 @@ impl SurfaceSheet {
         let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
         let panel = self.sheet.panels.get(i).ok_or_else(|| DocError::Invalid("panel".into()))?;
         let op = if by > 0.0 { BoolOp::Union } else { BoolOp::Cut };
-        let mut out = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(&panel.region), &[strip], op, 1e-9)?;
+        let mut out = crate::sheet_surface::boolean_past_holes(std::slice::from_ref(&panel.region), &[strip], op, &mut crate::sheet::FlatWork::new())?;
         if out.len() != 1 {
             return err("the flange's bend would cut its panel apart");
         }
@@ -589,6 +589,64 @@ impl SurfaceSheet {
                 *o = o.iter().map(r).collect();
             }
         }
+    }
+
+    /// Each flat panel's material as the flat has it (after its bends' trims), in its chart, with
+    /// its frame in the body; and a box round every piece of the sheet in the body (each flat
+    /// panel's material, each bend's zone, each loose piece), the panel's index for a panel's.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn pieces_in_space(&self) -> Option<(Vec<(usize, Rigid3, Region2)>, Vec<(Option<usize>, solidcraft_geom::Aabb3)>)> {
+        let dev = develop(&self.sheet, 0).ok()?;
+        let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
+        let fold = if self.unfolded { None } else { Some(crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?) };
+        let pieces = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new()).ok()?;
+        let t = self.thickness;
+        let mut panels = Vec::new();
+        let mut boxes = Vec::new();
+        let slab = |frame: &Rigid3, r: &Region2| {
+            let mut b = solidcraft_geom::Aabb3::EMPTY;
+            for p in &r.outer.polyline(1e-3) {
+                for z in [0.0, t] {
+                    b.add(frame.point(Vec3::new(p.x, p.y, z)));
+                }
+            }
+            b
+        };
+        for (piece, region) in &pieces {
+            match *piece {
+                crate::sheet_surface::Piece::Panel(i) | crate::sheet_surface::Piece::Tab(_, i) => {
+                    let (Some(frame), Some(Some(at))) = (frames.get(i).copied().flatten(), dev.placements.get(i)) else { return None };
+                    let own = at.inverse().region(region);
+                    boxes.push((Some(i).filter(|_| matches!(piece, crate::sheet_surface::Piece::Panel(_))), slab(&frame, &own)));
+                    if matches!(piece, crate::sheet_surface::Piece::Panel(_)) && matches!(self.sheet.panels.get(i)?.surface, Surface::Plane) {
+                        panels.push((i, frame, own));
+                    }
+                }
+                crate::sheet_surface::Piece::Zone(z) => {
+                    // The zone's outline, finely: its arc bulges between its corners.
+                    let zone = dev.zones.get(z)?;
+                    let mut b = solidcraft_geom::Aabb3::EMPTY;
+                    let pts = region.outer.polyline(1e-3);
+                    for (p, q) in (&pts).edges() {
+                        for k in 0..=16 {
+                            let x = p.lerp(*q, k as f64 / 16.0);
+                            for depth in [0.0, t] {
+                                match fold.as_ref() {
+                                    Some(fold) => b.add(fold.bends.get(zone.joint).copied().flatten()?.point(x, depth)),
+                                    None => b.add(self.places.first().copied().flatten()?.point(Vec3::new(x.x, x.y, depth))),
+                                }
+                            }
+                        }
+                    }
+                    boxes.push((None, b));
+                }
+            }
+        }
+        for l in &self.loose {
+            let frame = frames.get(l.panel).copied().flatten()?;
+            boxes.push((None, slab(&frame, &l.region)));
+        }
+        Some((panels, boxes))
     }
 
     /// The flat face of the sheet a point lies on (the body's coordinates, within `tol`, kept

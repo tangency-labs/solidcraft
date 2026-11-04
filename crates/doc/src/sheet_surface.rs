@@ -217,7 +217,7 @@ pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piec
             // trims of two bends can share an edge and a corner with the panel, which the
             // planar booleans take apart only one tool at a time, so join them first.
             let trims = stage(&format!("joining panel {i}'s trims"), material_union(trims, work))?;
-            let left = stage(&format!("trimming panel {i}"), material_boolean(&[placed], &trims, BoolOp::Cut, work))?;
+            let left = stage(&format!("trimming panel {i}"), boolean_past_holes(&[placed], &trims, BoolOp::Cut, work))?;
             pieces.extend(left.into_iter().map(|r| (Piece::Panel(i), r)));
         }
     }
@@ -249,7 +249,7 @@ fn cut_from(pieces: Vec<(Piece, Region2)>, cuts: &[&Region2], work: &mut FlatWor
     let cuts = stage("joining what is cut from the flat", material_union(cuts.iter().map(|c| (*c).clone()).collect(), work))?;
     let mut out = Vec::with_capacity(pieces.len());
     for (piece, region) in pieces {
-        out.extend(stage("cutting the flat", material_boolean(&[region], &cuts, BoolOp::Cut, work))?.into_iter().map(|r| (piece, r)));
+        out.extend(stage("cutting the flat", boolean_past_holes(&[region], &cuts, BoolOp::Cut, work))?.into_iter().map(|r| (piece, r)));
     }
     Ok(out)
 }
@@ -335,7 +335,90 @@ pub(crate) fn join(dev: &Development, work: &mut FlatWork) -> Result<Vec<Region2
 
 /// A development's pieces (see [`pieces`]) joined into its flat.
 pub(crate) fn join_pieces(pieces: &[(Piece, Region2)], work: &mut FlatWork) -> Result<Vec<Region2>> {
-    stage("joining the sheet's pieces", material_union(pieces.iter().map(|(_, r)| r.clone()).collect(), work))
+    let regions: Vec<Region2> = pieces.iter().map(|(_, r)| r.clone()).collect();
+    // The holes clear of every other piece stay out of the union, and go back after it.
+    let reach: Vec<Aabb2> = regions.iter().map(|r| loop_box(&r.outer)).collect();
+    let mut carried: Vec<Loop2> = Vec::new();
+    let mut bare = Vec::with_capacity(regions.len());
+    for (i, r) in regions.into_iter().enumerate() {
+        let others: Vec<Aabb2> = reach.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, b)| *b).collect();
+        let (clear, near): (Vec<Loop2>, Vec<Loop2>) = r.holes.into_iter().partition(|h| boxes_clear(&loop_box(h), &others));
+        carried.extend(clear);
+        bare.push(Region2 { outer: r.outer, holes: near });
+    }
+    let joined = stage("joining the sheet's pieces", material_union(bare, work))?;
+    stage("joining the sheet's pieces", put_back(joined, carried))
+}
+
+/// A loop's box, out by [`CLEAR`] and its chords' sag.
+fn loop_box(l: &Loop2) -> Aabb2 {
+    l.polyline(1e-4).bounds().inflated(CLEAR + 2e-4)
+}
+
+/// Whether box `b` meets none of `of`.
+fn boxes_clear(b: &Aabb2, of: &[Aabb2]) -> bool {
+    of.iter().all(|o| b.max.x < o.min.x || o.max.x < b.min.x || b.max.y < o.min.y || o.max.y < b.min.y)
+}
+
+/// The holes `carried` back in the regions of `out` that hold them.
+fn put_back(mut out: Vec<Region2>, carried: Vec<Loop2>) -> Result<Vec<Region2>> {
+    for h in carried {
+        let Some(at) = h.segs.first().map(Seg2::start) else { continue };
+        let r = out
+            .iter_mut()
+            .find(|r| r.outer.contains(at) && !r.holes.iter().any(|k| k.contains(at)))
+            .ok_or_else(|| DocError::Invalid("a cut-out of the flat lost its piece".into()))?;
+        r.holes.push(h);
+    }
+    Ok(out)
+}
+
+/// Whether loop `h` keeps clear of region `t`: apart from it by their boxes, or outside its
+/// material and holding none of it, its loops crossing none of `t`'s and nowhere nearer them than
+/// [`CLEAR`].
+fn loop_clear_of(h: &Loop2, t: &Region2) -> bool {
+    let hb = loop_box(h);
+    if boxes_clear(&hb, std::slice::from_ref(&loop_box(&t.outer))) {
+        return true;
+    }
+    let (Some(p), ring) = (h.segs.first().map(Seg2::start), h.ccw()) else { return false };
+    if t.contains(p) {
+        return false;
+    }
+    let sag = 1e-4;
+    let mine = h.polyline(sag);
+    std::iter::once(&t.outer).chain(&t.holes).all(|l| {
+        let other = l.polyline(sag);
+        if boxes_clear(&hb, std::slice::from_ref(&other.bounds())) {
+            return true;
+        }
+        let gap = |a: &Ring<Vec2>, b: &Ring<Vec2>| {
+            a.iter().map(|p| b.edges().map(|(q0, q1)| segment_distance(*p, *q0, *q1)).fold(f64::INFINITY, f64::min)).fold(f64::INFINITY, f64::min)
+        };
+        l.segs.first().is_none_or(|s| !ring.contains(s.start()))
+            && crossings(&h.segs, &l.segs).is_empty()
+            && gap(&mine, &other).min(gap(&other, &mine)) > 2.0 * sag + CLEAR
+    })
+}
+
+/// `op` of `a` with `b` ([`material_boolean`]), the holes of `a` clear of every region of `b`
+/// (see [`loop_clear_of`]) left out of it and put back in the region of the result that holds
+/// them.
+pub(crate) fn boolean_past_holes(a: &[Region2], b: &[Region2], op: BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    let clear_of_tools = |h: &Loop2| b.iter().all(|t| loop_clear_of(h, t));
+    let mut carried: Vec<Loop2> = Vec::new();
+    let bare: Vec<Region2> = a
+        .iter()
+        .map(|r| {
+            let (clear, near): (Vec<Loop2>, Vec<Loop2>) = r.holes.iter().cloned().partition(|h| clear_of_tools(h));
+            carried.extend(clear);
+            Region2 { outer: r.outer.clone(), holes: near }
+        })
+        .collect();
+    if carried.is_empty() {
+        return material_boolean(a, b, op, work);
+    }
+    put_back(material_boolean(&bare, b, op, work)?, carried)
 }
 
 /// A region with its points on the sheet's nanometre grid, as the sheet model rounds its

@@ -1266,6 +1266,138 @@ fn extrude_cut(st: &ModelState, f: &Feature) -> Result<Option<ExtrudeCut>> {
     Ok(Some(ExtrudeCut { plane: ss.plane, regions, text, operation: *operation, bound: extent.to.is_some() }))
 }
 
+/// What an extrude cut takes from the sheets made from surfaces it reaches, read straight into
+/// their outlines (#6748): each tool a prism along a flat panel's normal, through its whole
+/// thickness, its footprint clear inside the panel's material and its box apart from the rest
+/// of the sheet. That is what the cut takes in space (see `sheet_surface_cuts`), without cutting
+/// a body the sheet builds again. What lies inside a footprint (a letter's counter) stays, a
+/// loose piece. The sheets' bodies cut; none, and nothing changed, for any other cut, which the
+/// generic path takes.
+pub(super) fn surface_prism_cut(
+    f: &Feature,
+    st: &mut ModelState,
+    tools: &[Body],
+    targets: &[String],
+    constructor: Option<&ExtrudeConstructor>,
+) -> Result<Vec<String>> {
+    let Some(cut) = extrude_cut(st, f)? else { return Ok(Vec::new()) };
+    if cut.operation != Operation::Cut || tools.is_empty() || tools.len() > 10_000 {
+        return Ok(Vec::new());
+    }
+    let n = cut.plane.normal();
+    // The tools' span along the sketch's normal, one for all of them, and each footprint: the
+    // tools' own, else the sketch's profiles.
+    // The extrusion's own interval where it was built on the sketch's plane.
+    let mut span: Option<(f64, f64)> = constructor.filter(|c| c.plane == cut.plane).map(|c| (c.interval.0.min(c.interval.1), c.interval.0.max(c.interval.1)));
+    let mut footprints: Option<Vec<(Plane, Region2)>> = if span.is_some() { None } else { Some(Vec::with_capacity(tools.len())) };
+    let read_tools = footprints.is_some();
+    for tool in tools.iter().filter(|_| read_tools) {
+        let Some((lo, hi, _, footprint)) = sheet_tool_span(tool, &cut.plane) else { return Ok(Vec::new()) };
+        if span.is_some_and(|(a, b)| (a - lo).abs() > 1e-7 || (b - hi).abs() > 1e-7) {
+            return Ok(Vec::new());
+        }
+        span = Some((lo, hi));
+        match (footprint, footprints.as_mut()) {
+            (Some(fp), Some(list)) => list.push(fp),
+            _ => footprints = None,
+        }
+    }
+    let Some((lo, hi)) = span else { return Ok(Vec::new()) };
+    let footprints = footprints.unwrap_or_else(|| cut.regions.iter().map(|r| (cut.plane, r.clone())).collect());
+    // Each footprint's prism's box.
+    let spans: Vec<(f64, f64, Plane, Region2, Option<Aabb3>)> = footprints
+        .into_iter()
+        .map(|(plane, region)| {
+            let mut b = Aabb3::EMPTY;
+            for q in &region.outer.polyline(1e-3) {
+                let w = plane.to_world(*q);
+                let off = (w - cut.plane.origin).dot(n);
+                for s in [lo, hi] {
+                    b.add(w + n * (s - off));
+                }
+            }
+            (lo, hi, plane, region, Some(b.inflated(1e-6)))
+        })
+        .collect();
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
+    for (i, sk) in st.surface_sheets.iter().enumerate() {
+        let Some(mb) = st.body(&sk.body) else { continue };
+        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
+            continue;
+        }
+        let body_box = exact_box(&mb.body);
+        let reaching: Vec<_> = spans.iter().filter(|s| !boxes_apart(&s.4, &body_box)).collect();
+        if reaching.is_empty() {
+            continue;
+        }
+        let Some((panels, boxes)) = sk.pieces_in_space() else { return Ok(Vec::new()) };
+        let t = sk.thickness;
+        let tol = 1e-7;
+        let mut out = sk.clone();
+        for (lo, hi, plane, region, tool_box) in reaching {
+            // The panel the tool goes square through.
+            let mut found = None;
+            for (p, frame, own) in &panels {
+                if frame.z.cross(n).len() > 1e-9 {
+                    continue;
+                }
+                let s0 = (frame.shift - cut.plane.origin).dot(n);
+                let s1 = s0 + t * frame.z.dot(n);
+                if !(*lo <= s0.min(s1) + tol && *hi >= s0.max(s1) - tol) {
+                    continue;
+                }
+                let inv = frame.inverse();
+                let chart = |q: Vec2| {
+                    let w = inv.point(plane.to_world(q));
+                    Vec2::new(w.x, w.y)
+                };
+                let mapped = crate::sheet_surface_convert::rigid_region(region, chart);
+                let outline = Region2 { outer: mapped.outer.clone(), holes: Vec::new() };
+                if !crate::sheet_surface::holds_clear(own, &outline) {
+                    continue;
+                }
+                if found.is_some() {
+                    return Ok(Vec::new());
+                }
+                found = Some((*p, mapped));
+            }
+            let Some((p, mapped)) = found else { return Ok(Vec::new()) };
+            // Nothing else of the sheet in its way, and nothing the panel keeps there already.
+            if boxes.iter().any(|(k, b)| *k != Some(p) && !boxes_apart(tool_box, &Some(*b))) {
+                return Ok(Vec::new());
+            }
+            let near = |r: &Region2| {
+                let (a, b) = (r.outer.polyline(1e-3).bounds(), mapped.outer.polyline(1e-3).bounds());
+                !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
+            };
+            if out.recesses.iter().any(|r| r.panel == p && near(&r.region)) || out.loose.iter().any(|l| l.panel == p && near(&l.region)) || !out.sheet.cuts.is_empty() {
+                return Ok(Vec::new());
+            }
+            let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
+            if !crate::sheet_surface::holds_clear(&panel.region, &Region2 { outer: mapped.outer.clone(), holes: Vec::new() }) {
+                return Ok(Vec::new());
+            }
+            panel.region.holes.push(mapped.outer.ccw().reversed());
+            out.loose.extend(mapped.holes.iter().map(|h| crate::Loose { panel: p, region: Region2 { outer: h.ccw(), holes: Vec::new() } }));
+        }
+        plans.push((i, out));
+    }
+    let letters = cut_letters(st, f);
+    let mut handled = Vec::with_capacity(plans.len());
+    for (i, mut sk) in plans {
+        if let Some(flat) = letters.as_ref().and_then(|(plane, regions)| sk.flat_of(plane, regions)) {
+            sk.labels.extend(flat);
+        }
+        handled.push(sk.body.clone());
+        if let Some(slot) = st.surface_sheets.get_mut(i) {
+            *slot = sk;
+        }
+        rebuild_surface_sheet(st, i)?;
+    }
+    Ok(handled)
+}
+
 /// The letters `f` cut, where it is an extrude cut from a sketch with text: the sketch's plane
 /// and the regions of the cut that are letters, with their counters.
 pub(super) fn cut_letters(st: &ModelState, f: &Feature) -> Option<(Plane, Vec<Region2>)> {
