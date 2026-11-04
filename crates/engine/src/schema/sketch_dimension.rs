@@ -259,7 +259,7 @@ pub struct DimensionResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraint: Option<String>,
     /// The parameter that holds the dimension's value (`d1`, or the name a `name = expression`
-    /// value defined); null for a driven dimension, which has none.
+    /// value defined). A driven dimension's is read-only: it reads what the dimension measures.
     pub param: Option<String>,
     /// `true` for a driven (reference) dimension, as asked or placed instead of a redundant one.
     /// Absent for a driving one.

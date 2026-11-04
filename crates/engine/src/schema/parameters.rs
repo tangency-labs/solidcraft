@@ -691,6 +691,10 @@ pub struct ParameterRow {
     /// A text parameter's text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// A driven (reference) dimension's parameter: read-only, its value what the dimension
+    /// measures. Left out for every other parameter.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub driven: bool,
 }
 
 impl From<ParamRow> for ParameterRow {
@@ -710,6 +714,7 @@ impl From<ParamRow> for ParameterRow {
             uses: r.uses,
             used_by: r.used_by,
             text: r.text,
+            driven: r.driven,
         }
     }
 }
