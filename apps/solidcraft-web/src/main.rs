@@ -545,6 +545,12 @@ mod web {
                         continue;
                     }
                     let first = *t.first_unwritten.get_or_insert(time);
+                    let failed = files.kept_failed.borrow().get(&id).copied();
+                    if !keep::may_write(time, failed) {
+                        // The last write failed: try again after a while.
+                        soon(keep::RETRY_MS);
+                        continue;
+                    }
                     if now || keep::due(time, first, t.last_change) {
                         match solidcraft_engine::io::write_design_container(&s.design()) {
                             Ok(bytes) => {
@@ -552,7 +558,10 @@ mod web {
                                 files::write_kept(files, &entry, bytes, s.revision);
                                 t.first_unwritten = None;
                             }
-                            Err(e) => error = Some(format!("keeping unsaved work in this browser: {e}")),
+                            Err(e) => {
+                                files.kept_failed.borrow_mut().insert(id, time);
+                                error = Some(format!("keeping unsaved work in this browser: {e}"));
+                            }
                         }
                         soon(100.0);
                     } else {
@@ -642,9 +651,24 @@ mod web {
             if let Some(path) = &plan.open_saved {
                 if vfs::exists(path) {
                     self.app.open_path(path);
+                    if !keep::is_open(self.app.session.path.as_deref(), path) {
+                        // Not opened (the status says why): the copy stays offered.
+                        return;
+                    }
                 } else {
                     // A file on the computer: the browser asks for access again, in this click.
-                    disk::restore(&self.files, path);
+                    // The copy goes once the file has opened, not before: if access is refused,
+                    // the picker is dismissed or the file is gone, it stays offered.
+                    let (files, id) = (self.files.clone(), entry.id.clone());
+                    disk::restore(
+                        &self.files,
+                        path,
+                        Some(Box::new(move || {
+                            files.keep_offered.borrow_mut().retain(|e| e.id != id);
+                            files::remove_kept(&files, &id);
+                        })),
+                    );
+                    return;
                 }
             }
             if plan.drop_copy {
@@ -1167,7 +1191,7 @@ mod web {
                             can_restore: Some(Box::new(move |path: &str| {
                                 disk::parse(path).is_some_and(|(id, _)| restorable.disk_known.borrow().contains(id))
                             })),
-                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
+                            restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path, None))),
                             download_design: Some(Box::new(files::download)),
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),

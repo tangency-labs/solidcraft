@@ -84,6 +84,8 @@ pub struct Files {
     pub kept: RefCell<std::collections::HashMap<String, Option<u64>>>,
     /// Kept copies being written or removed now (one browser call at a time per copy).
     pub keeping: RefCell<std::collections::HashSet<String>>,
+    /// When (ms) the last write of a copy failed, to wait before trying again (`keep::may_write`).
+    pub kept_failed: RefCell<std::collections::HashMap<String, f64>>,
     /// Copies earlier pages left, newer than their design's last save: offered at start.
     pub keep_offered: RefCell<Vec<keep::Entry>>,
 }
@@ -769,8 +771,12 @@ pub fn write_kept(files: &Rc<Files>, entry: &keep::Entry, bytes: Vec<u8>, revisi
         match r.await {
             Ok(()) => {
                 files.kept.borrow_mut().insert(id.clone(), Some(revision));
+                files.kept_failed.borrow_mut().remove(&id);
             }
-            Err(e) => files.say(format!("keeping unsaved work in this browser: {e}"), true),
+            Err(e) => {
+                files.kept_failed.borrow_mut().insert(id.clone(), js_sys::Date::now());
+                files.say(format!("keeping unsaved work in this browser: {e}"), true)
+            }
         }
         files.keeping.borrow_mut().remove(&id);
         files.wake();
@@ -784,6 +790,7 @@ pub fn remove_kept(files: &Rc<Files>, id: &str) {
         return;
     }
     let _ = vfs::remove(&kept_path(&id));
+    files.kept_failed.borrow_mut().remove(&id);
     let files = files.clone();
     spawn_local(async move {
         // The metadata first: what's left without it is never offered.

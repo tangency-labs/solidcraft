@@ -159,6 +159,20 @@ pub fn due(now: f64, first_unwritten: f64, last_change: f64) -> bool {
     now - last_change >= QUIET_MS || now - first_unwritten >= MAX_WAIT_MS
 }
 
+/// How long after a failed write of a design's copy it isn't tried again (ms).
+pub const RETRY_MS: f64 = 30_000.0;
+
+/// Whether a copy whose write last failed at `failed_at` (ms; `None`: it hasn't) may be written
+/// at `now`: not before [`RETRY_MS`] has passed, so a full or denied store isn't hit every tick.
+pub fn may_write(now: f64, failed_at: Option<f64>) -> bool {
+    failed_at.is_none_or(|t| !(now >= t) || now - t >= RETRY_MS)
+}
+
+/// Whether `wanted` is the design now open, given the open design's path.
+pub fn is_open(open: Option<&str>, wanted: &str) -> bool {
+    open == Some(wanted)
+}
+
 /// Whether leaving the page asks through the browser's "leave site?" box: there is unsaved work,
 /// and either the user still wants to be asked or it isn't all kept in the browser yet (with the
 /// keep preference off it never is, so there the box always stays).
@@ -212,6 +226,22 @@ mod tests {
 
     fn entry(id: &str, changed_at: f64, path: Option<&str>) -> Entry {
         Entry { id: id.into(), name: "Bracket".into(), path: path.map(str::to_string), changed_at }
+    }
+
+    #[test]
+    fn a_failed_write_waits_before_the_next_try() {
+        assert!(may_write(1000.0, None));
+        assert!(!may_write(1000.0 + RETRY_MS - 1.0, Some(1000.0)));
+        assert!(may_write(1000.0 + RETRY_MS, Some(1000.0)));
+        // A clock that went back doesn't block for good.
+        assert!(may_write(10.0, Some(1000.0)));
+    }
+
+    #[test]
+    fn a_design_counts_as_opened_only_at_its_own_path() {
+        assert!(is_open(Some("a.sc"), "a.sc"));
+        assert!(!is_open(Some("b.sc"), "a.sc"));
+        assert!(!is_open(None, "a.sc"));
     }
 
     #[test]
