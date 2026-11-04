@@ -55,7 +55,7 @@ mod tests {
     use solidcraft_engine::geom::drawing_view::NamedView;
 
     /// Ticked until nothing is being drawn, the window ends at the sheet built at once, byte for
-    /// byte, with the design and its undo steps as they were.
+    /// byte, its dimension read too, with the design and its undo steps as they were.
     #[test]
     fn ticks_draw_the_sheet_beside_the_window() {
         let mut h = crate::scenario::Harness::new();
@@ -64,8 +64,12 @@ mod tests {
         let mut d = (**h.app.session.drawing("test").unwrap()).clone();
         let mut ids = solidcraft_engine::doc::ids::IdSource::seeded(4892);
         let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
+        let mut front = 0;
         for (at, view) in [([120.0, 150.0], NamedView::Front), ([280.0, 150.0], NamedView::Right)] {
             let id = d.allocate_id(&mut ids).unwrap();
+            if view == NamedView::Front {
+                front = id;
+            }
             let kind = ViewKind::Base { source, view: ViewDirection::Named(view) };
             d.add_views([Arc::new(View {
                 id,
@@ -77,6 +81,9 @@ mod tests {
             })]);
         }
         h.app.session.doc_mut().put_drawing(Arc::new(d));
+        // The plate's top front edge, read once no view is waiting.
+        let view = solidcraft_engine::doc::ids::encode(front);
+        h.app.run("drawing.dimension.add", json!({"view": view, "kind": {"length": {"edge": [50, 0, 20]}}})).unwrap();
         let (doc, undo) = (h.app.session.doc.to_json(), h.app.session.undo.len());
         drawing_scene::extract(&mut h.app.session, sheet).unwrap();
         for _ in 0..10_000 {
@@ -88,7 +95,7 @@ mod tests {
         let shown = drawing_scene::extract(&mut h.app.session, sheet).unwrap();
         let d = h.app.session.drawing("test").unwrap().clone();
         let built = drawing_scene::build(&h.app.session, &d, sheet).unwrap();
-        assert!(shown.stale.is_empty() && h.app.drawing_job.is_none());
+        assert!(shown.stale.is_empty() && shown.stale_dimensions.is_empty() && h.app.drawing_job.is_none());
         assert_eq!(serde_json::to_string(&*shown.scene).unwrap(), serde_json::to_string(&built.scene).unwrap());
         assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc, undo));
     }
