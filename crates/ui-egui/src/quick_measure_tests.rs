@@ -139,7 +139,7 @@ fn a_circle_and_a_line_show_the_distance_from_the_line_to_the_centre() {
     h.app.run("sketch.line", json!({"points": [[20, 0], [30, 0]]})).unwrap();
     h.app.session.selection = ["c1", "l1"].into_iter().map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).collect();
     let rows = readout(&mut h);
-    assert!(rows.contains(&row("Line to centre", crate::prefs::show_mm(&h.app, 20.0, 1))), "{rows:?}");
+    assert!(rows.contains(&row("Line to center", crate::prefs::show_mm(&h.app, 20.0, 1))), "{rows:?}");
     assert!(!rows.iter().any(|(l, _)| l == crate::i18n::tr("Centre to centre")), "{rows:?}");
 
     h.app.run("sketch.circle.center", json!({"center": [50, 0], "radius": 5})).unwrap();
