@@ -1,11 +1,13 @@
 # AGENTS.md — solidcore
 
-solidcore is a B-rep kernel in idiomatic safe Rust, based on NVIDIA's SMLib (C++, Apache-2.0)
-and going its own way from there: it started as a port, and new constructions are designed and
-built here. Upstream is cloned (gitignored) at `upstream/`, pinned to v1.0.1, commit `3fd5b95`
+solidcore is a B-rep kernel in idiomatic safe Rust. It started as a port of NVIDIA's SMLib (C++,
+Apache-2.0) and has detached from it: the aim is the most correct result, by construction, not
+SMLib's. SMLib and the SolidCraft fork of it are references to consult (test inputs, expected
+values, known constructions), never targets to match.
+Upstream is cloned (gitignored) at `upstream/`, pinned to v1.0.1, commit `3fd5b95`
 (`scripts/upstream-pin.env` is the single source of truth for scripts, CI and the site). Many
-agents work here at once: read this whole file before your first change. Where a construction has been
-redesigned (the generic blend), the new design is what solidcore builds, not upstream's (§4b). People: [CONTRIBUTING.md](CONTRIBUTING.md) has the same principles in short.
+agents work here at once: read this whole file before your first change. What solidcore builds is its own
+design wherever that is more correct than upstream's (§4b). People: [CONTRIBUTING.md](CONTRIBUTING.md) has the same principles in short.
 
 ```
 crates/solidcore       the kernel (pure Rust, no unsafe, wasm-ok)        owner: unit porters
@@ -56,6 +58,10 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
   stack is allowed only if it visits in exactly the same order. Note each bound in the
   file header's Deviations line. `audit.recursion` (last unit) sweeps the whole crate.
 
+**Correctness is proved directly.** A result is right because closed forms, geometric checks
+and invariants say so, not because it matches the C++. Every fix comes with a regression test
+that fails without it.
+
 **The gate.** solidcore's CI gates on its own checks: fmt, clippy, its tests and the wasm build.
 A pull request is green when they pass. The difftest against the C++ reference is a tool, not
 the gate: maintainers run it on a pull request that needs it, from the CI workflow's Run workflow
@@ -63,7 +69,10 @@ with `difftest` set (`.github/workflows/ci.yml`), and the reference it builds is
 `scripts/upstream-pin.env`. Pushes to main still run the sweep and publish main's reports,
 which are the exact base a requested run checks against. When it runs, it holds the rules below.
 
-**Difftest parity.** A unit is **green** only when difftest runs the Rust and the C++
+**Difftest.** The difftest against the pinned C++ is a diagnostic for code that is ported and
+unchanged, not a goal: where solidcore is more correct and differs, the C++ is wrong for that
+case, recorded as below. The rules for a port: a unit is **green** only when difftest runs
+the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within
 `1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|)`; an absolute floor only where a unit
 documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. The harness never feeds C++ outputs or C++ process state into the Rust side (`crates/difftest/README.md`, No C++ state reaches the Rust side). A disagreement you cannot fix
@@ -114,12 +123,14 @@ nice -n 10 cargo test -p solidcore                     # every cargo/C++ command
 
 ## 3. Code style
 
-**Port faithfully, write idiomatically.** Keep upstream numerics: same formulas, same
-operation order, same iteration order, same branch structure for tolerance tests and
-degenerate cases. Do not "simplify" `a*b + c` into `mul_add`, reorder sums, swap in
-`hypot`/`midpoint`, or replace loops with library calls that change rounding. The C++
-reference is built with `-ffp-contract=off`, so matching order gives matching bits.
-Everything else is Rust-first:
+**Numerics: ported code keeps upstream's, new code chooses for correctness.** Code that is
+ported and unchanged keeps upstream numerics: same formulas, same operation order, same
+iteration order, same branch structure for tolerance tests and degenerate cases. Do not
+"simplify" `a*b + c` into `mul_add`, reorder sums, swap in `hypot`/`midpoint`, or replace
+loops with library calls that change rounding there; the C++ reference is built with
+`-ffp-contract=off`, so matching order gives matching bits. Code that fixes or replaces a
+construction uses the numerics its correctness needs (exact predicates, interval enclosures,
+certified rounding bounds) and says so in its doc comment. Everything else is Rust-first:
 
 - **Data model.** Topology lives in `topology::Brep` arenas addressed by typed ids
   (`FaceId`, `EdgeId`, `VertexId`, `LoopId`, `ShellId`, `BrepId`); no pointers, `Rc`,
@@ -270,8 +281,10 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    9. **`UNPORTED` stubs only for calls into units that are not `green`/`partial`**,
       tagged with the owning unit from `harness/callgraph/units.json`; co-ports are
       recorded as `CO-PORTED` in that unit's `plan/units/<id>.toml` notes.
-6. **Finish the PR**: merge the latest `origin/main` into your branch (never rebase a
-   pushed branch), re-verify, set the unit's `status` to `"green"` or `"partial"` in
+6. **Finish the PR**: rebase your branch onto the latest `origin/main` (never merge main
+   into it: history stays linear) and force-push your own PR branch with
+   `--force-with-lease`; never rewrite a branch someone else builds on, or `main`. Re-verify,
+   set the unit's `status` to `"green"` or `"partial"` in
    `plan/units/<unit id>.toml` with case/deferred counts in `notes` (plus the files of
    any units you promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
    the PR description. CI runs fmt, clippy, tests, wasm, difftest on every green or
@@ -361,38 +374,41 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
 - **Local swarms only:** when several agents share one clone, everything that writes
   that clone's `main` runs under `flock .git/swarm.lock -c '<commands>'`.
 
-## 4b. Fixing upstream defects
+## 4b. Fixing defects and building constructions
 
-Every SMLib unit has a Rust counterpart; most new work fixes SMLib defects or builds solidcore's
-own constructions. The policy (owner, 2026-11-02; supersedes the interim rule of #1018):
+Every SMLib unit has a Rust counterpart; the work now is fixing defects and building solidcore's
+own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #1018):
 
-- **Redesigned constructions are the reference, not upstream.** solidcore's default behaviour is
-  no longer upstream usd-brep v1.0.1's where a construction has been redesigned (the generic blend,
-  `docs/generic-blend.md`). Those steps were first built in the SolidCraft fork of SMLib, and their
-  results there are the baseline they keep, bit for bit; the difftest shows it when the
-  maintainers run it, against the reference set in `scripts/upstream-pin.env`. New construction
-  is designed on its solidcore issue and built here.
-- **Flags only while a step is being brought over.** A change of result lands behind its
-  `Kernel::fixes` (`UpstreamFixes`) field with a regression test of its case and an addendum in
-  `plan/upstream-issues/`. Once its construction's ports are in and parity is shown, the flag
-  becomes the default and is removed, and the old path is **deleted** together with the
-  solidcore-only `WR-` patches made to it. No flag is permanent, and nothing is kept as a
-  fallback.
+- **The most correct solution, in solidcore.** Don't match SMLib or the fork by default. Use them,
+  pinned or fork, for test inputs, expected values and known constructions; where their approach
+  is the most correct one, use it, and never copy their bugs. The redesigned constructions (the
+  generic blend, `docs/generic-blend.md`) are designed on their solidcore issue and built here; the
+  fork's results are a cross-check, not a baseline to keep bit for bit.
+- **No compatibility flags.** A fix changes the default result, with a regression test that fails
+  without it. No new `Kernel::fixes` (`UpstreamFixes`) field, no old path kept behind a switch,
+  no preference for the old behaviour: a saved design rebuilds with today's correct result. Each PR
+  says what result changes and shows the evidence (for example: every case that built before is
+  unchanged bit for bit, or the cases that change and why the new result is right).
+- **Retire the existing flags.** The `UpstreamFixes` fields that exist are left from the port.
+  Turning one on by default, deleting its off path and the solidcore-only `WR-` patches made to
+  it, is welcome work: a few flags per PR, each with the cases whose results change.
+- **Record differences from the C++, don't hide them.** When solidcore is more correct and
+  differs, the C++ is wrong for that case: record it as a confirmed `plan/upstream-issues/` entry
+  and a `cpp_defect` known-mismatch marker (§1). Never loosen a tolerance.
 - **Cases with images.** A pull request that makes a SolidCraft rig case pass, or turns a known
   failure into a correct refusal, updates its row in `docs/generic-blend.md` §7 and its render
   (`docs/generic-blend/cases/<case>.jpg`) in the same change. No row changes without its image.
   Choose the render's view from the case's geometry so it shows the issue (the corner, the seam,
   the spot refused or fixed), framed close on it, with an inset of the whole part where it helps;
   never a fixed angle.
-- **Don't extend code that is going away.** Fix an old path only when a parity gate needs it
-  before its replacement lands; say so in the PR, and it is deleted with the code.
+- **Don't extend code that is going away.** Improve the construction that replaces it; an old
+  path is deleted when its replacement lands, never kept as a fallback.
 - **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. #1160 for UB-87.
 - **Check that the issue is still open work before you claim it.** Many issues were
   fixed by a PR that did not close them (see #1206). Search merged PRs for the issue
   number, the upstream symbol and the `WR-`/`UB-`/`HANG-` record id, and grep
-  `plan/upstream-issues/` and the `UpstreamFixes` docs. Issues about fork-only features
-  that are not in SMLib or SM_API at the pin (e.g. the screw sweep, #1162/#1163) are out
-  of scope.
+  `plan/upstream-issues/` and the `UpstreamFixes` docs. Constructions SMLib never had
+  (the screw sweep, procedural definitions, STEP import) are in scope like any other.
 - A fixing PR uses a closing keyword (`Fixes #n`) so the issue closes when it merges.
 
 **Root causes, not point solutions.**

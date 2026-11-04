@@ -2,8 +2,8 @@
 
 # Contributing to solidcore
 
-Thank you for helping. solidcore is a B-rep kernel in safe, deterministic Rust. It is based on
-SMLib and goes its own way: clean, procedural constructions, each built from the geometry of its
+Thank you for helping. solidcore is a B-rep kernel in safe, deterministic Rust. It started as a
+port of SMLib and has detached from it: clean, procedural constructions, each built from the geometry of its
 case, replacing the code they supersede. This page is the short version;
 [AGENTS.md](AGENTS.md) has the full rules, which apply to people and agents alike.
 
@@ -41,12 +41,15 @@ case, replacing the code they supersede. This page is the short version;
 
 ## The new construction replaces the old
 
-- **SMLib is the base, not the limit.** Where a construction has been redesigned (the generic
-  blend), the new one is what solidcore builds, and its steps keep their results bit for bit.
-- **Flags are temporary.** A port lands behind an opt-in flag only while it's in progress. Once its
-  construction is ported and parity is shown, the flag becomes the default and the old code is
-  deleted, together with the patches made to it.
+- **The most correct solution, not SMLib's.** SMLib and the SolidCraft fork are references to
+  consult (inputs, expected values, known constructions), never targets to match. Prove a result
+  with closed forms, geometric checks and invariants.
+- **No compatibility flags.** A fix changes the default result, with a test that fails without
+  it; no old path is kept behind a flag, and a saved design rebuilds with today's correct result.
+  Say in the PR which results change and show the evidence. Retiring the `UpstreamFixes` flags
+  left from the port (turn on, delete the old path) is welcome work.
 - **Don't extend the old paths.** Improve the construction that replaces them.
+- **Keep history linear.** Rebase your branch onto `main`; never merge `main` into it.
 
 ## Cases and known failures
 
