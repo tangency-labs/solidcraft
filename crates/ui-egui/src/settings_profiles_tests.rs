@@ -17,7 +17,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 98, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 99, "page presentation must not alter profile membership");
     for key in [
         "nav",
         "mouse_gestures",
