@@ -2058,7 +2058,7 @@ mod tests {
         harness.step(&json!({"widget":"Reset", "near":"Hide preview for reselect"})).unwrap();
         assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
         harness.app.preferences.preview_reselect_modifier = PreviewModifier::Shift;
-        harness.step(&json!({"widget":"Reset All"})).unwrap();
+        harness.step(&json!({"widget":"Restore page defaults"})).unwrap();
         assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
         harness.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
