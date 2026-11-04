@@ -181,7 +181,8 @@ pub fn local_operation(
             if e.is_unported_or_cancelled() || k.fixes.local_operation_offset_status {
                 e
             } else {
-                SolidError::sm_err(OP)
+                // status `SM_ERR`, as upstream; the offset's own error is kept (#2615)
+                SolidError::failed_after(OP, "the offset of the moved faces could not be built", e)
             }
         });
     drop(executive);

@@ -38,7 +38,7 @@ pub enum Error {
         why: Option<RoomReason>,
     },
     /// A shell, offset or thicken whose wall is thicker than a face curves (the kernel's
-    /// `ShellRefusal::Fold`): the largest wall that works, when the kernel names one.
+    /// `OffsetFailure::Folds`): the largest wall that works, when the kernel names one.
     WallFolds {
         /// The largest wall that works.
         largest: Option<f64>,

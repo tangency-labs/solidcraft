@@ -28,7 +28,7 @@ mod offset_fixture;
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
-use solidcore::error::{SolidError, SM_ERR};
+use solidcore::error::SM_ERR;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
@@ -117,7 +117,7 @@ fn wr_578_box_and_cylinder_shell_other_seams() {
 fn wr_578_other_seams_are_refused() {
     for seam in [125.0, 200.0] {
         match shell_1494_with(kernel(true), seam).1 {
-            Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR, "seam {seam}"),
+            Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR), "seam {seam}"),
             other => panic!("seam {seam}: {other:?}"),
         }
     }
@@ -151,7 +151,7 @@ fn wr_578_shell_thicker_than_a_step_is_edge_vanishes() {
     let strip = planar_faces_at(&k, &b, 1, 35.0);
     assert_eq!(strip.len(), 1, "the far side under the notch");
     match shell(&mut k, b, -1.5, &strip) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, 1043),
+        Err(e) => assert_eq!(e.sm_status(), Some(1043)),
         other => panic!("SM_ERR_OFFSET_EDGE_VANISHES expected: {other:?}"),
     }
 }

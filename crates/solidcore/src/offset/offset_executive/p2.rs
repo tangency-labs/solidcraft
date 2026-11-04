@@ -252,13 +252,15 @@ fn refuse_folding_offset(
     let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
     match certify_regular(kernel, base, offset.offset_distance(), Some(uv_box))? {
         Regularity::Regular => Ok(()),
-        Regularity::Folds { largest } => Err(SolidError::ShellRefused {
+        Regularity::Folds { largest } => Err(crate::error::Failure::new(
             operation,
-            code: crate::error::SM_ERR,
-            entity: Some(EntityRef::Face(face)),
-            refusal: crate::offset::construction::ShellRefusal::Fold,
-            size: Some(largest),
-        }),
+            crate::error::offset::OffsetFailure::Folds {
+                face,
+                distance: offset.offset_distance(),
+                largest,
+            },
+        )
+        .into_error()),
     }
 }
 
@@ -2024,13 +2026,15 @@ fn shell_difference_with(
     }
 }
 
+/// `OffsetBrep`'s `SER(SM_ERR)` after a failed `DoSolidOffset`: the status is `SM_ERR`,
+/// and the offset's own error is kept as its cause (#2615, #2511).
 fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
     result.map_err(|error| {
         // a cancel (#2136, #2372) is no offset failure: it is returned as it is
         if error.is_unported_or_cancelled() {
             error
         } else {
-            SolidError::sm_err(OP_OFFSET)
+            SolidError::failed_after(OP_OFFSET, "the offset could not be built", error)
         }
     })
 }
@@ -2691,9 +2695,7 @@ mod tests {
     }
 
     fn assert_status<T: core::fmt::Debug>(result: Result<T>, code: i32) {
-        assert!(
-            matches!(result.unwrap_err(), SolidError::Upstream { code: actual, .. } if actual == code)
-        );
+        assert_eq!(result.unwrap_err().sm_status(), Some(code));
     }
 
     /// The B-rep box (`query.brep`) these paths used to stop at is ported: on the

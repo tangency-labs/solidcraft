@@ -71,9 +71,8 @@ use crate::topology::{loopuse, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopI
 
 const OP: &str = "offset::offset_executive::crossing_loops::resolve_crossing_loops";
 
-// `SM_ERR_BAD_INTERSECTIONS`.
-use crate::error::SM_ERR_BAD_INTERSECTIONS;
-use crate::error::SM_ERR_OFFSET_WALLS_TOUCH;
+use crate::error::offset::{LoopCrossing, OffsetFailure, WallContact};
+use crate::error::Failure;
 // `SM_ERR_ASSERT_FAILURE`.
 use crate::error::SM_ERR_ASSERT_FAILURE;
 
@@ -104,25 +103,32 @@ struct LoopStretch {
 
 /// A crossing of the loops of an offset face that is not resolved
 /// (`sm_UnresolvedCrossing`): the offset fails with `SM_ERR_BAD_INTERSECTIONS` rather
-/// than merge a face whose loops cross; `why` names the configuration.
-fn unresolved(why: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation: why,
-        code: SM_ERR_BAD_INTERSECTIONS,
-        entity: None,
-    }
+/// than merge a face whose loops cross; `crossing` names the configuration. The face is
+/// named by `resolve_crossing_loops`, which knows the input face it comes from.
+fn unresolved(crossing: LoopCrossing) -> SolidError {
+    Failure::new(
+        OP,
+        OffsetFailure::LoopsCross {
+            face: None,
+            crossing,
+        },
+    )
+    .into_error()
 }
 
 /// Loops of an offset face that touch without crossing (`sm_WallsTouch`, fork a759622):
 /// the offset walls they come from meet there, so the offset would pinch to nothing
 /// along a line (or over a stretch). No face is bounded there, and the offset is refused
-/// with `SM_ERR_OFFSET_WALLS_TOUCH`; `why` names the configuration.
-fn walls_touch(why: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation: why,
-        code: SM_ERR_OFFSET_WALLS_TOUCH,
-        entity: None,
-    }
+/// with `SM_ERR_OFFSET_WALLS_TOUCH`; `contact` names the configuration.
+fn walls_touch(contact: WallContact) -> SolidError {
+    Failure::new(
+        OP,
+        OffsetFailure::WallsTouch {
+            face: None,
+            contact,
+        },
+    )
+    .into_error()
 }
 
 /// Where edge uses `a` and `b` of different loops meet (`sm_LoopContact`, fork a759622):
@@ -254,9 +260,7 @@ fn cut_at_crossings_refusing_touch(
             )?;
             for solution in solutions.as_slice() {
                 if solution.solution_type != SolutionType::SingleValue {
-                    return Err(walls_touch(
-                        "Offset face loops run along one another: the offset walls meet there",
-                    ));
+                    return Err(walls_touch(WallContact::RunAlong));
                 }
                 contacts.push(LoopContact {
                     a: aa,
@@ -303,9 +307,7 @@ fn cut_at_crossings_refusing_touch(
             tol_3d,
         )?;
         if loop_touches_at(&dirs_a, &dirs_b, normal)? {
-            return Err(walls_touch(
-                "Offset face loops touch without crossing: the offset walls meet along a line",
-            ));
+            return Err(walls_touch(WallContact::Touch));
         }
     }
 
@@ -323,7 +325,7 @@ fn cut_at_crossings_refusing_touch(
             || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
             || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
         {
-            return Err(unresolved("Offset face loops cross at a loop vertex"));
+            return Err(unresolved(LoopCrossing::AtLoopVertex));
         }
         at_mut(cuts, c.a)?.push((c.t_a, num_crossings));
         at_mut(cuts, c.b)?.push((c.t_b, num_crossings));
@@ -417,10 +419,32 @@ impl OffsetExecutive {
         let status = bp1::faces(&offset, None).and_then(|faces| {
             faces.into_iter().try_for_each(|f| {
                 self.resolve_crossing_loops_of_face(kernel, original, &mut offset, f, notifications)
+                    .map_err(|e| self.on_input_face(original, f, e))
             })
         });
         self.set_offset_brep(offset);
         status
+    }
+
+    /// `e`, a refusal of offset face `f`, naming the face of `original` that
+    /// `f` comes from where the refusal names no face and `f` comes from exactly one
+    /// (not upstream, #2615: error context only; any other error is returned as it is).
+    fn on_input_face(&self, original: &Brep, f: FaceId, e: SolidError) -> SolidError {
+        let SolidError::Failed(mut failure) = e else {
+            return e;
+        };
+        let crate::error::Reason::Offset(refusal) = failure.reason else {
+            return SolidError::Failed(failure);
+        };
+        let input_face = match self.faceuse_to_faces.firsts(f).as_slice() {
+            [fu] => eu::faceuse_face(original, *fu).ok().flatten(),
+            _ => None,
+        };
+        if let Some(face) = input_face {
+            failure.reason = crate::error::Reason::Offset(refusal.on_face(face));
+            failure.entity = failure.entity.or(Some(EntityRef::Face(face)));
+        }
+        SolidError::Failed(failure)
     }
 
     /// `ResolveCrossingLoopsOfFace` (fork, not upstream): when the loops of offset face
@@ -538,7 +562,7 @@ impl OffsetExecutive {
                     )?;
                     for solution in solutions.as_slice() {
                         if solution.solution_type != SolutionType::SingleValue {
-                            return Err(unresolved("Offset face loops run along one another"));
+                            return Err(unresolved(LoopCrossing::RunAlong));
                         }
                         let t_a = solution.start.param(0)?;
                         let t_b = solution.start.param(1)?;
@@ -551,7 +575,7 @@ impl OffsetExecutive {
                             || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
                             || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
                         {
-                            return Err(unresolved("Offset face loops meet at a loop vertex"));
+                            return Err(unresolved(LoopCrossing::MeetAtLoopVertex));
                         }
                         at_mut(&mut cuts, aa)?.push((t_a, num_crossings));
                         at_mut(&mut cuts, bb)?.push((t_b, num_crossings));
@@ -568,9 +592,7 @@ impl OffsetExecutive {
         // alone.
         for &edgeuse in &edgeuses {
             if !eu::edge_is_lamina(b, edge_of(b, edgeuse)?)? {
-                return Err(unresolved(
-                    "Offset face whose loops cross shares an edge with another face",
-                ));
+                return Err(unresolved(LoopCrossing::SharesEdge));
             }
         }
 
@@ -608,7 +630,7 @@ impl OffsetExecutive {
                 if hi.partial_cmp(&lo) != Some(core::cmp::Ordering::Greater)
                     || from_pt.distance(to_pt) <= tol_3d
                 {
-                    return Err(unresolved("Three offset face loops cross at one point"));
+                    return Err(unresolved(LoopCrossing::ThreeAtOnePoint));
                 }
                 let mid = curve.evaluate_point(kernel, 0.5 * (lo + hi))?;
                 stretches.push(LoopStretch {
@@ -646,9 +668,7 @@ impl OffsetExecutive {
                 }
                 let found = contains_uv_point(kernel, b, l, None, uv, zone_tol)?.containment;
                 if found != PointContainment::Inside && found != PointContainment::Outside {
-                    return Err(unresolved(
-                        "Offset face loop stretch is neither inside nor outside another loop",
-                    ));
+                    return Err(unresolved(LoopCrossing::StretchUnclassified));
                 }
                 let wanted = if ll == 0 {
                     PointContainment::Inside
@@ -747,15 +767,13 @@ impl OffsetExecutive {
                     continue;
                 }
                 if at(&next, ss)?.is_some() {
-                    return Err(unresolved(
-                        "Offset face loops leave a crossing more than one way",
-                    ));
+                    return Err(unresolved(LoopCrossing::LeaveMoreThanOneWay));
                 }
                 *at_mut(&mut next, ss)? = Some(tt);
                 *at_mut(&mut prev_count, tt)? += 1;
             }
             if at(&next, ss)?.is_none() {
-                return Err(unresolved("Offset face loops leave a crossing no way"));
+                return Err(unresolved(LoopCrossing::LeaveNoWay));
             }
         }
         let mut new_loops: Vec<Vec<usize>> = Vec::new();
@@ -770,9 +788,7 @@ impl OffsetExecutive {
             let mut tt = ss;
             while !*at(&done, tt)? {
                 if *at(&prev_count, tt)? != 1 {
-                    return Err(unresolved(
-                        "Offset face loops arrive at a crossing more than one way",
-                    ));
+                    return Err(unresolved(LoopCrossing::ArriveMoreThanOneWay));
                 }
                 *at_mut(&mut done, tt)? = true;
                 chain.push(tt);
@@ -795,9 +811,7 @@ impl OffsetExecutive {
         // (deviation: SmBrep::MakeFaceFromLoopOnFace is not ported, so a face that
         // comes apart is made one face per outer loop, and only without holes)
         if outer_loops.len() > 1 && !hole_loops.is_empty() {
-            return Err(unresolved(
-                "Offset face whose loops cross comes apart around a hole",
-            ));
+            return Err(unresolved(LoopCrossing::ComesApartAroundHole));
         }
         let face_loops: Vec<Vec<usize>> = if outer_loops.len() > 1 {
             outer_loops.iter().map(|&ll| vec![ll]).collect()

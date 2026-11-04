@@ -15,7 +15,6 @@
 )] // test helpers
 
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
@@ -108,7 +107,7 @@ fn wr_648_without_the_opt_in_the_closed_wall_is_refused() {
         let mut b = stepped(&mut k);
         let top = top_at(&k, &b, z);
         match OffsetFacesExecutive::new().offset_faces(&mut k, &mut b, &[top], d) {
-            Err(SolidError::Upstream { code, .. }) => assert_eq!(code, 1043, "z = {z}"),
+            Err(e) => assert_eq!(e.sm_status(), Some(1043), "z = {z}"),
             other => panic!("z = {z}: {other:?}"),
         }
     }

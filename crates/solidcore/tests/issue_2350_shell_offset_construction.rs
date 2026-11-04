@@ -20,11 +20,12 @@
 mod offset_fixture;
 
 use offset_fixture::{volume, Notifications};
+use solidcore::error::offset::OffsetFailure;
+use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::nurbs::b_spline_surface::p1::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
-use solidcore::offset::construction::ShellRefusal;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::query::api_queries::brep_is_manifold_solid;
@@ -36,7 +37,7 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, FaceId};
-use solidcore::{EntityRef, Kernel, SolidError};
+use solidcore::{EntityRef, Kernel};
 
 /// The quadratic Bezier (-10, 0), (0, 10), (10, 0) in the xy-plane extruded 20 along z;
 /// `two_spans` inserts a knot at s = 1/2.
@@ -217,13 +218,34 @@ fn parabola_fold_is_refused_naming_its_apex_radius() {
         let mut k = kernel(true);
         let sheet = parabola_sheet(&mut k, two);
         let err = thicken(&mut k, sheet, 11.0).unwrap_err();
-        let SolidError::ShellRefused { refusal, size, .. } = err else {
+        let Some(failure) = err.failure() else {
             panic!("t11 towards the centre: {err:?}");
         };
-        assert_eq!(refusal, ShellRefusal::Fold);
-        let size = size.unwrap();
-        assert!((size - 10.0).abs() < 1e-9, "{size}");
+        let Reason::Offset(OffsetFailure::Folds {
+            face,
+            distance,
+            largest,
+        }) = failure.reason
+        else {
+            panic!("t11 towards the centre: {err:?}");
+        };
+        assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+        assert_eq!(distance.abs(), 11.0);
         assert_eq!(err.sm_status(), Some(1001));
+        // #2615: the refusal in solidcore's terms, naming the face and the sizes
+        assert_eq!(err.kind(), ErrorKind::OffsetFolds);
+        assert_eq!(err.entity(), Some(EntityRef::Face(face)));
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "{}: the offset of face {} by {distance} folds: the wall is thicker than a \
+                 radius of curvature of the face on that side (the largest wall that works is \
+                 {largest})",
+                err.operation(),
+                face.index()
+            )
+        );
+        assert!(!err.to_string().contains("1001"), "{err}");
     }
 }
 
@@ -235,7 +257,7 @@ fn flag_off_keeps_smlibs_results() {
         let mut k = kernel(false);
         let sheet = parabola_sheet(&mut k, two);
         let err = thicken(&mut k, sheet, 11.0).unwrap_err();
-        assert!(!matches!(err, SolidError::ShellRefused { .. }), "{err:?}");
+        assert_ne!(err.kind(), ErrorKind::OffsetFolds, "{err:?}");
         let mut k = kernel(false);
         let sheet = parabola_sheet(&mut k, two);
         let mut b = thicken(&mut k, sheet, 2.0).unwrap();

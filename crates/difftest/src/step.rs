@@ -164,6 +164,10 @@ fn status<T>(r: &Result<T, SolidError>, notes: &mut Vec<String>) -> Result<f64, 
             Err(Deferred((*unit).to_string(), (*upstream).to_string()))
         }
         Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
+        // a failure in solidcore's terms (#2615): its C++ comparison status
+        Err(e @ SolidError::Failed(_)) => {
+            Ok(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)))
+        }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
             Ok(f64::from(solidcore::error::SM_ERR_INVALID_INPUT))
         }

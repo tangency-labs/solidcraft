@@ -46,7 +46,7 @@ use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{EdgeId, EdgeuseId, FaceId};
-use solidcore::{Brep, EntityRef, Kernel, SolidError};
+use solidcore::{Brep, EntityRef, Kernel};
 
 /// The #1528 operand: a plate 27.5 thick on the profile (0, 0)-(42.5, 0)-(42.5, 20)-(0, 20)
 /// plus the half circle r 10 centred (0, 10) on the x < 0 side, less a blind hole r 5 along
@@ -125,7 +125,10 @@ fn shell_open_at_y20_fails_as_upstream() {
         assert_eq!(open.len(), 1, "the y = 20 face");
         let r = api_shell(&mut k, &mut b, options(cos), &open);
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
+            matches!(
+                r.as_ref().map_err(solidcore::SolidError::sm_status),
+                Err(Some(1001))
+            ),
             "create_offset_solid={cos}: {:?}",
             r.map(|b| b.face_list().len())
         );

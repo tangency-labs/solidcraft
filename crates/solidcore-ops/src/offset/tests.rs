@@ -215,9 +215,10 @@ fn a_thickened_sheet_that_is_no_solid_is_refused() {
 /// the largest that works), a vertex moved past an edge's other end; others as the kernel's.
 #[test]
 fn the_offset_refusals_are_typed() {
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
     use solidcore::error::{SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH};
-    use solidcore::offset::construction::ShellRefusal;
-    use solidcore::SolidError;
+    use solidcore::{FaceId, SolidError};
     let up = |code| SolidError::Upstream {
         operation: "test",
         code,
@@ -231,17 +232,39 @@ fn the_offset_refusals_are_typed() {
         super::status(up(SM_ERR_OFFSET_EDGE_VANISHES)),
         Error::Unsupported(_)
     ));
+    // the kernel's typed offset refusals (solidcore#2615)
+    let refused = |o| Failure::new("test", o).into_error();
     assert_eq!(
-        super::status(SolidError::ShellRefused {
-            operation: "test",
-            code: 1001,
-            entity: None,
-            refusal: ShellRefusal::Fold,
-            size: Some(10.0),
-        }),
+        super::status(refused(OffsetFailure::Folds {
+            face: FaceId::from_index(3),
+            distance: -11.0,
+            largest: 10.0,
+        })),
         Error::WallFolds {
             largest: Some(10.0)
         }
+    );
+    assert_eq!(
+        super::status(refused(OffsetFailure::WallsTouch {
+            face: None,
+            contact: solidcore::error::offset::WallContact::Touch,
+        })),
+        Error::WallsTouch
+    );
+    assert!(matches!(
+        super::status(refused(OffsetFailure::EdgeVanishes {
+            edge: None,
+            face: None,
+        })),
+        Error::Unsupported(_)
+    ));
+    // an unresolved crossing stays the kernel's status, as before
+    assert_eq!(
+        super::status(refused(OffsetFailure::LoopsCross {
+            face: None,
+            crossing: solidcore::error::offset::LoopCrossing::AtLoopVertex,
+        })),
+        Error::Status(solidcore::error::SM_ERR_BAD_INTERSECTIONS)
     );
     assert_eq!(super::status(up(1001)), Error::Status(1001));
 }

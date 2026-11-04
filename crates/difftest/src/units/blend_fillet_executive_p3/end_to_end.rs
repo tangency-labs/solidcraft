@@ -674,6 +674,8 @@ pub(super) fn status(error: SolidError) -> SolidResult<f64> {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         SolidError::Upstream { code, .. } => Ok(f64::from(code)),
+        // a failure in solidcore's terms (#2615; a shell's): its C++ comparison status
+        e @ SolidError::Failed(_) => Ok(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))),
         error => Err(error),
     }
 }

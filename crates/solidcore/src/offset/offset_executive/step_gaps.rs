@@ -29,7 +29,8 @@ use super::p1::{forget_seconds, OffsetExecutive};
 use super::p2::OffsetNotifications;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::offset::OffsetFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::kernel::Kernel;
@@ -49,10 +50,6 @@ use crate::topology::face::{p2 as face2, p3 as face3, p4 as face4};
 use crate::topology::{vertexuse, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 const OP: &str = "offset::offset_executive::step_gaps";
-
-/// `SM_ERR_OFFSET_EDGE_VANISHES` (the fork's `SmMessages.h`): an offset moves a vertex
-/// along an edge past the edge's other end, a change of topology it does not make.
-pub use crate::error::SM_ERR_OFFSET_EDGE_VANISHES;
 
 /// The gap search's passes per face (the fork's `lGuard`).
 const MAX_GAP_PASSES: usize = 64;
@@ -115,7 +112,7 @@ impl OffsetExecutive {
     ///
     /// `SM_ERR` for a gap neither end of which is at the vertex, a segment off the
     /// surface, or more than [`MAX_GAP_PASSES`] gaps on one face;
-    /// [`SM_ERR_OFFSET_EDGE_VANISHES`] where the vertex moved to or past the edge's other
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] where the vertex moved to or past the edge's other
     /// end; those of the evaluations, solves, curve edits
     /// and the split; [`SolidError::InvalidInput`] for missing topology.
     ///
@@ -246,7 +243,7 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// [`SM_ERR_OFFSET_EDGE_VANISHES`] for a closed edge of a face that did not close to
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] for a closed edge of a face that did not close to
     /// nothing and across from none that did (a face turned inside out past it); those of
     /// `IsDegenerate`, the edge and face queries and `DeleteFace`.
     fn remove_closed_faces(
@@ -277,11 +274,7 @@ impl OffsetExecutive {
         for &(face, across) in closed_edges {
             let explained = gone.contains(&face) || across.is_some_and(|a| gone_orig.contains(&a));
             if !explained {
-                return Err(SolidError::Upstream {
-                    operation: OP,
-                    code: SM_ERR_OFFSET_EDGE_VANISHES,
-                    entity: None,
-                });
+                return Err(self.edge_vanishes(original, face, None));
             }
         }
         let mut gone_eus: BTreeSet<EdgeuseId> = BTreeSet::new();
@@ -389,11 +382,8 @@ impl OffsetExecutive {
                     }
                     // (fork 34318f4) elsewhere the vertex moved past the edge's end: the edge
                     // vanishes, the face turns inside out
-                    return Err(SolidError::Upstream {
-                        operation: OP,
-                        code: SM_ERR_OFFSET_EDGE_VANISHES,
-                        entity: None,
-                    });
+                    let input_edge = self.original_edge(original, b, u).ok().flatten();
+                    return Err(self.edge_vanishes(original, f, input_edge));
                 }
                 curve.trim(kernel, &mut keep, TrimMode::Notify)?;
                 let new_ivl = curve.natural_interval();
@@ -969,6 +959,18 @@ impl OffsetExecutive {
             }
         }
         Ok(())
+    }
+
+    /// The refusal of an offset that moves a vertex of an edge of offset face `f` to or
+    /// past the edge's other end ([`crate::error::offset::OffsetFailure::EdgeVanishes`]), naming `edge` of
+    /// `original`, else the face of `original` that `f` comes from (error context only:
+    /// a lookup that fails names nothing).
+    fn edge_vanishes(&self, original: &Brep, f: FaceId, edge: Option<EdgeId>) -> SolidError {
+        let face = match (edge, self.faceuse_to_faces.firsts(f).as_slice()) {
+            (None, [fu]) => eu::faceuse_face(original, *fu).ok().flatten(),
+            _ => None,
+        };
+        Failure::new(OP, OffsetFailure::EdgeVanishes { edge, face }).into_error()
     }
 
     /// The original edge offset edge use `u` (or its mate) was made from, where it maps

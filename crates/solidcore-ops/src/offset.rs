@@ -15,8 +15,8 @@
 //! Each changes the body it is given, as the kernel does; a refused or failed one leaves it as
 //! it came in ([`crate::session`]'s edit wrapper).
 
-use solidcore::error::SM_ERR_OFFSET_WALLS_TOUCH;
-use solidcore::offset::construction::ShellRefusal;
+use solidcore::error::offset::OffsetFailure;
+use solidcore::error::{ErrorKind, Reason};
 use solidcore::offset::offset_executive::p2::{
     offset_brep_simple, shell_brep_simple, OffsetOptions, ShellOptions,
 };
@@ -38,20 +38,19 @@ const MAX_DISTANCE: f64 = 1e6;
 /// vertex moved past an edge's other end ([`Error::Unsupported`]), any other as
 /// [`crate::error::status`].
 fn status(e: SolidError) -> Error {
-    match e {
-        SolidError::Upstream {
-            code: SM_ERR_OFFSET_WALLS_TOUCH,
-            ..
-        } => Error::WallsTouch,
-        SolidError::ShellRefused {
-            refusal: ShellRefusal::Fold,
-            size,
-            ..
-        } => Error::WallFolds { largest: size },
-        e if e.is_offset_edge_vanishes() => {
+    match e.kind() {
+        ErrorKind::OffsetWallsTouch => Error::WallsTouch,
+        ErrorKind::OffsetFolds => {
+            let largest = match e.failure().map(|f| &f.reason) {
+                Some(Reason::Offset(OffsetFailure::Folds { largest, .. })) => Some(*largest),
+                _ => None,
+            };
+            Error::WallFolds { largest }
+        }
+        ErrorKind::OffsetEdgeVanishes => {
             Error::Unsupported("a vertex moved past the other end of an edge")
         }
-        e => kernel_status(e),
+        _ => kernel_status(e),
     }
 }
 

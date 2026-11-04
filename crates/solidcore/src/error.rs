@@ -24,6 +24,9 @@
 //! | `native_failure` (crate)  | a call whose failing `SmStatus` upstream handles (internal errors propagate) |
 //! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
+//! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
+//! | [`ErrorKind`], [`SolidError::kind`] | none: solidcore's stable error codes (#2615) |
+//! | [`offset::OffsetFailure`]   | none: the offset subsystem's refusals (#2615)    |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -32,6 +35,44 @@
 //! Every variant names the `operation` (a `&'static str`, by convention the Rust path
 //! of the failing function, e.g. `"geom::vector3d::Vec3::unitize"`) so that errors surfaced to
 //! callers stay actionable without a backtrace.
+//!
+//! # Errors in solidcore's own terms (#2615)
+//!
+//! solidcore has no upstream: its errors are its own. [`SolidError::Failed`] is the
+//! error a converted subsystem returns. Its [`Failure`] says what failed in solidcore's
+//! terms and never shows a C++ status number, type or symbol:
+//!
+//! - `operation`: the solidcore path of the failing stage
+//!   (`"offset::offset_executive::crossing_loops::resolve_crossing_loops"`);
+//! - `reason`: a typed [`Reason`] naming what failed, on which entity, with the key
+//!   values (a size, a distance, a gap, a tolerance). Each subsystem's reasons are one
+//!   enum in a submodule of this module ([`offset::OffsetFailure`]), so the taxonomy
+//!   stays in one place;
+//! - `entity`: the entity the failure is about, in the caller's B-rep where there is one;
+//! - `cause`: the error of the stage this failure comes from. Where a caller turns a
+//!   stage's failure into a generic one, the stage's error is kept here, so the caller
+//!   still sees it (#2511).
+//!
+//! [`SolidError::kind`] gives every error a stable solidcore [`ErrorKind`] (a number and
+//! a name). Callers match on it and on the [`Reason`], never on message text or a
+//! status: each reason carries everything a caller needs (the sizes, the entities, the
+//! distinctions between cases). [`SolidError::is_port_failure`] tells a solidcore defect
+//! or missing port from a failure of the operation on its input (#1452).
+//!
+//! **Comparison with the pinned C++.** difftest compares each failure with the status
+//! the pinned C++ reports for the same input. A failure records that status privately,
+//! where it is made (the status depends on the call path, not only on the reason), and
+//! [`SolidError::sm_status`] is the one hook that reads it, for difftest (and the FFI
+//! side) only. It is not a public field, never part of a message, and not for callers.
+//!
+//! **Retiring "upstream".** The goal is no [`SolidError::Upstream`] (nor `Nlib`,
+//! `FilletRefused`) variant and no "upstream status" text in the public API. They are
+//! the pre-#2615 shape: subsystems move their sites to [`SolidError::Failed`] one PR at
+//! a time (offset first), and the variants go when their last site does. Then
+//! `sm_status` and the status numbers here move to a comparison-only module (or to
+//! difftest and the FFI), since nothing but the comparison needs them.
+
+pub mod offset;
 
 use crate::topology::{
     BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
@@ -315,23 +356,11 @@ pub enum SolidError {
         fit: crate::blend::fillet_executive::FitSize<EdgeId>,
     },
 
-    /// A shell, offset or thicken refused by the one construction (opt-in
-    /// `fixes.shell_one_construction`, WR-718, tangency-labs/solidcore#2350), naming the
-    /// largest size that works when there is one. `code` is the status (`SM_ERR`) so
-    /// [`SolidError::sm_status`] reads as an ordinary failure.
-    #[error("{operation}: upstream status {code}: refused ({refusal:?}){}", fmt_size(*.size))]
-    ShellRefused {
-        /// Operation that refused.
-        operation: &'static str,
-        /// Upstream `SmStatus` value (`SM_ERR`).
-        code: i32,
-        /// The entity refused (a face of the input), when known.
-        entity: Option<EntityRef>,
-        /// Why.
-        refusal: crate::offset::construction::ShellRefusal,
-        /// The largest size (a wall thickness) that works, when there is one.
-        size: Option<f64>,
-    },
+    /// A failure in solidcore's own terms: the stage, what failed, the entity and the
+    /// key values, and the upstream status it stands for (kept for
+    /// [`SolidError::sm_status`], never shown). See [`Failure`] and the module docs.
+    #[error("{0}")]
+    Failed(Box<Failure>),
 
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
@@ -521,10 +550,273 @@ fn fmt_entity(entity: Option<EntityRef>) -> String {
     entity.map_or_else(String::new, |e| format!(" at {e}"))
 }
 
-fn fmt_size(size: Option<f64>) -> String {
-    size.map_or_else(String::new, |s| {
-        format!("; the largest size that works is {s}")
-    })
+/// A failure in solidcore's own terms, carried by [`SolidError::Failed`].
+///
+/// Build one with [`Failure::new`] and its `at` and `caused_by` methods, then make it a
+/// [`SolidError`] with [`Failure::into_error`]. Its message is
+/// `"{operation}: {reason}"`, followed by `"; caused by {cause}"` when it keeps the error
+/// of the stage it comes from.
+///
+/// It also records, privately, the status the pinned C++ reports for the same failure,
+/// so that difftest can compare the two ([`SolidError::sm_status`], the comparison
+/// hook). That number is not part of the failure's public fields or its message.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Failure {
+    /// The solidcore path of the failing stage (e.g.
+    /// `"offset::offset_executive::p2::refuse_folding_offset"`).
+    pub operation: &'static str,
+    /// The entity the failure is about, when known: in the caller's B-rep where the
+    /// failure is about one of its entities.
+    pub entity: Option<EntityRef>,
+    /// What failed.
+    pub reason: Reason,
+    /// The status the pinned C++ reports for this failure: a comparison detail, read
+    /// only through [`SolidError::sm_status`]. It is recorded where the failure is made
+    /// because it depends on the call path, not only on the reason (a refusal the C++
+    /// passes on keeps its own status; after a generic collapse it is `SM_ERR`).
+    pub(crate) status: i32,
+    /// The error of the stage this failure comes from, kept where a caller reports a
+    /// stage's failure as its own, generic one (#2511).
+    pub cause: Option<SolidError>,
+}
+
+impl Failure {
+    /// A failure of `operation` for `reason`, with the reason's entity and status and no
+    /// cause.
+    #[must_use]
+    pub fn new(operation: &'static str, reason: impl Into<Reason>) -> Self {
+        let reason = reason.into();
+        Self {
+            operation,
+            entity: reason.entity(),
+            status: reason.comparison_status(),
+            reason,
+            cause: None,
+        }
+    }
+
+    /// The same failure about `entity`.
+    #[must_use]
+    pub fn at(mut self, entity: EntityRef) -> Self {
+        self.entity = Some(entity);
+        self
+    }
+
+    /// The failure's stable [`ErrorKind`].
+    #[must_use]
+    pub fn kind(&self) -> ErrorKind {
+        self.reason.kind_given(self.status)
+    }
+
+    /// The same failure, keeping `cause`, the error of the stage it comes from.
+    #[must_use]
+    pub fn caused_by(mut self, cause: SolidError) -> Self {
+        self.cause = Some(cause);
+        self
+    }
+
+    /// The [`SolidError::Failed`] of this failure. (Not a `From` impl: a second
+    /// `From` for [`SolidError`] would make `?` in closures ambiguous.)
+    #[must_use]
+    pub fn into_error(self) -> SolidError {
+        SolidError::Failed(Box::new(self))
+    }
+}
+
+impl core::fmt::Display for Failure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}: {}", self.operation, self.reason)?;
+        // a reason that names no entity of its own is followed by the failure's
+        if let (Reason::Failed(_), Some(entity)) = (&self.reason, self.entity) {
+            write!(f, " ({entity})")?;
+        }
+        if let Some(cause) = &self.cause {
+            write!(f, "; caused by {cause}")?;
+        }
+        Ok(())
+    }
+}
+
+/// What failed, in solidcore's terms: one variant per subsystem whose errors are
+/// described, plus [`Reason::Failed`] for a stage whose failure is described by a phrase.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum Reason {
+    /// A stage failed, as the phrase says (e.g. "the offset could not be built"). Its
+    /// status is `SM_ERR` unless the failure says otherwise; its cause, when kept, says
+    /// why.
+    Failed(&'static str),
+    /// An offset, shell, thicken or local operation refused.
+    Offset(offset::OffsetFailure),
+}
+
+impl Reason {
+    /// The entity the reason names, if any.
+    #[must_use]
+    pub fn entity(&self) -> Option<EntityRef> {
+        match self {
+            Self::Failed(_) => None,
+            Self::Offset(o) => o.entity(),
+        }
+    }
+
+    /// The status the C++ reports for the reason unless the failure says otherwise (a
+    /// comparison detail).
+    pub(crate) fn comparison_status(&self) -> i32 {
+        match self {
+            Self::Failed(_) => SM_ERR,
+            Self::Offset(o) => o.comparison_status(),
+        }
+    }
+
+    /// The reason's stable [`ErrorKind`]; `status` (the failure's comparison status)
+    /// gives the kind of a [`Reason::Failed`].
+    pub(crate) fn kind_given(&self, status: i32) -> ErrorKind {
+        match self {
+            Self::Failed(_) => ErrorKind::of_status(status),
+            Self::Offset(o) => o.kind(),
+        }
+    }
+}
+
+impl core::fmt::Display for Reason {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Failed(what) => f.write_str(what),
+            Self::Offset(o) => o.fmt(f),
+        }
+    }
+}
+
+impl From<offset::OffsetFailure> for Reason {
+    fn from(o: offset::OffsetFailure) -> Self {
+        Self::Offset(o)
+    }
+}
+
+/// A stable solidcore code for the kind of an error, from [`SolidError::kind`]: match
+/// on it (or on its [`ErrorKind::code`] or [`ErrorKind::name`]) instead of message
+/// text. Codes and names never change meaning once released; new kinds are added as
+/// subsystems describe their failures. General kinds are numbered from 1, solidcore's
+/// own (no upstream status) from 90, blend kinds from 100 and offset kinds from 200.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+#[repr(u16)]
+pub enum ErrorKind {
+    /// An argument was out of range, malformed or inconsistent.
+    InvalidInput = 1,
+    /// A typed id did not refer to a live entity.
+    NotFound = 2,
+    /// Geometry was degenerate where it may not be.
+    Degenerate = 3,
+    /// An iterative solve did not converge.
+    NotConverged = 4,
+    /// The inputs are a combination the operation does not support.
+    Unsupported = 5,
+    /// The operation failed, and the error does not describe how yet (a generic
+    /// status of a subsystem not converted yet, or a stage's generic failure whose
+    /// cause says more).
+    Failed = 6,
+    /// A required entity, geometry or value was missing.
+    Missing = 7,
+    /// A parameter was outside its domain.
+    OutsideDomain = 8,
+    /// A result was not within tolerance.
+    NotWithinTolerance = 9,
+    /// A port-side invariant or adapter failure (no upstream status).
+    PortInvariant = 90,
+    /// A call into a part of the kernel not ported yet.
+    Unported = 91,
+    /// The caller cancelled the operation.
+    Cancelled = 92,
+    /// A read-only solve needs its caller to prepare geometry first.
+    PreparationRequired = 93,
+    /// A face's trims could not be used while its B-rep is edited.
+    FaceTrimsUnavailable = 94,
+    /// A fillet or chamfer is too large to build; the error names the largest size
+    /// that builds.
+    FilletTooLarge = 100,
+    /// An offset face's offset folds: the wall is thicker than a radius of curvature.
+    OffsetFolds = 200,
+    /// Loops of an offset face touch without crossing: the offset walls would meet.
+    OffsetWallsTouch = 201,
+    /// Loops of an offset face cross in a way the offset does not resolve.
+    OffsetLoopsCross = 202,
+    /// An offset would move a vertex to or past the other end of its edge.
+    OffsetEdgeVanishes = 203,
+}
+
+impl ErrorKind {
+    /// The kind's stable number.
+    #[must_use]
+    pub const fn code(self) -> u16 {
+        self as u16
+    }
+
+    /// True for a solidcore-side failure, not a failure of the operation on its input: a
+    /// port invariant that did not hold, a call into a part not ported yet, a solve that
+    /// needs its caller to prepare geometry, or trims unavailable while editing. A caller
+    /// that skips an entity where the operation fails on it must not skip on these
+    /// (#1452). A cancellation is the caller's own and is not one.
+    #[must_use]
+    pub const fn is_port_failure(self) -> bool {
+        matches!(
+            self,
+            Self::PortInvariant
+                | Self::Unported
+                | Self::PreparationRequired
+                | Self::FaceTrimsUnavailable
+        )
+    }
+
+    /// The kind's stable name (`snake_case`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::InvalidInput => "invalid_input",
+            Self::NotFound => "not_found",
+            Self::Degenerate => "degenerate",
+            Self::NotConverged => "not_converged",
+            Self::Unsupported => "unsupported",
+            Self::Failed => "failed",
+            Self::Missing => "missing",
+            Self::OutsideDomain => "outside_domain",
+            Self::NotWithinTolerance => "not_within_tolerance",
+            Self::PortInvariant => "port_invariant",
+            Self::Unported => "unported",
+            Self::Cancelled => "cancelled",
+            Self::PreparationRequired => "preparation_required",
+            Self::FaceTrimsUnavailable => "face_trims_unavailable",
+            Self::FilletTooLarge => "fillet_too_large",
+            Self::OffsetFolds => "offset_folds",
+            Self::OffsetWallsTouch => "offset_walls_touch",
+            Self::OffsetLoopsCross => "offset_loops_cross",
+            Self::OffsetEdgeVanishes => "offset_edge_vanishes",
+        }
+    }
+
+    /// The kind of an error that carries only a C++ status ([`SolidError::Upstream`],
+    /// until it is retired): the status's kind where solidcore has one for it,
+    /// [`ErrorKind::Failed`] otherwise.
+    pub(crate) const fn of_status(status: i32) -> Self {
+        match status {
+            SM_ERR_INVALID_INPUT => Self::InvalidInput,
+            SM_ERR_NULL_POINTER => Self::Missing,
+            SM_ERR_OUTSIDE_OF_DOMAIN => Self::OutsideDomain,
+            SM_ERR_NOT_WITHIN_TOLERANCE => Self::NotWithinTolerance,
+            SM_ERR_NOT_CONVERGING => Self::NotConverged,
+            SM_ERR_OFFSET_WALLS_TOUCH => Self::OffsetWallsTouch,
+            SM_ERR_OFFSET_EDGE_VANISHES => Self::OffsetEdgeVanishes,
+            _ => Self::Failed,
+        }
+    }
+}
+
+impl core::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 impl SolidError {
@@ -575,9 +867,15 @@ impl SolidError {
         Self::PortInvariant { operation, reason }
     }
 
-    /// The upstream `SmStatus` this error stands for, when it stands for one exactly:
+    /// The comparison hook, for difftest only: the status the pinned C++ reports for this
+    /// failure, when it reports one exactly. Callers use [`SolidError::kind`], the
+    /// [`Reason`] and [`SolidError::is_port_failure`] instead; this moves to a
+    /// comparison-only module once the pre-#2615 variants are gone (see the module docs).
+    ///
+    /// By variant:
     ///
     /// - [`SolidError::Upstream`]: its `code`.
+    /// - [`SolidError::Failed`]: its failure's `status`.
     /// - [`SolidError::Nlib`]: [`SM_ERR`]. The `Sm*` callers of an NLib routine
     ///   surface its failure as `SER(SM_ERR)` (`if (NL_YES == N_...) SER(SM_ERR)`;
     ///   `nl_ser`), never as the `NL_*_ERR` number.
@@ -591,9 +889,8 @@ impl SolidError {
     #[must_use]
     pub const fn sm_status(&self) -> Option<i32> {
         match self {
-            Self::Upstream { code, .. }
-            | Self::FilletRefused { code, .. }
-            | Self::ShellRefused { code, .. } => Some(*code),
+            Self::Upstream { code, .. } | Self::FilletRefused { code, .. } => Some(*code),
+            Self::Failed(f) => Some(f.status),
             Self::Nlib { .. } => Some(SM_ERR),
             Self::InvalidInput { .. }
             | Self::NotFound { .. }
@@ -644,18 +941,84 @@ impl SolidError {
         matches!(self, Self::Unported { .. })
     }
 
-    /// True for the refusal [`SolidError::Upstream`] with code
-    /// [`SM_ERR_OFFSET_EDGE_VANISHES`]: an offset that would move a vertex past the
-    /// other end of its edge.
+    /// True for the refusal of an offset that would move a vertex past the other end of
+    /// its edge ([`ErrorKind::OffsetEdgeVanishes`]: [`offset::OffsetFailure::EdgeVanishes`],
+    /// or an [`SolidError::Upstream`] with code [`SM_ERR_OFFSET_EDGE_VANISHES`]).
     #[must_use]
-    pub const fn is_offset_edge_vanishes(&self) -> bool {
-        matches!(
-            self,
-            Self::Upstream {
-                code: SM_ERR_OFFSET_EDGE_VANISHES,
-                ..
-            }
-        )
+    pub fn is_offset_edge_vanishes(&self) -> bool {
+        self.kind() == ErrorKind::OffsetEdgeVanishes
+    }
+
+    /// The stable solidcore [`ErrorKind`] of this error. A [`SolidError::Failed`] has its
+    /// reason's kind; an error that carries only an upstream status has that status's
+    /// kind (1007 is `invalid_input`, 1006 `missing`, 1022 `not_converged`, ...).
+    #[must_use]
+    pub fn kind(&self) -> ErrorKind {
+        match self {
+            Self::InvalidInput { .. } => ErrorKind::InvalidInput,
+            Self::NotFound { .. } => ErrorKind::NotFound,
+            Self::Degenerate { .. } => ErrorKind::Degenerate,
+            Self::NotConverged { .. } => ErrorKind::NotConverged,
+            Self::Unsupported { .. } => ErrorKind::Unsupported,
+            Self::FaceTrimsUnavailable { .. } => ErrorKind::FaceTrimsUnavailable,
+            Self::Upstream { code, .. } => ErrorKind::of_status(*code),
+            Self::Nlib { code, .. } => match code {
+                NlibCode::Convergence => ErrorKind::NotConverged,
+                _ => ErrorKind::Failed,
+            },
+            Self::PortInvariant { .. } => ErrorKind::PortInvariant,
+            Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
+            Self::Cancelled { .. } => ErrorKind::Cancelled,
+            Self::FilletRefused { .. } => ErrorKind::FilletTooLarge,
+            Self::Failed(f) => f.kind(),
+            Self::Unported { .. } => ErrorKind::Unported,
+        }
+    }
+
+    /// True for a solidcore-side failure rather than a failure of the operation on its
+    /// input ([`ErrorKind::is_port_failure`], #1452).
+    #[must_use]
+    pub fn is_port_failure(&self) -> bool {
+        self.kind().is_port_failure()
+    }
+
+    /// The failure in solidcore's terms, for a [`SolidError::Failed`].
+    #[must_use]
+    pub fn failure(&self) -> Option<&Failure> {
+        match self {
+            Self::Failed(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// The error of the stage this one comes from, where it was kept
+    /// ([`Failure::cause`]).
+    #[must_use]
+    pub fn cause(&self) -> Option<&SolidError> {
+        self.failure().and_then(|f| f.cause.as_ref())
+    }
+
+    /// The first error in the chain of [`SolidError::cause`]s: the stage where the
+    /// failure began (this error itself when it keeps no cause).
+    #[must_use]
+    pub fn root_cause(&self) -> &SolidError {
+        let mut e = self;
+        while let Some(cause) = e.cause() {
+            e = cause;
+        }
+        e
+    }
+
+    /// [`SolidError::Failed`] for a stage whose failure upstream reports as a generic
+    /// `SER(SM_ERR)`: status [`SM_ERR`], keeping `cause`, the stage's error (#2511).
+    pub(crate) fn failed_after(
+        operation: &'static str,
+        what: &'static str,
+        cause: SolidError,
+    ) -> Self {
+        Failure::new(operation, Reason::Failed(what))
+            .caused_by(cause)
+            .into_error()
     }
 
     /// [`SolidError::Nlib`] with the upstream error number `code` (NLib's
@@ -678,11 +1041,11 @@ impl SolidError {
             | Self::PortInvariant { operation, .. }
             | Self::Upstream { operation, .. }
             | Self::FilletRefused { operation, .. }
-            | Self::ShellRefused { operation, .. }
             | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
             | Self::Cancelled { operation } => operation,
+            Self::Failed(f) => f.operation,
             Self::Unported { upstream, .. } => upstream,
         }
     }
@@ -696,8 +1059,8 @@ impl SolidError {
             }
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }
-            | Self::FilletRefused { entity, .. }
-            | Self::ShellRefused { entity, .. } => *entity,
+            | Self::FilletRefused { entity, .. } => *entity,
+            Self::Failed(f) => f.entity,
             Self::InvalidInput { .. }
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }
@@ -834,6 +1197,251 @@ mod tests {
         assert_eq!(
             SolidError::nl_ser("native")(e),
             SolidError::sm_err("native")
+        );
+    }
+
+    fn walls_touch(face: Option<FaceId>) -> SolidError {
+        Failure::new(
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops",
+            offset::OffsetFailure::WallsTouch {
+                face,
+                contact: offset::WallContact::RunAlong,
+            },
+        )
+        .into_error()
+    }
+
+    #[test]
+    fn failures_keep_their_status_for_difftest_but_never_show_it() {
+        let e = walls_touch(Some(FaceId::from_index(3)));
+        assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_WALLS_TOUCH));
+        assert_eq!(e.kind(), ErrorKind::OffsetWallsTouch);
+        assert_eq!(e.kind().code(), 201);
+        assert_eq!(e.kind().name(), "offset_walls_touch");
+        assert_eq!(e.entity(), Some(EntityRef::Face(FaceId::from_index(3))));
+        assert_eq!(
+            e.operation(),
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops"
+        );
+        assert_eq!(
+            e.to_string(),
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops: the loops of the \
+             offset of face 3 run along one another, so the offset walls would meet there"
+        );
+        // a failure stands for an upstream status (#1452): ignored and handled as one
+        assert_eq!(native_failure::<()>(Err(e.clone())), Ok(None));
+        assert_eq!(ignored::<()>(Err(e.clone())), Ok(None));
+        assert!(!e.is_unported_or_cancelled());
+        assert_eq!(e.cause(), None);
+        assert_eq!(e.root_cause(), &e);
+        // without a face it says so
+        assert_eq!(
+            walls_touch(None).to_string(),
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops: the loops of an \
+             offset face run along one another, so the offset walls would meet there"
+        );
+        assert_eq!(walls_touch(None).entity(), None);
+    }
+
+    #[test]
+    fn a_generic_failure_keeps_the_stage_error_it_comes_from() {
+        let stage = walls_touch(Some(FaceId::from_index(3)));
+        let e = SolidError::failed_after(
+            "topology::brep::local_operation::local_operation",
+            "the offset of the moved faces could not be built",
+            stage.clone(),
+        );
+        // the status upstream returns (SER(SM_ERR)), so difftest is unchanged
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.cause(), Some(&stage));
+        assert_eq!(e.root_cause(), &stage);
+        assert_eq!(
+            e.to_string(),
+            format!(
+                "topology::brep::local_operation::local_operation: the offset of the moved faces \
+                 could not be built; caused by {stage}"
+            )
+        );
+        // a described failure about an entity names it
+        let mut at = Failure::new("op", Reason::Failed("the section has no points"))
+            .at(EntityRef::Edge(EdgeId::from_index(12)));
+        at.status = SM_ERR_NOT_CONVERGING;
+        let at = at.into_error();
+        assert_eq!(at.to_string(), "op: the section has no points (edge 12)");
+        assert_eq!(at.kind(), ErrorKind::NotConverged);
+        assert_eq!(at.sm_status(), Some(SM_ERR_NOT_CONVERGING));
+        assert_eq!(at.entity(), Some(EntityRef::Edge(EdgeId::from_index(12))));
+    }
+
+    #[test]
+    fn every_error_has_a_stable_kind() {
+        let f = FaceId::from_index(1);
+        let up = |code| SolidError::Upstream {
+            operation: "op",
+            code,
+            entity: None,
+        };
+        let cases = [
+            (
+                SolidError::invalid_input("op", "bad"),
+                ErrorKind::InvalidInput,
+                1,
+            ),
+            (
+                SolidError::NotFound {
+                    operation: "op",
+                    entity: EntityRef::Face(f),
+                },
+                ErrorKind::NotFound,
+                2,
+            ),
+            (
+                SolidError::Degenerate {
+                    operation: "op",
+                    entity: None,
+                },
+                ErrorKind::Degenerate,
+                3,
+            ),
+            (
+                SolidError::NotConverged {
+                    operation: "op",
+                    iterations: 3,
+                },
+                ErrorKind::NotConverged,
+                4,
+            ),
+            (
+                SolidError::Unsupported {
+                    operation: "op",
+                    reason: "r",
+                },
+                ErrorKind::Unsupported,
+                5,
+            ),
+            (SolidError::sm_err("op"), ErrorKind::Failed, 6),
+            (SolidError::null_pointer("op"), ErrorKind::Missing, 7),
+            (up(SM_ERR_INVALID_INPUT), ErrorKind::InvalidInput, 1),
+            (up(SM_ERR_OUTSIDE_OF_DOMAIN), ErrorKind::OutsideDomain, 8),
+            (
+                up(SM_ERR_NOT_WITHIN_TOLERANCE),
+                ErrorKind::NotWithinTolerance,
+                9,
+            ),
+            (up(SM_ERR_NOT_CONVERGING), ErrorKind::NotConverged, 4),
+            (up(SM_ERR_BAD_INTERSECTIONS), ErrorKind::Failed, 6),
+            (
+                up(SM_ERR_OFFSET_WALLS_TOUCH),
+                ErrorKind::OffsetWallsTouch,
+                201,
+            ),
+            (
+                up(SM_ERR_OFFSET_EDGE_VANISHES),
+                ErrorKind::OffsetEdgeVanishes,
+                203,
+            ),
+            (SolidError::nlib("op", NlibCode::Knot), ErrorKind::Failed, 6),
+            (
+                SolidError::nlib("op", NlibCode::Convergence),
+                ErrorKind::NotConverged,
+                4,
+            ),
+            (
+                SolidError::port_invariant("op", "owner"),
+                ErrorKind::PortInvariant,
+                90,
+            ),
+            (
+                SolidError::unported("X::y", "geom.x"),
+                ErrorKind::Unported,
+                91,
+            ),
+            (SolidError::cancelled("op"), ErrorKind::Cancelled, 92),
+            (
+                SolidError::PreparationRequired { operation: "op" },
+                ErrorKind::PreparationRequired,
+                93,
+            ),
+            (
+                SolidError::FaceTrimsUnavailable {
+                    operation: "op",
+                    entity: EntityRef::Face(f),
+                },
+                ErrorKind::FaceTrimsUnavailable,
+                94,
+            ),
+            (walls_touch(None), ErrorKind::OffsetWallsTouch, 201),
+        ];
+        for (e, kind, code) in cases {
+            // #1452 in solidcore terms: only the 90s but a cancellation are port-side
+            assert_eq!(
+                e.is_port_failure(),
+                (90..=94).contains(&code) && kind != ErrorKind::Cancelled,
+                "{e:?}"
+            );
+            assert_eq!(e.kind(), kind, "{e:?}");
+            assert_eq!(kind.code(), code, "{e:?}");
+            assert_eq!(kind.to_string(), kind.name());
+        }
+        let edge = offset::OffsetFailure::EdgeVanishes {
+            edge: Some(EdgeId::from_index(7)),
+            face: None,
+        };
+        let e = Failure::new("op", edge).into_error();
+        assert!(e.is_offset_edge_vanishes());
+        assert_eq!(e.entity(), Some(EntityRef::Edge(EdgeId::from_index(7))));
+        assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_EDGE_VANISHES));
+        assert!(up(SM_ERR_OFFSET_EDGE_VANISHES).is_offset_edge_vanishes());
+        assert!(!walls_touch(None).is_offset_edge_vanishes());
+    }
+
+    #[test]
+    fn offset_refusals_name_their_entities_and_statuses() {
+        use offset::{LoopCrossing, OffsetFailure};
+        let face = FaceId::from_index(4);
+        let folds = OffsetFailure::Folds {
+            face,
+            distance: -11.0,
+            largest: 10.0,
+        };
+        assert_eq!(folds.comparison_status(), SM_ERR);
+        assert_eq!(folds.kind(), ErrorKind::OffsetFolds);
+        assert_eq!(folds.entity(), Some(EntityRef::Face(face)));
+        assert_eq!(
+            folds.to_string(),
+            "the offset of face 4 by -11 folds: the wall is thicker than a radius of curvature \
+             of the face on that side (the largest wall that works is 10)"
+        );
+        let cross = OffsetFailure::LoopsCross {
+            face: None,
+            crossing: LoopCrossing::ThreeAtOnePoint,
+        };
+        assert_eq!(cross.comparison_status(), SM_ERR_BAD_INTERSECTIONS);
+        assert_eq!(cross.entity(), None);
+        assert_eq!(cross.on_face(face).entity(), Some(EntityRef::Face(face)));
+        assert_eq!(
+            cross.on_face(face).to_string(),
+            "the loops of the offset of face 4 cross in a way the offset cannot resolve: three \
+             loops cross at one point"
+        );
+        // a face already named, or an edge, is kept
+        let other = FaceId::from_index(9);
+        assert_eq!(cross.on_face(face).on_face(other), cross.on_face(face));
+        let edge = OffsetFailure::EdgeVanishes {
+            edge: Some(EdgeId::from_index(2)),
+            face: None,
+        };
+        assert_eq!(edge.on_face(face), edge);
+        assert_eq!(
+            OffsetFailure::EdgeVanishes {
+                edge: None,
+                face: None
+            }
+            .on_face(face)
+            .to_string(),
+            "the offset moves a vertex of an edge of face 4 to or past the edge's other end: the \
+             edge would vanish, a change of topology the offset does not make"
         );
     }
 

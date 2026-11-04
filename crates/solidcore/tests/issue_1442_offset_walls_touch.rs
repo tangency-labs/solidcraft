@@ -23,7 +23,10 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::{SolidError, SM_ERR_BAD_INTERSECTIONS, SM_ERR_OFFSET_WALLS_TOUCH};
+use solidcore::error::offset::{LoopCrossing, OffsetFailure, WallContact};
+use solidcore::error::{
+    EntityRef, ErrorKind, Reason, SM_ERR_BAD_INTERSECTIONS, SM_ERR_OFFSET_WALLS_TOUCH,
+};
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -76,7 +79,7 @@ fn shell_with(
 
 fn code(result: &solidcore::Result<Brep>) -> Option<i32> {
     match result {
-        Err(SolidError::Upstream { code, .. }) => Some(*code),
+        Err(e) => e.sm_status(),
         _ => None,
     }
 }
@@ -85,15 +88,56 @@ fn code(result: &solidcore::Result<Brep>) -> Option<i32> {
 fn issue_1442_walls_touch_refused_with_its_own_status() {
     let (_, result) = shell(true, -2.0);
     assert_eq!(code(&result), Some(SM_ERR_OFFSET_WALLS_TOUCH), "{result:?}");
-    if let Err(SolidError::Upstream { operation, .. }) = &result {
-        assert!(operation.starts_with("Offset face loops touch without crossing"));
-    }
+    // #2615: the refusal in solidcore's terms, naming the face of the input it is about
+    // (before, the configuration's text stood in `operation` and the face was not named)
+    let err = result.unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::OffsetWallsTouch);
+    let Some(Reason::Offset(OffsetFailure::WallsTouch {
+        face: Some(face),
+        contact: WallContact::Touch,
+    })) = err.failure().map(|f| f.reason.clone())
+    else {
+        panic!("{err:?}");
+    };
+    assert_eq!(err.entity(), Some(EntityRef::Face(face)));
+    assert_eq!(
+        err.operation(),
+        "offset::offset_executive::crossing_loops::resolve_crossing_loops"
+    );
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops: the loops of the \
+             offset of face {} touch without crossing, so the offset walls would meet there",
+            face.index()
+        )
+    );
 }
 
 #[test]
 fn issue_1442_walls_touch_without_the_opt_in_is_bad_intersections() {
     let (_, result) = shell(false, -2.0);
     assert_eq!(code(&result), Some(SM_ERR_BAD_INTERSECTIONS), "{result:?}");
+    // #2615: an unresolved crossing says how the loops cross, and on which face
+    let err = result.unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::OffsetLoopsCross);
+    let Some(Reason::Offset(OffsetFailure::LoopsCross {
+        face: Some(face),
+        crossing,
+    })) = err.failure().map(|f| f.reason.clone())
+    else {
+        panic!("{err:?}");
+    };
+    assert_eq!(crossing, LoopCrossing::MeetAtLoopVertex, "{err}");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops: the loops of the \
+             offset of face {} cross in a way the offset cannot resolve: they meet at a loop \
+             vertex",
+            face.index()
+        )
+    );
 }
 
 /// `offset_walls_touch_refused` only changes `ResolveCrossingLoopsOfFace`, which runs

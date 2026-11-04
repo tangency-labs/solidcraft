@@ -28,7 +28,7 @@ use offset_fixture::{planar_faces_at, report, volume, Notifications};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_union, boolean_with_options};
 use solidcore::boolean::merge::MergeOptions;
-use solidcore::error::{SolidError, SM_ERR};
+use solidcore::error::SM_ERR;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::knots::Side;
@@ -107,7 +107,7 @@ fn move_piece(k: &mut Kernel, b: &mut Brep, piece: FaceId, dz: f64) -> solidcore
 
 fn refused(result: solidcore::Result<()>) {
     match result {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
         other => panic!("WR-530 refuses the step without the opt-in: {other:?}"),
     }
 }

@@ -55,7 +55,6 @@ use solidcore::topology::brep::p5::{remove_faces, transform};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, FaceId};
-use solidcore::SolidError;
 
 /// The issue's flags: every fix on except `geometric_g2_continuity`, with or without
 /// this one. `offset_lamina_corner_at_vertex_image` (WR-736, #2611), which came later and
@@ -249,7 +248,7 @@ fn flag_off_refuses_the_gap() {
         let mut k = issue_kernel(false);
         let s = intersected_cap(&mut k);
         match thicken(&mut k, &s, distance) {
-            Err(SolidError::Upstream { code, .. }) => assert_eq!(code, 1043, "{distance}"),
+            Err(e) => assert_eq!(e.sm_status(), Some(1043), "{distance}"),
             other => panic!("{distance}: {other:?}"),
         }
     }

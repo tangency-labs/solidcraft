@@ -19,7 +19,7 @@ mod offset_fixture;
 use offset_fixture::Notifications;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
-use solidcore::error::{SolidError, SM_ERR};
+use solidcore::error::SM_ERR;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_cylinder_surface};
 use solidcore::surface::surface::Surface;
@@ -95,7 +95,7 @@ fn move_wall(fixed: bool) -> solidcore::Result<()> {
 #[test]
 fn wr_530_moved_boss_wall_beside_its_round_is_refused() {
     match move_wall(true) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
         other => panic!("{other:?}"),
     }
 }

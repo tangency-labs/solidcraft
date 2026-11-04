@@ -19,7 +19,8 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, report, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::{SolidError, SM_ERR_OFFSET_EDGE_VANISHES};
+use solidcore::error::offset::OffsetFailure;
+use solidcore::error::{ErrorKind, Reason, SM_ERR_OFFSET_EDGE_VANISHES};
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -125,9 +126,31 @@ fn wr_566_high_top_down_onto_the_low_top_closes_the_wall() {
 fn wr_566_without_the_opt_in_the_closed_wall_is_refused() {
     for (z, to) in [(10.0, 20.0), (20.0, 10.0)] {
         match move_top(false, z, to).1 {
-            Err(e @ SolidError::Upstream { code, .. }) => {
-                assert_eq!(code, SM_ERR_OFFSET_EDGE_VANISHES, "z = {z}");
+            Err(e) => {
+                assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_EDGE_VANISHES), "z = {z}");
                 assert!(e.is_offset_edge_vanishes(), "z = {z}");
+                // #2615: the refusal says which edge (or face) of the input it is about
+                assert_eq!(e.kind(), ErrorKind::OffsetEdgeVanishes, "z = {z}");
+                let Some(Reason::Offset(OffsetFailure::EdgeVanishes { edge, face })) =
+                    e.failure().map(|f| f.reason.clone())
+                else {
+                    panic!("z = {z}: {e:?}");
+                };
+                let which = match (edge, face) {
+                    (Some(edge), _) => format!("edge {}", edge.index()),
+                    (None, Some(face)) => format!("an edge of face {}", face.index()),
+                    (None, None) => panic!("z = {z}: names no entity: {e:?}"),
+                };
+                assert!(e.entity().is_some(), "z = {z}");
+                assert_eq!(
+                    e.to_string(),
+                    format!(
+                        "offset::offset_executive::step_gaps: the offset moves a vertex of {which} \
+                         to or past the edge's other end: the edge would vanish, a change of \
+                         topology the offset does not make"
+                    ),
+                    "z = {z}"
+                );
             }
             other => panic!("z = {z}: {other:?}"),
         }

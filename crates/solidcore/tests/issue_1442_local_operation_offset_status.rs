@@ -19,7 +19,7 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::{SolidError, SM_ERR, SM_ERR_OFFSET_WALLS_TOUCH};
+use solidcore::error::{ErrorKind, SM_ERR, SM_ERR_OFFSET_WALLS_TOUCH};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::plane::Plane;
@@ -52,7 +52,7 @@ fn move_side(status: bool) -> solidcore::Result<()> {
 fn issue_1442_local_operation_passes_on_the_offset_status() {
     let r = move_side(true);
     match r {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR_OFFSET_WALLS_TOUCH),
+        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_WALLS_TOUCH)),
         other => panic!("{other:?}"),
     }
 }
@@ -61,7 +61,57 @@ fn issue_1442_local_operation_passes_on_the_offset_status() {
 fn issue_1442_local_operation_without_the_opt_in_is_sm_err() {
     let r = move_side(false);
     match r {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
         other => panic!("{other:?}"),
     }
+}
+
+/// #2615: with the status passed on, the local operation's error is the offset's refusal
+/// in solidcore's terms.
+#[test]
+fn issue_2615_local_operation_names_the_walls_that_touch() {
+    let e = move_side(true).unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::OffsetWallsTouch);
+    assert_eq!(e.cause(), None);
+    let message = e.to_string();
+    assert!(
+        message.starts_with(
+            "offset::offset_executive::crossing_loops::resolve_crossing_loops: the loops of the \
+             offset of face "
+        ),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(" run along one another, so the offset walls would meet there")
+            || message.ends_with(" touch without crossing, so the offset walls would meet there"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("1042") && !message.contains("status"),
+        "{message}"
+    );
+}
+
+/// #2615 (#2511's ask): without the status passed on, the local operation still fails with
+/// `SM_ERR` as upstream does, and keeps the offset's refusal as its cause.
+#[test]
+fn issue_2615_local_operation_keeps_the_offsets_refusal_as_its_cause() {
+    let e = move_side(false).unwrap_err();
+    assert_eq!(e.sm_status(), Some(SM_ERR));
+    assert_eq!(e.kind(), ErrorKind::Failed);
+    assert_eq!(
+        e.operation(),
+        "topology::brep::local_operation::local_operation"
+    );
+    let cause = e.cause().unwrap_or_else(|| panic!("no cause kept: {e:?}"));
+    assert_eq!(cause.kind(), ErrorKind::OffsetWallsTouch);
+    assert_eq!(e.root_cause(), cause);
+    assert_eq!(cause, &move_side(true).unwrap_err());
+    assert_eq!(
+        e.to_string(),
+        format!(
+            "topology::brep::local_operation::local_operation: the offset of the moved faces \
+             could not be built; caused by {cause}"
+        )
+    );
 }

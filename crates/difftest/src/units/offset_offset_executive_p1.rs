@@ -1041,6 +1041,8 @@ fn operation<T>(result: solidcore::Result<T>) -> RResult<(i64, Option<T>)> {
     match result {
         Ok(value) => Ok((i64::from(ffi::NATIVE_SUCCESS), Some(value))),
         Err(SolidError::Upstream { code, .. }) => Ok((i64::from(code), None)),
+        // a failure in solidcore's terms (#2615): its C++ comparison status
+        Err(e @ SolidError::Failed(_)) => Ok((i64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
         Err(error) => Err(RunError::Kernel(error)),
     }
 }
