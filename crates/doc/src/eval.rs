@@ -2030,18 +2030,41 @@ const BLEND_REACH: f64 = 1.0;
 /// box reaches within [`BLEND_REACH`] of its first edge point. `None` when none of them has an
 /// edge that near, as a body further away could then be the nearest; or around a mesh body.
 fn blend_candidates(st: &ModelState, edges: &[Vec3]) -> Option<Vec<usize>> {
-    let p = *edges.first()?;
-    let near: Vec<usize> =
-        st.bodies.iter().enumerate().filter(|(_, b)| b.outline_bounds().inflated(BLEND_REACH).contains(p)).map(|(i, _)| i).collect();
-    let mut hit = false;
-    for b in near.iter().filter_map(|i| st.bodies.get(*i)) {
-        if b.body.is_mesh() {
+    if edges.is_empty() {
+        return None;
+    }
+    // Each pick finds its body among all of them: the read set is every body near any pick, and
+    // a pick with no edge near it may take one anywhere.
+    let mut all = Vec::new();
+    for &p in edges {
+        let near: Vec<usize> =
+            st.bodies.iter().enumerate().filter(|(_, b)| b.outline_bounds().inflated(BLEND_REACH).contains(p)).map(|(i, _)| i).collect();
+        let mut hit = false;
+        for b in near.iter().filter_map(|i| st.bodies.get(*i)) {
+            if b.body.is_mesh() {
+                return None;
+            }
+            let tol = (b.body.size() * 2e-3).max(1e-3);
+            hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if d <= BLEND_REACH);
+        }
+        if !hit {
             return None;
         }
-        let tol = (b.body.size() * 2e-3).max(1e-3);
-        hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if d <= BLEND_REACH);
+        all.extend(near);
     }
-    hit.then_some(near)
+    all.sort_unstable();
+    all.dedup();
+    Some(all)
+}
+
+/// A pattern whose copies are placed by numbers alone: not along a sketch path, nor about a
+/// model edge or face, or a feature named for its axis.
+fn fixed_pattern(pattern: &crate::PatternKind) -> bool {
+    match pattern {
+        crate::PatternKind::Rectangular { .. } => true,
+        crate::PatternKind::Circular { axis_ref, axis_feature, .. } => axis_ref.is_none() && axis_feature.is_none(),
+        crate::PatternKind::Path { .. } => false,
+    }
 }
 
 /// A plane given by numbers alone or a construction plane (its geometry is in the feature's key,
@@ -2098,10 +2121,10 @@ impl Feature {
         match &self.kind {
             // A cylinder placed by reference edges reads the faces they lie on.
             k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(feature_op(self))?),
-            FeatureKind::Pattern { bodies: copied, .. } if !copied.is_empty() => bodies(named(&crate::plain::<String, _>(copied))?),
-            FeatureKind::Pattern { features, pattern: crate::PatternKind::Rectangular { .. } | crate::PatternKind::Circular { .. }, .. }
-                if !features.is_empty() =>
-            {
+            FeatureKind::Pattern { bodies: copied, pattern, .. } if !copied.is_empty() && fixed_pattern(pattern) => {
+                bodies(named(&crate::plain::<String, _>(copied))?)
+            }
+            FeatureKind::Pattern { features, pattern, .. } if !features.is_empty() && fixed_pattern(pattern) => {
                 let mut read = Vec::new();
                 for id in features {
                     let src =
@@ -2157,6 +2180,8 @@ struct Change {
     blend: Option<Vec<Vec3>>,
     fitted: Option<Vec<f64>>,
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
+    /// A join's touching pieces it kept as bodies of their own.
+    kept_separate: Option<KeptSeparate>,
 }
 
 #[derive(Clone, Debug)]
@@ -2197,10 +2222,11 @@ impl ModelState {
             && kept.iter().zip(others).all(|(a, b)| Arc::ptr_eq(a, b))
             && (sketch.is_some() || kept.len() == before.sketches.len())
             && self.sketch_keys == before.sketch_keys
-            && self.construct.len() == before.construct.len()
+            && self.construct == before.construct
             && others_same(&self.blend_edges, &before.blend_edges, feature)
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
+            && others_same(&self.kept_separate, &before.kept_separate, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
             return None;
@@ -2230,6 +2256,7 @@ impl ModelState {
             blend: self.blend_edges.get(&feature).cloned(),
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
+            kept_separate: self.kept_separate.get(&feature).copied(),
         })
     }
 
@@ -2261,6 +2288,10 @@ impl ModelState {
         }
         if let Some(t) = &change.tapered {
             next.tapered.insert(feature, t.clone());
+        }
+        next.kept_separate.remove(&feature);
+        if let Some(k) = change.kept_separate {
+            next.kept_separate.insert(feature, k);
         }
         Some(next)
     }
