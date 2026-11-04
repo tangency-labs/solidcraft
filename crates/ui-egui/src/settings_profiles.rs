@@ -1,8 +1,9 @@
 //! Settings profiles (#6237): the input and interface settings kept together under a name, such
 //! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
 //! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar,
-//! S box favourites, and imported theme it uses. Page moves preserve that stored key set;
-//! device-specific 3D mouse keys, graphics, recent files and Assistant settings stay out.
+//! S box favourites, imported theme it uses, and the custom view navigator's texture, arrows and
+//! Home, and its body (when one is chosen; a profile without one leaves the current body alone). Page moves preserve that stored
+//! key set; device-specific 3D mouse keys, graphics, recent files and Assistant settings stay out.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
@@ -240,7 +241,7 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
     let all = serde_json::to_value(&app.preferences).unwrap_or_default();
     let preferences: Map<String, Value> = keys().filter_map(|key| Some((key.to_string(), all.get(key)?.clone()))).collect();
     let themes: Vec<Value> = app.preferences.custom_themes.iter().filter(|t| t.id == app.preferences.theme).map(theme_document).collect();
-    json!({
+    let mut doc = json!({
         "format": FORMAT,
         "name": name,
         "preferences": preferences,
@@ -248,7 +249,17 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
         "favourites": app.sbox.pinned,
         "toolbar": app.toolbar_custom.prefs(),
         "themes": themes,
-    })
+    });
+    // The custom view navigator's own settings ride in their own entry: they are newer than the
+    // profile key set above, which never changes.
+    if let Some(o) = doc.as_object_mut() {
+        o.insert("view_navigator".into(), crate::view_gizmo::profile_settings(app));
+    }
+    let gizmo = app.view_gizmo.stored();
+    if let Some(o) = doc.as_object_mut().filter(|_| gizmo.is_object()) {
+        o.insert("view_gizmo".into(), gizmo);
+    }
+    doc
 }
 
 /// An imported theme as a theme file that also keeps the id the profile's `theme` names.
@@ -322,7 +333,7 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
             Err(e) => log::warn!("settings profile `{name}`: a theme is left out: {e}"),
         }
     }
-    let doc = json!({
+    let mut doc = json!({
         "format": FORMAT,
         "name": name,
         "preferences": preferences,
@@ -331,6 +342,21 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
         "toolbar": toolbar.prefs(),
         "themes": themes,
     });
+    if let Some(settings) = o.get("view_navigator").map(crate::view_gizmo::checked_profile_settings)
+        && let Some(d) = doc.as_object_mut()
+    {
+        d.insert("view_navigator".into(), settings);
+    }
+    if let Some(v) = o.get("view_gizmo") {
+        match crate::view_gizmo::Shape::from_json(v) {
+            Some(shape) => {
+                if let Some(d) = doc.as_object_mut() {
+                    d.insert("view_gizmo".into(), shape.to_json());
+                }
+            }
+            None => log::warn!("settings profile `{name}`: the view navigator's body can't be read; left out"),
+        }
+    }
     if doc.to_string().len() > MAX_PROFILE_BYTES {
         return Err(format!("a settings profile is at most {} KiB", MAX_PROFILE_BYTES / 1024));
     }
@@ -416,6 +442,12 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     if let Some(t) = doc.get("toolbar") {
         app.toolbar_custom.load(t);
     }
+    if let Some(v) = doc.get("view_navigator") {
+        crate::view_gizmo::apply_profile_settings(app, v);
+    }
+    if let Some(v) = doc.get("view_gizmo") {
+        app.view_gizmo.load(Some(v));
+    }
     skipped
 }
 
@@ -448,7 +480,8 @@ pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String>
     match id {
         "settings.profile.list" => Ok(json!({ "profiles": app.settings_profiles.names(), "active": app.settings_profiles.active })),
         "settings.profile.save" => {
-            let doc = capture(app, name);
+            // The checks a profile meets when it is read back, so none is saved only to be dropped.
+            let doc = sanitize(&capture(app, name))?;
             match app.settings_profiles.find(name) {
                 Some(i) => {
                     if let Some(old) = app.settings_profiles.list.get_mut(i) {

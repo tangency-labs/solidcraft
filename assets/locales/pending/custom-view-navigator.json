@@ -1,0 +1,98 @@
+{
+  "en": {
+    "cmd.view.navigator": "Custom View Navigator",
+    "ui.heading_custom_view_navigator": "CUSTOM VIEW NAVIGATOR",
+    "view_gizmo.arrows": "Rotation arrows",
+    "view_gizmo.home": "Home button",
+    "view_gizmo.no_such_body": "This design has no body of that name.",
+    "view_gizmo.note": "Pick a body in the view. It is kept with your preferences and settings profiles, and shown in every design. Click one of its faces to look straight at it.",
+    "view_gizmo.texture": "Texture",
+    "view_gizmo.themed": "Themed",
+    "view_gizmo.too_detailed": "Too detailed for the view navigator (over 10,000 triangles)",
+    "view_gizmo.too_thin": "Too long and thin for the view navigator: its thinnest side must be at least a fifth of its longest"
+  },
+  "ar": {
+    "cmd.view.navigator": "متصفح العرض المخصص",
+    "ui.heading_custom_view_navigator": "متصفح العرض المخصص",
+    "view_gizmo.arrows": "أسهم التدوير",
+    "view_gizmo.home": "زر العرض الرئيسي",
+    "view_gizmo.no_such_body": "لا يوجد في هذا التصميم جسم بهذا الاسم.",
+    "view_gizmo.note": "اختر جسمًا في العرض. يُحفظ مع تفضيلاتك وملفات تعريف الإعدادات، ويظهر في كل تصميم. انقر أحد أوجهه للنظر إليه مباشرة.",
+    "view_gizmo.texture": "الخامة",
+    "view_gizmo.themed": "حسب السمة",
+    "view_gizmo.too_detailed": "مفصّل أكثر مما يناسب متصفح العرض (أكثر من 10,000 مثلث)",
+    "view_gizmo.too_thin": "طويل ورفيع أكثر مما يناسب متصفح العرض: يجب ألا يقل أرفع جانب عن خُمس أطول جانب"
+  },
+  "de": {
+    "cmd.view.navigator": "Eigener Ansichtsnavigator",
+    "ui.heading_custom_view_navigator": "EIGENER ANSICHTSNAVIGATOR",
+    "view_gizmo.arrows": "Drehpfeile",
+    "view_gizmo.home": "Schaltfläche „Ausgangsansicht“",
+    "view_gizmo.no_such_body": "Diese Konstruktion hat keinen Körper mit diesem Namen.",
+    "view_gizmo.note": "Wählen Sie einen Körper in der Ansicht. Er wird mit Ihren Einstellungen und Einstellungsprofilen gespeichert und in jeder Konstruktion angezeigt. Klicken Sie auf eine seiner Flächen, um direkt darauf zu blicken.",
+    "view_gizmo.texture": "Textur",
+    "view_gizmo.themed": "Design",
+    "view_gizmo.too_detailed": "Zu detailliert für den Ansichtsnavigator (über 10.000 Dreiecke)",
+    "view_gizmo.too_thin": "Zu lang und dünn für den Ansichtsnavigator: Die dünnste Seite muss mindestens ein Fünftel der längsten sein"
+  },
+  "he": {
+    "cmd.view.navigator": "ניווט תצוגה מותאם אישית",
+    "ui.heading_custom_view_navigator": "ניווט תצוגה מותאם אישית",
+    "view_gizmo.arrows": "חיצי סיבוב",
+    "view_gizmo.home": "לחצן תצוגת בית",
+    "view_gizmo.no_such_body": "אין בעיצוב הזה גוף בשם הזה.",
+    "view_gizmo.note": "בחרו גוף בתצוגה. הוא נשמר עם ההעדפות ופרופילי ההגדרות שלכם ומוצג בכל עיצוב. לחצו על אחת מפאותיו כדי להביט בה ישירות.",
+    "view_gizmo.texture": "מרקם",
+    "view_gizmo.themed": "לפי ערכת הנושא",
+    "view_gizmo.too_detailed": "מפורט מדי לניווט התצוגה (יותר מ-10,000 משולשים)",
+    "view_gizmo.too_thin": "ארוך ודק מדי לניווט התצוגה: הצד הדק ביותר חייב להיות לפחות חמישית מהצד הארוך ביותר"
+  },
+  "ja": {
+    "cmd.view.navigator": "カスタム ビューナビゲーター",
+    "ui.heading_custom_view_navigator": "カスタム ビューナビゲーター",
+    "view_gizmo.arrows": "回転矢印",
+    "view_gizmo.home": "ホーム ボタン",
+    "view_gizmo.no_such_body": "このデザインにその名前のボディはありません。",
+    "view_gizmo.note": "ビューでボディを選択してください。ボディは環境設定と設定プロファイルに保存され、すべてのデザインで表示されます。面をクリックすると、その面を正面から見ます。",
+    "view_gizmo.texture": "テクスチャ",
+    "view_gizmo.themed": "テーマ",
+    "view_gizmo.too_detailed": "ビューナビゲーターには細かすぎます (10,000 三角形を超えています)",
+    "view_gizmo.too_thin": "ビューナビゲーターには細長すぎます: 最も薄い辺が最も長い辺の 5 分の 1 以上である必要があります"
+  },
+  "ko": {
+    "cmd.view.navigator": "사용자 지정 뷰 탐색기",
+    "ui.heading_custom_view_navigator": "사용자 지정 뷰 탐색기",
+    "view_gizmo.arrows": "회전 화살표",
+    "view_gizmo.home": "홈 버튼",
+    "view_gizmo.no_such_body": "이 디자인에 그런 이름의 바디가 없습니다.",
+    "view_gizmo.note": "뷰에서 바디를 선택하십시오. 바디는 환경설정과 설정 프로필에 저장되어 모든 디자인에 표시됩니다. 면을 클릭하면 그 면을 정면으로 봅니다.",
+    "view_gizmo.texture": "텍스처",
+    "view_gizmo.themed": "테마",
+    "view_gizmo.too_detailed": "뷰 탐색기에 너무 세밀합니다 (삼각형 10,000개 초과)",
+    "view_gizmo.too_thin": "뷰 탐색기에 너무 가늘고 깁니다: 가장 얇은 변이 가장 긴 변의 5분의 1 이상이어야 합니다"
+  },
+  "vi": {
+    "cmd.view.navigator": "Khối điều hướng góc nhìn tùy chỉnh",
+    "ui.heading_custom_view_navigator": "KHỐI ĐIỀU HƯỚNG GÓC NHÌN TÙY CHỈNH",
+    "view_gizmo.arrows": "Mũi tên xoay",
+    "view_gizmo.home": "Nút góc nhìn mặc định (Home)",
+    "view_gizmo.no_such_body": "Thiết kế này không có thân khối nào mang tên đó.",
+    "view_gizmo.note": "Chọn một thân khối trong khung nhìn. Thân khối được lưu cùng tùy chọn và hồ sơ cài đặt của bạn, và hiển thị trong mọi thiết kế. Nhấp vào một mặt của nó để nhìn thẳng vào mặt đó.",
+    "view_gizmo.texture": "Kết cấu",
+    "view_gizmo.themed": "Theo chủ đề",
+    "view_gizmo.too_detailed": "Quá chi tiết cho khối điều hướng góc nhìn (hơn 10.000 tam giác)",
+    "view_gizmo.too_thin": "Quá dài và mảnh cho khối điều hướng góc nhìn: cạnh mỏng nhất phải ít nhất bằng một phần năm cạnh dài nhất"
+  },
+  "zh": {
+    "cmd.view.navigator": "自定义视图导航器",
+    "ui.heading_custom_view_navigator": "自定义视图导航器",
+    "view_gizmo.arrows": "旋转箭头",
+    "view_gizmo.home": "主页按钮",
+    "view_gizmo.no_such_body": "此设计中没有该名称的实体。",
+    "view_gizmo.note": "在视图中选择一个实体。它随首选项和设置配置文件保存，并在每个设计中显示。单击它的一个面即可正视该面。",
+    "view_gizmo.texture": "纹理",
+    "view_gizmo.themed": "主题",
+    "view_gizmo.too_detailed": "对视图导航器而言过于精细（超过 10,000 个三角形）",
+    "view_gizmo.too_thin": "对视图导航器而言过于细长：最薄的一边至少要有最长一边的五分之一"
+  }
+}

@@ -41,6 +41,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
         Target::HistoryControls,
         Target::Workspace,
         Target::NamedViews,
+        Target::ViewGizmo,
         Target::InsertDesign,
         Target::VisualStyle,
         Target::ViewTool,
