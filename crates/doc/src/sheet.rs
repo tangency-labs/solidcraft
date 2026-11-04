@@ -609,7 +609,7 @@ impl HeightFrom {
     }
 
     /// What the measure starts at, for messages.
-    fn datum(self) -> &'static str {
+    pub fn datum(self) -> &'static str {
         match self {
             Self::Outer => "the outer sharp",
             Self::Inner => "the inner sharp",

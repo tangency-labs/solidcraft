@@ -762,8 +762,13 @@ pub(super) fn sheet_eval(
                     )),
                 };
             let n0 = sk.sheet.panels.len();
-            for (edge, height, angle) in picks {
-                let joint = sk.add_flange_on(edge, height, angle, rr, position, from, *flip)?;
+            let several = picks.len() > 1;
+            for (k, (edge, height, angle)) in picks.into_iter().enumerate() {
+                // Each edge's error names it, among several.
+                let joint = sk.add_flange_on(edge, height, angle, rr, position, from, *flip).map_err(|e| match e {
+                    DocError::Invalid(m) if several => DocError::Invalid(format!("edge {}: {m}", k + 1)),
+                    e => e,
+                })?;
                 if let Some((relief, size)) = own {
                     sk.corner_reliefs.push((joint, relief, size));
                 }

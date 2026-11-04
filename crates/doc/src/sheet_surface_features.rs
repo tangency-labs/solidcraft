@@ -83,16 +83,35 @@ impl SurfaceSheet {
     }
 
     /// Moves the edge `a`–`b` of panel `i` `by` mm outward (inward where negative): the panel
-    /// gains, or loses, the strip between.
+    /// gains, or loses, the strip between. At each end the line of the outline beside the edge
+    /// is followed to the edge's new line (on a slanted edge the strip is a parallelogram); where
+    /// that line is round, or runs nearly along the edge, the end moves square to it.
     fn move_edge(&mut self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64) -> Result<()> {
         if by.abs() <= 1e-9 {
             return Ok(());
         }
         let out = Vec2::new(d.y, -d.x);
-        let (p, q) = (a + out * by, b + out * by);
+        let panel = self.sheet.panels.get(i).ok_or_else(|| DocError::Invalid("panel".into()))?;
+        let segs = &panel.region.outer.segs;
+        let n = segs.len();
+        let k = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9));
+        // Along the line of `s` through the corner `at` to the edge's new line.
+        let follow = |s: Option<&Seg2>, at: Vec2| -> Vec2 {
+            let square = at + out * by;
+            let Some(Seg2::Line { a: x, b: y }) = s.copied() else { return square };
+            let Some(w) = (y - x).normalized() else { return square };
+            let across = w.dot(out);
+            if across.abs() < 0.1 {
+                return square;
+            }
+            at + w * (by / across)
+        };
+        let (p, q) = match k {
+            Some(k) => (follow(segs.get((k + n - 1) % n), a), follow(segs.get((k + 1) % n), b)),
+            None => (a + out * by, b + out * by),
+        };
         let strip = if by > 0.0 { [a, b, q, p] } else { [p, q, b, a] };
         let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
-        let panel = self.sheet.panels.get(i).ok_or_else(|| DocError::Invalid("panel".into()))?;
         let op = if by > 0.0 { BoolOp::Union } else { BoolOp::Cut };
         let mut out = crate::sheet_surface::boolean_past_holes(std::slice::from_ref(&panel.region), &[strip], op, &mut crate::sheet::FlatWork::new())?;
         if out.len() != 1 {
@@ -171,7 +190,11 @@ impl SurfaceSheet {
         let sharp = if toward { (radius + t) * half } else { radius * half };
         let leg = height - from.before_leg(angle, radius, t);
         if !(leg >= -1e-9) {
-            return err(format!("the flange height must be at least {:.3} mm for this bend", from.before_leg(angle, radius, t)));
+            let datum = match from {
+                HeightFrom::Outer => String::new(),
+                other => format!(" from {}", other.datum()),
+            };
+            return err(format!("the flange height{datum} must be at least {:.3} mm for this bend", from.before_leg(angle, radius, t)));
         }
         let by = sharp - start;
         // A sharp inside the edge by no more than the thickness needs no cut: the bend's band runs
