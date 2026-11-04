@@ -127,6 +127,9 @@ pub const SECTIONS: &[Section] = &[
     },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
+    // The type filter (NX's Selection Filter): what a click and a box pick. It has no commands
+    // of its own; its panel holds the filter controls.
+    Section { tab: "MODEL", panel: "SELECT", promoted: 0, ids: &[] },
     // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.

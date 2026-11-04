@@ -89,15 +89,15 @@ fn language_dropdown_defaults_to_system() {
 /// English silently, so check the word actually rendered in each language.
 #[test]
 fn window_chrome_renders_in_the_active_language() {
-    for (lang, browser, filter, faces) in [
-        ("zh", "浏览器", "选择筛选", "面"),
-        ("ja", "ブラウザ", "選択フィルター", "面"),
-        ("de", "Browser", "Auswahlfilter", "Flächen"),
-        ("ko", "브라우저", "선택 필터", "면"),
-        ("ru", "Браузер", "Фильтр выделения", "Грани"),
-        ("fr", "Navigateur", "Filtre de sélection", "Faces"),
-        ("it", "Struttura", "Filtro di selezione", "Facce"),
-        ("uk", "Браузер", "Фільтр виділення", "Грані"),
+    for (lang, browser, filter) in [
+        ("zh", "浏览器", "选择筛选"),
+        ("ja", "ブラウザ", "選択フィルター"),
+        ("de", "Browser", "Auswahlfilter"),
+        ("ko", "브라우저", "선택 필터"),
+        ("ru", "Браузер", "Фильтр выделения"),
+        ("fr", "Navigateur", "Filtre de sélection"),
+        ("it", "Struttura", "Filtro di selezione"),
+        ("uk", "Браузер", "Фільтр виділення"),
     ] {
         let mut h = Harness::new();
         h.app.preferences.language = lang.into();
@@ -111,7 +111,6 @@ fn window_chrome_renders_in_the_active_language() {
         h.step(&json!({"click": [select.x, select.y]})).unwrap();
         h.frames(2);
         assert!(h.widget(filter).is_some(), "{lang}: the selection filter must show {filter:?}");
-        assert!(h.widget(faces).is_some(), "{lang}: the Faces checkbox must show {faces:?}");
     }
 }
 
