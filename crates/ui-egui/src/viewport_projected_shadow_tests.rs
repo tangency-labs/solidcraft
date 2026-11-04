@@ -9,6 +9,8 @@ fn projected_ground_shadow_preserves_gaps_and_display_opacity() {
         }
     }
     let mut app = SolveApp::new(session, crate::Services::default());
+    app.ui.show_grid = false;
+    app.set_origin_shown(false);
     app.cam =
         Camera { target: Vec3::new(0.0, 0.0, 4.0), distance: 90.0, pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, fov: 0.0, ..Default::default() };
     let projection = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(256.0, 256.0)));
@@ -17,9 +19,9 @@ fn projected_ground_shadow_preserves_gaps_and_display_opacity() {
         app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
         let mut render = |mode| {
             app.run("view.ground_shadow", json!({"mode":mode})).unwrap();
-            crate::gpu::render_offscreen(
+            crate::gpu::render_offscreen_layers(
                 build_scene(&app),
-                None,
+                build_sketch_scene(&app, &projection),
                 projection.vp.to_f32(),
                 app.cam.back().to_f32(),
                 [eye[0], eye[1], eye[2], 0.0],
@@ -42,9 +44,9 @@ fn projected_ground_shadow_preserves_gaps_and_display_opacity() {
     app.run("appearance.assign", json!({"bodies":names,"color":"#bec3cd","opacity":0.0})).unwrap();
     let mut render = |mode| {
         app.run("view.ground_shadow", json!({"mode":mode})).unwrap();
-        crate::gpu::render_offscreen(
+        crate::gpu::render_offscreen_layers(
             build_scene(&app),
-            None,
+            build_sketch_scene(&app, &projection),
             projection.vp.to_f32(),
             app.cam.back().to_f32(),
             [eye[0], eye[1], eye[2], 0.0],

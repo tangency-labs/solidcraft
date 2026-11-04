@@ -2176,7 +2176,7 @@ pub struct Renderer {
     /// published when `paint` copies it into the view.
     ss_stats: DrawStats,
     shadow: Option<ground_shadow::Resources>,
-    shadow_key: Option<(u64, u64, bool, [u32; 4])>,
+    shadow_key: Option<(u64, u64, bool, [u32; 4], usize)>,
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
     ground_ao: wgpu::RenderPipeline,
@@ -3791,12 +3791,12 @@ impl Renderer {
 
     /// Refresh the camera-independent coverage only when its casters change.
     fn prepare_shadow(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, cb: &Frame) {
-        let Some(original) = self.model.projection.clone() else {
+        let Some(original) = self.sketch.projection.clone().or_else(|| self.model.projection.clone()) else {
             self.shadow = None;
             self.shadow_key = None;
             return;
         };
-        let key = (cb.key, cb.pv_key, cb.pv_hide, cb.clip.map(f32::to_bits));
+        let key = (cb.key, cb.pv_key, cb.pv_hide, cb.clip.map(f32::to_bits), Arc::as_ptr(&original) as usize);
         if self.shadow_key == Some(key) {
             return;
         }
@@ -4107,7 +4107,9 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         tris(pass, &res.trans, &sk.shadow);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        if m.projection.as_ref().is_some_and(|p| p.visible(cb.back)) {
+        let shadow_source = if sk.projection.is_some() { sk } else { m };
+        pass.set_bind_group(0, scene_bind(shadow_source, &res.bind), &[]);
+        if shadow_source.projection.as_ref().is_some_and(|p| p.visible(cb.back)) {
             if let Some(shadow) = &res.shadow {
                 pass.set_pipeline(&res.image);
                 pass.set_bind_group(1, &shadow.bind, &[]);
@@ -4119,9 +4121,10 @@ impl Renderer {
                     }
                 }
             } else {
-                tris(pass, &res.trans, &m.shadow_fallback);
+                tris(pass, &res.trans, &shadow_source.shadow_fallback);
             }
         }
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         if phase == Phase::BeforeSeeThrough {
             return;
         }
