@@ -65,6 +65,9 @@ struct Edit {
     /// or a reference, or pressed into the field. Until then every frame starts with the whole
     /// value selected, so the first key replaces it whatever else moved the caret (#11204).
     owned: bool,
+    /// A value was typed, completed or given a reference: until then the draft is the design as
+    /// it is, and the view is not put in its preview (see [`preview_world`]).
+    typed: bool,
     /// Where the box sat last frame: a press only takes the value over once the box stayed put
     /// under it, so the click that placed or pinned the value does not.
     shown: Option<Pos2>,
@@ -103,6 +106,8 @@ struct DimensionDraft {
     checked_expr: String,
     preview_doc: Arc<solidcraft_engine::doc::Document>,
     preview: Arc<solidcraft_engine::doc::ModelState>,
+    /// Which solve `preview` is (see [`next_solve`]).
+    solve: u64,
     error: Option<String>,
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
     /// it has no parameter and no value to edit (#320).
@@ -231,6 +236,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -270,6 +276,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             live,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -329,6 +336,7 @@ fn reevaluate(app: &SolveApp, draft: &mut DimensionDraft, expr: &str) {
     match draft.evaluate(app, expr) {
         Ok(scratch) => {
             draft.preview = crate::open_meshing::session_world(&scratch);
+            draft.solve = next_solve();
             draft.preview_doc = scratch.doc.clone();
             draft.error = None;
         }
@@ -391,6 +399,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         at,
         checked_expr: expr.clone(),
         preview: crate::open_meshing::session_world(&scratch),
+        solve: next_solve(),
         preview_doc: scratch.doc.clone(),
         error: None,
         driven,
@@ -451,6 +460,8 @@ thread_local! {
     /// A text being dragged: dimension id, undo depth at the start, grab offset (sketch).
     static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
+    /// Solves made for drafts so far: each preview's number, which the sketch scene is keyed on.
+    static SOLVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PLACEMENT: RefCell<Option<Placement>> = const { RefCell::new(None) };
     /// The half-axis of an ellipse the last placed draft for these picks in this sketch
     /// measured (see `previous_axis`).
@@ -509,6 +520,7 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: Some(d.sketch),
@@ -610,6 +622,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -773,8 +786,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         Some((e.param.clone(), draft.clone()))
     });
     let placing = !editing();
+    // While a value is typed the whole sketch, its other dimensions included, is drawn as the
+    // value would leave it (#11584); placing one only measures, so nothing moves.
+    let typed = preview_world(app);
     let draft = editor_draft.or_else(|| placing.then(|| placement_preview(app)).flatten());
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         // Only a finished sketch's dimension edited from the model view stays open, at its text.
@@ -816,11 +832,15 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
-    let mut constraints = sk.constraints.iter().map(|c| (ss, c, false)).collect::<Vec<_>>();
-    if let (Some(source), Some((param, _))) = (draft_sketch, draft.as_ref()) {
-        // A driven draft is keyed by its constraint id (it has no parameter).
-        let ours = |c: &&solidcraft_engine::sketch::Constraint| c.param.as_deref() == Some(param.as_str()) || (c.driven && c.id == *param);
-        constraints.extend(source.sketch.constraints.iter().filter(ours).map(|c| (source, c, true)));
+    // A driven draft is keyed by its constraint id (it has no parameter).
+    let ours = |c: &solidcraft_engine::sketch::Constraint| {
+        draft.as_ref().is_some_and(|(param, _)| c.param.as_deref() == Some(param.as_str()) || (c.driven && c.id == *param))
+    };
+    // Drawn from the typed value's solve, the sketch already holds the draft: it is told apart
+    // by its parameter, as below.
+    let mut constraints = sk.constraints.iter().filter(|c| typed.is_none() || !ours(c)).map(|c| (ss, c, false)).collect::<Vec<_>>();
+    if let Some(source) = draft_sketch {
+        constraints.extend(source.sketch.constraints.iter().filter(|c| ours(c)).map(|c| (source, c, true)));
     }
     // Text boxes already drawn this frame, in draw order: a later dimension that would land
     // on one of them steps clear of it (#44).
@@ -965,6 +985,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -992,6 +1013,7 @@ fn is_plain_value(text: &str) -> bool {
 ///
 /// The cursor ends just after the name and the field keeps the keyboard.
 fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
+    edit.typed = true;
     let id = egui::Id::new("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     let len = edit.expr.chars().count();
@@ -1024,7 +1046,7 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
 /// Consume dimension clicks while editing: a click on another driving dimension inserts its
 /// name at the cursor (replacing selected text), keeping what was typed. The second click of a
 /// double-click on the same dimension does not insert it again.
-pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
+pub fn pick_reference(app: &SolveApp, ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return false };
@@ -1043,6 +1065,12 @@ pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
             if !repeat {
                 insert_reference(ctx, edit, &param);
                 edit.picked = Some((param, now));
+                // Solved now, as a typed value is: the overlays read the preview before the
+                // editor runs this frame.
+                if let Some(draft) = edit.draft.as_mut() {
+                    let expr = edit.expr.clone();
+                    reevaluate(app, draft, &expr);
+                }
             }
         }
         edit.fresh = FRESH - 1;
@@ -1140,6 +1168,14 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     live.typed |= r.changed() || completed;
                 }
                 e.owned |= r.changed() || completed;
+                e.typed |= r.changed() || completed;
+                // Solved now, so the next frame draws the sketch at the new value from its start.
+                if (r.changed() || completed)
+                    && let Some(draft) = e.draft.as_mut()
+                {
+                    let expr = e.expr.clone();
+                    reevaluate(app, draft, &expr);
+                }
                 if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                 }
@@ -1219,9 +1255,55 @@ fn clear_picks(app: &mut SolveApp) {
     }
 }
 
+/// While a new dimension's value is typed: the design solved with that value (the last value
+/// that solved), so the open sketch is drawn as Enter would leave it. None otherwise.
+pub fn preview_world(app: &SolveApp) -> Option<Arc<solidcraft_engine::doc::ModelState>> {
+    EDIT.with(|e| e.try_borrow().ok()?.as_ref().filter(|e| e.typed)?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.preview.clone()))
+}
+
+/// A number for a new solve, never one an earlier solve had: a preview's address can be an earlier
+/// one's once that is freed, so the sketch scene is keyed on this instead.
+fn next_solve() -> u64 {
+    SOLVES.with(|n| {
+        n.set(n.get() + 1);
+        n.get()
+    })
+}
+
+/// Which solve [`preview_world`] is, while there is one.
+pub fn preview_solve(app: &SolveApp) -> Option<u64> {
+    EDIT.with(|e| e.try_borrow().ok()?.as_ref().filter(|e| e.typed)?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.solve))
+}
+
+/// The sketch drawn at a typed value (the open one), while there is one: its design curves are
+/// not where they are drawn, the other sketches' are.
+pub fn previewed_sketch(app: &SolveApp) -> Option<u64> {
+    preview_solve(app).and(app.session.active_sketch)
+}
+
 /// Is the inline editor open (it has the keyboard)?
 pub fn editing() -> bool {
     EDIT.with(|e| e.borrow().is_some())
+}
+
+/// The open draft's typed text and the text its preview was solved for (tests).
+#[cfg(test)]
+pub fn solved_for() -> Option<(String, String)> {
+    EDIT.with(|edit| {
+        let edit = edit.borrow();
+        let e = edit.as_ref()?;
+        Some((e.expr.clone(), e.draft.as_ref()?.checked_expr.clone()))
+    })
+}
+
+/// Solve the open draft again for `expr`, as a typed value or a moved text does (tests).
+#[cfg(test)]
+pub fn resolve(app: &SolveApp, expr: &str) {
+    EDIT.with(|edit| {
+        if let Some(draft) = edit.borrow_mut().as_mut().and_then(|e| e.draft.as_mut()) {
+            reevaluate(app, draft, expr);
+        }
+    });
 }
 
 /// The open draft: its expression, the dimension it adds and the sketch it previews (tests).

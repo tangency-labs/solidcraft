@@ -152,7 +152,7 @@ pub struct ViewportState {
     pub(crate) key: u64,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
-    sketch_slot: SceneSlot,
+    pub(crate) sketch_slot: SceneSlot,
     sketch_key: u64,
     physical_scale: f32,
     pub(crate) display: std::sync::Mutex<crate::sketch_display::DisplayCache>,
@@ -660,6 +660,8 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     // Conflicting curves in their own colour, or as before (#7244).
     app.preferences.sketch_conflict_colour.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
+    // The open sketch follows a dimension's typed value.
+    crate::dim_view::preview_solve(app).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     h.finish()
 }
@@ -1832,6 +1834,18 @@ pub(crate) fn seam_width(order: Option<solidcraft_engine::kernel::Continuity>) -
     2.6 + past_g2 as f32
 }
 
+/// Rebuild the sketch scene when what it shows has changed.
+pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
+    let sk = sketch_scene_key(app, proj);
+    if sk != app.viewport.sketch_key {
+        let scene = build_sketch_scene(app, proj);
+        if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
+            *slot = Some(scene);
+        }
+        app.viewport.sketch_key = sk;
+    }
+}
+
 /// View-dependent geometry: grid, sketch feedback and the ground shadow's visibility.
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
@@ -1924,16 +1938,38 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             }
         }
     }
+    // While a dimension's value is typed, the open sketch as that value leaves it. Sampled past
+    // the display cache, which holds the design's own solve for picking.
+    let typed = crate::dim_view::preview_world(app);
+    let ppp = app.viewport.pixels_per_point();
+    let mut uncached = crate::sketch_display::Uncached::default();
     for sid in visible_sketches(app) {
-        let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
+        let typed = typed.as_ref().filter(|_| active);
+        let Some(ss) = typed.unwrap_or(&st).sketch(sid) else { continue };
+        // Its curves are sampled before its profiles, which share their budget: past it a fill
+        // goes missing rather than a curve.
+        let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = match typed {
+            Some(_) => (0..ss.sketch.curves.len())
+                .filter(|i| solidcraft_engine::view::sketch_curve_visible(&ss.sketch, *i))
+                .map(|i| (i, uncached.curve(&ss.sketch, i, &ss.plane, proj, ppp)))
+                .collect(),
+            None => std::collections::HashMap::new(),
+        };
         // Closed profiles are shaded (lifted off a face they may lie on).
         let lift = ss.plane.normal() * 0.01;
         let profiles = if app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
         let profile_fill = sc.color(c4(tk.profile_fill));
-        for (index, _) in profiles.iter().enumerate() {
-            let display = crate::sketch_display::profile_region(app, sid, index, &ss.plane, proj);
-            for tri in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
+        for (index, profile) in profiles.iter().enumerate() {
+            let (sampled, cached);
+            let display = if typed.is_some() {
+                sampled = uncached.profile(&profile.region, &ss.plane, proj, ppp);
+                &sampled
+            } else {
+                cached = crate::sketch_display::profile_region(app, sid, index, &ss.plane, proj);
+                cached.as_ref()
+            };
+            for tri in display.as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
                 for q in tri {
                     sc.trans_tri((ss.plane.to_world(q) + lift).to_f32(), [0.0; 3], profile_fill);
                 }
@@ -1951,7 +1987,10 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let conflict = if active { Conflict::of(app, &ss.sketch, &ss.report) } else { Conflict::default() };
         let mut owners = Vec::new();
         let lines = sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
-            let parts = crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone();
+            let parts = match typed {
+                Some(_) => typed_curves.remove(&index).unwrap_or_default(),
+                None => crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone(),
+            };
             owners.extend(std::iter::repeat_n(index, parts.len()));
             parts
         });
@@ -3807,6 +3846,8 @@ pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
     highlight_geometry_key(app).hash(&mut h);
     let selected = app.highlighted();
     app.cam.half_height().to_bits().hash(&mut h);
+    // A typed dimension value hides the hovered profile (see `build_highlight`).
+    crate::dim_view::preview_solve(app).is_some().hash(&mut h);
     // Body triangles and outlines live in world space; the GPU applies the new camera.
     // Only sketch feedback needs projected tessellation and the profile's lift toward the eye.
     let projected = selected.iter().any(|s| matches!(s, Sel::Profile { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }))
@@ -4264,7 +4305,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     }
                 }
             }
-            Sel::Profile { sketch, index } => profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),
+            // Not while a dimension's value is typed: the design's profile would show over the
+            // sketch drawn at it (as for the hovered one below). Other sketches are drawn where
+            // they are.
+            Sel::Profile { sketch, index } if crate::dim_view::previewed_sketch(app) != Some(*sketch) => {
+                profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge)
+            }
             // A 3D sketch curve, in the sketch it names, or whichever sketch has it.
             Sel::SketchCurve { id, sketch } if st.sketches.iter().any(|ss| ss.sketch.wire_index(id).is_some()) => {
                 let sel_edge = feedback.color(c4(t.sel_edge));
@@ -4277,7 +4323,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             // A curve picked into a dialog from another sketch than the active one names it.
-            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) } => {
+            // Not the curves of the sketch drawn at a typed value: the design has them elsewhere.
+            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) }
+                if crate::dim_view::previewed_sketch(app) != Some(*sketch) =>
+            {
                 let sel_edge = feedback.color(c4(t.sel_edge));
                 if let Some(ss) = st.sketch(*sketch)
                     && let Some(ci) = ss.sketch.curve_index(id)
@@ -4295,7 +4344,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     }
                 }
             }
-            Sel::SketchCurve { id, .. } => {
+            Sel::SketchCurve { id, .. } if crate::dim_view::previewed_sketch(app).is_none() => {
                 if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
@@ -4425,8 +4474,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
         }
+        // While a dimension's value is typed the sketch is drawn at it: the design's profile
+        // would show over the resized one.
         Some(Hit::Profile { sketch, index })
-            if !sel.iter().any(|x| matches!(x, Sel::Profile { sketch: s2, index: i2 } if s2 == sketch && i2 == index)) =>
+            if !sel.iter().any(|x| matches!(x, Sel::Profile { sketch: s2, index: i2 } if s2 == sketch && i2 == index))
+                && crate::dim_view::previewed_sketch(app) != Some(*sketch) =>
         {
             profile_fill(&mut feedback, app, *sketch, *index, t.hover_profile, t.hover_profile_edge);
         }
@@ -4713,14 +4765,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
         }
-        let sk = sketch_scene_key(app, &proj);
-        if sk != app.viewport.sketch_key {
-            let scene = build_sketch_scene(app, &proj);
-            if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
-                *slot = Some(scene);
-            }
-            app.viewport.sketch_key = sk;
-        }
+        refresh_sketch_scene(app, &proj);
         let hk = highlight_key(app);
         if hk != app.viewport.hl_key {
             let hl = build_highlight(app);
@@ -4959,7 +5004,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !midpoint_geometry
             && !held
             && app.dialog.is_none()
-            && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
+            && crate::dim_view::pick_reference(app, ui.ctx(), p, resp.double_clicked());
         // Capture the press too: text editors lose focus before the click is released. A
         // running tool keeps the keyboard for its own typed values.
         if !held
@@ -6578,9 +6623,16 @@ fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
 
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
 fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    // While a dimension's value is typed the open sketch is drawn at that value, but hover follows
+    // the design: a highlight there would trace a curve where none is drawn. Other sketches are
+    // drawn where they are.
+    let previewed = crate::dim_view::previewed_sketch(app);
     let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
-    match &app.viewport.hover {
+    let hover = app.viewport.hover.as_ref().filter(|h| {
+        !matches!(h, Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. } if previewed == Some(*sketch))
+    });
+    match hover {
         // Trim shows the piece it would take away instead (`sketch_tools::preview`, #3052).
         Some(Hit::SketchCurve { sketch, id, .. }) if crate::sketch_tools::trim_hover_piece(app, *sketch, id).is_some() => {}
         Some(Hit::SketchCurve { sketch, id, .. }) => {
@@ -6611,6 +6663,7 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     // The centre of the circle or arc hovered last: a cross in a ring, where a click takes it.
     if let Some((sketch, id)) = &app.viewport.woken_centre
+        && previewed != Some(*sketch)
         && !matches!(&app.viewport.hover, Some(Hit::SketchPoint { id: h, .. }) if h == id)
         && let Some(ss) = st.sketch(*sketch)
         && let Some(at) = ss.sketch.resolve_point(id).and_then(|i| ss.sketch.point(i))
@@ -6724,6 +6777,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     let Some(sid) = app.session.active_sketch else { return };
+    // While a dimension's value is typed, its points where that value puts them.
+    let st = crate::dim_view::preview_world(app).unwrap_or(st);
     let Some(ss) = st.sketch(sid) else { return };
     let sk = &ss.sketch;
     let locked = sk.locked_points();
@@ -8110,6 +8165,44 @@ mod tests {
             plain.len(),
             &plain[..plain.len().min(6)]
         );
+    }
+
+    /// While a dimension's value is typed only the open sketch, drawn at that value, loses its
+    /// hover highlight: another sketch's curve is drawn where it is, so its hover still shows.
+    #[test]
+    fn a_typed_value_keeps_the_hover_of_another_sketch() {
+        crate::dim_view::cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let line = h.app.run("sketch.line", json!({"points":[[0,30],[40,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+        let other = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let own = h.app.run("sketch.line", json!({"points":[[0,0],[40,0]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+        let open = h.app.session.active_sketch.unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.app.cam.target = Vec3::new(20.0, 15.0, 0.0);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+        h.step(&json!({"text":"60"})).unwrap();
+        h.settle();
+        assert!(crate::dim_view::preview_solve(&h.app).is_some(), "the value is typed");
+        let proj = display_proj(&h.app);
+        let drawn = |h: &crate::scenario::Harness| {
+            let ctx = crate::fonts::test_context();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                hover_highlight(&h.app, &ui.ctx().layer_painter(egui::LayerId::background()), &proj);
+            });
+            output.textures_delta.clear();
+            !output.shapes.is_empty()
+        };
+        h.app.viewport.hover = Some(Hit::SketchCurve { sketch: other, id: line, straight: true, point: Vec3::ZERO });
+        assert!(drawn(&h), "the other sketch's curve is lit under the pointer");
+        h.app.viewport.hover = Some(Hit::SketchCurve { sketch: open, id: own, straight: true, point: Vec3::ZERO });
+        assert!(!drawn(&h), "the open sketch's design curve is not");
+        crate::dim_view::cancel();
     }
 
     #[test]

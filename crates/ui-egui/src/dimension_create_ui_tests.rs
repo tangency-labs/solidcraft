@@ -668,8 +668,10 @@ fn dimension_to_fillet_virtual_sharp_keeps_the_arc_and_fixed_origin() {
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
 
+/// While a new dimension's value is typed, a committed dimension moves with the sketch drawn at
+/// that value and is picked where it is drawn; the draft is no hit target, and Esc puts it back.
 #[test]
-fn draft_annotation_does_not_move_committed_dimension_hitboxes() {
+fn a_committed_dimension_moves_with_the_typed_preview_and_is_picked_where_drawn() {
     crate::dim_view::cancel();
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -685,8 +687,14 @@ fn draft_annotation_does_not_move_committed_dimension_hitboxes() {
     place(&mut h, &[[0., 0.], [0., 10.]], [-5., 5.]);
     type_value(&mut h, "12 mm");
     h.settle();
-    assert_eq!(crate::dim_view::text_at(&width), Some(at));
-    assert_eq!(crate::dim_view::drawn(), drawn, "draft annotations must not become committed hit targets");
+    // The sketch is drawn at the typed height, so the width on the top side is drawn, and
+    // picked, 2 mm higher; the draft itself is no hit target.
+    let [_, top] = h.at(&json!({"world":[10,12,0]})).unwrap();
+    let [_, was] = h.at(&json!({"world":[10,10,0]})).unwrap();
+    let moved = crate::dim_view::text_at(&width).unwrap() - at;
+    assert!(moved.x.abs() < 0.5 && (f64::from(moved.y) - (top - was)).abs() < 0.5, "the width follows its side: {moved:?}");
+    let ids = |d: Vec<(String, egui::Pos2)>| d.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+    assert_eq!(ids(crate::dim_view::drawn()), ids(drawn.clone()), "draft annotations must not become committed hit targets");
     assert_eq!(h.app.session.doc.to_json(), baseline);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert_eq!(crate::dim_view::drawn(), drawn);
@@ -1029,6 +1037,253 @@ fn type_first_escape_cancels_with_no_change() {
         assert_eq!(h.app.session.undo.len(), undo);
         assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)), "Esc drops the picks too");
     }
+    crate::dim_view::cancel();
+}
+
+/// The open sketch's lines as the next frame paints them (the viewport's sketch scene, rebuilt
+/// only when its key changes, before the frame's dimensions are drawn; the harness has no GPU,
+/// so the test does it): their bounds, [min x, min y, max x, max y].
+fn drawn_extent(h: &mut Harness) -> [f32; 4] {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    crate::viewport::refresh_sketch_scene(&mut h.app, &proj);
+    let slot = h.app.viewport.sketch_slot.lock().unwrap();
+    let scene = slot.as_ref().expect("a sketch scene");
+    let ends = scene.overlay.as_chunks::<32>().0.iter().flat_map(|l| [&l[0..12], &l[12..24]]);
+    ends.map(|b| [0, 4].map(|i| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map(f32::from_le_bytes)))
+        .filter_map(|[x, y]| Some([x?, y?]))
+        .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |m, [x, y]| [m[0].min(x), m[1].min(y), m[2].max(x), m[3].max(y)])
+}
+
+fn near(a: [f32; 4], b: [f32; 4]) -> bool {
+    a.iter().zip(b).all(|(a, b)| (a - b).abs() < 0.6)
+}
+
+fn bounds(sk: &solidcraft_engine::sketch::Sketch) -> [f32; 4] {
+    let (lo, hi) = sk.bounds().unwrap_or_default();
+    [lo.x, lo.y, hi.x, hi.y].map(|v| v as f32)
+}
+
+/// While a value is typed the sketch is drawn as the value leaves it, not only the dimension
+/// (#11584), whatever the shape; Esc draws it as it is again.
+#[test]
+fn typing_a_value_draws_the_sketch_at_that_value_and_escape_restores_it() {
+    let fix = |entity: &str| ("sketch.constraint.fix", json!({"entity": entity}));
+    let rectangle = vec![("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))];
+    let circle = vec![("sketch.circle.center", json!({"center":[10,0],"radius":5})), fix("c1.center")];
+    let slot = vec![("sketch.slot.center_to_center", json!({"p0":[-20,0],"p1":[20,0],"width":20}))];
+    let arc = vec![("sketch.arc.center_point", json!({"center":[10,0],"start":[18,0],"sweep":90})), fix("a1.center")];
+    let spline = vec![
+        ("sketch.spline.fit_point", json!({"points": [[-30, 0], [-10, 18], [10, 6], [30, 20]]})),
+        ("sketch.line", json!({"points":[[30,20],[30,-10]],"infer":true})),
+    ];
+    let mixed = vec![
+        ("sketch.circle.center", json!({"center":[0,0],"radius":10})),
+        ("sketch.circle.center", json!({"center":[40,0],"radius":10})),
+        ("sketch.line", json!({"points":[[0,10],[40,10]],"infer":false})),
+        ("sketch.constraint.tangent", json!({"a":"l1","b":"c1"})),
+        ("sketch.constraint.tangent", json!({"a":"l1","b":"c2"})),
+        ("sketch.constraint.equal", json!({"a":"c1","b":"c2"})),
+        fix("c1.center"),
+        fix("c2.center"),
+    ];
+    let half = std::f64::consts::FRAC_1_SQRT_2 * 8.0;
+    let cases: [(&str, &[(&str, serde_json::Value)], [f64; 2], Vec<[f64; 2]>, &str); 6] = [
+        ("rectangle side", &rectangle, [20., 10.], vec![[20., 0.]], "60"),
+        ("circle diameter", &circle, [10., 0.], vec![[15., 0.]], "20"),
+        ("slot side", &slot, [0., 0.], vec![[0., 10.]], "60"),
+        ("arc radius", &arc, [10., 0.], vec![[10. + half, half]], "12"),
+        ("spline end", &spline, [0., 5.], vec![[30., 5.]], "50"),
+        ("tangent equal circles", &mixed, [20., 0.], vec![[-10., 0.]], "30"),
+    ];
+    for (name, setup, centre, picks, typed) in cases {
+        let mut h = sketch_with(setup, centre);
+        // Far enough out that the grown shapes stay in view (the drawn lines stop at its edge).
+        h.app.cam.distance = 200.0;
+        h.settle();
+        let real = bounds(&solved(&h));
+        let before = drawn_extent(&mut h);
+        assert!(near(before, real), "{name}: drawn {before:?}, sketch {real:?}");
+        for p in &picks {
+            h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
+        }
+        assert_live(&h);
+        keys(&mut h, typed);
+        // What the frame after the last key paints, against the typed value's solve a frame later.
+        let shown = drawn_extent(&mut h);
+        h.frames(1);
+        let (_, _, preview) = crate::dim_view::draft_preview().expect("the draft is open");
+        let target = bounds(&preview);
+        assert!(!near(target, real), "{name}: the typed value changes the sketch: {target:?}");
+        assert!(near(shown, target), "{name}: the sketch follows the typed value: drawn {shown:?}, solved {target:?}");
+        assert!(near(bounds(&solved(&h)), real), "{name}: nothing changes until Enter");
+        // A value that does not solve (here half typed) keeps the last one that did.
+        keys(&mut h, "*");
+        assert_eq!(crate::dim_view::draft_preview().map(|(expr, _, _)| expr), Some(format!("{typed}*")));
+        let kept = drawn_extent(&mut h);
+        assert!(near(kept, target), "{name}: an unsolved value keeps the last drawn: {kept:?}");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!crate::dim_view::editing());
+        let after = drawn_extent(&mut h);
+        assert!(near(after, real), "{name}: Esc draws the sketch as it is: {after:?}");
+        crate::dim_view::cancel();
+    }
+}
+
+/// Each solve of a typed value redraws the sketch, also two between frames (a moved text and a
+/// typed value in one frame), and a solve back to an earlier value: the scene is keyed on the
+/// solve, not on where its result happens to be in memory.
+#[test]
+fn every_solve_of_a_typed_value_redraws_the_sketch() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.app.cam.distance = 300.0;
+    h.settle();
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sixty = drawn_extent(&mut h);
+    let mut solves = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        crate::dim_view::resolve(&h.app, "70");
+        crate::dim_view::resolve(&h.app, "80");
+        assert!(solves.insert(crate::dim_view::preview_solve(&h.app).expect("a preview")), "a new solve has a new number");
+        let (_, _, preview) = crate::dim_view::draft_preview().expect("the draft is open");
+        let drawn = drawn_extent(&mut h);
+        assert!(!near(drawn, sixty) && near(drawn, bounds(&preview)), "drawn {drawn:?}, solved {:?}", bounds(&preview));
+        crate::dim_view::resolve(&h.app, "60");
+        assert!(near(drawn_extent(&mut h), sixty));
+    }
+    crate::dim_view::cancel();
+}
+
+/// While a value is typed the sketch is drawn at it, so a profile under the pointer is not lit
+/// where the design has it (over the resized one); it is again once the value is let go.
+#[test]
+fn a_typed_value_does_not_light_the_design_s_profile_under_the_pointer() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.viewport.hover = Some(crate::viewport::Hit::Profile { sketch, index: 0 });
+    let key = crate::viewport::highlight_key(&h.app);
+    assert!(crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "no profile lit while the value is typed");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.app.viewport.hover = Some(crate::viewport::Hit::Profile { sketch, index: 0 });
+    assert_ne!(crate::viewport::highlight_key(&h.app), key, "letting the value go lights it again");
+    assert!(!crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "lit as before");
+    crate::dim_view::cancel();
+}
+
+/// Until a value is typed the sketch is drawn as the design has it, so a picked dimension's
+/// value box alone does not put the view in the typed preview: the profile under the pointer
+/// stays lit. The first key does.
+#[test]
+fn a_dimension_only_picked_keeps_the_design_view_until_a_value_is_typed() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    assert!(crate::dim_view::preview_solve(&h.app).is_none(), "nothing typed yet: no preview");
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.viewport.hover = Some(crate::viewport::Hit::Profile { sketch, index: 0 });
+    assert!(!crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "the profile is lit while only picked");
+    keys(&mut h, "6");
+    assert!(crate::dim_view::preview_solve(&h.app).is_some(), "a key starts the preview");
+    crate::dim_view::cancel();
+}
+
+/// A selected profile is not lit where the design has it while a value is typed either.
+#[test]
+fn a_typed_value_does_not_light_a_selected_design_profile() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    assert!(crate::dim_view::preview_solve(&h.app).is_some(), "the value is still typed");
+    assert!(crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "no profile lit while the value is typed");
+    crate::dim_view::cancel();
+    assert!(!crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "lit once the value is let go");
+}
+
+/// While a value is typed the sketch's curves are sampled before its profiles: a sketch whose
+/// profiles would use up the sampling budget still has its curves drawn (its fills go first).
+#[test]
+fn a_typed_value_draws_the_curves_before_the_profiles_use_up_the_budget() {
+    let mut h = sketch_with(
+        &[("sketch.circle.center", json!({"center":[10,0],"radius":5})), ("sketch.constraint.fix", json!({"entity": "c1.center"}))],
+        [10., 0.],
+    );
+    h.step(&json!({"click":{"world":[15,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "20");
+    let (_, _, preview) = crate::dim_view::draft_preview().expect("the draft is open");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    let plane = h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+    let mut all = solidcraft_engine::render::SamplingBudget::new(131_072, 1_048_576);
+    let need = crate::sketch_display::curve_with_budget(&preview, 0, &plane, &proj, h.app.viewport.pixels_per_point(), &mut all).vertex_count;
+    assert!(need > 4, "the circle takes some vertices: {need}");
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(Some(need)));
+    let drawn = drawn_extent(&mut h);
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(None));
+    assert!(near(drawn, bounds(&preview)), "the circle is drawn at the typed value: drawn {drawn:?}, solved {:?}", bounds(&preview));
+    crate::dim_view::cancel();
+}
+
+/// Is a sketch point drawn at `world` this frame (its filled square)?
+fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
+    let [x, y] = h.at(&json!({"world":[world[0], world[1], 0]})).unwrap();
+    let at = egui::pos2(x as f32, y as f32);
+    h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect.width() == 5.0 && r.rect.center().distance(at) < 0.5))
+}
+
+/// Is a sketch curve's hover highlight painted this frame?
+fn hover_painted(h: &Harness) -> bool {
+    let col = egui::epaint::ColorMode::Solid(crate::theme::Tokens::get().hover_profile_edge);
+    h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.stroke.width == 3.0 && p.stroke.color == col))
+}
+
+/// While a value is typed, the sketch's points and constraint glyphs are drawn where the value
+/// puts them as well as its curves, the next frame already (the value is solved when typed), and
+/// no hover highlight traces a curve of the design; Esc puts everything back.
+#[test]
+fn typing_a_value_draws_points_and_glyphs_there_and_no_hover_of_the_design() {
+    let rectangle = [("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))];
+    let mut h = sketch_with(&rectangle, [30., 15.]);
+    h.app.cam.distance = 200.0;
+    h.settle();
+    let glyphs = crate::sketch_tools::glyph_positions();
+    assert!(!glyphs.is_empty());
+    assert!(point_drawn(&mut h, [40., 20.]));
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    // The frame after the last key, as the app draws it.
+    h.frames(1);
+    assert!(point_drawn(&mut h, [60., 30.]), "the corner is drawn where 60 puts it");
+    assert!(!point_drawn(&mut h, [40., 20.]), "no point where the design has it");
+    // The right side's glyph moves with its middle, from (40, 10) to (60, 15).
+    let [x0, y0] = h.at(&json!({"world":[40,10,0]})).unwrap();
+    let [x1, y1] = h.at(&json!({"world":[60,15,0]})).unwrap();
+    let shift = egui::vec2((x1 - x0) as f32, (y1 - y0) as f32);
+    let typed = crate::sketch_tools::glyph_positions();
+    let moved = |id: &String, at: egui::Pos2| glyphs.iter().any(|(was_id, was)| was_id == id && (at - *was - shift).length() < 1.5);
+    assert!(typed.iter().any(|(id, at)| moved(id, *at)), "a glyph follows the right side: {glyphs:?} -> {typed:?}, shift {shift:?}");
+    // Over where the design's right side is, nothing is drawn, so nothing lights up.
+    h.step(&json!({"move":{"world":[40,10,0]}})).unwrap();
+    h.frames(1);
+    assert!(!hover_painted(&h), "no hover highlight of the design's curve");
+    // One more key and one frame: the value is solved in the frame it is typed, so the next
+    // frame's sketch scene, built before the dimensions are drawn, is already at that value.
+    h.frame_with(vec![egui::Event::Text("5".into())]);
+    let (text, solved) = crate::dim_view::solved_for().expect("the draft is open");
+    assert_eq!((text.as_str(), solved.as_str()), ("605", "605"));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(1);
+    assert!(point_drawn(&mut h, [40., 20.]));
+    assert_eq!(crate::sketch_tools::glyph_positions(), glyphs);
     crate::dim_view::cancel();
 }
 
@@ -1731,5 +1986,63 @@ fn the_status_after_a_dimension_is_in_the_interface_language() {
     for id in ["sketch.dimension_applied", "sketch.dimension_applied_defined", "sketch.dimension_applied_renamed", "sketch.dimension_added_driven"] {
         assert_ne!(pl.text(id), en.text(id), "{id}: the Polish catalog translates it");
     }
+    crate::dim_view::cancel();
+}
+
+/// A selected curve of the sketch is not lit where the design has it while a value is typed, as
+/// a selected profile is not.
+#[test]
+fn a_typed_value_does_not_light_a_selected_design_curve() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sketch = h.app.session.active_sketch.unwrap();
+    let id = solved(&h).curves[0].id.clone();
+    for sel in [
+        solidcraft_engine::Sel::SketchCurve { id: id.clone(), sketch: None },
+        solidcraft_engine::Sel::SketchCurve { id: id.clone(), sketch: Some(sketch) },
+        solidcraft_engine::Sel::ExternalSketchCurve { sketch, id: id.clone() },
+    ] {
+        h.app.session.selection = vec![sel.clone()];
+        assert!(crate::viewport::build_highlight(&h.app).overlay.is_empty(), "{sel:?}: no curve lit while the value is typed");
+    }
+    crate::dim_view::cancel();
+    assert!(!crate::viewport::build_highlight(&h.app).overlay.is_empty(), "lit once the value is let go");
+}
+
+/// The Dimension tool's "x, y" readout gives the design's coordinates: while a value is typed it
+/// is not drawn, as the hover highlight is not.
+#[test]
+fn a_typed_value_hides_the_pointer_readout() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"move":{"world":[10,5,0]}})).unwrap();
+    h.frames(1);
+    assert!(crate::scenario::rect_of("viewport:readout").is_some(), "the readout is drawn while only pointing");
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    h.step(&json!({"move":{"world":[12,6,0]}})).unwrap();
+    h.frames(1);
+    assert!(crate::scenario::rect_of("viewport:readout").is_none(), "no readout while the value is typed");
+    crate::dim_view::cancel();
+}
+
+/// A curvature comb's teeth are the design's: while a value is typed they are not drawn.
+#[test]
+fn a_typed_value_hides_the_curvature_combs() {
+    let mut h = sketch_with(&[("sketch.circle.center", json!({"center":[20,10],"radius":5}))], [20., 10.]);
+    let id = solved(&h).curves[0].id.clone();
+    h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
+    h.frames(1);
+    assert!(comb_drawn(&h), "the comb is drawn");
+    h.step(&json!({"click":{"world":[25,10,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "8");
+    h.frames(1);
+    assert!(!comb_drawn(&h), "no comb of the design while the value is typed");
     crate::dim_view::cancel();
 }
