@@ -1032,3 +1032,25 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
         }));
     }
 }
+
+/// An ellipse's axis is never a side of a Fillet or Chamfer corner (the engine refuses it), so a
+/// line drawn from the major end is no corner the picker offers.
+#[test]
+fn an_ellipse_axis_end_is_no_corner_to_pick() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let e = h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    let major_end = {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let CurveKind::Ellipse { m, .. } = sk.curves[sk.curve_index(&e).unwrap()].kind else { panic!("an ellipse") };
+        sk.points[m].id.clone()
+    };
+    h.app.run("sketch.line", json!({"points":[major_end, [40,10]],"connect":false,"infer":false})).unwrap();
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let pi = sk.resolve_point(&major_end).unwrap();
+    for arcs_ok in [true, false] {
+        assert_eq!(crate::sketch_tools::corner_curves(sk, pi, arcs_ok), None, "the axis and the line are no corner (arcs_ok {arcs_ok})");
+    }
+}

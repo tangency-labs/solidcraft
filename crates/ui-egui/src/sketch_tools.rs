@@ -981,12 +981,16 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 }
 
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
-/// the corner commands resolve them in from a `point` parameter. Construction curves are
-/// ignored when more than two meet. Each side must be a line, or an arc for a fillet.
+/// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
+/// side (the engine refuses it), and construction curves are ignored when more than two meet.
+/// Each side must be a line, or an arc for a fillet.
 pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
-    let candidates =
-        sk.curves.iter().enumerate().filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+    let candidates = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(ci, c)| !sk.is_linked_curve(*ci) && !sk.is_ellipse_axis(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.
