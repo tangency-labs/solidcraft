@@ -108,6 +108,14 @@ pub struct State {
     card_listing: Option<(ListingKey, String)>,
 }
 
+/// Forget requests queued with an endpoint's revoked permission, without touching a started listing.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn forget_card_listing(state: &mut State, id: &str) {
+    if state.card_listing.as_ref().is_some_and(|(_, agent)| agent == id) {
+        state.card_listing = None;
+    }
+}
+
 /// What an endpoint's models are listed by: protocol, base URL, whether a key goes along, and HTTP consent.
 type ListingKey = (Protocol, String, bool, bool);
 
@@ -1883,6 +1891,7 @@ mod card_tests {
         h.app.agent_chat.settings.endpoint_models.clear();
         h.call("ui.prefs", json!({"open": "AI"}));
         h.frames(3);
+        reveal_card_action(&mut h, &format!("prefs:ai_model:{id}")).unwrap();
         let before = requests().len();
         h.step(&json!({"click":{"handle":format!("prefs:ai_model:{id}")}})).unwrap();
         list_settled(&mut h);
@@ -1951,6 +1960,62 @@ mod card_tests {
         crate::documents::switch(&mut h.app, 1);
         assert!(h.app.agent_chat.backend.is_some(), "other endpoints keep their permission");
         super::super::disconnect(&mut h.app);
+    }
+
+    #[test]
+    fn revoking_http_consent_discards_queued_listings_in_every_tab() {
+        let mut h = Harness::new();
+        let keys = std::sync::Arc::new(MemoryKeys::default());
+        h.app.services.secrets = Some(keys.clone());
+        let seen = listing_http(&mut h);
+        keys.set("revoked", "test-only-key").unwrap();
+        h.app.preferences.agents.push(AgentConfig {
+            id: "revoked".into(),
+            kind: Kind::Api,
+            base_url: "http://revoked.example/v1".into(),
+            model: "example-model".into(),
+            key: true,
+            allow_insecure_http: true,
+            ..Default::default()
+        });
+        let queue = |state: &mut State, id: &str| {
+            let key = listing_key(Protocol::OpenAi, &format!("http://{id}.example/v1"), true, true).unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            state.listing =
+                Some(ModelListing { key: listing_key(Protocol::OpenAi, "https://already-started.example/v1", false, false).unwrap(), rx });
+            state.card_listing = Some((key, id.into()));
+            tx
+        };
+        let completion = queue(&mut h.app.agent_chat.settings, "revoked");
+        // Main keeps picker state in the window when a different document becomes active.
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        assert!(h.app.agent_chat.running_id.is_empty(), "listing does not require a conversation");
+        assert!(open_edit(&mut h.app, "revoked"));
+        h.app.agent_chat.settings.add.as_mut().unwrap().insecure_http_url = None;
+        add_agent(&mut h.app).unwrap();
+        h.app.agent_chat.settings.add = None;
+        assert!(!h.app.preferences.agents[0].allow_insecure_http);
+        assert_eq!(keys.get("revoked").unwrap().as_deref(), Some("test-only-key"));
+        crate::documents::switch(&mut h.app, 0);
+        assert!(h.app.agent_chat.settings.card_listing.is_none(), "the revoked queue cannot return with an earlier tab");
+        assert!(h.app.agent_chat.settings.listing.is_some(), "an already-started listing stays intact");
+        completion.send(Ok(Vec::new())).unwrap();
+        poll_listing(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.settings.listing.is_none(), "no revoked request may dispatch after completion");
+        assert!(seen.lock().unwrap().is_empty(), "revoked queues must not reach the transport");
+
+        // The background endpoint cleanup also forgets a matching queue before checking running_id.
+        for id in ["revoked", "unrelated"] {
+            let mut chat = AgentChat::default();
+            let _completion = queue(&mut chat.settings, id);
+            chat.disconnect_endpoint(&mut solidcraft_engine::Session::default(), "revoked");
+            assert_eq!(chat.settings.card_listing.is_some(), id == "unrelated");
+            assert!(chat.settings.listing.is_some(), "started listings are preserved for {id}");
+        }
+        let _completion = queue(&mut h.app.agent_chat.settings, "unrelated");
+        super::super::disconnect_endpoint(&mut h.app, "revoked");
+        assert_eq!(h.app.agent_chat.settings.card_listing.as_ref().unwrap().1, "unrelated");
+        assert!(h.app.agent_chat.settings.listing.is_some());
     }
 
     /// Edit on an added agent reopens the dialog filled in; Save changes it in place, keeping its

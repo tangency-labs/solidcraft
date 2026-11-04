@@ -497,6 +497,8 @@ impl AgentChat {
     }
 
     pub(crate) fn disconnect_endpoint(&mut self, session: &mut solidcraft_engine::Session, id: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
+        settings::forget_card_listing(&mut self.settings, id);
         if self.running_id == id {
             self.disconnect_document(session, false);
         }
@@ -1127,6 +1129,8 @@ pub fn disconnect(app: &mut SolveApp) {
 
 /// Revoking an endpoint's HTTP consent also stops its conversations in other document tabs.
 pub(super) fn disconnect_endpoint(app: &mut SolveApp, id: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    settings::forget_card_listing(&mut app.agent_chat.settings, id);
     if app.agent_chat.running_id == id {
         disconnect(app);
     }
