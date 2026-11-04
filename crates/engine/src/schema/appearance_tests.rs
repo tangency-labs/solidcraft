@@ -80,3 +80,17 @@ fn replies_match_the_output_schema() {
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &warned);
 }
+
+/// A colour's text pattern allows what `inspect::color_param` reads: spaces at either end, as
+/// `trim` drops them, and any number of `#` before the six digits. `conforms` doesn't read
+/// patterns, so the pattern's text is pinned here, next to the reader's answers.
+#[test]
+fn the_colour_pattern_allows_what_the_reader_trims() {
+    for text in ["#ff00ff", "ff00ff", "  #FF00ff\t", "##ff00ff"] {
+        assert_eq!(crate::cmd::inspect::color_param(&json!(text)), Some([255, 0, 255]), "{text}");
+    }
+    assert_eq!(crate::cmd::inspect::color_param(&json!("# ff00ff")), None, "a space after the `#` isn't trimmed");
+    let schema = schemars::schema_for!(super::ColorParam);
+    let ws = crate::schema::types::whitespace_class();
+    assert_eq!(schema.as_value()["anyOf"][0]["pattern"], json!(format!("^[{ws}]*#*[0-9A-Fa-f]{{6}}[{ws}]*$")), "{}", schema.as_value());
+}
