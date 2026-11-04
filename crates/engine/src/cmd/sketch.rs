@@ -3325,6 +3325,15 @@ fn half_axes_held(sk: &Sketch, e: usize, c: usize, m: usize, major: Option<(usiz
                 held.1 |= minor.is_some_and(|(line, ..)| line == l);
             }
             ConstraintKind::Radius { c: on, .. } => held.1 |= on == e,
+            // A horizontal (vertical) distance across the major axis holds its length when the
+            // axis lies that way, the distance then being the length; across a slanted axis it is
+            // only a projection.
+            ConstraintKind::DistanceX { p, q, value } | ConstraintKind::DistanceY { p, q, value }
+                if major.is_some_and(|(_, m2)| pair(p, q, c, m) || pair(p, q, m, m2) || pair(p, q, c, m2)) =>
+            {
+                let length = sk.point(p).zip(sk.point(q)).map(|(a, b)| a.dist(b));
+                held.0 |= length.is_some_and(|l| (value.abs() - l).abs() <= 1e-9 * l.max(1.0));
+            }
             _ => {}
         }
     }

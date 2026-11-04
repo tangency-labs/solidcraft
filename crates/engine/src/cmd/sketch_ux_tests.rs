@@ -1742,6 +1742,23 @@ fn an_ellipse_s_second_half_axis_is_the_one_not_yet_dimensioned() {
     }
 }
 
+/// A horizontal dimension across a level major axis is its length, so D on the outline then
+/// gives the minor half-axis; across a slanted axis it is only a projection, and the major
+/// half-axis is still free to take.
+#[test]
+fn a_horizontal_dimension_across_a_level_major_axis_counts_as_holding_it() {
+    for turn in [false, true] {
+        let mut s = new_sketch();
+        let (e, major, _) = ellipse_with_axes(&mut s, turn);
+        run(&mut s, "sketch.dimension", json!({"entities": [format!("{major}.start"), format!("{major}.end")], "type": "horizontal"}));
+        let at = if turn { [std::f64::consts::FRAC_1_SQRT_2 * (3.0 - 16.0), std::f64::consts::FRAC_1_SQRT_2 * (3.0 + 16.0)] } else { [3.0, 16.0] };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        let want = if turn { "major" } else { "minor" };
+        assert_eq!(r["axis"], json!(want), "turned {turn}: {r}");
+        assert!(r["param"].is_string(), "turned {turn}: it drives: {r}");
+    }
+}
+
 /// A half-axis and its whole axis are one dimension: whichever comes second is determined by
 /// the first, so the Dimension tool's `if_redundant: "driven"` adds it as a reference, and
 /// without it the command refuses it. Both orders, both axes. After the whole axis, D on the
