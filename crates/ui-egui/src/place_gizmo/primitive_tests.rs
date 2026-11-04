@@ -404,19 +404,21 @@ fn a_box_on_a_vertex_has_its_marker_and_outline_at_its_bottom() {
 }
 
 #[test]
-fn a_box_moved_by_its_marker_drops_its_point_pick() {
-    let mut h = plate();
-    start(&mut h, "solid.box");
-    {
-        let s = &h.app.session;
-        let d = h.app.dialog.as_mut().unwrap();
-        d.pick(s, Sel::Vertex { body: "Body1".into(), point: Vec3::new(0.0, 0.0, 10.0) });
+fn a_box_sphere_or_torus_moved_by_its_marker_drops_its_point_pick() {
+    for cmd in ["solid.box", "solid.sphere", "solid.torus"] {
+        let mut h = plate();
+        start(&mut h, cmd);
+        {
+            let s = &h.app.session;
+            let d = h.app.dialog.as_mut().unwrap();
+            d.pick(s, Sel::Vertex { body: "Body1".into(), point: Vec3::new(0.0, 0.0, 10.0) });
+        }
+        assert!(!h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{cmd}: the point is picked");
+        assert!(drop_on(&mut h, [40.0, 25.0, 10.0]));
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(d.inputs[0].items.is_empty(), "{cmd}: the pick no longer says where it is: {:?}", d.inputs[0].items);
+        assert!(crate::canvas::anchor(&h.app, d).is_none(), "{cmd}: nothing on the canvas stays at the old point");
     }
-    assert!(!h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "the point is picked");
-    assert!(drop_on(&mut h, [40.0, 25.0, 10.0]));
-    let d = h.app.dialog.as_ref().unwrap();
-    assert!(d.inputs[0].items.is_empty(), "the pick no longer says where the box is: {:?}", d.inputs[0].items);
-    assert!(crate::canvas::anchor(&h.app, d).is_none(), "nothing on the canvas stays at the old point");
 }
 
 #[test]
