@@ -4242,6 +4242,27 @@ fn a_picked_thing_that_is_also_selected_is_listed_once() {
     assert!(prompt.contains("2 item(s)") && prompt.contains("not placed in the message"), "the edge is the only one not placed: {prompt}");
 }
 
+/// A pick that was also selected with Attach selection on is one item under its pill; taking the
+/// pill out of the queued message keeps it, once, as not placed: it was attached too.
+#[test]
+fn a_pick_that_was_also_attached_stays_once_when_its_pill_is_taken_out() {
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.state = Some(State::Busy);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    app.session.selection = vec![sels[3].clone()];
+    app.agent_chat.attach_selection = true;
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let bodies = |p: &Pending| p.context.items.iter().filter(|i| i.kind == context::Kind::Body).map(|i| i.group).collect::<Vec<_>>();
+    let queued = app.agent_chat.pending.last_mut().expect("queued");
+    assert_eq!(bodies(queued), [1], "listed once, under the pill");
+    queued.text = "see".into();
+    queued.regroup();
+    assert_eq!(bodies(queued), [0], "kept once, as not placed");
+}
+
 /// A mark pasted from an earlier message stands for nothing: it is sent as plain brackets, so it is
 /// not read as one of the numbered groups.
 #[test]
@@ -5137,6 +5158,7 @@ fn entries_that_read_the_same_light_their_own_things() {
         sels: vec![Sel::Body { name: name.into() }],
         names: Vec::new(),
         group: 1,
+        attached: false,
     };
     let (first, second) = (entry("Body1"), entry("Body2"));
     assert_eq!(panel::lit(&ctx, &app.session, std::iter::once(&first)), first.sels);

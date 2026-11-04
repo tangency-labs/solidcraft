@@ -1480,6 +1480,12 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
     let (text, mut context) = place_pills(&mut app.agent_chat, text);
     if app.agent_chat.attach_selection {
         let mut selected = context::describe_selection(&mut app.session);
+        // A pick that is also selected stays one item, under its pill, marked as attached too.
+        for item in &mut context.items {
+            if selected.items.iter().any(|i| item.same_item(i)) {
+                item.attached = true;
+            }
+        }
         selected.items.retain(|i| !context.items.iter().any(|c| c.same_item(i)));
         context.merge(selected);
     }
