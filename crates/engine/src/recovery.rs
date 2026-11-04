@@ -466,6 +466,19 @@ mod tests {
         d
     }
 
+    /// Ticks (bounded) until the autosave a tick started has been written and taken up, as the
+    /// app's own frames would. A tick right after the one that started a write can find it still
+    /// running under load and take nothing up, so a test that then changes the session (marking
+    /// it saved) and checks the files would race the worker.
+    fn tick_until_caught_up(a: &mut Autosaver, s: &Session) {
+        let began = Instant::now();
+        while !a.caught_up(s) {
+            assert!(began.elapsed() < Duration::from_secs(30), "the autosave never caught up");
+            std::thread::sleep(Duration::from_millis(1));
+            a.tick(s, false).unwrap();
+        }
+    }
+
     #[test]
     fn autosave_only_unsaved_changes_and_recover_after_a_crash() {
         let d = dir("crash");
@@ -590,6 +603,7 @@ mod tests {
         let mut a = Autosaver::new(&d, Duration::ZERO).unwrap();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         assert!(a.tick(&s, false).unwrap());
+        tick_until_caught_up(&mut a, &s);
         s.mark_saved();
         a.tick(&s, false).unwrap();
         assert!(!file(&d, &a.id, solidcraft_io::DESIGN_EXT).exists());

@@ -1,5 +1,6 @@
 //! Shared labelled settings blocks and compact explanatory specimens.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align, FontId, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 const SETTINGS_PAGE: &str = "sc_settings_page";
@@ -55,7 +56,7 @@ pub(crate) fn settings_change_dot(ui: &mut Ui, label: &str) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(t.space_8, t.space_8), Sense::hover());
     ui.painter().circle_filled(rect.center(), (t.space_8 - t.space_2 / 2.0) / 2.0, t.pref_note);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// One compact card trigger for the pinned profile menu, without a nested input frame.
@@ -101,7 +102,7 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
     crate::scenario::publish_rect("prefs:profile:sidebar_card", response.rect);
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// Compact 18 pt informational badge, with semantic foreground/background pairs.
@@ -125,7 +126,7 @@ pub(crate) fn settings_state_badge(ui: &mut Ui, label: &str, tone: SettingsBadge
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    if clipped { response.on_hover_text(label) } else { response }
+    if clipped { response.backing_on_hover_text(label) } else { response }
 }
 
 #[derive(Default)]
@@ -187,21 +188,27 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
         if let Some(key) = chip.key {
             // Allocate the pill in the wrapping parent before giving its action a unique identity.
             let mut action_ui = ui.new_child(egui::UiBuilder::new().id_salt(key).max_rect(target));
-            return super::quiet_icon_button_at(&mut action_ui, target, "close", remove).on_hover_text(label);
+            return super::quiet_icon_button_at(&mut action_ui, target, "close", remove).backing_on_hover_text(label);
         }
-        return super::quiet_icon_button_at(ui, target, "close", remove).on_hover_text(label);
+        return super::quiet_icon_button_at(ui, target, "close", remove).backing_on_hover_text(label);
     }
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// A labelled form block whose control column can contain several natural-height rows.
 pub(crate) fn settings_block<R>(ui: &mut Ui, label: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    settings_block_content(ui, label, None, label_width, add)
+    settings_block_hint(ui, label, None, label_width, add)
 }
 
 /// A form block whose explanatory hint belongs below its label, beside the controls.
-pub(crate) fn settings_block_hint<R>(ui: &mut Ui, label: &str, hint: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    settings_block_content(ui, label, Some(hint), label_width, add)
+pub(crate) fn settings_block_hint<'a, R>(
+    ui: &mut Ui,
+    label: &str,
+    hint: impl Into<Option<&'a str>>,
+    label_width: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    settings_block_content(ui, label, hint.into(), label_width, add)
 }
 
 fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -306,32 +313,58 @@ pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
 
 /// A keyboard binding table: keycaps are separate from actions and never imply fixed bindings.
 pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
-        return;
-    }
     let t = Tokens::get();
+    let font = FontId::proportional(t.font_small);
+    let key_width = bindings
+        .iter()
+        .map(|(keys, _)| {
+            keys.iter()
+                .map(|key| ui.painter().layout_no_wrap((*key).to_owned(), font.clone(), t.form_ink).size().x.ceil() + t.space_12 + t.space_4)
+                .sum::<f32>()
+        })
+        .fold(t.space_24 * 8.0 + t.space_8, f32::max);
     for (keys, action) in bindings {
-        let width = super::metrics::dimension(ui.available_width());
-        let (r, _) = ui.allocate_exact_size(vec2(width, t.control_height + t.space_2), Sense::hover());
-        t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
-        let mut left = r.left();
-        for key in *keys {
-            let galley = ui.painter().layout_no_wrap((*key).into(), FontId::proportional(t.font_small), t.form_ink);
-            let key_rect = Rect::from_center_size(
-                pos2(left + (galley.size().x + t.space_12) * 0.5, r.center().y),
-                vec2(galley.size().x + t.space_12, t.control_height - t.space_8),
-            );
-            ui.painter().rect(key_rect, t.radius_sm, t.control_fill, t.container_border(t.control_border), egui::StrokeKind::Inside);
-            ui.painter().galley(key_rect.center() - galley.size() * 0.5, galley, t.form_ink);
-            left = key_rect.right() + t.space_4;
+        if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
+            if !crate::prefs_search::texts_hit(ui, &[action, &keys.join(" ")]) {
+                continue;
+            }
+            crate::prefs_search::reveal(ui);
         }
-        let text_rect = Rect::from_min_max(pos2(r.left() + (t.space_24 * 8.0 + t.space_8).min(width * 0.45) + t.space_10, r.top()), r.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::left_to_right(Align::Center)), |ui| {
-            super::text(ui, action, super::Text::Inline);
-        });
+        let width = super::metrics::dimension(ui.available_width());
+        let action_width = super::ContentWidth::label(ui, action);
+        let beside = key_width + t.space_10 + action_width <= width;
+        let limit = if beside { key_width } else { width };
+        let cap_height = t.control_height - t.space_8;
+        let mut caps = Vec::new();
+        let (mut x, mut y) = (0.0, t.space_4);
+        for key in *keys {
+            let galley = ui.painter().layout_no_wrap((*key).to_owned(), font.clone(), t.form_ink);
+            let cap_width = (galley.size().x.ceil() + t.space_12).min(limit);
+            if x > 0.0 && x + cap_width > limit {
+                x = 0.0;
+                y += cap_height + t.space_4;
+            }
+            caps.push((*key, Rect::from_min_size(pos2(x, y), vec2(cap_width, cap_height))));
+            x += cap_width + t.space_4;
+        }
+        let keys_bottom = y + cap_height + t.space_4;
+        let action_left = if beside { key_width + t.space_10 } else { 0.0 };
+        let action_top = if beside { 0.0 } else { keys_bottom };
+        let action = ui.painter().layout((*action).to_owned(), FontId::proportional(t.font_label), t.form_ink, (width - action_left).max(0.0));
+        let height = (action_top + action.size().y + t.space_4).max(keys_bottom).max(t.control_height + t.space_2);
+        let (r, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{}: {}", keys.join(" + "), action.text())));
+        t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
+        for (key, cap) in caps {
+            let cap = cap.translate(r.min.to_vec2());
+            ui.painter().rect(cap, t.radius_sm, t.control_fill, t.container_border(t.control_border), egui::StrokeKind::Inside);
+            super::text::paint_text(ui, cap.shrink2(vec2(t.space_6.min(cap.width() / 2.0), 0.0)), key, font.clone(), t.form_ink, false);
+        }
+        let action_y = if beside { r.center().y - action.size().y / 2.0 } else { r.top() + action_top };
+        ui.painter().with_clip_rect(r.intersect(ui.clip_rect())).galley(pos2(r.left() + action_left, action_y), action, t.form_ink);
     }
 }
-
 /// Natural-width, dim monospaced numeric specimen beside a precision control.
 pub(crate) fn settings_precision_sample(ui: &mut Ui, text: &str) {
     let t = Tokens::get();

@@ -1194,6 +1194,65 @@ fn transform_scales_turns_and_moves_in_one_step() {
     }
 }
 
+/// Transform must leave a dimensioned rectangle where its preview put it, rather than letting
+/// the old horizontal/vertical relations and size dimensions pull it back (#11617).
+#[test]
+fn transform_turns_and_scales_a_dimensioned_rectangle() {
+    for angle in [30.0_f64, 90.0, 180.0] {
+        let mut s = new_sketch();
+        let drawn = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [25, 12.5]}));
+        let curves = ids(&drawn["curves"]);
+        let width = run(&mut s, "sketch.dimension", json!({"entities": [curves[0]], "type": "length", "value": "50 mm"}));
+        let height = run(&mut s, "sketch.dimension", json!({"entities": [curves[1]], "type": "length", "value": "25 mm"}));
+        let before = sketch(&s);
+        let result = run(&mut s, "sketch.transform", json!({"entities": curves, "factor": 2, "angle": angle, "center": [0, 0]}));
+        assert_eq!(result["sketch"]["solved"], true);
+        let after = sketch(&s);
+        let (sin, cos) = angle.to_radians().sin_cos();
+        for id in ["p1", "p2", "p3", "p4"] {
+            let p = before.point(before.resolve_point(id).unwrap()).unwrap();
+            let expected = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos) * 2.0;
+            let actual = after.point(after.resolve_point(id).unwrap()).unwrap();
+            assert!(actual.dist(expected) < 1e-6, "{angle} degrees, {id}: {actual:?}, expected {expected:?}");
+        }
+        for (dimension, expected) in [(&width, 100.0), (&height, 50.0)] {
+            let name = dimension["param"].as_str().unwrap();
+            assert!(close(s.doc.eval(name, solidcraft_doc::expr::Kind::Length).unwrap(), expected));
+        }
+        assert!(close(profiles(&s)[0], 5000.0));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(sketch(&s).constraints, before.constraints);
+        assert!(close(profiles(&s)[0], 1250.0));
+        run(&mut s, "edit.redo", json!({}));
+        assert!(close(profiles(&s)[0], 5000.0));
+    }
+}
+
+#[test]
+fn transform_scales_dimension_formulas_once_and_keeps_unselected_dimensions() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "50 mm"}));
+    let rectangle = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [60, 35]}));
+    let curves = ids(&rectangle["curves"]);
+    let width = run(&mut s, "sketch.dimension", json!({"entities": [curves[0]], "type": "length", "value": "=width"}));
+    let width_param = width["param"].as_str().unwrap();
+    let height = run(&mut s, "sketch.dimension", json!({"entities": [curves[1]], "type": "length", "value": format!("{width_param} / 2")}));
+    run(&mut s, "sketch.dimension", json!({"entities": [curves[2]], "type": "length", "driven": true}));
+    let circle = run(&mut s, "sketch.circle.center", json!({"center": [100, 100], "radius": 5}));
+    let radius = run(&mut s, "sketch.dimension", json!({"entities": [circle["curves"][0]], "type": "radius", "value": "5 mm"}));
+    let outside = s.doc.param(radius["param"].as_str().unwrap()).unwrap().clone();
+    run(&mut s, "sketch.transform", json!({"entities": curves, "factor": 2, "angle": 90, "center": [35, 22.5]}));
+    let length = solidcraft_doc::expr::Kind::Length;
+    assert!(close(s.doc.eval("width", length).unwrap(), 50.0), "the user parameter stays unchanged");
+    assert!(close(s.doc.eval(width_param, length).unwrap(), 100.0));
+    assert!(close(s.doc.eval(height["param"].as_str().unwrap(), length).unwrap(), 50.0));
+    assert_eq!(s.doc.param(&outside.name).unwrap(), &outside);
+    assert!(close(sketch(&s).radius(sketch(&s).curve_index(circle["curves"][0].as_str().unwrap()).unwrap()).unwrap(), 5.0));
+    run(&mut s, "parameters.change", json!({"name": "width", "expression": "60 mm"}));
+    assert!(close(s.doc.eval(width_param, length).unwrap(), 120.0), "the formula still follows its user parameter");
+    assert!(close(s.doc.eval(height["param"].as_str().unwrap(), length).unwrap(), 60.0), "dependent dimensions scale only once");
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.

@@ -1347,6 +1347,7 @@
   "document.read_only_save": "Ten projekt otwarto tylko do odczytu: zapisz go jako nowy plik",
   "document.save_changes": "Zapisać zmiany w {name}?",
   "document.save_copy": "Zapisz kopię…",
+  "document.tab_unsaved_changes": "Niezapisane zmiany",
   "document.unsaved_changes": "{name} ma niezapisane zmiany. Jeśli ich nie zapiszesz, zostaną utracone.",
   "drive.rigid": "{joint} to złącze sztywne: utrzymuje swoje części nieruchomo, więc nie ma czym sterować. Aby mogły się poruszać, zmień jego typ w Edytuj złącze: Obrotowe do obrotu, Przesuwne do przesuwu, Walcowe do obu.",
   "drive.stopped_by_contact": "Zatrzymano przy {value}: {a} przeszedłby przez {b}",

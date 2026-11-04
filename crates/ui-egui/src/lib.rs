@@ -131,6 +131,8 @@ mod surface_clamp_tests;
 #[cfg(test)]
 mod surface_errors_tests;
 #[cfg(test)]
+mod timeline_dependents_tests;
+#[cfg(test)]
 mod timeline_marks_tests;
 #[cfg(test)]
 mod status_tests {
@@ -455,6 +457,8 @@ pub struct Services {
     /// frame, so it only reads a value kept up to date elsewhere. None, or `None` from it: the
     /// window toolkit's theme.
     pub desktop_dark: Option<Box<dyn Fn() -> Option<bool>>>,
+    /// Lazy background observation; `needed` arms polling, the return is cached only.
+    pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
@@ -513,6 +517,7 @@ pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
     pub blur: blur::State,
+    pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
@@ -616,7 +621,8 @@ pub struct SolveApp {
     /// How long OK waits for a feature before computing it off the window thread, saying so;
     /// `None`: it waits as long as it takes (headless use, tests). The desktop app sets it.
     pub apply_off_thread: Option<std::time::Duration>,
-    /// Tests: the off-thread evaluation waits for this before it reports done.
+    /// Tests: work started off the window thread (a feature's evaluation, a Properties
+    /// measurement) waits for this before it reports done.
     #[cfg(test)]
     pub(crate) apply_gate: Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>>,
     /// The last command started interactively (id, label), for Repeat.
@@ -790,6 +796,7 @@ impl SolveApp {
             panel_runtime: None,
             viewport_status: Default::default(),
             blur: Default::default(),
+            blur_session: Default::default(),
             viewport_status_fixture: Default::default(),
             session,
             ui: UiState::default(),
@@ -1463,6 +1470,8 @@ impl SolveApp {
                     self.applying = None;
                     self.editing_state = None;
                     self.pending_feature_edit = None;
+                    // So does what it had computing: none of it may land in the new design.
+                    self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
                     self.cam = Camera::default();
@@ -1600,6 +1609,24 @@ impl SolveApp {
                 self.set_status(self.tr("ui.delete_select_first"), false);
             } else if !timeline_left::delete_selected_folders(self) {
                 delete::delete_selection(self);
+            }
+            return;
+        }
+        // The Dependents button of INSPECT ▸ HISTORY asks for the dependents of ONE
+        // feature, so it needs a target. With nothing selected it used to run the
+        // command with no feature and the engine answered "Feature Dependents:
+        // `feature` must be an id or name". It reports the dependents of what is
+        // selected, one command call per selected feature.
+        if id == "timeline.dependents" {
+            let selected = timeline::selected_feature_ids(self);
+            if selected.is_empty() {
+                self.set_status(self.tr("ui.dependents_select_first"), false);
+                return;
+            }
+            for feature_id in selected {
+                if let Err(why) = self.run("timeline.dependents", json!({ "feature": feature_id })) {
+                    self.set_status(why, true);
+                }
             }
             return;
         }
@@ -2958,6 +2985,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        prefs::prepare_blur(self, ui.ctx());
         let blur_source = !self.home.open && !render_workspace::result_active(self);
         let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);

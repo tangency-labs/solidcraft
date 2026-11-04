@@ -1392,6 +1392,7 @@
   "document.read_only_save": "Questa progettazione è stata aperta in sola lettura: salvala come nuovo file",
   "document.save_changes": "Salvare le modifiche a {name}?",
   "document.save_copy": "Salva una copia…",
+  "document.tab_unsaved_changes": "Modifiche non salvate",
   "document.unsaved_changes": "{name} contiene modifiche non salvate. Se non salvi, andranno perse.",
   "drive.rigid": "{joint} è un giunto rigido: tiene ferme le sue parti, quindi non c'è nulla da azionare. Per farle muovere, cambia il suo tipo in Modifica giunto: Rotante per ruotare, Scorrevole per scorrere, Cilindrico per entrambi.",
   "drive.stopped_by_contact": "Arrestato a {value}: {a} attraverserebbe {b}",

@@ -156,7 +156,7 @@ mod validity;
 pub mod watch;
 
 pub use blend::{
-    ChamferSide, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
+    ChamferSide, FilletTurn, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
     fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, largest_fit_note,
     names_largest_fit, tangent_chain, with_fit_note,
 };

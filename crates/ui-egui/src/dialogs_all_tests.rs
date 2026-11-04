@@ -1468,6 +1468,12 @@ fn dialog_profile_labels_name_the_sketch_in_coil_and_mirror() {
         h.app.start(command);
         h.app.dialog.as_mut().unwrap().preview_enabled = false;
         h.frames(3);
+        // A field that takes several picks lists them, labels and all, behind its arrow (#3683).
+        let (multi, label) = h.app.dialog.as_ref().map(|d| (d.inputs[0].multi, d.inputs[0].label)).unwrap();
+        if multi {
+            h.step(&json!({"click": {"handle": format!("dialog:list_toggle:{label}")}})).unwrap();
+            h.frames(2);
+        }
         let d = h.app.dialog.as_ref().unwrap();
         let input = &d.inputs[0];
         assert_eq!(input.items, vec![Sel::Profile { sketch, index: 0 }]);

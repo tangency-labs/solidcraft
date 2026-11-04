@@ -17,6 +17,7 @@
 use serde_json::{Map, Value, json};
 use solidcraft_engine::{MAX_PROFILE_NAME, profile_name};
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, prefs, theme_files, ui_kit};
 
 /// The format tag of a profile document.
@@ -616,8 +617,8 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.settings_profiles.draft = draft;
                 let name = app.settings_profiles.draft.trim().to_string();
                 let valid = profile_name(&name).is_some();
-                let save =
-                    ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true).on_hover_text(app.tr("prefs.profiles_note"));
+                let save = ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true)
+                    .backing_on_hover_text(app.tr("prefs.profiles_note"));
                 crate::scenario::publish_target("prefs:profile:save", save.rect);
                 if valid && (enter || save.clicked()) {
                     act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
@@ -639,11 +640,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (
                     app.tr("prefs.general.held"),
                     &[
-                        ("prefs.structure.appearance", "settings_palette"),
-                        ("prefs.structure.layout", "settings_monitor"),
-                        ("ui.navigation", "settings_mouse"),
-                        ("prefs.structure.sketch", "select_sketch"),
-                        ("prefs.shortcuts", "settings_keyboard"),
+                        ("prefs.structure.appearance", "prefs_appearance"),
+                        ("prefs.structure.layout", "prefs_layout"),
+                        ("ui.navigation", "prefs_navigation"),
+                        ("prefs.structure.sketch", "prefs_sketch"),
+                        ("prefs.shortcuts", "prefs_shortcuts"),
                         ("ui.language", "settings"),
                     ][..],
                     true,
@@ -787,6 +788,6 @@ pub(crate) fn tag(ui: &mut egui::Ui) {
         crate::i18n::tr("prefs.structure.in_profile"),
         ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
     )
-    .on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    .backing_on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }

@@ -3,6 +3,7 @@
 //! every colour comes from `Tokens`. A card sizes to the width its container gives it and its
 //! figure keeps the figure's aspect ratio.
 use super::{metrics::dimension, preferences::centred_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
@@ -75,7 +76,7 @@ pub(super) fn card_width(available: f32, columns: usize, gap: f32) -> f32 {
 }
 
 fn card_height(t: &Tokens, width: f32, card: &Card) -> f32 {
-    let pad = t.space_6;
+    let pad = t.space_4;
     let aspect = if card.aspect.is_finite() && card.aspect > 0.01 { card.aspect } else { 1.0 };
     let figure = ((width - 2.0 * pad).max(0.0) / aspect).min(dimension(f32::MAX));
     let sub = if card.sub.is_some() { t.space_14 } else { 0.0 };
@@ -138,7 +139,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     if look.focus_ring {
         p.rect_stroke(rect.expand(t.space_2), radius + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
-    let inset = t.space_6;
+    let inset = t.space_4;
     let figure = Rect::from_min_size(
         rect.min + vec2(inset, inset),
         vec2((rect.width() - 2.0 * inset).max(0.0), ((rect.width() - 2.0 * inset).max(0.0) / card.aspect.max(0.01)).min(rect.height())),
@@ -147,7 +148,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
         let figure_painter = p.with_clip_rect(figure.intersect(p.clip_rect()));
         (card.figure)(&figure_painter, figure);
         if !enabled {
-            p.rect_filled(figure, 0.0, t.control_fill.gamma_multiply(0.5));
+            p.rect_filled(figure, (radius - inset).max(0.0), t.control_fill.gamma_multiply(0.5));
         }
     }
     let ink = match look.ink {
@@ -187,8 +188,8 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     let kind = if tile { egui::WidgetType::Checkbox } else { egui::WidgetType::RadioButton };
     response.widget_info(|| egui::WidgetInfo::selected(kind, enabled, card.selected, card.label));
     scenario::publish_target(&format!("prefs:card:{}", card.label), rect);
-    let response = response.on_hover_text(card.label);
-    let response = if let Some(options) = card.options { response.on_hover_text(options) } else { response };
+    let response = response.backing_on_hover_text(card.label);
+    let response = if let Some(options) = card.options { response.backing_on_hover_text(options) } else { response };
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
@@ -388,7 +389,7 @@ pub(crate) fn help_icon(ui: &mut Ui, text: &str) -> Response {
     p.line_segment([pos2(rect.center().x, rect.top() + size * 0.46), pos2(rect.center().x, rect.bottom() - size * 0.24)], Stroke::new(1.2, ink));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     scenario::publish_target("prefs:help_icon", rect);
-    response.on_hover_text(text)
+    response.backing_on_hover_text(text)
 }
 
 /// Which items of a carousel are shown: the first one and how many fit between the two arrows.
