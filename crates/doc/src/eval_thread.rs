@@ -728,14 +728,13 @@ fn trim_at_shoulders(mut tool: Body, axis: Vec3, ends: [End; 2], face: (f64, f64
         if end != End::Shoulder {
             continue;
         }
-        #[cfg(test)]
-        if tests::FAIL_TRIM.get() {
-            return Err(kernel::KernelError::Failed("trim refused for the test".into()).into());
-        }
         let plane = Plane::from_normal(axis + k * at, *k).ok_or_else(|| DocError::Invalid("thread axis".into()))?;
         // An error of the cut, like the kernel's own: `cut` then falls back to the square stop.
         let missed = || kernel::KernelError::Failed("the thread's groove misses its face".into());
-        tool = kernel::half_space(&tool, &plane, keep_positive)?.0.ok_or_else(missed)?;
+        let kept = kernel::half_space(&tool, &plane, keep_positive)?.0;
+        #[cfg(test)]
+        let kept = kept.filter(|_| !tests::EMPTY_TRIM.get());
+        tool = kept.ok_or_else(missed)?;
     }
     Ok(tool)
 }
@@ -1016,8 +1015,8 @@ mod tests {
     use std::cell::Cell;
 
     thread_local! {
-        /// Make [`trim_at_shoulders`] fail as the kernel would.
-        pub(super) static FAIL_TRIM: Cell<bool> = const { Cell::new(false) };
+        /// Make [`trim_at_shoulders`] find nothing of the groove left.
+        pub(super) static EMPTY_TRIM: Cell<bool> = const { Cell::new(false) };
     }
 
     fn ask() -> ThreadAsk<'static> {
@@ -1061,7 +1060,7 @@ mod tests {
         assert!(on_round.contains(&End::Closed) && !on_round.contains(&End::Shoulder), "{on_round:?}");
     }
 
-    /// Where the kernel can't make the trimmed cut, a thread at a shoulder that built with the
+    /// Where the trim leaves nothing of the groove, a thread at a shoulder that built with the
     /// square stop still builds with it, and the feature says its last turn is left uncut.
     #[test]
     fn a_shoulder_cut_the_kernel_refuses_falls_back_to_the_square_stop_and_says_so() {
@@ -1072,9 +1071,9 @@ mod tests {
             let mut st = ModelState::default();
             st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
             let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask()).unwrap();
-            FAIL_TRIM.set(fail);
+            EMPTY_TRIM.set(fail);
             let note = cut(&mut st, on, (ThreadTip::None, None, None));
-            FAIL_TRIM.set(false);
+            EMPTY_TRIM.set(false);
             (note.unwrap(), kernel::measure(&st.bodies[0].body).unwrap().volume)
         };
         let (none, trimmed) = build(false);
