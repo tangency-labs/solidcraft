@@ -385,6 +385,10 @@ fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Opt
         return None;
     }
     let ids = features_from(app, marker, shown);
+    // A feature the bar's filter leaves out has nothing shown after the marker to delete.
+    if ids.is_empty() {
+        return None;
+    }
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
     Some((crate::i18n::format(key, &[("count", &ids.len().to_string())]), ids))
 }
