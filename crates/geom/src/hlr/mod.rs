@@ -445,7 +445,7 @@ impl Default for Options {
 
 /// Most placements in one scene, and the default [`Options::max_tracks`]: the aggregate item
 /// limit of [`crate::section`]. Each body's records are bounded on their own by
-/// [`crate::brep::MAX_ITEMS`] when [`prepare`] validates the body.
+/// [`solidcore_record::brep::MAX_ITEMS`] when [`prepare`] validates the body.
 pub const MAX_ITEMS: usize = crate::section::MAX_ITEMS;
 /// Largest [`Options::trim_samples`].
 pub const MAX_TRIM_SAMPLES: usize = 4096;

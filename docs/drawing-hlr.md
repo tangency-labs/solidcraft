@@ -156,7 +156,7 @@ Inputs are checked before any work:
 
 | Input | Limit | Otherwise |
 | --- | --- | --- |
-| Records of one body | `brep::MAX_ITEMS` (1 000 000), checked by `Brep::validate` in `prepare` | `Invalid("portable B-rep")` |
+| Records of one body | `solidcore_record::brep::MAX_ITEMS` (4 000 000), checked by `brep::check::validate` in `prepare` | `Invalid("portable B-rep")` |
 | Placements in one scene | `hlr::MAX_ITEMS` (100 000) | `Budget("placement")` |
 | `Options::trim_samples` | 1 to `MAX_TRIM_SAMPLES` (4096) | `Invalid("trim samples")` |
 | Coordinates of a placed body's box | at most `MAX_COORDINATE` (1e12 mm, the bound `geom::section` and `geom::brep` put on stored numbers) | `Invalid("scene extent")` |
@@ -181,7 +181,8 @@ does not depend on the number of threads or on their scheduling:
 applies, and the body limit of `file.export_view_dxf`. It bounds the placements a caller
 supplies and, by default, the number of curves, which is the number of lines in the drawing;
 a caller drawing a large assembly may raise `max_tracks`. A body's own records have the
-larger limit of `geom::brep`, which stores whole evaluated models.
+larger limit of the B-rep record (`solidcore_record::brep`), which stores whole evaluated
+models.
 The ray budget is HLR's own: it counts visibility classifications, one per ray. The 200 million
 work steps of `file.export_view_dxf` count other work (placements, tree nodes and triangles of
 its occlusion test), so the two numbers are not comparable. Every piece costs at least one

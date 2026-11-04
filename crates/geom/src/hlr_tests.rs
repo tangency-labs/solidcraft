@@ -3181,7 +3181,7 @@ fn wavy_disc(r: f64, n: usize) -> Brep {
     let spans = n - 3;
     let knots: Vec<f64> = (0..n + 4).map(|i| (i.saturating_sub(3).min(spans)) as f64 / spans as f64).collect();
     Brep {
-        version: crate::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         shells: vec![Shell {
             vertices: vec![points[0]],
             edges: vec![Edge { vertices: [0, 0], curve: Curve::Spline { knots, points } }],
@@ -3231,7 +3231,7 @@ fn long_items_poll_cancellation_inside_them() {
     assert!(matches!(screen_samples(&track, &ctx), Err(HlrError::Cancelled)));
     // Tracing a body's silhouettes is one item: it asks again before each surface.
     let (a, b) = (torus(5., 1.5), torus(9., 1.));
-    let two = prepare(&Brep { version: crate::brep::VERSION, shells: vec![a.shells[0].clone(), b.shells[0].clone()] }, &o).unwrap();
+    let two = prepare(&Brep { version: solidcore_record::brep::VERSION, shells: vec![a.shells[0].clone(), b.shells[0].clone()] }, &o).unwrap();
     let ctx = context(&[], &[], &view, &o, &never).unwrap();
     assert_eq!(body_silhouettes(&two, view.d, &o, &ctx).unwrap().len(), 2);
     let polls = AtomicUsize::new(0);
@@ -3255,7 +3255,7 @@ fn long_items_poll_cancellation_inside_them() {
     assert!(matches!(body_silhouettes(&halves, view.d, &o, &ctx), Err(HlrError::Cancelled)));
     // Many faces: forming the sets asks too, before any surface is traced.
     let shells = (0..50).map(|k| cuboid([2. * k as f64, 0., 0.], [2. * k as f64 + 1., 1., 1.]).shells.remove(0)).collect();
-    let boxes = prepare(&Brep { version: crate::brep::VERSION, shells }, &o).unwrap();
+    let boxes = prepare(&Brep { version: solidcore_record::brep::VERSION, shells }, &o).unwrap();
     let ctx = context(&[], &[], &view, &o, &|| true).unwrap();
     assert!(matches!(body_silhouettes(&boxes, view.d, &o, &ctx), Err(HlrError::Cancelled)));
     // One chord across the boxes of many left-out faces: it asks every 1024 boxes.
@@ -3284,7 +3284,7 @@ fn spline_points_and_hulls_come_from_their_own_knot_spans() {
         points: (0..10).map(|i| [i as f64, ((i * 7) % 5) as f64, (i % 3) as f64]).collect(),
     };
     for curve in [Curve::Spline { knots: knots.clone(), points: points.clone() }, repeated] {
-        let (c, _) = C3::new(&curve).unwrap();
+        let c = C3::bounded(&curve.label(), curve.extent()).unwrap();
         let C3::Spline { degree, knots, pieces, .. } = &c else { panic!("a spline") };
         let [t0, t1] = c.domain();
         let ts = knots.iter().copied().chain((0..=997).map(|i| t0 + (t1 - t0) * i as f64 / 997.)).filter(|t| *t >= t0 && *t <= t1);
