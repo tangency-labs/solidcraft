@@ -577,6 +577,116 @@ fn trim_circle_makes_an_arc_and_a_profile() {
     assert!(close(a[0], std::f64::consts::PI * 50.0), "{a:?}");
 }
 
+/// Trimming half of a center rectangle's diagonal left two points at the centre, one held by
+/// nothing: dragging a corner pulled them apart. Either diagonal, the half that stays ends on the
+/// one centre point, which stays where the diagonals cross.
+#[test]
+fn trimming_half_a_center_rectangle_diagonal_keeps_one_centre() {
+    for (diagonal, at) in [(0, [7.5, 4.25]), (1, [7.5, -0.25])] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
+        let sk = sketch(&s);
+        let diagonals: Vec<String> = sk.curves.iter().filter(|c| c.construction).map(|c| c.id.clone()).collect();
+        assert_eq!(diagonals.len(), 2, "{diagonals:?}");
+        let (cut, other) = (diagonals[diagonal].clone(), diagonals[1 - diagonal].clone());
+        run(&mut s, "sketch.trim", json!({"curve": cut, "at": at}));
+        let sk = sketch(&s);
+        let at_centre = sk.points.iter().filter(|p| p.pos.dist(Vec2::new(3.0, 2.0)) < 1e-7).count();
+        assert_eq!(at_centre, 1, "diagonal {cut}: {} points at the centre", at_centre);
+        let si = run(&mut s, "sketch.inspect", json!({}));
+        assert_eq!(si["dof"], 4, "diagonal {cut}: {si}");
+        assert_ne!(si["status"], "conflict", "diagonal {cut}: {si}");
+        assert!(si["status"].as_str().is_none_or(|t| !t.contains("over")), "diagonal {cut}: {si}");
+        // Drag a corner: the trimmed half still ends where the diagonals cross.
+        run(&mut s, "sketch.drag", json!({"entity": "l2.end", "from": [12, 6.5], "to": [16, 9]}));
+        let sk = sketch(&s);
+        let ends = |id: &str| {
+            let (a, b) = sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap();
+            (sk.point(a).unwrap(), sk.point(b).unwrap())
+        };
+        let (o0, o1) = ends(&other);
+        let centre = (o0 + o1) * 0.5;
+        let (c0, c1) = ends(&cut);
+        assert!(c0.dist(centre).min(c1.dist(centre)) < 1e-6, "diagonal {cut}: {c0:?} {c1:?}, centre {centre:?}");
+    }
+}
+
+#[test]
+fn trimming_the_start_half_of_a_center_rectangle_diagonal_keeps_its_parallel_distance_on_the_centre() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
+    let diagonal = sketch(&s).curves.iter().find(|c| c.construction).map(|c| c.id.clone()).unwrap();
+    // A line parallel to the diagonal (-6,-2.5)-(12,6.5), 10 mm lower, dimensioned from the
+    // diagonal's start.
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[-6, -12.5], [12, -3.5]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.parallel", json!({"a": diagonal, "b": line}));
+    run(&mut s, "sketch.dimension", json!({"entities": [diagonal, line]}));
+    let value = |sk: &solidcraft_sketch::Sketch| {
+        sk.constraints.iter().find_map(|c| match c.kind {
+            ConstraintKind::PointLineDistance { p, value, .. } => Some((sk.point(p).unwrap(), value)),
+            _ => None,
+        })
+    };
+    let (from, d) = value(&sketch(&s)).expect("the distance between the parallel lines");
+    assert!(from.dist(Vec2::new(-6.0, -2.5)) < 1e-7, "{from:?}");
+    // Trim the half from the diagonal's start: the kept half starts at the centre, so the
+    // distance moves there, onto the one point the cut is welded to.
+    run(&mut s, "sketch.trim", json!({"curve": diagonal, "at": [-1.5, -0.25]}));
+    let sk = sketch(&s);
+    let (from, after) = value(&sk).expect("the distance survives the trim");
+    assert!(from.dist(Vec2::new(3.0, 2.0)) < 1e-7, "{from:?}");
+    assert!((after - d).abs() < 1e-9, "{after} != {d}");
+}
+
+/// A center rectangle whose bottom is held square to a side instead of horizontal keeps one
+/// centre after a trim: what makes its diagonals bisect each other is the solver's to say, not
+/// which constraints hold the sides.
+#[test]
+fn trimming_a_diagonal_of_a_center_rectangle_held_by_other_constraints_keeps_one_centre() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
+    let sk = sketch(&s);
+    let bottom = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Horizontal { l: 0 })).map(|c| c.id.clone()).unwrap();
+    run(&mut s, "sketch.delete", json!({"entities": [bottom]}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": "l1", "b": "l2"}));
+    let dof = run(&mut s, "sketch.inspect", json!({}))["dof"].clone();
+    let diagonal = sketch(&s).curves.iter().find(|c| c.construction).map(|c| c.id.clone()).unwrap();
+    run(&mut s, "sketch.trim", json!({"curve": diagonal, "at": [7.5, 4.25]}));
+    let sk = sketch(&s);
+    let at_centre = sk.points.iter().filter(|p| p.pos.dist(Vec2::new(3.0, 2.0)) < 1e-7).count();
+    assert_eq!(at_centre, 1, "{at_centre} points at the centre");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], dof, "the trim frees the centre: {si}");
+}
+
+/// A line's held midpoint trimmed at a crossing line that only happens to have its middle there
+/// ends the kept half on that point and keeps it on the crossing line, without tying the crossing
+/// line's middle to it: nothing held that middle before.
+#[test]
+fn trimming_at_a_held_midpoint_on_an_unrelated_line_adds_no_hold_to_that_line() {
+    let mut s = new_sketch();
+    let trimmed = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [10,0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let crossing = ids(&run(&mut s, "sketch.line", json!({"points": [[5,-3], [5,3]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": format!("mid:{trimmed}")}));
+    let sk = sketch(&s);
+    let mid = sk.points.iter().find(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).map(|p| p.id.clone()).unwrap();
+    run(&mut s, "sketch.trim", json!({"curve": trimmed, "at": [8, 0]}));
+    let sk = sketch(&s);
+    let l = sk.curve_index(&crossing).unwrap();
+    let m = sk.resolve_point(&mid).unwrap();
+    assert!(
+        !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: cl, .. } if cl == l)),
+        "the crossing line gets no midpoint hold: {:?}",
+        sk.constraints
+    );
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: cc } if p == m && cc == l)),
+        "the old midpoint stays on the crossing line: {:?}",
+        sk.constraints
+    );
+    assert_eq!(sk.points.iter().filter(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).count(), 1, "one point at the cut");
+}
+
 #[test]
 fn exact_extend_ellipse_preserves_support_target_and_history() {
     for (y, expected_x) in [(3.0, 12.0), (5.0, 20.0)] {

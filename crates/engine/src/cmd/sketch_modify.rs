@@ -9,7 +9,7 @@ use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::ProfileSel;
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, Wire, WireSpace, intersections, intersections_within};
 
-use super::sketch::{add_c, coincident_points, edit, ids_of, line_or_axis_ref, solve_current};
+use super::sketch::{add_c, coincident_points, dof_now, edit, ids_of, line_or_axis_ref, solve_current};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
@@ -555,6 +555,14 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
     Ok(released)
 }
 
+/// Whether the sketch already holds point `m` at the middle of line `l`, though no constraint says
+/// so: adding that Midpoint takes away no degree of freedom (a center rectangle's centre, held on
+/// one diagonal, is the other's middle too because the diagonals bisect each other).
+fn middle_implied(sk: &Sketch, m: usize, l: usize) -> bool {
+    let mut with = sk.clone();
+    add_c(&mut with, ConstraintKind::Midpoint { p: m, l }).is_ok() && dof_now(&with) == dof_now(sk)
+}
+
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
 /// side, or the whole curve when nothing crosses it. Returns what `sketch.trim` reports and the
 /// removed piece as a polyline.
@@ -597,6 +605,18 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
             .then(|| dimension.id.clone())
         })
         .collect();
+    // Points held at the middle of the trimmed line (a center rectangle's centre on its first
+    // diagonal): `release_extent` drops that hold, so remember them for the cuts below.
+    let midpoints: Vec<usize> = sk
+        .constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            ConstraintKind::Midpoint { p, l } if l == ci => Some(p),
+            _ => None,
+        })
+        .collect();
+    // The sketch as it was, for `middle_implied`: only needed when a midpoint can be cut.
+    let before = (!midpoints.is_empty()).then(|| sk.clone());
     release_extent(sk, ci);
     let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
@@ -608,8 +628,40 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     } else {
         ts.iter().filter(|t| **t < tq).count()
     };
+    // A cut on a point already held there ends the piece on that point: no second point.
+    let mut welds: Vec<(usize, usize)> = Vec::new();
     for (pi, c) in pts.iter().zip(&cuts) {
-        pin(sk, *pi, c.2)?;
+        let cutter = c.2;
+        let Some(at) = sk.point(*pi) else { continue };
+        let near = |sk: &Sketch, p: usize| sk.point(p).is_some_and(|q| q.dist(at) < TOL * 10.0);
+        // The cutter's middle, held there, is taken as its ends are (`pin`).
+        let held = sk.constraints.iter().find_map(|k| match k.kind {
+            ConstraintKind::Midpoint { p, l } if l == cutter && near(sk, p) => Some(p),
+            _ => None,
+        });
+        if let Some(m) = held {
+            welds.push((*pi, m));
+        } else if let Some(m) = midpoints.iter().copied().find(|m| near(sk, *m)) {
+            // The trimmed line's middle: it moves to the cutter's middle when the sketch makes it
+            // that too (a center rectangle's diagonals bisect each other), else it stays on the
+            // cutter. A cutter whose middle is there only by chance gets no hold it never had.
+            welds.push((*pi, m));
+            let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
+                Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
+                _ => None,
+            };
+            let implied = match &before {
+                Some(was) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, m, cutter),
+                _ => false,
+            };
+            if implied {
+                add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
+            } else {
+                pin(sk, m, cutter)?;
+            }
+        } else {
+            pin(sk, *pi, cutter)?;
+        }
     }
     let gone = pieces.get(k).copied().ok_or_else(|| bad(cmd, "piece"))?;
     let keep: Vec<usize> = pieces.iter().copied().filter(|x| *x != gone).collect();
@@ -632,6 +684,13 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     };
     rebind_endpoint_tangencies(sk, ci, &pieces, &tangencies);
     let keep: Vec<usize> = pieces.iter().copied().filter(|x| *x != gone).collect();
+    for &(from, to) in &welds {
+        for piece in &keep {
+            if let Some(c) = sk.curves.get_mut(*piece) {
+                c.kind.map_points(&|p| if p == from { to } else { p });
+            }
+        }
+    }
     tie(sk, &keep)?;
     if let Some((a, _)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) {
         for dimension in &mut sk.constraints {
