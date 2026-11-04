@@ -1822,8 +1822,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let background_slot = painter.add(egui::Shape::Noop);
                 let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
-                // Finish and Cancel never show pressed; a tool pinned into their group does.
-                let exit = finish && matches!(selected.id, "sketch.finish" | "sketch.cancel" | "component.finish_edit");
+                // The buttons that leave the sketch or the edit (Finish, Finish with AutoConstrain,
+                // Cancel, Finish Edit) never show pressed; a tool pinned into their group does.
+                let exit =
+                    finish && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit");
                 let neutral = if !exit
                     && (resp.is_pointer_button_down_on()
                         || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
@@ -5098,12 +5100,14 @@ mod dropdown_toggle_tests {
             all.iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == soft))
         };
         assert!(pressed(&h, "sketch.ellipse"), "the running tool's button is pressed");
-        // A press lights any other button while the pointer is down; Finish and Cancel stay
-        // plain. Neither runs as a tool or leaves a dialog, so a press is how they would light.
-        for exit in ["sketch.finish", "sketch.cancel"] {
+        // A press lights any other button while the pointer is down; Finish, Cancel and Finish
+        // with AutoConstrain (a button only once pinned) stay plain. None runs as a tool or
+        // leaves a dialog, so a press is how they would light.
+        for exit in ["sketch.finish", "sketch.cancel", "sketch.finish_auto_constrain"] {
             let mut h = Harness::new();
             h.app.home.open = false;
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            crate::toolbar_custom::pin(&mut h.app, "SKETCH", exit).unwrap();
             h.settle();
             let at = crate::scenario::handle_at(&format!("button:{exit}")).unwrap();
             h.frame_with(crate::test_support::pointer(at, true));
