@@ -4957,7 +4957,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !midpoint_geometry
             && !held
             && app.dialog.is_none()
-            && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
+            && crate::dim_view::pick_reference(app, ui.ctx(), p, resp.double_clicked());
         // Capture the press too: text editors lose focus before the click is released. A
         // running tool keeps the keyboard for its own typed values.
         if !held

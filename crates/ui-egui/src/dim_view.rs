@@ -1046,7 +1046,7 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
 /// Consume dimension clicks while editing: a click on another driving dimension inserts its
 /// name at the cursor (replacing selected text), keeping what was typed. The second click of a
 /// double-click on the same dimension does not insert it again.
-pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
+pub fn pick_reference(app: &SolveApp, ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return false };
@@ -1065,6 +1065,12 @@ pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
             if !repeat {
                 insert_reference(ctx, edit, &param);
                 edit.picked = Some((param, now));
+                // Solved now, as a typed value is: the overlays read the preview before the
+                // editor runs this frame.
+                if let Some(draft) = edit.draft.as_mut() {
+                    let expr = edit.expr.clone();
+                    reevaluate(app, draft, &expr);
+                }
             }
         }
         edit.fresh = FRESH - 1;
