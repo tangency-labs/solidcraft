@@ -1470,14 +1470,7 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
             .take(app.session.doc.marker.unwrap_or(app.session.doc.features.len()))
             .enumerate()
             .filter_map(|(i, f)| {
-                let kind = if sketches {
-                    matches!(f.kind, FeatureKind::Sketch { .. })
-                } else {
-                    matches!(
-                        f.kind,
-                        FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. }
-                    )
-                };
+                let kind = if sketches { matches!(f.kind, FeatureKind::Sketch { .. }) } else { f.kind.is_construction() };
                 (f.component == component && kind).then_some(i)
             })
             .collect(),

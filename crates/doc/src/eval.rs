@@ -1770,11 +1770,6 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
     out
 }
 
-/// A construction plane, axis or point.
-fn is_construction(f: &Feature) -> bool {
-    matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-}
-
 /// Every string in `v` (names of planes, axes, bodies and features among them).
 fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeSet<&'a str>) {
     match v {
@@ -1793,7 +1788,7 @@ fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeS
 /// definition that is a construction's name may take one too many, never one too few: the
 /// other construction geometry no longer goes into every feature's key.
 fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>) -> u64 {
-    if !doc.features.iter().any(is_construction) {
+    if !doc.features.iter().any(|f| f.kind.is_construction()) {
         return 0;
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1813,7 +1808,7 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         if steps > 4096 {
             named = true;
             "too deep".hash(&mut h);
-            for c in doc.features.iter().filter(|c| is_construction(c)) {
+            for c in doc.features.iter().filter(|c| c.kind.is_construction()) {
                 fingerprint(doc, 0, c, vals, false, &ImportDigests::default()).hash(&mut h);
             }
             break;
@@ -1832,7 +1827,8 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
                 ids.insert(id.0);
             }
         });
-        for c in doc.features.iter().filter(|c| is_construction(c) && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str()))) {
+        for c in doc.features.iter().filter(|c| c.kind.is_construction() && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str())))
+        {
             if !seen.insert(c.id) {
                 continue;
             }
