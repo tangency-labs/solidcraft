@@ -1508,6 +1508,9 @@ impl SolveApp {
                 }
             }
             Err(e) => {
+                // The native menu runs Undo and Redo before `logic` installs the frame scope, so
+                // the error would be translated with the thread default.
+                let _language = i18n::scope(&self.preferences.language);
                 let msg = friendly_error(id, e);
                 self.session.echo(msg.clone());
                 self.set_status(msg, true);
@@ -1593,6 +1596,9 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
+        // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
+        // `logic`): build its hint in the user's language, not the thread default.
+        let _language = crate::i18n::scope(&self.preferences.language);
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -2887,6 +2893,9 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // Shortcuts run here, before `ui` installs the language scope: a tool started by its
+        // key must build its translated hint in the user's language, not in English.
+        let _language = crate::i18n::scope(&self.preferences.language);
         panel_runtime::tick_app(self);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
@@ -3466,6 +3475,7 @@ pub fn command_label(id: &str) -> &str {
 pub fn friendly_error(id: &str, e: &str) -> String {
     let label = i18n::tr_label(command_label(id));
     let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
+    let msg = i18n::tr_engine_error(&msg);
     let msg = i18n::tr_label(&msg);
     if msg.starts_with(label) { msg.to_string() } else { format!("{label}: {msg}") }
 }

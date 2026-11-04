@@ -3,6 +3,7 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
+use crate::i18n::{tr, tr_engine_error};
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -921,9 +922,9 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
             "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
             "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
-            "sketch.trim" => "Trim: click the piece of a curve to remove, or drag across the pieces to remove",
-            "sketch.extend" => "Extend: click a curve near the end to extend (Shift: click two curves to extend both to where they meet)",
-            "sketch.break" => "Break: click a curve where it should split",
+            "sketch.trim" => tr("sketch.hint.trim"),
+            "sketch.extend" => tr("sketch.hint.extend"),
+            "sketch.break" => tr("sketch.hint.break"),
             "sketch.line.midpoint" => "Midpoint line: click the middle, then an end",
             "sketch.arc.tangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
             "sketch.ellipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
@@ -1350,7 +1351,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     }
     if tool.cmd == "sketch.circle.two_tangent" && tool.picks.len() == 2 {
         if let Err(error) = crate::sketch_dims::validate(app, tool) {
-            app.set_status(error, true);
+            app.set_status(tr_engine_error(&error), true);
             return;
         }
         if run_entities(app, tool) {
@@ -1366,7 +1367,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
-        app.set_status(error, true);
+        app.set_status(tr_engine_error(&error), true);
         return;
     }
     let p = crate::sketch_dims::placed(app, tool, &p);
