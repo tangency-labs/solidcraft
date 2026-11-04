@@ -331,6 +331,62 @@ fn a_side_drop_does_not_follow_another_box_with_the_same_fields() {
 }
 
 #[test]
+fn a_typed_box_beside_a_far_face_in_the_same_plane_does_not_stand_on_it() {
+    let mut h = plate();
+    start(&mut h, "solid.box");
+    // The box's left side is in the plane of the plate's right side (x = 80), 150 mm away from it.
+    let fields = json!(["80", "200", "0"]);
+    h.app.dialog.as_mut().unwrap().extra.insert("corner".into(), fields);
+    let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+    let (base, n) = place(&h);
+    let bottom = Vec3::new(80.0 + size.x / 2.0, 200.0 + size.y / 2.0, 0.0);
+    assert!(n.dist(Vec3::Z) < 1e-9 && base.dist(bottom) < 1e-6, "the middle of its bottom, not the far face's side: {base:?} {n:?}");
+}
+
+#[test]
+fn a_typed_box_dropped_on_a_round_wall_stands_out_from_it() {
+    let mut h = plate();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20, "base": [40, 25, 10], "operation": "new"})).unwrap();
+    h.settle();
+    start(&mut h, "solid.box");
+    let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+    assert!(drop_on(&mut h, [50.0, 25.0, 20.0]), "the wall takes the box");
+    let corner = typed(&h, "corner");
+    assert!(
+        (corner.x - 50.0).abs() < 1e-3 && (corner.z - (20.0 - size.z / 2.0)).abs() < 1e-3,
+        "out from the wall along +X, centred on the point: {corner:?}"
+    );
+}
+
+#[test]
+fn a_typed_box_is_not_dropped_on_a_tilted_face() {
+    let mut h = plate();
+    h.app.run("solid.chamfer", json!({"edges": [[80, 25, 10]], "distance": 5})).unwrap();
+    h.settle();
+    start(&mut h, "solid.box");
+    let before = h.app.dialog.as_ref().unwrap().extra.clone();
+    assert!(!drop_on(&mut h, [77.5, 25.0, 7.5]), "a tilted face has no outline to stand the box on");
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra, before, "the fields are left alone");
+}
+
+#[test]
+fn a_cylinder_dropped_on_another_body_lets_go_of_the_edges_it_cannot_reach() {
+    let mut h = plate();
+    h.app.run("solid.box", json!({"length": 40, "width": 50, "height": 10, "corner": [120, 0, 0], "operation": "new"})).unwrap();
+    h.settle();
+    start(&mut h, "solid.cylinder");
+    h.step(&json!({"click": {"world": [30, 25, 10]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click": {"world": [0, 20, 10]}})).unwrap();
+    h.settle();
+    drag_ok(&mut h, [140.0, 25.0, 10.0]);
+    let (_, kind) = last(&h);
+    let FeatureKind::Cylinder { base, references, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
+    assert!(references.is_empty(), "the plate's edge is let go: {references:?}");
+    assert!(point(&h, base).dist(Vec3::new(140.0, 25.0, 10.0)) < 0.5, "{:?}", point(&h, base));
+}
+
+#[test]
 fn a_box_on_a_vertex_has_its_marker_and_outline_at_its_bottom() {
     let mut h = plate();
     h.app.session.selection = vec![Sel::Vertex { body: "Body1".into(), point: Vec3::new(80.0, 50.0, 10.0) }];

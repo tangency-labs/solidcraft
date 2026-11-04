@@ -48,8 +48,9 @@ pub(super) static SPEC: Spec = Spec {
     turn: None,
 };
 
-/// A planar face's plane: a point on it and its outward normal.
-type FacePlane = (Vec3, Vec3);
+/// A planar face's plane: a point on it, its outward normal and the face's bounds (lowest and
+/// highest corner of the box round it).
+type FacePlane = (Vec3, Vec3, [Vec3; 2]);
 
 thread_local! {
     /// The planes of the planar faces of the model state last asked about, found once per state.
@@ -65,8 +66,22 @@ fn planes(app: &SolveApp) -> Arc<Vec<FacePlane>> {
     let found: Vec<FacePlane> = st
         .bodies
         .iter()
-        .flat_map(|b| b.body.faces((b.body.size() * 1e-3).max(1e-3)).unwrap_or_default())
-        .filter_map(|f| Some((f.centroid, f.plane_normal?)))
+        .flat_map(|b| {
+            let m = b.mesh();
+            let mut bounds: std::collections::HashMap<usize, [Vec3; 2]> = std::collections::HashMap::new();
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                for q in m.tri(t).into_iter().flatten() {
+                    let e = bounds.entry(*f as usize).or_insert([q, q]);
+                    *e = [e[0].min(q), e[1].max(q)];
+                }
+            }
+            b.body
+                .faces((b.body.size() * 1e-3).max(1e-3))
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|f| Some((f.centroid, f.plane_normal?, *bounds.get(&f.index)?)))
+                .collect::<Vec<_>>()
+        })
         .collect();
     let found = Arc::new(found);
     PLANES.with(|c| *c.borrow_mut() = (Some(st), found.clone()));
@@ -127,10 +142,19 @@ fn box_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
         None => d.extra.get("corner").and_then(|v| expr_point(app, v)).unwrap_or(Vec3::ZERO) + half,
     };
     let side = |n: Vec3| centre - Vec3::new(n.x * half.x, n.y * half.y, n.z * half.z);
+    // The side's rectangle overlaps the face across its plane: a far face in the same plane is
+    // not one the box stands on.
+    let overlaps = |n: Vec3, [lo, hi]: [Vec3; 2]| {
+        let (c, across) = (side(n), half - Vec3::new(n.x.abs() * half.x, n.y.abs() * half.y, n.z.abs() * half.z));
+        let (a, b) = (c - across, c + across);
+        [(a.x, b.x, lo.x, hi.x, n.x), (a.y, b.y, lo.y, hi.y, n.y), (a.z, b.z, lo.z, hi.z, n.z)]
+            .into_iter()
+            .all(|(a, b, lo, hi, along)| along.abs() > 0.5 || (b.min(hi) - a.max(lo)) > ON_PLANE)
+    };
     let planes = planes(app);
     let n = STANDS_ON
         .into_iter()
-        .find(|n| planes.iter().any(|(q, m)| m.dot(*n) > 1.0 - 1e-9 && (side(*n) - *q).dot(*m).abs() < ON_PLANE))
+        .find(|n| planes.iter().any(|(q, m, bounds)| m.dot(*n) > 1.0 - 1e-9 && (side(*n) - *q).dot(*m).abs() < ON_PLANE && overlaps(*n, *bounds)))
         .unwrap_or(Vec3::Z);
     Some((side(n), n))
 }
@@ -173,6 +197,8 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
         if let Kind::Primitive { at, .. } = &mut d.kind {
             *at = Some((p, Some(n)));
         }
+        // Reference edges the new place cannot be measured from (another body's) are let go.
+        crate::hole_refs::keep_reachable(s, d);
         d.error = None;
         return true;
     }
@@ -188,6 +214,17 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
         "solid.cone" | "solid.coil" if n.is_none() => return false,
         "solid.box" => {
             if at.is_none() {
+                // Typed fields stand the box square to the world: on a curved face, the way out of
+                // it at the point when that is along an axis; a tilted face, which has no outline,
+                // does not take it.
+                let n = n.or_else(|| {
+                    solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), p)
+                        .map(|d| -d)
+                        .filter(|n| STANDS_ON.iter().any(|axis| square_to(*n, *axis)))
+                });
+                if n.is_some_and(|n| !STANDS_ON.iter().any(|axis| square_to(n, *axis))) {
+                    return false;
+                }
                 crate::primitive_placement::dropped(s, &mut d.extra, p, n.unwrap_or(Vec3::Z), sz);
             } else {
                 *at = Some((p, n));
