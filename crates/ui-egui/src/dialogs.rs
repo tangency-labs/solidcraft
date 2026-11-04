@@ -4214,6 +4214,8 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
     add_object(inputs, active, SelInput::new(label, accept, false), on);
 }
 
+/// Add `input` (`on`) or remove the input with its label (not `on`); adding an input that is
+/// already there, or removing one that is not, changes nothing.
 fn add_object(inputs: &mut Vec<SelInput>, active: &mut usize, input: SelInput, on: bool) {
     let label = input.label;
     if on && !object_on(inputs, label) {
@@ -6048,6 +6050,8 @@ fn shown_face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
     face_sel_in(s, p0, None)
 }
 
+/// The body face containing `p0`, taken from each body's stored frame to the world by `frames`
+/// ([`stored_on`]; none: `p0` is already where the model is shown).
 fn face_sel_in(s: &Session, p0: Vec3, frames: Option<Vec<(String, solidcraft_engine::doc::Mat)>>) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
