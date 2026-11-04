@@ -2,6 +2,7 @@
 //! inputs (geometry picked in the viewport, never typed), then runs its command; it never
 //! changes the design itself. Things selected before the command starts become its input.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::choice_row;
 use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
@@ -2674,7 +2675,7 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     let cur = usize::from(inp.accept == selection::FEATURES);
     let mut ty = cur;
     // What the two kinds are, and that a sketch is neither (#10057).
-    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"]).on_hover_text(crate::i18n::tr("ui.pattern_object_type_tip"));
+    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"]).backing_on_hover_text(crate::i18n::tr("ui.pattern_object_type_tip"));
     if ty != cur {
         inp.accept = if ty == 1 { selection::FEATURES } else { BODIES };
         inp.label = objects_label(inp.accept);
@@ -2987,7 +2988,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
-                if chip.on_hover_text(tooltip).clicked() {
+                if chip.backing_on_hover_text(tooltip).clicked() {
                     activate = Some(i);
                     surrender_keyboard_focus(ui);
                 }
@@ -3187,7 +3188,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             ui.vertical(|ui| {
                 match &plain {
                     Some(FilletRefusal::Plain(plain)) => {
-                        crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).on_hover_text(shown_error(&error));
+                        crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
                     }
                     Some(FilletRefusal::InField) => {}
                     None => {
@@ -3198,7 +3199,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                     if plain.is_some() {
                         let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
                         crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
-                        if copy.on_hover_text(tr("ui.copy_details_tip")).clicked() {
+                        if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
                             ui.ctx().copy_text(error.clone());
                         }
                     }

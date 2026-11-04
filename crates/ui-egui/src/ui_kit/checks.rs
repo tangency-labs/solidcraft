@@ -1,5 +1,6 @@
 //! The only checkbox box and check glyph, shared by inline, palette, grid and menu rows.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Response, Ui, pos2, vec2};
 
 /// Fixed logical size and pixel-aligned origin, independent of a caller's fonts or spacing.
@@ -115,5 +116,5 @@ pub(crate) fn checkbox_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool
     }
     paint_box(ui, rect, &response, *value, false);
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, label));
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }

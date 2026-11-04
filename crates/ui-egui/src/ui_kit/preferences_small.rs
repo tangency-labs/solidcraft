@@ -1,5 +1,6 @@
 //! Shared labelled settings blocks and compact explanatory specimens.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align, FontId, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 const SETTINGS_PAGE: &str = "sc_settings_page";
@@ -55,7 +56,7 @@ pub(crate) fn settings_change_dot(ui: &mut Ui, label: &str) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(t.space_8, t.space_8), Sense::hover());
     ui.painter().circle_filled(rect.center(), (t.space_8 - t.space_2 / 2.0) / 2.0, t.pref_note);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// One compact card trigger for the pinned profile menu, without a nested input frame.
@@ -101,7 +102,7 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
     crate::scenario::publish_rect("prefs:profile:sidebar_card", response.rect);
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// Compact 18 pt informational badge, with semantic foreground/background pairs.
@@ -125,7 +126,7 @@ pub(crate) fn settings_state_badge(ui: &mut Ui, label: &str, tone: SettingsBadge
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    if clipped { response.on_hover_text(label) } else { response }
+    if clipped { response.backing_on_hover_text(label) } else { response }
 }
 
 #[derive(Default)]
@@ -187,11 +188,11 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
         if let Some(key) = chip.key {
             // Allocate the pill in the wrapping parent before giving its action a unique identity.
             let mut action_ui = ui.new_child(egui::UiBuilder::new().id_salt(key).max_rect(target));
-            return super::quiet_icon_button_at(&mut action_ui, target, "close", remove).on_hover_text(label);
+            return super::quiet_icon_button_at(&mut action_ui, target, "close", remove).backing_on_hover_text(label);
         }
-        return super::quiet_icon_button_at(ui, target, "close", remove).on_hover_text(label);
+        return super::quiet_icon_button_at(ui, target, "close", remove).backing_on_hover_text(label);
     }
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// A labelled form block whose control column can contain several natural-height rows.

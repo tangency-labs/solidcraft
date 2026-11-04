@@ -11,6 +11,7 @@ use egui::RichText;
 use serde::Deserialize;
 
 use crate::SolveApp;
+use crate::ui_kit::BackingTooltipExt as _;
 
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
@@ -212,7 +213,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         if !searching {
             ui.horizontal(|ui| {
                 let button = crate::ui_kit::icon_label_button(ui, crate::i18n::tr("prefs.plugins_show_folder"), "folder", true, false)
-                    .on_hover_text(crate::i18n::format("ui.plugins_note", &[("path", &path)]));
+                    .backing_on_hover_text(crate::i18n::format("ui.plugins_note", &[("path", &path)]));
                 crate::scenario::publish_target("prefs:plugins:folder", button.rect);
                 if button.clicked() {
                     if let Err(e) = std::fs::create_dir_all(dir) {

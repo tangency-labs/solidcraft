@@ -1,5 +1,6 @@
 //! Shared Browser tree rows; feature modules supply content and dispatch commands.
 use crate::icons::glyphs::badge;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{icons, theme::Tokens};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;
@@ -194,8 +195,8 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
             .inner;
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), action.label));
         let response = match action.reason {
-            Some(reason) => response.on_disabled_hover_text(format!("{}\n{reason}", action.label)),
-            None => response.on_hover_text(action.label),
+            Some(reason) => response.backing_on_disabled_hover_text(format!("{}\n{reason}", action.label)),
+            None => response.backing_on_hover_text(action.label),
         };
         crate::scenario::publish_rect(action.target, rect);
         if action.reason.is_none() {
@@ -412,16 +413,16 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         (Some(t), _) if hover_on == 2 && eye_end => {
             let mut at_eye = resp.clone();
             (at_eye.rect, at_eye.interact_rect) = (eye_r, eye_r);
-            at_eye.on_hover_text(t);
+            at_eye.backing_on_hover_text(t);
             resp
         }
-        (Some(t), _) => resp.on_hover_text(t),
-        (None, Some(state)) if elided => resp.on_hover_text(format!("{label_display}\n{state}")),
-        (None, Some(state)) => resp.on_hover_text(state),
+        (Some(t), _) => resp.backing_on_hover_text(t),
+        (None, Some(state)) if elided => resp.backing_on_hover_text(format!("{label_display}\n{state}")),
+        (None, Some(state)) => resp.backing_on_hover_text(state),
         (None, None) if !row.secondary.is_empty() || !row.count.is_empty() => {
-            resp.on_hover_text(format!("{label_display}\n{}\n{}", row.secondary, row.count))
+            resp.backing_on_hover_text(format!("{label_display}\n{}\n{}", row.secondary, row.count))
         }
-        (None, None) if elided => resp.on_hover_text(label_display.to_string()),
+        (None, None) if elided => resp.backing_on_hover_text(label_display.to_string()),
         (None, None) => resp,
     };
     out.on_control = press_on != 0 || over_action(ui.input(|i| i.pointer.press_origin()));

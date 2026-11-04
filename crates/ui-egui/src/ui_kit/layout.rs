@@ -1,5 +1,6 @@
 //! Layout elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{metrics::*, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
 use solidcraft_engine::kernel::Continuity;
@@ -103,7 +104,7 @@ pub(crate) fn catalog_footer(ui: &mut Ui, text: &str) -> Response {
 
 /// A short note with further guidance on its information icon and text.
 pub(crate) fn catalog_footer_with_tip(ui: &mut Ui, text: &str, tip: &str) {
-    catalog_footer(ui, text).on_hover_text(tip);
+    catalog_footer(ui, text).backing_on_hover_text(tip);
 }
 
 /// A filling catalog body above a measured, bottom-anchored footer. Long detail
@@ -265,7 +266,7 @@ pub(crate) fn continuity_row_explained(ui: &mut Ui, label: &str, id: &str, value
     if let Some(g) = allowed.get(index) {
         *value = *g;
     }
-    response.on_hover_text(tip)
+    response.backing_on_hover_text(tip)
 }
 
 /// The hover text of a continuity choice: each order's own line, which names its code.
@@ -331,7 +332,7 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
                         |ui| {
                             ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
-                                .on_hover_text(&shown)
+                                .backing_on_hover_text(&shown)
                         },
                     )
                     .inner;
@@ -339,7 +340,8 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
                 scenario::publish_rect(&format!("dialog:row_label:{text}"), label.rect);
                 scenario::publish_rect(&format!("dialog:row_help:{text}"), help.rect);
             } else {
-                ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate()).on_hover_text(shown);
+                ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
+                    .backing_on_hover_text(shown);
             }
         });
     }
@@ -761,7 +763,7 @@ pub(crate) fn text_lines(ui: &mut Ui, id: &str, text: &str) {
     let height = ui.fonts_mut(|f| f.row_height(&font));
     let response = egui::ScrollArea::vertical().id_salt(id).max_height(t.control_height * 15.0).show_rows(ui, height, lines.len(), |ui, rows| {
         for line in lines.get(rows).unwrap_or_default() {
-            ui.add(egui::Label::new(RichText::new(*line).font(font.clone()).color(t.form_ink)).truncate()).on_hover_text(*line);
+            ui.add(egui::Label::new(RichText::new(*line).font(font.clone()).color(t.form_ink)).truncate()).backing_on_hover_text(*line);
         }
     });
     scenario::publish_rect(&format!("dialog:lines:{id}"), response.inner_rect);
@@ -854,17 +856,20 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         });
         paint_text(ui, rect, text, font, ink, false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-        response.on_hover_text(tooltip.as_deref().unwrap_or(text))
+        response.backing_on_hover_text(tooltip.as_deref().unwrap_or(text))
     } else if matches!(style, Text::Error(_)) {
-        egui::Frame::NONE
-            .fill(t.form_error_fill)
-            .corner_radius(t.control_radius)
-            .inner_margin(egui::Margin::symmetric(t.form_inset as i8, t.space_6 as i8))
-            .show(ui, |ui| {
+        crate::ui_kit::Container::show_backing(
+            ui,
+            egui::Frame::NONE
+                .fill(t.form_error_fill)
+                .corner_radius(t.control_radius)
+                .inner_margin(egui::Margin::symmetric(t.form_inset as i8, t.space_6 as i8)),
+            |ui| {
                 ui.set_min_width(dimension(ui.available_width()));
                 ui.add(egui::Label::new(RichText::new(text).font(font).color(ink)).wrap())
-            })
-            .inner
+            },
+        )
+        .inner
     } else if matches!(style, Text::Hint(_) | Text::Note(_) | Text::MonoNote(_)) {
         let width = dimension(ui.available_width());
         let galley = if matches!(style, Text::Note(_)) { note_galley(ui, text) } else { ui.painter().layout(text.to_owned(), font, ink, width) };
@@ -877,7 +882,7 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         let label = egui::Label::new(RichText::new(text).font(font).color(ink));
         ui.add(if matches!(style, Text::Inline) { label.truncate() } else { label.wrap() })
     };
-    let response = if matches!(style, Text::Hint(_)) { response.on_hover_text(text) } else { response };
+    let response = if matches!(style, Text::Hint(_)) { response.backing_on_hover_text(text) } else { response };
     let (kind, key) = match style {
         Text::Hint(key) => ("hint", key),
         Text::Note(key) | Text::MonoNote(key) => ("note", key),
@@ -906,7 +911,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
     let changed = ui
         .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            super::checkbox(ui, "", enabled).on_hover_text(crate::i18n::tr_label("Enable rule")).changed()
+            super::checkbox(ui, "", enabled).backing_on_hover_text(crate::i18n::tr_label("Enable rule")).changed()
         })
         .inner;
     let right = (rect.right() - dimension(actions_width) - t.space_6).max(check.right());
@@ -918,7 +923,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
     paint_text(ui, title, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
     paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
-    let response = ui.interact(text, ui.id().with("summary"), egui::Sense::hover()).on_hover_text(summary);
+    let response = ui.interact(text, ui.id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{name}: {summary}")));
     scenario::publish_rect(&format!("dialog:inline:{name}"), title);
     scenario::publish_rect("dialog:report:rule_report", detail);

@@ -4102,6 +4102,7 @@ dependencies = [
  "ureq",
  "windows-sys 0.61.2",
  "winit",
+ "winreg",
  "x11rb",
  "zbus 5.19.0",
 ]
