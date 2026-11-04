@@ -1119,11 +1119,12 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     if let Some((now, d, a, b)) = shown_distance(r, *show) {
         if r.get("center_distance").is_some() {
             // Centre, min and max all listed; the chosen one is drawn and broken into ΔX/Y/Z.
+            let centre_label = crate::quick_measure::centre_distance_label(r);
             for (which, label, key) in
-                [(Shown::Centre, "Centre to centre", "center_distance"), (Shown::Min, "Min", "distance_mm"), (Shown::Max, "Max", "max")]
+                [(Shown::Centre, centre_label, "center_distance"), (Shown::Min, tr("Min"), "distance_mm"), (Shown::Max, tr("Max"), "max")]
             {
                 let Some(v) = r.get(key).filter(|v| v.is_number()) else { continue };
-                if ui_kit::list_picker(ui, key, &format!("{}  {}", tr(label), mm(v)), now == which).clicked() {
+                if ui_kit::list_picker(ui, key, &format!("{}  {}", label, mm(v)), now == which).clicked() {
                     *show = Some(which);
                 }
             }
