@@ -1542,17 +1542,22 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
     prepare_model(app);
     if crate::browser_search::bar_shown(app) {
-        // Above the rows and never scrolled with them, but clipped to the card's height, so it folds
-        // away with the card as the rows do. The bar ends with its own gap, so none between the two.
+        // The panel host draws the title row (#15184), so the field is the first row under it.
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::row_height() + Tokens::get().space_8), Sense::hover());
+        crate::browser_search::header_field(app, ui, rect);
+    }
+    if app.tree.search.on() {
+        // Under the header and never scrolled with the rows, but clipped to the card's height, so it
+        // folds away with the card as the rows do.
         ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical()
-            .id_salt("browser_search_bar")
+            .id_salt("browser_search_results")
             .max_height(ui.available_height())
             .min_scrolled_height(0.0)
             .auto_shrink([false, true])
             .scroll_source(egui::scroll_area::ScrollSource::NONE)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| crate::browser_search::bar(app, ui));
+            .show(ui, |ui| crate::browser_search::results(app, ui));
         if app.tree.search.hits().is_some_and(|h| h.total() == 0) {
             return;
         }

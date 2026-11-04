@@ -289,12 +289,10 @@ fn browser_search_cost() {
             line.push_str(&format!(" find[{text}]_ms={:.2}", times[times.len() / 2]));
         }
         // What the bar costs with nobody searching, against the same frame without it.
-        h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Magnifier;
         h.frames(2);
         let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
         times.sort_by(f64::total_cmp);
         line.push_str(&format!(" no_bar_frame_ms={:.2}", times[times.len() / 2]));
-        h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Always;
         for (name, text) in [("no_search", ""), ("few_rows", "bolt:7"), ("many_rows", "bolt")] {
             if text.is_empty() {
                 h.app.tree.search.clear();
