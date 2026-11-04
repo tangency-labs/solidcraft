@@ -1745,7 +1745,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     context_chips(ui, context, false);
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| copy_message_button(ui, n, text));
+                        // Top-aligned: a row centred across its height takes all the height left in
+                        // the conversation's view, which stretched a prompt near the top.
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| copy_message_button(ui, n, text));
                     }
                 });
                 if copyable {

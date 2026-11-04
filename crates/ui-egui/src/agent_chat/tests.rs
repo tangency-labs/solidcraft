@@ -4542,6 +4542,20 @@ fn the_copy_message_button_copies_the_prompt_as_entered() {
     assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
 }
 
+/// A prompt at the top of a short conversation is as tall as its text and its Copy message
+/// button: the button sits at the bubble's foot and the reply follows straight after, instead of
+/// the bubble stretching over the empty view below it.
+#[test]
+fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
+    let h = chat_with_copiable_messages();
+    let button = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let prompt = crate::scenario::rect_of("agent_chat:msg:0").expect("the prompt's message area");
+    let reply = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    let row = crate::theme::Tokens::get().control_height;
+    assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
+    assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
+}
+
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
 /// fenced code, not the laid-out text.
 #[test]
