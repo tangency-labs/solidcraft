@@ -253,6 +253,32 @@ fn analytic_trim_and_break_use_freeform_cutters() {
 /// An ellipse's construction axes cut a trim, as a Center Rectangle's construction diagonals
 /// do: a line inside the ellipse trims back to the minor axis, one inside the rectangle to the
 /// diagonals.
+/// An ellipse's own axes do not cut it (they end on it, where a Center Rectangle's diagonals end
+/// at its corners): a lone ellipse trims away whole, its axes staying as when it is deleted, and
+/// a trim of its outline stops where a line crosses, not at an axis end.
+#[test]
+fn an_ellipse_s_own_axes_do_not_cut_it() {
+    let mut s = new_sketch();
+    let e = ids(&run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}))["curves"])[0].clone();
+    run(&mut s, "sketch.trim", json!({"curve": e, "at": [0, 8]}));
+    let sk = sketch(&s);
+    assert!(sk.curves.iter().all(|c| c.construction), "the whole ellipse goes: {:?}", sk.curves);
+    assert_eq!(sk.curves.len(), 2, "its two axes stay");
+
+    let mut s = new_sketch();
+    let e = ids(&run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[10, -10], [10, 10]], "connect": false}));
+    // Clicked 10 degrees round from the major end: the cap right of the line goes, from one
+    // crossing to the other, past the major end.
+    let at = Vec2::new(20.0 * 10f64.to_radians().cos(), 8.0 * 10f64.to_radians().sin());
+    run(&mut s, "sketch.trim", json!({"curve": e, "at": [at.x, at.y]}));
+    let sk = sketch(&s);
+    for (i, c) in sk.curves.iter().enumerate().filter(|(_, c)| !c.construction && !matches!(c.kind, CurveKind::Line { .. })) {
+        let right = sk.polyline(i).iter().map(|q| q.x).fold(f64::MIN, f64::max);
+        assert!(right < 10.0 + 1e-6, "{}: what is left stays left of the line, reaching x = {right}", c.id);
+    }
+}
+
 #[test]
 fn an_ellipse_s_axes_cut_as_a_center_rectangle_s_diagonals_do() {
     // What is left of the line at y = 1, as x ranges.

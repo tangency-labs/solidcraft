@@ -58,8 +58,12 @@ fn cuts(sk: &Sketch, ci: usize, segs: &[Seg2], only_freeform: bool) -> Vec<(f64,
         let (t, u) = ((c - a).cross(s) / den, (c - a).cross(r) / den);
         ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then(|| a + r * t)
     };
+    // An ellipse's own axes end on it and cut it nowhere, as a Center Rectangle's diagonals end
+    // at its corners.
+    let (major, minor) = sk.ellipse_axis_lines(ci).unwrap_or((None, None));
+    let own_axes = [major.map(|(l, _)| l), minor.map(|(l, ..)| l)];
     for (oi, curve) in sk.curves.iter().enumerate() {
-        if oi == ci || (only_freeform && !curve.kind.is_freeform()) {
+        if oi == ci || (only_freeform && !curve.kind.is_freeform()) || own_axes.contains(&Some(oi)) {
             continue;
         }
         let other = sk.polyline(oi);
