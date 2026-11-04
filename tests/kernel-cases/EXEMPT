@@ -53,6 +53,7 @@ component.replace_with_link       component links
 component.show_history            the History bar: which features it lists
 component.unlock                  component locking
 component.update_links            component links
+construct.plane.normal_to_axis    construction: tested in crates/engine/src/construct_tests.rs
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
