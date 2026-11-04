@@ -143,7 +143,6 @@ render.camera.set
 render.cancel
 render.effects.describe
 render.export
-render.hdr.inspect
 render.library.appearance.apply
 render.library.environment.apply
 render.library.physical.prepare
@@ -162,7 +161,6 @@ render.result.pin
 render.result.regrade
 render.scene
 render.settings.apply
-render.settings.capture_hdr
 render.settings.get
 render.settings.set
 render.start
