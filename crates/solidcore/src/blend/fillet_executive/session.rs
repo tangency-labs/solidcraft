@@ -330,6 +330,7 @@ struct SessionObjects<'target> {
     /// The corner type of chamfers meeting at a vertex (`set_chamfer_corner`; WR-716).
     /// Read only with `Kernel::fixes.fillet_chamfer_corner`.
     chamfer_corner: crate::blend::blend_corner::BlendChamferCorner,
+    band_cut_cache: Option<band_cuts::BandCutCache>,
 }
 
 impl SessionObjects<'_> {
@@ -1538,6 +1539,7 @@ impl<'target> FilletSession<'target> {
                 setback_refusal: None,
                 blend_face_marks: Vec::new(),
                 chamfer_corner: crate::blend::blend_corner::BlendChamferCorner::Mitre,
+                band_cut_cache: None,
             },
             _gn_scope: gn_scope,
         })
@@ -2543,8 +2545,11 @@ impl<'target> FilletSession<'target> {
         k: &mut Kernel,
         error_info: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
-        self.executive
-            .create_fillet_brep(k, &mut self.objects, error_info)
+        let res = self
+            .executive
+            .create_fillet_brep(k, &mut self.objects, error_info);
+        self.objects.band_cut_cache = None;
+        res
     }
 
     /// `GetPreviewFilletSurfaces`: `CreateFilletCorners` (its default null error info),
@@ -3641,7 +3646,13 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
             return Ok(None);
         }
-        let Some(cut) = band_cuts::band_cuts_the_part(k, self.target, current)? else {
+        let Some(cut) = band_cuts::band_cuts_the_part_cached(
+            k,
+            self.target,
+            current,
+            &mut self.band_cut_cache,
+        )?
+        else {
             return Ok(None);
         };
         let chamfer = current.base().fsg.as_ref().is_some_and(|fsg| {
@@ -3680,7 +3691,13 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
             return Ok(None);
         }
-        let Some(cut) = band_cuts::band_breaks_through_the_part(k, self.target, current)? else {
+        let Some(cut) = band_cuts::band_breaks_through_the_part_cached(
+            k,
+            self.target,
+            current,
+            &mut self.band_cut_cache,
+        )?
+        else {
             return Ok(None);
         };
         let chamfer = current.base().fsg.as_ref().is_some_and(|fsg| {

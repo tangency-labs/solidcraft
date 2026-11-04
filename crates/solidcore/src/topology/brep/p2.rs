@@ -1795,8 +1795,33 @@ pub(crate) fn ray_fire_with_solver(
         TopologySolveOptions<'_>,
     ) -> Result<crate::geom::solution_array::SolutionArray<CacheObject>>,
 ) -> Result<RayFireResult> {
-    // get Brep BoundingBox and BoundingSphere
     let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
+    ray_fire_with_bbox_and_solver(
+        k,
+        b,
+        bbox,
+        start,
+        direction,
+        ray_zone_tol_3d,
+        answer_limit,
+        solve,
+    )
+}
+
+pub(crate) fn ray_fire_with_bbox_and_solver(
+    k: &Kernel,
+    b: &mut Brep,
+    bbox: Extent3d,
+    start: Point3,
+    direction: Vec3,
+    ray_zone_tol_3d: f64,
+    answer_limit: Option<f64>,
+    solve: impl FnOnce(
+        &mut Brep,
+        Point3,
+        TopologySolveOptions<'_>,
+    ) -> Result<crate::geom::solution_array::SolutionArray<CacheObject>>,
+) -> Result<RayFireResult> {
     let sphere = bbox.sphere_bound();
     let radius = sphere.radius;
 

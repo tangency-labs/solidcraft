@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use super::{cache_handle, face_surface_cache, prepare_surface_cache};
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::Shape;
@@ -181,6 +181,44 @@ impl KeptFaceCaches {
     fn put(&self, key: &FaceCacheKey, caches: FaceCaches, built: usize) {
         self.kept.set(Some((*key, caches)));
         self.builds.set(self.builds.get().saturating_add(built));
+    }
+
+    /// Runs `f` with a [`BrepFaceServices`] seeded from the kept face caches for `(k, brep)`
+    /// and puts the updated caches back afterwards.
+    pub(crate) fn with_services<T>(
+        &self,
+        k: &Kernel,
+        brep: &mut Brep,
+        f: impl FnOnce(&mut BrepFaceServices<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let key = FaceCacheKey::of(k, brep);
+        let caches = self.take(&key);
+        let built_before: Vec<FaceId> = built_faces(&caches).collect();
+        let mut services = BrepFaceServices::with_caches(brep, caches);
+        let res = f(&mut services);
+        let caches = services.into_caches();
+        let built = built_faces(&caches)
+            .filter(|face| !built_before.contains(face))
+            .count();
+        self.put(&key, caches, built);
+        res
+    }
+
+    /// Classifies `uv` on `face` using the kept face cache if present under `(k, brep)`.
+    pub(crate) fn point_classify(
+        &self,
+        k: &Kernel,
+        brep: &mut Brep,
+        face: FaceId,
+        uv: Point2,
+        pc: &mut PointClassification<EntityRef>,
+        options: PointClassifyOptions,
+    ) -> Result<()> {
+        let key = FaceCacheKey::of(k, brep);
+        let caches = self.take(&key);
+        let res = point_classify_live(k, brep, face, uv, pc, options, caches.get(&face));
+        self.put(&key, caches, 0);
+        res
     }
 
     /// How many face cache trees the solves built.

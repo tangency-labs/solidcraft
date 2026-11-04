@@ -41,13 +41,15 @@ use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
-use crate::query::brep::{BrepFaceServices, BrepQuery};
+use crate::nurbs::b_spline_curve::BoundingBoxRequest;
+use crate::query::brep::BrepQuery;
 use crate::surface::plane::p1::Plane;
 use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
@@ -82,6 +84,85 @@ pub struct BandCut {
     pub radius: f64,
     /// `rdSetback`.
     pub setback: f64,
+}
+
+#[derive(Debug)]
+struct CachedEdge {
+    curve: Curve,
+    natural_interval: Extent1d,
+    interval: Extent1d,
+    bbox: Option<Extent3d>,
+}
+
+#[derive(Debug)]
+struct CachedFace {
+    id: FaceId,
+    surface: Surface,
+    domain: Extent2d,
+    bbox: Option<Extent3d>,
+}
+
+/// Precomputed target-body topology, bounding boxes, and [`BrepQuery`] (with its kept
+/// `BrepCache`, `Extent3d`, and `KeptFaceCaches`) shared across all station and solver
+/// checks in [`band_cuts_the_part_cached`] and [`band_breaks_through_the_part_cached`].
+#[derive(Debug)]
+pub(crate) struct BandCutCache {
+    edges: Vec<CachedEdge>,
+    faces: Vec<CachedFace>,
+    query: BrepQuery<'static>,
+}
+
+impl BandCutCache {
+    fn new(k: &Kernel, body: &mut Brep) -> Result<Self> {
+        let mut edges = Vec::new();
+        for e in crate::topology::brep::p1::edges(body, None)? {
+            let Some(curve) = edge::evaluation_curve(body, e)? else {
+                continue;
+            };
+            let interval = edge::interval(body, e)?;
+            let natural_interval = curve.natural_interval();
+            let bbox = curve
+                .calculate_bounding_box(
+                    k,
+                    &interval,
+                    BoundingBoxRequest {
+                        normal: true,
+                        pseudo: false,
+                        polar: false,
+                    },
+                    false,
+                )
+                .ok()
+                .and_then(|b| b.normal);
+            edges.push(CachedEdge {
+                curve,
+                natural_interval,
+                interval,
+                bbox,
+            });
+        }
+        let mut faces = Vec::new();
+        for f in crate::topology::brep::p1::faces(body, None)? {
+            let Some(surface) = face::p2::surface(body, f)? else {
+                continue;
+            };
+            let surface = surface.clone_for_evaluation()?;
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
+            let bbox = crate::query::face::p1::calculate_bounding_box(k, &mut *body, f, false).ok();
+            faces.push(CachedFace {
+                id: f,
+                surface,
+                domain,
+                bbox,
+            });
+        }
+        let query = BrepQuery::of_brep(body);
+        Ok(Self {
+            edges,
+            faces,
+            query,
+        })
+    }
 }
 
 /// The operands of the plane's intersections: an edge's curve and the plane, named as
@@ -123,6 +204,7 @@ impl SolutionObject for Operand {
 fn edges_crossing_plane(
     k: &Kernel,
     body: &Brep,
+    cache: &BandCutCache,
     origin: Point3,
     normal: Vec3,
 ) -> Result<Vec<Point3>> {
@@ -137,20 +219,22 @@ fn edges_crossing_plane(
     let plane = Surface::from(Plane::create_canonical(&Axis2Placement::new(origin, x, y))?);
     let domain = plane.natural_uv_domain_with_nurb(k)?;
     let tol = body.tolerance();
-    for e in crate::topology::brep::p1::edges(body, None)? {
-        let Some(curve) = edge::evaluation_curve(body, e)? else {
-            continue;
-        };
-        let interval = edge::interval(body, e)?;
+    let plane_tol = smos_max(tol, 1.0e-4);
+    for edge in &cache.edges {
+        if let Some(bbox) = &edge.bbox {
+            if bbox.distance_to_plane(origin, normal).abs() > plane_tol {
+                continue;
+            }
+        }
         let solutions = plane.global_curve_intersect(
             k,
             [
-                Operand::Curve(curve.natural_interval()),
+                Operand::Curve(edge.natural_interval),
                 Operand::Plane(domain),
             ],
             &domain,
-            &curve,
-            &interval,
+            &edge.curve,
+            &edge.interval,
             tol,
         )?;
         for sol in solutions.as_slice() {
@@ -160,7 +244,7 @@ fn edges_crossing_plane(
                 .first()
                 .copied()
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
-            crossings.push(curve.evaluate_point(k, t)?);
+            crossings.push(edge.curve.evaluate_point(k, t)?);
             if sol.solution_type == SolutionType::RangeOfValues {
                 let t = sol
                     .end
@@ -168,7 +252,7 @@ fn edges_crossing_plane(
                     .first()
                     .copied()
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
-                crossings.push(curve.evaluate_point(k, t)?);
+                crossings.push(edge.curve.evaluate_point(k, t)?);
             }
         }
     }
@@ -187,6 +271,7 @@ fn edges_crossing_plane(
 fn keeps_material_behind(
     k: &Kernel,
     body: &mut Brep,
+    cache: &BandCutCache,
     centre: Point3,
     rails: [Point3; 2],
     chord: bool,
@@ -248,28 +333,47 @@ fn keeps_material_behind(
     let interval = section.natural_interval();
     let ends = body.tolerance();
     let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
-    for f in crate::topology::brep::p1::faces(body, None)? {
+    let sec_box = section
+        .calculate_bounding_box(
+            k,
+            &interval,
+            BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            false,
+        )
+        .ok()
+        .and_then(|b| b.normal);
+    for face in &cache.faces {
+        if let (Some(f_box), Some(s_box)) = (&face.bbox, &sec_box) {
+            if f_box.are_disjoint(s_box, ends) {
+                continue;
+            }
+        }
+        let f = face.id;
         // the crossings inside the face's surface's domain, judged after the borrow ends
         let mut on_face: Vec<Point2> = Vec::new();
         {
-            let Some(surface) = face::p2::surface(body, f)? else {
-                continue;
-            };
-            let surface = surface.clone_for_evaluation()?;
-            let domain = surface.natural_uv_domain_with_nurb(k)?;
             // the face's surface solves through its face (its trimmed cache), as upstream's
             // `GlobalCurveIntersect` reaches the owner's cache
-            let mut services = BrepFaceServices::new(&mut *body);
-            let solutions = surface.global_curve_intersect_with_context::<CacheObject>(
-                k,
-                [None, Some(CacheObject::Surface(f))],
-                None,
-                &mut services,
-                &domain,
-                &section,
-                &interval,
-                ends,
-            )?;
+            let solutions = cache
+                .query
+                .face_caches()
+                .with_services(k, &mut *body, |services| {
+                    face.surface
+                        .global_curve_intersect_with_context::<CacheObject>(
+                            k,
+                            [None, Some(CacheObject::Surface(f))],
+                            None,
+                            services,
+                            &face.domain,
+                            &section,
+                            &interval,
+                            ends,
+                        )
+                })?;
             for sol in solutions.as_slice() {
                 if sol.solution_type == SolutionType::RangeOfValues {
                     return Ok(true); // the section runs along the face's surface
@@ -288,7 +392,7 @@ fn keeps_material_behind(
         }
         for uv in on_face {
             let mut class = PointClassification::<EntityRef>::new(zone);
-            crate::query::face::p2::point_classify(
+            cache.query.face_caches().point_classify(
                 k,
                 body,
                 f,
@@ -307,7 +411,7 @@ fn keeps_material_behind(
         }
     }
     // no crossing: the section between its rails is wholly in the part or wholly outside it
-    let class = BrepQuery::of_brep(body).point_3d_classify(k, body, middle, zone, true)?;
+    let class = cache.query.point_3d_classify(k, body, middle, zone, true)?;
     if class.point_class() != PointClassType::Region {
         return Ok(true);
     }
@@ -337,6 +441,7 @@ struct Section {
 fn keeps(
     k: &Kernel,
     target: &mut Brep,
+    cache: &BandCutCache,
     solver: &mut SolverObject,
     edge_curve: &Curve,
     chord: bool,
@@ -413,10 +518,10 @@ fn keeps(
     out.setback = p.distance(rail1);
     out.keeps = match judge {
         Judge::KeepsMaterial(crossings) => {
-            keeps_material_behind(k, target, centre, [rail1, rail2], chord, crossings)?
+            keeps_material_behind(k, target, cache, centre, [rail1, rail2], chord, crossings)?
         }
         Judge::StaysInside(faces) => {
-            !section_breaks_through(k, target, centre, [rail1, rail2], chord, faces)?
+            !section_breaks_through(k, target, cache, centre, [rail1, rail2], chord, faces)?
         }
     };
     Ok(out)
@@ -471,6 +576,7 @@ struct ThroughFaces {
 fn section_breaks_through(
     k: &Kernel,
     body: &mut Brep,
+    cache: &BandCutCache,
     centre: Point3,
     rails: [Point3; 2],
     chord: bool,
@@ -507,29 +613,48 @@ fn section_breaks_through(
     let interval = section.natural_interval();
     let ends = body.tolerance();
     let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
+    let sec_box = section
+        .calculate_bounding_box(
+            k,
+            &interval,
+            BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            false,
+        )
+        .ok()
+        .and_then(|b| b.normal);
     // where the section meets the boundary of face `f`: its parameter, whether it crosses
     // `f` inside it (not on its boundary), whether `f` is judged and whether the blend
     // reaches `f`
     let mut meets: Vec<Meet> = Vec::new();
-    for f in crate::topology::brep::p1::faces(body, None)? {
+    for face in &cache.faces {
+        if let (Some(f_box), Some(s_box)) = (&face.bbox, &sec_box) {
+            if f_box.are_disjoint(s_box, ends) {
+                continue;
+            }
+        }
+        let f = face.id;
         let mut on_face: Vec<(f64, Point2)> = Vec::new();
         {
-            let Some(surface) = face::p2::surface(body, f)? else {
-                continue;
-            };
-            let surface = surface.clone_for_evaluation()?;
-            let domain = surface.natural_uv_domain_with_nurb(k)?;
-            let mut services = BrepFaceServices::new(&mut *body);
-            let solutions = surface.global_curve_intersect_with_context::<CacheObject>(
-                k,
-                [None, Some(CacheObject::Surface(f))],
-                None,
-                &mut services,
-                &domain,
-                &section,
-                &interval,
-                ends,
-            )?;
+            let solutions = cache
+                .query
+                .face_caches()
+                .with_services(k, &mut *body, |services| {
+                    face.surface
+                        .global_curve_intersect_with_context::<CacheObject>(
+                            k,
+                            [None, Some(CacheObject::Surface(f))],
+                            None,
+                            services,
+                            &face.domain,
+                            &section,
+                            &interval,
+                            ends,
+                        )
+                })?;
             for sol in solutions.as_slice() {
                 let params = &sol.start.parameters;
                 let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
@@ -545,7 +670,7 @@ fn section_breaks_through(
         }
         for (t, uv) in on_face {
             let mut class = PointClassification::<EntityRef>::new(zone);
-            crate::query::face::p2::point_classify(
+            cache.query.face_caches().point_classify(
                 k,
                 body,
                 f,
@@ -583,6 +708,7 @@ fn section_breaks_through(
         at: &at,
         classes: vec![None; at.len() - 1],
         zone,
+        query: &cache.query,
     };
     for (j, pair) in meets.windows(2).enumerate() {
         let [m0, m1] = pair else {
@@ -616,6 +742,8 @@ struct Pieces<'a> {
     classes: Vec<Option<Piece>>,
     /// The body's zone tolerance.
     zone: f64,
+    /// Shared B-rep query for point classifications.
+    query: &'a BrepQuery<'static>,
 }
 
 impl Pieces<'_> {
@@ -632,6 +760,7 @@ impl Pieces<'_> {
         } else if point_in_material(
             k,
             body,
+            self.query,
             self.section.evaluate_point(k, 0.5 * (t0 + t1))?,
             self.zone,
         )? {
@@ -693,8 +822,14 @@ struct Meet {
 /// the zone tolerance of a face, edge or vertex, not counted in: a piece of a section
 /// between two crossings of faces that lies within the tolerance of the boundary is too
 /// shallow to keep material).
-fn point_in_material(k: &Kernel, body: &mut Brep, point: Point3, zone: f64) -> Result<bool> {
-    let class = BrepQuery::of_brep(body).point_3d_classify(k, body, point, zone, true)?;
+fn point_in_material(
+    k: &Kernel,
+    body: &mut Brep,
+    query: &BrepQuery<'_>,
+    point: Point3,
+    zone: f64,
+) -> Result<bool> {
+    let class = query.point_3d_classify(k, body, point, zone, true)?;
     if class.point_class() != PointClassType::Region {
         return Ok(false);
     }
@@ -726,6 +861,15 @@ pub fn band_cuts_the_part(
     target: &mut Brep,
     solver: &mut SolverObject,
 ) -> Result<Option<BandCut>> {
+    band_cuts_the_part_cached(k, target, solver, &mut None)
+}
+
+pub(crate) fn band_cuts_the_part_cached(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    cache_slot: &mut Option<BandCutCache>,
+) -> Result<Option<BandCut>> {
     let base = solver.base();
     if base.surface(0)?.is_none() || base.surface(1)?.is_none() {
         return Ok(None);
@@ -747,6 +891,10 @@ pub fn band_cuts_the_part(
     let chord = solver.base().fsg.as_ref().is_some_and(|fsg| {
         fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
     });
+    let cache = match cache_slot {
+        Some(c) => c,
+        None => cache_slot.insert(BandCutCache::new(k, target)?),
+    };
 
     // each section: its parameter, plane crossings and section found near, and whether it keeps
     // material behind it (0), takes all of the part between the rails (1), or is not judged (2)
@@ -769,10 +917,11 @@ pub fn band_cuts_the_part(
             continue;
         }
         let normal = tangent.unitize()?;
-        let crossings = edges_crossing_plane(k, target, point, normal)?;
+        let crossings = edges_crossing_plane(k, target, cache, point, normal)?;
         let judged = keeps(
             k,
             target,
+            cache,
             solver,
             &curve,
             chord,
@@ -828,6 +977,7 @@ pub fn band_cuts_the_part(
                 let judged = keeps(
                     k,
                     target,
+                    cache,
                     solver,
                     &curve,
                     chord,
@@ -851,6 +1001,7 @@ pub fn band_cuts_the_part(
                 let judged = keeps(
                     k,
                     target,
+                    cache,
                     solver,
                     &curve,
                     chord,
@@ -898,6 +1049,15 @@ pub fn band_breaks_through_the_part(
     target: &mut Brep,
     solver: &mut SolverObject,
 ) -> Result<Option<BandCut>> {
+    band_breaks_through_the_part_cached(k, target, solver, &mut None)
+}
+
+pub(crate) fn band_breaks_through_the_part_cached(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    cache_slot: &mut Option<BandCutCache>,
+) -> Result<Option<BandCut>> {
     let base = solver.base();
     if base.surface(0)?.is_none() || base.surface(1)?.is_none() {
         return Ok(None);
@@ -936,6 +1096,10 @@ pub fn band_breaks_through_the_part(
         }
     }
     let faces = ThroughFaces { skip, reached };
+    let cache = match cache_slot {
+        Some(c) => c,
+        None => cache_slot.insert(BandCutCache::new(k, target)?),
+    };
     let mut out: Option<BandCut> = None;
     let mut near: Option<TsectPnt> = None;
     for j in 0..STEPS {
@@ -943,6 +1107,7 @@ pub fn band_breaks_through_the_part(
         let judged = keeps(
             k,
             target,
+            cache,
             solver,
             &curve,
             chord,
@@ -963,6 +1128,7 @@ pub fn band_breaks_through_the_part(
             let s = keeps(
                 k,
                 target,
+                cache,
                 solver,
                 &curve,
                 chord,
@@ -986,6 +1152,7 @@ pub fn band_breaks_through_the_part(
             let s = keeps(
                 k,
                 target,
+                cache,
                 solver,
                 &curve,
                 chord,

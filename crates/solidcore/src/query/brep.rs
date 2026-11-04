@@ -548,6 +548,7 @@ pub struct BrepQuery<'a> {
     /// The face surface caches the classification solves made, kept for the next solve
     /// as upstream keeps them on the surfaces (`smsurf_GetSurfaceCache`).
     face_caches: ray::KeptFaceCaches,
+    bbox: OnceCell<Extent3d>,
 }
 
 impl core::fmt::Debug for BrepQuery<'_> {
@@ -596,6 +597,7 @@ impl<'a> BrepQuery<'a> {
             identity,
             cache: OnceCell::new(),
             face_caches: ray::KeptFaceCaches::new(),
+            bbox: OnceCell::new(),
         }
     }
 
@@ -614,7 +616,27 @@ impl<'a> BrepQuery<'a> {
             identity: ProvenBrepIdentity::plain(identity),
             cache: OnceCell::from(cache),
             face_caches: ray::KeptFaceCaches::new(),
+            bbox: OnceCell::new(),
         }
+    }
+
+    /// The kept face caches of this query.
+    #[must_use]
+    pub(crate) const fn face_caches(&self) -> &ray::KeptFaceCaches {
+        &self.face_caches
+    }
+
+    /// Cached 3D bounding box of `b` with default options.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`calculate_bounding_box`].
+    pub fn bounding_box(&self, k: &Kernel, b: &mut Brep) -> Result<Extent3d> {
+        if let Some(&bbox) = self.bbox.get() {
+            return Ok(bbox);
+        }
+        let bbox = calculate_bounding_box(k, b, BoundingBoxOptions::default())?;
+        Ok(*self.bbox.get_or_init(|| bbox))
     }
 
     /// The base identities (without proven overrides).
@@ -658,14 +680,26 @@ impl<'a> BrepQuery<'a> {
     ) -> Result<crate::topology::brep::p2::RayFireResult> {
         let identity = self.effective_identity();
         let cache = self.cache(k, b)?;
-        crate::topology::brep::p2::ray_fire_with_solver(
+        let bbox = self.bounding_box(k, b)?;
+        crate::topology::brep::p2::ray_fire_with_bbox_and_solver(
             k,
             b,
+            bbox,
             start,
             direction,
             tolerance,
             None,
-            |b, point, options| solve_mutable_brep_point(k, b, &identity, cache, point, options),
+            |b, point, options| {
+                ray::solve_mutable_brep_point_kept(
+                    k,
+                    b,
+                    &identity,
+                    cache,
+                    &self.face_caches,
+                    point,
+                    options,
+                )
+            },
         )
     }
 
@@ -805,9 +839,11 @@ impl<'a> BrepQuery<'a> {
         let mut fire = |direction: Vec3| -> Result<Option<Option<RegionId>>> {
             let b = target.mutable()?;
             let fired = self.cache(k, b).and_then(|cache| {
-                bp2::ray_fire_with_solver(
+                let bbox = self.bounding_box(k, b)?;
+                bp2::ray_fire_with_bbox_and_solver(
                     k,
                     b,
+                    bbox,
                     point,
                     direction,
                     point_zone_tol_3d,
