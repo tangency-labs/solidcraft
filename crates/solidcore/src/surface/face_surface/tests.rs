@@ -35,6 +35,10 @@ fn frame() -> Frame {
     }
 }
 
+fn is_nurbs(f: &FaceSurface) -> bool {
+    matches!(f.surface.kind(), SurfaceKind::BSpline(_))
+}
+
 /// The points of `s` at its box's corners and middle are at `r` from the z axis.
 fn on_cylinder(k: &Kernel, f: &FaceSurface, r: f64) {
     let (lo, hi) = (f.uv_domain.min(), f.uv_domain.max());
@@ -90,7 +94,7 @@ fn a_sliver_off_a_cylinder_stays_its_nurbs() {
 }
 
 /// A cylinder face on its NURBS form is the cylinder holding that form; the form labelled a
-/// sphere is refused.
+/// sphere keeps no label (owner 22254): the face is its exact NURBS, not refused.
 #[test]
 fn an_analytic_face_on_its_form_is_proved_on_it() {
     let k = k();
@@ -111,7 +115,87 @@ fn an_analytic_face_on_its_form_is_proved_on_it() {
         frame: frame(),
         radius: 3.0,
     };
-    assert!(face_surface(&k, &wrong, Some(&net), d).is_err());
+    assert!(is_nurbs(&face_surface(&k, &wrong, Some(&net), d).unwrap()));
+}
+
+/// F1: a label's own numbers are proved on its form. A cylinder label of radius 5 over the
+/// form of a radius-7 cylinder is not read as a 7 mm cylinder under the label: the label is
+/// dropped and the face is its exact NURBS.
+#[test]
+fn a_label_whose_numbers_are_off_its_form_is_dropped_not_rewritten() {
+    let k = k();
+    let seven = Record::Cylinder {
+        frame: frame(),
+        radius: 7.0,
+    };
+    let (net, d) = form::surface(&seven, [[0.0, PI], [0.0, 2.0]]).unwrap();
+    let five = Record::Cylinder {
+        frame: frame(),
+        radius: 5.0,
+    };
+    let f = face_surface(&k, &five, Some(&net), d).unwrap();
+    assert!(is_nurbs(&f), "{:?}", f.surface.kind());
+    let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+    assert_eq!((r.surface, r.nurbs), (net, None));
+}
+
+/// A label whose frame's origin lies elsewhere on the axis than where the form's height starts
+/// (a hole's frame on the solid's floor at z = -10, its form from z = 0) is that cylinder: its
+/// own numbers, the form's parametrisation, and the same record back.
+#[test]
+fn a_label_with_its_origin_elsewhere_on_the_axis_keeps_its_numbers() {
+    let k = k();
+    let label = Record::Cylinder {
+        frame: frame(),
+        radius: 3.0,
+    };
+    let (net, d) = form::surface(&label, [[0.0, PI], [10.0, 12.0]]).unwrap();
+    let lower = Record::Cylinder {
+        frame: Frame {
+            origin: [0.0, 0.0, -10.0],
+            ..frame()
+        },
+        radius: 3.0,
+    };
+    let f = face_surface(&k, &lower, Some(&net), d).unwrap();
+    assert!(
+        matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder),
+        "{:?}",
+        f.surface.kind()
+    );
+    let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+    assert_eq!((&r.surface, r.nurbs.as_ref()), (&lower, Some(&net)));
+}
+
+/// A small cylinder far from the origin (a 1.8 mm hole at (150, 150)) is proved on its form:
+/// the form's points are held to the rounding at 150, which the proof's bound includes.
+#[test]
+fn a_small_cylinder_far_from_the_origin_is_proved_on_its_form() {
+    let k = k();
+    let label = Record::Cylinder {
+        frame: Frame {
+            origin: [150.0, 150.0, -2.0],
+            x_axis: [0.8178681931580377, 0.5754056122600879, 0.0],
+            y_axis: [-0.5754056122600879, 0.8178681931580377, 0.0],
+        },
+        radius: 1.8,
+    };
+    let (net, d) = form::surface(&label, [[0.0, 2.0 * PI], [2.0, 4.0]]).unwrap();
+    let f = face_surface(&k, &label, Some(&net), d).unwrap();
+    assert!(
+        matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder),
+        "{:?}",
+        f.surface.kind()
+    );
+    let moved = Record::Cylinder {
+        frame: Frame {
+            origin: [150.0, 150.0 + 1e-9, -2.0],
+            x_axis: [0.8178681931580377, 0.5754056122600879, 0.0],
+            y_axis: [-0.5754056122600879, 0.8178681931580377, 0.0],
+        },
+        radius: 1.8,
+    };
+    assert!(is_nurbs(&face_surface(&k, &moved, Some(&net), d).unwrap()));
 }
 
 /// A rational spline that is an extruded circle is its cylinder.
@@ -160,16 +244,19 @@ fn a_ball_patch_is_certified_on_its_sphere() {
     )
     .unwrap();
     assert!(matches!(f.surface.kind(), SurfaceKind::BallPatch(_)));
-    assert!(face_surface(
-        &k,
-        &Record::BallPatch {
-            center: [1e-6, 0.0, 0.0],
-            radius: 4.0
-        },
-        Some(&net),
-        d
-    )
-    .is_err());
+    // a net off its sphere keeps no label: the face is its exact NURBS (owner 22254)
+    assert!(is_nurbs(
+        &face_surface(
+            &k,
+            &Record::BallPatch {
+                center: [1e-6, 0.0, 0.0],
+                radius: 4.0
+            },
+            Some(&net),
+            d
+        )
+        .unwrap()
+    ));
     assert!(face_surface(
         &k,
         &Record::BallPatch {
@@ -182,9 +269,9 @@ fn a_ball_patch_is_certified_on_its_sphere() {
     .is_err());
 }
 
-/// A cylinder face goes to the record as its label (the kernel's reading of its form) on that
-/// form, over its box, and comes back to the same record; the form labelled a sphere is refused
-/// on the way back.
+/// A cylinder face goes to the record as its label (its own numbers, proved on its form) on
+/// that form, over its box, and comes back to the same record; the form labelled a sphere comes
+/// back as its NURBS alone.
 #[test]
 fn an_analytic_face_goes_back_as_its_label_on_its_form() {
     let k = k();
@@ -209,7 +296,9 @@ fn an_analytic_face_goes_back_as_its_label_on_its_form() {
         frame: frame(),
         radius: 3.0,
     };
-    assert!(face_surface(&k, &sphere, r.nurbs.as_ref(), r.domain).is_err());
+    assert!(is_nurbs(
+        &face_surface(&k, &sphere, r.nurbs.as_ref(), r.domain).unwrap()
+    ));
 }
 
 /// A plane goes to the record on its placement, its box its kernel box times its scales; a

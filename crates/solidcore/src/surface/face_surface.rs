@@ -61,14 +61,17 @@ pub struct FaceSurface {
 ///   ([`form::surface`]), recognised as an analytic surface when one is proved on it;
 /// - a ball patch's form is its net, certified on its sphere;
 /// - a revolution's form is that NURBS, recognised as above;
-/// - an analytic label's form is that NURBS, which must be proved on the analytic surface of the
-///   label's kind the kernel derives from it.
+/// - an analytic label's form is that NURBS, proved on the analytic surface of the label's own
+///   numbers.
+///
+/// A label its form does not prove (a ball patch's net off its sphere, an analytic label's
+/// numbers off its form) is dropped, and the face is its exact NURBS (owner 22254: a valid
+/// body is never refused, and the form's numbers are never put under the label).
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a form that is not a spline, a ball patch without its form, a ball
-/// patch's net off its sphere, an analytic label not proved on its form, or a revolution with no
-/// exact form; those of [`from_parameters`] and the constructors.
+/// `InvalidInput` for a form that is not a spline, a ball patch without its form, or a
+/// revolution with no exact form; those of [`from_parameters`] and the constructors.
 pub fn face_surface(
     k: &Kernel,
     label: &Record,
@@ -133,13 +136,22 @@ pub fn face_surface(
     let (net, uv_domain) = spline(k, n, domain)?;
     let surface = match label {
         Record::BallPatch { center, radius } => {
-            Surface::from(BallPatch::create_certified(&net, Point3::new(center[0], center[1], center[2]), *radius)?)
+            let centre = Point3::new(center[0], center[1], center[2]);
+            match BallPatch::create_certified(&net, centre, *radius) {
+                Ok(b) => Surface::from(b),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                // owner 22254: a label its form does not prove is dropped; the face is its
+                // exact NURBS
+                Err(_) => Surface::from(net),
+            }
         }
         Record::PlacedRevolution { .. } => recognised(k, net, &REVOLVED)?,
-        Record::Cylinder { .. } => on_form(k, SupportKind::Cylinder, net)?,
-        Record::Cone { .. } => on_form(k, SupportKind::Cone, net)?,
-        Record::Sphere { .. } => on_form(k, SupportKind::Sphere, net)?,
-        Record::Torus { .. } => on_form(k, SupportKind::Torus, net)?,
+        Record::Cylinder { .. }
+        | Record::Cone { .. }
+        | Record::Sphere { .. }
+        | Record::Torus { .. } => labelled(k, label, net)?,
         _ => return Err(bad("a NURBS form is given for a cylinder, cone, sphere, torus, ball patch or revolution only")),
     };
     Ok(FaceSurface {
@@ -228,9 +240,70 @@ fn recognised(k: &Kernel, net: BSplineSurface, kinds: &[SupportKind]) -> Result<
     Ok(Surface::from(net))
 }
 
-/// The analytic surface of `kind` the NURBS form `net` is, proved and holding it.
-fn on_form(k: &Kernel, kind: SupportKind, net: BSplineSurface) -> Result<Surface> {
-    AnalyticSupport::derive(k, kind, &net)?.build(k, net)
+/// The analytic surface of a cylinder, cone, sphere or torus label on its NURBS form `net`:
+/// the label's own numbers (its frame, radii and half angle, the angle in the kernel's
+/// degrees), proved on the form ([`AnalyticSupport::build`]: the form lies on the label's
+/// implicit surface and the analytic surface on the form's parametrisation evaluates as it),
+/// holding the form. A label the form does not prove is dropped (owner 22254): the face is its
+/// exact NURBS, never the analytic surface of numbers recomputed from the form under the
+/// label, and never a refused body.
+///
+/// # Errors
+///
+/// Only [`SolidError::Unported`] and cancellation from the proof.
+fn labelled(k: &Kernel, label: &Record, net: BSplineSurface) -> Result<Surface> {
+    let Some(support) = label_support(label) else {
+        return Ok(Surface::from(net));
+    };
+    match support.build(k, net.copy()) {
+        Ok(s) => Ok(s),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(_) => Ok(Surface::from(net)),
+    }
+}
+
+/// A cylinder, cone, sphere or torus label's numbers as the kernel's support: the frame copied
+/// as stored (its axes are checked by [`AnalyticSupport::build`]), a cone's half angle in
+/// degrees. A torus's tube start moves only its parametrisation, which is its form's here.
+fn label_support(label: &Record) -> Option<AnalyticSupport> {
+    let placement = |f: &crate::eval::Frame| {
+        let v = |a: [f64; 3]| crate::geom::vector3d::Vec3::new(a[0], a[1], a[2]);
+        crate::geom::axis2_placement::Axis2Placement::from_stored(
+            Point3::new(f.origin[0], f.origin[1], f.origin[2]),
+            v(f.x_axis),
+            v(f.y_axis),
+        )
+    };
+    Some(match label {
+        Record::Cylinder { frame, radius } => AnalyticSupport::Cylinder {
+            placement: placement(frame),
+            radius: *radius,
+        },
+        Record::Cone {
+            frame,
+            radius_at_origin,
+            half_angle,
+        } => AnalyticSupport::Cone {
+            placement: placement(frame),
+            base_radius: *radius_at_origin,
+            semi_angle_deg: half_angle.to_degrees(),
+        },
+        Record::Sphere { frame, radius } => AnalyticSupport::Sphere {
+            placement: placement(frame),
+            radius: *radius,
+        },
+        Record::Torus {
+            frame,
+            major_radius,
+            minor_radius,
+            ..
+        } => AnalyticSupport::Torus {
+            placement: placement(frame),
+            major_radius: *major_radius,
+            minor_radius: *minor_radius,
+        },
+        _ => return None,
+    })
 }
 
 const OP_BACK: &str = "surface::face_surface::record_face";
@@ -260,16 +333,16 @@ pub struct RecordFace {
 ///   and pcurves its kernel parameters times its scales: the kernel's plane is
 ///   `origin + su u x + sv v y` in its NURBS parameters, so the record's parameters are an
 ///   exact image of the kernel's, and their normals agree when `su sv > 0`.
-/// - **Cylinder, cone, sphere, torus:** the label of its own kind, its numbers those the
-///   kernel derives from its NURBS form ([`AnalyticSupport::derive`], as [`face_surface`]
-///   reads the record back, so a round trip keeps them), frame copied (no cross product),
-///   angles in radians, with that NURBS as its form, over the kernel's box. Exact class at
-///   bound 0: proved on the form ([`AnalyticSupport::build`]: `lies_on` and the form's own
-///   parametrisation). The record has
+/// - **Cylinder, cone, sphere, torus:** the label of its own kind and its own numbers
+///   ([`AnalyticSupport::of`], as [`face_surface`] reads the label back, so a round trip
+///   keeps them), frame copied (no cross product), angles in radians, with its NURBS as its
+///   form, over the kernel's box. Exact class at bound 0: proved on the form
+///   ([`AnalyticSupport::build`]: `lies_on` and the form's own parametrisation); numbers the
+///   form does not prove give no label, and the face goes as its NURBS. The record has
 ///   no cone of half angle under 10⁻¹² nor a torus whose tube reaches its axis: those go as
 ///   their NURBS, which is the face exactly.
 /// - **Ball patch:** its sphere's label on its net, certified on it
-///   ([`BallPatch::create_certified`]).
+///   ([`BallPatch::create_certified`]); a net the certificate refuses goes as its NURBS.
 /// - **B-spline, revolution, extrusion, procedural blend:** its NURBS (a procedural blend's
 ///   net, until the record has its kind).
 ///
@@ -278,8 +351,7 @@ pub struct RecordFace {
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a plane with a zero or non-finite scale, a label not proved on its form,
-/// or a ball patch's net off its sphere; `Unsupported` for a surface with no NURBS form (an
+/// `InvalidInput` for a plane with a zero or non-finite scale; `Unsupported` for a surface with no NURBS form (an
 /// offset, a curve-bounded or STEP surface), which the record cannot carry exactly.
 pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<RecordFace> {
     use crate::blend::fillet_section::station::as_b_spline;
@@ -326,59 +398,67 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                     y_axis: [y.x, y.y, y.z],
                 }
             };
-            // The label as the kernel reads the form back ([`face_surface`] derives the
-            // same), proved on it: `lies_on` and the form's own parametrisation.
-            let kind = match A::of(s) {
-                Some(A::Cylinder { .. }) => SupportKind::Cylinder,
-                Some(A::Cone { .. }) => SupportKind::Cone,
-                Some(A::Sphere { .. }) => SupportKind::Sphere,
-                Some(A::Torus { .. }) => SupportKind::Torus,
-                _ => return Err(bad("an analytic surface of no analytic kind")),
-            };
+            // The surface's own numbers, proved on its form (`lies_on` and the form's own
+            // parametrisation), as [`face_surface`] reads the label back; numbers the form
+            // does not prove give no label (owner 22254): the face goes as its exact NURBS.
+            let own = A::of(s).ok_or_else(|| bad("an analytic surface of no analytic kind"))?;
             let form = as_b_spline(k, s)?.ok_or_else(|| bad("the surface has no NURBS form"))?;
-            let derived = A::derive(k, kind, &form)?;
-            derived.build(k, form.into_owned())?;
-            match derived {
-                A::Cylinder { placement, radius } => Some(Record::Cylinder {
-                    frame: frame(&placement),
-                    radius,
-                }),
-                A::Cone {
-                    placement,
-                    base_radius,
-                    semi_angle_deg,
-                } => {
-                    let half_angle = semi_angle_deg.to_radians();
-                    (half_angle.abs() >= 1e-12).then(|| Record::Cone {
-                        frame: frame(&placement),
-                        radius_at_origin: base_radius,
-                        half_angle,
-                    })
+            let proved = match own.build(k, form.into_owned()) {
+                Ok(_) => Some(own),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
                 }
-                A::Sphere { placement, radius } => Some(Record::Sphere {
-                    frame: frame(&placement),
-                    radius,
-                }),
-                A::Torus {
-                    placement,
-                    major_radius,
-                    minor_radius,
-                } => (major_radius > minor_radius).then(|| Record::Torus {
-                    frame: frame(&placement),
-                    major_radius,
-                    minor_radius,
-                    tube_start: 0.0,
-                }),
-                A::Plane { .. } => return Err(bad("a plane read as another kind")),
+                Err(_) => None,
+            };
+            match proved {
+                None => None,
+                Some(proved) => match proved {
+                    A::Cylinder { placement, radius } => Some(Record::Cylinder {
+                        frame: frame(&placement),
+                        radius,
+                    }),
+                    A::Cone {
+                        placement,
+                        base_radius,
+                        semi_angle_deg,
+                    } => {
+                        let half_angle = semi_angle_deg.to_radians();
+                        (half_angle.abs() >= 1e-12).then(|| Record::Cone {
+                            frame: frame(&placement),
+                            radius_at_origin: base_radius,
+                            half_angle,
+                        })
+                    }
+                    A::Sphere { placement, radius } => Some(Record::Sphere {
+                        frame: frame(&placement),
+                        radius,
+                    }),
+                    A::Torus {
+                        placement,
+                        major_radius,
+                        minor_radius,
+                    } => (major_radius > minor_radius).then(|| Record::Torus {
+                        frame: frame(&placement),
+                        major_radius,
+                        minor_radius,
+                        tube_start: 0.0,
+                    }),
+                    A::Plane { .. } => return Err(bad("a plane read as another kind")),
+                },
             }
         }
         SurfaceKind::BallPatch(bp) => {
-            BallPatch::create_certified(bp.net(), bp.centre(), bp.radius())?;
             let c = bp.centre();
-            Some(Record::BallPatch {
-                center: [c.x, c.y, c.z],
-                radius: bp.radius(),
-            })
+            match BallPatch::create_certified(bp.net(), c, bp.radius()) {
+                Ok(_) => Some(Record::BallPatch {
+                    center: [c.x, c.y, c.z],
+                    radius: bp.radius(),
+                }),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => None,
+            }
         }
         SurfaceKind::BSpline(_)
         | SurfaceKind::SurfOfRevolution(_)

@@ -135,7 +135,10 @@ impl BPoly {
 /// implicit equation in the patch's homogeneous coordinates `(X W, W)` (`X` from the
 /// surface's origin) is within the rounding of computing it, `gamma_K` times the size of
 /// its terms, `K` four times the operations of the products of the equation's degree d
-/// (`K = 4 d (p + 1) (q + 1) + 16`), the stored points a few ulps each.
+/// (`K = 4 d (p + 1) (q + 1) + 16`), the stored points a few ulps each. One factor of that
+/// size is the absolute one, `|H| + |O| W`: the points are stored, and moved to `O`, in
+/// absolute coordinates, so a patch far from the origin is known only to the rounding there,
+/// however small it is (a 1.8 mm hole at (150, 150) holds its points to ulp(150)).
 ///
 /// # Errors
 ///
@@ -151,10 +154,17 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
             let (p, q) = patch.degrees();
             let mut x = [Vec::new(), Vec::new(), Vec::new()];
             let mut w = Vec::new();
+            // the largest absolute homogeneous term of the move to O, `|H| + |O| W`: the
+            // stored points are known to their rounding at this size, and the move rounds
+            // at it, however near O they lie
+            let mut absolute = 0.0_f64;
+            let om = origin.x.abs().max(origin.y.abs()).max(origin.z.abs());
             for prow in patch.rows() {
                 for c in prow {
                     // (stored weighted when rational: H, homogeneous either way)
                     let wi = if c.w == NOW { 1.0 } else { c.w };
+                    let hm = c.x.abs().max(c.y.abs()).max(c.z.abs());
+                    absolute = absolute.max(hm + om * wi.abs());
                     // X W = H - O W
                     let xw = Vec3::new(c.x, c.y, c.z) - origin * wi;
                     x[0].push(xw.x);
@@ -167,6 +177,7 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
             let [x0, x1, x2] = x;
             let (xs, ws) = ([poly(x0), poly(x1), poly(x2)], poly(w));
             let size = xs.iter().map(BPoly::max_abs).fold(0.0_f64, f64::max);
+            let absolute = absolute.max(size);
             let wmax = ws.max_abs();
             let dot = |v: Vec3| xs[0].combine(v.x, &xs[1], v.y).combine(1.0, &xs[2], v.z);
             let norm2 = || {
@@ -177,7 +188,7 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
             };
             let w2 = ws.mul(&ws);
             let (f, scale, degree) = match *a {
-                Implicit::Plane { normal, .. } => (dot(normal), size, 1),
+                Implicit::Plane { normal, .. } => (dot(normal), absolute, 1),
                 Implicit::Cone {
                     axis,
                     radius,
@@ -192,12 +203,13 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
                         -1.0,
                     );
                     let s = size + (radius + tan_angle.abs() * size) * wmax;
-                    (f, s * s, 2)
+                    let sa = absolute + (radius + tan_angle.abs() * absolute) * wmax;
+                    (f, s * sa, 2)
                 }
                 Implicit::Sphere { radius, .. } => {
                     let f = norm2().combine(1.0, &w2, -radius * radius);
                     let s = size + radius * wmax;
-                    (f, s * s, 2)
+                    (f, s * (absolute + radius * wmax), 2)
                 }
                 Implicit::Torus {
                     axis, major, minor, ..
@@ -210,7 +222,7 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
                         .mul(&g)
                         .combine(1.0, &radial.mul(&w2), -4.0 * major * major);
                     let s = size + (major + minor) * wmax;
-                    (f, s * s * s * s, 4)
+                    (f, s * s * s * (absolute + (major + minor) * wmax), 4)
                 }
             };
             let tol = gamma(4 * degree * (p + 1) * (q + 1) + 16) * scale;
@@ -866,7 +878,7 @@ impl AnalyticSupport {
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
-                c.rev.position = placement;
+                on_axis_from(&mut c.rev, placement);
                 c.base_radius = radius;
                 c.rev.base = form.copy();
             }
@@ -878,7 +890,7 @@ impl AnalyticSupport {
                     semi_angle_deg,
                 },
             ) => {
-                c.rev.position = placement;
+                on_axis_from(&mut c.rev, placement);
                 c.base_radius = base_radius;
                 c.semi_angle_deg = semi_angle_deg;
                 c.rev.base = form.copy();
@@ -908,6 +920,23 @@ impl AnalyticSupport {
         }
         Ok(surface)
     }
+}
+
+/// A cylinder's or cone's recognised parametrisation carried by the support's own
+/// `placement`: its heights are measured along the axis from the placement's origin, so the
+/// recognised heights move by how far along the axis the recognised origin lies from it.
+/// The record puts a frame's origin anywhere on the axis (a hole's at the solid's floor, its
+/// form from the face's own bottom); the point at each parameter is then unchanged, which
+/// [`evaluates_as`] proves. A placement off the axis or turned about it is not the form's
+/// parametrisation, and is refused there.
+fn on_axis_from(
+    rev: &mut crate::surface::surf_of_revolution::SurfOfRevolution,
+    placement: Axis2Placement,
+) {
+    let h = (rev.position.origin() - placement.origin()).dot(placement.z_axis());
+    let d = rev.anal_uv_domain;
+    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), d.v_min() + h, d.u_max(), d.v_max() + h);
+    rev.position = placement;
 }
 
 /// The cylinder, cone, sphere or torus of kind `kind` the kernel recognises in `form`
