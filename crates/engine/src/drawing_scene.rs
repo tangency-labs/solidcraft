@@ -1,11 +1,11 @@
 //! The sheet scene (#4890 W10, #3890 W15): everything drawn on one sheet of a drawing as one paper
 //! scene ([`Scene`]), for the sheet page and every export, so the screen and the files draw the
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
-//! on the sheet by id, its visible lines as [`paper_group`] makes them, then the dimensions of those
+//! on the sheet by id, its lines as [`paper_group`] makes them, then the dimensions of those
 //! views, by view and id ([`crate::drawing_dimension_paper`]), then its title block's lines and
 //! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
 //! the sheet sit between the border and the views ([`groups`]), so a view's lines draw over a photo.
-//! Text, tables and hidden lines each join as one more kind of group. A shaded view's group holds
+//! Text and tables each join as one more kind of group. A shaded view's group holds
 //! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
@@ -58,7 +58,7 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// What became of one view of a sheet scene.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
-    /// Its visible lines are in the scene.
+    /// Its lines are in the scene.
     Drawn,
     /// It has nothing to measure, so it draws nothing: the sheet page shows its placeholder.
     Placeholder(Unmeasured),
@@ -203,7 +203,8 @@ struct DrawnDimension {
     why: Option<String>,
 }
 
-/// View `id`, drawing as `view` does, of the bodies `shown` holds: its visible lines, sampled at
+/// View `id`, drawing as `view` does, of the bodies `shown` holds: its lines, the hidden ones too
+/// when its style draws them, sampled at
 /// [`CHORD_MM`] on paper, or coarser past 100:1, where that would ask the mesh for chords finer than
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
@@ -216,8 +217,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None };
     let styles = Styles::from(view);
-    // A style that draws hidden lines is refused here too, so the lines below are visible ones.
-    if let Some(why) = crate::drawing_view::not_drawable(view.display_style.value, view.reference_style.value, true) {
+    if let Some(why) = crate::drawing_view::not_drawable(view.display_style.value, view.reference_style.value) {
         return none(Status::Failed(why.into()));
     }
     // Every body the design places, until saved views have `source` and `hide` (V4) to keep a part.
@@ -230,7 +230,8 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     // The margin keeps the mesh's chord at or above its floor once divided back by the factor.
     let chord_mm = CHORD_MM.max(MIN_MODEL_CHORD_MM * view.scale.value.factor() * (1.0 + 1e-9));
     let reference_hides_model = view.reference_hides_model.value;
-    let request = LineRequest { shows: around, hidden: false, reference_hidden: false, reference_hides_model, tangent_edges, chord_mm };
+    let (hidden, reference_hidden) = (view.display_style.value.draws_hidden(), view.reference_style.value.draws_hidden());
+    let request = LineRequest { shows: around, hidden, reference_hidden, reference_hides_model, tangent_edges, chord_mm };
     let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, CMD) {
         Ok(frame) => frame,
         Err(e) => return none(Status::Failed(reason(e))),
