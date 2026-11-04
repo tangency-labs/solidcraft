@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.point_cloud_dots": "Dots"
+  },
+  "fr": {
+    "ui.point_cloud_dots": "Points isolés"
+  },
+  "de": {
+    "ui.point_cloud_dots": "Einzelpunkte"
+  },
+  "ja": {
+    "ui.point_cloud_dots": "単独の点"
+  },
+  "zh": {
+    "ui.point_cloud_dots": "独立点"
+  },
+  "ar": {
+    "ui.point_cloud_dots": "نقاط منفردة"
+  },
+  "he": {
+    "ui.point_cloud_dots": "נקודות בודדות"
+  },
+  "vi": {
+    "ui.point_cloud_dots": "Điểm đơn lẻ"
+  }
+}
