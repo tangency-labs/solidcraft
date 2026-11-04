@@ -6,7 +6,6 @@
 //! fork fixed in its own sources; each one turned on here says which fork commit it matches.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -153,7 +152,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.fillet_point_bigger_step_retry = true;
-    f.fillet_through_extended_rail_end = true;
     f.precise_properties_body_length_scale = true;
     f.offset_extension_from_base = true;
     f.corner_blend_stays_inside_neighbours = true;
@@ -410,17 +408,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
 #[cfg(test)]
 const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
 
-/// How far apart two kernels' procedural blend serials start. A body keeps the serials of the
-/// kernel that made it and may be used on any other, whose memo of solved stations is keyed by
-/// serial alone: the ranges keep one definition's stations from answering for another's.
-pub(crate) const BLEND_SERIALS_PER_KERNEL: u64 = 1 << 40;
-
-/// A new kernel. Each takes the next range of blend serials, the first starting at 0.
+/// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
-    static MADE: AtomicU64 = AtomicU64::new(0);
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes();
-    k.blend_last_serial.set(MADE.fetch_add(1, Ordering::Relaxed).wrapping_mul(BLEND_SERIALS_PER_KERNEL));
     k
 }
 
