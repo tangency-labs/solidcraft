@@ -11,11 +11,13 @@
 
 mod backend;
 mod server;
+pub mod service;
 mod skill_reference;
 mod tools;
 
 pub use backend::{Auto, Backend, Headless, Remote};
 pub use server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
+pub use service::{McpLogEntry, McpLogLevel, McpServerConfig, McpServerController, McpStatus, McpTransportMode};
 pub use tools::{call_tool, tool_definitions};
 
 use std::path::PathBuf;

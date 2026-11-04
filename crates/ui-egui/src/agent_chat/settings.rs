@@ -462,6 +462,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
+            super::mcp_server_ui::show_mcp_control_center(app, ui);
             permissions_section(app, ui);
             #[cfg(not(target_arch = "wasm32"))]
             {

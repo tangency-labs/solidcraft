@@ -146,8 +146,29 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
     let button = menu_button(app, ui, button.left() - t.space_4, Target::Navigation, &contents.navigation, &navigation, tip);
     right = button.left() - t.space_6;
 
-    // The sketch's state, after a dot in its colour; then what is being edited.
+    // The MCP server status, sketch's state, after a dot in its colour; then what is being edited.
     let mut items: Vec<(&str, String, Color32, Option<Color32>)> = Vec::new();
+    let mcp_status = app.mcp_server.status();
+    match mcp_status {
+        solidcraft_mcp::McpStatus::Running { host, port, .. } => {
+            let dot = Color32::from_rgb(74, 222, 128);
+            items.push(("status:mcp", format!("MCP: {host}:{port}"), t.text, Some(dot)));
+        }
+        solidcraft_mcp::McpStatus::Error(_) => {
+            let dot = Color32::from_rgb(239, 68, 68);
+            items.push(("status:mcp", "MCP Error".into(), t.text, Some(dot)));
+        }
+        solidcraft_mcp::McpStatus::Starting => {
+            let dot = Color32::from_rgb(250, 204, 21);
+            items.push(("status:mcp", "MCP Starting".into(), t.text, Some(dot)));
+        }
+        solidcraft_mcp::McpStatus::Stopped => {
+            if app.preferences.ai_features {
+                let dot = Color32::from_rgb(156, 163, 175);
+                items.push(("status:mcp", "MCP Off".into(), t.text_dim, Some(dot)));
+            }
+        }
+    }
     if let Some(state) = contents.sketch {
         let colour = state.colour(&t);
         items.push(("status:sketch", state.text(), colour, Some(colour)));
@@ -170,7 +191,11 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
             painter.circle_filled(pos2(item.left() + t.space_4, item.center().y), t.space_3 + 0.5, dot);
         }
         painter.galley(pos2(item.left() + dot_width, item.center().y - galley.size().y / 2.0), galley, colour);
-        ui.interact(item, egui::Id::new(handle), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+        let resp = ui.interact(item, egui::Id::new(handle), if handle == "status:mcp" { Sense::click() } else { Sense::hover() });
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+        if handle == "status:mcp" && resp.clicked() {
+            crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
+        }
         crate::scenario::publish_target(handle, item);
         right = item.left();
     }

@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
 solidcraft-engine = { workspace = true }
 serde_json = { workspace = true }
 

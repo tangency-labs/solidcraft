@@ -320,6 +320,7 @@ impl Drop for App {
     /// `on_exit`, it read `app.ron` while the old process was still writing it, found it
     /// unreadable and moved it aside, resetting every setting (#9044).
     fn drop(&mut self) {
+        self.solve.mcp_server.stop();
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
@@ -1211,6 +1212,24 @@ fn main() -> eframe::Result {
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
             app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            if app.preferences.mcp_autostart && app.preferences.ai_features {
+                let host = app.preferences.mcp_host.clone();
+                let port = app.preferences.mcp_port;
+                let transport = solidcraft_mcp::McpTransportMode::from_str_loose(&app.preferences.mcp_transport);
+                let workspace = if app.preferences.mcp_workspace.trim().is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(app.preferences.mcp_workspace.trim()))
+                };
+                let _ = app.mcp_server.start(solidcraft_mcp::McpServerConfig {
+                    host,
+                    port,
+                    transport,
+                    workspace_path: workspace,
+                    control_port,
+                    control_token: None,
+                });
+            }
             if sample {
                 if let Err(e) = app.session.run_script(&solidcraft_engine::sample::script()) {
                     app.set_status(format!("sample: {e}"), true);
