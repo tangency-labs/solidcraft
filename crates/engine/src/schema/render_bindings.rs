@@ -22,10 +22,37 @@ fn no_change() -> Value {
 
 /// `set`: changes to the setup, as `render.settings.set` takes them. `patched_settings` in
 /// `cmd/render.rs` refuses anything but an object of at most 13 fields, with its own message.
+/// The fields of a render setup, as `render.settings.get` gives them. A `set` patch may give up
+/// to 13 of them; `patched_settings` reads the patched setup as a `RenderSetup`, which refuses any
+/// other key.
+const SETUP_FIELDS: &[&str] = &[
+    "backend",
+    "mode",
+    "camera",
+    "width",
+    "height",
+    "format",
+    "exposure_ev",
+    "environment_rotation",
+    "environment_intensity",
+    "background",
+    "job",
+    "surfaces",
+    "optics",
+    "stage",
+];
+
+/// Each setup field, without its own schema: `patched_settings` checks the values.
+fn setup_properties() -> serde_json::Map<String, Value> {
+    SETUP_FIELDS.iter().map(|field| (field.to_string(), Value::Object(serde_json::Map::new()))).collect()
+}
+
 fn set_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "Changes to the setup made with the binding, as `render.settings.set` takes them: an object of at most 13 setup fields. Default: none.",
+        "description": "Changes to the setup made with the binding, as `render.settings.set` takes them: at most 13 of the setup's fields. Default: none.",
         "type": "object",
+        "properties": setup_properties(),
+        "additionalProperties": false,
         "maxProperties": 13,
         "default": {}
     })
@@ -91,7 +118,7 @@ fn surface_schema(_: &mut SchemaGenerator) -> Schema {
             "id": {"description": "The surface: `SURF-` and its number, as `render.library.list` gives it.", "type": "string"},
             "body_index": {"description": "The body's place in the render scene, from 0, as `render.library.targets` gives it.", "type": "integer", "minimum": 0},
             "body_name": {"description": "The body's name at that place, as `render.library.targets` gives it; a body that moved in the list is refused.", "type": "string"},
-            "origin": {"description": "Where the maps start, in mm, as [x, y, z]. Default: the origin.", "type": ["array", "null"], "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+            "origin": {"description": "Where the maps start, in mm, as [x, y, z]. Default: the centre of the body's bounding box.", "type": ["array", "null"], "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
             "plane": {"description": "The plane the maps lie in: `xy`, `yz` or `zx`. Default: xy.", "type": "string", "enum": ["xy", "yz", "zx"]},
             "scale": {"description": "How much larger than authored the maps repeat: 0.001 to 1000. Default: 1.", "type": "number", "minimum": 0.001, "maximum": 1000}
         },
