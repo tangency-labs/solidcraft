@@ -595,13 +595,21 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
         for i in 0..=16 {
             for j in 0..=16 {
                 let uv = at(f64::from(i) / 16.0, f64::from(j) / 16.0);
-                if let Some(kg) = gaussian_curvature(&k, patch, uv) {
-                    least = least.min(kg);
+                // only the patch's boundary may hold a degenerate point (a corner where
+                // the setback's sides meet); inside, the curvature must evaluate
+                let on_boundary = i == 0 || i == 16 || j == 0 || j == 16;
+                let Some(kg) = gaussian_curvature(&k, patch, uv) else {
                     assert!(
-                        kg >= -1e-9 / (size * size),
-                        "patch {p} at {uv:?}: Gaussian curvature {kg:e}"
+                        on_boundary,
+                        "patch {p} at {uv:?}: no curvature inside the patch"
                     );
-                }
+                    continue;
+                };
+                least = least.min(kg);
+                assert!(
+                    kg >= -1e-9 / (size * size),
+                    "patch {p} at {uv:?}: Gaussian curvature {kg:e}"
+                );
             }
         }
     }
