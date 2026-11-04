@@ -2278,6 +2278,8 @@
   "prefs.browser_eye_left": "Auge neben dem Aufklapppfeil",
   "prefs.browser_eye_left_note": "Browserzeilen zeigen ihr Auge zum Ein- und Ausblenden wie bisher neben dem Aufklapppfeil statt in einer Spalte am rechten Zeilenende.",
   "prefs.browser_reveal_on_hover": "Beim Überfahren einblenden",
+  "prefs.browser_rows_start_closed": "Browser-Zeilen beginnen geschlossen",
+  "prefs.browser_rows_start_closed_note": "Platzierungen und Ordner im Browser beginnen geschlossen, sodass ein Entwurf mit vielen Komponenten seine obersten Zeilen zeigt. Jede öffnet sich mit ihrem Pfeil, „Alle ausklappen“ oder „Im Browser suchen“, das nur die Zeilen bis zu seinem Körper öffnet und die von der letzten Suche geöffneten wieder schließt. Ein in der 3D-Ansicht gewählter Körper lässt den Browser, wie er ist. Ist es aus, beginnen die Ordner geöffnet, Platzierungen so, wie „Komponenten zu Beginn aufgeklappt“ es festlegt, und eine Auswahl in der 3D-Ansicht öffnet den Browser bis zu ihrem Körper, wie bisher.",
   "prefs.browser_show_note": "Angezeigt lässt den Browser auf dem Bildschirm. Beim Überfahren einblenden blendet ihn aus, bis der Zeiger über seinen Platz oder die schmale Lasche an seinem linken Rand kommt; er bleibt offen, solange der Zeiger darin ist oder ein Menü daraus offen ist.",
   "prefs.browser_shown": "Angezeigt",
   "prefs.built_in": "Integriert",
