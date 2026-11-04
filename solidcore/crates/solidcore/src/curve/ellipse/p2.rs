@@ -1307,7 +1307,7 @@ impl Ellipse {
         // watch out for periodicity - map output to proper period
         let c = self
             .anal_domain
-            .contains_periodic_value_with(angular_param, 360.0, -1.0, &k.fixes);
+            .contains_periodic_value(angular_param, 360.0, -1.0);
         let in_arc = c.contained;
         angular_param = c.periodic_value;
 
@@ -1503,7 +1503,7 @@ impl Ellipse {
             // clamp angle to full curve analytic extent - so convert angle will work
             let clamped_angle = if num_angles == 1 {
                 self.anal_domain
-                    .clamp_periodic_value_with(*angle, 360.0, param_tol, &k.fixes)
+                    .clamp_periodic_value(*angle, 360.0, param_tol)
             } else {
                 self.anal_domain.clamp_value(*angle)
             };
@@ -2334,7 +2334,7 @@ mod tests {
     fn issue_1518_short_arc_inverts_each_point_to_itself() {
         // The 70.9232 x 16 ellipse of #1518 on an arc 7e-5 degrees long, shorter than
         // the angular tolerance (1e-4 degrees); atan2 puts its points a period up.
-        let mut k = kernel();
+        let k = kernel();
         let (d0, d1) = (-10.0, -10.0 + 7.0e-5);
         let e = Ellipse::new(
             &k,
@@ -2356,12 +2356,8 @@ mod tests {
             })
             .collect();
 
-        // upstream: every point is inverted to the arc's start
-        for &(_, p) in &points {
-            assert_eq!(e.step_inversion(&k, p, false, 0.0).0, d0);
-        }
-
-        k.fixes.periodic_value_past_start_moves_down = true;
+        // each point inverts to its own angle, not to the arc's start (the pinned C++
+        // returns -10 for all four)
         for &(a, p) in &points {
             let t = e.step_inversion(&k, p, false, 0.0).0;
             assert!((t - a).abs() <= 1e-9 * a.abs(), "{a}: {t}");
