@@ -1012,6 +1012,21 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     chosen
 }
 
+/// Change one command's key: Preferences › Keyboard Shortcuts, filtered to that command and
+/// already waiting for the new key (a toolbar menu's "Change Keyboard Shortcut…").
+pub fn open_for(app: &mut SolveApp, id: &str) {
+    if solidcraft_engine::find_command(id).is_none() {
+        return;
+    }
+    crate::prefs::open_at(app, crate::prefs::PAGE_SHORTCUTS);
+    app.keymap.read_only = false;
+    app.keymap.filter = id.to_string();
+    app.keymap.capturing = Some(id.to_string());
+    app.keymap.slot = 0;
+    app.keymap.conflict = None;
+    app.keymap.message = None;
+}
+
 /// Stop waiting for a key (the dialog closed).
 pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.capturing = None;
