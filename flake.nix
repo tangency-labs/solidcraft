@@ -115,7 +115,10 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             # Git dependencies need a fixed-output hash; update it with the rev in Cargo.toml.
-            outputHashes."solidcore-1.0.1" = "sha256-SziXzxkQXY29PBOG7Ct3W8dex4RUWfAEczFUakB0k50=";
+            outputHashes = {
+              "solidcore-1.0.1" = "sha256-SziXzxkQXY29PBOG7Ct3W8dex4RUWfAEczFUakB0k50=";
+              "solidcore-record-0.1.0" = "sha256-5LUUk4lmC3igIXyHnmJEXj17je0gEH9AoB0iTd5z0A0=";
+            };
           };
           # The CLI draws the same packaging icons as the other Linux distributions.
           cargoBuildFlags = [
