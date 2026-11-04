@@ -3413,11 +3413,11 @@ fn a_hole_leaves_hidden_bodies_alone() {
             run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
         }
         // The name of the plate's face that is picked, before the hole takes the point away.
-        let picked = solidcraft_doc::naming::face_name_at_body(s.world_state().body("Plate").unwrap(), solidcraft_geom::Vec3::new(20.0, 20.0, 0.0));
+        let picked = solidcraft_doc::naming::face_name_at_body(s.world_state().unwrap().body("Plate").unwrap(), solidcore_record::Vec3::new(20.0, 20.0, 0.0));
         let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 10, "name": "Hole1"})).unwrap();
         (s, r, picked)
     };
-    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
     let (block, plate) = (40.0 * 40.0 * 20.0, 40.0 * 40.0 * 5.0);
     let (mut hidden, r, picked) = setup(true);
     assert_eq!(r["changed_bodies"], json!(["Plate"]));
@@ -3445,7 +3445,7 @@ fn a_hole_drills_its_picked_body_and_an_edit_keeps_its_scope() {
         run(&mut s, "solid.box", json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Upper"}));
         s
     };
-    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
     let plate = 40.0 * 40.0 * 5.0;
     let hole = |d: f64| json!({"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": d, "depth": 20, "name": "Hole1"});
 
@@ -3485,7 +3485,7 @@ fn a_hole_made_with_a_hidden_body_replays_the_same() {
         run(&mut s, "solid.hole", json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"}));
         s
     };
-    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
     // A new session evaluated from the saved text alone, as a rebuild from scratch does.
     let scratch = |s: &Session| Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     let s = build(5.0);
@@ -3531,7 +3531,7 @@ fn a_hole_made_with_a_hidden_body_replays_the_same() {
     // (6) Edit an earlier feature (the plate's own box, then the hidden block's), then rebuild:
     // the same as a design made with the new size from the start.
     let feature = |s: &Session, body: &str| {
-        let id = s.world_state().body(body).unwrap().feature;
+        let id = s.world_state().unwrap().body(body).unwrap().feature;
         s.doc.features.iter().find(|f| f.id == id).unwrap().name.clone()
     };
     let mut edited = build(5.0);
