@@ -673,15 +673,6 @@ impl ConstraintKind {
     }
 }
 
-/// An ellipse's construction axes (see [`Sketch::ellipse_axes`]): the two lines, and the axis
-/// ends: the major end, the point opposite it, the minor end on the ellipse, the one opposite.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EllipseAxes {
-    pub major: usize,
-    pub minor: usize,
-    pub ends: [usize; 4],
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {
     pub id: String,
@@ -1287,27 +1278,18 @@ impl Sketch {
         out
     }
 
-    /// The construction axes `sketch.ellipse` draws with an ellipse: the major axis line from
-    /// the point opposite the major end to the major end, the minor axis line held on the
-    /// ellipse at one end, both bisected by the centre. None for an ellipse without them (one
-    /// from an older design, or whose axes were deleted).
+    /// The construction axes `sketch.ellipse` draws with an ellipse, or what is left of them when
+    /// one was deleted: the major axis line (from the point opposite the major end to the major
+    /// end) with the point opposite the major end, and the minor axis line (held on the ellipse
+    /// at one end) with that end, then the one opposite; both are bisected by the centre. None
+    /// for an ellipse with neither (one from an older design, or whose axes were deleted).
     ///
     /// The axes are read from the constraints alone, with no mark in the design: any line the
     /// centre bisects through the major end, and any other with an end held on the ellipse,
     /// first in curve order, counts, construction or not (a diameter drawn that way before the
     /// minor axis is taken for it). Deleting the midpoint or point-on-curve constraint makes
-    /// it an ellipse without axes. Each call scans the constraints once (and again per line the
-    /// centre bisects), and `chain`, a line drag and a move ask it for every ellipse.
-    pub fn ellipse_axes(&self, e: usize) -> Option<EllipseAxes> {
-        let Some(CurveKind::Ellipse { m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
-        let (Some((major, m2)), Some((minor, n1, n2))) = self.ellipse_axis_lines(e)? else { return None };
-        Some(EllipseAxes { major, minor, ends: [*m, m2, n1, n2] })
-    }
-
-    /// What is left of an ellipse's axes (read as [`Sketch::ellipse_axes`] reads them) when one
-    /// of them may have been deleted: the major axis line with the point opposite the major end,
-    /// and the minor axis line with its end held on the ellipse, then the one opposite. None for
-    /// an ellipse with neither.
+    /// it an ellipse without that axis. Each call scans the constraints once, and `chain`, a
+    /// line drag and a move ask it for the ellipses they meet.
     #[allow(clippy::type_complexity)]
     pub fn ellipse_axis_lines(&self, e: usize) -> Option<(Option<(usize, usize)>, Option<(usize, usize, usize)>)> {
         let Some(CurveKind::Ellipse { c, m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };

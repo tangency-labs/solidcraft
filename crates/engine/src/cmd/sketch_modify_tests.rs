@@ -204,12 +204,15 @@ fn an_ellipse_moved_turned_or_scaled_alone_takes_its_axes_along() {
         assert_eq!(r["sketch"]["solved"], json!(true), "{cmd} {params}: {r}");
         let sk = sketch(&s);
         let ei = sk.curve_index(&e).unwrap();
-        let axes = sk.ellipse_axes(ei).unwrap_or_else(|| panic!("{cmd} {params}: still its axes"));
-        let ends: Vec<Vec2> = axes.ends.iter().map(|q| sk.point(*q).unwrap()).collect();
+        let Some((Some((major_line, opposite)), Some((minor_line, n1, n2)))) = sk.ellipse_axis_lines(ei) else {
+            panic!("{cmd} {params}: still its axes")
+        };
+        let CurveKind::Ellipse { m, .. } = sk.curves[ei].kind else { panic!("an ellipse") };
+        let ends: Vec<Vec2> = [m, opposite, n1, n2].iter().map(|q| sk.point(*q).unwrap()).collect();
         assert!(ends[0].dist(major) < 1e-6 && ends[1].dist(centre * 2.0 - major) < 1e-6, "{cmd} {params}: the major axis follows: {ends:?}");
         assert!(((ends[2] + ends[3]) * 0.5).dist(centre) < 1e-6, "{cmd} {params}: the minor axis follows: {ends:?}");
         let listed = ids(&r["curves"]);
-        for l in [axes.major, axes.minor] {
+        for l in [major_line, minor_line] {
             assert!(listed.contains(&sk.curves[l].id), "{cmd} {params}: the reply lists the axis lines: {r}");
         }
     }
