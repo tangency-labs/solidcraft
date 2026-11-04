@@ -50,13 +50,6 @@ const ARC: [f64; 3] = [48.045114044109852, -5.4635486396119797, 10.0];
 /// The pinned C++ with the fork's line: the part after both rounds.
 const BOTH_ROUNDS: f64 = 9531.3100142533;
 
-/// The fork's part after both rounds (tangency-labs/smlib@18e96f1, `SmApiFilletEdges` at
-/// `SmApiBrepComputeVolume` 1e-8): the arc round ends on the front round where both are
-/// tangent to the top face, a smooth vertex, which the fork's blend corner End builds
-/// (smlib#124, 41a39ec); the pinned C++ with only the WR-512 line stops short of it at
-/// [`BOTH_ROUNDS`]. Measured with the same plate, wall and picks as here: 9532.2987121741.
-const BOTH_ROUNDS_FORK: f64 = 9532.2987121741;
-
 /// The plate joined with the corner box less the cylinder, as the fork's capi test builds it.
 fn part(k: &mut Kernel) -> Brep {
     let corner = create_box(k, Point3::new(PLATE, -WALL, 0.0), WALL, WALL, 10.0).unwrap();
@@ -141,7 +134,7 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
 }
 
 /// The kernel with every fix but `fillet_blend_corner` (the fork's blend corner End, which
-/// builds this round by itself; see [`BOTH_ROUNDS_FORK`]), and the WR-512 fix as given.
+/// builds this round by itself), and the WR-512 fix as given.
 fn every_fix(wr512: bool) -> Kernel {
     let mut fixes = UpstreamFixes::all();
     fixes.fillet_blend_corner = false;
@@ -179,10 +172,16 @@ fn every_other_fix_still_refuses_the_arc_round() {
     assert_refused(r);
 }
 
-/// Every fix with the blend corner End: the arc round ends at a smooth vertex and builds
-/// without the WR-512 line, to the fork's volume (smlib#124, [`BOTH_ROUNDS_FORK`]), to 1e-8.
+/// Every fix with the blend corner End: the arc round's end on the front round, where the
+/// arc wall's top edge runs on tangentially into the front round's end arc on the wall, is
+/// no End at a smooth vertex (tangency-labs/solidcore#2656: the end arc turns into the wall
+/// away from the top edge continued, so the round run on leaves the part). It runs on as
+/// before smlib#124: without the WR-512 line it is refused as the pinned C++ refuses it,
+/// with it it builds the pinned C++'s body with that line, [`BOTH_ROUNDS`], to 1e-8 (the
+/// fork's End, tangency-labs/smlib@18e96f1, caps it there instead: 9532.2987121741 with
+/// `SmApiFilletEdges` and `SmApiBrepComputeVolume` at 1e-8, 0.99 more).
 #[test]
-fn the_blend_corner_end_builds_the_arc_round_as_the_fork() {
+fn the_blend_corner_runs_the_arc_round_on_as_the_pinned_with_wr512() {
     for wr512 in [false, true] {
         let mut fixes = UpstreamFixes::all();
         fixes.ssi_singular_start_inside_direction = wr512;
@@ -191,7 +190,11 @@ fn the_blend_corner_end_builds_the_arc_round_as_the_fork() {
             ..Kernel::default()
         };
         let (mut b, r) = both_rounds(&mut k);
-        assert_built_to(&mut k, &mut b, r, 1e-8, BOTH_ROUNDS_FORK);
+        if wr512 {
+            assert_built_to(&mut k, &mut b, r, 1e-8, BOTH_ROUNDS);
+        } else {
+            assert_refused(r);
+        }
     }
 }
 

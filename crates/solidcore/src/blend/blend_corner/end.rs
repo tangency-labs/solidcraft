@@ -22,6 +22,7 @@
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
+//! | `run_on_leaves_the_part` (private) | none (#2656: a blend run on past a smooth vertex that runs out of the part ends on the end face, not capped) |
 //!
 //! Deviations: the fork's `NoteError(SM_FILERR_NO_ROOM, ...)` and `NoteFitRadius` before
 //! `SM_ERR` are returned ([`EndRefusal`]) for the executive's caller to note, which then
@@ -136,6 +137,12 @@ fn radial_face(target: &Brep, eu: EdgeuseId) -> Result<FaceId> {
 /// earlier pass of the same blend made (`cpExec->IsEarlierPassFace`, the fork's 9822462):
 /// the two rounds meet as one blend's corner, never with an End and its cap between them.
 ///
+/// Not the fork's (tangency-labs/solidcore#2656): nor is an edge into which the blend, run on
+/// past the vertex, runs out of the part (`run_on_leaves_the_part`: the edge turns into
+/// their shared face away from the blended edge continued, as an earlier round's end arc
+/// does). There the End on the end face runs the blend on, as before smlib#124, instead of
+/// capping it with a face square to the blends at the vertex.
+///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` for an edge use without face, radial or edge; those of the
 /// convexity test.
@@ -205,11 +212,132 @@ pub fn end_at_smooth_vertex(
             && leaves
             && leave0.dot(leave1) < -(tan_tol_deg * (PI / 180.0)).cos()
             && same_convexity_edges_round_vertex(k, target, fil_eu, other)?
+            && !run_on_leaves_the_part(k, target, vertex, fil_eu, eu, leave0)?
         {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// Whether the blend of the edge of `fil_eu`, run on past `vertex` along the edge of
+/// `other_eu` that continues it there tangentially, runs out of the part, so the blend ends
+/// there by running on (the End on the end face) and needs no cap (tangency-labs/solidcore#2656;
+/// not the fork's).
+///
+/// The two edges E (blended) and E' (continuing) share a face A, and leave the vertex V
+/// opposite to each other with one tangent. The blend run on past V keeps its section, the
+/// corner between A and E's other face continued; the part there is bounded on A by E'.
+/// Where E' turns into A away from E continued (towards the blend's side of E: the rail on A
+/// lies that way), the part falls away from the blend run on, which takes off (or, concave,
+/// fills) what is left of its corner and runs out of the part: an edge running on into an
+/// earlier round's end arc, or into a round between two faces of a corner. Otherwise the
+/// blend run on would go on along E', and the End at the smooth vertex caps it: E' straight
+/// past a curved E (a rounded corner arc running on into a straight side,
+/// tangency-labs/solidcore#2176), E' along E continued, or one face round V (#453's rim).
+///
+/// The two curves are compared in A's binormal `d` into A at V (unit, square to the edge),
+/// each as its height `c2 x^2 + c3 x^3` along `d` over the distance `x` past V along the
+/// tangent, from its derivatives at V (E's run on past V), at `x` the shorter of the two
+/// edges' chords from V, against A's zone tolerance. Where the second orders' difference
+/// there exceeds both third orders, it decides: E' turns away where its height exceeds E's
+/// continued. Otherwise the curvatures nearly agree (an edge of a curvature-continuous round,
+/// which leaves its face with little curvature and turns as it goes), and E' turns away only
+/// where its own third order does: E's says how E turns into itself, away from V, not past it.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` for an edge use without face, radial or edge, or an edge without
+/// curve; those of the binormal and the curve evaluations.
+fn run_on_leaves_the_part(
+    k: &Kernel,
+    target: &mut Brep,
+    vertex: VertexId,
+    fil_eu: EdgeuseId,
+    other_eu: EdgeuseId,
+    leave: Vec3,
+) -> Result<bool> {
+    use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
+    let fil_radial = eu1::radial(target, fil_eu)?.ok_or_else(nul)?;
+    let other_radial = eu1::radial(target, other_eu)?.ok_or_else(nul)?;
+    let fil_faces = [face_of(target, fil_eu)?, face_of(target, fil_radial)?];
+    let other_faces = [face_of(target, other_eu)?, face_of(target, other_radial)?];
+    // one face round the vertex: the blend run on would follow the edge
+    if fil_faces.iter().all(|f| other_faces.contains(f)) {
+        return Ok(false);
+    }
+    // E's use on the shared face A
+    let eu_a = if other_faces.contains(&fil_faces[0]) {
+        fil_eu
+    } else if other_faces.contains(&fil_faces[1]) {
+        fil_radial
+    } else {
+        return Ok(false);
+    };
+    let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
+    let other_edge = eu1::edge(target, other_eu)?.ok_or_else(nul)?;
+    let at_start = |target: &Brep, e: EdgeId| -> Result<bool> {
+        Ok(edge::start_vertex(target, e)? == Some(vertex))
+    };
+    let param_at = |target: &Brep, e: EdgeId| -> Result<f64> {
+        let ivl = edge::interval(target, e)?;
+        Ok(if at_start(target, e)? {
+            ivl.min()
+        } else {
+            ivl.max()
+        })
+    };
+    let options = BinormalOptions::default();
+    let t_fil = param_at(target, fil_edge)?;
+    let Ok(d) = evaluate_binormal(k, target, eu_a, t_fil, true, &options)?
+        .binormal
+        .unitize()
+    else {
+        return Ok(false);
+    };
+    // past V, along the continuing edge
+    let along = -leave;
+    // (c2, c3) of an edge's curve at V, its parameter turned to run past V along `along`
+    let heights = |target: &Brep, e: EdgeId| -> Result<Option<(f64, f64)>> {
+        let start = at_start(target, e)?;
+        let c = edge::curve(target, e)?.ok_or_else(nul)?;
+        let ds = c.evaluate(k, param_at(target, e)?, 3, !start, true)?;
+        let der = |i: usize| ds.get(i).copied().ok_or_else(nul);
+        let (mut d1, d2, mut d3) = (der(1)?, der(2)?, der(3)?);
+        if d1.dot(along) < 0.0 {
+            d1 = -d1;
+            d3 = -d3;
+        }
+        let x1 = d1.dot(along);
+        if x1 <= 0.0 {
+            return Ok(None);
+        }
+        let (x2, h2, h3) = (d2.dot(along), d2.dot(d), d3.dot(d));
+        let c2 = h2 / (2.0 * x1 * x1);
+        let c3 = h3 / (6.0 * x1 * x1 * x1) - h2 * x2 / (2.0 * x1 * x1 * x1 * x1);
+        Ok(Some((c2, c3)))
+    };
+    let (Some((e2, e3)), Some((o2, o3))) =
+        (heights(target, fil_edge)?, heights(target, other_edge)?)
+    else {
+        return Ok(false);
+    };
+    // over the shorter of the two edges' chords from V
+    let at = vertex::point(target, vertex)?;
+    let mut span = BIG_DOUBLE;
+    for e in [fil_edge, other_edge] {
+        if let Some(far) = edge::other_vertex(target, e, Some(vertex))? {
+            span = span.min(vertex::point(target, far)?.distance(at));
+        }
+    }
+    if !(span > 0.0 && span < BIG_DOUBLE) {
+        return Ok(false);
+    }
+    let tol = zone_tol3d(k, target.face(face_of(target, eu_a)?)?.tolerance);
+    let second = (o2 - e2) * span * span;
+    if second.abs() > (o3.abs() + e3.abs()) * span * span * span {
+        return Ok(second > tol);
+    }
+    Ok(o3 * span * span * span > tol)
 }
 
 /// The fork's `SmBlendCorner::BallTouchingAt` (54a4ee7; 41a39ec's
