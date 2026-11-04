@@ -19,764 +19,764 @@ why = "as r2.0, r 3: C++ builds self-crossing corner faces; solidcore refuses it
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "attributed-box-edges-0-1-2-r1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.51371659147012e1 rust=1.5137166701561846e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.51371659147012e1 rust=1.5137166701561846e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "attributed-box-all-edges-r1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.5707959637652982e0 rust=1.5707977565211646e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.5707959637652982e0 rust=1.5707977565211646e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "attributed-per-edge-box-edges-4-5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=2.227765008008809e1 rust=2.2277652634651364e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=2.227765008008809e1 rust=2.2277652634651364e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "attributed-circular-box-r1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.5707959636710958e0 rust=1.570797756630218e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.5707959636710958e0 rust=1.570797756630218e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "attributed-box-cylinder-arc-round-seam-mid-r2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.6348722007276933e1 rust=1.6348717865071997e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=1.6348722007276933e1 rust=1.6348717865071997e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "attributed-box-cylinder-arc-round-seam-quarter-r2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=3.269744415425451e1 rust=3.269743999303879e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.attributes[1]: cpp=3.269744415425451e1 rust=3.269743999303879e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e0-deg1-4-2-4-c0-corner"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3780696234557445e3 rust=2.378074050023597e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3780696234557445e3 rust=2.378074050023597e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e3-deg1-4-2-4-c0-corner"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3780713377902525e3 rust=2.3780812378537685e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3780713377902525e3 rust=2.3780812378537685e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e0-deg2-c0-knot"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3780637780600227e3 rust=2.3780729638719945e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3780637780600227e3 rust=2.3780729638719945e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e0-deg1-linear-2-4"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3699972405849726e3 rust=2.369997237948705e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.3699972405849726e3 rust=2.369997237948705e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e0-deg2-smooth-4-2-4"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.364585839284445e3 rust=2.364585829344723e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.364585839284445e3 rust=2.364585829344723e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e0-deg2-smooth-xsect-blend-curve"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[7]: cpp=2.10004806255316e6 rust=2.100048064728172e6)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[7]: cpp=2.10004806255316e6 rust=2.100048064728172e6)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "law-cube20-e0-deg2-smooth-g2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.364585839284445e3 rust=2.364585829344723e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.364585839284445e3 rust=2.364585829344723e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "corner3x2-union-inset-side-step-edges1-18-r1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[565]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[565]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-high-corner-setback-eight"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.506678458592518e3 rust=8.8e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.506678458592518e3 rust=8.8e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-high-corner-setback-zero-control"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.522842931228559e3 rust=8.52284290055832e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.522842931228559e3 rust=8.52284290055832e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "curve-sih-box-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1482124746091645e3 rust=2.1482123682459182e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1482124746091645e3 rust=2.1482123682459182e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "curve-sih-box_diff_cyl-all-edges-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.272438632022713e2 rust=6.27243808974239e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.272438632022713e2 rust=6.27243808974239e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "curve-sih-box_diff_cyl-all-edges-r0.25"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[1]: cpp=9.492763716049255e2 rust=9.492763190765646e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[1]: cpp=9.492763716049255e2 rust=9.492763190765646e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "curve-sih-box_diff_cyl-all-edges-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.009561001914067e2 rust=6.009562871616752e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.009561001914067e2 rust=6.009562871616752e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "curve-sih-box_diff_cyl-all-edges-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=5.686905366319031e2 rust=5.686912498552141e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=5.686905366319031e2 rust=5.686912498552141e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "curve-sih-box_diff_cyl-all-edges-step2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.272438632022713e2 rust=6.27243808974239e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.272438632022713e2 rust=6.27243808974239e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "issue_2020_mitred_put_back_d9_solver_geometry"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.generated_geometry_samples[5]: cpp=-2.459999999999999e1 rust=-3.4499999999999986e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.generated_geometry_samples[5]: cpp=-2.459999999999999e1 rust=-3.4499999999999986e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "issue_2020_mitred_put_back_d9_corner_edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.all_corner_vertices[1]: cpp=6.661338147750939e-16 rust=-1.1102230246251565e-15)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.all_corner_vertices[1]: cpp=6.661338147750939e-16 rust=-1.1102230246251565e-15)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "issue_2176_tabbed_plate_corner_arc_r0_5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.399441905611055e3 rust=4.398846781734744e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.399441905611055e3 rust=4.398846781734744e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "issue_2176_tabbed_plate_tab_side_r0_5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.397942519679468e3 rust=4.398161782524585e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.397942519679468e3 rust=4.398161782524585e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "issue_2176_tabbed_plate_tab_top_r0_5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.398252074845071e3 rust=4.3986904300294145e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.398252074845071e3 rust=4.3986904300294145e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "issue_2176_tabbed_plate_disc_wall_r0_5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.367449516043326e3 rust=4.367449505761713e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.367449516043326e3 rust=4.367449505761713e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-fillet12-r3-shell-closed-issue-460"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.shell_geometry[1]: cpp=2.9999999999999982e0 rust=1.6999999999999986e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.shell_geometry[1]: cpp=2.9999999999999982e0 rust=1.6999999999999986e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-fillet12-r3-shell-open-top-issue-460"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.shell_geometry[1]: cpp=2.9999999999999982e0 rust=1.6999999999999986e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.shell_geometry[1]: cpp=2.9999999999999982e0 rust=1.6999999999999986e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "overhang-union-y-overhang-all-edges-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.3034713487073839e3 rust=1.3034712201001912e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.3034713487073839e3 rust=1.3034712201001912e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "overhang-union-y-both-overhang-all-edges-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.4966449354812767e3 rust=1.496644853366766e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.4966449354812767e3 rust=1.496644853366766e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "overhang-union-xy-overhang-all-edges-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.3194713778722116e3 rust=1.3194712187212856e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.3194713778722116e3 rust=1.3194712187212856e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1482124755792665e3 rust=2.14821236824592e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1482124755792665e3 rust=2.14821236824592e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.193419244240802e3 rust=2.193419247875058e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.193419244240802e3 rust=2.193419247875058e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-file-box1x1x2-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=9.30194538324081e0 rust=9.301946794595143e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=9.30194538324081e0 rust=9.301946794595143e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-1-2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1890199082702225e3 rust=2.1890199119044787e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1890199082702225e3 rust=2.1890199119044787e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-1-3"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.189091807433971e3 rust=2.1890918147009347e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.189091807433971e3 rust=2.1890918147009347e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-1-4"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1890199105871693e3 rust=2.1890199142213405e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1890199105871693e3 rust=2.1890199142213405e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-1-5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[1]: cpp=5.996802080307567e3 rust=5.996802025046345e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[1]: cpp=5.996802080307567e3 rust=5.996802025046345e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-4-8"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.184799771940774e3 rust=2.1847997792065776e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.184799771940774e3 rust=2.1847997792065776e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-1-2-3"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1846924714631823e3 rust=2.1846924787301464e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1846924714631823e3 rust=2.1846924787301464e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-3-8"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.184727871705279e3 rust=2.184727875337034e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.184727871705279e3 rust=2.184727875337034e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "piecewise-box-edges-0-4-5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1847997681506254e3 rust=2.184799775420751e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.1847997681506254e3 rust=2.184799775420751e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "radius-supported-at-limit-accepted"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.2000000000183927e3 rust=2.199999313231904e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.2000000000183927e3 rust=2.199999313231904e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "radius-supported-8x-tolerance-accepted"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.2000000000183927e3 rust=2.1999993132312175e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=2.2000000000183927e3 rust=2.1999993132312175e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-corners-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.prefix_state[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.prefix_state[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-first_topology-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-first-vertex-geometry-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-corner-vertices-component-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-adjusted-topology-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-solver-geometry-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-corner-edges-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-trim-rails-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-classified-rails-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-intermediate-faces-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[34]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[34]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-attribute-stitch-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[34]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[34]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-direct-shrink-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.before_direct_topology[5]: cpp=8 rust=9)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-create-fillet-brep-actual-session"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[34]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[34]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-trihedral-equal-radius-analytic-corner"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[5]: cpp=0e0 rust=5e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.intermediate_face_geometry[5]: cpp=0e0 rust=5e-1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "real-box-trihedral-equal-radius-full-api"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[43]: cpp=7.347763673217594e-5 rust=4e-5)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[43]: cpp=7.347763673217594e-5 rust=4e-5)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-l_shaped_box-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.4527480404409465e2 rust=3.4527480064158067e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.4527480404409465e2 rust=3.4527480064158067e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-6_sided_corner-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.435716453988927e2 rust=4.4357164052076826e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=4.435716453988927e2 rust=4.4357164052076826e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-brick-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[1]: cpp=2.949643218829163e5 rust=2.949643201768648e5)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[1]: cpp=2.949643218829163e5 rust=2.949643201768648e5)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-box_on_box-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.623981019897444e2 rust=1.623980995262507e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.623981019897444e2 rust=1.623980995262507e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-box_diff_cyl-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.272445423347634e2 rust=6.272444874195922e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=6.272445423347634e2 rust=6.272444874195922e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-box1x1x2-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=9.301945383062504e0 rust=9.301946794595839e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=9.301945383062504e0 rust=9.301946794595839e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-corner_box-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.6029209899977093e2 rust=3.602920981708457e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.6029209899977093e2 rust=3.602920981708457e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-box-union-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.3051789423524506e3 rust=1.3051793137278682e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.3051789423524506e3 rust=1.3051793137278682e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-box-difference-all-edges"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.305179394450937e3 rust=1.3051793161840712e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.305179394450937e3 rust=1.3051793161840712e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "source-file-box_with_large_fillet-edge4"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=5.382227848348099e2 rust=5.37671281975981e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=5.382227848348099e2 rust=5.37671281975981e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-test-sm-surface-surface-fillet"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge9-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[395]: cpp=0e0 rust=2e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[395]: cpp=0e0 rust=2e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge12-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[431]: cpp=0e0 rust=2e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[431]: cpp=0e0 rust=2e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge9-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[395]: cpp=0e0 rust=2e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[395]: cpp=0e0 rust=2e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge12-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[431]: cpp=0e0 rust=2e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[431]: cpp=0e0 rust=2e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge9-r2.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[395]: cpp=0e0 rust=2e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[395]: cpp=0e0 rust=2e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge12-r2.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[431]: cpp=0e0 rust=2e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[431]: cpp=0e0 rust=2e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs3-union-inset-side-step-edges17-22-r1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[439]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[439]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-open_shell-e5-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[414]: cpp=4e-5 rust=1e-5)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[414]: cpp=4e-5 rust=1e-5)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-shell_fillet2-e5-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[332]: cpp=7.499965358490174e-1 rust=7.5e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[332]: cpp=7.499965358490174e-1 rust=7.5e-1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-torii_unioned-e2-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[4]: cpp=7.557343408739472e-6 rust=7.557343420275544e-6)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[4]: cpp=7.557343408739472e-6 rust=7.557343420275544e-6)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-caps_coons-e5-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry.len: cpp=164 rust=360)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry.len: cpp=164 rust=360)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-nurb_cone-e5-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.148221363928385e2 rust=3.1483252600610484e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.148221363928385e2 rust=3.1483252600610484e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-nurb_cone-e8-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.14832648986208e2 rust=3.1483252600610484e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.14832648986208e2 rust=3.1483252600610484e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-test5-e2-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[41]: cpp=1.0519358666616144e-1 rust=1.051937448189453e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[41]: cpp=1.0519358666616144e-1 rust=1.051937448189453e-1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-test5-e3-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[40]: cpp=1.0519358666616269e-1 rust=1.0519374481894433e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[40]: cpp=1.0519358666616269e-1 rust=1.0519374481894433e-1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-test5-e5-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[41]: cpp=-1.0519358666616185e-1 rust=-1.0519374481894439e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[41]: cpp=-1.0519358666616185e-1 rust=-1.0519374481894439e-1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-degenerate-test5-e9-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[40]: cpp=-1.0519358666616241e-1 rust=-1.0519374481894439e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[40]: cpp=-1.0519358666616241e-1 rust=-1.0519374481894439e-1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-rollover-bague-e1-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-rollover-cap1-e3-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry.len: cpp=276 rust=138)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry.len: cpp=276 rust=138)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-bottle-e7-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-bottle-e8-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-bottle-e4-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.4502721965004639)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.4502721965004639)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-bottle-e6-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.4502702207096263)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.4502702207096263)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-bottle-e16-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.4502702307386244)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.4502702307386244)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-bottle-e19-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.45027219654139117)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (rust: blend::fillet_executive::session::finish: upstream status 1001: refused; the largest size that builds is 0.45027219654139117)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-linear-xsect"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-approx-circular-xsect"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-mirror"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-complement"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-mirror-complement-approx"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-negative-second-radius"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-negative-both-radii"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-tilted-second"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-partial-overlap-in-v"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[41]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[41]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-small-radius-tight-tolerance"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-huge-scale"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "surface-surface-tiny-scale"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "owned-first-free-second-x0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "free-first-owned-second-x0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "two-faces-one-body-x0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "two-faces-two-bodies-x0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "owned-first-free-second-x2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "free-first-owned-second-x2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "two-faces-one-body-x2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "two-faces-two-bodies-x2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-free-r2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-one-body-r2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-two-bodies-r2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-owned-first-r2"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-free-small"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-one-body-small"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-two-bodies-small"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-owned-first-small"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-free-radius-twice-tolerance"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-one-body-radius-twice-tolerance"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-two-bodies-radius-twice-tolerance"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "adjacent-owned-first-radius-twice-tolerance"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[33]: cpp=0e0 rust=1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep4-bottle-e29-r0.1"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.311823065493446e1 rust=3.31182287598083e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=3.311823065493446e1 rust=3.31182287598083e1)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-letter_g-e1-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.591432001436689e2 rust=8.591376729744185e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.591432001436689e2 rust=8.591376729744185e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-bottle-e29-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-letter_g-e10-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.555500031740756e2 rust=8.554938754361581e2)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=8.555500031740756e2 rust=8.554938754361581e2)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-sphere_diff_3cylinders-e29-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties.len: cpp=0 rust=12)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-ext_w_hole-e15-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[51]: cpp=5.297559784473877e-5 rust=5.297041359877074e-5)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[51]: cpp=5.297559784473877e-5 rust=5.297041359877074e-5)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-nurb_box1-all-r0.5"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.572351595052851e3 rust=1.5723515574254377e3)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.mass_properties[0]: cpp=1.572351595052851e3 rust=1.5723515574254377e3)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "sweep5-ext_w_hole-e14-r1.0"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[62]: cpp=1.4453956777755315e-15 rust=-7.131077187453804e-15)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.result_geometry[62]: cpp=1.4453956777755315e-15 rust=-7.131077187453804e-15)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "upstream-TestSmSetBevelCorners-bevel"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.api_status_counts[1]: cpp=25 rust=26)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (ints.api_status_counts[1]: cpp=25 rust=26)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0004"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[32]: cpp=8.881784197001252e-16 rust=2.829432357461615e-15)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[32]: cpp=8.881784197001252e-16 rust=2.829432357461615e-15)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0006"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[112]: cpp=1.5002e4 rust=1.5012e4)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[112]: cpp=1.5002e4 rust=1.5012e4)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0009"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0018"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0052"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[14]: cpp=-2.220446049250313e-16 rust=-1.5543122344752192e-15)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[14]: cpp=-2.220446049250313e-16 rust=-1.5543122344752192e-15)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0057"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[13]: cpp=6.661338147750939e-16 rust=-1.1102230246251565e-16)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[13]: cpp=6.661338147750939e-16 rust=-1.1102230246251565e-16)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
 case = "preview0058"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.preview[6]: cpp=1.5002e4 rust=1.5012e4)"

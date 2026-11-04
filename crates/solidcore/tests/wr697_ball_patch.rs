@@ -870,7 +870,7 @@ use solidcore::surface::procedural_blend::BlendNet;
 
 /// The box corner's Ball face with `fillet_round_as_definition` on or off.
 fn ball_face_with(definition: bool) -> (Kernel, Surface) {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     k.fixes.fillet_round_as_definition = definition;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let at = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];

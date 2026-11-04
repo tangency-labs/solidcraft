@@ -4,9 +4,9 @@
 [[mismatch]]
 unit = "blend.fillet_corner_p2"
 case = "p1_corner_tangent_solver_24"
-why = "old corner code deleted, #2400: the closed Nx1 corner's GetTangentFilletSolver override is deleted (a closed edge meeting itself G1 is the Join); main with fillet_blend_corner on gives the same result (values.solvers[0]: cpp=0e0 rust=-1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the closed Nx1 corner's GetTangentFilletSolver override is deleted (a closed edge meeting itself G1 is the Join); main with fillet_blend_corner on gives the same result (values.solvers[0]: cpp=0e0 rust=-1e0)"
 
 [[mismatch]]
 unit = "blend.fillet_corner_p2"
 case = "p1_corner_tangent_nx1_closed_g1_query0"
-why = "old corner code deleted, #2400: the closed Nx1 corner's GetTangentFilletSolver override is deleted (a closed edge meeting itself G1 is the Join); main with fillet_blend_corner on gives the same result (values.solvers[0]: cpp=0e0 rust=-1e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the closed Nx1 corner's GetTangentFilletSolver override is deleted (a closed edge meeting itself G1 is the Join); main with fillet_blend_corner on gives the same result (values.solvers[0]: cpp=0e0 rust=-1e0)"

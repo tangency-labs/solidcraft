@@ -12,9 +12,6 @@
 //!   crease whose faces turn by delta, a round of radius r lies r (sec(delta/2) - 1) inside
 //!   the edge; below the edge's tolerance it is refused with the smallest radius that rounds
 //!   it, tolerance / (sec(delta/2) - 1).
-//! - A round that cannot end where its edge runs on (#2223 without its fix and the blend
-//!   corner: the subtraction builds a section end only for a lone round) names the edge it runs
-//!   on into, status `SM_ERR` as before.
 //! - A setback asked for that does not fit on the corner's edges, or stops short of where the
 //!   rails cross (#2310's box corner): `SetbackTooLong { largest }`, `SetbackTooShort { least }`.
 
@@ -285,54 +282,6 @@ fn a_round_within_the_tolerance_of_its_edge_is_refused() {
     assert_eq!(b.face_list().len(), faces + 1);
 }
 
-/// #2223's rim and corner arc rounded together, without its fix and the blend corner: the
-/// round of the arc cannot end at the vertices where it runs on into the straight top and the
-/// tab's side, and the refusal names the first such edge. The arc alone builds.
-#[test]
-fn a_round_that_cannot_end_where_its_edge_runs_on_names_the_edge() {
-    let set = |f: &mut UpstreamFixes| {
-        f.fillet_section_end_trim_at_creases = false;
-        f.fillet_blend_corner = false;
-    };
-    let mut k = kernel(set);
-    let mut b = plate(&mut k);
-    let rim = pick(&k, &b, RIM);
-    let arc = pick(&k, &b, CORNER);
-    let err = fillet_edges(&mut k, &mut b, &[rim, arc], 0.5, 1, 1, 1.0).unwrap_err();
-    let SolidError::BlendRefused {
-        code,
-        refusal:
-            BlendRefusal::ContinuesInto {
-                edge,
-                vertex,
-                continues_into,
-            },
-        ..
-    } = err
-    else {
-        panic!("{err:?}");
-    };
-    assert_eq!(code, SM_ERR);
-    assert_eq!(edge, arc);
-    let ends = [
-        edge::start_vertex(&b, arc).unwrap(),
-        edge::end_vertex(&b, arc).unwrap(),
-    ];
-    assert!(ends.contains(&Some(vertex)));
-    let next = [
-        pick(&k, &b, [4.0, 29.0, 2.0]),
-        pick(&k, &b, [0.0, 280.0 / 9.0 + 2.0, 2.0]),
-    ];
-    assert!(next.contains(&continues_into), "{continues_into:?}");
-    let mut k = kernel(set);
-    let mut b = plate(&mut k);
-    let arc = pick(&k, &b, CORNER);
-    fillet_edges(&mut k, &mut b, &[arc], 0.5, 1, 1, 1.0).unwrap();
-}
-
-/// The box corner of #2310 (60 x 40 x 20, its corner (60, 40, 20)), its three edges rounded 5
-/// and the corner set back as asked: 20 does not fit on the upright edge (20 long), refused
-/// naming the bound 20; 0 stops short of where the rails cross, 5 from the vertex; 8 builds.
 #[test]
 fn a_setback_asked_that_does_not_fit_or_stops_short_is_refused() {
     let at = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];

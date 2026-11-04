@@ -497,7 +497,7 @@ fn block_cylinder_arc_piece_is_capped_at_the_seam() {
     assert_eq!(faces, 9, "the round and its cap");
 }
 
-/// tangency-labs/solidcore#2679 (`fillet_blend_corner`): fillets/1207 with the r3 round's end
+/// tangency-labs/solidcore#2679 (the blend corner): fillets/1207 with the r3 round's end
 /// arc on the end face (the edge the r1 round runs on into at y = 17) carrying a tangent
 /// field (`SmTangentField`) as its curve. The field passes the smooth vertex's tests (its
 /// derivative there runs on along the blended edge), but its values are cross tangents, not
@@ -577,7 +577,7 @@ fn a_tangent_field_edge_at_the_smooth_vertex_keeps_the_cap() {
     assert_eq!(b.faces().ids().count(), 9, "capped at the smooth vertex");
 }
 
-/// tangency-labs/solidcore#2680's review (`fillet_blend_corner`): the run-on check passes a
+/// tangency-labs/solidcore#2680's review (the blend corner): the run-on check passes a
 /// cancel through, not as an undecided run-on. fillets/1207's vertex (0, 17, 20) after the r3
 /// round, the end face's top edge blended there: uncancelled, the edge running on into the
 /// r3 round's end arc is no smooth-vertex End (the run-on leaves the part); with the

@@ -4,24 +4,24 @@
 [[mismatch]]
 unit = "topology.api_projection"
 case = "project_brep_fillet_box"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[22]: cpp=-2.7755575615628914e-16 rust=0e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[22]: cpp=-2.7755575615628914e-16 rust=0e0)"
 
 [[mismatch]]
 unit = "topology.api_projection"
 case = "project_brep_fillet_box_long_normal"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[22]: cpp=-2.7755575615628914e-16 rust=0e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[22]: cpp=-2.7755575615628914e-16 rust=0e0)"
 
 [[mismatch]]
 unit = "topology.api_projection"
 case = "silhouette_fillet_box_oblique"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[3]: cpp=5.268161424175952e-1 rust=5.196102397445207e-1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[3]: cpp=5.268161424175952e-1 rust=5.196102397445207e-1)"
 
 [[mismatch]]
 unit = "topology.api_projection"
 case = "gen0007"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[3]: cpp=1.1472800253272268e1 rust=1.1475153969945342e1)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[3]: cpp=1.1472800253272268e1 rust=1.1475153969945342e1)"
 
 [[mismatch]]
 unit = "topology.api_projection"
 case = "gen0012"
-why = "old corner code deleted, #2400: the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[22]: cpp=5.3290705182007514e-14 rust=0e0)"
+why = "old corner code deleted, #2400 (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md): the blend corner is the default now; main with fillet_blend_corner on gives the same result (values.record[22]: cpp=5.3290705182007514e-14 rust=0e0)"

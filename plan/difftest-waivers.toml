@@ -2,9 +2,7 @@
 # Every entry needs a reason a reviewer can check. Remove ratchet waivers once the PR
 # that needed them has merged (the base commit's reports then no longer contain the case).
 #
-# 
-
-[[waiver]]
+# [[waiver]]
 # unit = "nlib.knots"
 # check = "ratchet"          # or "value-share"
 # case = "insert_at_end"     # ratchet only; omit to waive every case of the unit
