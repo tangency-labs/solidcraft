@@ -5052,15 +5052,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Loft { operation, rail_fit } => {
             need(0, "profiles of two or more sketches")?;
-            // Each picked profile is a section, in pick order, two of them from one sketch
-            // included (#8221); a sketch point is a section of its own, an apex the loft closes
-            // to (#4830).
+            // Sections follow the picks. Profiles picked one after another in one sketch are one
+            // section, such as both halves of a split outline (#11720); a later return to that
+            // sketch is a section of its own, so a loft can go there and back (#8221). A sketch
+            // point is a section of its own, an apex the loft closes to (#4830).
             let mut sections: Vec<Value> = Vec::new();
             let (mut profile_sketches, mut apexes) = (Vec::new(), 0);
             for x in sels(d, 0) {
                 match x {
                     Sel::Profile { sketch, index } => {
-                        sections.push(json!({"sketch": sketch, "profiles": [index]}));
+                        let last = sections.last_mut().filter(|sec| sec.get("sketch").and_then(Value::as_u64) == Some(*sketch));
+                        match last.and_then(|sec| sec.get_mut("profiles")).and_then(Value::as_array_mut) {
+                            Some(profiles) => profiles.push(json!(index)),
+                            None => sections.push(json!({"sketch": sketch, "profiles": [index]})),
+                        }
                         profile_sketches.push(*sketch);
                     }
                     Sel::SketchPoint { id } => {

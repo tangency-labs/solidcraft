@@ -1,6 +1,7 @@
 //! The Loft and Surface Loft dialogs' guide rails (#201): rails picked in the dialog reach the
 //! commands with their sketches and the fit, and editing the loft brings them back and keeps them.
-//! Their sections follow the picks, two of them from one sketch included (#8221).
+//! Their sections follow the picks, two of them from one sketch included (#8221), and profiles
+//! picked one after another in one sketch are one section (#11720).
 use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
@@ -210,6 +211,42 @@ fn loft_profiles_from_one_sketch_stay_apart() {
     assert_eq!(commands[0].1["sections"], expected);
     ok(&mut h);
     assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1, "{:?}", h.app.session.log);
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["params"]["sections"], expected);
+    ok(&mut h);
+}
+
+/// Both halves of a split outline, picked one after the other, are one section (#11720): a
+/// 40 mm square split at x = 0 lofted to a 30 mm one split the same way makes one body, and an
+/// edit keeps the two sections. With one half picked above, the two halves below stay one section.
+#[test]
+fn loft_profiles_picked_together_in_one_sketch_are_one_section() {
+    let mut h = Harness::new();
+    let split =
+        |r: i32| [("sketch.rectangle.two_point", json!({"p0": [-r, -r], "p1": [r, r]})), ("sketch.line", json!({"points": [[0, -r], [0, r]]}))];
+    let low = sketch_at(&mut h, "Low", 0, &split(20));
+    let high = sketch_at(&mut h, "High", 30, &split(15));
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    let pick = |sketch, index| Sel::Profile { sketch, index };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![pick(low, 0), pick(low, 1), pick(high, 0)];
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["sections"], json!([{"sketch": low, "profiles": [0, 1]}, {"sketch": high, "profiles": [0]}]));
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items.push(pick(high, 1));
+    let expected = json!([{"sketch": low, "profiles": [0, 1]}, {"sketch": high, "profiles": [0, 1]}]);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["sections"], expected);
+    ok(&mut h);
+    let ws = h.app.session.world_state().unwrap();
+    assert_eq!(ws.bodies.len(), 1, "{:?}", h.app.session.log);
+    // Frustum of a 40 mm square to a 30 mm one, 30 mm tall: h/3 (A + B + sqrt(AB)) = 37000 mm³.
+    let volume = solidcraft_engine::doc::kernel::measure(&ws.bodies[0].body).unwrap().volume;
+    assert!((volume - 37000.0).abs() < 1.0, "{volume}");
     let name = h.app.session.doc.features.last().unwrap().name.clone();
     h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
     h.frames(8);
