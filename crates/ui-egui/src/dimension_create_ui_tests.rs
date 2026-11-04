@@ -1156,6 +1156,50 @@ fn every_solve_of_a_typed_value_redraws_the_sketch() {
     crate::dim_view::cancel();
 }
 
+/// While a value is typed the sketch is drawn at it, so a profile under the pointer is not lit
+/// where the design has it (over the resized one); it is again once the value is let go.
+#[test]
+fn a_typed_value_does_not_light_the_design_s_profile_under_the_pointer() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.viewport.hover = Some(crate::viewport::Hit::Profile { sketch, index: 0 });
+    let key = crate::viewport::highlight_key(&h.app);
+    assert!(crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "no profile lit while the value is typed");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.app.viewport.hover = Some(crate::viewport::Hit::Profile { sketch, index: 0 });
+    assert_ne!(crate::viewport::highlight_key(&h.app), key, "letting the value go lights it again");
+    assert!(!crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "lit as before");
+    crate::dim_view::cancel();
+}
+
+/// While a value is typed the sketch's curves are sampled before its profiles: a sketch whose
+/// profiles would use up the sampling budget still has its curves drawn (its fills go first).
+#[test]
+fn a_typed_value_draws_the_curves_before_the_profiles_use_up_the_budget() {
+    let mut h = sketch_with(
+        &[("sketch.circle.center", json!({"center":[10,0],"radius":5})), ("sketch.constraint.fix", json!({"entity": "c1.center"}))],
+        [10., 0.],
+    );
+    h.step(&json!({"click":{"world":[15,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "20");
+    let (_, _, preview) = crate::dim_view::draft_preview().expect("the draft is open");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    let plane = h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+    let mut all = solidcraft_engine::render::SamplingBudget::new(131_072, 1_048_576);
+    let need = crate::sketch_display::curve_with_budget(&preview, 0, &plane, &proj, h.app.viewport.pixels_per_point(), &mut all).vertex_count;
+    assert!(need > 4, "the circle takes some vertices: {need}");
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(Some(need)));
+    let drawn = drawn_extent(&mut h);
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(None));
+    assert!(near(drawn, bounds(&preview)), "the circle is drawn at the typed value: drawn {drawn:?}, solved {:?}", bounds(&preview));
+    crate::dim_view::cancel();
+}
+
 /// Is a sketch point drawn at `world` this frame (its filled square)?
 fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
     let [x, y] = h.at(&json!({"world":[world[0], world[1], 0]})).unwrap();

@@ -206,8 +206,25 @@ impl SketchBudget {
 
 /// One sketch sampled past the cache (the open sketch at a dimension's typed value), within the
 /// limits the cache gives one sketch: past them a curve or profile is not drawn, as there.
-#[derive(Default)]
 pub(crate) struct Uncached(SketchBudget);
+
+#[cfg(test)]
+thread_local! {
+    /// A smaller sampling budget for [`Uncached`] (vertices), so a test can run out of it.
+    pub(crate) static UNCACHED_VERTICES: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+impl Default for Uncached {
+    fn default() -> Self {
+        #[allow(unused_mut)]
+        let mut budget = SketchBudget::default();
+        #[cfg(test)]
+        if let Some(vertices) = UNCACHED_VERTICES.with(std::cell::Cell::get) {
+            budget.sampling = SamplingBudget::new(vertices, 1_048_576);
+        }
+        Self(budget)
+    }
+}
 
 impl Uncached {
     pub(crate) fn curve(&mut self, sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<Vec<Vec3>> {

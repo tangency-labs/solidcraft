@@ -1925,6 +1925,15 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let active = s.active_sketch == Some(sid);
         let typed = typed.as_ref().filter(|_| active);
         let Some(ss) = typed.unwrap_or(&st).sketch(sid) else { continue };
+        // Its curves are sampled before its profiles, which share their budget: past it a fill
+        // goes missing rather than a curve.
+        let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = match typed {
+            Some(_) => (0..ss.sketch.curves.len())
+                .filter(|i| solidcraft_engine::view::sketch_curve_visible(&ss.sketch, *i))
+                .map(|i| (i, uncached.curve(&ss.sketch, i, &ss.plane, proj, ppp)))
+                .collect(),
+            None => std::collections::HashMap::new(),
+        };
         // Closed profiles are shaded (lifted off a face they may lie on).
         let lift = ss.plane.normal() * 0.01;
         let profiles = if app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
@@ -1957,7 +1966,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let mut owners = Vec::new();
         let lines = sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
             let parts = match typed {
-                Some(_) => uncached.curve(&ss.sketch, index, plane, proj, ppp),
+                Some(_) => typed_curves.remove(&index).unwrap_or_default(),
                 None => crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone(),
             };
             owners.extend(std::iter::repeat_n(index, parts.len()));
@@ -3795,6 +3804,8 @@ pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
     highlight_geometry_key(app).hash(&mut h);
     let selected = app.highlighted();
     app.cam.half_height().to_bits().hash(&mut h);
+    // A typed dimension value hides the hovered profile (see `build_highlight`).
+    crate::dim_view::preview_solve(app).is_some().hash(&mut h);
     // Body triangles and outlines live in world space; the GPU applies the new camera.
     // Only sketch feedback needs projected tessellation and the profile's lift toward the eye.
     let projected = selected.iter().any(|s| matches!(s, Sel::Profile { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }))
@@ -4413,8 +4424,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
         }
+        // While a dimension's value is typed the sketch is drawn at it: the design's profile
+        // would show over the resized one.
         Some(Hit::Profile { sketch, index })
-            if !sel.iter().any(|x| matches!(x, Sel::Profile { sketch: s2, index: i2 } if s2 == sketch && i2 == index)) =>
+            if !sel.iter().any(|x| matches!(x, Sel::Profile { sketch: s2, index: i2 } if s2 == sketch && i2 == index))
+                && crate::dim_view::preview_solve(app).is_none() =>
         {
             profile_fill(&mut feedback, app, *sketch, *index, t.hover_profile, t.hover_profile_edge);
         }
