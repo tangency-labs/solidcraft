@@ -361,7 +361,7 @@ impl SurfaceSheet {
             n = -n;
         }
         let l = a2.dot(n);
-        let mut bend = Bend {
+        let bend = Bend {
             angle,
             radius,
             // Up from the sheet's surface, its top, as a flange rises; toward the material when
@@ -389,20 +389,75 @@ impl SurfaceSheet {
                 Err(_) => err(format!("the fold cuts its panel into more than one piece on its {what} side: not supported yet")),
             }
         };
-        let stays = one(beside(-n, -s0)?, "fixed")?;
-        let moves = one(beside(n, s0 + ba)?, "moving")?;
         // The zone along the line, from the anchors' origin: `a`'s material (the side that stays,
         // against `n`) on the left of its way.
         let u = n.perp();
+        // The moving side: one panel for each piece of it the drawn line reaches, each on its own
+        // bend (a tab beside it on the same line, the line not drawn across it, stays, #264).
+        let span = |r: &Region2| {
+            let along: Vec<f64> = (&r.outer.polyline(1e-4)).into_iter().map(|q| q.dot(u)).collect();
+            (along.iter().copied().fold(f64::MAX, f64::min), along.iter().copied().fold(f64::MIN, f64::max))
+        };
+        let line = {
+            let (p, q) = (back.point(a), back.point(b));
+            let (p, q) = (Vec2::new(p.x, p.y).dot(u), Vec2::new(q.x, q.y).dot(u));
+            (p.min(q), p.max(q))
+        };
+        let all_moving = beside(n, s0 + ba)?;
+        let reached = |r: &Region2| {
+            let (lo, hi) = span(r);
+            lo <= line.1 + 1e-9 && hi >= line.0 - 1e-9
+        };
+        let moves: Vec<Region2> = all_moving.iter().filter(|r| reached(r)).cloned().collect();
+        if moves.is_empty() {
+            return err("the fold leaves nothing on its moving side");
+        }
+        let stays = if moves.len() == all_moving.len() {
+            one(beside(-n, -s0)?, "fixed")?
+        } else {
+            // What the line does not reach stays with the fixed side, its zone too.
+            let big = {
+                let bb = region.outer.polyline(1e-3).bounds();
+                (bb.size().len() + bb.min.len() + bb.max.len() + 1.0) * 4.0
+            };
+            let boxes: Vec<Region2> = moves
+                .iter()
+                .map(|r| {
+                    let (lo, hi) = span(r);
+                    let corners = [n * s0 + u * lo, n * s0 + u * hi, n * (s0 + big) + u * hi, n * (s0 + big) + u * lo];
+                    Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() }
+                })
+                .collect();
+            let left = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(&region), &boxes, BoolOp::Cut, 1e-9)?;
+            one(left, "fixed")?
+        };
         let reach = |s: f64| crate::sheet_surface_convert::extent_across(&region, (n * s, u));
-        let (Some(near), Some(far)) = (reach(s0), reach(s0 + ba)) else { return err("the fold's bend zone runs off its panel") };
-        let start = near.0.min(far.0);
-        bend.ends = ZoneEnds { near: (near.0 - start, near.1 - start), far: (far.0 - start, far.1 - start) };
-        bend.length = near.1.max(far.1) - start;
-        let moved = self.sheet.panels.len();
-        // What lay on the moving side goes with it: joints, cut-outs across joints and recesses
-        // there; one in the zone itself has no one place.
-        let side = |p: Vec2| p.dot(n) - s0;
+        let (Some(near_all), Some(far_all)) = (reach(s0), reach(s0 + ba)) else { return err("the fold's bend zone runs off its panel") };
+        // Each piece's stretch along the line, and its zone there.
+        let mut bends = Vec::with_capacity(moves.len());
+        for piece in &moves {
+            let along: Vec<f64> = (&piece.outer.polyline(1e-4)).into_iter().map(|q| q.dot(u)).collect();
+            let (lo, hi) = (along.iter().copied().fold(f64::MAX, f64::min), along.iter().copied().fold(f64::MIN, f64::max));
+            let clip = |(a, b): (f64, f64)| (a.max(lo), b.min(hi));
+            let (near, far) = (clip(near_all), clip(far_all));
+            if !(near.0 < near.1 && far.0 < far.1) {
+                return err("the fold's bend zone runs off its panel");
+            }
+            let start = near.0.min(far.0);
+            let mut bend = bend.clone();
+            bend.ends = ZoneEnds { near: (near.0 - start, near.1 - start), far: (far.0 - start, far.1 - start) };
+            bend.length = near.1.max(far.1) - start;
+            bends.push((bend, start, lo, hi));
+        }
+        let first = self.sheet.panels.len();
+        // Which new panel a point on the moving side lies in.
+        let piece_at = |q: Vec2| -> usize {
+            let along = q.dot(u);
+            bends.iter().position(|(_, _, lo, hi)| along >= *lo - 1e-9 && along <= *hi + 1e-9).unwrap_or(0) + first
+        };
+        // What lay on the moving side goes with it: joints, cut-outs across joints, recesses and
+        // loose pieces there; one in the zone itself has no one place.
+        let side = |q: Vec2| q.dot(n) - s0;
         let tol = (ba.max(t) * 1e-6).max(1e-9);
         for joint in &mut self.sheet.joints {
             for an in [&mut joint.a, &mut joint.b] {
@@ -411,7 +466,7 @@ impl SurfaceSheet {
                 }
                 let s = side(an.origin);
                 if s >= ba - tol {
-                    an.panel = moved;
+                    an.panel = piece_at(an.origin);
                 } else if s > tol {
                     return err("the fold's bend zone reaches another joint of its panel: not supported yet");
                 }
@@ -419,7 +474,8 @@ impl SurfaceSheet {
         }
         for c in &mut self.sheet.cuts {
             if c.panel == i && c.region.outer.segs.iter().all(|g| side(g.start()) >= ba - tol) {
-                *c = Cut { panel: moved, region: c.region.clone() };
+                let at = c.region.outer.segs.first().map(|g| g.start()).unwrap_or_default();
+                *c = Cut { panel: piece_at(at), region: c.region.clone() };
             }
         }
         for r in &mut self.recesses {
@@ -428,7 +484,7 @@ impl SurfaceSheet {
             }
             let s: Vec<f64> = r.region.outer.segs.iter().map(|g| side(g.start())).collect();
             if s.iter().all(|x| *x >= ba - tol) {
-                r.panel = moved;
+                r.panel = piece_at(r.region.outer.segs.first().map(|g| g.start()).unwrap_or_default());
             } else if !s.iter().all(|x| *x <= tol) {
                 return err("the fold's bend zone runs through a recess: not supported yet");
             }
@@ -439,27 +495,32 @@ impl SurfaceSheet {
             }
             let s: Vec<f64> = l.region.outer.segs.iter().map(|g| side(g.start())).collect();
             if s.iter().all(|x| *x >= ba - tol) {
-                l.panel = moved;
+                l.panel = piece_at(l.region.outer.segs.first().map(|g| g.start()).unwrap_or_default());
             } else if !s.iter().all(|x| *x <= tol) {
                 return err("the fold's bend zone runs through a loose piece of the sheet: not supported yet");
             }
         }
         self.sheet.panels[i].region = stays;
-        let name = format!("fold {}", self.sheet.joints.len() + 1);
-        self.sheet.panels.push(Panel { name, surface: Surface::Plane, region: moves });
-        self.places.push(None);
         let j = self.sheet.joints.len();
-        self.sheet.joints.push(Joint {
-            a: Anchor { panel: i, origin: n * s0 + u * start, dir: u },
-            b: Anchor { panel: moved, origin: n * (s0 + ba) + u * start, dir: u },
-            kind: JointKind::Bend(bend),
-        });
+        for (k, (piece, (bend, start, _, _))) in moves.into_iter().zip(bends).enumerate() {
+            let moved = first + k;
+            let name = format!("fold {}.{k}", j + 1);
+            self.sheet.panels.push(Panel { name, surface: Surface::Plane, region: piece });
+            self.places.push(None);
+            self.sheet.joints.push(Joint {
+                a: Anchor { panel: i, origin: n * s0 + u * start, dir: u },
+                b: Anchor { panel: moved, origin: n * (s0 + ba) + u * start, dir: u },
+                kind: JointKind::Bend(bend),
+            });
+        }
+        let moved_all: Vec<usize> = (first..self.sheet.panels.len()).collect();
+        let made: Vec<usize> = (j..self.sheet.joints.len()).collect();
         // Every panel joined beyond the moving side follows the fold.
-        let mut reached = std::collections::BTreeSet::from([moved]);
-        let mut queue = vec![moved];
+        let mut reached: std::collections::BTreeSet<usize> = moved_all.iter().copied().collect();
+        let mut queue = moved_all.clone();
         while let Some(p) = queue.pop() {
             for (k, joint) in self.sheet.joints.iter().enumerate() {
-                if k == j {
+                if made.contains(&k) {
                     continue;
                 }
                 let other = if joint.a.panel == p {

@@ -613,7 +613,16 @@ fn sheet_for(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Vec3>
 /// display tolerance of one (picks land on the display mesh). A sheet with no mesh to test
 /// against counts as touched.
 fn on_sheet_material(st: &ModelState, i: usize, p: Vec3) -> bool {
-    let Some(mb) = st.sheets.get(i).and_then(|sh| st.body(&sh.body)) else { return true };
+    match st.sheets.get(i) {
+        Some(sh) => on_body_material(st, &sh.body, sh.t, p),
+        None => true,
+    }
+}
+
+/// Whether point `p` touches the material of body `body`, a sheet `t` thick: within a step of
+/// its mesh.
+fn on_body_material(st: &ModelState, body: &str, t: f64, p: Vec3) -> bool {
+    let Some(mb) = st.body(body) else { return true };
     let mesh = mb.mesh();
     if mesh.triangles.is_empty() {
         return true;
@@ -622,7 +631,7 @@ fn on_sheet_material(st: &ModelState, i: usize, p: Vec3) -> bool {
     // thickness: on a large thin sheet the first steps from a point on its face clean through
     // it, so a point on the face would touch nothing (#685).
     let step = 2.0 * (mb.body.size() * 1e-3).max(1e-3);
-    let thin = st.sheets.get(i).map_or(step, |sh| (sh.t * 0.25).min(step));
+    let thin = (t * 0.25).min(step);
     let offsets = [-step, -thin, 0.0, thin, step];
     offsets.iter().any(|&dx| offsets.iter().any(|&dy| offsets.iter().any(|&dz| mesh.contains(p + Vec3::new(dx, dy, dz)))))
 }
@@ -1027,6 +1036,15 @@ pub(super) fn sheet_eval(
                 Some(e) => val(vals, e, Kind::Length)?,
                 None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
             };
+            // A fixed point that touches no material at all still picks the side it lies on, so a
+            // stored fold keeps recomputing; it says so (#371).
+            let body = sk.body.clone();
+            let t = sk.thickness;
+            if let Some(p) = fixed
+                && !on_body_material(st, &body, t, p.0)
+            {
+                *warning = Some(format!("{} at ({:.3}, {:.3}, {:.3}); the side of the fold line it lies on stays", sheet::FOLD_FIXED_OFF_SHEET, p.x, p.y, p.z));
+            }
             if let Some(sk) = st.surface_sheets.get_mut(i) {
                 let n0 = sk.sheet.panels.len();
                 sk.add_fold(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?;
