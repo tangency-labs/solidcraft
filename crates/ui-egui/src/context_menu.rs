@@ -2305,9 +2305,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
         Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
         // Construction geometry, as the browser's Construction folder lists it.
-        Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
-            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-        }),
+        Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
