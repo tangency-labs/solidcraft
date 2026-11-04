@@ -720,7 +720,7 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         } else if pts.is_empty() {
             Vec::new()
         } else if matches!(kind, FeatureKind::Hole { .. }) {
-            hole_face_names(s, p, &kind)
+            hole_face_names(s, p, &kind)?
         } else {
             solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)
         }
@@ -1038,17 +1038,17 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
 /// A hole's face points, named on the bodies it drills where one of theirs holds the point
 /// (#7520): a face of another body in the same plane, a hidden one the hole leaves alone, would
 /// otherwise take the name of the face that was picked. Over every body, as before, elsewhere.
-fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Vec<String> {
+fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Result<Vec<String>> {
     let st = s.model.state();
-    let all = solidcraft_doc::face_point_names(&s.doc, &st, kind, s.active_component);
+    let all = solidcraft_doc::face_point_names(&s.doc, &st, kind, s.active_component)?;
     let drilled = string_list_or_default(p, "participants");
     if drilled.is_empty() || drilled.iter().any(|b| b == "*") {
-        return all;
+        return Ok(all);
     }
     let mut scoped = solidcraft_doc::ModelState::default();
     scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
-    let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component);
-    own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect()
+    let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component)?;
+    Ok(own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect())
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
