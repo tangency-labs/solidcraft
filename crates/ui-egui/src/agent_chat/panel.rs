@@ -2050,7 +2050,7 @@ const CHIP_W: f32 = 170.0;
 ///
 /// Worked out again only when the design or the entries change: while the pointer rests on a pill
 /// this is asked every frame.
-fn lit<'a>(
+pub(super) fn lit<'a>(
     ctx: &egui::Context,
     session: &solidcraft_engine::Session,
     entries: impl Iterator<Item = &'a context::Entry>,
@@ -2060,7 +2060,10 @@ fn lit<'a>(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (Arc::as_ptr(&session.doc) as usize).hash(&mut hasher);
     for e in &entries {
-        (&e.label, &e.detail, e.group, &e.names).hash(&mut hasher);
+        // What it stands for too: two entries that read the same can point at different things
+        // (an entry without persistent names lights its selection as it was picked). `Sel` holds
+        // floats, so its text stands in for it.
+        (&e.label, &e.detail, e.group, &e.names, format!("{:?}", e.sels)).hash(&mut hasher);
     }
     let key = hasher.finish();
     let id = Id::new("sc_agent_chat_lit");

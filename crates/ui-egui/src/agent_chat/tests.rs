@@ -5119,6 +5119,30 @@ fn enter_and_the_control_channel_send_the_box_with_its_pills() {
     assert!(h.app.agent_chat.pills.is_empty(), "the picks went with the message");
 }
 
+/// Two entries that read the same but stand for different things light their own things: what
+/// was lit last is kept only for the very same entries.
+#[test]
+fn entries_that_read_the_same_light_their_own_things() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, _ctx) = app_with_script();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).expect("Body1");
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new"})).expect("Body2");
+    let bodies = app.session.world_state().map(|s| s.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>()).unwrap_or_default();
+    assert_eq!(bodies, ["Body1", "Body2"]);
+    let ctx = egui::Context::default();
+    let entry = |name: &str| context::Entry {
+        kind: context::Kind::Body,
+        label: "Body".into(),
+        detail: String::new(),
+        sels: vec![Sel::Body { name: name.into() }],
+        names: Vec::new(),
+        group: 1,
+    };
+    let (first, second) = (entry("Body1"), entry("Body2"));
+    assert_eq!(panel::lit(&ctx, &app.session, std::iter::once(&first)), first.sels);
+    assert_eq!(panel::lit(&ctx, &app.session, std::iter::once(&second)), second.sels, "not the first one's");
+}
+
 /// A pill (or chip) lights the face it was made for even after an edit has renumbered the faces:
 /// the face is found by its persistent name, not by the number it had; one that has gone lights
 /// nothing.
