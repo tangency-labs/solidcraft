@@ -464,6 +464,9 @@ fn start(app: &mut SolveApp) {
     {
         let e = "too many open designs; close a tab before opening another";
         app.set_status(e, true);
+        if let Kind::Recover { id, dir } = &request.kind {
+            reoffer(app, id, dir.as_deref());
+        }
         request.answer(Err(e.into()));
         return;
     }
@@ -1909,7 +1912,7 @@ mod tests {
             tick(&mut app, &ctx);
             frames += 1;
         }
-        assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Open done")), "{:?}", app.status);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Opened staged"), "named as its tab is");
         assert_eq!(app.session.path.as_deref(), Some(path.as_str()));
         assert_eq!(app.session.doc, whole.doc);
         assert_eq!(names(&app.session), names(&whole));
