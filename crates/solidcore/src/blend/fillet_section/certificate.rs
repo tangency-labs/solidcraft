@@ -236,7 +236,7 @@ pub fn curve_derivs_over(
                     pwr = pwr * dt;
                     f *= (j - d) as f64;
                 }
-                let c = pwr * Ivl::from(1.0 / f);
+                let c = pwr * (Ivl::from(1.0) / Ivl::from(f));
                 let aj = at1(&am, j, VZ);
                 x = x + aj.x * c;
                 y = y + aj.y * c;
@@ -338,13 +338,13 @@ pub fn nurbs_partials_over_piece(
         *v0 = Ivl::from(1.0);
     }
     for i in 1..=la {
-        let x = at1(&pu, i - 1, IZ) * du * Ivl::from(1.0 / i as f64);
+        let x = at1(&pu, i - 1, IZ) * du * (Ivl::from(1.0) / Ivl::from(i as f64));
         if let Some(pi) = pu.get_mut(i) {
             *pi = x;
         }
     }
     for j in 1..=lb {
-        let x = at1(&pv, j - 1, IZ) * dv * Ivl::from(1.0 / j as f64);
+        let x = at1(&pv, j - 1, IZ) * dv * (Ivl::from(1.0) / Ivl::from(j as f64));
         if let Some(pj) = pv.get_mut(j) {
             *pj = x;
         }
@@ -441,7 +441,7 @@ pub fn leader_series_over(
         if j > 0 {
             fact *= j as f64;
         }
-        let f = Ivl::from(1.0 / fact);
+        let f = Ivl::from(1.0) / Ivl::from(fact);
         let dj = at1(&d, j, VZ);
         let dj1 = at1(&d, j + 1, VZ);
         let cl = [dj.x, dj.y, dj.z];
@@ -537,7 +537,7 @@ pub fn law_series_over(law: &GnLaw<'_>, s: Ivl, order: usize) -> Result<Ser<Ivl>
         if i > 0 {
             fact *= i as f64;
         }
-        r.set(i, 0, at1(&d, i, VZ).x * Ivl::from(1.0 / fact));
+        r.set(i, 0, at1(&d, i, VZ).x * (Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).is_positive() {
         return Err(SolidError::sm_err(OP));
@@ -904,7 +904,12 @@ pub fn gn_enclose_over(
                 *yrr = v;
                 rho = cmax(rho, v.mag());
             }
-            rho = round_up(rho / (1.0 - q));
+            // 1 - q rounded down: the quotient rounded up is then at least the exact one
+            let gap = round_down(1.0 - q);
+            if !gap.is_finite() || gap <= 0.0 {
+                return Ok(None);
+            }
+            rho = round_up(rho / gap);
             if !rho.is_finite() {
                 return Ok(None);
             }
@@ -1197,8 +1202,9 @@ pub fn gn_fourth_over_series(
 pub struct GnVarying {
     /// `n`.
     pub n: usize,
-    /// `dRR`: `r1 r2`.
-    pub rr: f64,
+    /// `r1`, `r2` (the fork's `dRR` is their product, rounded; the certificate takes it
+    /// in intervals from the radii).
+    pub r: [f64; 2],
     /// `pCells`: I's enclosures, computed once per cell.
     pub cells: GnAreaCells,
 }
@@ -1290,7 +1296,8 @@ pub fn gn_row_terms_over(
             }
         }
     }
-    let inv_rr = Ivl::from(1.0) / Ivl::from(vary.rr);
+    let [r1, r2] = vary.r;
+    let inv_rr = Ivl::from(1.0) / (Ivl::from(r1) * Ivl::from(r2));
     for xi in &mut x_mid {
         *xi = *xi * inv_rr;
     }

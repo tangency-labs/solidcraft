@@ -563,7 +563,7 @@ fn recertify_in_frame(k: &Kernel, pb: &ProceduralBlend, bound: f64, shift: f64) 
     // the stations the pieces need, on the pieces after them and (but the first) before
     let stations = definition_stations(k, &system, [seed0, seed1], &sigma, &used)?;
     let solved: Vec<GnStation> = stations.iter().flatten().copied().collect();
-    let mut vary = varying(n, r[0] * r[1], &solved, equal_area);
+    let mut vary = varying(n, r, &solved, equal_area);
 
     // span by span: the nets compared, then the certificate for what the bound leaves
     let mut achieved = 0.0_f64;
@@ -802,7 +802,7 @@ pub(crate) fn net_of_definition(
         .into_iter()
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| SolidError::sm_err(OP))?;
-    let mut vary = varying(n, r[0] * r[1], &solved, equal_area);
+    let mut vary = varying(n, r, &solved, equal_area);
     let mut spans = Vec::new();
     let mut certified = 0.0_f64;
     for pair in solved.windows(2) {

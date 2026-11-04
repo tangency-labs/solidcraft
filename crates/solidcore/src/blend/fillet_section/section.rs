@@ -449,10 +449,15 @@ pub(crate) fn crosses_knot(xa: f64, xb: f64, dk: f64) -> bool {
 /// The varying thumbweight's certificate data: I's enclosures on a grid over the
 /// stations' equal area thumbweights (a little wider: stations put in later lie between
 /// these); empty cells without the equal area thumbweight.
-pub(crate) fn varying(n: usize, rr: f64, stations: &[GnStation], equal_area: bool) -> GnVarying {
+pub(crate) fn varying(
+    n: usize,
+    r: [f64; 2],
+    stations: &[GnStation],
+    equal_area: bool,
+) -> GnVarying {
     let mut vary = GnVarying {
         n,
-        rr,
+        r,
         cells: GnAreaCells::default(),
     };
     if equal_area {
@@ -1820,7 +1825,7 @@ impl GnSectionFsg {
                 gn_station_thumbweight(k, n, rr, st)?;
             }
         }
-        let mut vary = varying(n, rr, &stations, equal_area);
+        let mut vary = varying(n, r, &stations, equal_area);
         let mut bounds = vec![-1.0_f64; stations.len().saturating_sub(1)];
         loop {
             let mut all = true;

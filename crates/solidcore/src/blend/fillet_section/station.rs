@@ -253,7 +253,7 @@ pub fn sided_span(u: &[f64], p: usize, n: usize, x: f64, side: i32) -> usize {
 
 /// `sm_DersBasis`: the non-zero basis functions `N_{k-p..k}` and their derivatives up to
 /// `d` at `x` in span `k`, `ders[d][j]` (the NURBS book's A2.3, its knot differences taken
-/// from the knots directly).
+/// from the knots directly, in `T`: for an interval `T` every result holds the exact one).
 #[must_use]
 pub fn ders_basis<T: GnScalar>(u: &[f64], k: usize, p: usize, x: T, d: usize) -> Vec<Vec<T>> {
     let (k, p) = (k as isize, p as isize);
@@ -279,7 +279,13 @@ pub fn ders_basis<T: GnScalar>(u: &[f64], k: usize, p: usize, x: T, d: usize) ->
         put(&mut right, j, T::of(knot(u, k + j)) - x);
         let mut saved = T::of(0.0);
         for r in 0..j {
-            ndu.set(j, r, T::of(knot(u, k + r + 1) - knot(u, k + 1 - j + r)));
+            // the knots are exact: their difference is rounded in T (outward for an
+            // interval), never as a double first (#2559)
+            ndu.set(
+                j,
+                r,
+                T::of(knot(u, k + r + 1)) - T::of(knot(u, k + 1 - j + r)),
+            );
             let temp = ndu.at(r, j - 1) / ndu.at(j, r);
             ndu.set(r, j, saved + at(&right, r + 1) * temp);
             saved = at(&left, j - r) * temp;
@@ -637,7 +643,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                     fb *= b as f64;
                 }
                 let mono = pua.mul(pvb, tr);
-                let sf = T::of(1.0 / (fa * fb));
+                // a! b! is exact, 1 / (a! b!) is rounded in T (#2559)
+                let sf = T::of(1.0) / T::of(fa * fb);
                 let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
                 let outs: [&mut VSer<T>; 3] = [&mut s, &mut su, &mut sv];
                 for (c, out) in cs.iter().zip(outs) {
@@ -1407,5 +1414,257 @@ mod tests {
         assert_eq!(sided_span(&u, p, n, 1.0 - 1e-10, 1), 5);
         assert_eq!(sided_span(&u, p, n, 0.5, -1), 3);
         assert_eq!(sided_span(&u, p, n, 1.5, 1), 5);
+    }
+
+    /// The double next to `x` towards +inf (`x` finite).
+    fn next_up(x: f64) -> f64 {
+        if x == 0.0 {
+            f64::from_bits(1)
+        } else if x > 0.0 {
+            f64::from_bits(x.to_bits() + 1)
+        } else {
+            f64::from_bits(x.to_bits() - 1)
+        }
+    }
+
+    fn next_down(x: f64) -> f64 {
+        -next_up(-x)
+    }
+
+    /// The exact result `x` of an operation as its double `s` and the sign of `x - s`:
+    /// the double at or below it, and the one at or above it.
+    fn bracket(s: f64, sign: f64) -> (f64, f64) {
+        if sign > 0.0 {
+            (s, next_up(s))
+        } else if sign < 0.0 {
+            (next_down(s), s)
+        } else {
+            (s, s)
+        }
+    }
+
+    fn sum(a: f64, b: f64) -> (f64, f64) {
+        let s = a + b;
+        let bb = s - a;
+        bracket(s, (a - (s - bb)) + (b - bb))
+    }
+
+    fn product(a: f64, b: f64) -> (f64, f64) {
+        let p = a * b;
+        bracket(p, a.mul_add(b, -p))
+    }
+
+    fn quotient(a: f64, b: f64) -> (f64, f64) {
+        let q = a / b;
+        // a - q b exactly, and a / b - q = (a - q b) / b
+        let r = (-q).mul_add(b, a);
+        bracket(q, r * b.signum())
+    }
+
+    /// Intervals with the tightest outward rounding there is (IEEE 754 directed
+    /// rounding): each end is the double next to the exact result on its side, or the
+    /// result itself when it is a double. An enclosure that holds under it holds by
+    /// construction, not by spare width.
+    #[derive(Clone, Copy, Debug)]
+    struct Directed {
+        lo: f64,
+        hi: f64,
+    }
+
+    impl Directed {
+        fn hull(c: [(f64, f64); 4]) -> Self {
+            let lo = c.iter().map(|x| x.0).fold(f64::INFINITY, f64::min);
+            let hi = c.iter().map(|x| x.1).fold(f64::NEG_INFINITY, f64::max);
+            Self { lo, hi }
+        }
+    }
+
+    impl core::ops::Add for Directed {
+        type Output = Self;
+        fn add(self, b: Self) -> Self {
+            Self {
+                lo: sum(self.lo, b.lo).0,
+                hi: sum(self.hi, b.hi).1,
+            }
+        }
+    }
+
+    impl core::ops::Sub for Directed {
+        type Output = Self;
+        fn sub(self, b: Self) -> Self {
+            Self {
+                lo: sum(self.lo, -b.hi).0,
+                hi: sum(self.hi, -b.lo).1,
+            }
+        }
+    }
+
+    impl core::ops::Mul for Directed {
+        type Output = Self;
+        fn mul(self, b: Self) -> Self {
+            let (a, c) = (self, b);
+            Self::hull([
+                product(a.lo, c.lo),
+                product(a.lo, c.hi),
+                product(a.hi, c.lo),
+                product(a.hi, c.hi),
+            ])
+        }
+    }
+
+    impl core::ops::Div for Directed {
+        type Output = Self;
+        fn div(self, b: Self) -> Self {
+            assert!(b.lo > 0.0 || b.hi < 0.0, "a divisor holding 0");
+            let a = self;
+            Self::hull([
+                quotient(a.lo, b.lo),
+                quotient(a.lo, b.hi),
+                quotient(a.hi, b.lo),
+                quotient(a.hi, b.hi),
+            ])
+        }
+    }
+
+    impl GnScalar for Directed {
+        fn of(d: f64) -> Self {
+            Self { lo: d, hi: d }
+        }
+        fn is_positive(self) -> bool {
+            self.lo > 0.0
+        }
+        fn sqrt(self) -> Self {
+            // sqrt is correctly rounded: a step outward holds the exact root
+            Self {
+                lo: next_down(self.lo.max(0.0).sqrt()),
+                hi: next_up(self.hi.sqrt()),
+            }
+        }
+    }
+
+    /// An exact dyadic rational `m 2^e`: every double is one, and sums and products of a
+    /// few doubles near 1 stay one in an `i128`.
+    #[derive(Clone, Copy, Debug)]
+    struct Dyadic {
+        m: i128,
+        e: i32,
+    }
+
+    impl Dyadic {
+        fn of(x: f64) -> Self {
+            assert!(x.is_finite());
+            let bits = x.to_bits();
+            let biased = ((bits >> 52) & 0x7ff) as i32;
+            let frac = i128::from(bits & ((1_u64 << 52) - 1));
+            let (m, e) = if biased == 0 {
+                (frac, -1074)
+            } else {
+                (frac | (1_i128 << 52), biased - 1075)
+            };
+            if m == 0 {
+                return Self { m: 0, e: 0 };
+            }
+            // odd m: the least exponent for the number
+            let z = m.trailing_zeros();
+            Self {
+                m: if bits >> 63 == 1 { -(m >> z) } else { m >> z },
+                e: e + z as i32,
+            }
+        }
+
+        /// `m 2^(self.e - e)`, for `e <= self.e`.
+        fn scaled(self, e: i32) -> i128 {
+            if self.m == 0 {
+                return 0;
+            }
+            let s = u32::try_from(self.e - e).unwrap();
+            assert!(s < 126, "out of the i128 range");
+            self.m.checked_mul(1_i128 << s).unwrap()
+        }
+
+        fn sub(self, b: Self) -> Self {
+            let e = match (self.m, b.m) {
+                (0, _) => b.e,
+                (_, 0) => self.e,
+                _ => self.e.min(b.e),
+            };
+            Self {
+                m: self.scaled(e).checked_sub(b.scaled(e)).unwrap(),
+                e,
+            }
+        }
+
+        fn mul(self, b: Self) -> Self {
+            Self {
+                m: self.m.checked_mul(b.m).unwrap(),
+                e: self.e + b.e,
+            }
+        }
+    }
+
+    /// `[lo, hi]` holds `n / d` (`d > 0`) exactly: `lo d <= n <= hi d`.
+    fn holds(lo: f64, hi: f64, n: Dyadic, d: Dyadic) -> bool {
+        assert!(d.m > 0);
+        n.sub(Dyadic::of(lo).mul(d)).m >= 0 && Dyadic::of(hi).mul(d).sub(n).m >= 0
+    }
+
+    /// #2559: the basis' knot differences are intervals rounded outward from the knots,
+    /// not the rounded double difference as a point. On `[a, a, b, b]` the linear basis at
+    /// `x` is `(b - x) / D` and `(x - a) / D`, its derivatives `-1 / D` and `1 / D`, with
+    /// `D = b - a` exactly. With `a = 0.7`, `b = 3.47`, `fl(b - a)` is 2.2e-16 above `D`,
+    /// and the reciprocal step of a tight interval division from it misses `1 / D`.
+    /// Under the tightest outward rounding every enclosure holds the exact value (checked
+    /// in exact rational arithmetic), so the crate's `Ivl`, which rounds wider, holds it by
+    /// construction too.
+    #[test]
+    fn the_basis_encloses_its_exact_values_under_the_tightest_rounding() {
+        fn check<T: GnScalar>(a: f64, b: f64, x: f64, ends: impl Fn(T) -> (f64, f64)) {
+            let u = [a, a, b, b];
+            let k = span(&u, 1, 2, x);
+            assert_eq!(k, 1);
+            let n = ders_basis(&u, k, 1, T::of(x), 1);
+            let d = Dyadic::of(b).sub(Dyadic::of(a));
+            let one = Dyadic::of(1.0);
+            let want = [
+                [
+                    Dyadic::of(b).sub(Dyadic::of(x)),
+                    Dyadic::of(x).sub(Dyadic::of(a)),
+                ],
+                [Dyadic::of(0.0).sub(one), one],
+            ];
+            for (r, (row, want_row)) in n.iter().zip(&want).enumerate() {
+                for (j, (&v, &w)) in row.iter().zip(want_row).enumerate() {
+                    let (lo, hi) = ends(v);
+                    assert!(
+                        holds(lo, hi, w, d),
+                        "a = {a:?}, b = {b:?}, x = {x:?}: N^({r})_{j} = [{lo:?}, {hi:?}]"
+                    );
+                }
+            }
+        }
+        // the issue's knots first, then knots in [1/4, 2) a span of [0.1, 3.1) apart
+        let mut cases = vec![(0.7, 3.47)];
+        let mut state = 0x2559_u64;
+        let mut unit = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for _ in 0..2000 {
+            let a = 0.25 + 1.75 * unit();
+            cases.push((a, a + 0.1 + 3.0 * unit()));
+        }
+        let mut inexact = 0;
+        for (a, b) in cases {
+            if Dyadic::of(b - a).sub(Dyadic::of(b).sub(Dyadic::of(a))).m != 0 {
+                inexact += 1;
+            }
+            let x = 0.5 * (a + b);
+            check::<Directed>(a, b, x, |v| (v.lo, v.hi));
+            check::<Ivl>(a, b, x, |v| (v.lo, v.hi));
+        }
+        // 554 of the 2001 differences are not doubles: the case the construction is for
+        assert_eq!(inexact, 554);
     }
 }

@@ -15,6 +15,11 @@
 //! built locally with the harness flags): the same inputs built the same way through
 //! `SmProceduralBlend::Create` and `EvaluatePoint`, then `Build(..., TRUE, rpSurface, 2.0,
 //! &bNotTheFeet)` through a subclass.
+//!
+//! The certified bounds are solidcore's own since #2559: its intervals take knot
+//! differences, factorials and radii outward-rounded, where the fork rounds them to
+//! nearest first, so a bound is a few ulps of the part above the fork's. The spans and
+//! points are the fork's, bit for bit.
 
 #![allow(
     clippy::unwrap_used,
@@ -309,7 +314,7 @@ fn the_ball_s_build_is_the_fork_s() {
     let (s, bound, spans, rail) = build(&k, 2.0);
     let s = s.unwrap();
     assert!(matches!(s.kind(), SurfaceKind::ProceduralBlend(_)));
-    assert_eq!((spans, bound), (40, 5.403_205_166_945_336_34e-9));
+    assert_eq!((spans, bound), (40, 5.403_205_167_109_537_5e-9));
     assert_pt(rail.evaluate_point(0.37).unwrap(), RAIL_037, "rail (0.37)");
     let uv = Point2::new(0.37, 0.5);
     assert_pt(
