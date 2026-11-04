@@ -23,6 +23,25 @@
 //! - **Curvature:** the Tangent construction with the extension's second row solved from the C2
 //!   condition on the homogeneous rows (linear, in closed form): the homogeneous surface is C2
 //!   across the side, so the surface is curvature continuous.
+//! - **Ruled:** each row continued past its end by the homogeneous line `H_n + s D`, `D = (p
+//!   / h) (rho H_n - H_(n-1))` (`h` the last span's length), with ONE `rho` for every row:
+//!   the rows' largest end weight ratio `w_(n-1) / w_n` (1 for polynomial rows). It is
+//!   written as one degree-`p` span by degree elevation of the line, joined at multiplicity
+//!   `p` (the joint point the source's own). A line in homogeneous space projects to a
+//!   straight line, so at a fixed parameter along the side the result is straight in `s`:
+//!   ruled. Across the side the homogeneous derivative is `H_u + mu H` with one `mu = (p /
+//!   h) (rho - 1)` for the whole side, the same tangent as `H_u` once projected: the surface
+//!   is C1 there exactly (`S_s = (D W - H D_w) / W^2 = S_u`), on polynomial and rational
+//!   rows alike, its direction the side's end tangent. Every weight is `w_n (1 + (i e / h)
+//!   (rho - rho_j)) >= w_n`. Where every row has the same ratio (every polynomial row; a
+//!   rational net whose weights are a product along and across the side, as a revolution's
+//!   or an extrusion's) the weights stay `w_n`: each row is the 3D segment `P_n + s T`
+//!   along its end tangent `T = C'(b)`, equally spaced, reaching any distance. Where the
+//!   ratios differ a row with a ratio below the largest has growing weights and its line
+//!   ends at a finite point (the row-wise exact ruled extension's reach is bounded; the
+//!   ruled surface `S + s S_u` itself is of degree `2q` along the side, which would move the
+//!   source's net): the length across saturates, and an ask past it is refused as not exact
+//!   naming the longest distance found.
 //!
 //! **Knots.** The source's net and knots are kept bit for bit: the end knot stays at
 //! multiplicity `p` as the joint, and the extension's spans follow it. No knot is removed.
@@ -47,9 +66,9 @@
 //! monotone either, so it is a long workable distance, not proved the longest).
 //!
 //! **Analytic kinds.** Natural on a plane, cone, sphere or torus is the same analytic widened
-//! ([`Surface::continued`]). So is Tangent or Curvature across a side whose B-spline form is of
-//! degree 1 across it (a plane; a cone or cylinder along its rulings): a straight row's mirror
-//! and its C2 condition are its own continuation.
+//! ([`Surface::continued`]). So is Tangent, Curvature or Ruled across a side whose B-spline form
+//! is of degree 1 across it (a plane; a cone or cylinder along its rulings): a straight row's
+//! mirror, its C2 condition and its tangent line are its own continuation.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -103,6 +122,9 @@ pub enum Continuity {
     Tangent,
     /// Curvature continuous: the mirror with its second row from the C2 condition.
     Curvature,
+    /// Tangent continuous and ruled: each row continued by a homogeneous line along its end
+    /// tangent (a straight segment in 3D), a degree-`p` span by degree elevation of the line.
+    Ruled,
 }
 
 /// Why an extension is refused ([`SolidError::ExtendRefused`]).
@@ -609,6 +631,9 @@ fn solve(
     };
     // (ask, f) running short of d and past it
     let (mut short, mut past): (Try, Try) = (None, None);
+    // the longest short ask's distance measured to the stop: what a length that saturates
+    // short of d reaches
+    let mut reach: Option<f64> = None;
     let mut overshoot = 1e-6;
     for _ in 0..BRACKET_TRIES {
         let Some((made_ask, s, b)) = try_ask(ask)? else {
@@ -619,6 +644,9 @@ fn solve(
             Says::Met => return finish(s, b),
             Says::Short(f) => {
                 short = Some((ask, f));
+                if let Some(l) = workable(b.as_ref(), s.1) {
+                    reach = Some(reach.map_or(l, |r| r.max(l)));
+                }
                 f
             }
             Says::Past(f) => {
@@ -654,6 +682,11 @@ fn solve(
         }
     }
     let (Some((mut lo, mut flo)), Some((mut hi, mut fhi))) = (short, past) else {
+        // every ask short of d, the length saturating (a ruled extension whose rows' end
+        // weight ratios differ): refused, naming the longest reached
+        if past.is_none() && reach.is_some() {
+            return Err(not_exact(reach));
+        }
         return Err(SolidError::NotConverged {
             operation: OP,
             iterations: u32::try_from(BRACKET_TRIES).unwrap_or(u32::MAX),
@@ -965,6 +998,7 @@ impl Local {
         }
         let grown = match how {
             Continuity::Natural => self.natural(e)?,
+            Continuity::Ruled => self.ruled(e)?,
             Continuity::Tangent | Continuity::Curvature => {
                 let mut cur = self.clone();
                 let mut left = e;
@@ -1064,6 +1098,55 @@ impl Local {
         let amp = a.powi(p as i32);
         let mut out = self.joined(ext, &knots)?;
         out.err = amp * (span.err + gamma(3 * p + 3) * span.size());
+        Ok(out)
+    }
+
+    /// Ruled: each row continued by the homogeneous line `H_n + s D`, `D = (p / h) (rho
+    /// H_n - H_(n-1))` with one `rho`, the rows' largest `w_(n-1) / w_n` (module docs),
+    /// written by degree elevation over `[b, b + e]`: the points `H_n + (i e / h) (rho H_n -
+    /// H_(n-1))`, all four coordinates. Its bound: the points' rounding.
+    fn ruled(&self, e: f64) -> Result<Self> {
+        let b = self.end()?;
+        let h = b - self.before_end(0)?;
+        let p = self.p;
+        #[allow(clippy::cast_precision_loss)]
+        let pf = p as f64;
+        let c = e / h;
+        let mut ends = Vec::new();
+        for row in &self.rows {
+            let mut back = row.iter().rev();
+            let (Some(&pn), Some(&pn1)) = (back.next(), back.next()) else {
+                return Err(op_err());
+            };
+            ends.push((pn, pn1));
+        }
+        // one rho for every row (any one keeps the surface C1); the largest keeps every
+        // weight at least its row's end weight: w_n (1 + (i e / h) (rho - rho_j))
+        let rho = if self.rational {
+            ends.iter()
+                .fold(f64::NEG_INFINITY, |m, (pn, pn1)| m.max(pn1[3] / pn[3]))
+        } else {
+            1.0
+        };
+        let (mut err, mut ext) = (0.0_f64, Vec::new());
+        for (pn, pn1) in ends {
+            let leg = lin(rho, pn, -1.0, pn1);
+            let q: Vec<H> = (1..=p)
+                .map(|i| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let t = c * i as f64;
+                    lin(1.0, pn, t, leg)
+                })
+                .collect();
+            // rounding: the leg (a product and a difference), t (two products) and the point
+            // (a product and a sum), gamma_6 of the terms' magnitudes
+            let m = |x: H| x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+            err = err.max(gamma(6) * (m(pn) + c * pf * (rho.abs() * m(pn) + m(pn1))));
+            ext.push(q);
+        }
+        let knots = vec![b + e; p + 1];
+        let mut out = self.joined(ext, &knots)?;
+        out.err = self.err.max(err);
         Ok(out)
     }
 

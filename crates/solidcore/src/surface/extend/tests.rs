@@ -181,7 +181,7 @@ fn jets(s: &Surface, u: f64) -> [(Vec3, Vec3); 2] {
     let SurfaceKind::BSpline(b) = s.kind() else {
         panic!()
     };
-    let c = extract_iso_crv(b.gw_nurb().unwrap(), 0.5, Direction::V).unwrap();
+    let c = extract_iso_crv(b.gw_nurb().unwrap(), 0.5, Direction::U).unwrap();
     [Side::Left, Side::Right].map(|side| {
         let d = c.derivs(u, side, 2).unwrap();
         let (d1, d2) = (d[1], d[2]);
@@ -884,4 +884,124 @@ fn a_cone_extends_as_itself_along_up_to_its_apex_and_is_left_round_its_axis() {
         assert!((long - 5.0).abs() <= 1e-8, "{long}");
         assert!(short < 2f64.sqrt() && short > 2f64.sqrt() - 1e-6, "{short}");
     }
+}
+
+#[test]
+fn ruled_on_a_rational_row_is_the_straight_tangent_line_at_any_distance() {
+    // the quarter cylinder of radius 2 ends at (0, 2) heading -x: ruled by 50, the extension
+    // is the line y = 2 from x = 0 to x = -50, tangent (C1) at the joint, the source kept
+    let s = quarter();
+    for (side, end) in [(BoxSide::UMax, [0.0, 2.0]), (BoxSide::UMin, [2.0, 0.0])] {
+        let e = s
+            .extended_by_distance(&k(), &dom(&s), side, Continuity::Ruled, 50.0)
+            .unwrap_or_else(|e| panic!("{side:?}: {e:?}"));
+        assert!(is_spline(&e.surface));
+        meets(&e, 50.0);
+        // the end weight ratio is the same on both rows: C1, no skew, rounding only
+        assert!(e.extension < 1e-12 * 50.0, "{}", e.extension);
+        let pts = past(&e, side);
+        let len = e.across.enclosure.mid();
+        for (i, p) in pts.iter().enumerate() {
+            // on the tangent line, equally spaced: the line's own parameter
+            let t = len * f64::from(u32::try_from(i).unwrap()) / 8.0;
+            let want = if side.is_high() {
+                Vec3::new(end[0] - t, end[1], 0.5)
+            } else {
+                Vec3::new(end[0], end[1] - t, 0.5)
+            };
+            assert!(p.distance(want) < 1e-10, "{side:?} {i}: {p:?} vs {want:?}");
+        }
+        let u = if side.is_high() { 1.0 } else { 0.0 };
+        let [(tl, _), (tr, _)] = jets(&e.surface, u);
+        assert!(tl.distance(tr) < 1e-12, "{tl:?} {tr:?}");
+        // the derivative itself matches across the joint (C1): S_u = (p / h) rho (P_n - P_(n-1))
+        let SurfaceKind::BSpline(b) = e.surface.kind() else {
+            panic!()
+        };
+        let c = extract_iso_crv(b.gw_nurb().unwrap(), 0.5, Direction::U).unwrap();
+        let l = c.derivs(u, Side::Left, 1).unwrap()[1];
+        let r = c.derivs(u, Side::Right, 1).unwrap()[1];
+        assert!(l.distance(r) < 1e-12 * l.length(), "{l:?} {r:?}");
+        assert!(
+            (l.length() - 2.0 * 2.0 * FRAC_1_SQRT_2).abs() < 1e-12,
+            "{l:?}"
+        );
+    }
+}
+
+#[test]
+fn ruled_on_a_polynomial_row_is_the_elevated_tangent_line() {
+    // y = x^2 ends at (1, 1) with tangent (1, 2): ruled by 3, the line (1, 1) + s (1, 2) / sqrt 5
+    let s = parabola();
+    let d = 3.0;
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, d)
+        .unwrap();
+    meets(&e, d);
+    let n = 5.0_f64.sqrt();
+    for p in past(&e, BoxSide::UMax) {
+        // on the tangent line, within its measured length
+        let off = (p.y - 1.0) - 2.0 * (p.x - 1.0);
+        assert!(off.abs() < 1e-12, "{p:?}");
+        assert!(p.x >= 1.0 - 1e-12 && (p.x - 1.0) * n <= d + 1e-8, "{p:?}");
+    }
+    let end = *past(&e, BoxSide::UMax).last().unwrap();
+    assert!(((end.x - 1.0) * n - d).abs() < 1e-8, "{end:?}");
+}
+
+#[test]
+fn ruled_with_end_weight_ratios_that_differ_is_c1_and_straight_up_to_its_reach() {
+    // a rational row pair whose last two weights differ in ratio (1 and 2 on the two rows):
+    // one rho, the largest, keeps it C1 and every ruling straight; the row with the smaller
+    // ratio has growing weights, so the length across saturates
+    let rows = [
+        vec![[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]],
+        vec![[0.5, 0.0, 0.0, 1.0], [1.0, 0.0, 2.0, 2.0]],
+        vec![[1.0, 1.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
+    ];
+    let s = spline(
+        &rows,
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        true,
+    );
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, 0.1)
+        .unwrap();
+    meets(&e, 0.1);
+    let SurfaceKind::BSpline(b) = e.surface.kind() else {
+        panic!()
+    };
+    let d = dom(&e.surface);
+    for v in [0.0, 0.3, 0.5, 0.9, 1.0] {
+        let c = extract_iso_crv(b.gw_nurb().unwrap(), v, Direction::U).unwrap();
+        // C1 at the joint
+        let l = c.derivs(1.0, Side::Left, 1).unwrap()[1];
+        let r = c.derivs(1.0, Side::Right, 1).unwrap()[1];
+        assert!(l.distance(r) < 1e-12 * l.length(), "{v}: {l:?} {r:?}");
+        // straight past it: every point on the line through the joint along S_u
+        let p0 = e.surface.evaluate_point(&k(), Vec2::new(1.0, v)).unwrap();
+        for i in 1..=8 {
+            let u = 1.0 + (d.max().x - 1.0) * f64::from(i) / 8.0;
+            let p = e.surface.evaluate_point(&k(), Vec2::new(u, v)).unwrap();
+            let off = (p - p0).cross(l).length() / l.length();
+            assert!(off < 1e-12, "{v} {u}: {p:?} off {off}");
+        }
+    }
+    let named = match s.extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, 1e3)
+    {
+        Err(SolidError::ExtendRefused {
+            refusal: ExtendRefusal::NotExact,
+            distance: Some(x),
+            ..
+        }) => x,
+        other => panic!("{other:?}"),
+    };
+    assert!(named > 0.1 && named < 1e3, "{named}");
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Ruled, named)
+        .unwrap();
+    meets(&e, named);
 }
