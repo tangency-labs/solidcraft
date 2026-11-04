@@ -84,6 +84,36 @@ fn each_placed_hole_has_its_own_marker_and_a_drag_moves_only_its_hole() {
 }
 
 #[test]
+fn where_two_markers_overlap_the_nearer_one_takes_the_press() {
+    // Two blocks 1 mm apart, a hole near each one's facing edge, 3 mm apart: their markers'
+    // reaches overlap between them (a face holds one hole, so they are on two faces).
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": true})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 20, "corner": [41, 0, 0], "body_name": "Other"})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    for p in [Vec3::new(39.0, 10.0, 20.0), Vec3::new(42.0, 10.0, 20.0)] {
+        let at = screen(&mut h, p);
+        h.step(&json!({"click": at})).unwrap();
+        h.frames(2);
+    }
+    let before = places(&h);
+    assert_eq!(before.len(), 2, "{before:?}");
+    let (Some(a), Some(b)) = (handle_at("hole:0"), handle_at("hole:1")) else { panic!("two markers") };
+    assert!(a.distance(b) < 36.0, "the reaches overlap: {a:?} {b:?}");
+    // Pressed a third of the way from the first to the second (inside both reaches) and dragged
+    // down: the first moves, the second stays.
+    let press = [f64::from(a.x + (b.x - a.x) / 3.0), f64::from(a.y)];
+    h.step(&json!({"drag": [press, [press[0], press[1] + 30.0]], "steps": 12})).unwrap();
+    h.settle();
+    let p = places(&h);
+    assert!(matches!(p.as_slice(), [x, y] if x.dist(before[0]) > 1.0 && y.dist(before[1]) < 1e-4), "the nearer marker moved: {before:?} -> {p:?}");
+}
+
+#[test]
 fn a_click_within_the_markers_reach_takes_the_hole_out() {
     let mut h = blocks();
     h.step(&json!({"start": "solid.hole"})).unwrap();

@@ -430,11 +430,18 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
 
     // The crosshairs that move the feature, one per place. The press lands where the finger is,
     // not always the centre: the drag keeps that gap. A place held still has no press area.
+    // Where press areas overlap, egui gives the press to the last one: register the farthest from
+    // the pointer first, so the nearest marker takes it.
     let mut markers: Vec<(u64, egui::Response)> = Vec::new();
     let before = places(app);
     let ids = marker_ids(ui.ctx(), store, before.len());
-    for (pl, marker) in before.into_iter().zip(ids) {
-        let Some(bs) = proj.to_screen(pl.base) else { continue };
+    let pointer = ui.ctx().pointer_latest_pos();
+    let mut order: Vec<(Place, u64, Pos2)> =
+        before.into_iter().zip(ids).filter_map(|(pl, marker)| proj.to_screen(pl.base).map(|bs| (pl, marker, bs))).collect();
+    if let Some(p) = pointer {
+        order.sort_by(|a, b| b.2.distance(p).total_cmp(&a.2.distance(p)));
+    }
+    for (pl, marker, bs) in order {
         if arms(proj, pl.base, pl.n, bs, freedom_of(app, pl.key)).is_empty() {
             continue;
         }
