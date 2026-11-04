@@ -24,7 +24,6 @@
 //! | [`BallPatch::read_from_db`]           | `ReadFromDB` (the writer: `topology::geometry_write`) |
 //! | [`BallPatch::is_kind_of`]             | `IsKindOf`                                   |
 //! | [`BallPatch::is_on_sphere`]           | `IsOnSphere` (efb8007; no SMLib caller), by [`crate::eval::sphere`] |
-//! | [`BallPatch::from_form`]              | not in the fork: a patch from a record's NURBS form (#2357) |
 //! | [`BallPatch::is_curve_on_sphere`]     | not in the fork: `IsOnSphere`'s certificate on a curve (#2357) |
 //! | [`BallPatch::move_centre`]            | `Transform`'s centre                         |
 //! | [`BallPatch::create_certified`]       | the capi import's ball patch (`smlib_flat.cpp` `FlatToBrepData`, bc814a5, smlib#102) |
@@ -56,7 +55,6 @@ use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::nurbs::srf_basic::Surface as NurbSurface;
 use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
@@ -65,7 +63,6 @@ const OP_OFFSET: &str = "surface::ball_patch::BallPatch::create_offset_surface";
 const OP_TRANSFORM: &str = "surface::ball_patch::BallPatch::transform";
 const OP_ON_SPHERE: &str = "surface::ball_patch::BallPatch::is_on_sphere";
 const OP_CURVE_ON_SPHERE: &str = "surface::ball_patch::BallPatch::is_curve_on_sphere";
-const OP_FROM_FORM: &str = "surface::ball_patch::BallPatch::from_form";
 const OP_CERTIFIED: &str = "surface::ball_patch::BallPatch::create_certified";
 const OP_READ: &str = "surface::ball_patch::BallPatch::read_from_db";
 
@@ -243,55 +240,6 @@ impl BallPatch {
     ) -> Result<bool> {
         let form = curve_form(curve).ok_or_else(|| SolidError::sm_err(OP_CURVE_ON_SPHERE))?;
         Ok(eval::sphere::curve_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
-    }
-
-    /// A ball patch whose net is the NURBS form `net` (an [`eval::Surface::RationalSpline`],
-    /// its homogeneous control points as given), on the sphere of `centre` and `radius`
-    /// ([`Self::create`]). The net is not certified on the sphere here: a reader certifies it
-    /// first ([`eval::sphere::surface_on_sphere`]).
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` for a form that is not a rational NURBS or whose knots and points do
-    /// not fit; those of [`Self::create`].
-    pub fn from_form(net: &eval::Surface, centre: Point3, radius: f64) -> Result<Self> {
-        let eval::Surface::RationalSpline {
-            u_knots,
-            v_knots,
-            homogeneous,
-        } = net
-        else {
-            return Err(SolidError::invalid_input(
-                OP_FROM_FORM,
-                "a ball patch's net is a rational NURBS",
-            ));
-        };
-        let nu = homogeneous.len();
-        let nv = homogeneous.first().map_or(0, Vec::len);
-        let degree = |knots: &[f64], n: usize| {
-            knots
-                .len()
-                .checked_sub(n + 1)
-                .filter(|&p| p >= 1)
-                .ok_or_else(|| {
-                    SolidError::invalid_input(OP_FROM_FORM, "a net's knots and points do not fit")
-                })
-        };
-        let (p, q) = (degree(u_knots, nu)?, degree(v_knots, nv)?);
-        let grid = homogeneous
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
-                    .collect()
-            })
-            .collect();
-        let nurb = NurbSurface::new(grid, p, q, u_knots.clone(), v_knots.clone())?;
-        let net = BSplineSurface {
-            nurb: Some(nurb).into(),
-            ..BSplineSurface::new()
-        };
-        Self::create(&net, centre, radius)
     }
 
     /// The net (the `SmBSplineSurface` base): every evaluation of the patch is its net's.

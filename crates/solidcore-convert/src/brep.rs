@@ -400,6 +400,7 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
             &crate::surface(&f.surface),
             f.nurbs.as_ref().map(crate::surface).as_ref(),
             f.domain,
+            &boundary(rec, f)?,
         )?;
         let mut fd = FaceData::default();
         fd.zone_tol_3d = zone;
@@ -510,6 +511,25 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     Ok(d)
 }
 
+/// The curves of a ball patch face's loops, for [`face_surface`] to certify on its sphere:
+/// each edge's NURBS form, or its curve; empty for any other face, whose label is not
+/// checked against its loops.
+fn boundary(rec: &r::Brep, f: &r::Face) -> R<Vec<solidcore::eval::Curve>> {
+    if !matches!(f.surface, r::Surface::BallPatch { .. }) {
+        return Ok(Vec::new());
+    }
+    let mut curves = Vec::new();
+    for l in &f.loops {
+        if let r::Loop::Edges { edges } = l {
+            for u in edges {
+                let e = at(&rec.edges, u.edge)?;
+                curves.push(crate::curve(e.nurbs.as_ref().unwrap_or(&e.curve)));
+            }
+        }
+    }
+    Ok(curves)
+}
+
 fn idx(i: usize) -> R<u32> {
     u32::try_from(i).map_err(|_| Unsupported::Invalid("index"))
 }
@@ -527,7 +547,7 @@ pub fn recognised(
     domain: [[f64; 2]; 2],
 ) -> R<Option<&'static str>> {
     use solidcore::surface::surface::SurfaceKind;
-    let made = face_surface(k, &crate::surface(label), None, domain)?;
+    let made = face_surface(k, &crate::surface(label), None, domain, &[])?;
     Ok(match made.surface.kind() {
         SurfaceKind::Plane(_) => Some("plane"),
         SurfaceKind::Cone(c) if c.is_cylinder_class() => Some("cylinder"),

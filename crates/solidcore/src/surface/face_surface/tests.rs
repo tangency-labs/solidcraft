@@ -61,7 +61,7 @@ fn a_revolved_line_along_the_axis_is_its_cylinder() {
         start: [5.0, 0.0, 0.0],
         end: [5.0, 0.0, 4.0],
     };
-    let f = face_surface(&k, &revolution(line), None, [[0.0, 1.0], [0.0, PI]]).unwrap();
+    let f = face_surface(&k, &revolution(line), None, [[0.0, 1.0], [0.0, PI]], &[]).unwrap();
     assert!(
         matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder && c.base_radius == 5.0),
         "{:?}",
@@ -85,7 +85,7 @@ fn a_sliver_off_a_cylinder_stays_its_nurbs() {
             [5.0, 0.0, 4.0],
         ],
     };
-    let f = face_surface(&k, &revolution(bent), None, [[0.0, 1.0], [0.0, PI]]).unwrap();
+    let f = face_surface(&k, &revolution(bent), None, [[0.0, 1.0], [0.0, PI]], &[]).unwrap();
     assert!(
         matches!(f.surface.kind(), SurfaceKind::BSpline(_)),
         "{:?}",
@@ -103,7 +103,7 @@ fn an_analytic_face_on_its_form_is_proved_on_it() {
         radius: 3.0,
     };
     let (net, d) = form::surface(&label, [[0.0, PI], [0.0, 2.0]]).unwrap();
-    let f = face_surface(&k, &label, Some(&net), d).unwrap();
+    let f = face_surface(&k, &label, Some(&net), d, &[]).unwrap();
     assert!(
         matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder),
         "{:?}",
@@ -115,7 +115,9 @@ fn an_analytic_face_on_its_form_is_proved_on_it() {
         frame: frame(),
         radius: 3.0,
     };
-    assert!(is_nurbs(&face_surface(&k, &wrong, Some(&net), d).unwrap()));
+    assert!(is_nurbs(
+        &face_surface(&k, &wrong, Some(&net), d, &[]).unwrap()
+    ));
 }
 
 /// F1: a label's own numbers are proved on its form. A cylinder label of radius 5 over the
@@ -133,7 +135,7 @@ fn a_label_whose_numbers_are_off_its_form_is_dropped_not_rewritten() {
         frame: frame(),
         radius: 5.0,
     };
-    let f = face_surface(&k, &five, Some(&net), d).unwrap();
+    let f = face_surface(&k, &five, Some(&net), d, &[]).unwrap();
     assert!(is_nurbs(&f), "{:?}", f.surface.kind());
     let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
     assert_eq!((r.surface, r.nurbs), (net, None));
@@ -157,7 +159,7 @@ fn a_label_with_its_origin_elsewhere_on_the_axis_keeps_its_numbers() {
         },
         radius: 3.0,
     };
-    let f = face_surface(&k, &lower, Some(&net), d).unwrap();
+    let f = face_surface(&k, &lower, Some(&net), d, &[]).unwrap();
     assert!(
         matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder),
         "{:?}",
@@ -181,7 +183,7 @@ fn a_small_cylinder_far_from_the_origin_is_proved_on_its_form() {
         radius: 1.8,
     };
     let (net, d) = form::surface(&label, [[0.0, 2.0 * PI], [2.0, 4.0]]).unwrap();
-    let f = face_surface(&k, &label, Some(&net), d).unwrap();
+    let f = face_surface(&k, &label, Some(&net), d, &[]).unwrap();
     assert!(
         matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder),
         "{:?}",
@@ -195,7 +197,9 @@ fn a_small_cylinder_far_from_the_origin_is_proved_on_its_form() {
         },
         radius: 1.8,
     };
-    assert!(is_nurbs(&face_surface(&k, &moved, Some(&net), d).unwrap()));
+    assert!(is_nurbs(
+        &face_surface(&k, &moved, Some(&net), d, &[]).unwrap()
+    ));
 }
 
 /// A rational spline that is an extruded circle is its cylinder.
@@ -210,7 +214,7 @@ fn an_extruded_circle_is_its_cylinder() {
         [[0.0, PI / 2.0], [0.0, 1.0]],
     )
     .unwrap();
-    let f = face_surface(&k, &net, None, d).unwrap();
+    let f = face_surface(&k, &net, None, d, &[]).unwrap();
     assert!(
         matches!(f.surface.kind(), SurfaceKind::Cone(c) if c.cylinder),
         "{:?}",
@@ -241,6 +245,7 @@ fn a_ball_patch_is_certified_on_its_sphere() {
         },
         Some(&net),
         d,
+        &[],
     )
     .unwrap();
     assert!(matches!(f.surface.kind(), SurfaceKind::BallPatch(_)));
@@ -253,7 +258,8 @@ fn a_ball_patch_is_certified_on_its_sphere() {
                 radius: 4.0
             },
             Some(&net),
-            d
+            d,
+            &[]
         )
         .unwrap()
     ));
@@ -264,7 +270,8 @@ fn a_ball_patch_is_certified_on_its_sphere() {
             radius: 4.0
         },
         None,
-        d
+        d,
+        &[]
     )
     .is_err());
 }
@@ -280,7 +287,7 @@ fn an_analytic_face_goes_back_as_its_label_on_its_form() {
         radius: 3.0,
     };
     let (net, d) = form::surface(&label, [[0.0, PI], [0.0, 2.0]]).unwrap();
-    let f = face_surface(&k, &label, Some(&net), d).unwrap();
+    let f = face_surface(&k, &label, Some(&net), d, &[]).unwrap();
     let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
     // the kernel's reading of the form: the radius to its rounding
     assert!(
@@ -290,14 +297,14 @@ fn an_analytic_face_goes_back_as_its_label_on_its_form() {
     );
     assert_eq!(r.nurbs.as_ref(), Some(&net));
     assert_eq!((r.scale, r.agrees), ([1.0, 1.0], true));
-    let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain).unwrap();
+    let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain, &[]).unwrap();
     assert_eq!(record_face(&k, &back.surface, &back.uv_domain).unwrap(), r);
     let sphere = Record::Sphere {
         frame: frame(),
         radius: 3.0,
     };
     assert!(is_nurbs(
-        &face_surface(&k, &sphere, r.nurbs.as_ref(), r.domain).unwrap()
+        &face_surface(&k, &sphere, r.nurbs.as_ref(), r.domain, &[]).unwrap()
     ));
 }
 
@@ -314,7 +321,7 @@ fn a_plane_goes_back_on_its_axes_with_its_scales() {
         u_axis: [2.0, 0.0, 0.0],
         v_axis: [0.0, 1.0, 0.0],
     };
-    let f = face_surface(&k, &label, None, [[0.0, 1.0], [0.0, 3.0]]).unwrap();
+    let f = face_surface(&k, &label, None, [[0.0, 1.0], [0.0, 3.0]], &[]).unwrap();
     assert_eq!(f.scale, [2.0, 1.0]);
     let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
     assert_eq!(
@@ -366,7 +373,7 @@ fn degenerate_cone_and_torus_faces_go_round_with_their_label() {
         ),
     ] {
         let (net, d) = form::surface(&label, domain).unwrap();
-        let f = face_surface(&k, &label, Some(&net), d).unwrap();
+        let f = face_surface(&k, &label, Some(&net), d, &[]).unwrap();
         assert!(!is_nurbs(&f), "{label:?}: label dropped");
         let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
         assert_eq!(r.nurbs.as_ref(), Some(&net), "{label:?}");
@@ -384,7 +391,7 @@ fn degenerate_cone_and_torus_faces_go_round_with_their_label() {
             }
             (r, l) => assert_eq!(r, l),
         }
-        let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain).unwrap();
+        let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain, &[]).unwrap();
         assert_eq!(record_face(&k, &back.surface, &back.uv_domain).unwrap(), r);
     }
 }
@@ -449,7 +456,7 @@ fn a_label_with_its_origin_elsewhere_on_the_axis_passes_the_kernels_check() {
         ];
         for (label, moved) in labels {
             let (net, d) = form::surface(&label, [[0.0, 0.5 * PI], [2.0, 6.0]]).unwrap();
-            let f = face_surface(&k, &moved, Some(&net), d).unwrap();
+            let f = face_surface(&k, &moved, Some(&net), d, &[]).unwrap();
             assert!(
                 matches!(f.surface.kind(), SurfaceKind::Cone(_)),
                 "{h} {:?}",

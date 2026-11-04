@@ -938,3 +938,203 @@ fn a_healed_record_whose_topology_the_healer_changed_has_no_order() {
         "the healer removed the short edge"
     );
 }
+
+// ---- #2357: a ball patch face keeps its sphere only once its net and loop are certified on it ----
+
+/// A 40 x 30 x 60 box at `o`, every edge rounded r 1.5: eight Ball corners.
+fn rounded_box(k: &mut Kernel, o: [f64; 3]) -> Brep {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+    use solidcore::query::api_queries::get_edges;
+    use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+    let mut b = primitives::create_box(k, Vec3::new(o[0], o[1], o[2]), 40.0, 30.0, 60.0).unwrap();
+    let edges = get_edges(&b).unwrap();
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    {
+        let mut s = FilletSession::new(k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(k, &edges, &[1.5; 12], &xs, 1, 1.0)
+            .unwrap();
+        s.do_fillet(k).unwrap();
+    }
+    stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    b
+}
+
+/// The record's ball patch faces, by index.
+fn ball_faces(r: &Record) -> Vec<usize> {
+    (0..r.faces.len())
+        .filter(|&i| matches!(r.faces[i].surface, Surface::BallPatch { .. }))
+        .collect()
+}
+
+/// A record face's net, its homogeneous control points as bits.
+fn record_net_bits(f: &Face) -> Vec<[u64; 4]> {
+    let Some(Surface::RationalSpline { homogeneous, .. }) = &f.nurbs else {
+        panic!("a ball patch face on a rational net");
+    };
+    homogeneous
+        .iter()
+        .flatten()
+        .map(|h| h.map(f64::to_bits))
+        .collect()
+}
+
+/// A kernel net's homogeneous control points as bits, as the record stores them.
+fn kernel_net_bits(net: &solidcore::nurbs::b_spline_surface::BSplineSurface) -> Vec<[u64; 4]> {
+    use solidcore::nurbs::math::NOW;
+    let n = net.gw_nurb().unwrap();
+    n.rows()
+        .flatten()
+        .map(|c| [c.x, c.y, c.z, if c.w == NOW { 1.0 } else { c.w }].map(f64::to_bits))
+        .collect()
+}
+
+/// What record face `i` of `r` reads as: `Some` (centre, radius, net bits) for a ball patch,
+/// `None` with the net's bits checked equal to the record's for a face read as its NURBS.
+fn read_ball(k: &mut Kernel, r: &Record, i: usize) -> Option<([f64; 3], f64, Vec<[u64; 4]>)> {
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::face::p2 as face2;
+    let (back, order) = to_kernel(k, r, true).unwrap();
+    let s = face2::surface(&back, order.faces[i]).unwrap().unwrap();
+    match s.kind() {
+        SurfaceKind::BallPatch(bp) => {
+            let c = bp.centre();
+            Some(([c.x, c.y, c.z], bp.radius(), kernel_net_bits(bp.net())))
+        }
+        SurfaceKind::BSpline(net) => {
+            assert_eq!(
+                kernel_net_bits(net),
+                record_net_bits(&r.faces[i]),
+                "face {i}"
+            );
+            None
+        }
+        other => panic!("face {i} read as {other:?}"),
+    }
+}
+
+/// Moves the homogeneous points of a NURBS record curve by `d` (times each weight); false for a
+/// curve that is not one.
+fn move_curve(c: &mut Curve, d: f64) -> bool {
+    match c {
+        Curve::RationalSpline { homogeneous, .. } => {
+            for h in homogeneous.iter_mut() {
+                let w = h[3];
+                for x in &mut h[..3] {
+                    *x += d * w;
+                }
+            }
+            true
+        }
+        Curve::Spline { points, .. } => {
+            for p in points.iter_mut() {
+                for x in p.iter_mut() {
+                    *x += d;
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The eight corners read back as ball patches on their record's sphere and net, bit for bit;
+/// each centre r in from its three faces, R = 1.5.
+#[test]
+fn a_certified_ball_patch_reads_as_one() {
+    let mut k = kernel();
+    let mut b = rounded_box(&mut k, [0.0; 3]);
+    let (r, _) = to_record(&mut k, &mut b).unwrap();
+    let balls = ball_faces(&r);
+    assert_eq!(balls.len(), 8);
+    let (back, order) = to_kernel(&mut k, &r, true).unwrap();
+    for i in balls {
+        let Surface::BallPatch { center, radius } = r.faces[i].surface else {
+            unreachable!()
+        };
+        let s = solidcore::topology::face::p2::surface(&back, order.faces[i])
+            .unwrap()
+            .unwrap();
+        let solidcore::surface::surface::SurfaceKind::BallPatch(bp) = s.kind() else {
+            panic!("face {i} read as {:?}", s.kind());
+        };
+        let c = bp.centre();
+        assert_eq!([c.x, c.y, c.z].map(f64::to_bits), center.map(f64::to_bits));
+        assert_eq!(bp.radius().to_bits(), radius.to_bits());
+        assert_eq!(radius, 1.5);
+        assert_eq!(kernel_net_bits(bp.net()), record_net_bits(&r.faces[i]));
+        for (x, side) in [(c.x, 40.0), (c.y, 30.0), (c.z, 60.0)] {
+            let near = (x - 1.5).abs().min((x - (side - 1.5)).abs());
+            assert!(near <= 1e-12, "face {i}: {c:?}");
+        }
+    }
+}
+
+/// A sphere 1e-9 larger than the net, a net point moved 1e-7, a loop curve moved 1e-7: each
+/// corner reads as its exact NURBS with no ball patch label, and the body is still read.
+#[test]
+fn a_ball_patch_off_its_sphere_reads_as_its_nurbs() {
+    let mut k = kernel();
+    let mut b = rounded_box(&mut k, [0.0; 3]);
+    let (r, _) = to_record(&mut k, &mut b).unwrap();
+    let balls = ball_faces(&r);
+    assert_eq!(balls.len(), 8);
+    for &i in &balls {
+        let mut off = r.clone();
+        if let Surface::BallPatch { radius, .. } = &mut off.faces[i].surface {
+            *radius += 1e-9;
+        }
+        assert!(
+            read_ball(&mut k, &off, i).is_none(),
+            "face {i}: larger sphere"
+        );
+
+        let mut off = r.clone();
+        if let Some(Surface::RationalSpline { homogeneous, .. }) = &mut off.faces[i].nurbs {
+            let (u, v) = (homogeneous.len() / 2, homogeneous[0].len() / 2);
+            let h = &mut homogeneous[u][v];
+            h[0] += 1e-7 * h[3];
+        }
+        assert!(read_ball(&mut k, &off, i).is_none(), "face {i}: net moved");
+
+        let mut off = r.clone();
+        let Loop::Edges { edges } = &off.faces[i].loops[0] else {
+            panic!("face {i}: an edge loop");
+        };
+        let e = &mut off.edges[edges[0].edge as usize];
+        let moved = match &mut e.nurbs {
+            Some(n) => move_curve(n, 1e-7),
+            None => move_curve(&mut e.curve, 1e-7),
+        };
+        assert!(moved, "face {i}: a loop curve with a NURBS form");
+        assert!(read_ball(&mut k, &off, i).is_none(), "face {i}: loop moved");
+    }
+    // unchanged, every corner still reads as its ball patch
+    for &i in &balls {
+        assert!(read_ball(&mut k, &r, i).is_some(), "face {i}");
+    }
+}
+
+/// Far from the origin the certificate is as tight: the corners of a box at
+/// (1e5, -7e4, 3e4) read as ball patches, and a sphere 1e-9 larger there reads as the NURBS.
+#[test]
+fn a_ball_patch_far_from_the_origin_reads_as_one() {
+    let mut k = kernel();
+    let mut b = rounded_box(&mut k, [1e5, -7e4, 3e4]);
+    let (r, _) = to_record(&mut k, &mut b).unwrap();
+    let balls = ball_faces(&r);
+    assert_eq!(balls.len(), 8);
+    for &i in &balls {
+        let (c, radius, _) = read_ball(&mut k, &r, i).unwrap_or_else(|| panic!("face {i}"));
+        assert_eq!(radius, 1.5);
+        assert!(
+            c[0] > 9.9e4 && c[1] < -6.9e4 && c[2] > 2.9e4,
+            "face {i}: {c:?}"
+        );
+        let mut off = r.clone();
+        if let Surface::BallPatch { radius, .. } = &mut off.faces[i].surface {
+            *radius += 1e-9;
+        }
+        assert!(read_ball(&mut k, &off, i).is_none(), "face {i}");
+    }
+}

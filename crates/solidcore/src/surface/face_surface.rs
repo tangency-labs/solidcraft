@@ -11,8 +11,9 @@
 //! **Exact classes at bound 0** (owner rule 13564): an analytic face is made only once its
 //! NURBS is proved to lie on it (`lies_on`, through
 //! [`AnalyticSupport::build`](crate::surface::implicit::AnalyticSupport::build) or
-//! [`from_parameters`](crate::surface::from_parameters)); a ball patch only once its net is
-//! certified on its sphere ([`BallPatch::create_certified`]). A revolution or a rational spline
+//! [`from_parameters`](crate::surface::from_parameters)); a ball patch only once its net
+//! and the curves of its loops are certified on its sphere ([`BallPatch::create_certified`],
+//! [`sphere::curve_on_sphere`]). A revolution or a rational spline
 //! is recognised as a plane, cylinder, cone, sphere or torus only when the kernel derives that
 //! surface from its exact NURBS form and proves the form on it: the analytic surface then holds
 //! the form as its own NURBS, so the face's parameters and pcurves stay as they are. A
@@ -23,6 +24,8 @@
 
 use crate::error::{Result, SolidError};
 use crate::eval::form;
+use crate::eval::sphere;
+use crate::eval::Curve as RecordCurve;
 use crate::eval::Surface as Record;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::Point3;
@@ -54,19 +57,23 @@ pub struct FaceSurface {
 }
 
 /// The surface of a record face: `label`, parameterised on `nurbs` when given, over `domain`
-/// (the face's parameter box: `nurbs`'s parameters when given, else `label`'s).
+/// (the face's parameter box: `nurbs`'s parameters when given, else `label`'s). `boundary` is
+/// the curves of the face's loops (each edge's NURBS form, or its curve); only a ball patch's
+/// label is checked against them.
 ///
 /// - no form: an analytic label or a spline is [`from_parameters`]'s (a rational spline that is
 ///   an extruded circle recognised as its cylinder); a placed revolution is its exact NURBS form
 ///   ([`form::surface`]), recognised as an analytic surface when one is proved on it;
-/// - a ball patch's form is its net, certified on its sphere;
+/// - a ball patch's form is its net, certified on its sphere, and each curve of `boundary`
+///   certified on it too ([`sphere::curve_on_sphere`] at [`sphere::ON_SPHERE_REL_TOL`]; a
+///   curve that is not a NURBS is not certified);
 /// - a revolution's form is that NURBS, recognised as above;
 /// - an analytic label's form is that NURBS, proved on the analytic surface of the label's own
 ///   numbers.
 ///
-/// A label its form does not prove (a ball patch's net off its sphere, an analytic label's
-/// numbers off its form) is dropped, and the face is its exact NURBS (owner 22254: a valid
-/// body is never refused, and the form's numbers are never put under the label).
+/// A label its form does not prove (a ball patch's net or a loop curve off its sphere, an
+/// analytic label's numbers off its form) is dropped, and the face is its exact NURBS (owner
+/// 22254: a valid body is never refused, and the form's numbers are never put under the label).
 ///
 /// # Errors
 ///
@@ -77,6 +84,7 @@ pub fn face_surface(
     label: &Record,
     nurbs: Option<&Record>,
     domain: [[f64; 2]; 2],
+    boundary: &[RecordCurve],
 ) -> Result<FaceSurface> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let Some(n) = nurbs else {
@@ -137,14 +145,17 @@ pub fn face_surface(
     let surface = match label {
         Record::BallPatch { center, radius } => {
             let centre = Point3::new(center[0], center[1], center[2]);
-            match BallPatch::create_certified(&net, centre, *radius) {
-                Ok(b) => Surface::from(b),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+            let loop_on = boundary.iter().all(|c| {
+                sphere::curve_on_sphere(c, *center, *radius, sphere::ON_SPHERE_REL_TOL).is_ok()
+            });
+            match loop_on.then(|| BallPatch::create_certified(&net, centre, *radius)) {
+                Some(Ok(b)) => Surface::from(b),
+                Some(Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. }))) => {
                     return Err(e)
                 }
-                // owner 22254: a label its form does not prove is dropped; the face is its
-                // exact NURBS
-                Err(_) => Surface::from(net),
+                // owner 22254: a label its form or its loop does not prove is dropped; the
+                // face is its exact NURBS
+                Some(Err(_)) | None => Surface::from(net),
             }
         }
         Record::PlacedRevolution { .. } => recognised(k, net, &REVOLVED)?,
