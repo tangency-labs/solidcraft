@@ -25,6 +25,7 @@
 //!   ([`dimension`]).
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
 //! - **Images** on its sheets, each file kept once however many places it sits ([`image`]).
+//! - **Tables** on its sheets: parts lists and revision tables ([`table`]).
 //! - **Revisions**: one revision record for the whole drawing ([`RevisionRecord`]), its rows in the
 //!   order they were added, the newest last.
 //!
@@ -43,7 +44,7 @@
 //!
 //! [`Drawing::from_json`] reads a drawing in this order: at most [`MAX_DRAWING_BYTES`] of text,
 //! the family's format check, every number in range, the upgrade, the typed record with its views,
-//! dimensions, balloons and images by id, then [`Drawing::validate`] and each image's file
+//! dimensions, balloons, images and notes by id, then [`Drawing::validate`] and each image's file
 //! ([`Drawing::check_image_files`]); [`Drawing::from_value`] the same from the format check on.
 
 use std::borrow::Cow;
@@ -68,6 +69,8 @@ pub mod by_id;
 pub mod dimension;
 pub mod fields;
 pub mod image;
+pub mod note;
+pub mod table;
 pub mod template;
 pub mod view;
 
@@ -75,6 +78,8 @@ use balloon::Balloon;
 use by_id::ById;
 use dimension::Dimension;
 use image::{ImageFile, SheetImage};
+use note::{Anchor, Note};
+use table::SheetTable;
 use view::View;
 
 /// The most drawings a design may hold.
@@ -142,6 +147,12 @@ pub struct Drawing {
     /// Where they sit on the sheets.
     #[serde(default, skip_serializing_if = "ById::is_empty")]
     pub sheet_images: ById<SheetImage>,
+    /// The saved tables on its sheets: parts lists and revision tables.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub tables: ById<SheetTable>,
+    /// The notes on its sheets and in its views.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub notes: ById<Note>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -257,12 +268,24 @@ pub struct OnSheet {
     pub balloons: Vec<u64>,
     /// The images placed on it.
     pub images: Vec<u64>,
+    /// The revision tags on it.
+    pub tags: Vec<u64>,
+    /// The tables on it.
+    pub tables: Vec<u64>,
+    /// The notes on it and in its views.
+    pub notes: Vec<u64>,
 }
 
 impl OnSheet {
     /// Nothing is on the sheet.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty() && self.images.is_empty()
+        self.views.is_empty()
+            && self.dimensions.is_empty()
+            && self.balloons.is_empty()
+            && self.images.is_empty()
+            && self.tags.is_empty()
+            && self.tables.is_empty()
+            && self.notes.is_empty()
     }
 }
 
@@ -313,6 +336,8 @@ impl Drawing {
             balloons: ById::default(),
             images: ById::default(),
             sheet_images: ById::default(),
+            tables: ById::default(),
+            notes: ById::default(),
             revisions: Arc::default(),
         };
         drawing.validate()?;
@@ -342,6 +367,8 @@ impl Drawing {
         d.balloons.put_in_order();
         d.images.put_in_order();
         d.sheet_images.put_in_order();
+        d.tables.put_in_order();
+        d.notes.put_in_order();
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
@@ -378,16 +405,20 @@ impl Drawing {
 
     /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.
     pub fn has_object(&self, id: u64) -> bool {
-        self.view(id).is_some() || self.dimension(id).is_some() || self.balloons.by_id(id).is_some()
+        self.view(id).is_some() || self.dimension(id).is_some() || self.balloons.by_id(id).is_some() || self.notes.by_id(id).is_some()
     }
 
     /// What is on sheet `id`: its views and the dimensions and balloons in them, and the images placed on it.
     /// Each later kind of record on a sheet adds its own here, and goes with the sheet
     /// ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
-        // The views are listed by id, so the sheet's are too, and so are its images.
+        // The views are listed by id, so the sheet's are too, and so are its images, revision tags, tables and notes.
         let mut on = self.with_contents(self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect());
         on.images = self.sheet_images.iter().filter(|i| i.sheet == id).map(|i| i.id).collect();
+        on.tags = self.revisions.tags().iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
+        on.tables = self.tables.iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
+        let in_views = |n: &Note| n.anchor.view().is_some_and(|v| on.views.binary_search(&v).is_ok());
+        on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
         on
     }
 
@@ -396,7 +427,8 @@ impl Drawing {
     pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
-        OnSheet { views, dimensions, balloons, images: Vec::new() }
+        let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
+        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -418,6 +450,17 @@ impl Drawing {
         self.balloons.retain(|b| objects.balloons.binary_search(&b.id).is_err());
         self.sheet_images.retain(|i| objects.images.binary_search(&i.id).is_err());
         self.drop_unused_images();
+        self.tables.retain(|t| objects.tables.binary_search(&t.id).is_err());
+        self.notes.retain(|n| objects.notes.binary_search(&n.id).is_err());
+        // A balloon outlives the list it named, and goes back to the lists it could read.
+        for balloon in self.balloons.iter_mut() {
+            if balloon.parts_list.is_some_and(|list| objects.tables.binary_search(&list).is_ok()) {
+                Arc::make_mut(balloon).parts_list = None;
+            }
+        }
+        if !objects.tags.is_empty() {
+            Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
+        }
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its
@@ -431,6 +474,8 @@ impl Drawing {
             .chain(self.balloons.iter().map(|b| b.id))
             .chain(self.images.iter().map(|i| i.id))
             .chain(self.sheet_images.iter().map(|i| i.id))
+            .chain(self.tables.iter().map(|t| t.id))
+            .chain(self.notes.iter().map(|n| n.id))
             .chain(self.revisions.ids())
     }
 
@@ -460,10 +505,15 @@ impl Drawing {
         // One record for the whole drawing until sheets keep their own (#3874).
         require(!self.revisions.per_sheet, || "a drawing keeps one revision record for all its sheets".into())?;
         self.revisions.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
+        require(self.revisions.tags().iter().all(|t| self.sheets.iter().any(|s| s.id == t.sheet)), || {
+            "a revision tag is on one of the drawing's sheets".into()
+        })?;
         self.check_views()?;
         self.check_dimensions()?;
+        self.check_tables()?;
         self.check_balloons()?;
-        self.check_images()
+        self.check_images()?;
+        self.check_notes()
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.

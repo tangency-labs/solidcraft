@@ -281,6 +281,16 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### leader
+
+The line from a note to what it points at on the model. It is worked out from where that thing is
+now and is never saved: if the thing is lost, the note stays and has no leader.
+
+- **In SolidCraft:** `drawing.note.inspect`'s `point`, where the leader ends.
+- **Don't use:** arrow (the end of the line, on a balloon or a dimension); pointer.
+- **Elsewhere:** leader, leader line.
+- **For translators:** a drawn line; not a person who leads.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -309,6 +319,18 @@ them. The *first moments* are the mass times the centre of mass.
 - **Don't use:** rotational inertia, second moment of mass, mass moment.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
+
+### note
+
+Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
+with a leader. A note on a view moves with the view.
+
+- **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
+  `notes`.
+- **Don't use:** comment (that is for people working on a design); annotation (the wider kind of
+  thing that includes dimensions and symbols).
+- **Elsewhere:** note, general note, text.
+- **For translators:** text printed on the drawing; not a remark to a colleague.
 
 ### occurrence
 

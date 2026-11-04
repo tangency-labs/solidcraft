@@ -30,6 +30,7 @@ use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
+use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Looking, TangentEdges, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids;
@@ -638,15 +639,17 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let originals: Vec<u64> = std::iter::once(id).chain(linked.into_iter().filter(|_| with_linked)).collect();
-    // Each view's dimensions and balloons are part of what it shows, so they are copied with it.
+    // Each view's dimensions, balloons and notes are part of what it shows, so they are copied with it.
     let measured: Vec<u64> = record.dimensions.iter().filter(|d| originals.contains(&d.view)).map(|d| d.id).collect();
     let ballooned: Vec<u64> = record.balloons.iter().filter(|b| originals.contains(&b.view)).map(|b| b.id).collect();
-    let mut copies = (0..originals.len() + measured.len() + ballooned.len())
+    let noted: Vec<u64> = record.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| originals.contains(&v))).map(|n| n.id).collect();
+    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + noted.len())
         .map(|_| record.allocate_id(&mut s.ids))
         .collect::<solidcraft_doc::Result<Vec<u64>>>()
         .map_err(|e| bad(COPY, e.to_string()))?;
     let mut dimension_copies = copies.split_off(originals.len());
-    let balloon_copies = dimension_copies.split_off(measured.len());
+    let mut balloon_copies = dimension_copies.split_off(measured.len());
+    let note_copies = balloon_copies.split_off(ballooned.len());
     let copy_of = |old: u64| originals.iter().position(|o| *o == old).and_then(|i| copies.get(i)).copied();
     let sheet = s.edit_drawing(COPY, |d| {
         let (sheet, middle) = sheet_named(d, &request.sheet, COPY)?;
@@ -696,6 +699,15 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         d.balloons.add(copied);
+        let copied: Vec<Arc<Note>> = noted
+            .iter()
+            .zip(&note_copies)
+            .filter_map(|(old, new)| {
+                let original = d.notes.by_id(*old)?;
+                Some(Arc::new(Note { id: *new, anchor: original.anchor.on_view(copy_of(original.anchor.view()?)?), ..original.clone() }))
+            })
+            .collect();
+        d.notes.add(copied);
         Ok(sheet)
     })?;
     let first = copies.first().copied().unwrap_or_default();

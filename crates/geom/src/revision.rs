@@ -6,35 +6,33 @@
 //! - One record covers the whole drawing, or each sheet on its own (`per_sheet`), numbered apart.
 //! - A row holds what people type: revision, description, designer, checker and date. Adding a row
 //!   fills in only the next revision; nothing here fills in a date, a checker or an approval.
-//! - Numbers run from 1, or 0. Letters run A to Y without I, O, Q, S, X and Z, then AA, AB…
-//!   ([`LETTERS`]). The next revision follows the highest one in its scope among the rows and the
-//!   issued history, so an issued revision is never given out again. A revision typed by hand is
-//!   kept as typed; in letters one with a skipped letter is accepted with [`SkippedLetter`].
+//! - Revisions are numbered, never lettered: from 1, or 0. The next revision follows the highest
+//!   number in its scope among the rows and the issued history, so an issued revision is never given
+//!   out again. A revision typed by hand is kept as typed.
 //! - Hiding and deleting rows changes what the table shows. [`RevisionRecord::issue`] appends a
-//!   copy of a row to the issued history, which nothing here removes or changes. Release, approval
-//!   and frozen snapshots build on it later.
+//!   copy of a row to the issued history, once for each row and under the row's id, which nothing
+//!   here removes or changes. Release, approval and frozen snapshots build on it later.
 //! - Row and tag ids come from the caller (the design's random ids), never from a counter here, so
 //!   two people adding rows to one drawing never take the same id. An id in use is refused.
-//! - A [`Tag`] (a triangle with the revision in it) is bound to a row by its id and shows its
-//!   revision, or its own text. Deleting a row reports the tags bound to it, which then show the
-//!   revision they had, marked lost.
+//! - A [`Tag`] (a triangle with the revision in it) sits on a sheet, is bound to a row by its id and
+//!   shows its revision, or its own text. Deleting a row reports the tags bound to it, which then
+//!   show the revision they had, marked lost.
 //!
 //! This is the drawing's revision only: the model's revision is its component's part property and
 //! the time of an export is the writer's, and neither is kept or stood in for here.
 
+use std::collections::{BTreeSet, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::cell::{self, Content, HAlign, Part, Source, check_label, check_text};
+use crate::drawing_view::is_paper_coordinate;
 use crate::table::{self, Column, Heading, RowKind, Table};
 
 /// The most rows a record may have.
 pub const MAX_ROWS: usize = 1000;
 /// The most entries the issued history may hold, and the most tags.
 pub const MAX_ISSUED: usize = 10_000;
-/// The letters revisions are lettered with: A to Z without I, O, Q, S, X and Z, which read as
-/// numbers or each other.
-pub const LETTERS: &str = "ABCDEFGHJKLMNPRTUVWY";
-const SKIPPED: &str = "IOQSXZ";
 const TAG_SIZES_MM: std::ops::RangeInclusive<f64> = 1.0..=50.0;
 const DEFAULT_TAG_MM: f64 = 5.0;
 
@@ -55,19 +53,16 @@ pub struct RevisionRecord {
     tags: Vec<Tag>,
 }
 
-/// How new revisions are named.
+/// How new revisions are numbered: 1, 2, 3… from `start`, 0 or 1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum Numbering {
-    /// 1, 2, 3… from `start`, 0 or 1.
-    Numbers { start: u8 },
-    /// A, B, C… ([`LETTERS`]).
-    Letters,
+#[serde(deny_unknown_fields)]
+pub struct Numbering {
+    pub start: u8,
 }
 
 impl Default for Numbering {
     fn default() -> Self {
-        Numbering::Numbers { start: 1 }
+        Numbering { start: 1 }
     }
 }
 
@@ -94,7 +89,17 @@ pub struct RevisionRow {
     /// The model version an issued copy was issued against, for the release step to pin: none
     /// until version control gives versions (#2869).
     #[serde(default)]
-    pub model_version: Option<String>,
+    pub model_version: Option<ModelVersion>,
+}
+
+/// The design a revision was issued from, in the version history's words, both opaque here. A
+/// change rather than a commit: the row is saved in the file it describes, so it can't name that
+/// file's own commit, and a change's id survives an amend.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelVersion {
+    pub path: String,
+    pub change: String,
 }
 
 /// One of a row's texts.
@@ -140,6 +145,11 @@ pub struct Tag {
     pub id: u64,
     #[serde(with = "crate::ids")]
     pub row: u64,
+    /// The sheet it sits on.
+    #[serde(with = "crate::ids")]
+    pub sheet: u64,
+    /// Its centre on the sheet, in millimetres from the sheet's lower-left corner.
+    pub at: [f64; 2],
     /// The length of the triangle's side.
     pub size_mm: f64,
     /// Shown in place of the row's revision: an override.
@@ -150,6 +160,19 @@ pub struct Tag {
     pub lost: Option<String>,
 }
 
+impl Tag {
+    /// A tag's own rules: where it sits, its size and its text.
+    fn check(&self) -> Result<()> {
+        require(self.sheet != 0, "a tag is on a sheet")?;
+        require(self.at.iter().all(|c| is_paper_coordinate(*c)), "a tag is on paper")?;
+        require(TAG_SIZES_MM.contains(&self.size_mm), "a tag's side is 1 to 50 mm")?;
+        if let Some(text) = &self.text {
+            check_label(text).map_err(cell_rule)?;
+        }
+        Ok(())
+    }
+}
+
 /// What a tag shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TagText {
@@ -158,10 +181,6 @@ pub enum TagText {
     /// Its row is gone: the revision it had.
     Lost(String),
 }
-
-/// A revision typed in letters with a letter the lettering skips.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SkippedLetter(pub char);
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("revision record: {0}")]
@@ -175,36 +194,6 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
 
 fn cell_rule(e: cell::Invalid) -> Invalid {
     Invalid(e.0)
-}
-
-/// Letter label `n` from 0: A..Y, then AA, AB… (bijective base 20 over [`LETTERS`]).
-fn letters(mut n: u64) -> String {
-    let digits = LETTERS.as_bytes();
-    let base = digits.len() as u64;
-    let mut out = Vec::new();
-    loop {
-        out.push(digits.get((n % base) as usize).copied().unwrap_or(b'A'));
-        n /= base;
-        if n == 0 {
-            break;
-        }
-        n -= 1;
-    }
-    out.reverse();
-    String::from_utf8(out).unwrap_or_default()
-}
-
-/// The inverse of [`letters`], in either case (a typed "c" is C): none for a label that isn't
-/// lettering, or that counts past `u64`.
-fn letters_index(label: &str) -> Option<u64> {
-    let base = LETTERS.len() as u64;
-    label.bytes().try_fold(None, |n: Option<u64>, b| {
-        let d = LETTERS.bytes().position(|l| l == b.to_ascii_uppercase())? as u64;
-        Some(Some(match n {
-            None => d,
-            Some(n) => n.checked_add(1)?.checked_mul(base)?.checked_add(d)?,
-        }))
-    })?
 }
 
 impl RevisionRow {
@@ -231,8 +220,10 @@ impl RevisionRow {
     }
 
     fn check(&self) -> Result<()> {
-        for label in std::iter::once(&self.revision).chain(&self.model_version) {
-            check_label(label).map_err(cell_rule)?;
+        check_label(&self.revision).map_err(cell_rule)?;
+        if let Some(version) = &self.model_version {
+            check_label(&version.path).map_err(cell_rule)?;
+            check_label(&version.change).map_err(cell_rule)?;
         }
         check_text([&self.description, &self.designer, &self.checker, &self.date].map(String::as_str)).map_err(cell_rule)
     }
@@ -256,30 +247,41 @@ impl RevisionRecord {
         require(self.rows.len() <= MAX_ROWS, "a record has at most 1000 rows")?;
         require(self.issued.len() <= MAX_ISSUED, "a record's issued history holds at most 10,000 entries")?;
         require(self.tags.len() <= MAX_ISSUED, "a record has at most 10,000 tags")?;
-        require(matches!(self.numbering, Numbering::Letters | Numbering::Numbers { start: 0 | 1 }), "numbers start at 0 or 1")?;
-        let mut ids = std::collections::HashSet::new();
+        require(matches!(self.numbering.start, 0 | 1), "numbers start at 0 or 1")?;
+        let mut ids = HashSet::new();
         for row in &self.rows {
             require(ids.insert(row.id), "each row and tag has its own id")?;
             require(row.sheet.is_some() == self.per_sheet, "a row has a sheet when the record is kept per sheet, and only then")?;
             row.check()?;
         }
+        let mut issued = HashSet::new();
         for row in &self.issued {
+            require(issued.insert(row.id), "a row is issued once")?;
             row.check()?;
         }
+        // An issued copy keeps its row's id, row or no row: only a tag can't have it.
+        ids.extend(issued);
         for tag in &self.tags {
             require(ids.insert(tag.id), "each row and tag has its own id")?;
             require(tag.lost.is_some() || self.rows.iter().any(|r| r.id == tag.row), "a tag is bound to a row")?;
-            require(TAG_SIZES_MM.contains(&tag.size_mm), "a tag's side is 1 to 50 mm")?;
-            for text in tag.text.iter().chain(&tag.lost) {
+            tag.check()?;
+            if let Some(text) = &tag.lost {
                 check_label(text).map_err(cell_rule)?;
             }
         }
         Ok(())
     }
 
-    /// Every id the record holds: its rows', its issued copies' and its tags'.
+    /// Every id the record holds, each once: its rows', its issued copies' (a copy has its row's) and
+    /// its tags'.
     pub fn ids(&self) -> impl Iterator<Item = u64> + '_ {
-        self.rows.iter().chain(&self.issued).map(|r| r.id).chain(self.tags.iter().map(|t| t.id))
+        let rows: BTreeSet<u64> = self.rows.iter().chain(&self.issued).map(|r| r.id).collect();
+        rows.into_iter().chain(self.tags.iter().map(|t| t.id))
+    }
+
+    /// Whether row `id` has an issued copy.
+    pub fn is_issued(&self, id: u64) -> bool {
+        self.issued.iter().any(|r| r.id == id)
     }
 
     /// Whether a row, an issued copy or a tag has `id`, or a tag is bound to it.
@@ -295,13 +297,8 @@ impl RevisionRecord {
     /// None when nothing follows the highest (past `u64`), so none is ever given out twice.
     pub fn next_revision(&self, sheet: Option<u64>) -> Option<String> {
         let labels = self.rows.iter().chain(&self.issued).filter(|r| r.sheet == sheet).map(|r| r.revision.as_str());
-        match self.numbering {
-            Numbering::Numbers { start } => {
-                let highest = labels.filter_map(|l| l.parse::<u64>().ok()).max();
-                highest.map_or(Some(u64::from(start)), |n| n.checked_add(1)).map(|n| n.to_string())
-            }
-            Numbering::Letters => labels.filter_map(letters_index).max().map_or(Some(0), |n| n.checked_add(1)).map(letters),
-        }
+        let highest = labels.filter_map(|l| l.parse::<u64>().ok()).max();
+        highest.map_or(Some(u64::from(self.numbering.start)), |n| n.checked_add(1)).map(|n| n.to_string())
     }
 
     /// Adds row `id` for `sheet` (none unless the record is kept per sheet) with the next revision
@@ -315,18 +312,15 @@ impl RevisionRecord {
         Ok(())
     }
 
-    /// Sets one of a row's texts as typed, by the cell text rules (a revision is one line). In
-    /// letters, a revision with a skipped letter is kept and warned about.
-    pub fn set(&mut self, id: u64, field: Field, text: &str) -> Result<Option<SkippedLetter>> {
+    /// Sets one of a row's texts as typed, by the cell text rules (a revision is one line).
+    pub fn set(&mut self, id: u64, field: Field, text: &str) -> Result<()> {
         if field == Field::Revision {
             check_label(text).map_err(cell_rule)?;
         } else {
             check_text([text]).map_err(cell_rule)?;
         }
-        let letters = self.numbering == Numbering::Letters;
         *self.row_mut(id)?.field_mut(field) = text.to_string();
-        let skipped = text.chars().find(|c| SKIPPED.contains(c.to_ascii_uppercase()));
-        Ok(skipped.filter(|_| letters && field == Field::Revision).map(SkippedLetter))
+        Ok(())
     }
 
     /// Hides a row from the table, or shows it again.
@@ -349,23 +343,48 @@ impl RevisionRecord {
     }
 
     /// Appends a copy of a row, as it reads now, to the issued history, with the model version it
-    /// was issued against when there is one.
-    pub fn issue(&mut self, id: u64, model_version: Option<&str>) -> Result<()> {
+    /// was issued against when there is one. A row is issued once: a change is a new revision.
+    pub fn issue(&mut self, id: u64, model_version: Option<ModelVersion>) -> Result<()> {
         require(self.issued.len() < MAX_ISSUED, "a record's issued history holds at most 10,000 entries")?;
         let mut row = self.rows.iter().find(|r| r.id == id).ok_or(Invalid("no row has that id"))?.clone();
-        row.model_version = model_version.map(str::to_string);
+        require(!self.is_issued(id), "a row is issued once: make a new revision")?;
+        row.model_version = model_version;
         row.check()?;
         self.issued.push(row);
         Ok(())
     }
 
-    /// Adds tag `id` bound to a row, at the default size.
-    pub fn add_tag(&mut self, row: u64, id: u64) -> Result<()> {
+    /// Adds tag `id` bound to a row, on `sheet` at `at`, at the default size.
+    pub fn add_tag(&mut self, row: u64, id: u64, sheet: u64, at: [f64; 2]) -> Result<()> {
         require(self.tags.len() < MAX_ISSUED, "a record has at most 10,000 tags")?;
         require(self.rows.iter().any(|r| r.id == row), "no row has that id")?;
         require(!self.id_taken(id), "that id is taken")?;
-        self.tags.push(Tag { id, row, size_mm: DEFAULT_TAG_MM, text: None, lost: None });
+        let tag = Tag { id, row, sheet, at, size_mm: DEFAULT_TAG_MM, text: None, lost: None };
+        tag.check()?;
+        self.tags.push(tag);
         Ok(())
+    }
+
+    /// Changes tag `id` by `change`, which must leave it keeping a tag's rules.
+    pub fn edit_tag(&mut self, id: u64, change: impl FnOnce(&mut Tag)) -> Result<()> {
+        let tag = self.tags.iter_mut().find(|t| t.id == id).ok_or(Invalid("no tag has that id"))?;
+        let mut edited = tag.clone();
+        change(&mut edited);
+        edited.check()?;
+        *tag = edited;
+        Ok(())
+    }
+
+    /// Deletes tag `id`.
+    pub fn delete_tag(&mut self, id: u64) -> Result<()> {
+        let at = self.tags.iter().position(|t| t.id == id).ok_or(Invalid("no tag has that id"))?;
+        self.tags.remove(at);
+        Ok(())
+    }
+
+    /// Deletes the tags `ids` lists, by id: what deleting their sheet takes.
+    pub fn delete_tags(&mut self, ids: &[u64]) {
+        self.tags.retain(|t| !ids.contains(&t.id));
     }
 
     /// What a tag shows.

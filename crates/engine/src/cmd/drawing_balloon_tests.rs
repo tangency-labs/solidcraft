@@ -266,3 +266,111 @@ fn balloons_go_with_their_view_when_it_is_copied_and_with_its_sheet() {
     }
     assert_eq!(saved(&s), before);
 }
+
+/// A parts list on the drawing's first sheet: its id.
+fn list(s: &mut Session, set: Value) -> String {
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let reply = s.execute("drawing.table.add", &json!({"sheet": sheet, "kind": "parts_list", "set": set})).unwrap();
+    reply["table"].as_str().unwrap().to_string()
+}
+
+fn read(s: &mut Session, balloon: &str) -> Value {
+    run(s, INSPECT, json!({"balloon": balloon}))
+}
+
+/// A balloon with no list says so, and reads the only one when there is one: the row its part is
+/// counted in. Two lists leave it to choose, with the choices listed, until it names one. A list's
+/// delete reports the balloon that named it and leaves the balloon. One undo step each.
+#[test]
+fn a_balloon_reads_its_row_in_a_parts_list() {
+    let (mut s, view, [_, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    let alone = read(&mut s, &balloon);
+    assert_eq!((&alone["row_status"], alone.get("item"), alone.get("parts_list")), (&json!("no_list"), None, None), "{alone}");
+
+    let first = list(&mut s, json!({}));
+    let read1 = read(&mut s, &balloon);
+    assert_eq!((&read1["row_status"], &read1["item"], &read1["parts_list"]), (&json!("ok"), &json!("1"), &json!(first)), "{read1}");
+    assert!(s.drawing("test").unwrap().balloons.by_id(ids::decode(&balloon).unwrap()).unwrap().parts_list.is_none(), "worked out, not saved");
+
+    let second = list(&mut s, json!({"list": {"levels": "top"}}));
+    let both = read(&mut s, &balloon);
+    assert_eq!(both["row_status"], json!("no_list"), "{both}");
+    assert_eq!(both["choices"].as_array().map(Vec::len), Some(2));
+
+    let steps = s.undo.len();
+    let named = run(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": second}}));
+    assert_eq!((&named["changed"], s.undo.len()), (&json!(["parts_list"]), steps + 1), "{named}");
+    assert_eq!(read(&mut s, &balloon)["parts_list"], json!(second));
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": second}}));
+    assert_eq!(s.undo.len(), steps + 1, "nothing changed, no step");
+    assert!(refused(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": ids::encode(99)}})).contains("parts lists"));
+
+    let gone = s.execute("drawing.table.delete", &json!({"table": second})).unwrap();
+    assert_eq!(gone["balloons"], json!([balloon]), "{gone}");
+    assert_eq!(read(&mut s, &balloon)["parts_list"], json!(first), "the only one left");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(read(&mut s, &balloon)["parts_list"], json!(second), "the undo brings its link back");
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"parts_list": null}}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("no_list"));
+
+    let on_add = run(
+        &mut s,
+        ADD,
+        json!({"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [occurrence]}, "at": [60, 40], "parts_list": first}),
+    );
+    assert_eq!(on_add["parts_list"], json!(first), "{on_add}");
+    refused(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [occurrence]}, "at": [60, 40], "parts_list": "x"}));
+}
+
+/// A balloon follows its row: renumbered, it shows the new number. What the model does to the row
+/// says what became of it, and never removes the balloon; undoing brings the number back.
+#[test]
+fn a_balloon_follows_its_row_through_the_model() {
+    let (mut s, view, [component, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    list(&mut s, json!({}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("1"));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
+        s.execute("drawing.close", &json!({})).unwrap();
+        s.execute(id, &p).unwrap();
+        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    };
+
+    with_drawing_closed(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 7}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "renumbered");
+
+    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
+    let reference = read(&mut s, &balloon);
+    assert_eq!((&reference["row_status"], reference.get("item")), (&json!("reference"), None), "{reference}");
+    assert!(reference["warnings"][0].as_str().is_some_and(|w| w.contains("reference")), "{reference}");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "undone");
+
+    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "phantom"}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("ok"), "a phantom's own bodies are a row of their own");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+
+    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    let deleted = read(&mut s, &balloon);
+    assert_eq!(deleted["row_status"], json!("not_found"), "{deleted}");
+    assert_eq!(s.drawing("test").unwrap().balloons.len(), 1, "the balloon stays");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "the part back, its number back");
+}
+
+/// A list of the component the balloon's part is in reads it below that component; a list of the
+/// component a balloon's path doesn't run through, or one deleted since, finds nothing.
+#[test]
+fn a_balloon_reads_a_components_list_below_it() {
+    let (mut s, view, [component, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    list(&mut s, json!({"list": {"component": component}}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("no_row"), "the assembly listed has no row");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("component.delete", &json!({"component": component})).unwrap();
+    s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("not_found"));
+}

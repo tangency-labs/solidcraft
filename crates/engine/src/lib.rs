@@ -1200,6 +1200,12 @@ impl Session {
         Ok(out)
     }
 
+    /// The open design's version, for an issued revision to name: nothing in the browser, for an
+    /// unsaved design, and until version control gives versions (#2869), which fills this in.
+    pub(crate) fn design_version(&self) -> Option<solidcraft_geom::revision::ModelVersion> {
+        None
+    }
+
     /// Prepared placements only: optional save caches must not compute a cold world.
     pub(crate) fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
         let state = self.model.state();

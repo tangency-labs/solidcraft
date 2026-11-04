@@ -91,7 +91,7 @@ pub(crate) fn plate() -> Drawing {
         d.add_dimensions([Arc::new(Dimension { id, view: front, kind, offset_mm: -10.0, text, decimals: 1, override_text, last_good: None })]);
     }
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0] })]);
+    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0], parts_list: None })]);
     d.validate().unwrap();
     d
 }
@@ -429,6 +429,13 @@ fn damaged_files_are_refused_and_never_patched() {
         zero(&mut in_memory);
         assert_eq!(in_memory.validate().unwrap_err().to_string(), "an object has the id 0, which is never one");
     }
+    // A revision tag on a sheet the drawing doesn't have.
+    let mut tagged = d.clone();
+    let record = std::sync::Arc::make_mut(&mut tagged.revisions);
+    record.add(None, 1 << 44).unwrap();
+    record.add_tag(1 << 44, (1 << 44) + 1, 1 << 43, [10.0, 10.0]).unwrap();
+    let why = tagged.validate().unwrap_err().to_string();
+    assert!(why.contains("a revision tag is on one of the drawing's sheets"), "{why}");
     // A reference to nothing, or to an object of another kind; a source a sheet documents removed.
     for missing in [ids::encode(99), assembly_id.clone()] {
         let expected = format!("damaged drawing: sheet {bolt_sheet_id}: it documents source {missing}, which the drawing doesn't have");
