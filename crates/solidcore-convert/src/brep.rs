@@ -75,7 +75,8 @@ impl From<SolidError> for Unsupported {
 type R<T> = Result<T, Unsupported>;
 
 /// The kernel entity each record index names: `faces[i]` is record face `i`, and so for edges and
-/// vertices. Several record edges may name one kernel edge where solids touch along it.
+/// vertices. In [`to_record`]'s order several record edges may name one kernel edge where solids
+/// touch along it; [`to_kernel`] builds one kernel edge per record edge.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Order {
     /// Record face `i`'s kernel face.
@@ -393,8 +394,6 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
 
     // Faces, their loops and edgeuses.
     let mut eu = 0u64;
-    let mut eu_face: Vec<usize> = Vec::new();
-    let mut loop_vertices: Vec<(usize, u64)> = Vec::new();
     for (fi, f) in rec.faces.iter().enumerate() {
         let made = face_surface(
             k,
@@ -423,7 +422,6 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
                     ld.loop_type = 1;
                     ld.num_eu = 0;
                     ld.vertex = u64::from(*vertex);
-                    loop_vertices.push((fi, ld.vertex));
                 }
                 r::Loop::Edges { edges } => {
                     ld.loop_type = 0;
@@ -487,7 +485,6 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
                             ed.prim_eu = if this_top { here } else { -here - 1 };
                         }
                         d.edgeuses.push(ud);
-                        eu_face.push(fi);
                         eu += 1;
                     }
                 }
@@ -510,63 +507,11 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
         vd.point = Vec3::new(v.point[0], v.point[1], v.point[2]);
         d.vertices.push(vd);
     }
-    own_tolerances(&mut d, &eu_face, &loop_vertices)?;
     Ok(d)
 }
 
 fn idx(i: usize) -> R<u32> {
     u32::try_from(i).map_err(|_| Unsupported::Invalid("index"))
-}
-
-/// The body's and each face's tolerance from the edges' and vertices' own. The kernel's build
-/// raises every entity to the body's tolerance: taken as the largest, it would become every
-/// entity's, and each crossing between record and kernel spread the largest over the whole body.
-/// Each edge or vertex tolerance is at least the body's, so the body's is the least of them and a
-/// face's the least of its edges' and loop vertices'.
-fn own_tolerances(d: &mut BrepData, eu_face: &[usize], loop_vertices: &[(usize, u64)]) -> R<()> {
-    let zone = d.zone_tol_3d;
-    let mut faces = vec![f64::INFINITY; d.faces.len()];
-    let mut lower = |face: usize, t: f64| -> R<()> {
-        let slot = faces
-            .get_mut(face)
-            .ok_or(Unsupported::Invalid("edgeuse face"))?;
-        *slot = slot.min(t);
-        Ok(())
-    };
-    for (u, &face) in d.edgeuses.iter().zip(eu_face) {
-        let edge = usize::try_from(u.edge).map_err(|_| Unsupported::Invalid("edge"))?;
-        lower(
-            face,
-            d.edges
-                .get(edge)
-                .ok_or(Unsupported::Invalid("edgeuse edge"))?
-                .zone_tol_3d,
-        )?;
-    }
-    for &(face, vertex) in loop_vertices {
-        let v = usize::try_from(vertex).map_err(|_| Unsupported::Invalid("vertex"))?;
-        lower(
-            face,
-            d.vertices
-                .get(v)
-                .ok_or(Unsupported::Invalid("loop vertex"))?
-                .zone_tol_3d,
-        )?;
-    }
-    let least = d
-        .edges
-        .iter()
-        .map(|e| e.zone_tol_3d)
-        .chain(d.vertices.iter().map(|v| v.zone_tol_3d))
-        .fold(zone, f64::min);
-    if !(least.is_finite() && least > 0.0) {
-        return Ok(());
-    }
-    d.zone_tol_3d = least;
-    for (fd, t) in d.faces.iter_mut().zip(faces) {
-        fd.zone_tol_3d = if t.is_finite() { t.min(zone) } else { zone };
-    }
-    Ok(())
 }
 
 /// Whether the kernel holds `label` over `domain` as one of its analytic surfaces, proved: the

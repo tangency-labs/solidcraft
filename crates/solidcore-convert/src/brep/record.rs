@@ -6,10 +6,12 @@
 //!   ([`record_of`], [`record_face`]): a line by its two end points, a conic by its own frame and
 //!   its NURBS form, proved on each other; an analytic face by its label and its NURBS form,
 //!   proved (`lies_on`); a plane by its placement, its parameters its kernel ones times its
-//!   scales. Nothing is sampled, and nothing is approximated: a curve or surface with no exact
-//!   record is refused.
+//!   scales. Nothing is sampled. A curve or surface with no NURBS form (an offset) is refused.
+//!   Two things still cross as approximations: a procedural blend goes as its net and loses its
+//!   definition and bound until the definition records move into the record (PR 1's last
+//!   commit, still to come), and a use with no UV trim gets one the kernel makes by fitting.
 //! - **Pcurves:** every use's pcurve is the kernel's own UV trim (made first where a use has
-//!   none), its knots on the edge record's interval ([`record_trim`]). A face's parameters in
+//!   none, by the kernel's fit), its knots on the edge record's interval ([`record_trim`]). A face's parameters in
 //!   the record are its NURBS's (or a plane's, scaled), none periodic, so no loop is moved by
 //!   periods.
 //! - **Sides:** the kernel keeps a face's loops relative to its NURBS's natural normal, which is
