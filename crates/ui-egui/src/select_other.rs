@@ -118,7 +118,7 @@ fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2, through: bool) -> (Vec<Ro
     }
     // A face place a sketch point snapped (a Single hole's) is its own row: beside the face as
     // picked, and beside other points on that face.
-    let snapped = |h: &Hit| matches!(h, Hit::SketchPoint { .. } | Hit::SketchPoint3d { .. });
+    let snapped = |h: &Hit| matches!(h, Hit::SketchPoint { .. });
     let mut out: Vec<(Hit, Sel)> = Vec::new();
     for (h, s) in found {
         if !out.iter().any(|(hx, x)| if snapped(hx) || snapped(&h) { *x == s } else { crate::selection::same_item(x, &s) }) {

@@ -1658,6 +1658,8 @@ preference_settings! {
     selection_shift_add_only: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
+    /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.
+    select_3d_curve_points: bool = false, PAGE_SKETCH;
     /// While the open sketch's constraints conflict, the curves and points a failing constraint
     /// holds, and its glyph or dimension, are drawn in `sketch_conflict` (#7244). Off: only the
     /// glyphs and dimensions are red, in `error`, as before.
@@ -7603,6 +7605,7 @@ mod tests {
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
                 ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
                 ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
+                ("select_3d_curve_points", "prefs.sketch.select_3d_curve_points"),
                 ("select_other_hidden", "prefs.sketch.select_other_hidden"),
                 ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
             ] {

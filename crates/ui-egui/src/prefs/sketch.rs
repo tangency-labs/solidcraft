@@ -400,6 +400,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         check(
             ui,
+            "select_3d_curve_points",
+            "prefs.sketch.select_3d_curve_points",
+            Some("prefs.sketch.select_3d_curve_points_help"),
+            &mut app.preferences.select_3d_curve_points,
+        );
+        check(
+            ui,
             "select_other_hidden",
             "prefs.sketch.select_other_hidden",
             Some("prefs.select_other_hidden_help"),

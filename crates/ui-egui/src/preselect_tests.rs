@@ -2867,6 +2867,16 @@ fn offset_plane_picks_a_3d_spline_tip_and_keeps_its_reference() {
     h.frames(2);
     let [x, y] = h.at(&json!({"world":[50,40,30]})).unwrap();
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    assert!(!h.app.preferences.select_3d_curve_points, "new point targets are opt-in");
+    assert!(!crate::viewport::standalone_points(&h.app).contains(&Vec3::new(50., 40., 30.)));
+    assert!(
+        crate::viewport::pick(&h.app, &proj, egui::pos2(x as f32, y as f32))
+            .iter()
+            .all(|hit| !matches!(hit, crate::viewport::Hit::SketchPoint3d { .. }))
+    );
+    h.call("ui.prefs", json!({"select_3d_curve_points":true}));
+    h.frames(2);
+    assert!(crate::viewport::standalone_points(&h.app).contains(&Vec3::new(50., 40., 30.)));
     let hits = crate::viewport::pick(&h.app, &proj, egui::pos2(x as f32, y as f32));
     let hit = hits.iter().find(|hit| matches!(hit, crate::viewport::Hit::SketchPoint3d { .. })).expect("pickable 3D tip");
     let picked = h.app.dialog.as_ref().unwrap().candidate(&h.app.session, hit).expect("accepted point reference");
@@ -2880,6 +2890,33 @@ fn offset_plane_picks_a_3d_spline_tip_and_keeps_its_reference() {
     assert!((plane.origin.z - 30.0).abs() < 1e-9);
     let reopened = crate::dialogs::for_feature(&h.app, feature, None).unwrap();
     assert_eq!(reopened.inputs[1].items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:2") }]);
+    h.call("ui.prefs", json!({"select_3d_curve_points":false}));
+    assert!(!crate::viewport::standalone_points(&h.app).contains(&Vec3::new(50., 40., 30.)));
+}
+
+#[test]
+fn hole_does_not_freeze_or_preselect_a_drawn_3d_wire_point() {
+    use crate::viewport::Hit;
+    let mut app = boxed();
+    let sketch = app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    let wire = app.run("sketch.spline3d", json!({"points":[[10,10,0],[15,12,10],[20,15,20]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    app.run("sketch.finish", json!({})).unwrap();
+    let selected = Sel::SketchPoint { id: format!("{sketch}:{wire}:2") };
+    let mut d = start(&mut app, vec![selected], "solid.hole");
+    assert!(d.inputs.iter().all(|input| input.items.is_empty()));
+    let at = Vec3::new(20., 15., 20.);
+    let Sel::Face { body, index, point } = face(&app, at) else { panic!("top face") };
+    let face = Hit::Face { body, index, point };
+    let node = Hit::SketchPoint3d { sketch, id: format!("{wire}:2"), at };
+    assert!(d.face_snap(&app.session, &[face.clone(), node.clone()]).is_none());
+    assert!(d.candidate(&app.session, &node).is_none());
+    assert!(d.candidate(&app.session, &face).is_some(), "ordinary face placement still works");
+    if let Kind::Hole { opts, .. } = &mut d.kind {
+        opts.multiple = true;
+    }
+    d.inputs = vec![crate::selection::SelInput::new("Points", crate::selection::POINTS, true)];
+    assert!(d.candidate(&app.session, &node).is_none());
 }
 
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,

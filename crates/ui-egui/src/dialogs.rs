@@ -1145,6 +1145,9 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
+            if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
+                continue;
+            }
             // A sketch line drawn over a body edge is what a click there picks; a command that
             // takes edges and no sketch curves takes it as that edge (#8927).
             let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel)) && d.inputs.iter().any(|i| i.accept & EDGES != 0))
@@ -1552,7 +1555,6 @@ impl Dialog {
         let near: Vec<Vec3> = hits
             .iter()
             .filter_map(|h| match h {
-                Hit::SketchPoint3d { at, .. } => Some(*at),
                 Hit::SketchPoint { sketch, at, .. } => st.sketch(*sketch).map(|ss| ss.plane.to_world(*at)),
                 Hit::Edge { body, index, .. } => edge_circle_in(&st, body, *index).map(|(c, ..)| c),
                 _ => None,
@@ -1581,10 +1583,10 @@ impl Dialog {
                 _ => None,
             };
         }
-        if snaps_to_points(inp.accept)
-            && let Hit::SketchPoint3d { at, .. } = h
-        {
-            return snap?.place_at(*at);
+        // Only construction tools resolve wire-node references. In particular, Hole must
+        // not silently freeze a wire node into a face position or accept an unresolved ID.
+        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) {
+            return None;
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
@@ -2147,6 +2149,15 @@ fn single_hole_point(app: &SolveApp, d: &Dialog, x: &Sel) -> Option<(u64, String
         let p = ss.sketch.points.iter().find(|p| shown.takes(p) && ss.plane.to_world(p.pos).dist(*point) < 1e-9)?;
         Some((sid, p.id.clone()))
     })
+}
+
+/// A selected drawn wire node, distinguished from an ordinary planar sketch point.
+fn is_wire_point(s: &Session, sel: &Sel) -> bool {
+    let Sel::SketchPoint { id } = sel else { return false };
+    let Some((sketch, point)) = id.split_once(':') else { return false };
+    let Ok(sketch) = sketch.parse::<u64>() else { return false };
+    let Some((wire, index)) = point.rsplit_once(':') else { return false };
+    index.parse::<usize>().is_ok() && s.model.state().sketch(sketch).is_some_and(|ss| ss.sketch.wire_index(wire).is_some())
 }
 
 /// Does an input take face places that snap to sketch points on the face (the Single hole's)?
