@@ -72,11 +72,16 @@ pub struct Point3dParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = move_required)]
 pub struct Move3dParams {
-    // Optional in the type and required in the schema, as `Line3dParams::points`.
+    // Optional in the type; the schema requires `wire` or `point` (`move_required`).
     /// The drawn 3D curve or point to move, by id.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WireId")]
     pub wire: Option<WireId>,
+    /// Or a sketch point on the plane instead of `wire`: `l1.end`, `p3` (a line's end, a fit
+    /// point of a spline, a lone point). In a 3D sketch the lines and fit-point splines through it
+    /// become drawn 3D curves first; arcs, circles and control-point splines stay on the plane.
+    #[serde(default)]
+    pub point: Option<String>,
     /// Which fit point of the curve (0 is the first), below 500. Default: 0.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FitIndex")]
@@ -110,8 +115,13 @@ fn point_required(schema: &mut Schema) {
 }
 
 fn move_required(schema: &mut Schema) {
-    require(schema, "wire");
-    schema.insert("anyOf".into(), json!([{"required": ["to"]}, {"required": ["by"]}]));
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["wire"]}, {"required": ["point"]}]},
+            {"anyOf": [{"required": ["to"]}, {"required": ["by"]}]},
+        ]),
+    );
 }
 
 /// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, as their
@@ -277,6 +287,15 @@ pub struct Point3dResult {
 pub struct Move3dResult {
     /// How many fit points moved: the one asked for and the points joined to it.
     pub moved: usize,
+    /// For a sketch `point`: the drawn 3D curves the lines and splines through it became.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifted: Option<Vec<String>>,
+    /// For a sketch `point`: the drawn curve the point is on now, and its fit point there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<String>,
+    /// For a sketch `point`: which fit point of `wire` it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

@@ -1174,7 +1174,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "dimension_editing": crate::dim_view::editing(),
         })),
         "ui.triad" => {
-            // Screen points of the 3D move triad's handles (x, y, z arrows and the plane square).
+            // Screen points of a clicked drawn point's arrows (x, y, z and the plane square), there
+            // under the sketch_move_classic preference.
             let Some(rect) = app.viewport.rect else { return err("no viewport") };
             let proj = crate::viewport::projection(app, rect);
             ok(json!(
