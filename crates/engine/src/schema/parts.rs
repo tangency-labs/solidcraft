@@ -156,7 +156,7 @@ impl JsonSchema for HolePicks {
         let point = generator.subschema_for::<Point3>();
         json_schema!({
             "description": "A point on a hole's rim or wall, or a list of them (one per hole, at most 1000): the part seats on each hole's face with a rigid joint.",
-            "anyOf": [point.clone(), {"type": "array", "items": point, "maxItems": MAX_HOLES}]
+            "anyOf": [point.clone(), {"type": "array", "prefixItems": [{"type": "array"}], "items": point, "maxItems": MAX_HOLES}]
         })
     }
 }
