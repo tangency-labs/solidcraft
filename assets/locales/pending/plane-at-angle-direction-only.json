@@ -2,14 +2,23 @@
   "en": {
     "Use axis direction only": "Use axis direction only"
   },
+  "ar": {
+    "Use axis direction only": "استخدام اتجاه المحور فقط"
+  },
   "de": {
     "Use axis direction only": "Nur Achsenrichtung verwenden"
+  },
+  "he": {
+    "Use axis direction only": "השתמש בכיוון הציר בלבד"
   },
   "ja": {
     "Use axis direction only": "軸の方向のみを使用"
   },
   "ko": {
     "Use axis direction only": "축 방향만 사용"
+  },
+  "vi": {
+    "Use axis direction only": "Chỉ dùng hướng trục"
   },
   "zh": {
     "Use axis direction only": "仅使用轴方向"
