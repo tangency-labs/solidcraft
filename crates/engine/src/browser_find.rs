@@ -151,6 +151,14 @@ pub struct Search {
     pub incomplete: bool,
 }
 
+impl Search {
+    /// Does `found` hold every match? Not when it stopped at `MAX_LISTED` matches or
+    /// `MAX_PLACEMENTS` placements.
+    pub fn complete(&self) -> bool {
+        !self.incomplete && self.found.len() == self.total
+    }
+}
+
 /// Everything in the browser whose name matches `pattern` (everything, without one), of the
 /// `kinds` given (every kind when there are none).
 pub fn find(s: &Session, pattern: Option<&Pattern>, kinds: &[Kind]) -> Search {
@@ -210,7 +218,9 @@ impl Walk<'_> {
                 self.hit(Kind::Body, &b.name, item, path);
             }
         }
-        for f in s.doc.features.iter().filter(|f| f.component == component) {
+        // Features after the history marker are not in the browser's folders, so not found either.
+        let before_marker = s.doc.marker.unwrap_or(s.doc.features.len());
+        for f in s.doc.features.iter().take(before_marker).filter(|f| f.component == component) {
             match f.kind {
                 FeatureKind::Sketch { .. } => self.hit(Kind::Sketch, &f.name, || (f.id.to_string(), Some(Sel::Feature { id: f.id })), path),
                 FeatureKind::ConstructionPlane { .. } => {
