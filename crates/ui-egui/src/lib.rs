@@ -1568,6 +1568,9 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
+        // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
+        // `logic`): build its hint in the user's language, not the thread default.
+        let _language = crate::i18n::scope(&self.preferences.language);
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
