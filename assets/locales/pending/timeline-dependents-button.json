@@ -1,0 +1,10 @@
+{
+  "en": { "ui.dependents_select_first": "Select what to list the dependents of first" },
+  "ar": { "ui.dependents_select_first": "حدّد أولًا ما تريد سرد معتمداته" },
+  "de": { "ui.dependents_select_first": "Wählen Sie zuerst aus, wessen Abhängige aufgelistet werden sollen" },
+  "he": { "ui.dependents_select_first": "בחרו קודם מה להציג את התלויים שלו" },
+  "ja": { "ui.dependents_select_first": "先に、依存先を表示する対象を選択してください" },
+  "ko": { "ui.dependents_select_first": "먼저 종속 항목을 표시할 대상을 선택하세요" },
+  "vi": { "ui.dependents_select_first": "Hãy chọn trước đối tượng để liệt kê các phần phụ thuộc của nó" },
+  "zh": { "ui.dependents_select_first": "请先选择要列出其依赖项的对象" }
+}

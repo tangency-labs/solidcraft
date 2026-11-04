@@ -131,6 +131,8 @@ mod surface_clamp_tests;
 #[cfg(test)]
 mod surface_errors_tests;
 #[cfg(test)]
+mod timeline_dependents_tests;
+#[cfg(test)]
 mod timeline_marks_tests;
 #[cfg(test)]
 mod status_tests {
@@ -1607,6 +1609,24 @@ impl SolveApp {
                 self.set_status(self.tr("ui.delete_select_first"), false);
             } else if !timeline_left::delete_selected_folders(self) {
                 delete::delete_selection(self);
+            }
+            return;
+        }
+        // The Dependents button of INSPECT ▸ HISTORY asks for the dependents of ONE
+        // feature, so it needs a target. With nothing selected it used to run the
+        // command with no feature and the engine answered "Feature Dependents:
+        // `feature` must be an id or name". It reports the dependents of what is
+        // selected, one command call per selected feature.
+        if id == "timeline.dependents" {
+            let selected = timeline::selected_feature_ids(self);
+            if selected.is_empty() {
+                self.set_status(self.tr("ui.dependents_select_first"), false);
+                return;
+            }
+            for feature_id in selected {
+                if let Err(why) = self.run("timeline.dependents", json!({ "feature": feature_id })) {
+                    self.set_status(why, true);
+                }
             }
             return;
         }
