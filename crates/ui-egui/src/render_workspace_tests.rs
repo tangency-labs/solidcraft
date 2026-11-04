@@ -2607,7 +2607,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         off(&mut h);
         let handle = match style {
             crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            crate::prefs::NavigatorStyle::Cube => "navigation_cube:control:home",
+            // Custom draws the cube until a body is chosen.
+            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();
@@ -3840,6 +3841,31 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
     assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &mesh));
     let mut maximum = PreviewUploadPlan::default();
     assert!(maximum.add(true, false, MAX_GEOMETRY_BYTES / (3 * crate::gpu::PBR_SIZE) + 1, MAX_GEOMETRY_BYTES).is_err());
+}
+
+/// The product scene is extracted again only when what it shows can change: a selection or a
+/// view change keeps its signature (they extracted every body and built every vertex again),
+/// an appearance edit, hiding a body or a geometry edit changes it.
+#[test]
+fn product_preview_signature_follows_what_the_preview_shows() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
+    let first = preview_signature(&mut h.app);
+    assert_eq!(preview_signature(&mut h.app), first, "nothing changed");
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": &body}]})).unwrap();
+    assert_eq!(preview_signature(&mut h.app), first, "a selection");
+    h.app.run("select.clear", json!({})).unwrap();
+    let _ = h.call("ui.view", json!({"view": "top"}));
+    assert_eq!(preview_signature(&mut h.app), first, "a view change");
+    h.app.run("appearance.assign", json!({"bodies": [&body], "color": "#336699"})).unwrap();
+    let painted = preview_signature(&mut h.app);
+    assert_ne!(painted, first, "an appearance edit");
+    h.app.run("browser.visibility", json!({"items": [&body], "visible": false})).unwrap();
+    assert_ne!(preview_signature(&mut h.app), painted, "hiding a body");
+    h.app.run("browser.visibility", json!({"items": [&body], "visible": true})).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new"})).unwrap();
+    assert_ne!(preview_signature(&mut h.app), painted, "a geometry edit");
 }
 
 #[test]
@@ -5922,6 +5948,60 @@ fn output_viewer_copy_uses_retained_final_pixels_and_refuses_missing_or_oversize
     assert!(h.output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyImage(image) if image.size == [16,16])));
     assert!(Arc::ptr_eq(&document, &h.app.session.doc));
     assert_eq!(undo, h.app.session.undo.len());
+}
+
+/// #11222: during a render, Cancel keeps its whole label below and from 10 %. A name that fits
+/// is shown whole as the percentage grows; a long one is cut instead, and the row stays in the canvas.
+/// In a window too narrow for the row, Cancel still shows whole.
+#[test]
+fn progress_pill_cancel_keeps_its_label_and_a_long_name_gives_way() {
+    let mut h = output_viewer_fixture();
+    h.app.render_workspace.view.draft.width = 512;
+    h.app.render_workspace.view.draft.height = 512;
+    h.app.render_workspace.view.name = "A".into();
+    ribbon::perform_job(&mut h.app, "render.start").unwrap();
+    let job = h.app.render_workspace.view.job.unwrap();
+    h.frames(3);
+    let whole = crate::scenario::rect_of("render:progress:cancel").unwrap().width();
+    let fraction = |h: &mut Harness| {
+        let status = h.app.session.execute("render.status", &json!({"job":job})).unwrap();
+        status["progress"]["done"].as_f64().unwrap() / status["progress"]["total"].as_f64().unwrap().max(1.0)
+    };
+    assert!(fraction(&mut h) < 0.1);
+    let long = "A very long shot name that will not fit beside the progress meter ".repeat(4);
+    let host = h.app.session.render_job_host().unwrap().clone();
+    for below in [true, false] {
+        if !below {
+            for _ in 0..100_000 {
+                if fraction(&mut h) >= 0.1 {
+                    break;
+                }
+                host.pump(64).unwrap();
+            }
+            let reached = fraction(&mut h);
+            assert!((0.1..1.0).contains(&reached), "{reached}");
+        }
+        for name in ["Bracket front view", long.as_str()] {
+            h.app.render_workspace.view.job_shot = Some(name.into());
+            h.frames(3);
+            let cancel = crate::scenario::rect_of("render:progress:cancel").unwrap();
+            let pill = crate::scenario::rect_of("render:progress-pill").unwrap();
+            let shown = crate::scenario::rect_of("render:progress:name").unwrap();
+            let case = format!("below 10 %: {below}, {} characters", name.len());
+            assert!((cancel.width() - whole).abs() < 0.5, "{case}: Cancel {} wide, whole {whole}", cancel.width());
+            assert!(pill.contains_rect(cancel), "{case}: {cancel:?} outside {pill:?}");
+            assert!(shown.right() < cancel.left(), "{case}");
+            let cut = crate::scenario::count_of("render:progress:name:cut");
+            assert_eq!(cut, Some(if name == long { 1.0 } else { 0.0 }), "{case}");
+            assert!(h.app.viewport.rect.unwrap().contains_rect(pill), "{case}: {pill:?}");
+        }
+    }
+    // A window too narrow for the whole row: the name is cut and Cancel still shows whole.
+    h.call("ui.resize", json!({"width": 480, "height": 600}));
+    h.frames(3);
+    let cancel = crate::scenario::rect_of("render:progress:cancel").unwrap();
+    assert!((cancel.width() - whole).abs() < 0.5, "narrow window: Cancel {} wide, whole {whole}", cancel.width());
+    assert_eq!(crate::scenario::count_of("render:progress:name:cut"), Some(1.0));
 }
 
 #[test]

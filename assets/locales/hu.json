@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "Hozzáférhetőség-elemzés",
   "cmd.inspect_center_of_mass": "Tömegközéppont",
   "cmd.inspect_clearance": "Hézag",
-  "cmd.inspect_colored_components": "Komponensszínek bekapcsolása",
-  "cmd.inspect_colored_components_disable": "Komponensszínek kikapcsolása",
   "cmd.inspect_compare": "Testek összehasonlítása",
   "cmd.inspect_compare_picture": "Kép összehasonlítása",
   "cmd.inspect_continuity": "Folytonosságelemzés",

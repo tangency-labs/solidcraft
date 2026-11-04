@@ -1,5 +1,212 @@
 # Control protocol
 
+The [universal panel foundation](panel-foundation.md) supplies typed layout actions
+and retained runtime guards. The application-layout commands below are registered
+engine commands reached through `engine.execute`, `engine.batch`, `engine.script`
+and MCP's existing `execute`/`batch` tools. They require an injected application
+backend; enabling the internal panel runtime remains an explicit integration step.
+Current product defaults and the production shell are unchanged.
+
+### Application panel and layout commands
+
+Every command has input and output schemas through ordinary command discovery.
+Inputs are strict at every parameter-check level: unknown fields, including nested
+placement fields, are errors. As with other engine calls, omitted/null parameters
+mean an empty object. IDs use the foundation's bounded lowercase ID domains;
+dimensions are finite positive outer logical units, at most 32768. Requests are
+bounded to 16384 encoded bytes before cloning or deserialising. No command opens a
+dialog, edits the document, changes dirty/undo/revision, evaluates or tessellates a
+model, fits a body, follows a camera request or selects a ribbon/tool/document tab.
+Layout revision is independent of document revision.
+
+Canonical existing targets are typed: `{"target":{"type":"instance","id":"log"}}`.
+`section`, `workspace` and `native_host` are the other foundation target types;
+each command accepts only the domains listed below. A legacy `id` may replace
+`target`, but both together are rejected. It first resolves an exact instance ID.
+A kind ID resolves only when its registration is single-instance and exactly one
+canonical instance exists, including retained closed state. Multi-instance kinds
+are rejected even when only one instance currently exists. No first-match guessing
+or implicit instance creation occurs. `panel.open` instead requires separate `kind`
+and `instance` fields.
+
+All mutations accept optional `expected_revision:u64`. A stale revision produces
+the foundation `revision` rule and leaves the command's layout and catalogue
+unchanged. Successful mutations return the committed `LayoutReply` (layout,
+revision, interaction, effects, capabilities and availability), never an echoed
+placement request. `layout` includes all retained instances with `requested_open`,
+ordered sections and their active tabs. Missing availability entries mean available.
+Query replies contain no new host effects.
+
+| Command | Parameters and behaviour |
+|---|---|
+| `panel.list` | `{}` → `{state:LayoutReply,kinds:[PanelSpec]}` from the live sink and registry. |
+| `panel.open` | `{kind,instance,destination?,expected_revision?}`. New instances require a destination; closed instances can reuse remembered placement. |
+| `panel.close` | `{target:instance,expected_revision?}`. Explicit guarded close retains placement and can refuse cancellation. |
+| `panel.move` | `{target:instance,destination,expected_revision?}`. Existing open instances only. |
+| `panel.resize` | `{target:section|instance,size:{width,height},expected_revision?}`. Instance must have an open section; all tab bounds intersect. |
+| `panel.collapse` | `{target:section|instance,collapsed:bool,expected_revision?}`. Keeps requested dimensions. |
+| `panel.float` | Same as move, requiring a `new_section` with `floating` location. |
+| `panel.popout` | Same as move, requiring a `new_section` with `window` location and return destination. Desktop/headless without native capability refuse; web explicitly lowers to `floating`. |
+| `panel.focus` | `{target:instance,expected_revision?}`. Reopens retained closed state, activates, expands and requests focus. |
+| `panel.activate` | `{target:instance,expected_revision?}`. Activates an open tab without expanding or requesting focus. |
+| `panel.peek` | `{target:instance,expected_revision?}`. Temporary presentation of a collapsed tab, without persistence changes to size/collapse. |
+| `panel.dismiss` | `{expected_revision?}`. Dismisses transient peek. |
+| `panel.resize_pair` | `{first:SectionId,second:SectionId,first_size:{width,height},second_size:{width,height},expected_revision?}`. Adjacent sections of one dock; conserves split-axis extent and cross-axis dimensions. |
+| `panel.reset_pair` | `{first,second,expected_revision?}`. Resets adjacent sections to the registered default ratio within intersected bounds. |
+| `panel.native_close` | `{target:{type:"native_host",id:HostId},expected_revision?}`. Native window close redocks its whole section; it does not explicitly close/cancel content. |
+| `layout.save` | `{name,overwrite?:false,expected_revision?}` → `{name,overwritten,state}`. Saves the complete current envelope in the injected catalogue. |
+| `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
+| `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
+| `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
+| `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"|"default_preset"|"unchanged",state}`. Registered descriptors only; no implicit creation. |
+
+Destinations are distinct foundation operations, not aliases:
+
+```json
+{"type":"new_section","section":"logs","index":0,"location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}
+{"type":"join_tab","section":"logs","index":1}
+```
+
+New-section indices address the global section order after detachment; join indices
+address the destination's tab list after detachment. Joining keeps the destination's
+activation, collapse and dimensions. Locations are `dock` (left/right/bottom),
+`floating` (`origin:{x,y}`), or `window` (`host`, `origin`, `return_to`). Native
+`return_to` contains `{zone,index,size,collapsed,join?:{section,index}}`; it never
+recursively contains another native host. Pins and placement/size intersections
+retain the foundation's structured refusal rules.
+
+Preset names trim surrounding whitespace, require 1..64 Unicode scalar values and
+reject controls anywhere in the supplied name. Raw input is capped at 1024 UTF-8
+bytes before trimming; the trimmed name is at most 256 bytes. Names are case-sensitive.
+There are at most 64 user presets. Collisions reject unless `overwrite:true` is
+explicit; built-ins are immutable. No production kinds, preset contents or workspace
+descriptors are invented. Headless starts with an empty registry/catalogue and an
+internal current-layout identity, not a registered product workspace. Fixtures and
+peer integrations can inject synthetic or real registrations. Missing capabilities
+return errors rather than guessed defaults or disk/native success.
+
+Workspace selection stages the outgoing full envelope, destination and selected
+workspace together, then uses one guarded `Replace` on the retained runtime.
+Same-workspace selection is a true no-op, preserving revision, focus, peek and
+effects even if storage staging is unavailable. Applying/resetting a preset never
+selects a workspace. Replacements hide omitted content without implicit Close or
+Cancel; retained editors, conversations and hidden services survive A→B→A.
+
+Catalogue preparation uses encoded full `LayoutEnvelope` records and explicit
+aggregate caps: 64 registered workspaces, 64 built-ins, 64 remembered envelopes,
+64 user presets, 16384 metadata bytes, and 4194304 aggregate envelope/recovery bytes.
+Each envelope/rejected recovery buffer remains at most 262144 bytes and obeys the
+foundation node/depth/collection caps. Quarantine, retained data, shared section
+snapshots including projected sections, complete section order and bounded rejected
+recovery intent survive save/apply/reset. Conflicting opaque identities, snapshots,
+retained data or recovery intent reject atomically. Restoration uses the foundation
+decoder and reappearance logic. Storage preparation finishes before live dispatch;
+catalogue publication is infallible after successful native/controller guards.
+Revision changes during staging reject the staged catalogue. No fallible storage
+write after live commit is treated as an atomic success. The shipped catalogue is
+in-memory; production preference durability and migrations remain peer work.
+
+Atomic layout batches contain 1..64 commands, using the same parser/executor and
+one final guarded Apply or Replace plus one catalogue publication. Queries and
+saves may accompany mutations; save/apply/reset/workspace sequences can stage
+together. Replies describe the **final committed** state, not hypothetical
+intermediate live states. Every `expected_revision` in an atomic batch refers to
+the initial live revision. Explicit Close/Open conflicts remain `lifecycle` errors.
+Atomic batches cannot combine a snapshot replacement with explicit panel mutations,
+or mix document commands with application layout; they return `capability` before
+publishing anything. This preserves the foundation's explicit lifecycle intents.
+Use `rollback:false` for sequential per-command transactions across these domains;
+failures report `rolled_back:false`, `undone:0` and completed results. Scripts use
+the same injected backend sequentially and stop at the first failure. A Session-only
+executor (including ordinary CLI design scripts without an injected backend)
+returns a structured missing-capability error for layout commands.
+
+The GUI route uses the enabled runtime's actual content-service provider and an
+injected `NativeHostAdapter`, never a reconstructed LayoutService. Headless MCP
+owns one persistent application backend distinct from Session; Remote forwards to
+the app and keeps no mirrored layout. Auto mode does not discard headless layout
+work when an app appears. Foundation errors retain `{rule,detail}` with bounded
+details: control replies add `panel_error` alongside the existing error string;
+MCP tool errors add `structuredContent.panel_error`. The error string also encodes
+that object, preserving identity through older string-only backend boundaries.
+Rust integrations implement `ActionSink::project(LayoutAction)` as a pure
+projection on the authoritative service. Its default returns `capability` so an
+older inspect/dispatch-only sink cannot accidentally publish unstaged commands.
+`LayoutService` and `RuntimeActionSink` provide it using the foundation's own
+preparation path. `with_live_layout` refreshes the envelope's shared section memory
+and projections without discarding opaque fields, then encodes against the same
+foundation limits before publication.
+
+Storage consumers can enumerate `CatalogueState::user_presets()` read-only and
+round-trip a complete validated catalogue with `export()` and
+`CatalogueState::hydrate(bytes,registry)` or `InMemoryCatalogue::from_snapshot`.
+Hydration is independent of live commands; restored users remain explicitly
+overwritable users, while built-ins remain immutable. Workspace descriptors,
+remembered full envelopes, and rejected recovery bytes are included. The versioned
+snapshot uses `SCPCAT01`, then length-prefixed little-endian u32 counts/UTF-8 names
+and raw byte records, in built-ins/users/workspaces/remembered order. Each envelope
+record contains length-prefixed envelope JSON, a recovery-presence byte (0/1), and,
+when present, length-prefixed exact recovery bytes. Workspace descriptors contain
+ID/title-key/default-name strings. The snapshot has an additional 8192-byte framing
+allowance above the existing aggregate payload/metadata caps (4218880 bytes total).
+Every count/string/record is bounded before allocation, and hydration rejects
+duplicate names across users/built-ins, duplicate workspace keys, corrupt framing,
+trailing data, invalid envelope identities and all existing aggregate/node/depth
+limits before a candidate can be published. This seam performs no disk storage.
+
+Reading a retained envelope does not consume quarantine merely because the registry
+has grown. `decode_retained_record` validates an already-retained record exactly;
+`decode_retained` additionally checks its workspace. Neither reader generates
+section order/projections or performs quarantine migration/reappearance. Hydration
+preserves the original validated record bytes and rejected binary data, including
+records at the per-envelope or aggregate cap when optional panel kinds disappear
+or return. Missing registrations do not invalidate unrelated users, built-ins or
+workspace memories. Retained validation checks structural ownership, placement
+bounds and all applicable known-kind constraints, without invented descriptors.
+An exact retained layout can still contain absent kinds and is not live admission.
+`StoredEnvelope::project_envelope` (or foundation `project_retained_record`) stages
+missing-kind quarantine before a guarded live use, preserving full section order,
+activation and opaque records. This staging does not consume existing quarantine;
+ordinary save/live overlays therefore keep reappearance retryable after registry
+growth. Foundation `decode` also stages migration and attempts restoration, with
+its existing fallback/rejected-input result contract.
+Materialization may legitimately exceed a cap and reject its staged candidate;
+reading/hydrating the accepted original record does not materialize it.
+Apply/reset/workspace replacement
+explicitly stage restoration, and consume it only with a successful authoritative
+Replace and catalogue publication. A failed action leaves the restore obligation
+retryable. `panel.popout` requires the panel's `features.popout` on both web and
+native policies before any enabled web fallback; `panel.float` remains separate.
+
+Application command, atomic-batch and GUI action boundaries refresh the current
+read-only provider/document environment and availability. A document or contextual
+model change earlier in a sequential batch/script is visible to the next panel
+step without a tick. Queries and failed actions cannot borrow the previous
+document's context. No content tick, document edit, geometry work or camera tail is
+added to this boundary. All application GUI and command routes use one stored
+native adapter, installed once; redock its native sections before disabling it.
+Unsupported atomic intent mixtures are rejected by pure structural preflight
+before any context/controller publication as well as before layout/native effects.
+
+At MCP tool level, an atomic batch containing any panel/layout command must reach
+the authoritative batch transaction. If the endpoint is unavailable or the encoded
+request exceeds its transport margin, a structured zero-effect capability/size
+refusal replaces the old sequential fallback. No document checkpoint or individual
+layout command is sent. Explicit `rollback:false` keeps the sequential fallback
+and reports completed layout changes honestly. Document-only batch fallback keeps
+its existing checkpoint/rollback behaviour. Explicit null parameters normalize to
+an empty object in single, atomic, sequential and script routes for GUI/headless.
+
+Compatibility: `view.layout` still means Floating/Compact **surface styling**.
+History-in-Browser, History Bodies/Origin and Render search/options remain content
+preferences. Existing `view.history_layout`/`view.render_dock` controls continue to
+serve the existing shell. There is no safe universal alias without registered
+instance identities: `browser`/`under_browser` combine content with placement, and
+Render dock changes can affect a pair. They are not silently mapped to universal
+instances. Integrations with explicit identities can issue typed `panel.move`,
+`panel.resize` and `panel.collapse` requests for safe placement changes. No command
+implicitly selects a layout workspace on a document, ribbon, tool or context change.
+
 For UI-kit review, `ui.status_fixture {"preset":"mode"}` shows bounded status
 specimens in the real viewport. Presets are `off`, `mode`, `result`, `attention`,
 `row`, `kinds`, `many` and `key`; the reply carries the preset and item count. This
@@ -28,14 +235,34 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
-Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
-session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..60; the optional
 capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
-preference. The reply contains requested radius, capability/reason and cumulative
+preference. Theme-authored blur is edited with `ui.prefs {theme_options:{theme_id:{blur:18}}}`;
+the theme must declare the option. Finite fractional values remain valid, although
+the UI slider edits in steps of one physical pixel. The `ui.prefs` option definition's
+`available`/translated `reason` describes current app/device/OS availability; its
+value remains the saved/default intent while unavailable.
+
+The `ui.blur` reply contains requested radius, renderer capability, app-aware
+`available`/`reason`, `guard` (tier cap, streak, notice, session opt-out), and cumulative
 actual effect counters, including live resources and encoded passes. Unsupported
 software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
 panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
 fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+Supplying `radius_px` selects the legacy session-only rendering harness override;
+`fixture:"clear"` removes that override and any injected availability reason,
+returning to theme intent. It does not revoke a quality-guard Undo opt-out.
+
+Explicit evidence-only fixtures are `gpu-software`, `reduce-transparency`, and
+`web-unsupported` (force an unavailable reason), plus `guard-60` (inject sixty
+eligible 23 ms samples into the transient guard at the current positive radius).
+The reply labels the active injection as `evidence_fixture`; `null` means none.
+These are not end-user settings, real adapter/OS readings or performance measurements.
+There is no fixture that makes an unsupported renderer available. They do not
+change saved options, host OS settings or document history. All supplied fields
+are validated before mutation. Capture fixture screenshots with that label in the
+evidence description, and clear the fixture before checking real capabilities.
 
 | Launch | What listens |
 |---|---|
@@ -255,7 +482,7 @@ the legacy behavior: surface shading and Continuity remain independently active 
 and `view.status_items` faithfully lists both, using a separate stable `continuity` ID. Together
 with Section there are at most three slots. Turning the preference back on keeps the last
 successfully started or changed analysis at the oldest analysis-group position beside Section.
-Queries never normalize state. Graphics Restore Defaults restores `true`; other page resets
+Queries never normalize state. Graphics Restore page defaults restores `true`; other page resets
 leave it alone. It applies immediately to all open designs without document edits or undo.
 Cancel restores the opening preference value, but does not restart an analysis already stopped
 by switching to single mode. Run that analysis again to restore coexistence after cancelling.
@@ -312,8 +539,8 @@ drawing and answering while it runs:
   design changes, from any connection, wait their turn and run in the order they arrived.
 - A person's edit made meanwhile goes first. The agent's command is then computed again for the
   design as it is and lands after that edit, never in the middle of it. If the design was replaced
-  (another tab made active, a new file opened), the request fails with `… the design was
-  replaced … nothing was applied`.
+  (another tab made active, a new file opened, its tab closed), the request fails at once with
+  `… the design was replaced … nothing was applied`, and the requests behind it go on.
 - A chip in the view names the command, with **Stop**. Stop answers
   `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and the requests
   waiting behind it go on. The computation finishes unseen in the background.
@@ -475,6 +702,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
+- `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
+- `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
+- `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
@@ -499,7 +729,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
+- `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
+- `navigator_home` (default true: the custom view navigator has the cube's Home button beside it; also `view.navigator {home}`)
+- `navigator_style` (`axes` (default), `cube`, `custom`: the body chosen with `view.navigator`, the cube until one is chosen)
+- `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
@@ -513,6 +747,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
+- `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
@@ -563,7 +798,7 @@ when both occur in a call. Imported themes cannot claim the retired built-in ids
 
 Theme option values persist per theme, including a followed file's own id, through the same
 preference store in the browser and on desktop. Switching themes restores their saved values;
-Interface's Restore Defaults clears them. Preference exports and settings profiles carry values;
+Interface's Restore page defaults clears them. Preference exports and settings profiles carry values;
 `theme_export` carries the author's defaults. Saved entries that no longer fit a definition remain
 stored and use the default with a notice; unknown ids have a notice and no effective value.
 
@@ -627,11 +862,26 @@ channel; see [mcp.md](mcp.md).
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```
 
-Preferences → Navigation → View navigator offers **Signed axes** (the original default) and
-**Cube**. This choice is saved independently of the mouse preset. The control channel selects it
-with `ui.prefs {"navigator_style":"axes"}` or `ui.prefs {"navigator_style":"cube"}`.
-Existing settings without this field keep signed axes. Signed-axis tips choose principal views;
-clicking an aligned tip again reverses the view.
+Preferences → Navigation → View navigator offers **Signed axes** (the original default),
+**Cube** and **Custom**; a right-click anywhere on the navigator offers the same three. This choice is
+saved independently of the mouse preset. The control channel selects it with
+`ui.prefs {"navigator_style":"axes"}`, `"cube"` or `"custom"`. Existing settings without this field
+keep signed axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses
+the view.
+
+Custom draws a body in place of the cube, at the cube's size; a click on one of its faces looks
+straight at it, and with `navigator_fit` on it also frames the model, as the cube does. Picking
+Custom from the navigator's menu opens the Custom View Navigator panel, with OK and Cancel: pick
+the body in the view, then its texture (`themed`: the cube's colours; `modeled`: the body's own
+appearance and the view's edge colour) and whether the cube's rotation arrows and Home button go
+around it. The navigator previews the panel's choices while it is open. OK runs
+`view.navigator`, which scripts and `engine.execute` run too without opening anything:
+`{"style": "custom", "body": "Body1", "texture": "modeled", "arrows": true, "home": false}` (any
+subset; `"body": null` goes back to the cube) returns the whole navigator. A body over 10,000
+triangles is refused, and so is a long or flat one: measured across the axes and the diagonals,
+its thinnest width must be at least a fifth of its widest. The body is kept as a snapshot with the
+preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so it stays across
+runs and designs and travels with an exported profile.
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging either view navigator. Under the default preset,

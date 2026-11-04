@@ -1,4 +1,5 @@
 //! Read-only report and library containers, sharing the form's typography and actions.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
@@ -35,16 +36,19 @@ pub(crate) fn list_frame<R>(ui: &mut Ui, key: &str, add: impl FnOnce(&mut Ui) ->
 
 pub(super) fn list_frame_filled<R>(ui: &mut Ui, key: &str, fill: egui::Color32, vertical: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
-    let response = egui::Frame::NONE
-        .fill(fill)
-        .stroke(t.container_border(t.dialog_rule))
-        .corner_radius(t.control_radius)
-        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, vertical as i8))
-        .show(ui, |ui| {
+    let response = crate::ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(fill)
+            .stroke(t.container_border(t.dialog_rule))
+            .corner_radius(t.control_radius)
+            .inner_margin(egui::Margin::symmetric(t.space_10 as i8, vertical as i8)),
+        |ui| {
             // Frame already subtracts its border and padding from the content width.
             ui.set_min_width(ui.available_width().max(0.0));
             add(ui)
-        });
+        },
+    );
     scenario::publish_rect(&format!("dialog:list:{key}"), response.response.rect);
     response.inner
 }
@@ -64,7 +68,7 @@ pub(crate) fn path_chip(ui: &mut Ui, path: &str, add: impl FnOnce(&mut Ui)) {
             ui.painter().rect(rect, t.control_radius, t.dialog_footer, t.tertiary_border(t.dialog_rule), egui::StrokeKind::Inside);
             super::text::paint_text(ui, rect.shrink2(vec2(t.space_8, 0.0)), path, egui::FontId::monospace(t.font_small), t.form_dim, false);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), path));
-            response.on_hover_text(path);
+            response.backing_on_hover_text(path);
             let key = format!("dialog:cell:{path}");
             scenario::publish_handle(&key, rect.center());
             scenario::publish_rect(&key, rect);
@@ -132,7 +136,7 @@ pub(crate) fn report_header(ui: &mut Ui, kind: &str, count: u64, time: &str, ali
                 false,
             );
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), alias));
-            response.on_hover_text(alias);
+            response.backing_on_hover_text(alias);
             let key = format!("dialog:cell:{alias}");
             scenario::publish_rect(&key, rect);
             scenario::publish_handle(&key, rect.center());

@@ -1,5 +1,6 @@
 //! Numbered stage navigation in a two-row workspace card. The caller owns commands and state.
 use crate::theme::{TabAccent, Tokens};
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, Ui, pos2, vec2};
 
 pub(crate) struct StageAction<'a> {
@@ -214,7 +215,7 @@ impl StageBar {
                 result.action = Some(index);
             }
             if let Some(reason) = item.reason {
-                response.on_disabled_hover_text(reason);
+                response.backing_on_disabled_hover_text(reason);
             }
         }
         ui.add_space((ui.available_width() - search_width).max(0.0));

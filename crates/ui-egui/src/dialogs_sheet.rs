@@ -4,6 +4,7 @@
 //! its bend lines, the bend table and DXF export).
 
 use crate::dialogs::put;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use egui::{Align2, Color32, FontId, Pos2, Rect, RichText, Stroke, pos2, vec2};
 use serde_json::{Map, Value, json};
@@ -300,7 +301,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                     // Further bends: each a flange on the far edge of the one before it.
                     form_row(ui, "Further Bends", |ui| {
                         let add = crate::ui_kit::button(ui, "Add bend", crate::ui_kit::Button::Normal)
-                            .on_hover_text(crate::i18n::tr_label("Another bend on the far edge of the last flange"));
+                            .backing_on_hover_text(crate::i18n::tr_label("Another bend on the far edge of the last flange"));
                         if add.clicked() && then.len() < 16 {
                             then.push(("45 deg".into(), "20 mm".into(), false));
                         }
@@ -335,7 +336,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                         if points.len() > 1 || own.iter().any(|o| !(o.1.trim().is_empty() && o.2.trim().is_empty())) {
                             form_row(ui, "Per Edge", |ui| {
                                 ui.label(RichText::new(crate::i18n::tr_label("angle, height")).weak())
-                                    .on_hover_text("An edge's own angle and height. Empty: the values above.");
+                                    .backing_on_hover_text("An edge's own angle and height. Empty: the values above.");
                             });
                             for (n, p) in points.iter().enumerate() {
                                 let slot = own_slot(own, *p);
@@ -575,8 +576,11 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     if let Some(body) = last {
         export_flat(app, &body, extension);
     } else {
-        // Let the command report its ordinary "no sheet body" error without opening a picker.
-        let _ = app.run(id, json!({}));
+        // Let the command report its ordinary "no sheet body" error without opening a picker;
+        // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
+        if app.run(id, json!({})).is_err() {
+            app.restore_command_tab();
+        }
     }
     true
 }

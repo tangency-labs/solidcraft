@@ -12,10 +12,14 @@ use crate::{SolveApp, dialogs, help};
 
 mod form;
 
+/// The most an answer keeps, in characters (as `TextEdit::char_limit` counts them, not bytes).
 const MAX_ANSWER: usize = 2000;
+/// An answer with fewer characters left than this says how many.
+const ANSWER_ROOM: usize = 200;
 const MAX_BODY: usize = 24_000;
-// Room for all three answers and the original bounded diagnostic context.
-const MAX_REPORT: usize = 32_000;
+// Room for all three answers (up to four bytes a character) and the original bounded diagnostic
+// context.
+const MAX_REPORT: usize = 3 * 4 * MAX_ANSWER + MAX_BODY + 1000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
 
@@ -182,7 +186,7 @@ impl Draft {
     }
 
     fn report_body(&self) -> String {
-        let answer = |text: &str| if text.trim().is_empty() { "Not provided".to_string() } else { limited(text, MAX_ANSWER) };
+        let answer = |text: &str| if text.trim().is_empty() { "Not provided".to_string() } else { limited_chars(text, MAX_ANSWER) };
         let mut report = format!(
             "## Actual behavior\n{}\n\n## Reproduction\n{}\n\n## Expected behavior\n{}\n\n",
             answer(&self.description),
@@ -297,6 +301,18 @@ fn limited(value: &str, limit: usize) -> String {
         end = end.saturating_sub(1);
     }
     value.get(..end).unwrap_or_default().to_string()
+}
+
+/// [`truncate`] by characters: an answer's limit counts them, not bytes (#7191).
+fn truncate_chars(value: &mut String, limit: usize) {
+    if let Some((end, _)) = value.char_indices().nth(limit) {
+        value.truncate(end);
+    }
+}
+
+/// [`limited`] by characters.
+fn limited_chars(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
 }
 
 fn block(value: &str) -> String {
@@ -1100,6 +1116,58 @@ mod tests {
         draft.body = "調査🚀".repeat(MAX_REPORT);
         let bounded = draft.report_body();
         assert!(bounded.len() <= MAX_REPORT && bounded.ends_with("[technical details truncated]\n"));
+    }
+
+    /// An answer keeps 2,000 characters in any script (#7191): the limit counted bytes, so one in
+    /// Chinese kept 666. Wherever it is cut, no character is split.
+    #[test]
+    fn issue_report_answers_keep_2000_characters_in_any_script() {
+        let mut draft = draft_for(&app(), None, None);
+        draft.body = format!("{}END_CONTEXT", "d".repeat(MAX_BODY - 11));
+        let mixed = |n: usize| "a現🚀é".chars().cycle().take(n).collect::<String>();
+        for n in [MAX_ANSWER - 1, MAX_ANSWER, MAX_ANSWER + 1, MAX_ANSWER + 2, MAX_ANSWER + 3, 3000] {
+            (draft.description, draft.steps, draft.expected) = (mixed(n), "現".repeat(n), "🚀".repeat(n));
+            let kept = n.min(MAX_ANSWER);
+            let answers = format!(
+                "## Actual behavior\n{}\n\n## Reproduction\n{}\n\n## Expected behavior\n{}\n\n",
+                mixed(kept),
+                "現".repeat(kept),
+                "🚀".repeat(kept)
+            );
+            let report = draft.report_body();
+            assert!(report.starts_with(&answers), "{n} characters");
+            assert!(report.len() <= MAX_REPORT && report.ends_with(&draft.body), "{n} characters: the technical details still fit");
+        }
+    }
+
+    /// Near the limit, an answer says how many characters are left: a paste past it is visibly
+    /// cut (#7191).
+    #[test]
+    fn issue_report_answer_near_its_limit_says_how_many_characters_are_left() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(16);
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.frames(1);
+        h.frame_with(vec![egui::Event::Paste("故障".repeat(1500))]);
+        h.frames(4);
+        let draft = h.app.issue_report.draft.as_mut().unwrap();
+        assert_eq!(draft.description, "故障".repeat(MAX_ANSWER / 2), "3,000 Chinese characters pasted, 2,000 kept");
+        // An answer that gets past the limit some other way is cut there too, between characters.
+        let mixed = |n: usize| "a現🚀é".chars().cycle().take(n).collect::<String>();
+        (draft.steps, draft.expected) = ("步".repeat(MAX_ANSWER - 150), mixed(MAX_ANSWER + 3));
+        h.frames(4);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().expected, mixed(MAX_ANSWER));
+        for note in ["0 characters left", "150 characters left"] {
+            assert!(h.widget(note).is_some(), "{note}");
+        }
+        h.app.issue_report.draft.as_mut().unwrap().steps = "步".repeat(MAX_ANSWER - 1);
+        h.frames(4);
+        assert!(h.widget("1 character left").is_some());
+        h.app.issue_report.draft.as_mut().unwrap().steps = "步".repeat(MAX_ANSWER - 200);
+        h.frames(4);
+        assert!(h.widget("1 character left").is_none() && h.widget("200 characters left").is_none(), "no note far from the limit");
     }
 
     #[test]

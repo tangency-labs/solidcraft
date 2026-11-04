@@ -31,11 +31,17 @@ pub(crate) struct Piece {
     /// The segment as drawn that names it: itself, or for collinear lines joined into one, the
     /// first of them.
     pub drawn: Seg2,
+    /// It carries on the piece before it as one curve (pieces of one ellipse or spline): SMLib
+    /// gets the run as one B-spline and sweeps one wall over it.
+    pub joins_previous: bool,
 }
 
 /// The segments of `loops` as pieces, loop after loop.
 pub(crate) fn pieces<'a>(loops: impl IntoIterator<Item = &'a NumberedLoop>) -> Vec<Piece> {
-    loops.into_iter().flat_map(|l| l.lp.segs.iter().enumerate().map(|(i, s)| Piece { seg: *s, numbers: l.numbers(i).to_vec(), drawn: *s })).collect()
+    loops
+        .into_iter()
+        .flat_map(|l| l.lp.segs.iter().enumerate().map(|(i, s)| Piece { seg: *s, numbers: l.numbers(i).to_vec(), drawn: *s, joins_previous: false }))
+        .collect()
 }
 
 /// The pieces of `joined` (`drawn` with collinear lines joined): outer loop, then holes, each
@@ -145,8 +151,70 @@ mod imp {
         })
     }
 
+    /// The pieces as SMLib's curves: one each, but one B-spline for each run of pieces that join
+    /// the one before them ([`Piece::joins_previous`]).
     fn curves(plane: &Plane, pieces: &[Piece]) -> Result<Vec<Curve>> {
-        pieces.iter().map(|x| curve(plane, &x.seg)).collect()
+        let mut out = Vec::new();
+        let mut run = Vec::new();
+        for x in pieces {
+            if !x.joins_previous && !run.is_empty() {
+                out.push(joined(std::mem::take(&mut run))?);
+            }
+            run.push(curve(plane, &x.seg)?);
+        }
+        if !run.is_empty() {
+            out.push(joined(run)?);
+        }
+        Ok(out)
+    }
+
+    /// Bézier curves of one degree, each starting where the one before ends, as the one B-spline
+    /// they are, exactly: their control points in a row (each joint once) on knots repeated the
+    /// degree times at each joint. A rational piece's weights are scaled (which leaves it the same
+    /// curve) to meet the weight the piece before ends with. Each piece's knot span is as long as
+    /// keeps the speed through the joint the same on both sides, so pieces meeting tangentially
+    /// (the pieces of one ellipse or spline) join with a continuous first derivative: SMLib makes
+    /// one wall over a curve that is, and splits it where the derivative jumps.
+    fn joined(run: Vec<Curve>) -> Result<Curve> {
+        if run.len() == 1 {
+            return run.into_iter().next().ok_or_else(|| KernelError::Invalid("an empty run of curves".into()));
+        }
+        let not_one = || KernelError::Invalid("the pieces of one curve are not Béziers of one degree".into());
+        let xyz = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+        let mut degree = None;
+        let mut points: Vec<[f64; 4]> = Vec::new();
+        let mut knots = Vec::new();
+        // The knot at the last joint, and the length of the span before it.
+        let (mut at, mut span) = (0.0, 1.0);
+        for c in &run {
+            let Curve::Nurbs { degree: d, points: ps, .. } = c else { return Err(not_one()) };
+            if degree.is_some_and(|p| p != *d) || ps.len() != d + 1 || *d == 0 {
+                return Err(not_one());
+            }
+            degree = Some(*d);
+            let (Some(first), Some(second)) = (ps.first(), ps.get(1)) else { return Err(not_one()) };
+            let (Some(last), Some(before)) = (points.last(), points.len().checked_sub(2).and_then(|i| points.get(i))) else {
+                points.extend(ps.iter().copied());
+                knots.extend(std::iter::repeat_n(0.0, d + 1));
+                continue;
+            };
+            let scale = last[3] / first[3];
+            if !(scale.is_finite() && scale > 0.0) {
+                return Err(not_one());
+            }
+            // The derivative of a rational Bézier on a span of length h at its end is
+            // d (w[d-1] / w[d]) (P[d] - P[d-1]) / h, at its start d (w[1] / w[0]) (P[1] - P[0]) / h.
+            let ending = (xyz(last) - xyz(before)) * (before[3] / last[3]) * (1.0 / span);
+            let starting = (xyz(second) - xyz(first)) * (second[3] / first[3]);
+            let next = starting.len() / ending.len();
+            at += span;
+            span = if next.is_finite() && next > 0.0 { next } else { 1.0 };
+            points.extend(ps.iter().skip(1).map(|q| [q[0], q[1], q[2], q[3] * scale]));
+            knots.extend(std::iter::repeat_n(at, *d));
+        }
+        let degree = degree.ok_or_else(not_one)?;
+        knots.extend(std::iter::repeat_n(at + span, degree + 1));
+        Ok(Curve::Nurbs { degree, points, knots })
     }
 
     /// A chain of sketch segments on `plane` as SMLib's curves, one each, exactly (lines, arcs,
@@ -564,9 +632,24 @@ mod imp {
                     };
                     crate::FaceSource::ExtrudeSide { segment: x.drawn, plane, coalesced: false }
                 }),
+                // The one wall over a whole run of pieces of one curve: named by its first piece.
+                Role::Wall(set) if run_starts(pieces, set).is_some() => run_starts(pieces, set)
+                    .and_then(|i| pieces.get(i))
+                    .map(|x| crate::FaceSource::ExtrudeSide { segment: x.drawn, plane: None, coalesced: false }),
                 _ => None,
             })
             .collect()
+    }
+
+    /// The first piece of the run of joined pieces `set` is exactly (all of it, and nothing else).
+    fn run_starts(pieces: &[Piece], set: &BTreeSet<usize>) -> Option<usize> {
+        let (&first, &last) = (set.first()?, set.last()?);
+        let run = pieces.get(first..=last)?;
+        let whole = last - first + 1 == set.len()
+            && run.first().is_some_and(|x| !x.joins_previous)
+            && run.iter().skip(1).all(|x| x.joins_previous)
+            && pieces.get(last + 1).is_none_or(|x| !x.joins_previous);
+        (set.len() > 1 && whole).then_some(first)
     }
 
     fn numbered_segments(r: &Region2) -> usize {
@@ -595,7 +678,7 @@ mod imp {
         let walls: Vec<Piece> = pieces
             .iter()
             .filter(|x| [0.0, 0.5, 1.0].iter().any(|t| off_axis(plane.to_world(x.seg.point_at(*t)))))
-            .map(|x| Piece { seg: x.seg, numbers: x.numbers.clone(), drawn: x.drawn })
+            .map(|x| Piece { seg: x.seg, numbers: x.numbers.clone(), drawn: x.drawn, joins_previous: false })
             .collect();
         let about = |q: Vec3, a: f64| origin + turned(q - origin, k, a);
         let full = turn >= std::f64::consts::TAU - 1e-9;
@@ -1535,7 +1618,7 @@ mod imp {
                         all.extend(q.numbers.iter().copied());
                     }
                 }
-                Piece { seg: x.seg, numbers: all.into_iter().collect(), drawn: x.drawn }
+                Piece { seg: x.seg, numbers: all.into_iter().collect(), drawn: x.drawn, joins_previous: false }
             })
             .collect();
         let roles = roles(&body, start, Some(&last.0), &seeds(start, &columns, |q| q), &[], false)?;

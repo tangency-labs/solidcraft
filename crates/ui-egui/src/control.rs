@@ -176,7 +176,12 @@ fn ok(v: Value) -> Outcome {
     Outcome::Done(json!({"ok": true, "result": v}))
 }
 fn err(e: impl std::fmt::Display) -> Outcome {
-    Outcome::Done(json!({"ok": false, "error": e.to_string()}))
+    let text = e.to_string();
+    let mut reply = json!({"ok": false, "error": text});
+    if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&text) {
+        reply["panel_error"] = reason;
+    }
+    Outcome::Done(reply)
 }
 fn wrap(r: Result<Value, String>) -> Outcome {
     match r {
@@ -266,6 +271,10 @@ fn key_from(name: &str) -> Option<egui::Key> {
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    if solidcraft_engine::panels::commands::is_command(id) {
+        // No first-body meshing, camera-follow or fit tail for application layout.
+        return app.run(id, params);
+    }
     // User bindings live in the UI. A bridged agent needs the same key the menus show,
     // including null for a cleared binding; the standalone engine keeps its defaults.
     if id == "engine.commands" {
@@ -379,6 +388,38 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     let Some(steps) = p.get("commands").and_then(Value::as_array).filter(|s| s.len() <= MAX_BATCH) else {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
     };
+    let panels = steps.iter().filter(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)).count();
+    if panels > 0 {
+        if let Some(why) = batch_refusal(steps) {
+            return err(why);
+        }
+        if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
+            return ok(refusal.reply(steps.len()));
+        }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
+        if rollback {
+            if panels != steps.len() {
+                return err(solidcraft_engine::panels::commands::error_text(solidcraft_engine::panels::error(
+                    solidcraft_engine::panels::Rule::Capability,
+                    "atomic mixed document/layout batches are unavailable; use rollback:false or separate transactions",
+                )));
+            }
+            return wrap(app.run_panel_batch(steps).map_err(solidcraft_engine::panels::commands::error_text));
+        }
+        // Explicit sequential mode has per-command atomicity and no document
+        // checkpoint; previous application changes are truthfully retained.
+        let mut results = Vec::new();
+        for (i, step) in steps.iter().enumerate() {
+            let result = command(step)
+                .ok_or_else(|| "missing command".to_string())
+                .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
+            match result {
+                Ok(result) => results.push(result),
+                Err(error) => return ok(solidcraft_engine::panels::commands::sequential_failure(i, command(step), error, results)),
+            }
+        }
+        return ok(json!({"completed":results.len(),"results":results,"undone":0}));
+    }
     // (With the agent cursor shown, the pointer has already acted out a short summary of the
     // batch: `agent_cursor::intercept`.)
     if let Some(why) = batch_refusal(steps) {
@@ -612,8 +653,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.blur" => {
             // Internal rendering harness; deliberately no saved preference or product UI.
             let radius = if let Some(radius) = p.get("radius_px") {
-                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=40.0).contains(v)) else {
-                    return err("radius_px must be finite and between 0 and 40");
+                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=60.0).contains(v)) else {
+                    return err("radius_px must be finite and between 0 and 60");
                 };
                 Some(radius as f32)
             } else {
@@ -632,18 +673,70 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             } else {
                 None
             };
+            // Explicit, labelled evidence fixtures only. They can force a failure, never fake
+            // real renderer support. All validation precedes mutation, including old fields.
+            let fixture = if let Some(fixture) = p.get("fixture") {
+                let Some(fixture) =
+                    fixture.as_str().filter(|s| matches!(*s, "clear" | "gpu-software" | "reduce-transparency" | "web-unsupported" | "guard-60"))
+                else {
+                    return err("unknown blur evidence fixture");
+                };
+                Some(fixture)
+            } else {
+                None
+            };
             if let Some(radius) = radius {
                 if let Err(error) = app.blur.set_radius(radius) {
                     return err(error);
                 }
+                app.blur_session.harness_radius = Some(radius);
                 ctx.request_repaint();
             }
             if let Some(alpha) = alpha {
                 app.blur.set_surface_alpha(alpha);
                 ctx.request_repaint();
             }
+            if let Some(fixture) = fixture {
+                match fixture {
+                    "clear" => {
+                        app.blur_session.harness_unavailable = None;
+                        app.blur_session.harness_radius = None;
+                        app.blur_session.evidence_fixture = None;
+                    }
+                    "gpu-software" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_software");
+                        app.blur_session.evidence_fixture = Some("gpu-software");
+                    }
+                    "reduce-transparency" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_reduce_transparency");
+                        app.blur_session.evidence_fixture = Some("reduce-transparency");
+                    }
+                    "web-unsupported" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_web");
+                        app.blur_session.evidence_fixture = Some("web-unsupported");
+                    }
+                    "guard-60" => {
+                        let radius = app.blur.radius();
+                        for _ in 0..60 {
+                            app.blur_session.guard.observe(radius, 23.0, true);
+                        }
+                        app.blur_session.evidence_fixture = Some("guard-60");
+                    }
+                    _ => {}
+                }
+                ctx.request_repaint();
+            }
+            let availability = crate::prefs::blur_availability(app);
+            let reason = match availability {
+                crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason)),
+                crate::theme_options::Availability::Available => None,
+            };
             ok(
-                json!({"radius_px":app.blur.radius(), "max_radius_px":40, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters()}),
+                json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
+                    "available": availability == crate::theme_options::Availability::Available, "reason": reason,
+                    "evidence_fixture": app.blur_session.evidence_fixture,
+                    "guard": {"tier_cap": app.blur_session.guard.cap, "streak": app.blur_session.guard.streak,
+                        "notice": app.blur_session.guard.notice, "opted_out": app.blur_session.guard.opted_out}}),
             )
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
@@ -683,6 +776,30 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
             if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
                 return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
+            }
+            if let Some(steps) =
+                steps.filter(|steps| steps.iter().any(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)))
+            {
+                if steps.len() > 100_000 {
+                    return err("script too long");
+                }
+                let mut results = Vec::new();
+                for (i, step) in steps.iter().enumerate() {
+                    let result = command(step)
+                        .ok_or_else(|| "missing command".to_string())
+                        .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
+                    match result {
+                        Ok(result) => results.push(result),
+                        Err(error) => {
+                            let mut reply = json!({"ok":false,"error":error,"step":i + 1});
+                            if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&error) {
+                                reply["panel_error"] = reason;
+                            }
+                            return Outcome::Done(reply);
+                        }
+                    }
+                }
+                return ok(json!(results));
             }
             let mut replaced = false;
             let r = app
@@ -1466,10 +1583,170 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    fn panel_command_app() -> crate::SolveApp {
+        use crate::panel_runtime::*;
+        let h = PanelMountHarness::new(false).unwrap();
+        let catalogue = solidcraft_engine::panels::fixture_command_catalogue(h.runtime.layout().registry()).unwrap();
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.enable_panel_runtime(h.runtime, Box::<FakeAppPanelServices>::default()).unwrap();
+        app.panel_runtime_mut().unwrap().set_command_adapters(Box::new(catalogue), Box::new(FakeNativeAdapter::new(false))).unwrap();
+        app
+    }
+    fn panel_control(app: &mut crate::SolveApp, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let (request, _) = super::ControlRequest::new(method, params);
+        match super::handle(app, &egui::Context::default(), &request) {
+            super::Outcome::Done(reply) => reply,
+            _ => panic!("unexpected screenshot"),
+        }
+    }
+    fn panel_steps() -> Vec<serde_json::Value> {
+        vec![
+            json!({"command":"panel.open","params":{"kind":"fixture.log","instance":"log","destination":{"type":"new_section","section":"logs","index":0,
+            "location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}}}),
+            json!({"command":"panel.collapse","params":{"target":{"type":"instance","id":"log"},"collapsed":true}}),
+        ]
+    }
+    #[test]
+    fn panel_control_single_atomic_batch_and_script_share_live_runtime_without_geometry_or_camera_work() {
+        use solidcraft_engine::panels::ActionSink;
+        let mut single = panel_command_app();
+        let mut batch = panel_command_app();
+        let mut script = panel_command_app();
+        // A one-body design with a deliberately different camera exercises the
+        // old first-body-fit condition, rather than making it vacuously false.
+        for app in [&mut single, &mut batch, &mut script] {
+            app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            app.cam.distance *= 1.5;
+            app.session.mark_saved();
+        }
+        let doc = single.session.doc.clone();
+        let model = single.session.model.state();
+        let camera = single.cam;
+        let meshes: Vec<_> = model.bodies.iter().map(|body| body.cached_mesh()).collect();
+        let invariant = (single.session.document_id.clone(), single.session.revision, single.session.undo.len(), single.session.is_dirty());
+        for step in panel_steps() {
+            assert_eq!(panel_control(&mut single, "engine.execute", step)["ok"], true);
+        }
+        assert_eq!(panel_control(&mut batch, "engine.batch", json!({"commands":panel_steps(),"param_check":"strict"}))["ok"], true);
+        assert_eq!(panel_control(&mut script, "engine.script", json!({"commands":panel_steps(),"param_check":"strict"}))["ok"], true);
+        let live = single.panel_runtime().unwrap().layout().inspect();
+        assert_eq!(batch.panel_runtime().unwrap().layout().layout(), &live.layout);
+        assert_eq!(script.panel_runtime().unwrap().layout().layout(), &live.layout);
+        assert_eq!(panel_control(&mut single, "engine.execute", json!({"command":"layout.get"}))["result"]["state"]["revision"], live.revision);
+        assert!(crate::agent_cursor::picks(&single, "panel.open", &panel_steps()[0]["params"]).is_empty());
+        assert_eq!(single.cam, camera);
+        assert_eq!((single.session.document_id.clone(), single.session.revision, single.session.undo.len(), single.session.is_dirty()), invariant);
+        assert!(std::sync::Arc::ptr_eq(&doc, &single.session.doc));
+        assert!(std::sync::Arc::ptr_eq(&model, &single.session.model.state()));
+        for (old, new) in meshes.iter().zip(single.session.model.state().bodies.iter().map(|body| body.cached_mesh())) {
+            match (old, new) {
+                (Some(a), Some(b)) => assert!(std::sync::Arc::ptr_eq(a, &b)),
+                (None, None) => {}
+                _ => panic!("layout changed tessellation cache"),
+            }
+        }
+    }
+    #[test]
+    fn panel_control_reports_structured_missing_capability_unknown_fields_and_lifecycle_batch_errors() {
+        use solidcraft_engine::panels::ActionSink;
+        let mut disabled = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let reply = panel_control(&mut disabled, "engine.execute", json!({"command":"layout.get"}));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["panel_error"]["rule"], "capability");
+        let mut app = panel_command_app();
+        for check in ["off", "warn", "strict"] {
+            let reply = panel_control(&mut app, "engine.execute", json!({"command":"panel.list","params":{"unknown":true},"param_check":check}));
+            assert_eq!(reply["ok"], false);
+            assert_eq!(reply["panel_error"]["rule"], "schema");
+            assert_eq!(reply["param_check"], check);
+        }
+        panel_control(&mut app, "engine.execute", panel_steps()[0].clone());
+        let before = app.panel_runtime().unwrap().layout().inspect();
+        let reply = panel_control(
+            &mut app,
+            "engine.batch",
+            json!({"commands":[
+            {"command":"panel.close","params":{"target":{"type":"instance","id":"log"}}},
+            {"command":"panel.open","params":{"kind":"fixture.log","instance":"log"}}]}),
+        );
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["panel_error"]["rule"], "lifecycle");
+        assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+    }
+    #[test]
+    fn panel_control_catalogue_batches_and_scripts_retain_memory_and_refuse_unsupported_atomic_domains() {
+        let mut app = panel_command_app();
+        panel_control(&mut app, "engine.execute", panel_steps()[0].clone());
+        let reply = panel_control(
+            &mut app,
+            "engine.batch",
+            json!({"commands":[
+            {"command":"layout.save","params":{"name":"Control saved"}},
+            {"command":"layout.reset"}, {"command":"layout.apply","params":{"name":"Control saved"}}, {"command":"layout.get"}]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["completed"], 4);
+        assert_eq!(reply["result"]["results"][3]["state"]["layout"]["instances"][0]["id"], "log");
+        let mixed = json!({"commands":[{"command":"layout.get"},{"command":"file.new"}]});
+        let before = app.session.document_id.clone();
+        let reply = panel_control(&mut app, "engine.batch", mixed);
+        assert_eq!(reply["panel_error"]["rule"], "capability");
+        assert_eq!(app.session.document_id, before);
+        let reply = panel_control(
+            &mut app,
+            "engine.script",
+            json!({"commands":[
+            {"command":"layout.workspace.select","params":{"workspace":"fixture.other"}},
+            {"command":"layout.apply","params":{"name":"Control saved"}}, {"command":"layout.get"}]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"][2]["state"]["layout"]["workspace"], "fixture.other");
+    }
+
+    #[test]
+    fn null_panel_params_match_single_atomic_sequential_and_script_routes() {
+        let mut app = panel_command_app();
+        let expected = app.run("panel.list", json!({})).unwrap();
+        assert_eq!(app.run("panel.list", serde_json::Value::Null).unwrap(), expected);
+        let single = panel_control(&mut app, "engine.execute", json!({"command":"panel.list","params":null}));
+        assert_eq!(single["result"], expected);
+        for (method, rollback) in [("engine.batch", true), ("engine.batch", false), ("engine.script", false)] {
+            let reply = panel_control(
+                &mut app,
+                method,
+                json!({"rollback":rollback,"commands":[
+                    {"command":"panel.list","params":null},{"command":"layout.get","params":null},
+                ]}),
+            );
+            assert_eq!(reply["ok"], true, "{method}: {reply}");
+            let results = if method == "engine.script" { &reply["result"] } else { &reply["result"]["results"] };
+            assert_eq!(results[0], expected, "{method}");
+            assert_eq!(results[1]["state"], expected["state"]);
+        }
+    }
+
+    #[test]
+    fn null_normal_document_params_remain_accepted_in_panel_containing_sequences() {
+        for method in ["engine.batch", "engine.script"] {
+            let mut app = panel_command_app();
+            let previous = app.session.document_id.clone();
+            let reply = panel_control(
+                &mut app,
+                method,
+                json!({"rollback":false,"commands":[
+                    {"command":"file.new","params":null},{"command":"panel.list","params":null},{"command":"parameters.list","params":null},
+                ]}),
+            );
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert!(reply["result"].get("failed").is_none(), "{reply}");
+            assert_ne!(app.session.document_id, previous);
+            assert_eq!(app.panel_runtime().unwrap().environment().document.as_ref().unwrap().0, app.session.document_id);
+        }
+    }
     #[test]
     fn blur_control_validates_before_mutation_and_reports_no_gpu() {
         let mut h = crate::scenario::Harness::new();
-        for invalid in [json!(-1), json!(41), json!("18"), json!(null)] {
+        for invalid in [json!(-1), json!(61), json!("18"), json!(null)] {
             let reply = h.call("ui.blur", json!({"radius_px":invalid}));
             assert_eq!(reply["ok"], false, "{reply}");
             assert_eq!(h.app.blur.radius(), 0.0);
@@ -1485,6 +1762,43 @@ mod tests {
         assert_eq!(h.app.blur.counters().markers_emitted, 0);
         h.call("ui.blur", json!({"radius_px":0,"surface_alpha":null}));
         assert_eq!(h.app.blur.radius(), 0.0);
+    }
+
+    #[test]
+    fn blur_evidence_fixtures_are_atomic_transient_and_never_fake_support() {
+        let mut h = crate::scenario::Harness::new();
+        let source: Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({"theme_import":source,"theme_options":{"blur-review":{"blur":40}}}))["ok"], true);
+        h.frames(2);
+        let saved = h.app.preferences.theme_options.clone();
+        let revision = h.app.session.revision;
+        for invalid in [json!(null), json!([]), json!("available"), json!("unknown")] {
+            assert_eq!(h.call("ui.blur", json!({"fixture":invalid,"radius_px":8}))["ok"], false);
+            assert_eq!(h.app.blur.radius(), 40.0);
+            assert_eq!(h.app.blur_session.harness_radius, None);
+        }
+        for fixture in ["gpu-software", "reduce-transparency", "web-unsupported"] {
+            let reply = h.call("ui.blur", json!({"fixture":fixture}));
+            assert_eq!(reply["result"]["evidence_fixture"], fixture);
+            assert_eq!(reply["result"]["available"], false);
+            h.frames(2);
+            assert_eq!(h.app.blur.counters().textures_created, 0);
+            assert_eq!(h.app.blur.counters().markers_emitted, 0);
+            assert_eq!(h.app.preferences.theme_options, saved);
+        }
+        h.call("ui.blur", json!({"fixture":"clear"}));
+        h.call("ui.blur", json!({"fixture":"guard-60"}));
+        assert_eq!((h.app.blur_session.guard.cap, h.app.blur_session.guard.notice), (4, true));
+        assert_eq!(h.app.blur_session.evidence_fixture, Some("guard-60"));
+        h.app.blur_session.guard.undo();
+        assert_eq!((h.app.blur_session.guard.cap, h.app.blur_session.guard.opted_out), (5, true));
+        h.call("ui.blur", json!({"fixture":"guard-60"}));
+        assert_eq!(h.app.blur_session.guard.cap, 5);
+        assert_eq!(h.app.session.revision, revision, "quality actions never enter document undo");
+        assert_eq!(h.app.preferences.theme_options, saved);
+        h.call("ui.blur", json!({"fixture":"clear"}));
+        assert!(h.app.blur_session.evidence_fixture.is_none());
+        assert!(matches!(h.app.blur.capability(), crate::blur::Capability::Unavailable(_)), "clearing a fixture cannot manufacture a GPU");
     }
 
     use serde_json::json;
@@ -2321,12 +2635,23 @@ mod tests {
             assert_eq!(call("ui.render", json!({"path": at(&root, "a.png"), "width": 32, "height": 32}), true)["ok"], true);
         }
         assert_eq!(call("ui.screenshot", json!({"path": at(&root, "b.png")}), true)["ok"], true);
+        // Settings profiles are read and written by the app, not the engine, and stay inside too (#11362).
+        let profile = |id: &str, params: Value| json!({"command": id, "params": params});
+        let poc = json!({"format": "solidcraft-profile/1", "name": "scope-poc"});
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"profile": poc})), true)["ok"], true);
+        let inside = json!({"name": "scope-poc", "path": at(&root, "p.json")});
+        assert_eq!(call("engine.execute", profile("settings.profile.export", inside), true)["ok"], true);
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"path": at(&root, "p.json")})), true)["ok"], true);
+        std::fs::write(at(&base, "p.json"), poc.to_string()).unwrap();
         for (method, params) in [
             ("engine.execute", export(at(&out, "a.step"))),
             ("engine.execute", export(at(&root, "../out/a.step"))),
             ("engine.script", json!({"commands": [{"command": "file.export", "params": {"path": at(&out, "a.step")}}]})),
             ("ui.render", json!({"path": at(&out, "a.png"), "width": 32, "height": 32})),
             ("ui.screenshot", json!({"path": at(&out, "b.png")})),
+            ("engine.execute", profile("settings.profile.export", json!({"name": "scope-poc", "path": at(&out, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&base, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&out, "missing.json")}))),
         ] {
             let v = call(method, params, true);
             assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{method}: {v}");

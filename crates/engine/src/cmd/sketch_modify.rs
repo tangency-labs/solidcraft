@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two lines or arcs meeting at a corner (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two lines or arcs meeting at a corner (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). An ellipse's axis line is never a side of a corner (also for the chamfers)", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", chamfer_equal)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
@@ -1780,7 +1780,10 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     };
     let (la, lb) = if let Some(r) = str_(p, "point") {
         let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?;
-        let lines: Vec<usize> = (0..sk.curves.len()).filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i)).collect();
+        // An ellipse's construction axis is never a side: it would round a line into the axis.
+        let lines: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+            .collect();
         // A construction line ending there too (a diagonal that centres something) is not one of
         // the corner's sides: it keeps its end on the virtual sharp corner (#1026).
         let sides: Vec<usize> =
@@ -1792,6 +1795,9 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     } else {
         let a = str_(p, "a").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`a` must be a line"))?;
         let b = str_(p, "b").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`b` must be a line"))?;
+        if sk.is_ellipse_axis(a) || sk.is_ellipse_axis(b) {
+            return Err(bad(cmd, "an ellipse's axis is not a side of a corner"));
+        }
         (a, b)
     };
     let (a0, a1) = ends(la).ok_or_else(|| bad(cmd, "fillets and chamfers work on two lines"))?;
@@ -2087,7 +2093,9 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     };
     let (ca, cb, q) = if let Some(rf) = str_(p, "point") {
         let Some(q) = sk.resolve_point(rf) else { return Ok(None) };
-        let cs: Vec<usize> = (0..sk.curves.len()).filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i)).collect();
+        let cs: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+            .collect();
         match cs[..] {
             [a, b] => (a, b, q),
             _ => return Ok(None),
@@ -2097,6 +2105,9 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
             return Ok(None);
         };
         let (Some((a0, a1)), Some((b0, b1))) = (ends(a), ends(b)) else { return Ok(None) };
+        if sk.is_ellipse_axis(a) || sk.is_ellipse_axis(b) {
+            return Ok(None);
+        }
         let Some(q) = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1) else { return Ok(None) };
         (a, b, q)
     };
@@ -3186,6 +3197,28 @@ fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>
     Ok((cs, ps))
 }
 
+/// `cs` with the ellipse of every axis line in it and the axis lines of every ellipse in it: an
+/// ellipse, or one of its axes, moved, turned or scaled takes the rest along, as a drag does,
+/// instead of leaving the axes behind its centre or pulling an axis off the ellipse.
+fn with_ellipse_axes(sk: &Sketch, cs: &mut Vec<usize>) {
+    let ellipses: Vec<usize> = cs.iter().filter_map(|&l| sk.ellipse_of_axis(l)).collect();
+    for e in ellipses {
+        if !cs.contains(&e) {
+            cs.push(e);
+        }
+    }
+    let axes: Vec<usize> = cs
+        .iter()
+        .filter_map(|&e| sk.ellipse_axis_lines(e))
+        .flat_map(|(major, minor)| major.map(|(l, _)| l).into_iter().chain(minor.map(|(l, ..)| l)))
+        .collect();
+    for l in axes {
+        if !cs.contains(&l) {
+            cs.push(l);
+        }
+    }
+}
+
 /// Points used by curves plus lone points, in a stable order.
 fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
     let mut v: Vec<usize> = Vec::new();
@@ -3513,6 +3546,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             }
             return Ok(ids);
         }
+        with_ellipse_axes(sk, &mut cs);
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         if rotate_constraints {
             let moved = involved_points(sk, &cs, &ps);
@@ -3538,22 +3572,83 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        let (cs, ps) = entities(sk, p, cmd)?;
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        let (mut cs, ps) = entities(sk, p, cmd)?;
+        with_ellipse_axes(sk, &mut cs);
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(c + (q - c) * k) + t;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        let moved = involved_points(sk, &cs, &ps);
+        rotate_axis_constraints(sk, doc, &moved, ang)?;
+        scale_dimensions(sk, doc, &cs, &moved, k)?;
         Ok(ids_of(sk, &cs))
     })?;
+    s.doc_mut().prune_model_params();
     Ok(json!({"curves": out, "sketch": info}))
+}
+
+/// The driving lengths wholly inside a transformed selection scale with it. Keep formulas
+/// tied to their user parameters, and compensate references between scaled dimensions so a
+/// dimension such as `d1 / 2` does not get the factor twice.
+fn scale_dimensions(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, curves: &[usize], points: &[usize], factor: f64) -> Result<()> {
+    if factor == 1.0 {
+        return Ok(());
+    }
+    let selected: Vec<usize> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            let pts = sk.constraint_points(&c.kind);
+            !c.driven
+                && c.kind.is_dimension()
+                && !c.kind.is_angle()
+                && !pts.is_empty()
+                && pts.iter().all(|p| points.contains(p))
+                // A circle's centre may move with another curve while its radius stays put.
+                && c.kind.indices().1.iter().all(|i| {
+                    curves.contains(i)
+                        || !matches!(sk.curves.get(*i).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. }))
+                })
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let mut expressions = std::collections::BTreeMap::new();
+    for i in selected {
+        let Some(c) = sk.constraints.get_mut(i) else { continue };
+        if let Some(value) = c.kind.value() {
+            c.kind.set_value(value * factor);
+        }
+        if let Some(name) = &c.param
+            && let Some(param) = doc.param(name)
+        {
+            let expression = if solidcraft_doc::expr::references(&param.expr).is_empty() {
+                format!("{} mm", doc.eval(name, solidcraft_doc::expr::Kind::Length)? * factor)
+            } else {
+                let formula = param.expr.trim().strip_prefix('=').unwrap_or(&param.expr);
+                format!("({formula}) * {factor}")
+            };
+            expressions.insert(name.clone(), expression);
+        }
+    }
+    for (name, mut expression) in expressions.clone() {
+        for reference in solidcraft_doc::expr::references(&expression) {
+            if expressions.contains_key(&reference) {
+                expression = solidcraft_doc::expr::rename_reference(&expression, &reference, &format!("({reference} / {factor})"));
+            }
+        }
+        doc.set_param(&name, &expression, None, None)?;
+    }
+    Ok(())
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.scale";
     let k = num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        let (cs, ps) = entities(sk, p, cmd)?;
+        let (mut cs, ps) = entities(sk, p, cmd)?;
+        with_ellipse_axes(sk, &mut cs);
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;

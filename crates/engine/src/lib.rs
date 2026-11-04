@@ -21,6 +21,7 @@ pub mod frames;
 pub mod fuzz;
 pub mod licences;
 pub mod occurrences;
+pub mod panels;
 pub mod params;
 pub mod product_scene;
 pub mod recovery;
@@ -66,6 +67,8 @@ pub const MAX_LINE: usize = 16 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    #[error("{text}", text = panels::commands::error_text(.0.clone()))]
+    Panel(#[from] panels::PanelError),
     #[error("unknown command `{0}`{hint}", hint = cmd::did_you_mean(.0))]
     UnknownCommand(String),
     #[error("`{0}` is not available right now: {1}")]
@@ -346,16 +349,20 @@ impl Ahead {
     /// [`Ahead::evaluate`], setting `step` to the number of the command running (from 1), so a
     /// front end can say how far a batch has got.
     pub fn evaluate_counting(self, commands: &[(String, Value)], step: &std::sync::atomic::AtomicUsize) -> Result<Evaluated> {
-        let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-        after.world_state()?.warm_display();
-        Ok(Evaluated(after.model))
+        let stop = self.0.stop.clone();
+        stop.within(|| {
+            let (after, _) = self.0.preview_in_place(commands, Some(step))?;
+            after.world_state()?.warm_display();
+            Ok(Evaluated(after.model))
+        })
     }
 
     /// Run `commands` one after another, each reply or error in turn (what they evaluate stays
     /// in the shared evaluation cache): the checks a front end makes before a command, such as
     /// what a delete takes with it (#2678), computed off its window thread.
     pub fn replies(mut self, commands: &[(String, Value)]) -> Vec<Result<Value>> {
-        commands.iter().map(|(id, params)| self.0.execute(id, params)).collect()
+        let stop = self.0.stop.clone();
+        stop.within(|| commands.iter().map(|(id, params)| self.0.execute(id, params)).collect())
     }
 }
 
@@ -531,6 +538,10 @@ pub struct Session {
     /// not a move of the design's, so the placements the design reports and Capture Position
     /// keeps leave it out ([`Session::uncaptured_moves`]).
     pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// Stops the work computing off the window thread for this design, shared with its copies.
+    stop: solidcraft_kernel::Stop,
+    /// A copy of a design ([`Session::scratch`]), sharing its token.
+    is_copy: bool,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -791,6 +802,8 @@ impl Session {
     /// A session on `doc` evaluated as `model`, with what it hides.
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
+            stop: Default::default(),
+            is_copy: false,
             saved: doc.clone(),
             doc,
             model,
@@ -871,6 +884,11 @@ impl Session {
     /// design before the batch, which is what the batch promised (#3242). The design is what a
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
+        // Nothing still computing for the design that leaves has anywhere to go. A copy leaves
+        // the design it came from going, and its token with it.
+        if !self.is_copy {
+            self.stop_computing();
+        }
         let auto_project = self.auto_project;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
@@ -900,6 +918,19 @@ impl Session {
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
+    }
+
+    /// The token over the work running off the window thread for this design, on any of its
+    /// copies: a job started from a copy runs [`solidcraft_kernel::Stop::within`] it.
+    pub fn stop_token(&self) -> solidcraft_kernel::Stop {
+        self.stop.clone()
+    }
+
+    /// This design is going away: the work still computing for it stops at the kernel's next
+    /// check, and its results go nowhere (they are only ever for this design's evaluation cache).
+    /// A kernel call that doesn't check runs to its end, on a kernel of its own, holding up nothing.
+    pub fn stop_computing(&self) {
+        self.stop.stop();
     }
 
     /// Install (or with `None` remove) the check [`Session::execute`] runs before every command,
@@ -1610,6 +1641,12 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if panels::commands::is_command(spec.id) {
+            // Layout is application state. Even a missing capability must not
+            // clear live links, map picks, snapshot, evaluate or refresh a design.
+            panels::commands::parse_command(spec.id, params)?;
+            return Err(EngineError::Panel(panels::error(panels::Rule::Capability, "application layout backend was not injected")));
+        }
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
@@ -1862,6 +1899,8 @@ impl Session {
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
         Session {
+            stop: self.stop.clone(),
+            is_copy: true,
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -1952,6 +1991,23 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         expected.marker = source.doc.marker;
+        // Rolling the marker solves the joints again and stores where that puts each occurrence.
+        if expected.occurrences.len() == source.doc.occurrences.len() {
+            for (e, s) in expected.occurrences.iter_mut().zip(&source.doc.occurrences) {
+                if e.id == s.id {
+                    e.transform = s.transform;
+                }
+            }
+        }
+        // ...and works out each coupled joint's ratio and lift from the faces at that marker.
+        if expected.assembly.links.len() == source.doc.assembly.links.len() {
+            for (e, s) in expected.assembly.links.iter_mut().zip(&source.doc.assembly.links) {
+                if (e.a, e.ia, e.b, e.ib) == (s.a, s.ia, s.b, s.ib) {
+                    e.ratio = s.ratio;
+                    e.lift = s.lift.clone();
+                }
+            }
+        }
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
@@ -1959,6 +2015,16 @@ impl Session {
     }
 
     fn compute_commands_inner(
+        self,
+        commands: &[(String, Value)],
+        marker: Option<Option<usize>>,
+        original: Option<Session>,
+    ) -> Result<ComputedCommands> {
+        let stop = self.stop.clone();
+        stop.within(|| self.compute_commands_under(commands, marker, original))
+    }
+
+    fn compute_commands_under(
         self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,

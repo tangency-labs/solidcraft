@@ -10,6 +10,315 @@ fn server() -> Server {
     Server::new(Box::new(Headless::default()))
 }
 
+fn panel_headless() -> Headless {
+    Headless::new(solidcraft_engine::Session::default()).with_panels(solidcraft_engine::panels::fixture_command_backend().unwrap())
+}
+fn panel_mcp_steps() -> Vec<Value> {
+    vec![
+        json!({"command":"panel.open","params":{"kind":"fixture.log","instance":"log","destination":{"type":"new_section","section":"logs","index":0,
+        "location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}}}),
+        json!({"command":"panel.collapse","params":{"target":{"type":"instance","id":"log"},"collapsed":true}}),
+    ]
+}
+#[test]
+fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_session() {
+    use crate::Backend;
+    let mut one = panel_headless();
+    let mut batch = panel_headless();
+    let mut script = panel_headless();
+    let doc = one.session.doc.clone();
+    let model = one.session.model.state();
+    let before = (one.session.document_id.clone(), one.session.revision, one.session.undo.len(), one.session.is_dirty(), one.session.camera);
+    for step in panel_mcp_steps() {
+        one.call("engine.execute", step).unwrap();
+    }
+    batch.call("engine.batch", json!({"commands":panel_mcp_steps()})).unwrap();
+    script.call("engine.script", json!({"commands":panel_mcp_steps()})).unwrap();
+    let state = one.call("engine.execute", json!({"command":"layout.get"})).unwrap();
+    assert_eq!(batch.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    assert_eq!(script.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    assert_eq!(state["state"]["capabilities"]["native_windows"], false);
+    assert_eq!((one.session.document_id.clone(), one.session.revision, one.session.undo.len(), one.session.is_dirty(), one.session.camera), before);
+    assert!(std::sync::Arc::ptr_eq(&doc, &one.session.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &one.session.model.state()));
+    one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
+    one.call("engine.execute", json!({"command":"layout.apply","params":{"name":"MCP saved"}})).unwrap();
+    assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+}
+#[test]
+fn mcp_panel_tools_publish_structured_errors_and_committed_state_through_shared_backend() {
+    let mut s = Server::new(Box::new(panel_headless()));
+    let input = panel_mcp_steps()[0].clone();
+    let result = tool(&mut s, "execute", input);
+    assert_eq!(result["layout"]["instances"][0]["id"], "log");
+    let result = tool(
+        &mut s,
+        "batch",
+        json!({"commands":[
+        {"command":"panel.collapse","params":{"target":{"type":"instance","id":"log"},"collapsed":true}},
+        {"command":"panel.peek","params":{"target":{"type":"instance","id":"log"}}}]}),
+    );
+    assert_eq!(result["completed"], 2);
+    let result = raw_tool(&mut s, "execute", json!({"command":"panel.focus","params":{"id":"fixture.log"}}));
+    assert_eq!(result["result"]["isError"], true);
+    assert_eq!(result["result"]["structuredContent"]["panel_error"]["rule"], "exactly_once");
+    let result = raw_tool(&mut s, "execute", json!({"command":"layout.get","params":{"unknown":true}}));
+    assert_eq!(result["result"]["structuredContent"]["panel_error"]["rule"], "schema");
+}
+#[test]
+fn headless_catalogue_atomic_batch_failure_keeps_presets_and_layout_and_session_only_is_truthful() {
+    use crate::Backend;
+    use solidcraft_engine::panels::{ActionSink, commands::LayoutCatalogue};
+    let mut h = panel_headless();
+    let state = h.panels.as_ref().unwrap().service.inspect();
+    let catalogue = h.panels.as_ref().unwrap().catalogue.state().clone();
+    let error = h
+        .call(
+            "engine.batch",
+            json!({"commands":[
+        {"command":"layout.save","params":{"name":"Not committed"}},
+        {"command":"layout.workspace.select","params":{"workspace":"not-registered"}}]}),
+        )
+        .unwrap_err();
+    assert_eq!(solidcraft_engine::panels::commands::structured_error(&error).unwrap()["rule"], "missing_target");
+    assert_eq!(h.panels.as_ref().unwrap().service.inspect(), state);
+    assert_eq!(h.panels.as_ref().unwrap().catalogue.state(), &catalogue);
+    let mut plain = Headless::default();
+    let got = plain.call("engine.execute", json!({"command":"panel.list"})).unwrap();
+    assert!(got["kinds"].as_array().unwrap().is_empty());
+    assert_eq!(got["state"]["capabilities"]["native_windows"], false);
+    assert!(plain.call("engine.execute", json!({"command":"layout.reset"})).is_err());
+    assert!(solidcraft_engine::Session::default().run_script(&json!({"commands":[{"command":"layout.get"}]})).is_err());
+}
+
+#[test]
+fn auto_backend_keeps_headless_layout_work_even_without_document_features() {
+    use crate::Backend;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut headless = panel_headless();
+    headless.call("engine.execute", json!({"command":"layout.save","params":{"name":"Owned headless layout"}})).unwrap();
+    let discoveries = Rc::new(Cell::new(0));
+    let seen = discoveries.clone();
+    let mut auto = crate::Auto::new(
+        headless,
+        Box::new(move || {
+            seen.set(seen.get() + 1);
+            None
+        }),
+        None,
+    );
+    assert_eq!(auto.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"]["workspace"], "fixture.workspace");
+    assert_eq!(discoveries.get(), 0, "owned layout must not be discarded while probing for an app");
+}
+
+#[test]
+fn remote_panel_single_batch_and_script_forward_to_one_authoritative_backend() {
+    use crate::Backend;
+    let authoritative = std::sync::Arc::new(std::sync::Mutex::new(solidcraft_engine::panels::fixture_command_backend().unwrap()));
+    let state = authoritative.clone();
+    // This is an authored local transport fixture, never run during implementation.
+    let (addr, seen) = scripted_app(move |request| {
+        let mut backend = state.lock().unwrap();
+        let params = &request["params"];
+        let result = match request["method"].as_str() {
+            Some("engine.execute") => backend.execute(params["command"].as_str().unwrap(), params.get("params").unwrap_or(&json!({}))),
+            Some("engine.batch") => backend.batch(params["commands"].as_array().unwrap()),
+            Some("engine.script") => {
+                let mut replies = Vec::new();
+                for step in params["commands"].as_array().unwrap() {
+                    replies.push(backend.execute(step["command"].as_str().unwrap(), step.get("params").unwrap_or(&json!({}))).unwrap());
+                }
+                Ok(json!(replies))
+            }
+            _ => return json!({"ok":false,"error":"unknown method"}),
+        };
+        match result {
+            Ok(result) => json!({"ok":true,"result":result}),
+            Err(reason) => json!({"ok":false,"error":solidcraft_engine::panels::commands::error_text(reason)}),
+        }
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    remote.call("engine.execute", panel_mcp_steps()[0].clone()).unwrap();
+    remote
+        .call(
+            "engine.batch",
+            json!({"commands":[panel_mcp_steps()[1].clone(),{"command":"panel.peek","params":{"target":{"type":"instance","id":"log"}}}]}),
+        )
+        .unwrap();
+    authoritative.lock().unwrap().execute("panel.collapse", &json!({"target":{"type":"instance","id":"log"},"collapsed":false})).unwrap();
+    assert_eq!(
+        remote.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"]["sections"][0]["collapsed"],
+        false,
+        "remote reads external live changes"
+    );
+    remote
+        .call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"Remote saved"}},{"command":"layout.reset"}]}))
+        .unwrap();
+    assert!(remote.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"]["instances"].as_array().unwrap().is_empty());
+    let seen = seen.lock().unwrap();
+    assert!(seen.1.iter().any(|method| method == "engine.batch"));
+    assert!(seen.1.iter().any(|method| method == "engine.script"));
+}
+
+#[test]
+fn headless_null_params_match_all_panel_routes_and_normal_document_sequences() {
+    use crate::Backend;
+    let mut headless = panel_headless();
+    let expected = headless.call("engine.execute", json!({"command":"panel.list","params":null})).unwrap();
+    for (method, rollback) in [("engine.batch", true), ("engine.batch", false), ("engine.script", false)] {
+        let reply = headless
+            .call(
+                method,
+                json!({"rollback":rollback,"commands":[
+                    {"command":"panel.list","params":null},{"command":"layout.get","params":null},
+                ]}),
+            )
+            .unwrap();
+        let results = if method == "engine.script" { &reply } else { &reply["results"] };
+        assert_eq!(results[0], expected);
+        assert_eq!(results[1]["state"], expected["state"]);
+    }
+    for method in ["engine.batch", "engine.script"] {
+        let previous = headless.session.document_id.clone();
+        let reply = headless
+            .call(
+                method,
+                json!({"rollback":false,"commands":[
+                    {"command":"file.new","params":null},{"command":"panel.list","params":null},{"command":"parameters.list","params":null},
+                ]}),
+            )
+            .unwrap();
+        assert!(reply.get("failed").is_none(), "{reply}");
+        assert_ne!(headless.session.document_id, previous);
+    }
+}
+
+struct LayoutFallbackBackend {
+    headless: Headless,
+    calls: Vec<(String, String)>,
+}
+impl LayoutFallbackBackend {
+    fn new() -> Self {
+        Self { headless: panel_headless(), calls: Vec::new() }
+    }
+}
+impl crate::Backend for LayoutFallbackBackend {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.into(), params.get("command").and_then(Value::as_str).unwrap_or_default().into()));
+        if method == "engine.batch" {
+            return Err("engine.batch unavailable: fixture has no atomic endpoint".into());
+        }
+        crate::Backend::call(&mut self.headless, method, params)
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn in_process(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "synthetic layout fallback boundary".into()
+    }
+}
+fn fallback_tool_reply(backend: &mut LayoutFallbackBackend, args: Value) -> (Value, Value) {
+    let tool = crate::tools::call_tool(backend, "batch", &args);
+    let body = serde_json::from_str(tool["content"][0]["text"].as_str().unwrap()).unwrap();
+    (tool, body)
+}
+
+#[test]
+fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document_undo() {
+    use solidcraft_engine::panels::{ActionSink, commands::LayoutCatalogue};
+    let open = panel_mcp_steps()[0].clone();
+    for steps in [
+        json!([open.clone()]),
+        json!([open.clone(),{"command":"parameters.change","params":{"name":"broken","expression":"("}}]),
+        json!([{"command":"execute","params":{"command":"panel.open","params":open["params"]}}]),
+    ] {
+        let mut backend = LayoutFallbackBackend::new();
+        let before = backend.headless.panels.as_ref().unwrap().service.inspect();
+        let catalogue = backend.headless.panels.as_ref().unwrap().catalogue.state().clone();
+        let document = backend.headless.session.doc.clone();
+        let model = backend.headless.session.model.state();
+        let session = (backend.headless.session.revision, backend.headless.session.undo.len(), backend.headless.session.is_dirty());
+        let (tool, body) = fallback_tool_reply(&mut backend, json!({"commands":steps}));
+        assert_eq!(tool["isError"], true);
+        assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
+        assert_eq!(body["completed"], 0);
+        assert_eq!(body["applied"], json!([]));
+        assert_eq!(body["rolled_back"], false);
+        assert_eq!(backend.calls, vec![("engine.batch".into(), String::new())], "no checkpoint, inspection or single layout call");
+        assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
+        assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
+        assert!(std::sync::Arc::ptr_eq(&document, &backend.headless.session.doc));
+        assert!(std::sync::Arc::ptr_eq(&model, &backend.headless.session.model.state()));
+        assert_eq!((backend.headless.session.revision, backend.headless.session.undo.len(), backend.headless.session.is_dirty()), session);
+    }
+}
+
+#[test]
+fn oversized_atomic_tool_layout_batch_refuses_before_any_backend_or_checkpoint_call() {
+    use solidcraft_engine::panels::{ActionSink, commands::LayoutCatalogue};
+    let mut backend = LayoutFallbackBackend::new();
+    let before = backend.headless.panels.as_ref().unwrap().service.inspect();
+    let catalogue = backend.headless.panels.as_ref().unwrap().catalogue.state().clone();
+    let document = backend.headless.session.doc.clone();
+    let model = backend.headless.session.model.state();
+    let args = json!({"commands":[panel_mcp_steps()[0],{"command":"parameters.change","params":{"name":"broken","expression":"x".repeat(solidcraft_engine::MAX_LINE-32768)}}]});
+    assert!(args.to_string().len() < solidcraft_engine::MAX_LINE, "fixture fits the incoming line but exceeds the outgoing margin");
+    let (tool, body) = fallback_tool_reply(&mut backend, args);
+    assert_eq!(tool["isError"], true);
+    assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "collection_limit");
+    assert_eq!(body["completed"], 0);
+    assert_eq!(body["applied"], json!([]));
+    assert!(backend.calls.is_empty());
+    assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
+    assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
+    assert!(std::sync::Arc::ptr_eq(&document, &backend.headless.session.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &backend.headless.session.model.state()));
+}
+
+#[test]
+fn sequential_tool_layout_fallback_truthfully_retains_completed_changes_without_checkpointing() {
+    use solidcraft_engine::panels::{ActionSink, InstanceId, commands::LayoutCatalogue};
+    let mut backend = LayoutFallbackBackend::new();
+    let (_, body) = fallback_tool_reply(
+        &mut backend,
+        json!({"rollback":false,"commands":[
+            panel_mcp_steps()[0],{"command":"parameters.change","params":{"name":"broken","expression":"("}},
+        ]}),
+    );
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["completed"], 1);
+    assert_eq!(body["applied"], json!([0]));
+    assert_eq!(body["rolled_back"], false);
+    assert_eq!(body["undone"], 0);
+    let panels = backend.headless.panels.as_ref().unwrap();
+    assert!(panels.service.layout().instance(&InstanceId::new("log").unwrap()).unwrap().requested_open);
+    assert_eq!(panels.service.inspect().revision, 1);
+    assert!(panels.catalogue.state().remembered(&panels.service.layout().workspace).is_some());
+    assert!(!backend.calls.iter().any(|(_, command)| command == "edit.checkpoint" || command == "edit.restore_checkpoint"));
+    assert_eq!(backend.calls.iter().filter(|(_, command)| command == "panel.open").count(), 1);
+}
+
+#[test]
+fn document_only_atomic_tool_fallback_keeps_existing_checkpoint_rollback_behavior() {
+    let mut backend = LayoutFallbackBackend::new();
+    let (_, body) = fallback_tool_reply(
+        &mut backend,
+        json!({"commands":[
+            {"command":"parameters.change","params":{"name":"temporary","expression":1}},
+            {"command":"parameters.change","params":{"name":"broken","expression":"("}},
+        ]}),
+    );
+    assert_eq!(body["rolled_back"], true, "{body}");
+    assert_eq!(body["applied"], json!([]));
+    assert!(backend.headless.session.doc.param("temporary").is_none());
+    assert!(backend.calls.iter().any(|(_, command)| command == "edit.checkpoint"));
+    assert!(backend.calls.iter().any(|(_, command)| command == "edit.restore_checkpoint"));
+}
+
 /// Screenshots are drawn on the GPU by the renderer the host installs (`solidcraft-cli mcp`); the
 /// tests install the same one. `false`, with the reason printed, on a machine without a GPU
 /// adapter: the screenshots are then left out of the test.
@@ -1430,6 +1739,75 @@ fn list_commands_filter_by_a_command_id_matches_ids() {
     let ids: Vec<&str> = cmds.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
     assert!(ids.contains(&"sketch.delete"), "{ids:?}");
     assert!(ids.iter().all(|id| id.contains("sketch.delete")), "{} commands matched: {ids:?}", ids.len());
+}
+
+/// #11726: `list_commands` narrows by id prefix and by panel, shrinks each entry to id and label
+/// or to chosen keys, and pages; with none of these the reply is the whole catalog as before. A
+/// batch step narrows the same way, and a bad argument is a tool error that names it.
+#[test]
+fn list_commands_narrows_by_prefix_panel_fields_and_page() {
+    let mut s = server();
+    let all = tool(&mut s, "list_commands", json!({}));
+    let all = all.as_array().unwrap();
+    assert!(all.len() > 100 && all[0].get("params").is_some(), "the whole catalog, every key");
+    let ids = |v: &Value| v.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let sketch = tool(&mut s, "list_commands", json!({"prefix": "SKETCH."}));
+    assert!(!ids(&sketch).is_empty() && ids(&sketch).iter().all(|id| id.starts_with("sketch.")), "{:?}", ids(&sketch));
+    let want = all.iter().filter(|c| c["id"].as_str().unwrap().starts_with("sketch.")).count();
+    assert_eq!(ids(&sketch).len(), want, "every sketch command, not only those on a toolbar");
+    let modify = tool(&mut s, "list_commands", json!({"panel": "modify"}));
+    assert!(!ids(&modify).is_empty(), "{modify}");
+    assert!(
+        modify
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["panel"].as_str().unwrap().eq_ignore_ascii_case("modify") || c["tab"].as_str().unwrap().eq_ignore_ascii_case("modify")),
+        "only the whole panel name matches"
+    );
+    let compact = tool(&mut s, "list_commands", json!({"compact": true}));
+    assert_eq!(ids(&compact), ids(&Value::Array(all.clone())), "compact keeps every command");
+    assert!(compact.as_array().unwrap().iter().all(|c| c.as_object().unwrap().keys().eq(["id", "label"].iter())), "{}", compact[0]);
+    assert!(compact.to_string().len() * 5 < Value::Array(all.clone()).to_string().len(), "compact is far smaller");
+    let picked = tool(&mut s, "list_commands", json!({"prefix": "solid.fillet", "fields": ["id", "enabled"], "compact": true}));
+    assert_eq!(picked[0], json!({"id": "solid.fillet", "enabled": picked[0]["enabled"]}), "fields wins over compact");
+    // Pages: together they are the whole match list, in order.
+    let mut paged = Vec::new();
+    let mut offset = json!(0);
+    while let Some(at) = offset.as_u64() {
+        let page = tool(&mut s, "list_commands", json!({"prefix": "sketch.", "compact": true, "limit": 7, "offset": at}));
+        assert_eq!(page["total"], want, "{page}");
+        assert_eq!(page["offset"], at);
+        assert!(page["commands"].as_array().unwrap().len() <= 7);
+        paged.extend(ids(&page["commands"]));
+        offset = page["next_offset"].clone();
+    }
+    assert_eq!(paged, ids(&sketch));
+    let past = tool(&mut s, "list_commands", json!({"limit": 5, "offset": 1_000_000}));
+    assert_eq!((past["commands"].as_array().unwrap().len(), &past["next_offset"]), (0, &Value::Null), "{past}");
+    // A batch step narrows as the tool does.
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "list_commands", "params": {"prefix": "sketch.", "compact": true, "limit": 3}}]}));
+    let step = r["results"][0].clone();
+    assert_eq!(step["commands"].as_array().map(Vec::len), Some(3), "{r}");
+    assert_eq!(step["total"], want, "{r}");
+    for bad in [
+        json!({"limit": 0}),
+        json!({"limit": -1}),
+        json!({"offset": "x"}),
+        json!({"fields": ["nope"]}),
+        json!({"fields": "id"}),
+        json!({"compact": 1}),
+        json!({"prefix": 3}),
+    ] {
+        // The argument schema refuses a wrong type before the tool runs; the tool refuses the rest.
+        let r = raw_tool(&mut s, "list_commands", bad.clone());
+        let text = r["result"]["content"][0]["text"].as_str().or(r["error"]["message"].as_str()).unwrap_or_default().to_string();
+        assert!(r["result"]["isError"] == json!(true) || r["error"]["code"].is_i64(), "{bad}: {r}");
+        let key = bad.as_object().unwrap().keys().next().unwrap().clone();
+        assert!(text.contains(&format!("`{key}`")), "{bad}: the error names the argument: {text}");
+        let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": "list_commands", "params": bad.clone()}]}));
+        assert!(r["result"]["isError"] == json!(true) || r.to_string().contains(&format!("`{key}`")), "{bad} as a step: {r}");
+    }
 }
 
 /// Compatibility shims (docs/compatibility.md): a design saved before the rename (legacy
@@ -3171,9 +3549,9 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"nonsense": 1}}));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
     assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.fillet"), 1, "no contract here: the app decides");
+    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();

@@ -6,12 +6,13 @@ use solidcraft_render::{Camera, StandardView};
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
-    CameraReply, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, StandardViewParams, TabStep, TabStepParams,
+    CameraReply, NavigatorParams, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, StandardViewParams, TabStep, TabStepParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
+const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
 const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
 const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
@@ -50,20 +51,24 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
-CommandSpec::new("view.home", "Home view", home)
+CommandSpec::new("view.home", "Home View", home)
     .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
-CommandSpec::new("view.tool", "Navigation tool", tool)
+CommandSpec::new("view.tool", "Navigation Tool", tool)
     .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
-CommandSpec::new("view.spin", "Continuous orbit", spin)
+CommandSpec::new("view.spin", "Continuous Orbit", spin)
     .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
-CommandSpec::new("view.visual_style", "Visual style", visual_style)
+CommandSpec::new("view.visual_style", "Visual Style", visual_style)
     .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
 CommandSpec::new("view.grid", "Grid", grid)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
-CommandSpec::new("view.ground_shadow", "Ground shadow", ground_shadow)
+CommandSpec::new("view.ground_shadow", "Ground Shadow", ground_shadow)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
-CommandSpec::new("view.navigation_bar", "Navigation bar", navigation_bar)
+CommandSpec::new("view.navigation_bar", "Navigation Bar", navigation_bar)
     .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
+    .icon("nav_settings").noundo().doc_only()
+    .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
+    .params("style?: axes|cube|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
 CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
     .icon("render_scene").noundo().doc_only()
     .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
@@ -322,6 +327,18 @@ fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
     let _: crate::schema::view_navigation::StatusItemsParams =
         serde_json::from_value(p.clone()).map_err(|e| bad("view.status_items", e.to_string()))?;
     Ok(json!(crate::status_items::StatusItems { items: s.status_items() }))
+}
+
+/// The app sets the navigator; the engine checks the parameters and that a named body exists.
+fn navigator(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.navigator";
+    let request: NavigatorParams = serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(Some(name)) = &request.body
+        && s.world_state()?.body(name).is_none()
+    {
+        return Err(bad(cmd, format!("no body named `{name}`")));
+    }
+    serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {

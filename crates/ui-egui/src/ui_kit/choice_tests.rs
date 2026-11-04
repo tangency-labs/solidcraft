@@ -366,6 +366,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                         settings_choice_row(
                             ui,
                             &SettingsChoice {
+                                icon: None,
                                 key: "test:output:radio",
                                 title: locale.text("render.size_full_hd"),
                                 summary: "1920 × 1080",
@@ -395,7 +396,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                 ui.add_enabled_ui(enabled, |ui| {
                     clicked |= settings_choice_row(
                         ui,
-                        &SettingsChoice { key: "test:output:radio", title: "4K", summary: "3840 × 2160", detail: "Over budget" },
+                        &SettingsChoice { icon: None, key: "test:output:radio", title: "4K", summary: "3840 × 2160", detail: "Over budget" },
                         false,
                     )
                     .clicked();

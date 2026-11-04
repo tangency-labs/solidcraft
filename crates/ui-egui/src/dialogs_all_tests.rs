@@ -37,6 +37,53 @@ fn feature_inputs_reject_external_sketch_geometry() {
     }
 }
 
+#[test]
+fn point_at_edge_and_plane_accepts_preselected_axes() {
+    for (name, expected) in [("TestAxis", Vec3::new(20.0, 10.0, 0.0)), ("Z", Vec3::ZERO)] {
+        let mut h = Harness::new();
+        h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[20,10,20]},"name":"TestAxis"})).unwrap();
+        let axis = Sel::Axis { name: name.into() };
+        h.app.session.selection = vec![axis.clone(), Sel::Plane { name: "XY".into() }];
+        let d = Dialog::for_command(&h.app, "construct.point.edge_plane").unwrap();
+        assert_eq!(d.inputs[0].items, vec![axis], "{name}: the preselected axis fills Edge");
+        let commands = apply_commands(&h.app, &d).unwrap();
+        assert_eq!(commands[0].1["edge"], json!({"axis":name}));
+        for (command, params) in commands {
+            h.app.run(&command, params).unwrap();
+        }
+        let points = solidcraft_engine::view::construction_points(&h.app.session);
+        assert_eq!(points.len(), 1);
+        assert!(points[0].2.dist(expected) < 1e-9, "{name}: {:?}", points[0].2);
+    }
+}
+
+#[test]
+fn point_at_edge_and_plane_picks_a_construction_axis() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.tree.collapsed.insert("c0/features".into());
+        h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[20,10,20]},"name":"TestAxis"})).unwrap();
+        h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+        h.app.start("construct.point.edge_plane");
+        h.frames(4);
+        let axis = Sel::Axis { name: "TestAxis".into() };
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.candidate(&h.app.session, &Hit::Axis { name: "TestAxis".into() }), Some(axis.clone()));
+        assert!(fits(d.inputs[0].accept, &Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::ZERO }));
+        assert!(fits(d.inputs[0].accept, &Sel::SketchCurve { id: "l1".into(), sketch: None }));
+        let target = if browser { json!({"handle":"row:TestAxis"}) } else { json!({"world":[20,10,-20]}) };
+        h.step(&json!({"click":target})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![axis], "browser: {browser}");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        let points = solidcraft_engine::view::construction_points(&h.app.session);
+        assert_eq!(points.len(), 1);
+        assert!(points[0].2.dist(Vec3::new(20.0, 10.0, 0.0)) < 1e-9, "{:?}", points[0].2);
+    }
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {
@@ -1421,6 +1468,12 @@ fn dialog_profile_labels_name_the_sketch_in_coil_and_mirror() {
         h.app.start(command);
         h.app.dialog.as_mut().unwrap().preview_enabled = false;
         h.frames(3);
+        // A field that takes several picks lists them, labels and all, behind its arrow (#3683).
+        let (multi, label) = h.app.dialog.as_ref().map(|d| (d.inputs[0].multi, d.inputs[0].label)).unwrap();
+        if multi {
+            h.step(&json!({"click": {"handle": format!("dialog:list_toggle:{label}")}})).unwrap();
+            h.frames(2);
+        }
         let d = h.app.dialog.as_ref().unwrap();
         let input = &d.inputs[0];
         assert_eq!(input.items, vec![Sel::Profile { sketch, index: 0 }]);

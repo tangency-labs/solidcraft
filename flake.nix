@@ -148,10 +148,13 @@
           '';
 
           # Linux only: the app reaches the window through dlopen'd libraries, so the packaged
-          # binary needs the same LD_LIBRARY_PATH the shell exports. macOS needs no wrapper.
+          # binary needs the same LD_LIBRARY_PATH the shell exports. File dialogs go through the
+          # desktop portal and fall back to zenity without one (#2177), so zenity comes along,
+          # after the system's own on PATH. macOS needs no wrapper.
           postFixup = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
             wrapProgram $out/bin/solidcraft \
               --prefix LD_LIBRARY_PATH : "${libraryPath pkgs}" \
+              --suffix PATH : "${pkgs.lib.makeBinPath [ pkgs.zenity ]}" \
               --set-default XDG_DATA_DIRS /usr/local/share:/usr/share \
               --prefix XDG_DATA_DIRS : "$out/share:${driverShareDir pkgs}"
           '';

@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "Analisis Aksesibilitas",
   "cmd.inspect_center_of_mass": "Pusat Massa",
   "cmd.inspect_clearance": "Kelonggaran",
-  "cmd.inspect_colored_components": "Aktifkan Warna Komponen",
-  "cmd.inspect_colored_components_disable": "Nonaktifkan Warna Komponen",
   "cmd.inspect_compare": "Bandingkan Bodi",
   "cmd.inspect_compare_picture": "Bandingkan dengan Gambar",
   "cmd.inspect_continuity": "Analisis Kontinuitas",

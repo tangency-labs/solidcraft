@@ -63,6 +63,17 @@ impl Deferred {
     }
 }
 
+/// What one design has computing off the window thread or waiting its turn. It belongs to that
+/// design: it waits with its tab while another is shown, holds up nothing there, and goes when
+/// the design closes (the worker runs on to its end and its result is dropped).
+#[derive(Default)]
+pub struct DocJobs {
+    deferred: Option<Deferred>,
+    queue: Vec<(String, Value)>,
+    start_after_roll: Option<(String, u64)>,
+    delete_check: Option<DeleteCheck>,
+}
+
 /// How a command asked to run off the window thread goes.
 enum Start {
     /// It computes off the window thread.
@@ -133,6 +144,32 @@ fn replaced_by_a_later_one(id: &str) -> bool {
 }
 
 impl SolveApp {
+    /// Swap the active design's [`DocJobs`] for `incoming`, the jobs of the design taking its
+    /// place, and hand back the outgoing ones.
+    pub(crate) fn swap_jobs(&mut self, incoming: DocJobs) -> DocJobs {
+        DocJobs {
+            deferred: std::mem::replace(&mut self.deferred, incoming.deferred),
+            queue: std::mem::replace(&mut self.deferred_queue, incoming.queue),
+            start_after_roll: std::mem::replace(&mut self.start_after_roll, incoming.start_after_roll),
+            delete_check: std::mem::replace(&mut self.delete_check, incoming.delete_check),
+        }
+    }
+
+    /// The active design's revision moved from `before` to `after` only to refresh the views
+    /// (a tab shown again): its jobs were not computed for an older design.
+    pub(crate) fn jobs_view_changed(&mut self, before: u64, after: u64) {
+        if let Some(job) = &mut self.deferred
+            && job.revision == before
+        {
+            job.revision = after;
+        }
+        if let Some(check) = &mut self.delete_check
+            && check.revision == before
+        {
+            check.revision = after;
+        }
+    }
+
     /// A direct exit or editor switch supersedes any queued sketch exit. A late worker must
     /// never finish a different sketch that was opened while it computed.
     pub(crate) fn take_sketch_exit(&mut self) -> Option<String> {

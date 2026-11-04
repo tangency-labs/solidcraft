@@ -18,6 +18,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::PartSize(_) => Some("parts.resize"),
         Kind::SaveMesh(k) => Some(crate::dialogs_save_mesh::command_id(k)),
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
+        Kind::ViewNavigator(_) => Some("view.navigator"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
@@ -134,13 +135,17 @@ fn fillet_corner_tip() -> String {
 /// radius and narrow it only where the faces run out.
 const FILLET_FITS: [(&str, &str); 3] = [("ui.fillet_fit_exact", "exact"), ("ui.fillet_fit_reduce", "reduce"), ("ui.fillet_fit_taper", "taper")];
 
+/// How two rounds turn where they meet at a sharp corner edge (`turn`): in a mitre (the
+/// default) or swept round the edge.
+const FILLET_TURNS: [(&str, &str); 2] = [("ui.fillet_turn_mitre", "mitre"), ("ui.fillet_turn_swept", "swept")];
+
 /// Which fillet options apply together, exactly as `solid.fillet` takes them (`fillet` in
 /// crates/engine/src/cmd/features.rs):
 ///
-/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) |
-/// |---------------|-------------------------|-------------------------------------|----------------------|
-/// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  |
-/// | any other     | exact (not sent)        | tangent (not sent)                  | none                 |
+/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) | Turns (`turn`)                  |
+/// |---------------|-------------------------|-------------------------------------|----------------------|---------------------------------|
+/// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  | mitre; swept without taper, g2  |
+/// | any other     | exact (not sent)        | tangent (not sent)                  | none                 | mitre (not sent)                |
 ///
 /// The dialog shows an option's row only where it applies and sends the option only then, and a
 /// choice that rules another out puts that one back to its default ([`settle_fillet_options`]).
@@ -150,6 +155,8 @@ pub(super) fn fillet_option_applies(extra: &serde_json::Map<String, Value>, key:
     match key {
         "fit" => constant,
         "corner" | "setbacks" => constant && exact,
+        // A swept turn takes an exact or reduced radius and rolling-ball corners.
+        "turn" => constant && extra.get("fit").and_then(Value::as_str) != Some("taper") && extra.get("corner").and_then(Value::as_str) != Some("g2"),
         _ => true,
     }
 }
@@ -159,15 +166,29 @@ pub(super) fn fillet_option_applies(extra: &serde_json::Map<String, Value>, key:
 /// takes the exact radius. A type other than Constant clears both ([`choose_fillet_type`]).
 fn settle_fillet_options(extra: &mut serde_json::Map<String, Value>, changed: &str, setback: &mut Option<String>) {
     let fitted = extra.get("fit").and_then(Value::as_str).is_some_and(|fit| fit != "exact");
+    let tapered = extra.get("fit").and_then(Value::as_str) == Some("taper");
     let patch = extra.get("corner").and_then(Value::as_str) == Some("g2");
+    let swept = extra.get("turn").and_then(Value::as_str) == Some("swept");
     match changed {
         "fit" if fitted => {
             extra.remove("corner");
             extra.remove("setbacks");
             *setback = None;
+            if tapered {
+                extra.remove("turn");
+            }
         }
         "corner" if patch => {
             extra.remove("fit");
+            extra.remove("turn");
+        }
+        "turn" if swept => {
+            extra.remove("corner");
+            extra.remove("setbacks");
+            *setback = None;
+            if tapered {
+                extra.remove("fit");
+            }
         }
         _ => {}
     }
@@ -218,7 +239,7 @@ fn fillet_corner_rows(
             let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", &factor)]);
             ui_kit::checked_row(ui, "ui.fillet_setback", &mut text, &hint, warning.as_deref())
         });
-        row.response.on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", &factor)]));
+        row.response.backing_on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", &factor)]));
         let (accepted, field) = row.inner;
         enter |= accepted;
         if text != shown {
@@ -237,7 +258,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
     let t = Tokens::get();
     let before = extra.get("fit").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_fit", |ui| extra_choice(ui, extra, "fi_fit", "fit", &FILLET_FITS)));
-    row.response.on_hover_text(tr("ui.fillet_fit_tip"));
+    row.response.backing_on_hover_text(tr("ui.fillet_fit_tip"));
     let fit = row.inner;
     if extra.get("fit") != before.as_ref() {
         settle_fillet_options(extra, "fit", setback);
@@ -253,6 +274,17 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
             };
             ui.label(RichText::new(shown).color(t.warning));
         });
+    }
+}
+
+/// A Constant radius fillet's Turns row (`turn`): how two rounds turn where they meet at a sharp
+/// corner edge.
+fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
+    let before = extra.get("turn").cloned();
+    let row = ui.scope(|ui| form_row(ui, "ui.fillet_turn", |ui| extra_choice(ui, extra, "fi_turn", "turn", &FILLET_TURNS)));
+    row.response.on_hover_text(tr("ui.fillet_turn_tip"));
+    if extra.get("turn") != before.as_ref() {
+        settle_fillet_options(extra, "turn", setback);
     }
 }
 
@@ -293,6 +325,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
         extra.remove("fit");
         extra.remove("corner");
         extra.remove("setbacks");
+        extra.remove("turn");
     }
     if index == 2 {
         extra.entry("radius2").or_insert_with(|| json!("1 mm"));
@@ -322,14 +355,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             };
             tr(key).to_owned()
         };
-        ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).on_hover_text(&prompt);
+        ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).backing_on_hover_text(&prompt);
         if matches!(&d.kind, Kind::SketchModify(k) if k.previews()) {
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
             let step = crate::i18n::format(
                 "dialog.selection_step",
                 &[("step", &(d.active + 1).to_string()), ("total", &d.inputs.len().to_string()), ("input", label)],
             );
-            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).on_hover_text(tr("dialog.selection_guidance"));
+            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
     let manage_hint = match &d.kind {
@@ -361,6 +394,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::PartSize(k) => enter |= crate::dialogs_part_size::rows(app, ui, k),
         Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k, &mut d.inputs),
         Kind::ViewDxf { dashed, tolerance } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance),
+        Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::Sketch => {
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
@@ -540,10 +574,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     }
                     response
                 })
-                .on_hover_text(tr("ui.fillet_type_choices_tip"));
+                .backing_on_hover_text(tr("ui.fillet_type_choices_tip"));
                 if rtype == 0 {
                     enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, radius, setback);
                     fillet_fit_rows(app, ui, &mut d.extra, setback);
+                    fillet_turn_row(ui, &mut d.extra, setback);
                 }
             }
             if *chamfer && *ctype == 1 {
@@ -558,7 +593,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::section(ui, "fillet_options", "Options", true, |ui| {
                 ui.scope(|ui| ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2))
                     .response
-                    .on_hover_text(tr("ui.fillet_options_tip"));
+                    .backing_on_hover_text(tr("ui.fillet_options_tip"));
             });
             // The radii along the edge, for the two types that take them.
             if !*chamfer && matches!(rtype, 2 | 4) {
@@ -579,12 +614,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             form_row(ui, "Mid Radius", |ui| {
                                 ui.horizontal(|ui| {
                                     ui_kit::fraction_field(ui, position)
-                                        .on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
+                                        .backing_on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
                                     let width = (ui.available_width() - t.space_24 - t.space_4).max(0.0);
                                     ui.allocate_ui_with_layout(vec2(width, t.space_24), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                         enter |= field(ui, r);
                                     });
-                                    if ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Remove this point")).clicked() {
+                                    if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("Remove this point")).clicked() {
                                         remove = Some(k);
                                     }
                                 });
@@ -694,6 +729,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     ui_kit::dropdown_previews(ui, "hole_tip", &mut tip, &["Flat", "Angle"], |ui, i| preview(ui, Choice::Angled(i == 1)));
                     opts.angled = tip == 1;
                 });
+            }
+            // Counterbore only: the thickness of the layers a 3D printer bridges across its
+            // floor; empty for none.
+            if *kind == 1 {
+                enter |= hint_row(ui, "Bridge", &mut opts.bridge, tr("None"));
             }
             // The section through the hole, each size beside its dimension (#2171).
             let to_object = to_object_on(&d.inputs);
@@ -896,17 +936,25 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             ui.add(egui::Label::new(crate::i18n::tr("ui.emboss_wrap_note")).wrap());
         }
-        Kind::Align { flip, components, axes: [ax, ay, az] } => {
+        Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
-            // the other, an edge at its middle), its centre, or a round one's centre.
+            // the other, an edge at its middle), its center, a round one's center, or, for bodies,
+            // the joint origin the Joint dialog makes of it (found again as the part changes, #6257).
+            let snaps: &[(&str, &str)] = if *components {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]
+            } else {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
+            };
             for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]);
+                    extra_choice(ui, &mut d.extra, key, key, snaps);
                 });
             }
             if *components {
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
             } else {
+                // A turn about the target's direction after the move (#6257).
+                enter |= hint_row(ui, "Angle", angle, tr("none"));
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)]);
             }
             // A part inside a subassembly placed more than once sits where that shared
@@ -998,7 +1046,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         ui.label(format!("{:.2}, {:.2}, {:.2}", p.x, p.y, p.z));
                         // A cylinder's place is its Face pick, cleared there.
                         if *cmd != "solid.cylinder"
-                            && ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Place at the origin instead")).clicked()
+                            && ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("Place at the origin instead")).clicked()
                         {
                             *at = None;
                         }
@@ -1070,17 +1118,20 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         let lines = crate::quick_measure::item_lines(app, it);
         for (k, line) in lines.into_iter().enumerate() {
             let label = if k == 0 { crate::i18n::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
-            value(ui, &label, &line);
+            // Coordinates need all three values; a fixed-height form cell elides the end.
+            let text = if label.is_empty() { line } else { format!("{label}  {line}") };
+            ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_item_{i}_{k}"), false));
         }
     }
     if let Some((now, d, a, b)) = shown_distance(r, *show) {
         if r.get("center_distance").is_some() {
             // Centre, min and max all listed; the chosen one is drawn and broken into ΔX/Y/Z.
+            let centre_label = crate::quick_measure::centre_distance_label(r);
             for (which, label, key) in
-                [(Shown::Centre, "Centre to centre", "center_distance"), (Shown::Min, "Min", "distance_mm"), (Shown::Max, "Max", "max")]
+                [(Shown::Centre, centre_label, "center_distance"), (Shown::Min, tr("Min"), "distance_mm"), (Shown::Max, tr("Max"), "max")]
             {
                 let Some(v) = r.get(key).filter(|v| v.is_number()) else { continue };
-                if ui_kit::list_picker(ui, key, &format!("{}  {}", tr(label), mm(v)), now == which).clicked() {
+                if ui_kit::list_picker(ui, key, &format!("{}  {}", label, mm(v)), now == which).clicked() {
                     *show = Some(which);
                 }
             }
@@ -1273,13 +1324,46 @@ mod tests {
         assert!(scenario::handle_at("dialog:ui.fillet_fit").is_none(), "a fitted radius is for Constant radius only");
     }
 
+    /// Turns sends `turn: swept` with a Constant radius only, and a choice it rules out (a
+    /// narrowed radius, a curvature corner) puts the other back: Swept and those never go
+    /// together.
+    #[test]
+    fn turns_maps_to_turn_and_rules_out_what_a_swept_corner_does_not_take() {
+        let mut h = fillet_harness();
+        set_edges(&mut h, 3);
+        assert!(scenario::handle_at("dialog:ui.fillet_turn").is_some());
+        assert!(parameters(&h).get("turn").is_none(), "Mitre is the default, not sent");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        assert_eq!(parameters(&h)["turn"], json!("swept"));
+        choose(&mut h, "ui.fillet_fit", "ui.fillet_fit_reduce");
+        assert_eq!((parameters(&h)["turn"].clone(), parameters(&h)["fit"].clone()), (json!("swept"), json!("reduce")));
+        choose(&mut h, "ui.fillet_fit", "ui.fillet_fit_taper");
+        assert!(parameters(&h).get("turn").is_none(), "a narrowed radius puts Turns back to Mitre");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        assert!(parameters(&h).get("fit").is_none(), "Swept puts Face limits back to Exact radius");
+        choose(&mut h, "ui.corners", Continuity::G2.label_id());
+        assert!(parameters(&h).get("turn").is_none(), "a curvature corner puts Turns back to Mitre");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        assert!(parameters(&h).get("corner").is_none(), "Swept puts Corners back to Tangent");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_mitre");
+        assert!(parameters(&h).get("turn").is_none(), "Mitre is not sent");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        choose(&mut h, "Type", "Chord length");
+        assert!(parameters(&h).get("turn").is_none() && scenario::handle_at("dialog:ui.fillet_turn").is_none(), "Turns is for Constant radius only");
+    }
+
     /// The dialog follows the option model (`fillet_option_applies`): through every type, fit and
     /// corner choice, in either order, each option it shows is one the others allow, and the
     /// command it builds is never refused for its options (`solid.fillet` runs it on a copy of
     /// the design). A choice that rules another out resets that one, visibly.
     #[test]
     fn no_reachable_fillet_option_state_is_refused_for_its_options() {
-        let refused_for_options = |e: &str| e.contains("take a constant radius") || e.contains("is built for") || e.contains("are built for");
+        let refused_for_options = |e: &str| {
+            e.contains("take a constant radius")
+                || e.contains("is built for")
+                || e.contains("are built for")
+                || e.contains(solidcraft_engine::doc::SWEPT_TAKES)
+        };
         // Each distinct command is run once.
         let ran = std::cell::RefCell::new(std::collections::BTreeSet::new());
         let check = |h: &Harness, what: &str| {

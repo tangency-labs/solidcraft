@@ -1,5 +1,6 @@
 //! Integrated product preview. Shares the installed device/pipelines, not Design's scene policy.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -142,7 +143,13 @@ pub struct State {
     design_camera: Option<(Camera, bool)>,
     slot: SceneSlot,
     key: Option<u64>,
+    /// What the product scene was extracted from: the document's and the world state's
+    /// addresses, a hash of what decides visibility and the geometry budget
+    /// ([`State::prepare_preview`]).
     scene_signature: Option<(u64, usize, u64, u64)>,
+    /// The document and world state `scene_signature` names, held so their addresses cannot be
+    /// reused by others while the signature refers to them.
+    scene_sources: Option<(Arc<solidcraft_engine::doc::Document>, Arc<solidcraft_engine::doc::ModelState>)>,
     scene: Option<ProductScene>,
     scene_error: Option<String>,
     preview_upload_bytes: Option<usize>,
@@ -473,6 +480,7 @@ impl Default for State {
             slot: Arc::new(Mutex::new(None)),
             key: None,
             scene_signature: None,
+            scene_sources: None,
             scene: None,
             scene_error: None,
             preview_upload_bytes: None,
@@ -671,6 +679,7 @@ pub fn invalidate_scene(app: &mut SolveApp) {
     app.render_workspace.thumbnails = Default::default();
     app.render_workspace.revision = u64::MAX;
     app.render_workspace.scene_signature = None;
+    app.render_workspace.scene_sources = None;
     app.render_workspace.scene = None;
     app.render_workspace.scene_error = None;
     app.render_workspace.preview_upload_bytes = None;
@@ -963,7 +972,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
                 ui.close();
             }
             if let Err(reason) = capability {
-                response.on_hover_text(reason);
+                response.backing_on_hover_text(reason);
             }
         }
     });
@@ -1034,7 +1043,7 @@ fn image_method_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     cpu_lighting_controls(app, ui);
     ui.label(app.tr("render.image_exposure"));
     let exposure_help = app.tr("render.cpu_exposure_help").to_string();
-    crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV").on_hover_text(exposure_help);
+    crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV").backing_on_hover_text(exposure_help);
     cpu::controls(app, ui);
 }
 
@@ -1053,7 +1062,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let _ = app.run("render.result.view", json!({"view":"fit"}));
             }
             if crate::ui_kit::button(ui, crate::i18n::tr("render.result_actual_size"), crate::ui_kit::Button::Enabled(!reduced_display(app)))
-                .on_hover_text(app.tr("render.result_actual_help"))
+                .backing_on_hover_text(app.tr("render.result_actual_help"))
                 .clicked()
             {
                 let _ = app.run("render.result.view", json!({"view":"actual"}));
@@ -1213,7 +1222,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     let response = ui.add_sized([ui.available_width(), ui.text_style_height(&egui::TextStyle::Body)], egui::Label::new(message).truncate());
     crate::scenario::publish_target("render:job-summary", response.rect);
     if let Err(error) = &params {
-        response.on_hover_text(error);
+        response.backing_on_hover_text(error);
     }
     if let Some(status) = &state {
         if !compact {
@@ -1272,7 +1281,7 @@ fn completed_image(app: &mut SolveApp, ui: &mut egui::Ui) {
             Ok(texture) => {
                 if ui
                     .add(egui::Image::new(texture).max_size(egui::vec2(ui.available_width(), 240.0)).shrink_to_fit().sense(Sense::click()))
-                    .on_hover_text(app.tr("render.result_open"))
+                    .backing_on_hover_text(app.tr("render.result_open"))
                     .clicked()
                 {
                     let _ = app.run("render.result.view", json!({"view":"image"}));
@@ -1755,6 +1764,20 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::navigation_bar_view::show(app, ui, rect);
 }
 
+/// What the product scene is extracted from: the document (appearances, the history marker),
+/// the world state (geometry and placements) and what decides which bodies are visible. Not the
+/// session's revision, which every command moves: a selection or a view change extracts no scene
+/// and builds no vertices. The document and world state are held while the signature names them.
+fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
+    let mut visibility = std::collections::hash_map::DefaultHasher::new();
+    let v = &app.session.visibility;
+    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.active_sketch).hash(&mut visibility);
+    let (doc, world) = (app.session.doc.clone(), crate::open_meshing::session_world(&app.session));
+    let signature = (Arc::as_ptr(&doc) as usize as u64, Arc::as_ptr(&world) as usize, visibility.finish());
+    app.render_workspace.scene_sources = Some((doc, world));
+    signature
+}
+
 impl State {
     fn prepare_preview(&mut self, signature: (u64, usize, u64, u64), capture: impl FnOnce() -> Result<ProductScene, String>) -> Result<(), String> {
         if self.scene_signature != Some(signature) {
@@ -2171,16 +2194,9 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
         if app.session.model.is_stale() {
             return Err(crate::i18n::tr("render.error_finish_gesture").into());
         }
-        let mut visibility = std::collections::hash_map::DefaultHasher::new();
-        app.session.visibility.hidden_bodies.hash(&mut visibility);
-        app.session.visibility.hidden_occurrences.hash(&mut visibility);
+        let (doc, world, visibility) = preview_signature(app);
         let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
-        let signature = (
-            app.session.revision,
-            Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize,
-            visibility.finish() ^ assign::preview_key(app),
-            budget,
-        );
+        let signature = (doc, world, visibility ^ assign::preview_key(app), budget);
         let preview = assign::preview(app);
         let previous_key = app.render_workspace.key;
         app.render_workspace.prepare_preview(signature, || {
@@ -2225,6 +2241,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
             pv_key: 0,
             pv_slot: slot,
             pv_hide: false,
+            preview_bounds: None,
             view_proj: product_projection(camera, radius, rect, image).to_f32(),
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
@@ -2350,7 +2367,8 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
     Ok(())
 }
 
-pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+/// `key` names the row's scenario handles (`ui_kit::progress_action`).
+pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     if !ribbon::busy(app) {
         return false;
     }
@@ -2365,8 +2383,8 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let cancel =
-        crate::ui_kit::progress_action(ui, &format!("{name} · {} · {:.0}%", app.tr(&phase_key), fraction * 100.0), fraction, app.tr_label("Cancel"));
+    let status = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
+    let cancel = crate::ui_kit::progress_action(ui, key, &name, &status, fraction, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {
         app.start("render.cancel");

@@ -773,6 +773,8 @@ impl Model {
         let mut exact = true;
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
+        let mut construction = HashMap::new();
+        let mut prepared_states = std::collections::HashSet::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
@@ -784,8 +786,26 @@ impl Model {
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
             // A file without room for every state keeps some features without one (#3220).
-            let state =
-                r.get("state").map(|s| states.get(index(Some(s), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
+            if let Some(at) = state
+                && prepared_states.insert(at)
+            {
+                let original = matches!(
+                    &f.kind,
+                    FeatureKind::Box { operation: Operation::NewBody, .. } | FeatureKind::Extrude { operation: Operation::NewBody, .. }
+                );
+                let current = states.get_mut(at).ok_or_else(|| bad("saved model: state"))?;
+                // Each state is prepared before its first shared clone. Record and NameCell
+                // identity prove this is still the original geometry and its exact names.
+                for body in &mut Arc::make_mut(current).bodies {
+                    let key = (std::ptr::from_ref(body.body.record()).addr(), body.names.id());
+                    if original && body.feature == f.id && before.body(&body.name).is_none() {
+                        construction.insert(key, f.id);
+                    }
+                    body.names.cached_construction = construction.get(&key).copied();
+                }
+            }
+            let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),

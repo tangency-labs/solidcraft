@@ -6,6 +6,7 @@
 //! component shows where it goes, and with Animate the joint plays its motion.
 
 use crate::fonts::RichTextExt as _;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
 use serde_json::{Value, json};
@@ -125,9 +126,21 @@ pub enum Asm {
         of: Vec<Sel>,
         /// Pairs closer than this (mm, as typed) are listed too.
         clearance: String,
+        /// Compute's check under way (its reply lands here).
+        check: Option<Check>,
     },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
     Trace(Box<TraceForm>),
+}
+
+/// Interference's check off the window thread: where it leaves its reply (the check's and the
+/// shared volumes' meshes), the design and the picks it checked, and when it started.
+#[derive(Clone, Debug)]
+pub struct Check {
+    reply: std::sync::Arc<std::sync::Mutex<Option<(Value, Vec<Mesh>)>>>,
+    design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    of: Vec<Sel>,
+    started: f64,
 }
 
 /// The snap under the cursor, remembered for the selection it was found for.
@@ -287,7 +300,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
         "inspect.interference" => (
-            Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into() },
+            Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into(), check: None },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
         ),
         _ => return None,
@@ -737,7 +750,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     if !bodies.is_empty()
                         && crate::ui_kit::button(ui, crate::i18n::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
-                            .on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
+                            .backing_on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
                             .clicked()
                     {
                         // A refusal shows on the status line; the picks stay either way.
@@ -773,7 +786,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, "Animate", |ui| {
                     let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
                     if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-                        .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
+                        .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
                         .clicked()
                     {
                         f.animate = !f.animate;
@@ -956,10 +969,45 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
         }
         Asm::Coupling(f) => enter |= crate::dialogs_coupling::rows(app, ui, f, inputs),
         Asm::Cam(f) => enter |= crate::dialogs_coupling::cam::rows(app, ui, f, inputs),
-        Asm::Interference { result, overlaps, of, clearance } => {
+        Asm::Interference { result, overlaps, of, clearance, check } => {
             let picked: Vec<Sel> = inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+            if let Some(c) = check.take() {
+                match c.reply.lock().map(|mut r| r.take()).map_err(|_| ()) {
+                    Ok(None) => {
+                        *check = Some(c);
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                    }
+                    // Done: shown unless the design changed meanwhile (a script, the control
+                    // channel, undo). A poisoned lock (its thread panicked) leaves nothing.
+                    Ok(Some((r, o))) => {
+                        if c.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc)) {
+                            (*result, *overlaps, *of) = (Some(r), o, c.of);
+                        }
+                        ui.ctx().request_repaint();
+                    }
+                    Err(()) => {}
+                }
+            }
             enter |= expr_row(ui, "Clearance", clearance);
+            // While it checks: the seconds so far, and Cancel where Compute was.
+            if let Some(started) = check.as_ref().map(|c| c.started) {
+                let t = Tokens::get();
+                form_row(ui, "", |ui| {
+                    ui.horizontal(|ui| {
+                        let seconds = ((crate::now_ms() - started) / 1000.0).floor().max(0.0);
+                        ui.add(egui::Spinner::new().size(t.font_small));
+                        ui.label(RichText::new(crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
+                    });
+                });
+            }
             form_row(ui, "", |ui| {
+                if check.is_some() {
+                    if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                        // Its thread finishes the check; the reply is left unread.
+                        *check = None;
+                    }
+                    return;
+                }
                 let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
@@ -968,13 +1016,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 )
                 .clicked()
                 {
-                    let (r, o) = interference(app, &picked, clearance);
-                    *result = Some(r);
-                    *overlaps = o;
-                    *of = picked;
+                    (*result, *overlaps) = (None, Vec::new());
+                    *check = Some(interference(app, &picked, clearance));
+                    ui.ctx().request_repaint();
                 }
             });
-            if let Some(r) = result.as_ref() {
+            if check.is_none()
+                && let Some(r) = result.as_ref()
+            {
                 interference_rows(app, ui, r);
             }
         }
@@ -1034,7 +1083,7 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
                 }
             });
         } else if crate::ui_kit::button(ui, crate::i18n::tr("joint.find_limits"), crate::ui_kit::Button::Normal)
-            .on_hover_text(crate::i18n::tr("joint.find_limits_hint"))
+            .backing_on_hover_text(crate::i18n::tr("joint.find_limits_hint"))
             .clicked()
         {
             find_limits(app, f, id, inputs);
@@ -1174,34 +1223,73 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
     }
 }
 
-/// Run the check (overlaps, pairs closer than the clearance, each body's nearest neighbour) and
-/// find the overlapping volumes (world placement) to show in red.
-fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, Vec<Mesh>) {
+/// Start Compute's check (overlaps, pairs closer than the clearance, each body's nearest
+/// neighbour) and find the overlapping volumes (world placement) to show in red. Off the window
+/// thread, on a kernel thread, when the app runs commands there: a slow pair froze the window
+/// until the app was closed (#11483). Else at once.
+fn interference(app: &SolveApp, picked: &[Sel], clearance: &str) -> Check {
+    let check =
+        Check { reply: Default::default(), design: std::sync::Arc::downgrade(&app.session.doc), of: picked.to_vec(), started: crate::now_ms() };
     let names: Vec<String> = picked.body_names();
     let (scale, _) = crate::prefs::unit_scale(&app.session.doc.units);
-    let clearance = match crate::prefs::parse_length_mm(clearance, scale) {
-        Some(v) if v >= 0.0 => v,
-        _ => return (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
-    };
-    let mut p = json!({ "clearance": clearance, "nearest": 1 });
-    if !names.is_empty() {
-        p["bodies"] = json!(names);
-    }
-    let r = match app.run("inspect.clearance", p) {
-        Ok(v) => v,
-        Err(e) => return (json!({ "error": e }), Vec::new()),
-    };
-    let st = crate::open_meshing::session_world(&app.session);
-    let mut meshes = Vec::new();
-    for hit in r["overlaps"].as_array().into_iter().flatten() {
-        let (Some(a), Some(b)) = (hit["a"].as_str().and_then(|n| st.body(n)), hit["b"].as_str().and_then(|n| st.body(n))) else { continue };
-        if let Ok(Some(o)) = solidcraft_engine::kernel::boolean(&a.body, &b.body, solidcraft_engine::kernel::BoolOp::Intersect)
-            && let Ok(m) = o.mesh(&solidcraft_engine::kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3)))
-        {
-            meshes.push(m);
+    let reply = match crate::prefs::parse_length_mm(clearance, scale) {
+        Some(v) if v >= 0.0 => {
+            let mut p = json!({ "clearance": v, "nearest": 1 });
+            if !names.is_empty() {
+                p["bodies"] = json!(names);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if app.apply_off_thread.is_some() {
+                let (ahead, world, out, params) =
+                    (app.session.ahead(), crate::open_meshing::session_world(&app.session), check.reply.clone(), p.clone());
+                let spawned = solidcraft_engine::kernel::kernel_thread("interference").spawn(move || {
+                    let r = check_now(ahead, &world, params);
+                    if let Ok(mut slot) = out.lock() {
+                        *slot = Some(r);
+                    }
+                });
+                if spawned.is_ok() {
+                    return check;
+                }
+            }
+            check_now(app.session.ahead(), &crate::open_meshing::session_world(&app.session), p)
         }
+        _ => (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
+    };
+    if let Ok(mut slot) = check.reply.lock() {
+        *slot = Some(reply);
     }
-    (r, meshes)
+    check
+}
+
+/// `inspect.clearance` with `p` on a copy of the session, and the volume each pair it finds
+/// overlapping shares ([`overlap_meshes`]).
+fn check_now(ahead: solidcraft_engine::Ahead, world: &solidcraft_engine::doc::ModelState, p: Value) -> (Value, Vec<Mesh>) {
+    // One reply for the one command.
+    match ahead.replies(&[("inspect.clearance".to_string(), p)]).pop() {
+        Some(Ok(r)) => {
+            let meshes = overlap_meshes(world, &r);
+            (r, meshes)
+        }
+        Some(Err(e)) => (json!({ "error": e.to_string() }), Vec::new()),
+        None => (json!({}), Vec::new()),
+    }
+}
+
+/// The volume each pair in an `inspect.clearance` reply's `overlaps` shares, meshed in world
+/// placement. Each pair runs on a kernel worker with the kernel's stack, whatever thread asks
+/// (the window thread's is 1 MiB on Windows).
+fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mesh> {
+    use solidcraft_engine::kernel;
+    let pairs: Vec<_> =
+        r["overlaps"].as_array().into_iter().flatten().filter_map(|hit| Some((st.body(hit["a"].as_str()?)?, st.body(hit["b"].as_str()?)?))).collect();
+    kernel::map_with_local_pools(&pairs, usize::MAX, |&(a, b)| {
+        let Some(o) = kernel::boolean(&a.body, &b.body, kernel::BoolOp::Intersect)? else { return Ok(None) };
+        o.mesh(&kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3))).map(Some)
+    })
+    .into_iter()
+    .filter_map(|m| m.ok().flatten())
+    .collect()
 }
 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
@@ -1261,7 +1349,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     for u in unchecked {
         form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
             ui.label(RichText::new(crate::i18n::tr("dialog.could_not_be_checked")).color(t.warning))
-                .on_hover_text(u["reason"].as_str().unwrap_or(""));
+                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
         });
     }
 }
@@ -1727,7 +1815,7 @@ pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &eg
         if suppressed {
             p.line_segment([br.left_bottom() + vec2(4.0, -4.0), br.right_top() + vec2(-4.0, 4.0)], Stroke::new(1.5, t.text_dim));
         }
-        let resp = resp.on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        let resp = resp.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if resp.double_clicked() {
             open = edit_joint(app, id);
         } else if resp.clicked() {
@@ -1773,6 +1861,11 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     for (id, name, kind, suppressed) in joints {
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), egui::Sense::click());
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), rect.center());
+        // Keep the scroll extent and row IDs, but only lay out icons, text and menus for
+        // joints in the clipped viewport (an imported assembly can have thousands).
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
         if app.tree.picked_joints.contains(&id) {
             ui.painter().rect_filled(rect, t.radius_sm.saturating_sub(1), t.accent_soft);
         } else if response.hovered() {
@@ -1790,7 +1883,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
             egui::FontId::proportional(crate::theme::Tokens::get().font_body),
             if suppressed { t.text_dim } else { t.text },
         );
-        let response = response.on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if response.double_clicked() {
             open = edit_joint(app, id);
         } else if response.clicked() {
@@ -1862,7 +1955,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             },
         );
         if let Some(resp) = &r.resp {
-            resp.clone().on_hover_text(format!("{kind:?} joint"));
+            resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -1951,7 +2044,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
             },
         );
         if let Some(resp) = &r.resp {
-            resp.clone().on_hover_text(format!("{:?} joint", j.kind));
+            resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -2042,11 +2135,31 @@ pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> 
     v
 }
 
+/// Is a named joint origin's triad drawn: its occurrence shown (with its parents), and the
+/// Joints folder shown in the design and on that placement. Hidden hardware keeps no triad.
+pub fn origin_drawn(s: &Session, name: &str) -> bool {
+    let Some(o) = s.doc.assembly.origins.iter().find(|o| o.name == name) else { return false };
+    if s.folder_hidden("c0/joints") {
+        return false;
+    }
+    if o.origin.occurrence == 0 {
+        return true;
+    }
+    let Some(occ) = s.doc.occurrences.iter().find(|x| x.id == o.origin.occurrence) else { return false };
+    // The origin's own placement, not its component's first one (copies hide separately).
+    let mut path = s.doc.first_path(occ.parent);
+    path.push(occ.id);
+    s.occurrence_visible(&path) && !s.folder_hidden(&format!("{}/joints", Session::folder_scope(&path)))
+}
+
 /// Named joint origins in the viewport: a small triad where each sits.
 pub fn origins(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let len = app.cam.half_height() * 2.0 * 0.04;
-    for (_, m) in origins_world(&app.session) {
+    for (name, m) in origins_world(&app.session) {
+        if !origin_drawn(&app.session, &name) {
+            continue;
+        }
         let at = solidcraft_engine::doc::apply_point(&m, Vec3::ZERO);
         let Some(c) = proj.to_screen(at) else { continue };
         for (axis, col) in [(Vec3::X, t.axis_x), (Vec3::Y, t.axis_y), (Vec3::Z, t.axis_z)] {

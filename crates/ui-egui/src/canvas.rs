@@ -5,6 +5,7 @@
 //! command has its geometry, so typing a number sets the value at once; Enter applies, Tab
 //! moves on, Esc cancels.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Stroke, vec2};
 use solidcore_record::{Vec2, Vec3};
@@ -22,7 +23,8 @@ use crate::viewport::{Proj, projected_polygon};
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = crate::open_meshing::session_world(&app.session);
-    let first = &anchor_item(app, d)?;
+    let item = anchor_item(app, d);
+    let Some(first) = &item else { return section_plane(d) };
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -250,6 +252,18 @@ fn edge_concave(m: &Mesh, index: usize, p: Vec3) -> Option<bool> {
 pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     let n = edge_bisector(m, index, p)?;
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
+}
+
+/// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
+/// status): the plane it keeps as numbers when nothing is picked, so its arrow stands there as on
+/// a picked plane (#11423).
+fn section_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    if !matches!(d.kind, Kind::Section { .. }) {
+        return None;
+    }
+    let plane = d.extra.get("plane")?;
+    let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
+    Some((point("origin")?, Some(point("normal")?.normalized()?)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
@@ -927,7 +941,8 @@ fn value_box_full(
     // Background: under Preferences, Report a bug and other system windows (#9016). The box is
     // already kept clear of the command window (#6608), which floats at Middle with Features.
     Container::new(ui.ctx(), Surface::Canvas).area(area).fixed_pos(at).pivot(pivot).order(egui::Order::Background).show(ui.ctx(), |ui| {
-        Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+        let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
+        Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(crate::i18n::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
@@ -1801,7 +1816,8 @@ fn draw_revolve(
             .order(egui::Order::Background)
             .interactable(false);
         area.show(ui.ctx(), |ui| {
-            Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+            let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
+            Container::show_backing(ui, frame, |ui| {
                 let text = if extent.curved_to {
                     "To surface".into()
                 } else if extent.sweep.is_finite() {
@@ -1809,7 +1825,7 @@ fn draw_revolve(
                 } else {
                     "Choose target".into()
                 };
-                ui.label(text).on_hover_text(crate::i18n::tr_label("Determined by To Object. Choose Angle to edit the angular extent."));
+                ui.label(text).backing_on_hover_text(crate::i18n::tr_label("Determined by To Object. Choose Angle to edit the angular extent."));
             });
         });
     } else if let Kind::Revolve { angle, .. } = &mut d.kind {
