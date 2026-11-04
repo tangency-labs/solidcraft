@@ -699,10 +699,18 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             // as a point's is.
             let z = occurrence_of_body(s, body)
                 .map_or(Vec3::Z, |o| solidcraft_engine::doc::apply_vector(&solidcraft_engine::doc::joints::occurrence_world(&s.doc, o), Vec3::Z));
-            (
-                body.as_str(),
-                SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) },
-            )
+            let mut param = json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)});
+            // A woken point on a part that is no corner (an edge's middle, #11231) is kept by the
+            // edge it lies on, so it follows that edge as a pick of the edge does.
+            let tol = 1e-6 * (1.0 + point.len());
+            if st
+                .body(body)
+                .is_some_and(|b| !b.mesh().edges.iter().any(|e| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*point) <= tol)))
+                && let Value::Object(m) = &mut param
+            {
+                m.remove("corner");
+            }
+            (body.as_str(), SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param })
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its

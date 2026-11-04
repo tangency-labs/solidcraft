@@ -120,6 +120,19 @@ fn a_snap_point_is_the_cam_tip() {
     assert_eq!(app.session.doc.assembly.links.len(), 1, "the cam is made with the snapped tip");
 }
 
+/// A snapped middle of the tappet's end edge (a point on the part, no corner) is kept by that
+/// edge, so the tip follows it as a pick of the edge does; a real corner stays a corner.
+#[test]
+fn a_snapped_edge_middle_tip_is_kept_by_its_edge() {
+    let app = valve();
+    let st = app.session.world_state().unwrap();
+    let body = st.bodies.iter().find(|b| b.mesh().bounds().max.x > 59.0).map(|b| b.name.clone()).unwrap();
+    let mid = crate::dialogs_assembly::snap_of(&app.session, &Sel::Vertex { body: body.clone(), point: Vec3::new(60.0, 0.0, 5.0) }).unwrap();
+    assert!(mid.param.get("corner").is_none() && mid.param["edge"] == json!([60.0, 0.0, 5.0]), "{}", mid.param);
+    let corner = crate::dialogs_assembly::snap_of(&app.session, &Sel::Vertex { body, point: Vec3::new(60.0, 2.0, 5.0) }).unwrap();
+    assert_eq!(corner.param["corner"], json!([60.0, 2.0, 5.0]), "{}", corner.param);
+}
+
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_cam_dialog_labels_translate() {
