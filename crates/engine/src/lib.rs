@@ -1969,6 +1969,15 @@ impl Session {
                 }
             }
         }
+        // ...and works out each coupled joint's ratio and lift from the faces at that marker.
+        if expected.assembly.links.len() == source.doc.assembly.links.len() {
+            for (e, s) in expected.assembly.links.iter_mut().zip(&source.doc.assembly.links) {
+                if (e.a, e.ia, e.b, e.ib) == (s.a, s.ia, s.b, s.ib) {
+                    e.ratio = s.ratio;
+                    e.lift = s.lift.clone();
+                }
+            }
+        }
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
