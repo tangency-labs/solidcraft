@@ -164,7 +164,7 @@ pub struct Documents {
     pub quitting: Option<Vec<usize>>,
     /// The "save changes?" button the arrow keys have picked; Enter gives it.
     pub choice: Answer,
-    /// A grouped prompt and its save queue; tab indices stay stable until every save succeeds.
+    /// A grouped prompt and its save queue; row actions update the remaining tab indices.
     group: Option<SaveGroup>,
     /// Save As is answering a Close/Quit prompt.
     saving: bool,
@@ -182,6 +182,8 @@ pub struct Documents {
 struct SaveGroup {
     rows: Vec<(usize, bool)>,
     pending: Vec<usize>,
+    /// A row save restores the shown tab and prompt on cancellation or failure.
+    saving_row: Option<(usize, usize)>,
 }
 
 /// Start one confirmation before any tab (including clean tabs) is removed.
@@ -195,7 +197,7 @@ fn start_group(app: &mut SolveApp, tabs: &[usize]) -> bool {
     }
     app.docs.closing = rows.first().map(|(i, _)| *i);
     app.docs.choice = Answer::Save;
-    app.docs.group = Some(SaveGroup { rows, pending: Vec::new() });
+    app.docs.group = Some(SaveGroup { rows, pending: Vec::new(), saving_row: None });
     true
 }
 
@@ -227,6 +229,58 @@ fn save_group_next(app: &mut SolveApp) {
     crate::toolbar::save(app);
     if !app.file_picker_busy() {
         saved_for_close(app);
+    }
+}
+
+/// Answer one grouped row through the same save flow as Save Selected.
+fn answer_row(app: &mut SolveApp, i: usize, save: bool) {
+    if app.file_picker_busy() || app.docs.saving || !app.docs.group.as_ref().is_some_and(|g| g.rows.iter().any(|(row, _)| *row == i)) {
+        return;
+    }
+    if !save {
+        close_group_row(app, i);
+        return;
+    }
+    let previous = (app.docs.active, app.docs.closing.unwrap_or(i));
+    if let Some(group) = app.docs.group.as_mut() {
+        group.saving_row = Some(previous);
+    }
+    switch(app, i);
+    app.docs.closing = Some(i);
+    app.docs.saving = true;
+    crate::toolbar::save(app);
+    if !app.file_picker_busy() {
+        saved_for_close(app);
+    }
+}
+
+/// Remove an answered tab and adjust every remaining target after the tab strip shifts.
+fn close_group_row(app: &mut SolveApp, i: usize) {
+    let Some(mut group) = app.docs.group.take() else { return };
+    let mut batch = app.docs.batch.clone();
+    let mut quitting = app.docs.quitting.clone();
+    close(app, i, true);
+    group.rows.retain(|(row, _)| *row != i);
+    for (row, _) in &mut group.rows {
+        if *row > i {
+            *row -= 1;
+        }
+    }
+    for indices in [&mut batch, &mut quitting].into_iter().flatten() {
+        indices.retain(|row| *row != i);
+        for row in indices {
+            if *row > i {
+                *row -= 1;
+            }
+        }
+    }
+    app.docs.batch = batch;
+    app.docs.quitting = quitting;
+    app.docs.closing = group.rows.first().map(|(row, _)| *row);
+    let done = group.rows.is_empty();
+    app.docs.group = Some(group);
+    if done {
+        finish_group(app);
     }
 }
 
@@ -923,7 +977,8 @@ pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
 /// closes without asking), `close_others` (all but `index`), `close_all`, `move` (`from`, `to`)
 /// or `quit`; `answer`: save | dont_save | cancel answers "save changes?". `save_indices`
-/// sets every tick in a grouped prompt; `save_prompt` lists its rows. `open_elsewhere`:
+/// sets every tick in a grouped prompt; `save_row` / `discard_row` answer one tab index;
+/// `save_prompt` lists the remaining rows and their current tab indices. `open_elsewhere`:
 /// read_only | anyway | cancel and `changed_on_disk`: save_copy | overwrite | cancel answer those
 /// questions (#5467).
 pub fn control(app: &mut SolveApp, p: &Value) -> Value {
@@ -956,6 +1011,15 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         }
         for (i, checked) in &mut group.rows {
             *checked = indices.iter().any(|v| v.as_u64() == u64::try_from(*i).ok());
+        }
+    }
+    for (key, save) in [("save_row", true), ("discard_row", false)] {
+        if let Some(value) = p.get(key) {
+            let index = value.as_u64().and_then(|i| usize::try_from(i).ok());
+            let Some(index) = index.filter(|i| app.docs.group.as_ref().is_some_and(|g| g.rows.iter().any(|(row, _)| row == i))) else {
+                return json!({"error": "row must identify a design in the grouped prompt"});
+            };
+            answer_row(app, index, save);
         }
     }
     let answer = match p.get("answer").and_then(Value::as_str) {
@@ -1365,6 +1429,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let save_label = crate::i18n::tr(if grouped { "document.save_selected" } else { "ui.save" });
     let mut show_tab = None;
+    let mut row_action = None;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(save_label, crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("ui.don_t_save")))
@@ -1390,30 +1455,43 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                         if let Some(session) = session {
                             ui.push_id(*index, |ui| {
                                 ui.horizontal_top(|ui| {
-                                    let tick = ui_kit::checkbox(ui, "", checked);
-                                    tick.widget_info(|| {
-                                        egui::WidgetInfo::selected(
-                                            egui::Role::CheckBox,
-                                            ui.is_enabled(),
-                                            *checked,
-                                            crate::i18n::tr_name(&session.doc.name),
-                                        )
-                                    });
-                                    crate::scenario::publish_target(&format!("save_many:tick:{index}"), tick.rect);
-                                    ui.vertical(|ui| {
-                                        ui.spacing_mut().item_spacing.y = 0.0;
-                                        ui.spacing_mut().button_padding.x = 0.0;
-                                        let name = ui_kit::button(ui, &crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
-                                        crate::scenario::publish_target(&format!("save_many:name:{index}"), name.rect);
-                                        if name.clicked() {
-                                            show_tab = Some(*index);
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                                        ui.spacing_mut().item_spacing.x = t.space_8;
+                                        for (key, save) in [("document.discard_row", false), ("document.save_row", true)] {
+                                            let button = ui_kit::button(ui, crate::i18n::tr(key), ui_kit::Button::Small);
+                                            let action = if save { "save" } else { "discard" };
+                                            crate::scenario::publish_target(&format!("save_many:{action}:{index}"), button.rect);
+                                            if button.clicked() {
+                                                row_action = Some((*index, save));
+                                            }
                                         }
-                                        let path = ui_kit::text(
-                                            ui,
-                                            session.path.as_deref().unwrap_or(crate::i18n::tr("document.not_saved_yet")),
-                                            ui_kit::Text::Note("save_path"),
-                                        );
-                                        crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
+                                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                            let tick = ui_kit::checkbox(ui, "", checked);
+                                            tick.widget_info(|| {
+                                                egui::WidgetInfo::selected(
+                                                    egui::Role::CheckBox,
+                                                    ui.is_enabled(),
+                                                    *checked,
+                                                    crate::i18n::tr_name(&session.doc.name),
+                                                )
+                                            });
+                                            crate::scenario::publish_target(&format!("save_many:tick:{index}"), tick.rect);
+                                            ui.vertical(|ui| {
+                                                ui.spacing_mut().item_spacing.y = 0.0;
+                                                ui.spacing_mut().button_padding.x = 0.0;
+                                                let name = ui_kit::button(ui, &crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
+                                                crate::scenario::publish_target(&format!("save_many:name:{index}"), name.rect);
+                                                if name.clicked() {
+                                                    show_tab = Some(*index);
+                                                }
+                                                let path = ui_kit::text(
+                                                    ui,
+                                                    session.path.as_deref().unwrap_or(crate::i18n::tr("document.not_saved_yet")),
+                                                    ui_kit::Text::Note("save_path"),
+                                                );
+                                                crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
+                                            });
+                                        });
                                     });
                                 });
                             });
@@ -1430,6 +1508,10 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                 );
             }
         });
+    if let Some((index, save)) = row_action {
+        answer_row(app, index, save);
+        return;
+    }
     if let Some(index) = show_tab {
         switch(app, index);
     }
@@ -1514,6 +1596,16 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
         return;
     }
     let saved = !app.session.is_dirty();
+    let row_save = app.docs.group.as_mut().and_then(|g| g.saving_row.take());
+    if let Some((previous, closing)) = row_save {
+        if saved {
+            close_group_row(app, app.docs.active);
+        } else {
+            switch(app, previous);
+            app.docs.closing = Some(closing);
+        }
+        return;
+    }
     if app.docs.group.is_some() {
         if saved {
             save_group_next(app);
@@ -1835,6 +1927,103 @@ mod tests {
     }
 
     #[test]
+    fn grouped_row_save_closes_only_its_tab_and_keeps_the_last_row_grouped() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let file = h.dir.join("row.solidcraft");
+        let to = file.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
+        control(&mut h.app, &json!({"action":"close_all", "save_indices":[2]}));
+        control(&mut h.app, &json!({"save_row":0}));
+        assert_eq!(h.app.docs.count(), 4, "wait for the write");
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        crate::save_job::tick(&mut h.app, true);
+        assert_eq!(h.app.docs.count(), 3);
+        let rows = control(&mut h.app, &json!({}))["save_prompt"].clone();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!((rows[0]["index"].clone(), rows[0]["selected"].clone()), (json!(1), json!(true)));
+        assert!(dirty(&h.app, 1));
+        let design = solidcraft_engine::io::read_design(&std::fs::read(file).unwrap()).unwrap();
+        assert_eq!(design.features.len(), 1);
+        control(&mut h.app, &json!({"answer":"cancel"}));
+        assert_eq!(h.app.docs.count(), 3, "Cancel keeps the remaining tabs");
+    }
+
+    #[test]
+    fn grouped_row_discard_closes_only_its_tab_without_saving() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let file = h.dir.join("discard.solidcraft");
+        switch(&mut h.app, 0);
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        let before = std::fs::read(&file).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        control(&mut h.app, &json!({"action":"close_all", "discard_row":0}));
+        assert_eq!(h.app.docs.count(), 3);
+        assert_eq!(std::fs::read(file).unwrap(), before);
+        assert!(dirty(&h.app, 1));
+        assert_eq!(control(&mut h.app, &json!({}))["save_prompt"][0]["index"], 1);
+    }
+
+    #[test]
+    fn grouped_last_row_finishes_close_or_quit() {
+        for quit in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app = four_tabs();
+            let file = h.dir.join("last.solidcraft");
+            let to = file.to_string_lossy().into_owned();
+            h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
+            control(&mut h.app, &json!({"action":if quit { "quit" } else { "close_all" }}));
+            control(&mut h.app, &json!({"discard_row":2}));
+            assert_eq!(h.app.docs.count(), 3);
+            control(&mut h.app, &json!({"save_row":0}));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            crate::save_job::tick(&mut h.app, true);
+            assert!(h.app.docs.group.is_none() && h.app.docs.closing.is_none());
+            assert_eq!(h.app.quit_requested, quit);
+            if !quit {
+                assert!(active_is_blank(&h.app) && h.app.home.open);
+            }
+        }
+        for quit in [false, true] {
+            let mut a = four_tabs();
+            close(&mut a, 3, true);
+            close(&mut a, 1, true);
+            control(&mut a, &json!({"action":if quit { "quit" } else { "close_all" }}));
+            control(&mut a, &json!({"discard_row":0}));
+            control(&mut a, &json!({"discard_row":0}));
+            assert!(a.docs.group.is_none() && a.docs.closing.is_none());
+            assert!(active_is_blank(&a));
+            assert_eq!(a.quit_requested, quit, "last real tab closes too");
+        }
+        let mut a = four_tabs();
+        close_many(&mut a, vec![0, 2]);
+        control(&mut a, &json!({"discard_row":0}));
+        control(&mut a, &json!({"discard_row":1}));
+        assert_eq!(a.docs.count(), 2, "only the targeted tabs close");
+        assert!(a.docs.group.is_none() && a.docs.batch.is_none());
+    }
+
+    #[test]
+    fn grouped_row_cancelled_picker_or_failed_save_keeps_the_row() {
+        for fail in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app = four_tabs();
+            let bad = h.dir.join("missing").join("row.solidcraft").to_string_lossy().into_owned();
+            h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(fail.then(|| bad.clone())))));
+            let before = control(&mut h.app, &json!({"action":"quit", "save_indices":[2]}));
+            control(&mut h.app, &json!({"save_row":0}));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            crate::save_job::tick(&mut h.app, true);
+            let after = control(&mut h.app, &json!({}));
+            for key in ["save_prompt", "documents", "active", "closing", "quitting", "batch"] {
+                assert_eq!(after[key], before[key], "{key}, failed write: {fail}");
+            }
+            assert!(!h.app.quit_requested);
+        }
+    }
+
+    #[test]
     fn grouped_save_selected_writes_only_checked_designs() {
         let mut h = crate::scenario::Harness::new();
         h.app = four_tabs();
@@ -1959,6 +2148,11 @@ mod tests {
             let path = crate::scenario::rect_of(&format!("save_many:path:{index}")).unwrap();
             assert!((name.left() - path.left()).abs() < 1.0, "path aligns with the name");
             assert!(path.top() >= name.bottom(), "path is below its own name");
+            let save = crate::scenario::rect_of(&format!("save_many:save:{index}")).unwrap();
+            let discard = crate::scenario::rect_of(&format!("save_many:discard:{index}")).unwrap();
+            assert!(save.left() >= name.right(), "row actions follow the name");
+            assert!(discard.left() >= save.right(), "Discard follows Save");
+            assert!(crate::scenario::rect_of("dialog:window").unwrap().contains_rect(discard), "row actions stay inside the window");
             if let Some(previous) = previous_path {
                 assert!(name.top() - previous.bottom() >= Tokens::get().space_8, "designs have breathing room");
             }
