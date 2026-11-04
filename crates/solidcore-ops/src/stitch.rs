@@ -135,11 +135,12 @@ fn material_sides(b: &Brep) -> solidcore::Result<Vec<(FaceuseId, bool)>> {
 /// a face use the gluing did not keep), and whether a side that was not material is now (a
 /// space closed into a material region).
 fn material_change(before: &[(FaceuseId, bool)], after: &Brep) -> solidcore::Result<(bool, bool)> {
-    let now: Vec<(FaceuseId, bool)> = material_sides(after)?;
+    let now: std::collections::BTreeMap<FaceuseId, bool> =
+        material_sides(after)?.into_iter().collect();
     let (mut opened, mut closed) = (false, false);
     for &(u, was) in before {
-        match now.iter().find(|(v, _)| *v == u) {
-            Some(&(_, is)) => {
+        match now.get(&u) {
+            Some(&is) => {
                 opened |= was && !is;
                 closed |= !was && is;
             }

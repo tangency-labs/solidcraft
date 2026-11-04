@@ -338,10 +338,13 @@ pub fn definition_partials_naive(
 /// each part on its own piece, the hull), so a foot may cross a face's knot line (at a
 /// station, or anywhere on a refitted net) and the enclosure is still of the definition,
 /// certified to the faces' continuity there; the leader's series over the box's s likewise
-/// ([`super::certificate::leader_series_piecewise`]). Refused where a crossed knot line's
-/// continuity is below the order the feet's system needs (its Jacobian's second partials,
-/// and one more than `lk` for the series), or the box is past a face's or the leader's
-/// knots. Not upstream (the certified normal's and point's query, `query::normal`).
+/// ([`super::certificate::leader_series_piecewise`]). The partials up to `lk` are each part's
+/// hull, which encloses them at every point of the box whatever the continuity at a crossed
+/// line, so `lk` sets no continuity; only Krawczyk's mean-value test over the feet's box needs
+/// the faces C^2 across a crossed line ([`super::certificate::FEET_BOX_CONTINUITY`]), and the
+/// leader continuous. Refused where a crossed knot line is below that, or the box is past a
+/// face's or the leader's knots. Not upstream (the certified normal's and point's query,
+/// `query::normal`).
 ///
 /// # Errors
 ///
