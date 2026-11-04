@@ -387,8 +387,15 @@ pub fn auth_methods(init: &Value) -> Vec<AuthMethod> {
                     let kind = match m.get("type").and_then(Value::as_str) {
                         Some("terminal") => {
                             let meta = m.get("_meta").and_then(|x| x.get("terminal-auth"));
-                            let command = meta.and_then(|t| Some((t.get("command")?.as_str()?.to_string(), strings(t.get("args")))));
-                            AuthKind::Terminal { args: strings(m.get("args")), command }
+                            let mut command = meta.and_then(|t| Some((t.get("command")?.as_str()?.to_string(), strings(t.get("args")))));
+                            let mut args = strings(m.get("args"));
+                            // Vibe's Python launcher can advertise its own path as an argument.
+                            // The configured ACP command already starts Vibe and accepts --setup.
+                            if id == "vibe-setup" && init.pointer("/agentInfo/name").and_then(Value::as_str) == Some("@mistralai/mistral-vibe") {
+                                args = vec!["--setup".into()];
+                                command = None;
+                            }
+                            AuthKind::Terminal { args, command }
                         }
                         Some("env_var") => AuthKind::EnvVar {
                             vars: m
@@ -830,6 +837,26 @@ mod tests {
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
         assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+    }
+
+    #[test]
+    fn vibe_terminal_setup_uses_the_configured_acp_launcher() {
+        let mut init = json!({
+            "agentInfo": {"name": "@mistralai/mistral-vibe"},
+            "authMethods": [{
+                "id": "vibe-setup", "type": "terminal", "name": "Register your API Key",
+                "args": [r"C:\Program Files\Vibe\vibe-acp", "--setup"],
+                "_meta": {"terminal-auth": {"command": "python.exe", "args": [r"C:\Program Files\Vibe\vibe-acp", "--setup"]}}
+            }]
+        });
+        let methods = auth_methods(&init);
+        assert_eq!(methods[0].kind, AuthKind::Terminal { args: vec!["--setup".into()], command: None });
+
+        init["agentInfo"]["name"] = json!("another-agent");
+        let methods = auth_methods(&init);
+        let AuthKind::Terminal { args, command } = &methods[0].kind else { panic!("terminal method expected") };
+        assert_eq!(args, &[r"C:\Program Files\Vibe\vibe-acp", "--setup"]);
+        assert!(command.is_some());
     }
 
     #[test]
