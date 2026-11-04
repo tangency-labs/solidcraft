@@ -30,6 +30,7 @@ use solidcore::blend::definition_check::{
 use solidcore::blend::fillet_executive::api::{chamfer_fillet, fillet_edges_per_edge};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, FitSize};
+use solidcore::blend::fillet_geom::p1::FilletCornerType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -1572,6 +1573,44 @@ fn five_and_six_chamfers_at_an_apex_are_bilinear_quadrilaterals() {
             assert!(off <= EXACT * 20.0, "{off}");
             assert!((v - want).abs() <= 1e-12 * want, "{v}");
         }
+    }
+}
+
+// A chamfer corner keeps the type of the corner it replaces, the convex NxN corner
+// (`SmFilletConvexNxNCorner` with `SetChamfer`): it is closed by that corner's topology
+// (the bevel's for the Mitre, the ring's for the Facet), not by two blends meeting. The
+// fork's own events are Nx2 corners by type, as they took over the Nx2 corner's tests one
+// for one; were the chamfer event one too, the executive would treat it as a two-blend
+// corner: its big-radius conversion of the fillet between two Nx2 corners, its squeeze of
+// a rail edge too short at an Nx2 corner, the Nx2 branch of the fillet edges'
+// connectivity, and a mitred Turn's corner edges (#2355's review). At the 2/3/4 corner,
+// as either type: NByNConvex.
+#[test]
+fn a_chamfer_corner_is_the_nxn_corner_by_type() {
+    for corner in [BlendChamferCorner::Mitre, BlendChamferCorner::Facet] {
+        let mut k = chamfer_fixes(true);
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+        let edges: Vec<EdgeId> = BOX_CORNER_EDGES.iter().map(|&p| pick(&k, &b, p)).collect();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(
+            &mut k,
+            &edges,
+            &[2.0, 3.0, 4.0],
+            &[FilletSurfaceGeneratorType::Linear; 3],
+            1,
+            1.0,
+        )
+        .unwrap();
+        s.set_chamfer_corner(corner);
+        s.do_fillet(&mut k).unwrap();
+        let mut types = Vec::new();
+        for c in s.fillet_corners().unwrap() {
+            let c = s.corner(c).unwrap();
+            if c.chamfer_corner.is_some() {
+                types.push(c.corner_type());
+            }
+        }
+        assert_eq!(types, vec![FilletCornerType::NByNConvex], "{corner:?}");
     }
 }
 

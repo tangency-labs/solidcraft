@@ -1120,11 +1120,17 @@ impl FilletCorner {
     pub const fn corner_type(&self) -> FilletCornerType {
         // the fork's SmBlendCorner::GetCornerType is SM_FCR_BLEND, which took over every
         // test of SM_FCR_N_x_2 one for one (74e9beb); the blend corner of any event is an
-        // Nx2 corner by type here (WR-697)
-        if self.blend.is_some() {
-            return FilletCornerType::NByTwo;
+        // Nx2 corner by type here (WR-697). Not the chamfer event (WR-716, not the fork's):
+        // it is closed by the convex NxN corner's topology, whose type it keeps, so the
+        // executive's Nx2-only steps (the big-radius conversion, the short rail squeeze,
+        // the Nx2 edge connectivity, a mitred Turn's corner edges) do not take it for two
+        // blends meeting
+        match self.blend {
+            Some(blend) if !matches!(blend.event, BlendCornerEvent::Chamfer) => {
+                FilletCornerType::NByTwo
+            }
+            _ => self.kind.corner_type(),
         }
-        self.kind.corner_type()
     }
 
     // ---- SmFilletCorner::Create ------------------------------------------------------
