@@ -69,8 +69,12 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
 /// selected elements (#11804). Every other theme keeps its look. Tokens: `form_primary,
 /// selected_bg, selected_ink`.
 pub(crate) fn selection_ink(t: &Tokens) -> egui::Color32 {
-    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= 1.5 { t.form_primary } else { t.selected_ink }
+    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
+
+/// Below this contrast with `selected_bg`, a form's primary colour counts as the selection's own
+/// colour (`selection_ink`).
+const SELECTION_INK_MIN_CONTRAST: f64 = 1.5;
 
 /// Compact library cards share search, segment, chip and footer metrics.
 pub(crate) fn catalog_scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -974,7 +978,7 @@ mod selection_ink_tests {
         for t in [Tokens::dark(), Tokens::light()] {
             assert_eq!(selection_ink(&t), t.form_primary);
         }
-        let switched: Vec<&str> = crate::theme_files::builtin()
+        let mut switched: Vec<&str> = crate::theme_files::builtin()
             .iter()
             .filter(|theme| {
                 let t = crate::theme_files::resolve(theme);
@@ -982,7 +986,8 @@ mod selection_ink_tests {
             })
             .map(|theme| theme.id.as_str())
             .collect();
-        assert_eq!(switched, ["solidcraft-95", "cga"]);
+        switched.sort_unstable();
+        assert_eq!(switched, ["cga", "solidcraft-95"]);
         for id in ["solidcraft-95", "cga"] {
             let theme = crate::theme_files::builtin().iter().find(|theme| theme.id == id).unwrap();
             let t = crate::theme_files::resolve(theme);
