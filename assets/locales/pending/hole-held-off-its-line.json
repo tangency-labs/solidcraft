@@ -1,20 +1,20 @@
 {
   "en": {
-    "dialog.hole_held_off_its_line": "The reference edge holds this hole on a line that leaves the face before the picked point. Pick nearer the line, or take the edge out to move the hole freely."
+    "dialog.hole_held_off_its_line": "The reference edge holds this hole on a line that leaves the face before the picked point. Pick where the line crosses the face, or take the edge out to move the hole freely."
   },
   "ar": {
-    "dialog.hole_held_off_its_line": "الحافة المرجعية تُبقي هذا الثقب على خط يغادر الوجه قبل النقطة المختارة. اختر نقطة أقرب إلى الخط، أو أزل الحافة لتحريك الثقب بحرية."
+    "dialog.hole_held_off_its_line": "الحافة المرجعية تُبقي هذا الثقب على خط يغادر الوجه قبل النقطة المختارة. اختر حيث يعبر الخط الوجه، أو أزل الحافة لتحريك الثقب بحرية."
   },
   "he": {
-    "dialog.hole_held_off_its_line": "קצה הייחוס מחזיק את החור על קו שיוצא מהפאה לפני הנקודה שנבחרה. יש לבחור קרוב יותר לקו, או להסיר את הקצה כדי להזיז את החור בחופשיות."
+    "dialog.hole_held_off_its_line": "קצה הייחוס מחזיק את החור על קו שיוצא מהפאה לפני הנקודה שנבחרה. יש לבחור במקום שבו הקו עובר על הפאה, או להסיר את הקצה כדי להזיז את החור בחופשיות."
   },
   "ja": {
-    "dialog.hole_held_off_its_line": "参照エッジがこの穴を直線上に固定していますが、その直線は選択した点より手前で面の外に出ます。直線の近くを選択するか、エッジを外すと穴を自由に移動できます。"
+    "dialog.hole_held_off_its_line": "参照エッジがこの穴を直線上に固定していますが、その直線は選択した点より手前で面の外に出ます。直線が面の上を通る位置を選択するか、エッジを外すと穴を自由に移動できます。"
   },
   "vi": {
-    "dialog.hole_held_off_its_line": "Cạnh tham chiếu giữ lỗ này trên một đường thẳng ra khỏi mặt trước điểm đã chọn. Hãy chọn gần đường hơn, hoặc bỏ cạnh để di chuyển lỗ tự do."
+    "dialog.hole_held_off_its_line": "Cạnh tham chiếu giữ lỗ này trên một đường thẳng ra khỏi mặt trước điểm đã chọn. Hãy chọn chỗ đường thẳng đi qua mặt, hoặc bỏ cạnh để di chuyển lỗ tự do."
   },
   "zh": {
-    "dialog.hole_held_off_its_line": "参考边将此孔固定在一条直线上，该直线在所选点之前就离开了该面。请在靠近直线处选取，或移除该边以自由移动孔。"
+    "dialog.hole_held_off_its_line": "参考边将此孔固定在一条直线上，该直线在所选点之前就离开了该面。请在直线经过该面的位置选取，或移除该边以自由移动孔。"
   }
 }
