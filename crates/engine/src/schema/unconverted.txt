@@ -73,7 +73,6 @@ frame.profile.list
 frame.profile.properties
 inspect.interference
 inspect.measure
-inspect.parameter_sweep
 inspect.silhouette
 joint.as_built
 joint.cam
