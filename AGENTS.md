@@ -314,7 +314,9 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
   per-entry files that tools read in sorted order, never one file everybody appends to.
 - **Branches from before the per-unit split** (they edit `plan/modules.toml` or commit
   reports): merge main, then run the migration, which moves your `modules.toml` edits
-  into `plan/units/*.toml` and untracks your reports:
+  into `plan/units/*.toml` and untracks your reports. This one merge is the only exception
+  to rebasing (§4 step 6): the script reads the conflicted merge (`MERGE_HEAD`) to find
+  your edits. After it, rebase as usual:
   ```sh
   git fetch origin && git merge origin/main; scripts/units-migrate-branch.sh && git commit --no-edit
   ```
