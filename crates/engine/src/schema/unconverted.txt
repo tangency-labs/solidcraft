@@ -181,9 +181,6 @@ render.settings.set
 render.shot.duplicate
 render.shot.remove
 render.shot.rename
-render.stage.backdrop
-render.stage.clear
-render.stage.ground
 render.start
 render.status
 select.clear

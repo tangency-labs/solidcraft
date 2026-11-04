@@ -91,11 +91,17 @@ CommandSpec::new("render.library.preview", "Inspect Original Surface Map", libra
     .params("id: SURF-*. Returns bounded hash-verified original base-color PNG bytes and source-map fidelity label, not a rendered material thumbnail. No external paths, rendering or document edits."),
 CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", physical_library::prepare).icon("inspect").noundo().doc_only()
     .params("id: named built-in physical profile, name: proposed new material label, acknowledge_reference:true. Read-only loss-aware creation plan using native ValidatedCard admission and one point density; returns source receipts, extended fields and omissions. Does not execute material.create, assign bodies or infer effective-part physics."),
-CommandSpec::new("render.stage.ground", "Save Render Ground", staging::ground).icon("render_scene")
+CommandSpec::new("render.stage.ground", "Save Render Ground", crate::checked!("render.stage.ground", staging::ground)).icon("render_scene")
+    .contract(&staging::GROUND_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: typed raytrace setup, set?: setup patch, margin_fraction?:0.25, gap_mm?:0.1, reflectance_linear?:[0.18,0.18,0.18], replace_stage?:false. Fits one finite passive ground below the visible product once and saves its physical transforms in one undo. Product AABB separation is rechecked on every render."),
-CommandSpec::new("render.stage.backdrop", "Save Physical Render Background", staging::backdrop).icon("render_scene").doc_only()
+CommandSpec::new("render.stage.backdrop", "Save Physical Render Background", crate::checked!("render.stage.backdrop", staging::backdrop)).icon("render_scene").doc_only()
+    .contract(&staging::BACKDROP_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: typed raytrace setup, set?: setup patch, kind: floor_wall or cyclorama, reflectance_linear?: [0.18,0.18,0.18], expected_revision: reviewed revision, replace_stage?:false. Fits a finite floor/wall or a 24-strip polygonal cyclorama behind the visible subject using the saved camera azimuth; world +Z up and a minimum one-mm stage envelope. Preserves subject geometry, lighting, output, pose and engineering materials; one undo and rechecked product separation. Not an infinite/analytically smooth/terrain background."),
-CommandSpec::new("render.stage.clear", "Remove Render Stage", staging::clear).icon("render_scene").doc_only()
+CommandSpec::new("render.stage.clear", "Remove Render Stage", crate::checked!("render.stage.clear", staging::clear)).icon("render_scene").doc_only()
+    .contract(&staging::CLEAR_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: setup, set?: setup patch. Removes saved render-only panels atomically; CAD geometry and lighting are unchanged."),
 CommandSpec::new("render.library.surface.bind", "Save Surface Binding", surface_bindings::bind).icon("appearance")
     .params("name: GPU setup; set?: setup patch; surface: same input as render.library.surface.prepare; replace?: false. Pins exact source hashes and definition/feature/occurrence identity with local-mm mapping in one undo. No paths, mesh ordinals or physical material changes."),
