@@ -2512,6 +2512,53 @@ fn loft_pairs_the_vertices_of_matching_non_convex_sections() {
     assert!(m.centroid.x.abs() < 0.05, "centre of mass x {}", m.centroid.x);
 }
 
+/// #11849: a 25 × 15 rectangle ending in a point (two tangent arcs meeting at (37, 7.5)) lofted
+/// 15 up to a 40.4 × 25 slot, both symmetric about y = 7.5. The slot's four segments had to become
+/// five, and splitting its longest one in half split a long side (40.4) rather than the round end
+/// (39.3): the loft twisted, its seams ran diagonally and its centre of mass sat at y = 7.363.
+/// Each slot vertex pairs with the corner it lines up with and the point with the middle of the
+/// round end.
+#[test]
+fn loft_pairs_a_point_with_the_middle_of_a_round_end() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    // A counter-clockwise arc about `c` from `a` to `b`.
+    let arc = |c: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        let start = (a.1 - c.1).atan2(a.0 - c.0);
+        let sweep = ((b.1 - c.1).atan2(b.0 - c.0) - start).rem_euclid(2.0 * PI);
+        Seg2::Arc { center: Vec2::new(c.0, c.1), radius: Vec2::new(a.0 - c.0, a.1 - c.1).len(), start, sweep }
+    };
+    let tip = (37.0, 7.5);
+    let point = Loop2 {
+        segs: vec![
+            line((0.0, 0.0), (25.0, 0.0)),
+            arc((25.0, 13.35), (25.0, 0.0), tip),
+            arc((25.0, 1.65), tip, (25.0, 15.0)),
+            line((25.0, 15.0), (0.0, 15.0)),
+            line((0.0, 15.0), (0.0, 0.0)),
+        ],
+    };
+    let x = 35.4;
+    let slot = Loop2 {
+        segs: vec![
+            line((-5.0, 20.0), (-5.0, -5.0)),
+            line((-5.0, -5.0), (x, -5.0)),
+            arc((x, 7.5), (x, -5.0), (x, 20.0)),
+            line((x, 20.0), (-5.0, 20.0)),
+        ],
+    };
+    let secs = [(Plane::XY, point), (Plane::XY.offset(15.0), slot)];
+    let body = loft(&secs).unwrap();
+    let m = measure(&body).unwrap();
+    assert!((m.centroid.y - 7.5).abs() < 1e-6, "centre of mass y {}", m.centroid.y);
+    let at = |p: Vec3| body.record().vertices.iter().any(|v| Vec3::from(v.point).dist(p) < 1e-6);
+    assert!(at(Vec3::new(x + 12.5, 7.5, 15.0)), "the round end splits at its middle");
+    assert_eq!(body.record().vertices.len(), 10);
+    // The same with the sections given the other way round.
+    let back = [secs[1].clone(), secs[0].clone()];
+    let m = measure(&loft(&back).unwrap()).unwrap();
+    assert!((m.centroid.y - 7.5).abs() < 1e-6, "reversed: centre of mass y {}", m.centroid.y);
+}
+
 /// A plate 3 m long and 2 mm thick with ten holes of radius `r` along a diagonal, turned by
 /// `tilt` about the X axis and read back from STEP (each rim is then two half circles).
 fn long_plate_with_small_holes(r: f64, tilt: f64) -> (Body, Vec<Vec3>) {
