@@ -38,9 +38,9 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// The 98 stored keys selected dynamically before the split: Interface, Navigation and Sketch, plus
-/// language, excluding space_mouse_* and orbit_cursor. Page moves and title tags must never
-/// change profile contents (including the bridge, origin names and direct interaction).
+/// The original 98 Interface, Navigation, Sketch and language keys, plus explicitly added
+/// settings. Device-specific space_mouse_* and orbit_cursor stay outside profiles. Page moves
+/// and title tags never remove stored keys such as the bridge, origin names and direct interaction.
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_collapsed",
@@ -93,6 +93,7 @@ const PROFILE_KEYS: &[&str] = &[
     "ribbon_click_ends_tool",
     "ribbon_icon_grid",
     "ribbon_labels",
+    "ribbon_menus_follow_hover",
     "ribbon_menus_skip_pinned",
     "ribbon_reveal",
     "right_drag_orbits",

@@ -17,7 +17,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 98, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 99, "page presentation must not alter profile membership");
     for key in [
         "nav",
         "mouse_gestures",
@@ -739,7 +739,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_literal_pre_split_baseline() {
+fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     let expected = [
         "browser_bodies_folders",
         "browser_collapsed",
@@ -792,6 +792,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
+        "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
         "right_drag_orbits",
@@ -842,7 +843,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 98);
+    assert_eq!(expected.len(), 99);
     assert_eq!(actual, expected);
 }
 
@@ -850,7 +851,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
 fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let mut h = Harness::new();
     let defaults = crate::prefs::Prefs::default();
-    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc);
+    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc && !defaults.ribbon_menus_follow_hover);
     for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
         let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
@@ -867,6 +868,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.invert_navigator_arrows = true;
     h.app.preferences.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
+    h.app.preferences.ribbon_menus_follow_hover = true;
     h.app.preferences.sketch_face_activates_part = true;
     run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
     let saved = h.app.settings_profiles.prefs();
@@ -878,6 +880,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         ("invert_navigator_arrows", json!(true)),
         ("navigator_fit", json!(true)),
         ("ribbon_click_ends_tool", json!(false)),
+        ("ribbon_menus_follow_hover", json!(true)),
         ("sketch_face_activates_part", json!(true)),
     ] {
         assert_eq!(doc["preferences"][key], value, "capture retains {key}");
@@ -906,10 +909,11 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
     h.app.preferences.home_fit_size = defaults.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
+    h.app.preferences.ribbon_menus_follow_hover = defaults.ribbon_menus_follow_hover;
     h.app.preferences.sketch_face_activates_part = defaults.sketch_face_activates_part;
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
     assert_eq!(out["skipped"], json!([]));
-    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc);
+    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc && h.app.preferences.ribbon_menus_follow_hover);
     assert_eq!(capture(&h.app, "Moved"), doc);
     for value in [0.05, 1.1] {
         let mut invalid = doc.clone();
