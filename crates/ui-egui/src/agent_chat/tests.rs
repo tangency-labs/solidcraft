@@ -4242,6 +4242,27 @@ fn a_picked_thing_that_is_also_selected_is_listed_once() {
     assert!(prompt.contains("2 item(s)") && prompt.contains("not placed in the message"), "the edge is the only one not placed: {prompt}");
 }
 
+/// A face picked as a pill and selected again at another point is still one face: it is listed
+/// once, under its pill.
+#[test]
+fn a_face_picked_and_selected_at_another_point_is_listed_once() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let Sel::Face { body, index, point } = sels[0].clone() else { panic!("a face") };
+    let elsewhere = Sel::Face { body, index, point: solidcore_record::Vec3::new(point.x + 1.0, point.y + 1.0, point.z) };
+    app.agent_chat.state = Some(State::Busy);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[..1]);
+    app.session.selection = vec![elsewhere];
+    app.agent_chat.attach_selection = true;
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let queued = app.agent_chat.pending.last().expect("queued");
+    let faces: Vec<_> = queued.context.items.iter().filter(|i| i.kind == context::Kind::Element).map(|i| (i.group, i.attached)).collect();
+    assert_eq!(faces, [(1, true)], "one face, under its pill, attached too");
+}
+
 /// A pick that was also selected with Attach selection on is one item under its pill; taking the
 /// pill out of the queued message keeps it, once, as not placed: it was attached too.
 #[test]

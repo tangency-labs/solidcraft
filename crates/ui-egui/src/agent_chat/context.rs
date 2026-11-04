@@ -69,7 +69,12 @@ pub struct Entry {
 impl Entry {
     /// Whether both stand for the same thing, whichever pill each is in.
     pub fn same_item(&self, other: &Entry) -> bool {
-        self.kind == other.kind && self.label == other.label && self.detail == other.detail && self.sels == other.sels
+        // A face or edge is the same one wherever it was clicked: the pick point (in `sels` and in
+        // `detail`) does not count.
+        self.kind == other.kind
+            && self.label == other.label
+            && self.sels.len() == other.sels.len()
+            && self.sels.iter().zip(&other.sels).all(|(a, b)| crate::selection::same_item(a, b))
     }
 
     fn new(kind: Kind, label: String, detail: String) -> Entry {
