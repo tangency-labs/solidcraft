@@ -880,26 +880,23 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // Without orbit (a flat page), bindings that orbit do nothing.
     let allowed = |m: NavMode| caps.orbit || m != NavMode::Orbit;
     let motion = modifier_motion(app, ui, inside, hover, mods, picking).filter(|(m, _)| allowed(*m));
-    let mode = if touch.active {
-        touch.mode
-    } else {
-        motion
-            .map(|(m, _)| m)
-            .or_else(|| {
-                if dragging && app.viewport.axis_drag.is_none() {
-                    match button {
-                        Some(b) => crate::prefs::nav_mode(app, b, mods),
-                        // A press held still that opened Select Other stays its own: egui calls it a
-                        // drag after 0.8 s, and moving to a row must not turn the view under the list.
-                        None if primary_down && !crate::select_other::is_open(app) => primary_nav,
-                        None => None,
-                    }
-                } else {
-                    None
+    let mode = motion
+        .map(|(m, _)| m)
+        .or_else(|| {
+            if dragging && app.viewport.axis_drag.is_none() {
+                match button {
+                    Some(b) => crate::prefs::nav_mode(app, b, mods),
+                    // A press held still that opened Select Other stays its own: egui calls it a
+                    // drag after 0.8 s, and moving to a row must not turn the view under the list.
+                    None if primary_down && !crate::select_other::is_open(app) => primary_nav,
+                    None => None,
                 }
-            })
-            .filter(|m| allowed(*m))
-    };
+            } else {
+                None
+            }
+        })
+        .filter(|m| allowed(*m));
+    let mode = if touch.active { touch.mode } else { mode };
     if touch.active {
         if touch.delta != egui::Vec2::ZERO || touch.zoom != 1.0 && touch.zoom > 0.0 {
             app.cancel_view_animation();

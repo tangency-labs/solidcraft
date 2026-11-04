@@ -1019,6 +1019,8 @@ preference_settings! {
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
+    /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
+    touchscreen_navigation: bool = true, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;
@@ -1027,8 +1029,6 @@ preference_settings! {
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
     /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
     right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
-    /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
-    touchscreen_navigation: bool = true, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
