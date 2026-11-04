@@ -428,6 +428,7 @@ pub fn table() -> Table {
         content: Content(vec![Part::Field { source: Source::Row, key: f.key().to_string(), format: cell::Format::default() }]),
         width_mm: None,
         align: HAlign::Left,
+        printed: true,
     };
     Table {
         columns: Field::ALL.into_iter().map(column).collect(),

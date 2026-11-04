@@ -226,6 +226,7 @@ fn a_balloon_reads_the_list_it_names_else_the_only_one() {
     assert_eq!(read(&d), Ok(1 << 42), "the sheet's only one comes first");
     add_list(&mut d, sheet, 1 << 43);
     assert_eq!(read(&d), Err(vec![1 << 41, 1 << 42, 1 << 43]), "the choices");
+    assert!(d.balloons_by_list().is_empty(), "with none to go by, a balloon reads no list");
     let kind = Kind::Revision;
     d.tables.add([Arc::new(SheetTable { id: 1 << 44, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
     assert_eq!(read(&d).unwrap_err().len(), 3, "a revision table is no choice");
@@ -233,6 +234,8 @@ fn a_balloon_reads_the_list_it_names_else_the_only_one() {
     let at = d.balloons.index_of(id).unwrap();
     Arc::make_mut(&mut d.balloons[at]).parts_list = Some(1 << 41);
     assert_eq!(read(&d), Ok(1 << 41), "its link wins");
+    let by_list = d.balloons_by_list();
+    assert_eq!((by_list.len(), by_list[&(1 << 41)].iter().map(|b| b.id).collect::<Vec<_>>()), (1, vec![id]), "the other reads none");
     d.validate().unwrap();
     assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
 

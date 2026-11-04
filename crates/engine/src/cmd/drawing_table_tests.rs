@@ -53,6 +53,10 @@ fn a_new_table_has_its_defaults_and_saves() {
     assert_eq!(record["place"], json!({"anchor": {"corner": "top_right", "offset_mm": [0.0, 0.0]}}), "{record}");
     assert_eq!((&record["table"]["heading"], &record["table"]["row_height_mm"]), (&json!("top"), &json!(7.0)));
     assert_eq!(record["table"]["columns"][1]["heading"], json!("QTY"));
+    assert_eq!((&record["table"]["columns"][6]["name"], &record["table"]["columns"][6]["printed"]), (&json!("ballooned"), &json!(false)));
+    // Never on paper: until the sheet draws tables (P8) this guards that it never draws this one.
+    let svg = s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap();
+    assert!(!svg["svg"].as_str().unwrap().to_lowercase().contains("ballooned"), "{svg}");
     assert_eq!(record["kind"]["parts_list"]["of"]["component"], json!(0));
     assert_eq!(record["kind"]["parts_list"]["mass"], json!({"unit": "kg", "decimals": 2}));
     let revisions = run(&mut s, ADD, json!({"sheet": "Sheet 1", "kind": "revision"}));

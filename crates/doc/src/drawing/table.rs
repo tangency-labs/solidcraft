@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use solidcraft_geom::cell::{Content, Format, HAlign, Part, Source};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::table::{Column, Filter, Heading, Table};
+use solidcraft_geom::table::{BALLOONED, Column, Filter, Heading, Table};
 
 use super::by_id::Record;
 use super::{Drawing, SheetComponent, require};
@@ -130,7 +130,8 @@ impl PartsList {
 
 impl Kind {
     /// The definition a new table of this kind starts with: headings on top, rows of 7 mm, each
-    /// column as wide as its text.
+    /// column as wide as its text. A parts list's last column says how many balloons point at each
+    /// row, for its editor alone: it isn't printed.
     pub fn default_table(&self) -> Table {
         let columns = match self {
             Kind::PartsList(_) => vec![
@@ -140,6 +141,7 @@ impl Kind {
                 column("description", "DESCRIPTION", HAlign::Left),
                 column("material", "MATERIAL", HAlign::Left),
                 column("mass", "MASS", HAlign::Right),
+                Column { printed: false, ..column(BALLOONED, "BALLOONED", HAlign::Centre) },
             ],
             Kind::Revision => vec![
                 column("revision", "REV", HAlign::Centre),
@@ -174,7 +176,7 @@ impl Kind {
 
 fn column(key: &str, heading: &str, align: HAlign) -> Column {
     let content = Content(vec![Part::Field { source: Source::Row, key: key.into(), format: Format::default() }]);
-    Column { name: key.into(), heading: heading.into(), content, width_mm: None, align }
+    Column { name: key.into(), heading: heading.into(), content, width_mm: None, align, printed: true }
 }
 
 impl Record for SheetTable {

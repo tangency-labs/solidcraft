@@ -75,8 +75,11 @@ fn a_list_asks_for_its_view() {
     );
     assert!(!request.mass);
     let names = |kind: &Kind| kind.default_table().columns.into_iter().map(|c| c.name).collect::<Vec<_>>();
-    assert_eq!(names(&Kind::PartsList(list)), ["item", "quantity", "name", "description", "material", "mass"]);
+    assert_eq!(names(&Kind::PartsList(list)), ["item", "quantity", "name", "description", "material", "mass", "ballooned"]);
     assert_eq!(names(&Kind::Revision), ["revision", "description", "designer", "checker", "date"]);
+    // How many balloons point at each row, for the editor alone: the only column not printed.
+    let unprinted = |kind: &Kind| kind.default_table().columns.iter().filter(|c| !c.printed).map(|c| c.heading.clone()).collect::<Vec<_>>();
+    assert_eq!((unprinted(&Kind::PartsList(list)), unprinted(&Kind::Revision)), (vec!["BALLOONED".to_string()], vec![]));
     assert_eq!(Kind::Revision.default_place(), Place::Anchor { corner: Corner::BottomLeft, offset_mm: [0.0, 0.0] });
     for kind in [Kind::PartsList(list), Kind::Revision] {
         kind.default_table().validate().unwrap();

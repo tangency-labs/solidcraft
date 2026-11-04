@@ -14,7 +14,7 @@ fn field(key: &str) -> Content {
 }
 
 fn column(name: &str, heading: &str, align: HAlign) -> Column {
-    Column { name: name.into(), heading: heading.into(), content: field(name), width_mm: None, align }
+    Column { name: name.into(), heading: heading.into(), content: field(name), width_mm: None, align, printed: true }
 }
 
 /// Item, part number and quantity: 2.5 mm text, a 0.7 mm outline and 0.35 mm lines between cells.
@@ -224,6 +224,58 @@ fn a_table_round_trips_through_json_and_unknown_fields_are_refused() {
         assert!(serde_json::from_value::<Table>(bad).is_err(), "{path}");
     }
     assert!(serde_json::from_value::<Heading>(json!("left")).is_err());
+}
+
+/// A column that isn't printed has no cells, lines or width on paper, and the others keep the places
+/// they have without it; its cells are still worked out, so a filter can read them. Saved only when
+/// it isn't printed.
+#[test]
+fn a_column_that_isnt_printed_is_left_off_paper() {
+    let mut with = table();
+    let note = Column { printed: false, ..column("note", "Note", HAlign::Left) };
+    with.columns.insert(1, note.clone());
+    with.columns.push(Column { printed: false, ..column(BALLOONED, "Ballooned", HAlign::Centre) });
+    let rows: Vec<Row> = rows()
+        .into_iter()
+        .map(|mut r| {
+            r.fields.insert("note".into(), "a long note no column of paper has room for".into());
+            r.fields.insert(BALLOONED.into(), "2".into());
+            r
+        })
+        .collect();
+    let corner = Vec2::new(400.0, 280.0);
+    let (laid, alone) = (with.layout(&rows, corner, &fixed).unwrap(), table().layout(&rows, corner, &fixed).unwrap());
+    assert_eq!(laid, alone);
+    assert_eq!(laid.paper(9, ObjectKind::PartsList), alone.paper(9, ObjectKind::PartsList));
+
+    with.filter.text.push(TextFilter { column: "note".into(), contains: "NOTE".into() });
+    with.overrides.push(Override { row: "pin".into(), column: "note".into(), text: "kept".into() });
+    let filtered = with.layout(&rows, corner, &fixed).unwrap();
+    assert_eq!(filtered.rows.iter().map(|r| r.key.as_deref().unwrap()).collect::<Vec<_>>(), ["plate", "frame"], "filtered on its text");
+
+    let json = serde_json::to_value(&with).unwrap();
+    assert_eq!((json["columns"][0].get("printed"), &json["columns"][1]["printed"]), (None, &json!(false)));
+    assert_eq!(serde_json::from_value::<Table>(json).unwrap(), with);
+}
+
+/// The ballooned field is for the editor: a printed column that reads it is refused, whatever else it
+/// shows. A table prints at least one column.
+#[test]
+fn the_ballooned_field_is_never_printed() {
+    let reads = |content: Vec<Part>, printed: bool| {
+        let mut t = table();
+        t.columns.push(Column { content: Content(content), printed, ..column("count", "Count", HAlign::Centre) });
+        t.validate()
+    };
+    let ballooned = || Part::Field { source: Source::Row, key: BALLOONED.into(), format: Format::default() };
+    let refusal = Err(Invalid("the ballooned column is for the editor only: it isn't printed"));
+    assert_eq!(reads(vec![ballooned()], true), refusal);
+    assert_eq!(reads(vec![Part::Text("x ".into()), ballooned()], true), refusal);
+    assert_eq!(reads(vec![ballooned()], false), Ok(()));
+    assert_eq!(reads(vec![Part::Field { source: Source::Row, key: "balloons".into(), format: Format::default() }], true), Ok(()));
+    let mut none = table();
+    none.columns.iter_mut().for_each(|c| c.printed = false);
+    assert_eq!(none.validate(), Err(Invalid("a table prints at least one column")));
 }
 
 #[test]
