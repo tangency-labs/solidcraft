@@ -17,15 +17,27 @@ Before choosing a task, check the [command inventory](docs/features.md) and
 
 Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
-## Kernel work is paused
+## Kernel work goes to solidcore
 
-We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
-change `crates/kernel/`, `crates/geom/` or `vendor/truck*`, or issues and discussions about kernel
-work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
-import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
-`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
-and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
-including the dialogs and tools for these features.
+Since 0.40, SolidCraft's geometry kernel is [solidcore](https://github.com/tangency-labs/solidcore),
+and the kernel operations still in this repository are migrating there. The split:
+
+- **SolidCraft** is the application: commands, the timeline, sketches, the UI, file handling. A new
+  feature calls the solidcore API and builds on the operations it offers.
+- **solidcore** holds the geometry: evaluators, intersections, booleans, blends, shells, sweeps,
+  tessellation and the rest of the math. If a feature needs kernel functionality solidcore does not
+  have yet, add it to solidcore first (its own issue and PR), then use it here.
+
+So pull requests that add geometry math to SolidCraft (`crates/kernel/`, `crates/geom/`, or a new
+evaluator or solver anywhere else) are not taken; they get the `kernel-paused` label
+(`.github/workflows/kernel-paused.yml`) and a maintainer points them to solidcore. Crashes and data
+loss are still taken as issues here, and the dialogs and tools for kernel features carry on as
+normal.
+
+Work started before 0.40 was written against the earlier kernel. It is still welcome: port it onto
+today's code, calling solidcore for the geometry, before it can land. Expect a substantial rework
+for anything that touched the kernel. Designs keep opening and rebuilding on the new kernel; where a
+result changes, the PR says so and why.
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -329,8 +341,11 @@ and a fresh CI run:
 
 1. Work is tracked in [GitHub issues](https://github.com/tangency-labs/solidcraft/issues), labelled
    by area (`area:kernel`, `area:sketch`, `area:doc`, `area:ui`, `area:infra`). For anything
-   bigger than a bug fix that has no issue yet, open one first. **Claim the issue with a draft
-   PR** before you start, so two people don't build the same thing:
+   bigger than a bug fix that has no issue yet, discuss it on [Discord](https://discord.gg/FtU4NQNVDH)
+   first, then open an issue. Before you start, search **all** issues and pull requests, open and
+   closed, for similar work (`gh issue list -R tangency-labs/solidcraft --state all --search "<words>"`,
+   and the same with `gh pr list`). **Claim the issue with a draft PR** before you start, so two
+   people don't build the same thing:
    - Check nobody has it: `gh pr list -R tangency-labs/solidcraft --state open --search "#N"`.
    - Branch from the latest `main`, commit `git commit --allow-empty -m "claim: #N"`, push, and
      open a **draft** PR titled `<summary> (#N)`, e.g. `Fillet: variable radius along a chain (#123)`.
@@ -443,7 +458,7 @@ correct them freely and it won't put them back.
 
 ## Where help is wanted most
 
-**Kernel speed (slow fillets, booleans, STEP):** please don't rewrite the current kernel code for speed; it is being replaced by [solidcore](https://github.com/bherbruck/solidcore) ([progress](https://tangency-labs.github.io/solidcore/)). Report slow cases with a file under the `kernel-perf` label, and put kernel effort into solidcore instead. See [#1597](https://github.com/tangency-labs/solidcraft/issues/1597).
+**Kernel speed (slow fillets, booleans, STEP):** please don't rewrite the current kernel code for speed; the kernel is [solidcore](https://github.com/tangency-labs/solidcore) ([progress](https://tangency-labs.github.io/solidcore/)). Report slow cases with a file under the `kernel-perf` label, and put kernel effort into solidcore instead. See [#1597](https://github.com/tangency-labs/solidcraft/issues/1597).
 
 See the [`help wanted`](https://github.com/tangency-labs/solidcraft/labels/help%20wanted) and
 [`good first issue`](https://github.com/tangency-labs/solidcraft/labels/good%20first%20issue) labels.
