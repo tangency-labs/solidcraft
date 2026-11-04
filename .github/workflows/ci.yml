@@ -166,6 +166,39 @@ jobs:
         if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
         run: cargo test --profile difftest -p difftest -p solidcore-ffi --features cpp
 
+  # The kernel rig (#2394): SolidCraft's operation-level cases in
+  # crates/solidcore/tests/kernel_cases, replayed through solidcore-ops' public
+  # operations and graded against the rig's values (crates/solidcore-ops/tests/
+  # kernel_cases.rs). The test is #[ignore]d out of the workspace run; here it runs whole
+  # (about 15 s today). It fails on a case that fails, on a hang, and on a known-failing
+  # case whose result moved (the list must shrink); an operation solidcore-ops does not
+  # have yet is reported unported, not run. When the corpus grows slow, shard it by area
+  # with KERNEL_CASES_AREA. The table is uploaded.
+  kernel-rig:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - name: Kernel rig
+        env:
+          # the test runs in its crate's directory, so the report path is absolute
+          KERNEL_CASES_REPORT: ${{ github.workspace }}/reports/kernel-rig/table.md
+        run: |
+          mkdir -p reports/kernel-rig
+          cargo test --profile difftest -p solidcore-ops --test kernel_cases -- --ignored --nocapture
+      - name: Upload the table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-rig
+          path: reports/kernel-rig/
+          if-no-files-found: ignore
+          retention-days: 30
+
   wasm:
     needs: changes
     if: needs.changes.outputs.full == 'true'
