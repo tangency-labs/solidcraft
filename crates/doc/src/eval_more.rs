@@ -77,9 +77,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 let what = if *deboss { "deboss" } else { "emboss" };
                 append_warning(
                     warning,
-                    format!(
-                        "the {what} changed nothing: its profile does not reach the body; check which side of the face the sketch is on and the depth"
-                    ),
+                    format!("the {what} changed nothing; check where its profile lies, which side of the face the sketch is on, and the depth"),
                 );
             }
             Ok(())
