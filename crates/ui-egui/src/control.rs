@@ -1379,6 +1379,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
         },
         "ui.recover" => match s("action") {
+            Some(_) if p.get("id").is_some_and(|v| !v.is_string()) => err("`id` must be a string (a design's `id` from `ui.inspect`'s `dialog`)"),
             Some(a) => match crate::recovery_ui::answer(app, a, s("id")) {
                 Ok(()) => ok(json!({"dialog": crate::recovery_ui::describe(app), "file_busy": app.file_load.busy()})),
                 Err(e) => err(e),
@@ -2126,6 +2127,41 @@ mod tests {
         assert_eq!(r["ok"], true, "{r}");
         assert!(h.call("ui.inspect", json!({}))["result"]["dialog"].is_null());
         assert!(orphans(&dir).iter().all(|e| e.id != id), "the autosave is deleted");
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A non-string `id` is refused (it is not "the first one"), and a recover the open-design
+    /// limit refuses keeps its entry offered.
+    #[test]
+    fn ui_recover_refuses_a_non_string_id_and_keeps_an_entry_the_limit_refuses() {
+        use solidcraft_engine::recovery::{Autosaver, orphans};
+        let dir = std::env::temp_dir().join(format!("solidcraft-recover-refuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut crashed = Session::default();
+        crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let mut a = Autosaver::new(&dir, std::time::Duration::from_secs(3600)).unwrap();
+        assert!(a.save(&crashed).unwrap());
+        drop(a);
+        let mut h = crate::scenario::Harness::new();
+        crate::recovery_ui::start(&mut h.app, &dir, std::time::Duration::from_secs(3600));
+        h.frames(2);
+        let id = h.app.recoverable[0].id.clone();
+        let r = h.call("ui.recover", json!({"action": "discard", "id": 0}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("string")), "{r}");
+        assert_eq!(h.app.recoverable.len(), 1, "nothing was discarded");
+        assert!(orphans(&dir).iter().any(|e| e.id == id));
+        // Full: 32 designs open and the active one is not blank.
+        for _ in 1..crate::documents::MAX_OPEN {
+            crate::documents::new_tab(&mut h.app);
+        }
+        h.app.session.path = Some("occupied.sc".into());
+        let r = h.call("ui.recover", json!({"action": "recover", "id": id}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("too many open designs")), "{r}");
+        assert_eq!(h.app.recoverable.len(), 1, "the entry is still offered");
+        assert!(h.call("ui.inspect", json!({}))["result"]["dialog"]["designs"][0]["id"] == id.as_str());
         drop(h);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -228,6 +228,10 @@ pub fn answer(app: &mut SolveApp, action: &str, id: Option<&str>) -> std::result
     if action == "recover" && app.session.is_dirty() {
         return Err("save or discard the open design's changes before recovering another".into());
     }
+    // `file_load` refuses this later, after `apply` has taken the entry off the list.
+    if action == "recover" && app.docs.count() >= crate::documents::MAX_OPEN && !crate::documents::active_is_blank(app) {
+        return Err("too many open designs; close a tab before opening another".into());
+    }
     apply(app, e, action == "recover");
     Ok(())
 }
