@@ -360,23 +360,21 @@ fn face_surface(
             )?,
         )
     } else {
-        solidcore::surface::surface::Surface::from(
-            solidcore::surface::plane::Plane::new(
-                Vec3::new(p[0], p[1], p[2]),
-                if kind == 4 {
-                    Vec3::new(0.6, 0.8, 0.0)
-                } else {
-                    Vec3::X
-                },
-                if kind == 4 {
-                    Vec3::new(-0.8, 0.6, 0.0)
-                } else {
-                    Vec3::Y
-                },
-                Vec2::new(p[3], p[4]),
-                domain,
-            ),
-        )
+        solidcore::surface::surface::Surface::from(solidcore::surface::plane::Plane::new(
+            Vec3::new(p[0], p[1], p[2]),
+            if kind == 4 {
+                Vec3::new(0.6, 0.8, 0.0)
+            } else {
+                Vec3::X
+            },
+            if kind == 4 {
+                Vec3::new(-0.8, 0.6, 0.0)
+            } else {
+                Vec3::Y
+            },
+            Vec2::new(p[3], p[4]),
+            domain,
+        ))
     })
 }
 fn geometry_rust(g: &Geometry) -> Output {
@@ -384,7 +382,6 @@ fn geometry_rust(g: &Geometry) -> Output {
     use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
     use solidcore::geom::extent1d::Extent1d;
     use solidcore::geom::extent2d::Extent2d;
-    use solidcore::geom::extent3d::Extent3d;
     use solidcore::kernel::Kernel;
     use solidcore::mass::integrator::properties as props;
     use solidcore::math::{Vec2, Vec3};
@@ -461,7 +458,14 @@ fn geometry_rust(g: &Geometry) -> Output {
                     }
                     return Ok(out);
                 }
-                let p = props::curve_properties(&kernel, &c, &ivl, accuracy, Vec3::new(ox, oy, oz), radius)?;
+                let p = props::curve_properties(
+                    &kernel,
+                    &c,
+                    &ivl,
+                    accuracy,
+                    Vec3::new(ox, oy, oz),
+                    radius,
+                )?;
                 let mut out = vec![0.0, p.length, p.properties.area, p.properties.volume];
                 for m in p.properties.moments {
                     out.extend([m.x, m.y, m.z]);
@@ -474,7 +478,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                 query,
             } => {
                 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-                if *query != 0 && *query != 7 {
+                {
                     // The aggregate queries (face area / centroid, B-rep area / volume /
                     // mass properties): as the shim, `new SmBrep()`, then the public API
                     // query on that face or B-rep. The shim makes the face with
@@ -560,7 +564,58 @@ fn geometry_rust(g: &Geometry) -> Output {
                         }
                     };
                     let accuracy = p[12];
-                    return match *query {
+                    match *query {
+                        0 => {
+                            let bbox = solidcore::query::face::p1::calculate_bounding_box(
+                                &fk, &brep, face, false,
+                            )?;
+                            let size = bbox.size();
+                            let d = size.z.max(size.x.max(size.y));
+                            let properties = props::face_properties(
+                                &fk,
+                                &mut brep,
+                                face,
+                                if p[14] == 0.0 {
+                                    OrientType::Same
+                                } else {
+                                    OrientType::Opposite
+                                },
+                                accuracy,
+                                Vec3::new(p[9], p[10], p[11]),
+                                d * d / 100.0,
+                                p[13],
+                                p[15] as u64,
+                            )?;
+                            let mut out = vec![0.0, properties.area, properties.volume];
+                            for m in properties.moments {
+                                out.extend([m.x, m.y, m.z]);
+                            }
+                            Ok(out)
+                        }
+                        7 => {
+                            let surface = brep
+                                .face(face)?
+                                .surface
+                                .as_ref()
+                                .ok_or_else(|| SolidError::sm_err("missing surface"))?;
+                            let eval = solidcore::surface::surface::p1::AreaIntegrand {
+                                surface,
+                                uv_domain: dom,
+                                iso_curve_accuracy: accuracy / 100.0,
+                            };
+                            let area = integrate(
+                                dom.min().x,
+                                dom.max().x,
+                                IntegrationAlgorithm::Romberg,
+                                accuracy,
+                                |t| eval.evaluate(&fk, t),
+                            )?;
+                            Ok(if area == 0.0 {
+                                vec![1001.0]
+                            } else {
+                                vec![0.0, area]
+                            })
+                        }
                         2 => Ok(vec![0.0, props::face_area(&fk, &mut brep, face, accuracy)?]),
                         3 => {
                             let (area, c) = props::face_centroid(&fk, &mut brep, face, accuracy)?;
@@ -583,131 +638,8 @@ fn geometry_rust(g: &Geometry) -> Output {
                             Ok(vec![0.0, m.properties.area])
                         }
                         _ => Err(SolidError::sm_err("unknown query")),
-                    };
-                }
-                // Import only input geometry: C++ constructs and exports its actual
-                // oriented trims. Both sides then integrate those same boundaries.
-                let raw = ffi::face(1, *kind, p).map_err(|_| SolidError::sm_err("trim export"))?;
-                let mut it = raw.into_iter();
-                if it.next() != Some(0.0) {
-                    // the C++ could not construct the face, so there are no trims to
-                    // import: the Rust side has nothing to integrate (a harness
-                    // limitation, as for the aggregate queries)
-                    return Err(SolidError::Unported {
-                        upstream: "mass.integrator runner: the C++ face construction failed",
-                        unit: "harness:mass.integrator-face-construction",
-                    });
-                }
-                let estimated_area = it.next().ok_or_else(|| SolidError::sm_err("bbox export"))?;
-                let mut face_box = [0.0; 6];
-                for v in &mut face_box {
-                    *v = it
-                        .next()
-                        .ok_or_else(|| SolidError::sm_err("face box export"))?;
-                }
-                let [x0, y0, z0, x1, y1, z1] = face_box;
-                let face_box =
-                    Extent3d::from_points(Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
-                let u0 = it
-                    .next()
-                    .ok_or_else(|| SolidError::sm_err("domain export"))?;
-                let v0 = it
-                    .next()
-                    .ok_or_else(|| SolidError::sm_err("domain export"))?;
-                let u1 = it
-                    .next()
-                    .ok_or_else(|| SolidError::sm_err("domain export"))?;
-                let v1 = it
-                    .next()
-                    .ok_or_else(|| SolidError::sm_err("domain export"))?;
-                let n = it.next().unwrap_or(0.0) as usize;
-                let mut curves = Vec::new();
-                for _ in 0..n {
-                    let n = it.next().ok_or_else(|| SolidError::sm_err("trim n"))? as usize;
-                    let degree =
-                        it.next().ok_or_else(|| SolidError::sm_err("trim degree"))? as usize;
-                    let m = it.next().ok_or_else(|| SolidError::sm_err("trim m"))? as usize;
-                    let cp: Vec<_> = (0..=n)
-                        .map(|_| {
-                            CPoint::new(
-                                it.next().unwrap_or(0.0),
-                                it.next().unwrap_or(0.0),
-                                it.next().unwrap_or(0.0),
-                                it.next().unwrap_or(1.0),
-                            )
-                        })
-                        .collect();
-                    let knots: Vec<_> = it.by_ref().take(m + 1).collect();
-                    let base = BSplineCurve::from_data(2, n, m, degree, &cp, &knots)?;
-                    // C++ evaluates an SmLine trim analytically, not through its NURB.
-                    let line = it.next().ok_or_else(|| SolidError::sm_err("trim type"))?;
-                    if line == 0.0 {
-                        curves.push(Curve::from(base));
-                        continue;
                     }
-                    let mut v = [0.0; 10];
-                    for x in &mut v {
-                        *x = it.next().ok_or_else(|| SolidError::sm_err("trim line"))?;
-                    }
-                    let [px, py, pz, vx, vy, vz, a, b, scale, inside_out] = v;
-                    curves.push(Curve::from(solidcore::curve::line::Line::from_parts(
-                        base,
-                        Vec3::new(px, py, pz),
-                        Vec3::new(vx, vy, vz),
-                        Extent1d::from_raw(a, b),
-                        scale,
-                        inside_out != 0.0,
-                    )));
                 }
-                let domain = if *query == 7 {
-                    // Surface::Area integrates the requested rectangle, independent
-                    // of the face's trims or its resulting UV bounding domain.
-                    Extent2d::from_points(Vec2::new(p[5], p[6]), Vec2::new(p[7], p[8]))
-                } else {
-                    Extent2d::from_points(Vec2::new(u0, v0), Vec2::new(u1, v1))
-                };
-                let surface = face_surface(*kind, p, &domain)?;
-                if *query == 7 {
-                    let eval = solidcore::surface::surface::p1::AreaIntegrand {
-                        surface: &surface,
-                        uv_domain: domain,
-                        iso_curve_accuracy: p[12] / 100.0,
-                    };
-                    let area = integrate(
-                        domain.min().x,
-                        domain.max().x,
-                        IntegrationAlgorithm::Romberg,
-                        p[12],
-                        |t| eval.evaluate(&kernel, t),
-                    )?;
-                    return Ok(if area == 0.0 {
-                        vec![1001.0]
-                    } else {
-                        vec![0.0, area]
-                    });
-                }
-                let properties = props::boundary_properties(
-                    &kernel,
-                    &surface,
-                    &curves,
-                    &domain,
-                    &face_box,
-                    if p[14] == 0.0 {
-                        OrientType::Same
-                    } else {
-                        OrientType::Opposite
-                    },
-                    p[12],
-                    Vec3::new(p[9], p[10], p[11]),
-                    estimated_area,
-                    p[13],
-                    p[15] as u64,
-                )?;
-                let mut out = vec![0.0, properties.area, properties.volume];
-                for m in properties.moments {
-                    out.extend([m.x, m.y, m.z]);
-                }
-                Ok(out)
             }
         }
     })();
@@ -720,6 +652,148 @@ fn geometry_rust(g: &Geometry) -> Output {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn face_queries_run_without_native_reference() {
+        for query in [0, 7] {
+            let case = Case {
+                unit: "mass.integrator".into(),
+                name: format!("independent_face_query_{query}"),
+                source: crate::case::CaseSource::Inline,
+                inputs: serde_json::json!({"geometry": {
+                    "op": "face", "kind": 0,
+                    "parameters": [0.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 1.0, 1.0,
+                                   0.0, 0.0, 0.0, 1e-6, 0.0, 0.0, 63.0],
+                    "query": query
+                }}),
+            };
+            let result = Runner.run_rust(&case).unwrap();
+            assert!(result.deferred.is_none(), "query {query}: {result:?}");
+            assert_eq!(result.ints["status"], [0], "query {query}: {result:?}");
+            assert!((result.values["out"][0] - 6.0).abs() < 1e-6);
+        }
+    }
+
+    fn independent_face(kind: i32, parameters: [f64; 16], query: i32) -> Output {
+        let case = Case {
+            unit: "mass.integrator".into(),
+            name: format!("independent_face_kind_{kind}_query_{query}"),
+            source: crate::case::CaseSource::Inline,
+            inputs: serde_json::json!({"geometry": {
+                "op": "face", "kind": kind, "parameters": parameters, "query": query
+            }}),
+        };
+        Runner.run_rust(&case).unwrap()
+    }
+
+    fn independent_success(out: &Output) -> &[f64] {
+        assert!(out.deferred.is_none(), "{out:?}");
+        assert!(out.rejected.is_none(), "{out:?}");
+        assert_eq!(out.ints["status"], [0], "{out:?}");
+        &out.values["out"]
+    }
+
+    #[test]
+    fn face_queries_run_without_native_reference_analytic() {
+        use core::f64::consts::PI;
+
+        // The rectangular subdomain is not the circular face's trim domain.
+        for kind in [0, 1, 2, 4] {
+            let circular = kind == 1 || kind == 2;
+            let mut p = if circular {
+                [
+                    2.5, -1.25, 3.75, 1.0, 1.0, -1.5, -1.5, 1.5, 1.5, 0.0, 0.0, 0.0, 1e-6, 0.0,
+                    0.0, 1.0,
+                ]
+            } else {
+                [
+                    1.0, 2.0, 3.0, 2.0, 3.0, 0.1, 0.2, 0.8, 0.9, 2.37, 3.21, 3.41, 1e-6, 0.0, 0.0,
+                    1.0,
+                ]
+            };
+            let area = match kind {
+                1 => PI * 0.25,
+                2 => PI * (0.25 - 0.04),
+                _ => 2.0 * 3.0 * 0.7 * 0.7,
+            };
+            let rectangle_area = if circular { 9.0 } else { area };
+            let center = match kind {
+                1 | 2 => [2.5, -1.25, 3.75],
+                4 => [
+                    1.0 + 0.6 * 0.9 - 0.8 * 1.65,
+                    2.0 + 0.8 * 0.9 + 0.6 * 1.65,
+                    3.0,
+                ],
+                _ => [1.9, 3.65, 3.0],
+            };
+            for orientation in [0.0, 1.0] {
+                for mask in [1.0, 63.0] {
+                    p[14] = orientation;
+                    p[15] = mask;
+                    let result = independent_face(kind, p, 0);
+                    let out = independent_success(&result);
+                    assert!((out[0] - area).abs() < 1e-6, "kind {kind}: {out:?}");
+                    if mask == 63.0 {
+                        for (i, coordinate) in center.iter().enumerate() {
+                            let expected = area * (coordinate - p[9 + i]);
+                            assert!((out[2 + i] - expected).abs() < 1e-6, "kind {kind}: {out:?}");
+                        }
+                    }
+                }
+                let result = independent_face(kind, p, 7);
+                let out = independent_success(&result);
+                assert!(
+                    (out[0] - rectangle_area).abs() < 1e-6,
+                    "kind {kind}: {out:?}"
+                );
+            }
+            // Analytic centroid control through the same runner, independent of C++.
+            let result = independent_face(kind, p, 3);
+            let out = independent_success(&result);
+            assert!((out[0] - area).abs() < 1e-6, "kind {kind}: {out:?}");
+            for (actual, expected) in out[1..].iter().zip(center) {
+                assert!((actual - expected).abs() < 1e-6, "kind {kind}: {out:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn face_queries_run_without_native_reference_curved_and_invalid() {
+        // Kinds 3 and 5 have fixed positive-height control points. Their graphs
+        // project onto a 2 x 3 rectangle, so their area exceeds 6. This is a
+        // finite, non-planar output control, not an asserted analytic surface area.
+        for kind in [3, 5] {
+            let mut p = [
+                1.0, 2.0, 3.0, 2.0, 3.0, 0.0, 0.0, 1.0, 1.0, 2.37, 3.21, 3.41, 1e-6, 0.0, 0.0, 1.0,
+            ];
+            for orientation in [0.0, 1.0] {
+                for mask in [1.0, 63.0] {
+                    p[14] = orientation;
+                    p[15] = mask;
+                    for query in [0, 7] {
+                        let result = independent_face(kind, p, query);
+                        let out = independent_success(&result);
+                        assert!(
+                            out.iter().all(|v| v.is_finite()),
+                            "kind {kind} query {query}: {out:?}"
+                        );
+                        assert!(out[0] > 6.0, "kind {kind} query {query}: {out:?}");
+                    }
+                }
+            }
+        }
+
+        // Existing face_invalid_mask fixture: invalid property selection, not a
+        // malformed surface or an FFI argument rejection.
+        let p = [
+            1.0, 2.0, 3.0, 1.0, 1.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1e-4, 0.0, 0.0, 0.0,
+        ];
+        let result = independent_face(0, p, 0);
+        assert!(result.deferred.is_none(), "{result:?}");
+        assert!(result.rejected.is_none(), "{result:?}");
+        assert_eq!(result.ints["status"], [1007]);
+        assert!(result.values["out"].is_empty());
+    }
 
     #[test]
     fn nonfinite_values_unused_or_supported_by_upstream() {
