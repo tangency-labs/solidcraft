@@ -505,7 +505,10 @@ impl SurfOfRevolution {
     /// The surface of one full revolution of `swept_curve` about the axis through
     /// `axis_point` along `axis_direction` (`CreateCanonical`, co-ported from unit
     /// `surface.surf_of_revolution_p2`): the X axis points from the axis point to the
-    /// curve's STEP start point (or, when that is on the axis, its point at 45%), the
+    /// curve's STEP start point (with
+    /// [`UpstreamFixes::revolution_frame_from_profile_origin`](crate::kernel::UpstreamFixes::revolution_frame_from_profile_origin),
+    /// its point at parameter 0 when the STEP interval holds it, WR-738; or, when that
+    /// is on the axis, its point at 45%), the
     /// domain is `[0, 360]` by the curve's STEP interval; the NURB is made by
     /// [`Self::make_nurb`]. A zero axis (squared length below `SM_EFF_ZERO_SQ`) is
     /// taken as `(0, 0, 1)`, as upstream's unchecked `Unitize`.
@@ -527,8 +530,17 @@ impl SurfOfRevolution {
         // locals
         let crv_ivl = gen_step_interval(&swept_curve)?;
 
-        // SweptCurve start point
-        let mut pnt = first(&gen_evaluate_step(k, &swept_curve, crv_ivl.min(), 0)?)?;
+        // SweptCurve start point; with the fix (WR-738) the point at its parameter origin
+        // when the interval holds it: the point the profile is defined from, where an
+        // unbounded profile's start is SM_INFINITE_PARAMETER away (past the axis for a
+        // line crossing it, so the frame would face the other nappe)
+        let ref_param =
+            if k.fixes.revolution_frame_from_profile_origin && crv_ivl.contains_value(0.0, 0.0) {
+                0.0
+            } else {
+                crv_ivl.min()
+            };
+        let mut pnt = first(&gen_evaluate_step(k, &swept_curve, ref_param, 0)?)?;
 
         // Vector from SweptCurve Start to RotAxis point
         let mut x_vec = pnt - axis_point;
@@ -2275,6 +2287,131 @@ mod tests {
         let r =
             SurfOfRevolution::create_canonical(&k(), Curve::from(l), Vec3::ZERO, Vec3::Z, false);
         assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+    }
+
+    /// The full revolution about Z through the origin of the unbounded line
+    /// `point + s * vector` (`Line::create_canonical`, as the STEP reader builds a
+    /// `LINE` profile), with [`UpstreamFixes::revolution_frame_from_profile_origin`]
+    /// (`crate::kernel::UpstreamFixes`) set to `fix`.
+    fn unbounded_line_revolution(
+        fix: bool,
+        point: Point3,
+        vector: Vec3,
+    ) -> (Kernel, SurfOfRevolution) {
+        let mut k = k();
+        k.fixes.revolution_frame_from_profile_origin = fix;
+        let line = Line::create_canonical(point, vector);
+        let s =
+            SurfOfRevolution::create_canonical(&k, Curve::from(line), Vec3::ZERO, Vec3::Z, false)
+                .unwrap();
+        (k, s)
+    }
+
+    /// Asserts that `point` inverts to the STEP parameters `uv` (exact to rounding),
+    /// both in the surface's domain and without it (the STEP window's
+    /// `step_inversion_unbounded`), and that the surface evaluates there back to
+    /// `point`.
+    fn assert_inverts(k: &Kernel, s: &SurfOfRevolution, point: Point3, uv: Point2) {
+        let bounded = s.step_inversion(k, &s.step_uv_domain(), point, 1e-9, None);
+        let unbounded = s.step_inversion_unbounded(k, point, 1e-9);
+        for (mode, r) in [("bounded", bounded), ("unbounded", unbounded)] {
+            let (got, _) =
+                r.unwrap_or_else(|e| panic!("{point:?} does not invert ({mode}): {e:?}"));
+            assert!(
+                (got.x - uv.x).abs() <= 1e-9 && (got.y - uv.y).abs() <= 1e-9,
+                "{point:?} inverts ({mode}) to {got:?}, expected {uv:?}"
+            );
+        }
+        let back = s.evaluate_step_point(k, uv).unwrap();
+        assert!(
+            (back - point).length() <= 1e-9,
+            "({uv:?}) evaluates to {back:?}"
+        );
+    }
+
+    /// tangency-labs/solidcore#2628 item 4: the profile `(1, 0, 0) + s (1, 0, 1)`
+    /// crosses the axis at `s = -1`. The surface is `S(u, v) = Rz(u) λ(v)` (ISO
+    /// 10303-42 `surface_of_revolution`: `u = 0` is the profile itself), so
+    /// `λ(1) = (2, 0, 1)` is `(u, v) = (0, 1)`; turned by 90° about Z it is
+    /// `(0, 2, 1) = (90, 1)`; `λ(-1/2) = (1/2, 0, -1/2)`, between the crossing and the
+    /// profile's origin, is `(0, -1/2)`. Upstream's frame faces the line's start at
+    /// `s = -SM_INFINITE_PARAMETER`, past the axis: X = (-1, 0, 0), and these points,
+    /// on the nappe of the profile's origin, do not invert (`SM_ERR`).
+    #[test]
+    fn unbounded_line_crossing_the_axis_inverts_on_its_origin_side() {
+        let (point, vector) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 1.0));
+        let (k, s) = unbounded_line_revolution(true, point, vector);
+        assert_eq!(s.position().x_axis(), Vec3::new(1.0, 0.0, 0.0));
+        assert_inverts(&k, &s, Vec3::new(2.0, 0.0, 1.0), Point2::new(0.0, 1.0));
+        assert_inverts(&k, &s, Vec3::new(0.0, 2.0, 1.0), Point2::new(90.0, 1.0));
+        assert_inverts(&k, &s, Vec3::new(0.5, 0.0, -0.5), Point2::new(0.0, -0.5));
+
+        let (k, s) = unbounded_line_revolution(false, point, vector);
+        assert_eq!(s.position().x_axis(), Vec3::new(-1.0, 0.0, 0.0));
+        let r = s.step_inversion(
+            &k,
+            &s.step_uv_domain(),
+            Vec3::new(2.0, 0.0, 1.0),
+            1e-9,
+            None,
+        );
+        assert!(
+            matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            "{r:?}"
+        );
+    }
+
+    /// The mirror image: `(-1, 0, 0) + s (-1, 0, 1)` lies on the -X side of the axis
+    /// near its origin, and its start at `s = -SM_INFINITE_PARAMETER` on the +X side.
+    /// The frame faces the origin, X = (-1, 0, 0) and Y = Z x X = (0, -1, 0):
+    /// `λ(1) = (-2, 0, 1)` is `(0, 1)`, and `(0, -2, 1)`, along Y, is `(90, 1)`.
+    #[test]
+    fn unbounded_line_on_the_other_side_inverts() {
+        let (point, vector) = (Vec3::new(-1.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 1.0));
+        let (k, s) = unbounded_line_revolution(true, point, vector);
+        assert_eq!(s.position().x_axis(), Vec3::new(-1.0, 0.0, 0.0));
+        assert_inverts(&k, &s, Vec3::new(-2.0, 0.0, 1.0), Point2::new(0.0, 1.0));
+        assert_inverts(&k, &s, Vec3::new(0.0, -2.0, 1.0), Point2::new(90.0, 1.0));
+    }
+
+    /// A line parallel to the axis, `(2, 0, 0) + s (0, 0, 1)` (a cylinder of radius 2),
+    /// never crosses it: upstream's frame (from the line's point at 45% of its
+    /// interval, its start being within 1° of the axis direction) and the fix's agree,
+    /// X = (1, 0, 0), and `(2, 0, 1)` is `(0, 1)`, `(0, -2, 5)` is `(270, 5)`.
+    #[test]
+    fn unbounded_line_parallel_to_the_axis_inverts_either_way() {
+        for fix in [false, true] {
+            let (k, s) =
+                unbounded_line_revolution(fix, Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+            assert_eq!(s.position().x_axis(), Vec3::new(1.0, 0.0, 0.0), "fix {fix}");
+            assert_inverts(&k, &s, Vec3::new(2.0, 0.0, 1.0), Point2::new(0.0, 1.0));
+            assert_inverts(&k, &s, Vec3::new(0.0, -2.0, 5.0), Point2::new(270.0, 5.0));
+        }
+    }
+
+    /// A bounded profile whose interval starts at its parameter origin keeps
+    /// upstream's frame bit for bit with the fix on: the cubic of `TestSmGeneral.cpp`
+    /// (interval [0, 1]) and the cone's segment.
+    #[test]
+    fn bounded_profile_frame_is_upstreams_with_the_fix() {
+        let mut fixed = k();
+        fixed.fixes.revolution_frame_from_profile_origin = true;
+        let a =
+            SurfOfRevolution::create_canonical(&k(), bezier(), Vec3::ZERO, Vec3::Z, false).unwrap();
+        let b = SurfOfRevolution::create_canonical(&fixed, bezier(), Vec3::ZERO, Vec3::Z, false)
+            .unwrap();
+        assert_eq!(a.position(), b.position());
+        let mut l = Line::from_points(Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 3.0), 3);
+        l.make_nurb().unwrap();
+        let c = SurfOfRevolution::create_canonical(
+            &fixed,
+            Curve::from(l),
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 3.0),
+            false,
+        )
+        .unwrap();
+        assert_eq!(cone().position(), c.position());
     }
 
     #[test]
