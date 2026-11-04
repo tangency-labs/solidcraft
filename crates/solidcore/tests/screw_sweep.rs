@@ -405,10 +405,10 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
         .expect("a screw wall is its definition");
     let d: &ProceduralSweep = sweep.definition();
     let net = sweep.net();
-    assert_eq!(d.motion().pitch(), pitch);
-    assert_eq!(d.motion().axis(), Z);
-    assert_eq!(d.motion().origin(), O);
-    assert_eq!(d.motion().law().is_some(), !law.is_empty());
+    assert_eq!(d.screw().unwrap().pitch(), pitch);
+    assert_eq!(d.screw().unwrap().axis(), Z);
+    assert_eq!(d.screw().unwrap().origin(), O);
+    assert_eq!(d.screw().unwrap().law().is_some(), !law.is_empty());
     assert!(d.half_angle() > 0.0 && d.half_angle() <= MAX_HALF_ANGLE);
     let ([_, a1], [_, b1], swapped) = d.definition_map();
     // the definition's stations are the net's knots across the turns, through the map
@@ -573,7 +573,8 @@ fn issue_2572_tapered_thread_walls_carry_their_law() {
             .procedural_sweep()
             .unwrap()
             .definition()
-            .motion()
+            .screw()
+            .unwrap()
             .law()
             .unwrap();
         assert_eq!(law.direction(), Vec3::X);
@@ -672,7 +673,8 @@ fn issue_2572_the_definition_follows_its_nets_edits() {
         .procedural_sweep()
         .unwrap()
         .definition()
-        .motion()
+        .screw()
+        .unwrap()
         .clone();
     assert_eq!(m.pitch(), 2.0 * p);
     assert!((m.axis() - place.z_axis()).length() <= 1e-15);
@@ -713,6 +715,7 @@ fn issue_2572_the_definition_follows_its_nets_edits() {
 /// The ledger: each kind of wall face that is not a definition yet, with its issue (the
 /// first `#n` of its file).
 fn sweep_ledger() -> BTreeMap<String, u32> {
+    // (the `path-` kinds are the general-path sweeps', tests/general_path_sweep.rs)
     let dir = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/data/sweep_definition_ledger"
@@ -721,6 +724,9 @@ fn sweep_ledger() -> BTreeMap<String, u32> {
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+        if stem.starts_with("path-") {
+            continue;
+        }
         let text = std::fs::read_to_string(&path).unwrap();
         let issue = text
             .split('#')

@@ -143,8 +143,7 @@ use crate::nurbs::srf_adv::p3::{
 };
 use crate::nurbs::srf_adv::p4::create_coons_srf as bilinear_coons_srf;
 use crate::nurbs::srf_adv::p6::{
-    create_sweep_scale, create_sweep_scale_with_placements, fill_n_sided_hole_with,
-    SweepScaleOptions,
+    create_sweep_scale_traced, fill_n_sided_hole_with, SweepScaleOptions, SweepTrace,
 };
 use crate::nurbs::srf_basic::{size_arrays, Direction, Surface, SurfaceIndices};
 use crate::nurbs::srf_common::ruled_srf;
@@ -1695,6 +1694,33 @@ impl BSplineSurface {
             approx_tol_3d,
             None,
         )
+        .map(|(surface, _)| surface)
+    }
+
+    /// [`create_sweep_surface`](Self::create_sweep_surface) that also reports where the sweep
+    /// put its sections ([`SweepTrace`]; `None` for a translational sweep) and, when asked, the
+    /// placements of [`create_sweep_surface_with_placements`](Self::create_sweep_surface_with_placements)
+    /// (not upstream: the fork's #2572 definition of a general-path sweep reads them).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`create_sweep_surface`](Self::create_sweep_surface).
+    pub fn create_sweep_surface_traced(
+        section_curve: &BSplineCurve,
+        trajectory_curve: &BSplineCurve,
+        opt_scale_curve: Option<&BSplineCurve>,
+        do_translational_sweep: bool,
+        approx_tol_3d: f64,
+        placements: Option<&mut [Axis2Placement; 3]>,
+    ) -> Result<(BSplineSurface, Option<SweepTrace>)> {
+        Self::sweep_surface(
+            section_curve,
+            trajectory_curve,
+            opt_scale_curve,
+            do_translational_sweep,
+            approx_tol_3d,
+            placements,
+        )
     }
 
     /// [`create_sweep_surface`](Self::create_sweep_surface) that also reports where
@@ -1718,7 +1744,7 @@ impl BSplineSurface {
         approx_tol_3d: f64,
     ) -> Result<(BSplineSurface, [Axis2Placement; 3])> {
         let mut placements = [Axis2Placement::IDENTITY; 3];
-        let surface = Self::sweep_surface(
+        let (surface, _) = Self::sweep_surface(
             section_curve,
             trajectory_curve,
             opt_scale_curve,
@@ -1737,7 +1763,7 @@ impl BSplineSurface {
         do_translational_sweep: bool,
         approx_tol_3d: f64,
         opt_placements: Option<&mut [Axis2Placement; 3]>,
-    ) -> Result<BSplineSurface> {
+    ) -> Result<(BSplineSurface, Option<SweepTrace>)> {
         const OP: &str = OP_SWEEP;
 
         // get NurbCurve pointers for Section and trajectory curves
@@ -1751,6 +1777,7 @@ impl BSplineSurface {
         };
 
         // branch on TranslationalSweep flag
+        let mut trace = None;
         let nl_surf = if do_translational_sweep {
             // nlSurf(u,v) = nlCurvS(u) + nlCurvT(v)
             let surf =
@@ -1799,12 +1826,24 @@ impl BSplineSurface {
                 e: approx_tol_3d,
             };
             match opt_placements {
-                None => create_sweep_scale(nl_curv_t, nl_curv_s, z_axis, &opt)
-                    .map_err(SolidError::nl_ser(OP))?,
-                Some(placements) => {
-                    let (surf, placed) =
-                        create_sweep_scale_with_placements(nl_curv_t, nl_curv_s, z_axis, &opt)
+                None => {
+                    let (surf, t) =
+                        create_sweep_scale_traced(nl_curv_t, nl_curv_s, z_axis, &opt, None)
                             .map_err(SolidError::nl_ser(OP))?;
+                    trace = Some(t);
+                    surf
+                }
+                Some(placements) => {
+                    let mut placed = Default::default();
+                    let (surf, t) = create_sweep_scale_traced(
+                        nl_curv_t,
+                        nl_curv_s,
+                        z_axis,
+                        &opt,
+                        Some(&mut placed),
+                    )
+                    .map_err(SolidError::nl_ser(OP))?;
+                    trace = Some(t);
                     // SolidCraft fork (5d3939e): each instance is the section carried from
                     // the global system onto the local one (OL, XL, YL, ZL) it was placed on
                     for (placement, frame) in placements.iter_mut().zip(placed) {
@@ -1816,7 +1855,7 @@ impl BSplineSurface {
         };
 
         // build SmBSplineSurface from NurbSurface
-        Ok(Self::from_gw_nurb(&nl_surf))
+        Ok((Self::from_gw_nurb(&nl_surf), trace))
     }
 
     /// The swung surface of a profile `section_curve` in the `[x, z]` plane and a

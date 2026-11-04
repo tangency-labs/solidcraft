@@ -48,6 +48,7 @@ use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use crate::nurbs::knots::Side;
 use crate::primitive::primitive_creation::{p1::PrimitiveCreation, SweepOptions};
+use crate::surface::procedural_sweep::ProceduralSweep;
 use crate::surface::surface::{
     p2::{BlendEndType, CurvatureType, DerivSurfDefinition},
     Surface,
@@ -470,26 +471,30 @@ impl PrimitiveCreation {
             let mut groups = Vec::new();
             for (index, mut composite) in composites.composites.into_iter().enumerate() {
                 let profile = composite.make_composite_nurb()?;
-                let surface = if index == 0 && opt_placements.is_some() {
-                    let (surface, at) = BSplineSurface::create_sweep_surface_with_placements(
-                        &profile,
-                        &prepared.path,
-                        prepared.scale.as_ref(),
-                        options.translational_sweep,
-                        approx_tol,
-                    )?;
-                    placed = at;
-                    surface
-                } else {
-                    BSplineSurface::create_sweep_surface(
-                        &profile,
-                        &prepared.path,
-                        prepared.scale.as_ref(),
-                        options.translational_sweep,
-                        approx_tol,
-                    )?
+                let want_placements = index == 0 && opt_placements.is_some();
+                let (net, trace) = BSplineSurface::create_sweep_surface_traced(
+                    &profile,
+                    &prepared.path,
+                    prepared.scale.as_ref(),
+                    options.translational_sweep,
+                    approx_tol,
+                    want_placements.then_some(&mut placed),
+                )?;
+                // not upstream (#2572): a sweep along a path in the frame chain's frames,
+                // with no scale, keeps its definition and the net's certified distance
+                // from it; a net the definition does not certify keeps none (the
+                // error is the reason it has none, and the ledger keeps the kinds of wall
+                // that do not)
+                let definition = match (&trace, prepared.scale.is_none()) {
+                    (Some(trace), true) => {
+                        ProceduralSweep::create_path(&profile, &prepared.path, trace, &net).ok()
+                    }
+                    _ => None,
                 };
-                let surface = Surface::from(surface);
+                let mut surface = Surface::from(net);
+                if let Some(definition) = definition {
+                    surface.set_sweep_definition(definition);
+                }
                 // (a B-spline surface just made: never lazy)
                 let domain = surface.natural_uv_domain_if_built();
                 let mut made = Vec::new();

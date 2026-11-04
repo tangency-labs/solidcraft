@@ -195,7 +195,41 @@ pub fn create_sweep_scale(
     z0: Vec3,
     opt: &SweepScaleOptions<'_>,
 ) -> Result<Surface> {
-    sweep_scale(cur_t, cur_c, z0, opt, None)
+    sweep_scale(cur_t, cur_c, z0, opt, None, None)
+}
+
+/// Where a sweep put its sections, as the fork's #2572 definition of a general-path sweep
+/// reads them (not upstream): the trajectory parameters of the placed sections, those of the
+/// frame chain (a superset: the sections and the samples between them) and the unit start
+/// normal the chain began from. Empty when the sweep took its frames from a curve.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SweepTrace {
+    /// The parameters of the sections of each piece of the path (a linear or a curved one),
+    /// ascending: each piece is skinned on its own and the skins are joined.
+    pub pieces: Vec<Vec<f64>>,
+    /// The parameters of the frame chain, ascending, each once.
+    pub chain: Vec<f64>,
+    /// The unit normal the chain began from.
+    pub start_normal: Vec3,
+}
+
+/// [`create_sweep_scale`] that also reports its [`SweepTrace`] (and, as
+/// [`create_sweep_scale_with_placements`], the placements when asked). The surface is the
+/// same.
+///
+/// # Errors
+///
+/// Those of [`create_sweep_scale`].
+pub fn create_sweep_scale_traced(
+    cur_t: &Curve,
+    cur_c: &Curve,
+    z0: Vec3,
+    opt: &SweepScaleOptions<'_>,
+    placed: Option<&mut SweepPlacements>,
+) -> Result<(Surface, SweepTrace)> {
+    let mut trace = SweepTrace::default();
+    let surface = sweep_scale(cur_t, cur_c, z0, opt, placed, Some(&mut trace))?;
+    Ok((surface, trace))
 }
 
 /// The local systems a sweep placed its cross section on (the SolidCraft fork's
@@ -218,7 +252,7 @@ pub fn create_sweep_scale_with_placements(
     opt: &SweepScaleOptions<'_>,
 ) -> Result<(Surface, SweepPlacements)> {
     let mut placed = [Frame::default(); 3];
-    let surface = sweep_scale(cur_t, cur_c, z0, opt, Some(&mut placed))?;
+    let surface = sweep_scale(cur_t, cur_c, z0, opt, Some(&mut placed), None)?;
     Ok((surface, placed))
 }
 
@@ -229,6 +263,7 @@ fn sweep_scale(
     z0: Vec3,
     opt: &SweepScaleOptions<'_>,
     mut placed: Option<&mut SweepPlacements>,
+    mut trace: Option<&mut SweepTrace>,
 ) -> Result<Surface> {
     const OP: &str = OP_SWEEP;
     let SweepScaleOptions {
@@ -361,6 +396,11 @@ fn sweep_scale(
             }
         }
         zl_vecs = create_b_vectors(cur_t, z0, &tt)?;
+        if let Some(trace) = trace.as_mut() {
+            trace.pieces.clone_from(&seg_pars);
+            trace.chain.clone_from(&tt);
+            trace.start_normal = normalize(z0)?.0;
+        }
     }
     let zl_count = zl_vecs.len();
 
