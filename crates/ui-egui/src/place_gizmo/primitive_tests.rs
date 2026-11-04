@@ -356,6 +356,12 @@ fn a_typed_box_dropped_on_a_round_wall_stands_out_from_it() {
         (corner.x - 50.0).abs() < 1e-3 && (corner.z - (20.0 - size.z / 2.0)).abs() < 1e-3,
         "out from the wall along +X, centred on the point: {corner:?}"
     );
+    // Off the world axes the wall's way out is tilted: a typed box, square to the world, does not
+    // take it (as a tilted face does not), rather than stand buried on +Z at the point.
+    let before = typed(&h, "corner");
+    let a = std::f64::consts::FRAC_PI_4;
+    assert!(!drop_on(&mut h, [40.0 + 10.0 * a.cos(), 25.0 + 10.0 * a.sin(), 20.0]), "45 degrees round the wall does not take it");
+    assert!(typed(&h, "corner").dist(before) < 1e-9, "the box stays where it was: {:?}", typed(&h, "corner"));
 }
 
 #[test]
