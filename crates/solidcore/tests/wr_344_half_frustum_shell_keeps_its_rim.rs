@@ -5,7 +5,8 @@
 //! built as two half faces (`create_partial_cone` 0..180 and 180..360, united) is
 //! shelled inward, open at its top. With `offset_extended_edges_mated` the mated pairs
 //! are related and the shell has its seven faces, twelve edges and eight vertices; by
-//! default these frustums come out with extra edges and vertices on the rim.
+//! default these frustums came out with extra edges and vertices on the rim; on the exact
+//! surface extensions the default keeps the rim too.
 //!
 //! The shell's volume is held to 1e-6 of the closed form: the frustum less the cavity
 //! bounded by the inner cone (the wall moved `t` along its normal, its radius smaller by
@@ -81,13 +82,21 @@ fn wr_344_mated_rims_are_not_split_with_the_fix() {
     }
 }
 
-/// Upstream intersects the mated pairs again and splits the rim.
+/// Upstream intersects the mated pairs again and splits the rim. On the exact extensions
+/// (a cone continued as its own net, its rulings one straight span, the offsets' extended
+/// bases meeting along the mated edges) the default path no longer splits it: the same seven
+/// faces, twelve edges and eight vertices as the fix, a manifold solid of the closed form's
+/// volume to 1e-6.
 #[test]
-fn wr_344_default_splits_the_rim() {
+fn wr_344_default_keeps_the_rim_on_exact_extensions() {
     for case in CASES {
-        let (_, b) = shelled(false, case);
-        let (f, e, v) = counts(&b);
-        assert_eq!(f, 7, "{case:?}");
-        assert!(e > 12 && v > 8, "{case:?}: {e} edges, {v} vertices");
+        let (k, mut b) = shelled(false, case);
+        assert!(brep_is_manifold_solid(&b).unwrap(), "{case:?}");
+        assert_eq!(counts(&b), (7, 12, 8), "{case:?}");
+        let (v, exact) = (volume(&k, &mut b).unwrap(), closed_form(case));
+        assert!(
+            ((v - exact) / exact).abs() < 1e-6,
+            "{case:?}: {v} against {exact}"
+        );
     }
 }

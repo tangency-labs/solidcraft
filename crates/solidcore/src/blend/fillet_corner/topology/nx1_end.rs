@@ -28,7 +28,6 @@ use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertex, FilletVertexType,
 };
 use crate::error::{EntityRef, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO};
@@ -268,11 +267,13 @@ impl FilletCorner {
             // there depends on how its curvature differs from the rail's face across the
             // seam, which a linear (G1) extension would not keep (tangency-labs/smlib@856b54e).
             let extension = if mixed && (tangent_side[0] || tangent_side[1]) {
-                ContinuityType::CInfinity
+                crate::surface::extend::Continuity::Natural
             } else {
-                ContinuityType::G1
+                crate::surface::extend::Continuity::Tangent
             };
-            let new_surface = surface.create_extended_surface(k, ext_dist, extension)?;
+            let new_surface = surface
+                .extended_sides(k, &crate::surface::side::BoxSide::ALL, extension, ext_dist)?
+                .surface;
             // Copy pNewSurface, when possible as an analytic surface
             let new_extend_surface = new_surface.copy_and_add_analytics(k)?;
             // If AddExtendedOriginalSurface() deleted pNewExtendSurface, then

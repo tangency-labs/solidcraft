@@ -4,8 +4,8 @@
 //! eight corner faces is on the sphere of radius 1 concentric with its outer corner.
 //! The shell's extended offset (`SmOffsetExecutive::GetCreateExtendedSurface`) used to
 //! extend those patches tangentially (`SM_CT_G1R`) into plain B-splines, and 7 of the 8
-//! inner corners lost their sphere; with every fix on, each is a ball patch on its
-//! sphere, the volume is the closed form's and the body checks clean.
+//! inner corners lost their sphere; now each is a ball patch on its sphere (its own net
+//! continued, flag or not), the volume is the closed form's and the body checks clean.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -209,12 +209,13 @@ fn the_shell_has_the_closed_form_volume_and_checks_clean() {
     assert!(lines.is_empty(), "{lines:?}");
 }
 
-/// Without `offset_extends_ball_patches_as_themselves` the extended offset extends a ball
-/// patch tangentially, a plain B-spline: only the inner corner whose trims stay inside
-/// its patch's domain to `EFF_ZERO` (corner 1, at (27, 3, 3)) keeps its patch; the other
-/// seven reach 1.6e-12 to 2.4e-11 past it in their trims' rounding and keep the B-spline.
+/// `offset_extends_ball_patches_as_themselves` no longer changes the extended offset: it
+/// always extends a ball patch as itself, its own net continued on its sphere
+/// (`Surface::extended_sides`), so with the flag off every inner corner still keeps its
+/// patch, on its sphere (before, a tangent extension into a plain B-spline kept only
+/// corner 1's).
 #[test]
-fn without_the_fix_seven_inner_corners_lose_their_sphere() {
+fn without_the_fix_every_inner_corner_still_keeps_its_sphere() {
     let mut k = all_fixes_but("offset_extends_ball_patches_as_themselves");
     let shell = shelled_box(&mut k);
     let mut kept = Vec::new();
@@ -222,9 +223,10 @@ fn without_the_fix_seven_inner_corners_lose_their_sphere() {
         let faces = corner_faces(&k, &shell, corner, R - WALL);
         assert_eq!(faces.len(), 1, "corner {corner}");
         let s = face2::surface(&shell, faces[0]).unwrap().unwrap();
-        if matches!(s.kind(), SurfaceKind::BallPatch(_)) {
+        if let SurfaceKind::BallPatch(p) = s.kind() {
+            assert!(off_sphere(p) <= 1e-12, "corner {corner}");
             kept.push(corner);
         }
     }
-    assert_eq!(kept, [1]);
+    assert_eq!(kept, (0..8).collect::<Vec<_>>());
 }

@@ -422,12 +422,14 @@ fn partials_past_the_series_are_refused() {
 /// evaluators and box (fork 0136260's values on the same definitions, whose net is the
 /// unit square z = 0): the box is the net's grown by the bound, so the blend is not
 /// planar within 1e-6 although its net is; the degeneracy tests, the largest analytic
-/// domain and the extension follow the fork's.
+/// domain follow the fork's; the extension is the exact one (`extended_sides`).
 #[test]
 fn the_base_class_paths_take_the_blend_s_box_and_points() {
+    use solidcore::error::SolidError;
     use solidcore::geom::extent2d::Extent2d;
-    use solidcore::geom::geom_utility::p2::ContinuityType;
     use solidcore::math::EFF_ZERO_DEG;
+    use solidcore::surface::extend::{Continuity, SideExtension};
+    use solidcore::surface::side::BoxSide;
     let k = kernel();
     for (bumpy, n, w, law) in [
         (false, 1, 0.0, false),
@@ -456,13 +458,47 @@ fn the_base_class_paths_take_the_blend_s_box_and_points() {
             (m.min().x, m.min().y, m.max().x, m.max().y),
             (-100.0, -100.0, 101.0, 101.0)
         );
-        let ext = s
-            .create_extended_surface(&k, 0.1, ContinuityType::G1)
-            .unwrap();
-        let ed = ext.natural_uv_domain_with_nurb(&k).unwrap();
-        assert!(close(ed.min().x, -0.1) && close(ed.max().y, 1.1));
-        let p0 = ext.evaluate_point(&k, ed.min()).unwrap();
-        assert!((p0 - Point3::new(-0.1, -0.1, 0.0)).length() < 1e-15);
+        // the exact extension (`extended_sides`): across (v, the section's t) the toy net
+        // continued with its bound grown in closed form; along (u) the toy net is not the
+        // construction's cubic Hermite net, so no span of the definition joins it
+        // (refused); the equal area G^n section's thumbweight is proved only on a net of
+        // its definition (refused)
+        let across = s.extended_sides(
+            &k,
+            &[BoxSide::VMin, BoxSide::VMax],
+            Continuity::Tangent,
+            0.1,
+        );
+        if n == 2 {
+            assert!(
+                matches!(across, Err(SolidError::InvalidInput { .. })),
+                "{across:?}"
+            );
+        } else {
+            let ext = across.unwrap();
+            assert!(matches!(ext.sides[2], SideExtension::Extended(_)));
+            assert!(matches!(ext.sides[3], SideExtension::Extended(_)));
+            let ed = ext.surface.natural_uv_domain_with_nurb(&k).unwrap();
+            assert!(close(ed.min().y, -0.1) && close(ed.max().y, 1.1), "{ed:?}");
+            assert!(ed.min().x == 0.0 && ed.max().x == 1.0, "{ed:?}");
+            // the net continued: the unit square's corner moved by 0.1 across
+            let solidcore::surface::surface::SurfaceKind::ProceduralBlend(pb) = ext.surface.kind()
+            else {
+                panic!("not a blend");
+            };
+            let p0 = pb.net().evaluate_point(ed.min()).unwrap();
+            assert!(
+                (p0 - Point3::new(0.0, -0.1, 0.0)).length() < 1e-12,
+                "{p0:?}"
+            );
+        }
+        for side in [BoxSide::UMin, BoxSide::UMax] {
+            let along = s.extended_sides(&k, &[side], Continuity::Tangent, 0.1);
+            assert!(
+                matches!(along, Err(SolidError::Unsupported { .. })),
+                "{along:?}"
+            );
+        }
     }
 }
 

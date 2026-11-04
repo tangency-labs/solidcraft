@@ -789,6 +789,12 @@ struct Local {
     /// A bound on how far each extension point's homogeneous coordinates are from the exact
     /// construction's (0 for the source's own points, which are kept bit for bit).
     err: f64,
+    /// The degree across the rows (the other direction's): `q + 1` consecutive rows make a
+    /// point of the surface.
+    q: usize,
+    /// The 3D bound of a construction made in a local frame ([`Self::natural`]), which
+    /// [`Self::bound`] returns in place of the one from [`Self::err`].
+    frame: Option<f64>,
 }
 
 fn op_err() -> SolidError {
@@ -806,6 +812,7 @@ impl Local {
                 [c.x, c.y, c.z, c.w]
             }
         };
+        let q = if side.is_u() { net.q() } else { net.p() };
         let (rows, knots, p): (Vec<Vec<H>>, &[f64], usize) = if side.is_u() {
             let cols = cpts.first().map_or(0, Vec::len);
             let rows = (0..cols)
@@ -822,6 +829,8 @@ impl Local {
             p,
             rational,
             err: 0.0,
+            q,
+            frame: None,
         };
         if !side.is_high() {
             l.reverse();
@@ -956,6 +965,8 @@ impl Local {
             p: self.p,
             rational: self.rational,
             err,
+            q: self.q,
+            frame: None,
         })
     }
 
@@ -977,6 +988,9 @@ impl Local {
     /// from the homogeneous bound [`Self::err`]: `S = sum N H / sum N w`, so a change of at
     /// most `err` in each coordinate moves it at most `err (sqrt 3 + |S|) / w_min`.
     fn bound(&self) -> f64 {
+        if let Some(b) = self.frame {
+            return b;
+        }
         if self.err == 0.0 {
             return 0.0;
         }
@@ -1056,23 +1070,64 @@ impl Local {
             p: self.p,
             rational: self.rational,
             err: self.err,
+            q: self.q,
+            frame: None,
         })
     }
 
     /// Natural: the last span's Bezier points (from a copy with its start knot at multiplicity
     /// `p`) continued past `b` by de Casteljau at `t = 1 + e / (b - c)`: the points
     /// `blossom(1^(p-i), t^i)` are the polynomial's Bezier points over `[b, b + e]`.
+    ///
+    /// In a local frame: each row is translated by its own origin `O_j` (its end point), `H'
+    /// = H - w O_j` (the weights unchanged), continued, and its new points translated back,
+    /// `H = H' + w O_j`; the source's rows are kept as they are. Translation commutes with the
+    /// continuation (both are linear in the homogeneous points and keep the weights), so the
+    /// construction is the same; only its rounding changes. The continuation amplifies its
+    /// input's and its own rounding by `a^p` (`a = |1 - t| + |t|`), which is now relative to
+    /// the rows' local size, not to their absolute coordinates; the translations round once
+    /// each, the way back not amplified. The 3D bound ([`Self::bound`]) is then that of the
+    /// local construction ([`Self::frame`]).
     fn natural(&self, e: f64) -> Result<Self> {
         let b = self.end()?;
         let c = self.before_end(0)?;
         let p = self.p;
-        let span = if c > self.start()? {
-            self.with_knot(c)?
+        // each row's origin: its end point (any point would do: it is exact by choice)
+        let origins: Vec<[f64; 3]> = self
+            .rows
+            .iter()
+            .map(|r| {
+                let x = r.last().ok_or_else(op_err)?;
+                let w = if self.rational { x[3] } else { 1.0 };
+                if !(w.is_finite() && w > 0.0) {
+                    return Err(SolidError::invalid_input(
+                        OP,
+                        "a weight that is not positive",
+                    ));
+                }
+                Ok([x[0] / w, x[1] / w, x[2] / w])
+            })
+            .collect::<Result<_>>()?;
+        // the rows translated: one product and one difference a coordinate
+        let mut local = self.clone();
+        let mut moved = 0.0_f64;
+        for (r, o) in local.rows.iter_mut().zip(&origins) {
+            for x in r.iter_mut() {
+                let w = x[3];
+                for (v, &oc) in x.iter_mut().zip(o) {
+                    moved = moved.max(v.abs() + (w * oc).abs());
+                    *v -= w * oc;
+                }
+            }
+        }
+        local.err = self.err + gamma(2) * moved;
+        let span = if c > local.start()? {
+            local.with_knot(c)?
         } else {
-            self.clone()
+            local.clone()
         };
         let t = 1.0 + e / (b - c);
-        let ext: Vec<Vec<H>> = span
+        let ext_local: Vec<Vec<H>> = span
             .rows
             .iter()
             .map(|r| {
@@ -1091,15 +1146,63 @@ impl Local {
                 out
             })
             .collect();
-        let knots = vec![b + e; p + 1];
         // de Casteljau past the span: each level `(1 - t) x + t y` scales the errors and the
         // points by `a = |1 - t| + |t|` and rounds by gamma_3 of that, over p levels (the
         // rounding of t itself only reparametrises the continuation, its points stay on it)
         let a = (1.0 - t).abs() + t.abs();
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let amp = a.powi(p as i32);
+        let err_local = amp * (span.err + gamma(3 * p + 3) * span.size());
+        // the local frame's extent: its points' largest l1 size over their weight, the
+        // smallest weight (the source's rows and the new ones), and the new rows translated
+        // back, each coordinate one product and one sum
+        let (mut wmin, mut pmax, mut back) = (f64::INFINITY, 0.0_f64, 0.0_f64);
+        for x in local
+            .rows
+            .iter()
+            .flatten()
+            .chain(ext_local.iter().flatten())
+        {
+            let w = if self.rational { x[3] } else { 1.0 };
+            wmin = wmin.min(w);
+            pmax = pmax.max((x[0].abs() + x[1].abs() + x[2].abs()) / w.abs());
+        }
+        let ext: Vec<Vec<H>> = ext_local
+            .into_iter()
+            .zip(&origins)
+            .map(|(r, o)| {
+                r.into_iter()
+                    .map(|mut x| {
+                        let w = x[3];
+                        for (v, &oc) in x.iter_mut().zip(o) {
+                            back = back.max(v.abs() + (w * oc).abs());
+                            *v += w * oc;
+                        }
+                        x
+                    })
+                    .collect()
+            })
+            .collect();
+        // rows of different origins mix at a point: the q + 1 rows of a span across, so the
+        // largest l1 distance between two origins within q + 1 consecutive rows
+        let mut diam = 0.0_f64;
+        for (i, oi) in origins.iter().enumerate() {
+            for oj in origins.iter().skip(i + 1).take(self.q) {
+                let dist = (oi[0] - oj[0]).abs() + (oi[1] - oj[1]).abs() + (oi[2] - oj[2]).abs();
+                diam = diam.max(dist);
+            }
+        }
+        let knots = vec![b + e; p + 1];
         let mut out = self.joined(ext, &knots)?;
-        out.err = amp * (span.err + gamma(3 * p + 3) * span.size());
+        out.err = err_local;
+        // `S = sum N (H' + w O_j) / sum N w`: an error of at most `err_local` in each local
+        // coordinate and weight moves it at most `err_local (sqrt 3 + |S - O_j| ...)`, with
+        // `|S - O_j| <= pmax + diam` for every row j at the point; the way back's rounding
+        // `gamma_2 back` in each coordinate moves it at most `sqrt 3` of that over the weight
+        out.frame = Some(
+            (err_local * (2.0 + pmax + diam) * (1.0 + gamma(4)) + 2.0 * gamma(2) * back) / wmin
+                * (1.0 + gamma(8)),
+        );
         Ok(out)
     }
 
@@ -1331,6 +1434,8 @@ fn keeps(net: &Net, out: &Net, side: BoxSide) -> Result<bool> {
     Ok(points_kept && a.len() <= b.len())
 }
 
+mod analytic;
+mod ball;
 mod blend;
 mod sides;
 pub use sides::{ExtendedSides, SideExtension};

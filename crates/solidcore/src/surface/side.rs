@@ -18,7 +18,8 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
-use crate::nurbs::math::{gamma, NOW};
+use crate::nurbs::math::{gamma, CPoint, NOW};
+use crate::nurbs::srf_basic::Surface as Net;
 use crate::surface::implicit::AnalyticSupport;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -137,6 +138,46 @@ impl Bracket {
     }
 }
 
+/// `form`'s net translated by `P0` (the iso's first point, as computed), and the
+/// translation's rounding: each homogeneous point `(X w - P0 w, w)`, its coordinates within
+/// `gamma_2 (|x| + |P0| |w|)` of the exact translation's (a product and a difference; the
+/// weights exact). A length is the same on the translated surface (`S - P0`, `P0` a fixed
+/// vector); measured there, the points' and their rounding's magnitudes are the net's size
+/// about `P0`, not its distance from the origin.
+///
+/// # Errors
+///
+/// `SM_ERR` for a form without a NURBS net; those of the net.
+fn translated(form: &BSplineSurface, p0: Vec3, op: &'static str) -> Result<(BSplineSurface, f64)> {
+    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
+    let cpts = nurb.cpts();
+    let size = p0.x.abs().max(p0.y.abs()).max(p0.z.abs());
+    let g = gamma(2);
+    let mut shift = 0.0_f64;
+    let net: Vec<Vec<CPoint>> = cpts
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|c| {
+                    let w = if c.w == NOW { 1.0 } else { c.w };
+                    let mag = c.x.abs().max(c.y.abs()).max(c.z.abs());
+                    shift = shift.max(g * (mag + size * w.abs()));
+                    CPoint::new(c.x - p0.x * w, c.y - p0.y * w, c.z - p0.z * w, c.w)
+                })
+                .collect()
+        })
+        .collect();
+    let (p, q) = nurb.degrees();
+    let out = Net::new(net, p, q, nurb.u_knots().to_vec(), nurb.v_knots().to_vec())?;
+    if !shift.is_finite() {
+        return Err(SolidError::invalid_input(
+            op,
+            "the net's translation is not bounded",
+        ));
+    }
+    Ok((BSplineSurface::from_gw_nurb(&out), shift))
+}
+
 /// A rational Bezier piece in homogeneous coordinates `(w x, w y, w z, w)`.
 type Piece = Vec<[f64; 4]>;
 
@@ -180,21 +221,156 @@ struct Rounding {
     homogeneous: f64,
 }
 
+/// The largest knot magnitude and the least nonzero span of the knots of `kv` (the full
+/// vector) from `margin` indices under the last knot below `a` to `margin` over the first
+/// above `b`: what the knot insertions and the Bezier decomposition that make the pieces
+/// over `[a, b]` read of `kv` (a segment's coefficients `(t - u_i) / (u_(i+p) - u_i)` take
+/// `i` from its start group's last index, the one before it for its first points, to `p`
+/// past it; the iso's extraction the knots within `q` of its span).
+fn knot_window(kv: &[f64], a: f64, b: f64, margin: usize) -> (f64, f64) {
+    let lo = kv
+        .iter()
+        .position(|&x| x > a)
+        .unwrap_or(kv.len())
+        .saturating_sub(margin);
+    let hi = kv
+        .iter()
+        .rposition(|&x| x < b)
+        .unwrap_or(0)
+        .saturating_add(margin);
+    let (mut kmax, mut smin) = (0.0_f64, f64::INFINITY);
+    let window: Vec<f64> = kv
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i >= lo && i <= hi)
+        .map(|(_, &x)| x)
+        .collect();
+    for (&x, &y) in window.iter().zip(window.iter().skip(1)) {
+        kmax = kmax.max(x.abs()).max(y.abs());
+        if y > x {
+            smin = smin.min(y - x);
+        }
+    }
+    (kmax, smin)
+}
+
+/// [`knot_window`] for the iso's extraction at `t` of a direction of degree `q` (full knot
+/// vector `kv`): knot insertion at `t` in its span `[u_s, u_(s+1))` forms its coefficients
+/// `(t - u_i) / (u_(i+q-j+1) - u_i)` from the knots `u_(s-q+1) .. u_(s+q)` only.
+fn extraction_window(kv: &[f64], t: f64, q: usize) -> (f64, f64) {
+    let s = kv.iter().rposition(|&x| x <= t).unwrap_or(0);
+    let (lo, hi) = (s.saturating_sub(q), s.saturating_add(q));
+    let window: Vec<f64> = kv
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i >= lo && i <= hi)
+        .map(|(_, &x)| x)
+        .collect();
+    let (mut kmax, mut smin) = (t.abs(), f64::INFINITY);
+    for (&x, &y) in window.iter().zip(window.iter().skip(1)) {
+        kmax = kmax.max(x.abs()).max(y.abs());
+        if y > x {
+            smin = smin.min(y - x);
+        }
+    }
+    (kmax, smin)
+}
+
+/// [`knot_window`] for the Bezier decomposition along the pieces over `[a, b]` of a curve of
+/// degree `p` (full knot vector `kv`): the decomposition forms a coefficient only where it
+/// inserts, at an interior knot of multiplicity below `p`, and each of its denominators
+/// `u_(i+j) - u_i` there is at least the length of the segment that knot ends. So the least
+/// span read is the least such segment's in the window; a window whose interior knots are all
+/// of multiplicity `p` or more (Bezier joints already) forms none (`INFINITY`).
+fn decomposed_window(kv: &[f64], a: f64, b: f64, p: usize) -> (f64, f64) {
+    let margin = p.saturating_add(2);
+    let (kmax, _) = knot_window(kv, a, b, margin);
+    let lo = kv
+        .iter()
+        .position(|&x| x > a)
+        .unwrap_or(kv.len())
+        .saturating_sub(margin);
+    let hi = kv
+        .iter()
+        .rposition(|&x| x < b)
+        .unwrap_or(0)
+        .saturating_add(margin);
+    // the distinct knots in the window with their multiplicities in the whole vector
+    let mut groups: Vec<(f64, usize)> = Vec::new();
+    for (i, &x) in kv.iter().enumerate() {
+        match groups.last_mut() {
+            Some((y, m)) if *y == x => *m = m.saturating_add(1),
+            _ if i >= lo && i <= hi => groups.push((x, 1)),
+            _ => {}
+        }
+    }
+    let (first, last) = (kv.first().copied(), kv.last().copied());
+    let mut smin = f64::INFINITY;
+    for (&(x, _), &(y, my)) in groups.iter().zip(groups.iter().skip(1)) {
+        let interior = Some(y) != first && Some(y) != last;
+        if interior && my < p && y > x {
+            smin = smin.min(y - x);
+        }
+    }
+    (kmax, smin)
+}
+
+/// The control indices of degree `deg` on the knots `k` whose basis function's support
+/// `[k_i, k_(i + deg + 1)]` meets `[lo, hi]` (closed: a support ending at `lo` is kept).
+fn support_meets(k: &[f64], deg: usize, lo: f64, hi: f64) -> std::ops::RangeInclusive<usize> {
+    let count = k.len().saturating_sub(deg + 1);
+    let meets = |i: usize| matches!((k.get(i), k.get(i + deg + 1)), (Some(&a), Some(&b)) if a <= hi && b >= lo);
+    let first = (0..count).find(|&i| meets(i));
+    let last = (0..count).rev().find(|&i| meets(i));
+    match (first, last) {
+        (Some(f), Some(l)) => f..=l,
+        // none: every point, as the whole net's bound
+        _ => 0..=count.saturating_sub(1),
+    }
+}
+
 impl Rounding {
+    /// [`Rounding::of`] for the pieces of the iso at `fixed` (constant v for `along_u`)
+    /// over `[from, to]` alone: the knots read are only those near them. Knot insertion and
+    /// the Bezier decomposition are local: a segment's points are combinations whose
+    /// coefficients take the knots from its start's segment's start to `p` past its end
+    /// (`(t - u_i) / (u_(i+p) - u_i)`, i from the segment's start index), and the iso's
+    /// extraction at `fixed` the knots within `q` of it. A span far from the pieces (a sliver
+    /// at the net's other end) does not touch them.
+    fn local(
+        form: &BSplineSurface,
+        along_u: bool,
+        fixed: f64,
+        from: f64,
+        to: f64,
+        op: &'static str,
+    ) -> Result<Self> {
+        let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
+        let (p, q) = nurb.degrees();
+        let (held, along, dp, dq) = if along_u {
+            (nurb.v_knots(), nurb.u_knots(), p, q)
+        } else {
+            (nurb.u_knots(), nurb.v_knots(), q, p)
+        };
+        let (a, b) = (from.min(to), from.max(to));
+        // each direction's coefficients read its own knots and parameters
+        let (k1, s1) = decomposed_window(along, a, b, dp);
+        let (k2, s2) = extraction_window(held, fixed, dq);
+        let ratio = (k1.max(from.abs()).max(to.abs()) / s1).max(k2 / s2);
+        // and only the control points the pieces are made of: those whose basis function's
+        // support meets `[from, to]` along and holds `fixed` across (a far row's size, the
+        // other end of a long spine, enters no piece)
+        let along_ix = support_meets(along, dp, a, b);
+        let held_ix = support_meets(held, dq, fixed, fixed);
+        let keep = |i: usize, j: usize| {
+            let (ia, ih) = if along_u { (i, j) } else { (j, i) };
+            along_ix.contains(&ia) && held_ix.contains(&ih)
+        };
+        Self::with_ratio_in(nurb, ratio, op, &keep)
+    }
+
     fn of(form: &BSplineSurface, extra: &[f64], op: &'static str) -> Result<Self> {
         let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
-        let (mut h, mut wmin, mut wmax) = (0.0_f64, f64::INFINITY, 0.0_f64);
-        for row in nurb.rows() {
-            for c in row {
-                let w = if c.w == NOW { 1.0 } else { c.w };
-                if w.is_nan() || w <= 0.0 {
-                    return Err(SolidError::invalid_input(op, "a weight is not positive"));
-                }
-                h = h.max(c.x.abs()).max(c.y.abs()).max(c.z.abs());
-                wmin = wmin.min(w);
-                wmax = wmax.max(w);
-            }
-        }
         let (mut kmax, mut smin) = (0.0_f64, f64::INFINITY);
         for kv in [nurb.u_knots(), nurb.v_knots()] {
             for (&a, &b) in kv.iter().zip(kv.iter().skip(1)) {
@@ -207,7 +383,45 @@ impl Rounding {
         for &x in extra {
             kmax = kmax.max(x.abs());
         }
-        let level = gamma(3) * (1.0 + 6.0 * kmax / smin) * 2.0;
+        Self::with_ratio(nurb, kmax / smin, op)
+    }
+
+    /// The rounding of a net whose coefficients' knots and parameters are at most `ratio`
+    /// times the least span they divide by (`K / S`).
+    fn with_ratio(
+        nurb: &crate::nurbs::srf_basic::Surface,
+        ratio: f64,
+        op: &'static str,
+    ) -> Result<Self> {
+        Self::with_ratio_in(nurb, ratio, op, &|_, _| true)
+    }
+
+    /// [`Rounding::with_ratio`] over the control points `keep` names (`[i along u][j along
+    /// v]`): the pieces' points are combinations of those alone.
+    fn with_ratio_in(
+        nurb: &crate::nurbs::srf_basic::Surface,
+        ratio: f64,
+        op: &'static str,
+        keep: &dyn Fn(usize, usize) -> bool,
+    ) -> Result<Self> {
+        let (mut h, mut wmin, mut wmax) = (0.0_f64, f64::INFINITY, 0.0_f64);
+        for (i, row) in nurb.rows().enumerate() {
+            for c in row
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| keep(i, j))
+                .map(|(_, c)| c)
+            {
+                let w = if c.w == NOW { 1.0 } else { c.w };
+                if w.is_nan() || w <= 0.0 {
+                    return Err(SolidError::invalid_input(op, "a weight is not positive"));
+                }
+                h = h.max(c.x.abs()).max(c.y.abs()).max(c.z.abs());
+                wmin = wmin.min(w);
+                wmax = wmax.max(w);
+            }
+        }
+        let level = gamma(3) * (1.0 + 6.0 * ratio) * 2.0;
         let scale = h * wmax / (wmin * wmin);
         if level.is_finite() && scale.is_finite() {
             Ok(Self {
@@ -565,10 +779,18 @@ impl Surface {
                 converged: true,
             });
         }
-        let rounding = Rounding::of(&form, &[fixed, from, to], OP_LENGTH)?;
+        let start = if side.is_u() {
+            Point2::new(from, fixed)
+        } else {
+            Point2::new(fixed, from)
+        };
+        let (form, shift) = translated(&form, form.evaluate_point(start)?, OP_LENGTH)?;
+        let rounding = Rounding::local(&form, side.is_u(), fixed, from, to, OP_LENGTH)?;
         let (pieces, levels) = iso_pieces(k, &form, side.is_u(), fixed, from, to)?;
-        // the pieces' homogeneous points as computed, within this of the exact ones
-        let made = rounding.homogeneous(levels);
+        // the pieces' homogeneous points as computed, within this of the exact ones (of the
+        // net translated exactly), the translation's rounding carried through the levels'
+        // convex combinations unchanged
+        let made = rounding.homogeneous(levels) + shift;
         let (mut chords, mut polygons, mut leaves) = (0.0_f64, 0.0_f64, 0_usize);
         let (mut chord_cuts, mut polygon_cuts, mut moved) = (0.0_f64, 0.0_f64, 0.0_f64);
         let mut converged = true;

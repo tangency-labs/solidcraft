@@ -17,18 +17,26 @@
 //! Two more rules (owner, 2026-11-04):
 //! - **Unbounded.** A plane's side at `+-INFINITE_PARAMETER` (the kernel's infinite plane) is
 //!   left: the plane has no side there to extend past.
-//! - **Analytic kinds as themselves.** A cone, sphere or torus is extended as its own exact
-//!   shape whatever the continuity asked ([`Surface::continued`], Natural): along the
-//!   generator up to its apex, pole or full turn where the distance asked runs past it (the
-//!   refusal's named distance, the longest that works), and said so. A surface of
-//!   revolution is extended along its generator as asked, on its B-spline form row by row:
-//!   its rows are one generator turned and weighted, every construction here commutes with
-//!   both, so the result is the revolution of the generator extended. Round the axis is a
-//!   closed direction for all of them, so a side round the axis is left.
+//! - **Analytic kinds as themselves.** A cone, sphere or torus (or an offset surface of one;
+//!   a plane too for a caller keeping its trims, [`Surface::extended_sides_keeping_parameters`];
+//!   otherwise a plane is widened as a plane) is extended by its own NURBS net continued Natural whatever the continuity asked, the
+//!   source's net and parameters bit for bit, still on its analytic surface (certified):
+//!   round its axis up to a quarter of the turn the source leaves open, along its generator
+//!   never past its apex, pole or full turn, and said so where that caps the distance
+//!   (`analytic`). A surface of revolution is extended along its generator as asked, on its
+//!   B-spline form row by row: its rows are one generator turned and weighted, every
+//!   construction here commutes with both, so the result is the revolution of the generator
+//!   extended; its side round its axis is left.
+//!
+//! - **Ball patches as themselves.** A ball patch (the sphere's triangle with a pole) is
+//!   extended by its own net continued Natural (the source bit for bit, every point still on
+//!   the sphere, certified), round the pole up to a quarter of the turn it leaves open and
+//!   away from it up to half the arc left to the antipode, its pole's side collapsed
+//!   (`ball`).
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use super::{Continuity, ExtendRefusal, Extended};
+use super::{Continuity, Extended};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
@@ -59,7 +67,7 @@ pub enum SideExtension {
 
 /// For a cone, sphere, torus or surface of revolution, whether side `side` runs round its
 /// axis (its NURBS u is the sweep unless swapped); `None` for any other kind.
-fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
+pub(super) fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
     let swap = match s.kind() {
         SurfaceKind::Cone(c) => c.rev().swap_uv(),
         SurfaceKind::Sphere(sp) => sp.base.swap_uv,
@@ -99,6 +107,48 @@ impl Surface {
         how: Continuity,
         distance: f64,
     ) -> Result<ExtendedSides> {
+        self.extended_sides_with(k, asked, how, distance, false)
+    }
+
+    /// [`Surface::extended_sides`] for a caller that keeps the face's UV trims on the result
+    /// (the shell's extended offset replaces a face's surface with UV trim creation off): a
+    /// plane too is extended by its own net, a B-spline on the plane's own parameters (owner,
+    /// 2026-11-04: the cone, sphere and torus rule), where [`Surface::extended_sides`] widens
+    /// it as a plane (its kind kept, which a caller intersecting with it reads).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::extended_sides`].
+    pub fn extended_sides_keeping_parameters(
+        &self,
+        k: &Kernel,
+        asked: &[BoxSide],
+        how: Continuity,
+        distance: f64,
+    ) -> Result<ExtendedSides> {
+        self.extended_sides_with(k, asked, how, distance, true)
+    }
+
+    fn extended_sides_with(
+        &self,
+        k: &Kernel,
+        asked: &[BoxSide],
+        how: Continuity,
+        distance: f64,
+        keeping: bool,
+    ) -> Result<ExtendedSides> {
+        // a ball patch as its sphere (`ball`)
+        if let SurfaceKind::BallPatch(patch) = self.kind() {
+            if let Some(e) = super::ball::ball_extended_sides(k, self, patch, asked, distance)? {
+                return Ok(e);
+            }
+        }
+        // a cone, sphere or torus (a plane too when keeping) by its own net (`analytic`)
+        if let Some(e) =
+            super::analytic::analytic_extended_sides(k, self, asked, distance, keeping)?
+        {
+            return Ok(e);
+        }
         let mut current: Option<Extended> = None;
         // the side of the current result each side of the source's box is on
         let mut on = BoxSide::ALL;
@@ -135,44 +185,24 @@ impl Surface {
                 *done = SideExtension::Unbounded;
                 continue;
             }
-            let revolution = round_the_axis(carrier, side);
-            if revolution == Some(true) {
+            // a revolution's side round its axis is left; along it, its B-spline form row by
+            // row as asked, which is again a revolution (its rows are one generator turned
+            // and weighted, and every construction commutes with both)
+            if round_the_axis(carrier, side) == Some(true) {
                 *done = SideExtension::AroundAxis;
                 continue;
             }
-            // an analytic label is extended as itself (Natural, its continuation); a
-            // revolution's B-spline form row by row as asked, which is again a revolution
-            // (its rows are one generator turned and weighted, and every construction
-            // commutes with both)
-            let analytic =
-                revolution.is_some() && !matches!(carrier.kind(), SurfaceKind::SurfOfRevolution(_));
-            let how = if analytic { Continuity::Natural } else { how };
-            let (grown, capped) = match surface.extended_by_distance(k, &dom, side, how, distance) {
-                Ok(g) => (g, false),
-                // as itself up to its apex, pole or turn: the longest distance that works
-                Err(SolidError::ExtendRefused {
-                    refusal:
-                        ExtendRefusal::PastApex | ExtendRefusal::PastPole | ExtendRefusal::OverATurn,
-                    distance: Some(limit),
-                    ..
-                }) if analytic && limit > 0.0 && limit < distance => (
-                    surface.extended_by_distance(k, &dom, side, how, limit)?,
-                    true,
-                ),
-                Err(e) => return Err(e),
-            };
+            let grown = surface.extended_by_distance(k, &dom, side, how, distance)?;
             for s in &mut on {
                 *s = grown.side_of(*s);
             }
             extension = extension.max(grown.extension);
-            *done = if capped {
-                SideExtension::UpToLimit(grown.across)
-            } else {
-                SideExtension::Extended(grown.across)
-            };
+            *done = SideExtension::Extended(grown.across);
             current = Some(grown);
         }
         let surface = match current {
+            // a Natural continuation of the net is still on an exact round's S (#2487)
+            Some(e) if how == Continuity::Natural => self.carry_round_on_continuation(e.surface),
             Some(e) => e.surface,
             None => self.copy(k)?,
         };

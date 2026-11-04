@@ -3826,6 +3826,13 @@ impl Surface {
         }
     }
 
+    /// An exact round's definition carried onto `continuation`, this surface's own NURBS
+    /// net continued Natural (`surface::extend`'s analytic kinds): still on S, as
+    /// [`Surface::create_extended_surface`]'s `CInfinity` carries it (#2487).
+    pub(crate) fn carry_round_on_continuation(&self, continuation: Self) -> Self {
+        self.carry_exact_round_on_extension(continuation, ContinuityType::CInfinity)
+    }
+
     /// [`Surface::create_extended_surface`] of the kind alone.
     fn create_extended_surface_of_kind(
         &self,

@@ -25,7 +25,13 @@
 //! convex hull: every weight positive, as the Natural extension proves). The result's
 //! bound is `max(eps, eps G + the extension's rounding)`, the growth `G` rounded up.
 //!
-//! A G^n section (order 2 and up) has no growth factor here and is refused across.
+//! A G^n section (order `n >= 2`) is the same argument with `d_S = 3 n + 1` and its weight
+//! `W = A B^n C^n` (`A = (1 - t)^(n+1) + t^(n+1)`, `B = 1 - w + w t`, `C = 1 - w t`), bounded
+//! in closed form over a proved range of its thumbweight `w`: a constant one, or the equal
+//! area one's enclosure from its certificate's interval Newton roots (the stations' own w's
+//! padded would be no proof). `A` grows with `|t - 1/2|`; `B` and `C` are bilinear in `(t,
+//! w)`, their extremes at the corners of the (t range) x (w range) box. A corner past which
+//! `B` or `C` is not positive is a weight that vanishes: refused.
 //!
 //! **Along the spine (s).** Past the definition's end station (the side its last or first
 //! station, the net on its whole section `t in [0, 1]`, s along u): the definition is
@@ -33,14 +39,19 @@
 //! its seeds by a span to the new station, as the construction's seeds are the feet's
 //! Hermite curves on the stations), and the net gains that span of the construction's:
 //! the stations at the end and at `s_new` solved, the span's Hermite rows
-//! ([`end_span_of_definition`], the construction's `NetForm::span`) certified against the definition ([`gn_certify_span`]'s bound), and
-//! joined after the source's net at multiplicity 3 (the construction's own joints), scaled
-//! to its weights. The source's net is kept bit for bit; the piece's first row is the
-//! source's own, so its bound against the span's Hermite rows is the joint's row
-//! difference ([`net_distance`]). The result's bound: `max(eps, certificate + joint +
-//! three floors + rounding)`. The distance is solved as any extension's
+//! ([`span_of_definition`], the construction's `NetForm::span`) certified against the
+//! definition ([`gn_certify_span`]'s bound), and joined after the source's net at
+//! multiplicity 3 (the construction's own joints), scaled to its weights. A side INSIDE the
+//! spine (a piece of the blend cut across it) runs the definition's spans already there
+//! first: each span the extension crosses solved and certified the same way, the part of
+//! it past the side (or up to `s_new`) its Hermite rows' cubic Bezier cut there (blossoms),
+//! each part joined at multiplicity 3 and scaled to the row before it; then past the end
+//! as above. The source's net is kept bit for bit; each part's first row is the row before
+//! it, so its bound against its span's rows is the joint's row difference
+//! ([`net_distance`]). The result's bound: `max(eps, the largest part's certificate +
+//! joint, + three floors + rounding)`. The distance is solved as any extension's
 //! ([`Surface::extended_by_distance`]), measured on the net; an ask whose station does not
-//! solve, whose foot leaves its support's box, or whose span is not proved, works as one
+//! solve, whose foot leaves a B-spline support's box (an analytic support continued is still itself), or whose span is not proved, works as one
 //! whose weights are not positive: the refusal names the longest that does.
 //!
 //! [`gn_certify_span`]: crate::blend::fillet_section::certificate::gn_certify_span
@@ -48,10 +59,11 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::{keeps, op_err, solve, Continuity, Extended, Local, Made, H, OP, REL};
+use crate::blend::fillet_section::recertify::recertify_with_thumbweight;
 use crate::blend::fillet_section::recertify::{
-    end_span_of_definition, net_distance, precision_floor, DefinitionSpan,
+    net_distance, precision_floor, span_of_definition, DefinitionSpan,
 };
-use crate::blend::fillet_section::section::{param, param_in};
+use crate::blend::fillet_section::section::{param, param_in, GN_THUMBWEIGHT_EQUAL_AREA};
 use crate::blend::fillet_section::station::GnStation;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -61,6 +73,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::math::{gamma, CPoint, NOW};
 use crate::nurbs::srf_basic::Surface as Net;
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::procedural_blend::ProceduralBlend;
 use crate::surface::side::BoxSide;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -79,15 +92,12 @@ pub(super) fn blend_extended(
         return along(k, pb, dom, side, distance);
     }
     let order = pb.order();
+    let n = order as usize;
+    // the section's degree in t: the chord's 1, the circle's 2, a G^n section's 3 n + 1
     let section_degree = match order {
         0 => 1,
         1 => 2,
-        _ => {
-            return Err(SolidError::Unsupported {
-                operation: OP,
-                reason: "a G^n section has no growth factor past its source's t range here",
-            })
-        }
+        _ => 3 * n + 1,
     };
     let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
     let grown = Surface::from(pb.net.clone()).extended_by_distance(
@@ -129,14 +139,19 @@ pub(super) fn blend_extended(
     let m = section_degree + net_degree;
     let x = (2.0 * te - t0 - t1).abs() / (t1 - t0);
     let cheb = chebyshev(m, x);
-    let (w_hi, w_lo) = if order == 0 {
-        (1.0, 1.0)
-    } else {
-        let off = |t: f64| (t * (t - 1.0)).max(0.0);
-        let hi = 1.0 + 2.0 * off(t0).max(off(t1));
-        let (lo_t, hi_t) = (ts.min(te), ts.max(te));
-        let lo = if lo_t < 1.0 && hi_t > 0.0 { 0.5 } else { 1.0 };
-        (hi, lo)
+    let (w_hi, w_lo) = match order {
+        0 => (1.0, 1.0),
+        1 => {
+            let off = |t: f64| (t * (t - 1.0)).max(0.0);
+            let hi = 1.0 + 2.0 * off(t0).max(off(t1));
+            let (lo_t, hi_t) = (ts.min(te), ts.max(te));
+            let lo = if lo_t < 1.0 && hi_t > 0.0 { 0.5 } else { 1.0 };
+            (hi, lo)
+        }
+        _ => {
+            let w = thumbweight(k, pb)?;
+            gn_weight_range(n, [t0, t1], [ts.min(te), ts.max(te)], w)?
+        }
     };
     let (v_hi, _) = weights(source_net);
     let (_, v_lo) = weights(out_net);
@@ -166,6 +181,87 @@ pub(super) fn blend_extended(
         surface: Surface::from(out),
         ..grown
     })
+}
+
+/// The thumbweight of `pb`'s G^n section over its face, `[lo, hi]`: a constant one, or the
+/// equal area one's proved enclosure from its certificate's interval Newton roots
+/// ([`recertify_with_thumbweight`]).
+fn thumbweight(k: &Kernel, pb: &ProceduralBlend) -> Result<[f64; 2]> {
+    let tw = pb.definition().thumbweight;
+    if tw != GN_THUMBWEIGHT_EQUAL_AREA {
+        return Ok([tw, tw]);
+    }
+    recertify_with_thumbweight(k, pb)?
+        .1
+        .ok_or(SolidError::Unsupported {
+            operation: OP,
+            reason: "the equal area thumbweight is not enclosed over the blend",
+        })
+}
+
+/// A G^n section's weight `W(t) = A(t) B(t)^n C(t)^n` (`A = (1 - t)^(n+1) + t^(n+1)`,
+/// `B = 1 - w + w t`, `C = 1 - w t`, `w` the thumbweight in `w`): its largest value over the
+/// source's t range `src` and its least over the extension's `ext`, rounded outward. `A`
+/// grows with `|t - 1/2|` (`A' = (n + 1) (t^n - (1 - t)^n)`, of the sign of `t - 1/2`), so
+/// its extremes on an interval are at the point farthest from and nearest to 1/2; `B` and
+/// `C` are bilinear in `(t, w)`, so their extremes on a box are at its corners. A corner of
+/// the extension's box where `B` or `C` is not positive is a weight that vanishes there:
+/// refused ([`super::ExtendRefusal::WeightVanishes`]).
+fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Result<(f64, f64)> {
+    let exp = i32::try_from(n).map_err(|_| SolidError::sm_err(OP))?;
+    let a = |t: f64| (1.0 - t).powi(exp + 1) + t.powi(exp + 1);
+    let far = |[x, y]: [f64; 2]| {
+        if (x - 0.5).abs() >= (y - 0.5).abs() {
+            x
+        } else {
+            y
+        }
+    };
+    let near = |[x, y]: [f64; 2]| {
+        if x <= 0.5 && y >= 0.5 {
+            0.5
+        } else if (x - 0.5).abs() <= (y - 0.5).abs() {
+            x
+        } else {
+            y
+        }
+    };
+    let corners = |[t0, t1]: [f64; 2]| {
+        let mut b = [0.0_f64; 4];
+        let mut c = [0.0_f64; 4];
+        for (i, (&t, &wt)) in [t0, t0, t1, t1]
+            .iter()
+            .zip(&[w[0], w[1], w[0], w[1]])
+            .enumerate()
+        {
+            if let (Some(bi), Some(ci)) = (b.get_mut(i), c.get_mut(i)) {
+                *bi = 1.0 - wt + wt * t;
+                *ci = 1.0 - wt * t;
+            }
+        }
+        (b, c)
+    };
+    let (bs, cs) = corners(src);
+    let mag = |x: &[f64; 4]| x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    let hi = a(far(src)) * mag(&bs).powi(exp) * mag(&cs).powi(exp);
+    let (be, ce) = corners(ext);
+    let least = |x: &[f64; 4]| x.iter().fold(f64::INFINITY, |m, &v| m.min(v));
+    let (bl, cl) = (least(&be), least(&ce));
+    if !(bl > 0.0 && cl > 0.0) {
+        return Err(SolidError::ExtendRefused {
+            operation: OP,
+            refusal: super::ExtendRefusal::WeightVanishes,
+            distance: None,
+        });
+    }
+    let lo = a(near(ext)) * bl.powi(exp) * cl.powi(exp);
+    // each a product of 3 n + 2 roundings at most: up and down by gamma_(4 n + 8)
+    let g = gamma(4 * n + 8);
+    let (hi, lo) = (hi * (1.0 + g), lo * (1.0 - g));
+    if !(hi.is_finite() && lo > 0.0) {
+        return Err(SolidError::sm_err(OP));
+    }
+    Ok((hi, lo))
 }
 
 /// `T_m(x)` for `x >= 1` (`|x|` taken), by its recurrence (every term positive and
@@ -222,11 +318,16 @@ fn along(
     let s_side = a[0] + b[0] * side.at(dom);
     // outward from the side, s grows (`up`) or falls
     let up = side.is_high() == (b[0] > 0.0);
-    let end = if up { sigma.last() } else { sigma.first() };
-    if end.copied() != Some(s_side) {
+    // the side on the definition's spine: at its end station, or inside it (extended by
+    // the definition's spans already there, then past its end)
+    let (Some(&first), Some(&last)) = (sigma.first(), sigma.last()) else {
+        return Err(SolidError::sm_err(OP));
+    };
+    let end = if up { last } else { first };
+    if !(s_side == end || (s_side > first && s_side < last)) {
         return Err(SolidError::Unsupported {
             operation: OP,
-            reason: "the side is not the definition's end station",
+            reason: "the side is not on the definition's spine",
         });
     }
     let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
@@ -238,34 +339,66 @@ fn along(
         });
     }
     let target = pb.bound();
-    // the definition and its end span for the ask e (in the net's parameter)
-    let piece_of = |e: f64| -> Result<Option<(ProceduralBlend, DefinitionSpan)>> {
-        let ds = e * b[0].abs();
+    let rate = b[0].abs();
+    // the definition and its spans from the side to s_new for the ask e (in the net's
+    // parameter), outward, each with its part `[x, y]` in s
+    let pieces_of = |e: f64| -> Result<Option<(ProceduralBlend, Vec<Piece>)>> {
+        let ds = e * rate;
         let s_new = if up { s_side + ds } else { s_side - ds };
         let next = continued_definition(pb, s_new, up)?;
-        // a station that does not solve, a foot off its support or a span not proved: an
-        // ask that does not work, as a weight not positive
-        let span = match end_span_of_definition(k, &next, up, target) {
-            Ok(span) if span.certified.is_finite() && feet_on(k, &next, &span)? => span,
-            Ok(_) | Err(SolidError::InvalidInput { .. } | SolidError::Upstream { .. }) => {
-                return Ok(None)
+        let sig = next
+            .definition()
+            .seeds
+            .first()
+            .ok_or_else(op_err)?
+            .knots(None)?
+            .0;
+        let (lo, hi) = if up { (s_side, s_new) } else { (s_new, s_side) };
+        let mut pieces = Vec::new();
+        for (idx, (sa, sb)) in sig.iter().zip(sig.iter().skip(1)).enumerate() {
+            let (x, y) = (sa.max(lo), sb.min(hi));
+            if y <= x {
+                continue;
             }
-            Err(e) => return Err(e),
-        };
-        Ok(Some((next, span)))
-    };
-    let made = |e: f64| -> Result<Option<Made>> {
-        let Some((_, span)) = piece_of(e)? else {
-            return Ok(None);
-        };
-        let (ext, piece, scale) = piece_rows(&source, &span, up)?;
-        // the piece's own bound waits for the met ask: here only that it is finite
-        if !piece_distance(&piece, scale)?.is_finite() {
+            // a station that does not solve, a foot off its support or a span not proved:
+            // an ask that does not work, as a weight not positive
+            let span = match span_of_definition(k, &next, idx, target) {
+                Ok(span) if span.certified.is_finite() && feet_on(k, &next, &span)? => span,
+                Ok(_) | Err(SolidError::InvalidInput { .. } | SolidError::Upstream { .. }) => {
+                    return Ok(None)
+                }
+                Err(e) => return Err(e),
+            };
+            pieces.push(Piece {
+                span,
+                part: [(x - sa) / (sb - sa), (y - sa) / (sb - sa)],
+                length: (y - x) / rate,
+            });
+        }
+        if !up {
+            pieces.reverse();
+        }
+        if pieces.is_empty() {
             return Ok(None);
         }
-        let mut grown = source.joined(ext, &[source.end()? + e; 4])?;
-        // the scaled points' rounding, one product each
-        grown.err = gamma(1) * grown.size();
+        Ok(Some((next, pieces)))
+    };
+    let made = |e: f64| -> Result<Option<Made>> {
+        let Some((_, pieces)) = pieces_of(e)? else {
+            return Ok(None);
+        };
+        let (ext, rows) = pieces_rows(&source, &pieces, up)?;
+        // the pieces' own bounds wait for the met ask: here only that they are finite
+        for (piece, scale) in &rows {
+            if !piece_distance(piece, *scale)?.is_finite() {
+                return Ok(None);
+            }
+        }
+        let grown = source.joined(ext, &joints(source.end()?, e, &pieces))?;
+        let mut grown = grown;
+        // the scaled points' rounding, one product each, and each part's subdivision (three
+        // levels of convex combinations, the part's ends a few more)
+        grown.err = gamma(16) * grown.size();
         let bound = grown.bound();
         let out = grown.surface(source_net, side)?;
         Ok(Some((
@@ -294,14 +427,26 @@ fn along(
             "the extension moved the source's net",
         ));
     }
-    // the met ask's definition again (the same solve and certificate, deterministic), its
-    // seeds the feet's Hermite curves on its stations, and the piece's bound against it
+    // the met ask's definition again (the same solves and certificates, deterministic);
+    // past the end station its seeds the feet's Hermite curves on its new span's
+    // stations; each piece's bound against its span
     let grown_end = Local::of(out_net, side)?.end()?;
     let e = grown_end - source.end()?;
-    let (mut next, span) = piece_of(e)?.ok_or_else(op_err)?;
-    hermite_seeds(&mut next, &span.stations, up)?;
-    let (_, rows, scale) = piece_rows(&source, &span, up)?;
-    let piece = span.certified + piece_distance(&rows, scale)?;
+    let (mut next, pieces) = pieces_of(e)?.ok_or_else(op_err)?;
+    let past_end = if up {
+        s_side + e * rate > last
+    } else {
+        s_side - e * rate < first
+    };
+    if past_end {
+        let outer = pieces.last().ok_or_else(op_err)?;
+        hermite_seeds(&mut next, &outer.span.stations, up)?;
+    }
+    let (_, rows) = pieces_rows(&source, &pieces, up)?;
+    let mut piece = 0.0_f64;
+    for (p, (r, scale)) in pieces.iter().zip(&rows) {
+        piece = piece.max(p.span.certified + piece_distance(r, *scale)?);
+    }
     let floor = 3.0 * precision_floor(k, next.supports(), next.order(), net)?;
     let mut out = ProceduralBlend {
         net: net.clone(),
@@ -317,6 +462,123 @@ fn along(
         dom: *dom,
         sides: BoxSide::ALL,
     })
+}
+
+/// One span of a definition an extension along its spine runs: the span, the part of it
+/// it runs (`[x, y]` of its own parameter in `[0, 1]`, in s's direction) and that part's
+/// length in the net's parameter.
+struct Piece {
+    span: DefinitionSpan,
+    part: [f64; 2],
+    length: f64,
+}
+
+/// The knots after the source's joint for `pieces` from `end` by `e` in all: each part's
+/// end at multiplicity 3 (the construction's own joints), the last clamped (4), at exactly
+/// `end + e`.
+fn joints(end: f64, e: f64, pieces: &[Piece]) -> Vec<f64> {
+    let mut knots = Vec::new();
+    let mut at = end;
+    let n = pieces.len();
+    for (i, p) in pieces.iter().enumerate() {
+        if i + 1 == n {
+            knots.extend([end + e; 4]);
+        } else {
+            at += p.length;
+            knots.extend([at; 3]);
+        }
+    }
+    knots
+}
+
+/// The cubic Bezier `p` over `[t0, t1]` of its parameter: its blossoms `B(t0^(3-i), t1^i)`.
+fn sub_bezier(p: [H; 4], t0: f64, t1: f64) -> [H; 4] {
+    let blossom = |u: [f64; 3]| -> H {
+        let mut q = p;
+        for (level, &t) in u.iter().enumerate() {
+            for i in 0..3 - level {
+                if let (Some(&a), Some(&b)) = (q.get(i), q.get(i + 1)) {
+                    if let Some(x) = q.get_mut(i) {
+                        *x = super::lin(1.0 - t, a, t, b);
+                    }
+                }
+            }
+        }
+        q.first().copied().unwrap_or([f64::NAN; 4])
+    };
+    [
+        blossom([t0, t0, t0]),
+        blossom([t0, t0, t1]),
+        blossom([t0, t1, t1]),
+        blossom([t1, t1, t1]),
+    ]
+}
+
+/// The extension's rows past the source's joint for `pieces` (outward), each part's rows
+/// scaled to the weight of the row before it (the source's joint row for the first), and
+/// for each piece its rows against its span's ([`piece_distance`]) with its scale.
+#[allow(clippy::type_complexity)]
+fn pieces_rows(
+    source: &Local,
+    pieces: &[Piece],
+    up: bool,
+) -> Result<(Vec<Vec<H>>, Vec<(Vec<(Vec<H>, Vec<H>)>, f64)>)> {
+    let mut ext: Vec<Vec<H>> = vec![Vec::new(); source.rows.len()];
+    let mut out = Vec::new();
+    // the row before each piece, across: the source's joint row first
+    let mut before: Vec<H> = source
+        .rows
+        .iter()
+        .map(|r| r.last().copied().ok_or_else(op_err))
+        .collect::<Result<_>>()?;
+    for p in pieces {
+        let ld = p.span.ld;
+        if source.rows.len() != ld {
+            return Err(SolidError::port_invariant(
+                OP,
+                "the net is not the section's width",
+            ));
+        }
+        // the span's part at across index j, outward from the joint
+        let part = |j: usize| -> Result<[H; 4]> {
+            let mut c = [[0.0; 4]; 4];
+            for (i, ci) in c.iter_mut().enumerate() {
+                let at = i
+                    .checked_mul(ld)
+                    .and_then(|x| x.checked_add(j))
+                    .ok_or_else(op_err)?;
+                let (q, w) = (
+                    p.span.homog.get(at).ok_or_else(op_err)?,
+                    p.span.weights.get(at).ok_or_else(op_err)?,
+                );
+                *ci = [q.x, q.y, q.z, *w];
+            }
+            let mut sub = sub_bezier(c, p.part[0], p.part[1]);
+            if !up {
+                sub.reverse();
+            }
+            Ok(sub)
+        };
+        let (Some(b0), Ok(h0)) = (before.first(), part(0)) else {
+            return Err(op_err());
+        };
+        let scale = b0[3] / h0[0][3];
+        let mut rows = Vec::new();
+        for (j, (e, bj)) in ext.iter_mut().zip(before.iter_mut()).enumerate() {
+            let h = part(j)?;
+            let (mut hs, mut bs) = (vec![h[0]], vec![*bj]);
+            for x in h.iter().skip(1) {
+                let y = x.map(|c| scale * c);
+                e.push(y);
+                hs.push(*x);
+                bs.push(y);
+            }
+            *bj = *bs.last().ok_or_else(op_err)?;
+            rows.push((bs, hs));
+        }
+        out.push((rows, scale));
+    }
+    Ok((ext, out))
 }
 
 /// `|B - H|` over the piece: `piece[j]` the net's rows along s at across index j (the
@@ -381,6 +643,8 @@ fn continued_curve(c: &BSplineCurve, s_new: f64, up: bool) -> Result<BSplineCurv
         p,
         rational,
         err: 0.0,
+        q: 0,
+        frame: None,
     };
     if !up {
         l.reverse();
@@ -475,57 +739,24 @@ fn hermite_seeds(next: &mut ProceduralBlend, stations: &[GnStation], up: bool) -
     Ok(())
 }
 
-/// The span's rows joined to the source past its side: per across index j the three
-/// points after the joint, scaled to the source's weights (the source's net is the
-/// stations' rows scaled by one factor, which the joint's weights give); the piece's net
-/// (the source's joint row, then those) beside the span's own rows; and the scale.
-#[allow(clippy::type_complexity)]
-fn piece_rows(
-    source: &Local,
-    span: &DefinitionSpan,
-    up: bool,
-) -> Result<(Vec<Vec<H>>, Vec<(Vec<H>, Vec<H>)>, f64)> {
-    let ld = span.ld;
-    if source.rows.len() != ld {
-        return Err(SolidError::port_invariant(
-            OP,
-            "the net is not the section's width",
-        ));
-    }
-    // the span's row i outward from the joint at across index j
-    let row = |i: usize, j: usize| -> Option<H> {
-        let i = if up { i } else { 3_usize.checked_sub(i)? };
-        let at = i.checked_mul(ld)?.checked_add(j)?;
-        let (p, w) = (span.homog.get(at)?, span.weights.get(at)?);
-        Some([p.x, p.y, p.z, *w])
-    };
-    let (Some(joint), Some(src)) = (row(0, 0), source.rows.first().and_then(|r| r.last())) else {
-        return Err(op_err());
-    };
-    let scale = src[3] / joint[3];
-    let mut ext = Vec::new();
-    let mut piece = Vec::new();
-    for (j, srow) in source.rows.iter().enumerate() {
-        let (Some(&sj), Some(hj)) = (srow.last(), row(0, j)) else {
-            return Err(op_err());
-        };
-        let (mut q, mut h, mut b) = (Vec::new(), vec![hj], vec![sj]);
-        for i in 1..4 {
-            let x = row(i, j).ok_or_else(op_err)?;
-            let y = x.map(|c| scale * c);
-            q.push(y);
-            h.push(x);
-            b.push(y);
-        }
-        ext.push(q);
-        piece.push((b, h));
-    }
-    Ok((ext, piece, scale))
-}
-
-/// Whether every foot of the span's stations is on its support's natural box.
+/// Whether every foot of the span's stations is on its support: on its natural box, or
+/// anywhere on an analytic support (plane, cone, sphere, torus). The stations are solved on
+/// the support's net continued past its knots ([`crate::blend::fillet_section::station`]);
+/// an analytic's net continued is still on the analytic (its implicit equation composed
+/// with the homogeneous net is a polynomial identity, so it holds on the continuation,
+/// wherever the weight is not zero), so a foot off its box is still on the surface. A
+/// B-spline's continuation is no longer its face's surface: a foot off its box is not on it.
 fn feet_on(k: &Kernel, pb: &ProceduralBlend, span: &DefinitionSpan) -> Result<bool> {
     for (f, support) in pb.supports().into_iter().enumerate() {
+        if AnalyticSupport::of(support).is_some() {
+            let finite = span.stations.iter().all(|st| {
+                param(st, 2 * f, 0, 0).is_finite() && param(st, 2 * f + 1, 0, 0).is_finite()
+            });
+            if !finite {
+                return Ok(false);
+            }
+            continue;
+        }
         let b = support.natural_uv_domain_with_nurb(k)?;
         for st in &span.stations {
             let (u, v) = (param(st, 2 * f, 0, 0), param(st, 2 * f + 1, 0, 0));

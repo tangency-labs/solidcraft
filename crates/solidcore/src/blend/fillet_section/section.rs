@@ -458,6 +458,7 @@ pub(crate) fn varying(
         n,
         r,
         cells: GnAreaCells::default(),
+        w: [f64::INFINITY, f64::NEG_INFINITY],
     };
     if equal_area {
         let mut w_lo = f64::INFINITY;

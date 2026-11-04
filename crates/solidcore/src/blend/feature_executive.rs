@@ -96,7 +96,6 @@ use crate::geom::a_object::BooleanOperation;
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::{self, SmallTopoType};
 use crate::intersect::point_class::{PointClassType, PointClassification};
@@ -1624,7 +1623,13 @@ fn ext_surface_rebuild(
                 .clone()
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
             let new_surf = surface
-                .create_extended_surface(k, ext, ContinuityType::G1)
+                .extended_sides(
+                    k,
+                    &crate::surface::side::BoxSide::ALL,
+                    crate::surface::extend::Continuity::Tangent,
+                    ext,
+                )
+                .map(|e| e.surface)
                 .map_err(|e| {
                     if e.is_unported_or_cancelled() {
                         e

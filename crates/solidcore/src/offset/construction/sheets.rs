@@ -53,7 +53,7 @@ use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::knots::{KnotVector, Side};
-use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::nurbs::nurbs_srf::decompose_srf;
 use crate::nurbs::srf_basic::Surface as Nurb;
 
@@ -339,23 +339,38 @@ pub struct CertifiedOffset {
 
 /// The knots of `G` in one direction: the base's breakpoints `breaks` (an interior one
 /// of multiplicity `m` in the base's degree `deg` taken `3 - min(deg - m - 1, 2)` times,
-/// so `G` keeps the normal's continuity) and the inserted `extra` knots (simple).
-fn offset_knots(breaks: &[f64], mults: &[usize], deg: usize, extra: &[f64]) -> Result<Vec<f64>> {
+/// so `G` keeps the normal's continuity) and the inserted `extra` knots (simple). An
+/// interior breakpoint of multiplicity `deg` (the net only `C0` in its parameter) is a
+/// crease unless `smooth` says its joint was proved tangent continuous ([`joint_meets`]):
+/// then the normal is `C0` there and `G` takes it `3` times.
+fn offset_knots(
+    breaks: &[f64],
+    mults: &[usize],
+    smooth: &[bool],
+    deg: usize,
+    extra: &[f64],
+) -> Result<Vec<f64>> {
     let (Some(&lo), Some(&hi)) = (breaks.first(), breaks.last()) else {
         return Err(invalid("no breakpoints"));
     };
     let mut interior: Vec<(f64, usize)> = Vec::new();
-    for (&x, &m) in breaks
+    for ((&x, &m), at) in breaks
         .iter()
         .skip(1)
         .take(breaks.len().saturating_sub(2))
         .zip(mults)
+        .zip(0..)
     {
-        // the normal is C^(deg - m - 1) there
-        let Some(cont) = deg.checked_sub(m + 1) else {
-            return Err(invalid(
-                "a crease inside the face: its offset is not one surface",
-            ));
+        // the normal is C^(deg - m - 1) there; at multiplicity deg C0 where the joint
+        // was proved tangent continuous
+        let cont = match deg.checked_sub(m + 1) {
+            Some(c) => c,
+            None if m == deg && smooth.get(at) == Some(&true) => 0,
+            None => {
+                return Err(invalid(
+                    "a crease inside the face: its offset is not one surface",
+                ))
+            }
         };
         interior.push((x, DEGREE - cont.min(DEGREE - 1)));
     }
@@ -367,6 +382,146 @@ fn offset_knots(breaks: &[f64], mults: &[usize], deg: usize, extra: &[f64]) -> R
     }
     k.extend(core::iter::repeat_n(hi, DEGREE + 1));
     Ok(k)
+}
+
+/// The most pieces [`joint_meets`] splits one joint's edge into.
+const MAX_JOINT_PIECES: usize = 256;
+
+/// Whether the joint of `ps` at the interior breakpoint `at` of the u (`along_u`) or v
+/// breakpoints, a knot of multiplicity the base's degree (where its net is only `C0` in the
+/// parameter), is tangent continuous closely enough that the offsets of its two sides meet
+/// there within half the offset's tolerance `tol` at the distance `d`: then its offset is
+/// one surface, `C0` across the joint, and [`certified_offset`] certifies it as any other
+/// breakpoint. A knot's multiplicity is not the joint's geometry: an exact extension's joint
+/// (Natural, Tangent, Ruled) is of multiplicity `p` and tangent continuous.
+///
+/// The comparison is of the two one-sided normals along the joint's edge, `n_L` and `n_R`
+/// (the patches' reduced normals [`reduced_normal`], of the one-sided derivatives across
+/// the joint and the common one along it), as Bernstein polynomials of the edge's parameter:
+/// `D = n_L . n_R`, `C = n_L x n_R` and `Y = |n_L|^2 |n_R|^2`. Where every coefficient of
+/// `D` is positive the angle `theta` between the unit normals is below a right angle, and
+/// where `|C| <= s sqrt(Y)` on the piece (the norm of `C`'s components' largest coefficients
+/// against `Y`'s smallest, each with its rounding) `sin theta <= s`, so the offset points'
+/// gap `|d| |n_L - n_R| = 2 |d| sin(theta / 2) <= sqrt 2 |d| sin theta`; `s = tol / (2 sqrt
+/// 2 |d|)` holds the gap to `tol / 2`. An edge piece not proved so is halved (an explicit
+/// stack, at most [`MAX_JOINT_PIECES`] pieces); a piece whose end shows the jump (`D` not
+/// positive, or `|C| > s sqrt(Y)` there) ends the test: a crease.
+fn joint_meets(
+    ps: &[Vec<Patch>],
+    along_u: bool,
+    at: usize,
+    d: f64,
+    tol: f64,
+    b: &Binomials,
+) -> Result<bool> {
+    let before = at
+        .checked_sub(1)
+        .ok_or_else(|| invalid("a joint at the domain's end"))?;
+    let s = tol / (2.0 * core::f64::consts::SQRT_2 * d.abs());
+    if !(s.is_finite() && positive(s)) {
+        return Ok(false);
+    }
+    let pairs: Vec<(&Patch, &Patch)> = if along_u {
+        let (Some(left), Some(right)) = (ps.get(before), ps.get(at)) else {
+            return Err(invalid("no patch row at the joint"));
+        };
+        left.iter().zip(right.iter()).collect()
+    } else {
+        ps.iter()
+            .map(|row| match (row.get(before), row.get(at)) {
+                (Some(l), Some(r)) => Ok((l, r)),
+                _ => Err(invalid("no patch column at the joint")),
+            })
+            .collect::<Result<_>>()?
+    };
+    for (left, right) in pairs {
+        let nl = reduced_normal(left, b)?;
+        let nr = reduced_normal(right, b)?;
+        // the edge: the left patch's high end, the right patch's low end, in the joint's
+        // direction (a polynomial constant in it, of the edge's parameter in the other)
+        let (el, er) = if along_u {
+            (
+                restrict3(&nl, 1.0, 1.0, 0.0, 1.0),
+                restrict3(&nr, 0.0, 0.0, 0.0, 1.0),
+            )
+        } else {
+            (
+                restrict3(&nl, 0.0, 1.0, 1.0, 1.0),
+                restrict3(&nr, 0.0, 1.0, 0.0, 0.0),
+            )
+        };
+        let mut stack = vec![(el, er)];
+        let mut pieces = 1_usize;
+        while let Some((a, c)) = stack.pop() {
+            let dd = dot(&a, &c, b)?;
+            let x = cross(&a, &c, b)?;
+            let y = dot(&a, &a, b)?.mul(&dot(&c, &c, b)?, b)?;
+            // every coefficient of these forms is a weighted mean of products of the normals'
+            // coefficients (the Bernstein product's weights sum to 1): at most 2 M for a
+            // component of the cross product, 3 M for D and 9 M^2 for Y, with M the product of
+            // the two normals' largest coefficients; each is formed in a few dozen operations
+            // and the splits are convex combinations: gamma_64 of that bounds their rounding
+            let m = a
+                .iter()
+                .map(Bernstein2::max_abs_coefficient)
+                .fold(0.0_f64, f64::max)
+                * c.iter()
+                    .map(Bernstein2::max_abs_coefficient)
+                    .fold(0.0_f64, f64::max);
+            let (rc, rd, ry) = (
+                gamma(64) * 2.0 * m,
+                gamma(64) * 3.0 * m,
+                gamma(64) * 9.0 * m * m,
+            );
+            // |n_L x n_R| over the piece: at most the norm of the components' largest
+            // coefficients (each component within the hull of its coefficients)
+            let cmax = x
+                .iter()
+                .map(|f| f.max_abs_coefficient().powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let floor = |v: f64| (v - ry).max(0.0).sqrt();
+            if dd.min_coefficient() > rd && cmax + rc <= s * floor(y.min_coefficient()) {
+                continue;
+            }
+            // a jump at an end of the piece (its end values are coefficients): a crease, no
+            // split proves it smooth
+            let first = |f: &Bernstein2| f.coefficients().first().copied().unwrap_or(0.0);
+            let last = |f: &Bernstein2| f.coefficients().last().copied().unwrap_or(0.0);
+            let norm = |pick: &dyn Fn(&Bernstein2) -> f64| {
+                x.iter().map(|f| pick(f).powi(2)).sum::<f64>().sqrt()
+            };
+            let creased = |dv: f64, cv: f64, yv: f64| dv <= -rd || cv - rc > s * (yv + ry).sqrt();
+            if creased(first(&dd), norm(&first), first(&y))
+                || creased(last(&dd), norm(&last), last(&y))
+            {
+                return Ok(false);
+            }
+            pieces = pieces.saturating_add(1);
+            if pieces > MAX_JOINT_PIECES {
+                return Ok(false);
+            }
+            let halves = |f: &Bernstein3| -> (Bernstein3, Bernstein3) {
+                let [x, yy, zz] = f;
+                let sp = |g: &Bernstein2| {
+                    if along_u {
+                        g.split_v(0.5)
+                    } else {
+                        g.split_u(0.5)
+                    }
+                };
+                let (x0, x1) = sp(x);
+                let (y0, y1) = sp(yy);
+                let (z0, z1) = sp(zz);
+                ([x0, y0, z0], [x1, y1, z1])
+            };
+            let (a0, a1) = halves(&a);
+            let (c0, c1) = halves(&c);
+            stack.push((a0, c0));
+            stack.push((a1, c1));
+        }
+    }
+    Ok(true)
 }
 
 /// The Greville abscissae of the knots `k` of degree [`DEGREE`].
@@ -622,12 +777,28 @@ pub fn certified_offset(k: &Kernel, s: &Nurb, d: f64, tol: f64) -> Result<Certif
     let (sub, sub_mults) = breakpoints(s.u_knots(), p)?;
     let (svb, svb_mults) = breakpoints(s.v_knots(), q)?;
     let (ub, vb, ps) = patches(s)?;
+    // the joints at multiplicity p (q) proved tangent continuous (an exact extension's)
+    let smooth = |mults: &[usize], deg: usize, along_u: bool| -> Result<Vec<bool>> {
+        mults
+            .iter()
+            .zip(1..)
+            .map(|(&m, at)| {
+                if m == deg {
+                    joint_meets(&ps, along_u, at, d, tol, &b)
+                } else {
+                    Ok(false)
+                }
+            })
+            .collect()
+    };
+    let smooth_u = smooth(&sub_mults, p, true)?;
+    let smooth_v = smooth(&svb_mults, q, false)?;
     let mut extra_u: Vec<f64> = Vec::new();
     let mut extra_v: Vec<f64> = Vec::new();
     for _round in 0..MAX_ROUNDS {
         k.check_cancelled(OP)?;
-        let ku = offset_knots(&sub, &sub_mults, p, &extra_u)?;
-        let kv = offset_knots(&svb, &svb_mults, q, &extra_v)?;
+        let ku = offset_knots(&sub, &sub_mults, &smooth_u, p, &extra_u)?;
+        let kv = offset_knots(&svb, &svb_mults, &smooth_v, q, &extra_v)?;
         let gu = greville(&ku);
         let gv = greville(&kv);
         let mut grid: Vec<Vec<Vec3>> = Vec::new();
@@ -1041,6 +1212,100 @@ mod tests {
             }
         }
         worst
+    }
+
+    /// `s` (a B-spline net) extended `how` past its u max by `e`: its net, the old end now an
+    /// interior knot of multiplicity `p` (the joint).
+    fn extended_net(s: &Nurb, how: crate::surface::extend::Continuity, e: f64) -> Nurb {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::side::BoxSide;
+        use crate::surface::surface::{Surface, SurfaceKind};
+        let k = Kernel::default();
+        let src = Surface::from(BSplineSurface::from_gw_nurb(s));
+        let dom = src.natural_uv_domain_with_nurb(&k).unwrap();
+        let out = src
+            .extended_by_distance(&k, &dom, BoxSide::UMax, how, e)
+            .unwrap()
+            .surface;
+        let SurfaceKind::BSpline(net) = out.kind() else {
+            panic!("not a B-spline: {out:?}");
+        };
+        net.gw_nurb().unwrap().clone()
+    }
+
+    #[test]
+    fn a_tangent_continuous_extension_joint_at_multiplicity_p_is_no_crease() {
+        use crate::surface::extend::Continuity;
+        let s = parabola(false);
+        for how in [Continuity::Natural, Continuity::Tangent, Continuity::Ruled] {
+            let g = extended_net(&s, how, 6.0);
+            let (p, _) = g.degrees();
+            // the joint: the old end, u = 1, now inside at multiplicity p
+            let at = g.u_knots().iter().filter(|&&x| x == 1.0).count();
+            assert_eq!(at, p, "{how:?}: {:?}", g.u_knots());
+            for d in [2.0, -2.0] {
+                let tol = 1e-7;
+                let made = certified_offset(&Kernel::default(), &g, d, tol).unwrap();
+                assert!(made.bound <= tol, "{how:?} d {d}: bound {}", made.bound);
+                let err = sampled_error(&g, &made.surface, d);
+                assert!(
+                    err <= made.bound * 1.000_001 + 1e-12,
+                    "{how:?} d {d}: {err}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_kink_at_multiplicity_p_is_a_crease() {
+        // two quadratic spans meeting at (0, 10) at multiplicity 2, their tangents there
+        // (10, 5) and (10, -5): a real crease
+        let pts = [
+            (-10.0, 0.0),
+            (-5.0, 7.5),
+            (0.0, 10.0),
+            (5.0, 7.5),
+            (10.0, 0.0),
+        ];
+        let net = pts
+            .iter()
+            .map(|&(x, y)| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 20.0, NOW)])
+            .collect();
+        let s = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0., 0., 0., 0.5, 0.5, 1., 1., 1.],
+            vec![0., 0., 1., 1.],
+        )
+        .unwrap();
+        let err = certified_offset(&Kernel::default(), &s, 2.0, 1e-7).unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { reason, .. } if reason.starts_with("a crease")),
+            "{err:?}"
+        );
+        // the same joint made smooth (its neighbours on the tangent through it) is none
+        let pts = [
+            (-10.0, 0.0),
+            (-5.0, 10.0),
+            (0.0, 10.0),
+            (5.0, 10.0),
+            (10.0, 0.0),
+        ];
+        let net = pts
+            .iter()
+            .map(|&(x, y)| vec![CPoint::new(x, y, 0.0, NOW), CPoint::new(x, y, 20.0, NOW)])
+            .collect();
+        let s = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0., 0., 0., 0.5, 0.5, 1., 1., 1.],
+            vec![0., 0., 1., 1.],
+        )
+        .unwrap();
+        let made = certified_offset(&Kernel::default(), &s, 2.0, 1e-7).unwrap();
+        assert!(made.bound <= 1e-7);
     }
 
     #[test]

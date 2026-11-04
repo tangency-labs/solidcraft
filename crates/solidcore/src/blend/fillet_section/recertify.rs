@@ -453,16 +453,35 @@ fn pieces(pb: &ProceduralBlend, ld: usize) -> Result<Vec<Piece>> {
 /// net's distance from its rows and the floor follow the round's size, not where it lies;
 /// the move's own rounding ([`frame_rounding`]) is added to the net's distance.
 pub fn recertify(k: &Kernel, pb: &ProceduralBlend) -> Result<f64> {
+    Ok(recertify_with_thumbweight(k, pb)?.0)
+}
+
+/// [`recertify`], with the equal area thumbweight's proved enclosure `[lo, hi]` over every
+/// span recertified ([`GnVarying::w`](super::certificate::GnVarying::w), from the certificate's interval Newton roots); `None`
+/// for any other section (a constant thumbweight is its own).
+///
+/// # Errors
+///
+/// Those of [`recertify`].
+pub fn recertify_with_thumbweight(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+) -> Result<(f64, Option<[f64; 2]>)> {
     crate::profile::profile_scope!(k, "blend::certificate::recertify");
     let centre = frame_centre(pb.net())?;
     let local = pb.translated(k, centre * -1.0)?;
     recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)
 }
 
-/// [`recertify`] of a blend already in its own frame, against `bound`, its net's
-/// distance from its rows taken as at least `shift` more.
+/// [`recertify_with_thumbweight`] of a blend already in its own frame, against `bound`,
+/// its net's distance from its rows taken as at least `shift` more.
 #[allow(clippy::too_many_lines)]
-fn recertify_in_frame(k: &Kernel, pb: &ProceduralBlend, bound: f64, shift: f64) -> Result<f64> {
+fn recertify_in_frame(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    bound: f64,
+    shift: f64,
+) -> Result<(f64, Option<[f64; 2]>)> {
     let d = pb.definition();
     let n = d.order as usize;
     let equal_area = n >= 2 && d.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
@@ -636,7 +655,8 @@ fn recertify_in_frame(k: &Kernel, pb: &ProceduralBlend, bound: f64, shift: f64) 
         }
         achieved = achieved.max(total);
     }
-    Ok(achieved)
+    let [lo, hi] = vary.w;
+    Ok((achieved, (equal_area && lo <= hi).then_some([lo, hi])))
 }
 
 /// The stations of a definition at `sigma`, its seeds' knots, where `needed`: each solved
@@ -759,20 +779,18 @@ pub(crate) struct DefinitionSpan {
     pub(crate) stations: Vec<GnStation>,
 }
 
-/// The span of a definition's net between its last two stations (`high`) or its first two,
-/// solved and certified as [`net_of_definition`] does each.
+/// The span of a definition's net from its station `first` to the next, solved and
+/// certified as [`net_of_definition`] does each.
 ///
 /// # Errors
 ///
 /// Those of [`net_of_definition`].
-pub(crate) fn end_span_of_definition(
+pub(crate) fn span_of_definition(
     k: &Kernel,
     pb: &ProceduralBlend,
-    high: bool,
+    first: usize,
     target: f64,
 ) -> Result<DefinitionSpan> {
-    let count = pb.definition().seeds[0].knots(None)?.0.len();
-    let first = if high { count.saturating_sub(2) } else { 0 };
     let (_, mut spans, certified, ld, stations) = spans_of_definition(k, pb, target, Some(first))?;
     let (homog, weights) = spans.pop().ok_or_else(|| SolidError::sm_err(OP))?;
     Ok(DefinitionSpan {

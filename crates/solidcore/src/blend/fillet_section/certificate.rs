@@ -1426,10 +1426,15 @@ pub struct GnVarying {
     pub r: [f64; 2],
     /// `pCells`: I's enclosures, computed once per cell.
     pub cells: GnAreaCells,
+    /// The thumbweight's proved enclosure, `[lo, hi]`, over every span certified with this
+    /// ([`gn_certify_span`]: the union of its pieces' [`GnRowTerms::w`] at each level whose
+    /// bound it returns); `[inf, -inf]` before any. Not upstream.
+    pub w: [f64; 2],
 }
 
 /// `sm_GnRowTerms`: the largest `|(sum_ik dg_ikj c'_ik)|` (`x`) and `|W_j|` (`y`),
-/// the least `W_j` (`w_lo`) per row, and the largest `|S - O|` (`r`).
+/// the least `W_j` (`w_lo`) per row, the largest `|S - O|` (`r`), and the equal area
+/// thumbweight's proved enclosure over the pieces (`w`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GnRowTerms {
     /// `X`.
@@ -1440,6 +1445,10 @@ pub struct GnRowTerms {
     pub w_lo: Vec<f64>,
     /// `R`.
     pub r: f64,
+    /// The equal area thumbweight over every piece folded in, `[lo, hi]`: the union of the
+    /// interval Newton roots `w0` (each holds every piece's root, for every s in it); `[inf,
+    /// -inf]` before any. Not upstream: the fork discards `w0` after the inversion.
+    pub w: [f64; 2],
 }
 
 /// `sm_Centred`: the coefficients `0..=SM_GN_TAY` of a series over a piece in their
@@ -1548,6 +1557,8 @@ pub fn gn_row_terms_over(
     if !root {
         return false;
     }
+    let [w_lo, w_hi] = rt.w;
+    rt.w = [cmin(w_lo, w0.lo), cmax(w_hi, w0.hi)];
     let over_w0 = vary.cells.over(k, w0);
     let sw = gn_invert(&tg, &over_w0, w0);
     let form = gn_form_normalized(n, sw);
@@ -1906,6 +1917,7 @@ pub fn gn_certify_span(
             y: vec![0.0; ld],
             w_lo: vec![f64::INFINITY; ld],
             r: 0.0,
+            w: [f64::INFINITY, f64::NEG_INFINITY],
         };
         for pair in ends.windows(2) {
             if !proved {
@@ -2053,7 +2065,15 @@ pub fn gn_certify_span(
             continue;
         }
         // certified by each parameter's own term, never larger than the fork's
-        bound_out = cmin(bound_out, round_up(level_bound(&uv4) * (1.0 + 1.0e-12)));
+        let bound = round_up(level_bound(&uv4) * (1.0 + 1.0e-12));
+        if bound < bound_out {
+            // the thumbweight over the span, proved at the level whose bound is returned
+            if let Some(v) = vary.as_deref_mut() {
+                let ([lo, hi], [rlo, rhi]) = (v.w, rows.w);
+                v.w = [cmin(lo, rlo), cmax(hi, rhi)];
+            }
+        }
+        bound_out = cmin(bound_out, bound);
         if bound_out <= target {
             break;
         }

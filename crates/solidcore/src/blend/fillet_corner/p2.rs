@@ -109,7 +109,6 @@ use crate::blend::fillet_standard_solver::p1::{FilletLaw, VariableRadiusFs};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::vector2d::Point2;
@@ -433,8 +432,14 @@ impl FilletCorner {
             .surface
             .as_ref()
             .ok_or_else(|| null_deref("side face without surface"))?;
-        let new_surface =
-            side_surface.create_extended_surface(k, 10.0 * gap_dist, ContinuityType::G1)?;
+        let new_surface = side_surface
+            .extended_sides(
+                k,
+                &crate::surface::side::BoxSide::ALL,
+                crate::surface::extend::Continuity::Tangent,
+                10.0 * gap_dist,
+            )?
+            .surface;
 
         // Copy pNewSurface, when possible as an analytic surface.
         let new_analytic_surface = new_surface.copy_and_add_analytics(k)?;

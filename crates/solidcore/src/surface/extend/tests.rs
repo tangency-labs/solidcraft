@@ -7,7 +7,7 @@ use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::ProceduralBlend;
-use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
 
 fn k() -> Kernel {
     Kernel::default()
@@ -817,7 +817,8 @@ fn every_side_extends_in_turn_and_closed_or_collapsed_sides_are_left() {
 }
 
 #[test]
-fn an_infinite_planes_sides_are_unbounded_and_a_finite_planes_extend() {
+fn an_infinite_planes_sides_are_unbounded_and_a_finite_planes_extend_its_own_net() {
+    use crate::surface::implicit::{lies_on, AnalyticSupport};
     let kk = k();
     let inf = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 3.0), Vec3::Z));
     let e = inf
@@ -837,8 +838,21 @@ fn an_infinite_planes_sides_are_unbounded_and_a_finite_planes_extend() {
         Vec2::new(1.0, 1.0),
         &Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0),
     ));
+    // widened as a plane
     let e = p
         .extended_sides(&kk, &BoxSide::ALL, Continuity::Tangent, 4.33)
+        .unwrap();
+    assert!(matches!(e.surface.kind(), SurfaceKind::Plane(_)));
+    let kept = inf
+        .extended_sides_keeping_parameters(&kk, &BoxSide::ALL, Continuity::Ruled, 4.33)
+        .unwrap();
+    assert!(kept
+        .sides
+        .iter()
+        .all(|x| matches!(x, SideExtension::Unbounded)));
+    // keeping its parameters
+    let e = p
+        .extended_sides_keeping_parameters(&kk, &BoxSide::ALL, Continuity::Tangent, 4.33)
         .unwrap();
     assert!(
         e.sides
@@ -847,11 +861,45 @@ fn an_infinite_planes_sides_are_unbounded_and_a_finite_planes_extend() {
         "{:?}",
         e.sides
     );
-    assert!(matches!(e.surface.kind(), SurfaceKind::Plane(_)));
+    // its own net continued: a B-spline on the plane's own parameters, on the plane
+    let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+        panic!("not a B-spline: {:?}", e.surface.kind());
+    };
+    let on = AnalyticSupport::check(&kk, &p).unwrap().implicit();
+    assert!(lies_on(grown, &on).unwrap());
+    // one straight span each way (its joint knots removed): the plane's own 2 x 2 form
+    assert_eq!(grown.gw_nurb().unwrap().cpts().len(), 2);
+    assert_eq!(grown.gw_nurb().unwrap().u_knots().len(), 4);
+    for (u, v) in [(0.0, 0.0), (10.0, 0.0), (3.5, 7.25), (-4.0, 14.0)] {
+        let uv = Point2::new(u, v);
+        // the plane's own parameters: origin + u X + v Y at scale 1
+        let at = Vec3::new(u, v, 0.0);
+        assert!(
+            (grown.evaluate_point(uv).unwrap() - at).length() <= 1e-13,
+            "{uv:?}"
+        );
+    }
+    // the across length is the distance on every side, in the plane's own parameters
+    let d = grown.gw_nurb().unwrap();
+    // (the extension parameter solved to 1e-12 of the distance)
+    let ends = |k: &[f64]| (k[0], *k.last().unwrap());
+    for (lo, hi) in [ends(d.u_knots()), ends(d.v_knots())] {
+        assert!(
+            (lo + 4.33).abs() <= 1e-9 && (hi - 14.33).abs() <= 1e-9,
+            "{lo} {hi}"
+        );
+    }
+    for a in e.sides {
+        let SideExtension::Extended(a) = a else {
+            unreachable!()
+        };
+        assert!((a.enclosure.mid() - 4.33).abs() <= 1e-9 * 4.33, "{a:?}");
+    }
 }
 
 #[test]
-fn a_cone_extends_as_itself_along_up_to_its_apex_and_is_left_round_its_axis() {
+fn a_cone_extends_its_own_net_along_up_to_its_apex_and_round_its_axis_a_quarter_of_its_open_turn() {
+    use crate::surface::implicit::{lies_on, AnalyticSupport};
     let kk = k();
     // radius 2 at the bottom, 1 at height 1: the apex at height 2, sqrt 2 slant past the top
     let pl = Axis2Placement::new(Vec3::ZERO, Vec3::Z, Vec3::X);
@@ -859,31 +907,73 @@ fn a_cone_extends_as_itself_along_up_to_its_apex_and_is_left_round_its_axis() {
     c.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 0.0, 90.0, 1.0))
         .unwrap();
     let c = Surface::from(c);
+    let on = AnalyticSupport::check(&kk, &c).unwrap().implicit();
+    let src = crate::blend::fillet_section::station::as_b_spline(&kk, &c)
+        .unwrap()
+        .unwrap()
+        .into_owned();
+    let src_net = src.gw_nurb().unwrap().clone();
     for how in [Continuity::Tangent, Continuity::Natural] {
         let e = c.extended_sides(&kk, &BoxSide::ALL, how, 5.0).unwrap();
-        assert!(matches!(e.surface.kind(), SurfaceKind::Cone(_)), "{how:?}");
-        let around = e
-            .sides
-            .iter()
-            .filter(|x| matches!(x, SideExtension::AroundAxis))
-            .count();
-        assert_eq!(around, 2, "{:?}", e.sides);
-        // one side along runs the whole 5, the other stops short of the apex
-        let mut lengths: Vec<(bool, f64)> = e
-            .sides
-            .iter()
-            .filter_map(|x| match x {
-                SideExtension::Extended(a) => Some((false, a.enclosure.mid())),
-                SideExtension::UpToLimit(a) => Some((true, a.enclosure.mid())),
-                _ => None,
-            })
-            .collect();
+        let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+            panic!("{how:?}: not a B-spline");
+        };
+        // the source's circles' points and knots bit for bit (along the rulings the span is
+        // widened, one straight span: its end circles to rounding), the result on the cone
+        let out = grown.gw_nurb().unwrap();
+        let (src_u, src_v) = (src_net.u_knots(), src_net.v_knots());
+        assert!(src_u.iter().all(|x| out.u_knots().contains(x)), "{how:?}");
+        assert_eq!(out.v_knots().len(), 4, "{how:?}: one straight span along");
+        assert_eq!(out.cpts().len(), src_net.cpts().len() + 4, "{how:?}");
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let uv = Point2::new(
+                    src_u[0] + f64::from(i) / 4.0 * (src_u.last().unwrap() - src_u[0]),
+                    src_v[0] + f64::from(j) / 4.0 * (src_v.last().unwrap() - src_v[0]),
+                );
+                let d = grown.evaluate_point(uv).unwrap() - src.evaluate_point(uv).unwrap();
+                assert!(d.length() <= 1e-14, "{how:?} {uv:?}: {d:?}");
+            }
+        }
+        assert!(lies_on(grown, &on).unwrap());
+        // round the axis (u): each side a quarter of the 270 degrees left open, said so: the
+        // radius at the side's middle (1.5) times 3 pi / 8
+        for i in [0, 1] {
+            let SideExtension::UpToLimit(a) = e.sides[i] else {
+                panic!("{:?}", e.sides);
+            };
+            let want = 1.5 * 0.375 * PI;
+            assert!((a.enclosure.mid() - want).abs() <= 1e-9 * want, "{a:?}");
+        }
+        // round the axis each end turned 67.5 degrees from the source's
+        let (d, sd) = (grown.gw_nurb().unwrap(), src_net.clone());
+        let ends =
+            |n: &crate::nurbs::srf_basic::Surface| (n.u_knots()[0], *n.u_knots().last().unwrap());
+        let vm = 0.5 * (sd.v_knots()[0] + *sd.v_knots().last().unwrap());
+        let ((u0, u1), (s0, s1)) = (ends(d), ends(&sd));
+        let crate::surface::implicit::Implicit::Cone { origin, axis, .. } = on else {
+            panic!("not a cone");
+        };
+        let flat = |s: &BSplineSurface, u: f64| {
+            let p = s.evaluate_point(Point2::new(u, vm)).unwrap() - origin;
+            p - axis * axis.dot(p)
+        };
+        let deg = |a: Vec3, b: Vec3| a.cross(b).length().atan2(a.dot(b)).to_degrees();
+        assert!((deg(flat(grown, u0), flat(&src, s0)) - 67.5).abs() <= 1e-6);
+        assert!((deg(flat(grown, u1), flat(&src, s1)) - 67.5).abs() <= 1e-6);
+        // along: one side runs the whole 5, the other stops at the apex
+        let along = |x: &SideExtension| match x {
+            SideExtension::Extended(a) => Some((false, a.enclosure.mid())),
+            SideExtension::UpToLimit(a) => Some((true, a.enclosure.mid())),
+            _ => None,
+        };
+        let mut lengths: Vec<(bool, f64)> = e.sides[2..].iter().filter_map(along).collect();
         lengths.sort_by(|a, b| a.1.total_cmp(&b.1));
         let [(true, short), (false, long)] = lengths[..] else {
             panic!("{:?}", e.sides);
         };
-        assert!((long - 5.0).abs() <= 1e-8, "{long}");
-        assert!(short < 2f64.sqrt() && short > 2f64.sqrt() - 1e-6, "{short}");
+        assert!((long - 5.0).abs() <= 1e-9 * 5.0, "{long}");
+        assert!((short - 2f64.sqrt()).abs() <= 1e-9, "{short}");
     }
 }
 
@@ -1012,6 +1102,11 @@ fn ruled_with_end_weight_ratios_that_differ_is_c1_and_straight_up_to_its_reach()
 /// 1e-3); with `certified`, on its own net and bound ([`net_of_definition`]). The planes
 /// run to x = 20, so the feet have room along.
 fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
+    round_blend_with(order, certified, 0.5)
+}
+
+/// [`round_blend`] with the G^n section's thumbweight rule `thumbweight`.
+fn round_blend_with(order: u32, certified: bool, thumbweight: f64) -> (Kernel, ProceduralBlend) {
     use crate::blend::fillet_section::recertify::net_of_definition;
     use crate::blend::fillet_section::section::GnSectionFsg;
     use crate::geom::vector3d::Point3;
@@ -1051,7 +1146,7 @@ fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
         offsets: [r, r],
         law: None,
         order,
-        thumbweight: if order >= 2 { 0.5 } else { 0.0 },
+        thumbweight: if order >= 2 { thumbweight } else { 0.0 },
         leader: &leader,
         seeds: [&seed, &seed],
         bound: 1e-3,
@@ -1168,14 +1263,146 @@ fn a_round_continues_along_its_spine_by_a_span_of_its_definition() {
 }
 
 #[test]
-fn a_gn_section_across_is_refused() {
-    let (kk, pb) = round_blend(2, false);
-    let s = Surface::from(pb);
+fn a_side_inside_the_spine_runs_the_definitions_spans_then_past_its_end() {
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let (kk, pb) = round_blend(1, true);
+    // the half of the round up to x = 5 (u = 1/2, inside the spine's one span)
+    let (left, _) = pb.split_at(&kk, 0.5, SurfParamType::U).unwrap();
+    let s = Surface::from(left.clone());
     let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
-    match s.extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, 0.1) {
-        Err(SolidError::Unsupported { .. }) => {}
-        other => panic!("{other:?}"),
+    assert!((d0.max().x - 0.5).abs() < 1e-15, "{d0:?}");
+    for (d, ue, stations) in [(3.0, 0.8, 2), (8.0, 1.3, 3)] {
+        let e = s
+            .extended_by_distance(&kk, &d0, BoxSide::UMax, Continuity::Tangent, d)
+            .unwrap();
+        meets(&e, d);
+        let SurfaceKind::ProceduralBlend(out) = e.surface.kind() else {
+            panic!("not a blend: {:?}", e.surface.kind());
+        };
+        let dd = e.surface.natural_uv_domain_with_nurb(&kk).unwrap();
+        assert!((dd.max().x - ue).abs() < 1e-6, "{d}: {dd:?}");
+        assert!(
+            out.bound() >= left.bound() && out.bound() < 1e-6,
+            "{}",
+            out.bound()
+        );
+        for i in 0..=8 {
+            for j in 0..=8 {
+                let u = 0.5 + (dd.max().x - 0.5) * f64::from(i) / 8.0;
+                let v = f64::from(j) / 8.0;
+                let p = e.surface.evaluate_point(&kk, Vec2::new(u, v)).unwrap();
+                let st = out.definition_parameters(Point2::new(u, v));
+                let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
+                assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
+                let rad = (p.y - 2.0).hypot(p.z - 2.0);
+                assert!((rad - 2.0).abs() <= out.bound() + 1e-12, "{p:?}");
+            }
+        }
+        // inside the spine the definition is its own; past its end it gains a station
+        let sigma = out.definition().seeds[0].knots(None).unwrap().0;
+        assert_eq!(sigma.len(), stations, "{d}: {sigma:?}");
+        let src = left.net.gw_nurb().unwrap();
+        assert!(keeps(src, out.net.gw_nurb().unwrap(), BoxSide::UMax).unwrap());
     }
+}
+
+#[test]
+fn a_gn_section_continues_past_a_foot_with_its_bound_grown_over_its_weight_in_closed_form() {
+    // the G^2 section at the constant thumbweight 1/2
+    let (kk, pb) = round_blend(2, true);
+    let s = Surface::from(pb.clone());
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    let e = s
+        .extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, 0.3)
+        .unwrap();
+    meets(&e, 0.3);
+    let SurfaceKind::ProceduralBlend(out) = e.surface.kind() else {
+        panic!("not a blend: {:?}", e.surface.kind());
+    };
+    let d = e.surface.natural_uv_domain_with_nurb(&kk).unwrap();
+    let te = d.max().y;
+    assert!(te > 1.0 && te < 2.0, "{d:?}");
+    // the growth in closed form: T_m(2 te - 1), m = 3 n + 1 + the net's degree across,
+    // times the net's weight ratio, over W's least past the foot: A >= 1, B >= 1 and
+    // C = 1 - te / 2 at the end (W at most 1 on the source)
+    let src = pb.net.gw_nurb().unwrap();
+    let m = 7 + src.q();
+    let x = 2.0 * te - 1.0;
+    let (mut prev, mut cur) = (1.0_f64, x);
+    for _ in 1..m {
+        let next = 2.0 * x * cur - prev;
+        prev = cur;
+        cur = next;
+    }
+    let ws = |n: &crate::nurbs::srf_basic::Surface| {
+        let w: Vec<f64> = n
+            .cpts()
+            .iter()
+            .flatten()
+            .map(|c| if c.w == NOW { 1.0 } else { c.w })
+            .collect();
+        (
+            w.iter().copied().fold(0.0_f64, f64::max),
+            w.iter().copied().fold(f64::INFINITY, f64::min),
+        )
+    };
+    let (vhi, _) = ws(src);
+    let (_, vlo) = ws(out.net.gw_nurb().unwrap());
+    let c = 1.0 - 0.5 * te;
+    let want = pb.bound() * cur * vhi / vlo / (c * c);
+    assert!(
+        out.bound() >= want && out.bound() <= want * (1.0 + 1e-9) + 1e-15 + e.extension,
+        "{} vs {want}",
+        out.bound()
+    );
+    // the continued part within the bound of the definition continued
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let u = f64::from(i) / 8.0;
+            let v = 1.0 + (te - 1.0) * f64::from(j) / 8.0;
+            let p = e.surface.evaluate_point(&kk, Vec2::new(u, v)).unwrap();
+            let st = out.definition_parameters(Point2::new(u, v));
+            let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
+            assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
+        }
+    }
+    // the source part is the source's net, bit for bit
+    assert!(keeps(src, out.net.gw_nurb().unwrap(), BoxSide::VMax).unwrap());
+    // a long ask stays short of the section's weight's zero (C = 0 at t = 2): met there
+    // with the bound grown by its closed form, or refused
+    match s.extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, 50.0) {
+        Ok(long) => {
+            let d = long.surface.natural_uv_domain_with_nurb(&kk).unwrap();
+            assert!(d.max().y < 2.0, "{d:?}");
+        }
+        Err(SolidError::ExtendRefused { .. }) => {}
+        Err(other) => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn an_equal_area_gn_section_continues_over_its_thumbweights_proved_enclosure() {
+    use crate::blend::fillet_section::recertify::recertify_with_thumbweight;
+    use crate::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
+    let (kk, pb) = round_blend_with(2, true, GN_THUMBWEIGHT_EQUAL_AREA);
+    // the certificate's interval Newton roots enclose the thumbweight: one w along this
+    // straight round, below 1
+    let (_, w) = recertify_with_thumbweight(&kk, &pb).unwrap();
+    let [lo, hi] = w.unwrap();
+    assert!(lo <= hi && hi < 1.0 && hi - lo < 1e-6, "{lo} {hi}");
+    let s = Surface::from(pb.clone());
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    let e = s
+        .extended_by_distance(&kk, &d0, BoxSide::VMax, Continuity::Tangent, 0.3)
+        .unwrap();
+    meets(&e, 0.3);
+    let SurfaceKind::ProceduralBlend(out) = e.surface.kind() else {
+        panic!("not a blend");
+    };
+    assert!(out.bound().is_finite() && out.bound() >= pb.bound());
+    // a constant thumbweight is its own
+    let (kk, pb) = round_blend(2, true);
+    assert!(recertify_with_thumbweight(&kk, &pb).unwrap().1.is_none());
 }
 
 #[test]
@@ -1196,4 +1423,67 @@ fn a_round_along_past_its_supports_is_refused_naming_a_distance_that_works() {
         .extended_by_distance(&kk, &d0, BoxSide::UMax, Continuity::Tangent, named)
         .unwrap();
     meets(&e, named);
+}
+
+/// The octant ball patch of radius 2 about `(1, -2, 0.5)`, its pole on +x.
+fn octant_ball() -> (Surface, Vec3, f64) {
+    let (c, r) = (Vec3::new(1.0, -2.0, 0.5), 2.0);
+    let dirs = [Vec3::X, Vec3::Y, Vec3::Z];
+    let (net, _, _) =
+        crate::blend::blend_corner::ball::ball_triangle_patch(c, r, &dirs, 0, false).unwrap();
+    let patch = crate::surface::ball_patch::BallPatch::create(&net, c, r).unwrap();
+    (Surface::from(patch), c, r)
+}
+
+#[test]
+fn a_ball_patch_extends_its_own_net_on_its_sphere_up_to_its_caps() {
+    use crate::surface::implicit::{lies_on, Implicit};
+    let kk = k();
+    let (s, c, r) = octant_ball();
+    let SurfaceKind::BallPatch(src) = s.kind() else {
+        panic!("not a ball patch");
+    };
+    let src_net = src.net().gw_nurb().unwrap().clone();
+    // a short ask is met on every side but the pole's; a long one stops at the caps: round
+    // the pole r times a quarter of the 270 degrees left open, away half the 90 degrees
+    // left from the third side to the antipode
+    for (d, round, away) in [(0.1, 0.1, 0.1), (100.0, r * 0.375 * PI, r * 0.25 * PI)] {
+        let e = s
+            .extended_sides(&kk, &BoxSide::ALL, Continuity::Ruled, d)
+            .unwrap();
+        let SurfaceKind::BallPatch(out) = e.surface.kind() else {
+            panic!("{d}: not a ball patch");
+        };
+        assert_eq!(e.sides[2], SideExtension::Collapsed, "{:?}", e.sides);
+        for (i, want) in [(0, round), (1, round), (3, away)] {
+            let a = match e.sides[i] {
+                SideExtension::Extended(a) if d < 1.0 => a,
+                SideExtension::UpToLimit(a) if d > 1.0 => a,
+                other => panic!("{d}: side {i}: {other:?}"),
+            };
+            assert!(
+                (a.enclosure.mid() - want).abs() <= 1e-9 * want,
+                "{d}: {i}: {a:?}"
+            );
+        }
+        // the source's net bit for bit, the whole result on the sphere
+        let out_net = out.net().gw_nurb().unwrap();
+        let kept = src_net.cpts().iter().flatten().all(|p| {
+            out_net
+                .cpts()
+                .iter()
+                .flatten()
+                .any(|q| p.x == q.x && p.y == q.y && p.z == q.z && p.w == q.w)
+        });
+        assert!(kept, "{d}: the source's net moved");
+        assert!(lies_on(
+            out.net(),
+            &Implicit::Sphere {
+                centre: c,
+                radius: r
+            }
+        )
+        .unwrap());
+        assert!((out.radius() - r).abs() == 0.0 && out.centre() == c);
+    }
 }

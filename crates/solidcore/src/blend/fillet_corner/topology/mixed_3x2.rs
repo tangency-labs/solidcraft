@@ -37,7 +37,6 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -361,7 +360,14 @@ impl FilletCorner {
             .surface
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let new_surface = surface.create_extended_surface(k, ext_dist, ContinuityType::G1)?;
+        let new_surface = surface
+            .extended_sides(
+                k,
+                &crate::surface::side::BoxSide::ALL,
+                crate::surface::extend::Continuity::Tangent,
+                ext_dist,
+            )?
+            .surface;
 
         // Copy pNewSurface, when possible as an analytic surface
         let new_analytic_surface = new_surface.copy_and_add_analytics(k)?;

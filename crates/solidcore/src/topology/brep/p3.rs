@@ -124,7 +124,6 @@ use crate::geom::context::{
 };
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
 use crate::geom::tol::{self, SmallTopoType};
 use crate::kernel::Kernel;
@@ -4264,21 +4263,16 @@ fn turn_to_nurbs_in(
                 size = 1.0;
             }
             let extend_distance = 0.02 * size;
-            let SurfaceKind::BSpline(new_bss) = new_surface.kind() else {
-                return Err(ner());
-            };
-            let ext = new_bss.create_extended_surface(k, extend_distance, ContinuityType::G1)?;
+            let ext = new_surface
+                .extended_sides(
+                    k,
+                    &crate::surface::side::BoxSide::ALL,
+                    crate::surface::extend::Continuity::Tangent,
+                    extend_distance,
+                )?
+                .surface;
             let face_ref = (env.key_of)(EntityRef::Face(f));
-            p2::replace_surface(
-                k,
-                b,
-                env,
-                f,
-                Surface::from(ext),
-                face_ref,
-                OldSurface::Delete,
-                true,
-            )?;
+            p2::replace_surface(k, b, env, f, ext, face_ref, OldSurface::Delete, true)?;
             continue;
         };
         if surface.type_code() == BSplineSurface::TYPE {

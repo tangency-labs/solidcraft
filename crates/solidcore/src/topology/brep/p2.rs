@@ -2912,7 +2912,13 @@ pub fn mate_lamina_edge_to_surface(
                 "negative surface extension distance",
             ));
         }
-        surf.create_extended_surface(k, ext_dist, ContinuityType::G1R)?
+        surf.extended_sides(
+            k,
+            &crate::surface::side::BoxSide::ALL,
+            crate::surface::extend::Continuity::Ruled,
+            ext_dist,
+        )?
+        .surface
     };
     let ext_domain = ext_surface.natural_uv_domain_with_nurb(k)?;
 
