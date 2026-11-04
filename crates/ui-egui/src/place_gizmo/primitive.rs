@@ -180,8 +180,8 @@ fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
 
 /// Stand the primitive on the face under the pointer, as a pre-selected face places it: through
 /// the Cylinder's Face input (its place follows in the same frame), into a typed Box's corner or
-/// centre (the Box's point pick, which no longer says where it is, is dropped), else as the
-/// picked place. A Cylinder, Cone or Coil does not take a curved face: it has no one axis there.
+/// centre, else as the picked place; the point pick, which no longer says where it is, is
+/// dropped. A Cylinder, Cone or Coil does not take a curved face: it has no one axis there.
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
     let s = &app.session;
     let planar = |sel: &Sel| match sel {
@@ -225,11 +225,12 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
             } else {
                 *at = Some((p, n));
             }
-            if let Some(inp) = d.inputs.first_mut() {
-                inp.items.clear();
-            }
         }
         _ => *at = Some((p, n)),
+    }
+    // The point pick no longer says where it is.
+    if let Some(inp) = d.inputs.first_mut() {
+        inp.items.clear();
     }
     d.error = None;
     true
