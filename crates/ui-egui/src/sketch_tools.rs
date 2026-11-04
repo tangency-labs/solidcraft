@@ -990,7 +990,8 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
         .curves
         .iter()
         .enumerate()
-        .filter(|(ci, c)| !sk.is_linked_curve(*ci) && !sk.is_ellipse_axis(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+        // The cheap end test first: the axis test scans the constraints.
+        .filter(|(ci, c)| c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi) && !sk.is_linked_curve(*ci) && !sk.is_ellipse_axis(*ci));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.

@@ -1288,8 +1288,8 @@ impl Sketch {
     /// centre bisects through the major end, and any other with an end held on the ellipse,
     /// first in curve order, counts, construction or not (a diameter drawn that way before the
     /// minor axis is taken for it). Deleting the midpoint or point-on-curve constraint makes
-    /// it an ellipse without that axis. Each call scans the constraints once, and `chain`, a
-    /// line drag and a move ask it for the ellipses they meet.
+    /// it an ellipse without that axis. Each call scans the constraints once, and again per line
+    /// the centre bisects; `chain`, a line drag and a move ask it for the ellipses they meet.
     #[allow(clippy::type_complexity)]
     pub fn ellipse_axis_lines(&self, e: usize) -> Option<(Option<(usize, usize)>, Option<(usize, usize, usize)>)> {
         let Some(CurveKind::Ellipse { c, m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
@@ -1738,7 +1738,8 @@ impl Sketch {
     }
 
     /// Remove curves (by index) and then any points no longer used by a curve (except the
-    /// origin and free points), and constraints that referred to removed entities.
+    /// origin and free points, and a removed ellipse's centre while one of its axes stays, as a
+    /// Center Rectangle's centre stays), and constraints that referred to removed entities.
     pub fn remove_curves(&mut self, which: &[usize]) {
         let mut owned: Vec<usize> = Vec::new();
         for (i, c) in self.curves.iter().enumerate() {

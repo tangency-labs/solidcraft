@@ -250,9 +250,6 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     assert!(shape.dist(Vec2::new(4.8296, 1.2941)) > 0.5);
 }
 
-/// An ellipse's construction axes cut a trim, as a Center Rectangle's construction diagonals
-/// do: a line inside the ellipse trims back to the minor axis, one inside the rectangle to the
-/// diagonals.
 /// An ellipse's own axes do not cut it (they end on it, where a Center Rectangle's diagonals end
 /// at its corners): a lone ellipse trims away whole, its axes staying as when it is deleted, and
 /// a trim of its outline stops where a line crosses, not at an axis end.
@@ -279,6 +276,9 @@ fn an_ellipse_s_own_axes_do_not_cut_it() {
     }
 }
 
+/// An ellipse's construction axes cut a trim, as a Center Rectangle's construction diagonals
+/// do: a line inside the ellipse trims back to the minor axis, one inside the rectangle to the
+/// diagonals.
 #[test]
 fn an_ellipse_s_axes_cut_as_a_center_rectangle_s_diagonals_do() {
     // What is left of the line at y = 1, as x ranges.
