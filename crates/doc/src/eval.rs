@@ -6996,7 +6996,10 @@ fn eval_feature(
             }
             let (spots, dir) = hole_spots(vals, st, f)?;
             let tools = hole_feature_tools(vals, st, f)?;
-            let handled = sheet_hole_cut(st, f, &tools, warning)?;
+            let mut handled = sheet_hole_cut(st, f, &tools, warning)?;
+            if handled.is_empty() && !st.surface_sheets.is_empty() {
+                handled = more::surface_hole_cut(st, &tools)?;
+            }
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
                 // A hole moved off the material (a changed position, parameter or sketch point)

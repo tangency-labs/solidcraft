@@ -2010,6 +2010,11 @@ pub struct SurfaceSheet {
     /// they were (see `sheet_surface_cuts`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loose: Vec<crate::Loose>,
+    /// Holes drilled along its flat panels into their rims (#560), each in its panel's frame
+    /// (`base` and `axis` in the chart, `base.z` its depth into the material): cut where the
+    /// panel lies, folded or flat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bores: Vec<crate::sheet::SheetBore>,
     /// Where text cut through it went, in the flat: each letter with its counters, so its DXF
     /// can put them on their own layer.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2122,6 +2127,7 @@ impl SurfaceSheet {
             pockets: Vec::new(),
             loose: Vec::new(),
             labels: Vec::new(),
+            bores: Vec::new(),
             perforations: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
@@ -2253,6 +2259,7 @@ impl SurfaceSheet {
             pockets: Vec::new(),
             loose: Vec::new(),
             labels: Vec::new(),
+            bores: Vec::new(),
             perforations: Vec::new(),
         };
         let solid = sheet.build()?;
@@ -2418,7 +2425,8 @@ impl SurfaceSheet {
         if self.unfolded {
             let base = self.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
             let frames: Vec<Option<Rigid3>> = dev.placements.iter().map(|p| p.map(|r| crate::sheet_surface_cuts::lift(&base, &r))).collect();
-            return self.recessed(self.flat_solid()?, &frames);
+            let body = self.recessed(self.flat_solid()?, &frames)?;
+            return self.bored(body, &frames);
         }
         let folded = fold_onto(&self.sheet, &dev, &self.places)?;
         let mut body = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work)?;
@@ -2429,7 +2437,23 @@ impl SurfaceSheet {
             let piece = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&l.region), 0.0, self.thickness)?;
             body = solidcraft_kernel::boolean(&body, &piece, solidcraft_kernel::BoolOp::Union)?.ok_or_else(|| DocError::Invalid("a loose piece".into()))?;
         }
-        self.recessed(body, &folded.places)
+        let body = self.recessed(body, &folded.places)?;
+        self.bored(body, &folded.places)
+    }
+
+    /// `body` with the sheet's bores cut from it, each from its panel where `frames` put it.
+    fn bored(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
+        for b in &self.bores {
+            let frame = b.panel.and_then(|p| frames.get(p).copied().flatten()).ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
+            let axis = frame.vector(b.axis);
+            let base = frame.point(b.base);
+            let Some(plane) = axis.normalized().and_then(|a| Plane::new(base, a.any_perp(), a.cross(a.any_perp()))) else { continue };
+            let circle = Region2 { outer: Loop2::circle(Vec2::new(0.0, 0.0), b.radius), holes: Vec::new() };
+            let (from, to) = (b.height.min(0.0), b.height.max(0.0));
+            let tool = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&circle), from, to)?;
+            body = solidcraft_kernel::boolean(&body, &tool, solidcraft_kernel::BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a bore takes the whole sheet".into()))?;
+        }
+        Ok(body)
     }
 
     /// `body` with the sheet's recesses cut from it, each from its panel where `frames` put it.

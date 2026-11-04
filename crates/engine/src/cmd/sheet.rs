@@ -852,6 +852,12 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness)).collect();
     let roll_lines: Vec<Value> =
         sk.roll_lines.iter().map(|l| json!({"panel": l.panel, "line": l.kind.name(), "start": pt(&l.start), "end": pt(&l.end)})).collect();
+    // Holes drilled along a panel into its rim (in the panel's frame): drilled after cutting.
+    let bores: Vec<Value> = sk
+        .bores
+        .iter()
+        .map(|b| json!({"panel": b.panel, "start": [b.base.x, b.base.y, b.base.z], "axis": [b.axis.x, b.axis.y, b.axis.z], "diameter": b.radius * 2.0, "length": b.height.abs()}))
+        .collect();
     let perforations: Vec<Value> = sk
         .perforations
         .iter()
@@ -867,9 +873,13 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .iter()
         .map(|r| json!({"roll": r.index, "panel": r.panel, "radius": r.radius, "angle_deg": r.angle_deg, "length": r.length, "width": r.width}))
         .collect();
-    json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
+    let mut out = json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
         "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
-        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch})
+        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch});
+    if !bores.is_empty() {
+        out["bores"] = Value::Array(bores);
+    }
+    out
 }
 
 fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {

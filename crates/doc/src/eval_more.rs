@@ -1398,6 +1398,103 @@ pub(super) fn surface_prism_cut(
     Ok(handled)
 }
 
+/// What a hole feature's drills take from the sheets made from surfaces they reach (#6748): a
+/// drill square across a flat panel, through its thickness and clear inside its material, is a
+/// round hole in its outline; one along a flat panel, inside its thickness, a bore of it (see
+/// [`crate::sheet::SheetBore`]). Each drill must meet one panel so and nothing else of the
+/// sheet. The sheets' bodies drilled; none, and nothing changed, for any other hole, which the
+/// generic path takes.
+pub(super) fn surface_hole_cut(st: &mut ModelState, tools: &[(Traced, Option<PrimitivePrism>)]) -> Result<Vec<String>> {
+    if tools.is_empty() || tools.len() > 10_000 {
+        return Ok(Vec::new());
+    }
+    let mut drills = Vec::with_capacity(tools.len());
+    for (_, prism) in tools {
+        let Some(PrimitivePrism::Cylinder { base, axis, radius, height }) = *prism else { return Ok(Vec::new()) };
+        drills.push((base, axis, radius, height, drill_box(base, axis, radius, height)));
+    }
+    let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
+    for (i, sk) in st.surface_sheets.iter().enumerate() {
+        let Some(mb) = st.body(&sk.body) else { continue };
+        let body_box = exact_box(&mb.body);
+        let reaching: Vec<_> = drills.iter().filter(|d| !boxes_apart(&d.4, &body_box)).collect();
+        if reaching.is_empty() {
+            continue;
+        }
+        let Some((panels, boxes)) = sk.pieces_in_space() else { return Ok(Vec::new()) };
+        let t = sk.thickness;
+        let tol = 1e-7;
+        let mut out = sk.clone();
+        for &&(base, axis, radius, height, reach) in &reaching {
+            let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64))> = None;
+            for (p, frame, own) in &panels {
+                let inv = frame.inverse();
+                let (b, a) = (inv.point(base), inv.vector(axis));
+                let Some(a) = a.normalized() else { return Ok(Vec::new()) };
+                let across = a.z.abs() >= 1.0 - 1e-9;
+                let mut span = (height.min(0.0), height.max(0.0));
+                let meets = if across {
+                    let (z0, z1) = (b.z.min(b.z + a.z * height), b.z.max(b.z + a.z * height));
+                    let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
+                    if own.contains(Vec2::new(b.x, b.y)) && !(z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)) {
+                        return Ok(Vec::new());
+                    }
+                    z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)
+                } else if a.z.abs() <= 1e-9 {
+                    // Along the panel: its line through the panel's material, inside its thickness.
+                    let (b2, a2) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
+                    let inside = crate::sheet_surface_convert::extent_across(own, (b2, a2)).map(|(s0, s1)| (s0.max(span.0), s1.min(span.1)));
+                    let through = inside.is_some_and(|(u0, u1)| u0 < u1);
+                    if let Some(inside) = inside.filter(|_| through) {
+                        span = inside;
+                    }
+                    if through && !(b.z - radius > tol && b.z + radius < t - tol) {
+                        return Ok(Vec::new());
+                    }
+                    through
+                } else {
+                    false
+                };
+                if meets {
+                    if found.is_some() {
+                        return Ok(Vec::new());
+                    }
+                    found = Some((*p, across, b, a, span));
+                }
+            }
+            let Some((p, across, b, a, (u0, u1))) = found else { return Ok(Vec::new()) };
+            if boxes.iter().any(|(k, bx)| *k != Some(p) && !boxes_apart(&reach, &Some(*bx))) {
+                return Ok(Vec::new());
+            }
+            if out.recesses.iter().any(|r| r.panel == p) || !out.sheet.cuts.is_empty() {
+                return Ok(Vec::new());
+            }
+            let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
+            if across {
+                let circle = Region2 { outer: Loop2::circle(Vec2::new(b.x, b.y), radius), holes: Vec::new() };
+                if !crate::sheet_surface::holds_clear(&panel.region, &circle) {
+                    return Ok(Vec::new());
+                }
+                panel.region.holes.push(circle.outer.ccw().reversed());
+            } else {
+                // Through the panel's material only, a hair past it at either end.
+                let past = t * 1e-2;
+                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - past), axis: a, radius, height: u1 - u0 + 2.0 * past });
+            }
+        }
+        plans.push((i, out));
+    }
+    let mut handled = Vec::with_capacity(plans.len());
+    for (i, sk) in plans {
+        handled.push(sk.body.clone());
+        if let Some(slot) = st.surface_sheets.get_mut(i) {
+            *slot = sk;
+        }
+        rebuild_surface_sheet(st, i)?;
+    }
+    Ok(handled)
+}
+
 /// An untapered extrude join one sheet thick in the plane of a flat panel of a sheet made from
 /// surfaces (#6748), folded or flat, that touches that panel's material and no other piece of
 /// the sheet: its footprint becomes part of the panel's outline, so the flat, its DXF and a

@@ -256,7 +256,7 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
     for i in 0..after.surface_sheets.len() {
         let Some(sk) = after.surface_sheets.get(i).cloned() else { continue };
         // A sheet the feature changed itself (a cut read straight into it) has its body already.
-        if before.surface_sheets.iter().any(|b| b.body == sk.body && (b.sheet != sk.sheet || b.loose != sk.loose)) {
+        if before.surface_sheets.iter().any(|b| b.body == sk.body && (b.sheet != sk.sheet || b.loose != sk.loose || b.bores != sk.bores)) {
             continue;
         }
         let (Some(was), Some(now)) = (before.body(&sk.body), after.body(&sk.body)) else { continue };
