@@ -386,6 +386,30 @@ fn a_drag_with_the_rest_of_a_selection_moves_it_as_one() {
     }
 }
 
+/// A selection dragged by an ellipse's axis takes the ellipse and its other axis along, as the
+/// axis dragged alone does: the whole ellipse slides by the cursor's move, keeping its size.
+#[test]
+fn a_selection_dragged_by_an_ellipse_axis_takes_the_ellipse_along() {
+    for live in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+        let e = r["curves"][0].as_str().expect("the ellipse").to_string();
+        run(&mut s, "sketch.line", json!({"points": [[40, -10], [40, 10]], "connect": false}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let Some((Some((major, _)), _)) = sk.ellipse_axis_lines(sk.curve_index(&e).expect("the ellipse")) else { panic!("its axes") };
+        let axis = sk.curves[major].id.clone();
+        let line = sk.curves.last().expect("the line").id.clone();
+        run(&mut s, "sketch.drag", json!({"entity": axis, "with": [line], "from": [10, 0], "to": [10, 15], "live": live}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let ei = sk.curve_index(&e).expect("the ellipse");
+        let solidcraft_sketch::CurveKind::Ellipse { c, m, .. } = sk.curves[ei].kind else { panic!("an ellipse") };
+        let v = solidcore_record::Vec2::new;
+        assert!(sk.point(c).expect("its centre").dist(v(0.0, 15.0)) < 1e-6, "live {live}: the centre follows: {:?}", sk.point(c));
+        assert!(sk.point(m).expect("its major end").dist(v(20.0, 15.0)) < 1e-6, "live {live}: the major end follows: {:?}", sk.point(m));
+    }
+}
+
 /// A 5 x 5 square drawn on the top face of a 30 x 20 x 10 box, the face's edges projected into
 /// its sketch; returns the session and a corner of the square (its id and where it is).
 fn on_a_face() -> (Session, String, solidcore_record::Vec2) {

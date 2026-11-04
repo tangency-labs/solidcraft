@@ -815,8 +815,9 @@ fn plan(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> Option<(Path, Hold)> {
 }
 
 /// A selection dragged by one of its entities (`e`, the rest `with`): every free point of all of
-/// them slides by `d` and the solves hold them all (circles and ellipses keep their radii), so
-/// the selection moves as one instead of its free ends trailing behind the grabbed entity.
+/// them slides by `d` and the solves hold them all (circles and ellipses keep their radii, an
+/// ellipse's axis brings its ellipse), so the selection moves as one instead of its free ends
+/// trailing behind the grabbed entity.
 fn plan_group(sk: &Sketch, e: Ent, with: &[Ent], d: Vec2) -> Option<(Path, Hold)> {
     let mut hold = Hold::default();
     for e in std::iter::once(&e).chain(with) {
@@ -827,6 +828,16 @@ fn plan_group(sk: &Sketch, e: Ent, with: &[Ent], d: Vec2) -> Option<(Path, Hold)
                 hold.points.extend(kind.point_ids());
                 if matches!(kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) {
                     hold.radii.push(c);
+                }
+                // An ellipse's axis takes the ellipse and the other axis along, as it does dragged
+                // alone (see `plan`).
+                if let Some(e) = sk.ellipse_of_axis(c)
+                    && let (Some(kind), Some((major, minor))) = (sk.curves.get(e).map(|x| &x.kind), sk.ellipse_axis_lines(e))
+                {
+                    hold.points.extend(kind.point_ids());
+                    hold.points.extend(major.map(|(_, q)| q));
+                    hold.points.extend(minor.into_iter().flat_map(|(_, n1, n2)| [n1, n2]));
+                    hold.radii.push(e);
                 }
             }
         }
