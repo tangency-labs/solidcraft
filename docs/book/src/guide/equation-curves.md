@@ -149,6 +149,12 @@ in it; change them and click **OK**.
   close enough or may not, but neither can be proven: a wave so fine that the spline through 500
   points crisscrosses it, say, or one with so many wiggles that the proof runs out of work. Raise
   the tolerance or narrow the range.
+- **A sketch warns "with these values its points leave the formulas' point … further than the
+  tolerance".** A parameter the rule uses changed (a wave made finer, a curve made much larger),
+  or the design was saved by an older SolidCraft that drew the curve without proving it: the
+  points no longer follow the rule closely enough, and the curve is drawn as they are. Edit the
+  curve (applying it unchanged is enough) to fit it with enough points; if even 500 can't, the
+  edit says so, and a larger tolerance or a narrower range fits it.
 
 ## For scripts and agents
 
@@ -159,7 +165,7 @@ another), up to 500. That is proven all along the curve, not checked at a few pl
 points, and the reply's `deviation` is the bound: making or editing a curve accepts only points
 proven within the Tolerance, and refuses when that can't be proven. Its points are fixed, so other
 curves can start at its ends. When a parameter a rule uses changes, the points follow, as many as
-before; the sketch reports an error only when the new values put the curve proven further than
-the Tolerance from its points (a wave made finer, say), not when it merely can't be proven, and
-editing the curve fits it again. The pictures on this page come from the scripts in
+before; the sketch warns only when the new values put the curve proven further than the Tolerance
+from its points (a wave made finer, say), not when it merely can't be proven, and editing the
+curve fits it again. The pictures on this page come from the scripts in
 `docs/book/scripts/equation-*.json`.

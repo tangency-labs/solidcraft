@@ -477,12 +477,12 @@ fn deviation(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f
     Ok(unproven.map_or(Found::Within(worst), Found::Unproven))
 }
 
-/// A refusal when, with these values, a point of the formulas is further from the whole spline
+/// A warning when, with these values, a point of the formulas is further from the whole spline
 /// than the tolerance (#10414): the saved count can't follow them, as a wave made finer by a
-/// parameter. A curve proven within, or one that merely can't be proven at its count (saved
-/// before the proof, or needing more points to prove than to be within), keeps rebuilding. The
-/// last few curves found fine are remembered (per thread), so an unchanged rebuild doesn't check
-/// them again.
+/// parameter, or a curve saved before the proof that was never within. A curve proven within, or
+/// one that merely can't be proven at its count (saved before the proof, or needing more points
+/// to prove than to be within), says nothing. The last few curves found fine are remembered (per
+/// thread), so an unchanged rebuild doesn't check them again.
 fn shown_off(vals: &BTreeMap<String, Value>, eq: &EquationCurve, span: (f64, f64), points: &[Vec2], closed: bool, d: Defaults) -> Option<String> {
     type Key = (EquationCurve, Vec<(String, u64, i8, i8)>, u64, usize, bool);
     thread_local! {
@@ -497,8 +497,8 @@ fn shown_off(vals: &BTreeMap<String, Value>, eq: &EquationCurve, span: (f64, f64
     if FINE.with(|fine| fine.borrow().contains(&key)) {
         return None;
     }
-    let refusal = match deviation(vals, eq, span, points, closed, d) {
-        // Found off by a heuristic: refused only once proven off.
+    let off = match deviation(vals, eq, span, points, closed, d) {
+        // Found off by a heuristic: said only once proven off.
         Ok(Found::Off { at, .. }) => surely_off(vals, eq, points, closed, d, at).then(|| {
             format!(
                 "with these values its {} points leave the formulas' point at {} = {} further than the tolerance of {} mm from the spline: edit the curve to fit it again",
@@ -510,7 +510,7 @@ fn shown_off(vals: &BTreeMap<String, Value>, eq: &EquationCurve, span: (f64, f64
         }),
         _ => None,
     };
-    if refusal.is_none() {
+    if off.is_none() {
         FINE.with(|fine| {
             let mut fine = fine.borrow_mut();
             if fine.len() >= 64 {
@@ -519,7 +519,7 @@ fn shown_off(vals: &BTreeMap<String, Value>, eq: &EquationCurve, span: (f64, f64
             fine.push(key);
         });
     }
-    refusal
+    off
 }
 
 /// Whether the formulas' point where the variable is `at` is proven further than the tolerance
@@ -616,9 +616,8 @@ pub fn fit(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<Equatio
 impl crate::Document {
     /// Place the points of the sketch's equation curves where their formulas put them now (in
     /// place), with the number of points each has. Their points are fixed, so the solve keeps
-    /// them there. A curve that is gone or is no longer a fit point spline is left as it is. A
-    /// curve whose formulas are now found further from its spline than its tolerance is an error
-    /// ([`shown_off`]).
+    /// them there. A curve that is gone or is no longer a fit point spline is left as it is.
+    /// Whether the spline still follows the formulas is [`Self::equation_curves_off`]'s question.
     pub fn apply_equation_values(&self, vals: &BTreeMap<String, Value>, sk: &mut Sketch) -> Result<()> {
         for k in 0..sk.equations.len() {
             let Some(eq) = sk.equations.get(k).cloned() else { continue };
@@ -627,14 +626,33 @@ impl crate::Document {
                 continue;
             };
             let (count, closed) = (pts.len(), *periodic);
-            let (points, closed, span, d) =
-                place(vals, &eq, count, Some(closed)).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
-            if let Some(why) = shown_off(vals, &eq, span, &points, closed, d) {
-                return Err(DocError::Expr(format!("equation curve {}: {why}", eq.curve)));
-            }
+            let (points, ..) = place(vals, &eq, count, Some(closed)).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
             sk.place_equation_points(ci, &points)?;
         }
         Ok(())
+    }
+
+    /// A warning for each equation curve of the placed sketch whose spline a point of its
+    /// formulas is proven further from than its tolerance ([`shown_off`]). The curve is still
+    /// drawn: a design that opened before keeps opening, and says what is wrong (#10414).
+    pub fn equation_curves_off(&self, vals: &BTreeMap<String, Value>, sk: &Sketch) -> Vec<String> {
+        let mut off = Vec::new();
+        for eq in &sk.equations {
+            let Some(ci) = sk.curve_index(&eq.curve) else { continue };
+            let Some(solidcraft_sketch::CurveKind::Spline { pts, control: false, periodic, .. }) = sk.curves.get(ci).map(|c| &c.kind) else {
+                continue;
+            };
+            let points: Vec<Vec2> = pts.iter().filter_map(|&p| sk.point(p)).collect();
+            if points.len() != pts.len() || check(eq).is_err() {
+                continue;
+            }
+            let d = defaults(vals);
+            let Ok(span) = range(vals, eq, d) else { continue };
+            if let Some(why) = shown_off(vals, eq, span, &points, *periodic, d) {
+                off.push(format!("equation curve {}: {why}", eq.curve));
+            }
+        }
+        off
     }
 }
 
@@ -795,12 +813,12 @@ mod tests {
         }
     }
 
-    /// On a rebuild, a curve is refused only when its formulas are proven further than the
-    /// tolerance from its spline. The semicircle at 348 points is within the tolerance (measured
-    /// densely, from 346 points) though not provable below 352, and keeps rebuilding; a sine the
-    /// samples all miss is refused (#10414).
+    /// On a rebuild, a curve warns only when its formulas are proven further than the tolerance
+    /// from its spline. The semicircle at 348 points is within the tolerance (measured densely,
+    /// from 346 points) though not provable below 352, and says nothing; a sine the samples all
+    /// miss warns (#10414).
     #[test]
-    fn a_rebuild_is_refused_only_when_the_formulas_are_shown_off_the_spline() {
+    fn a_rebuild_warns_only_when_the_formulas_are_shown_off_the_spline() {
         let vals = BTreeMap::new();
         let shown_off_at = |x: Option<&str>, y: &str, (a, b): (f64, f64), tol: f64, count: usize| {
             let mut e = eq(x, y, &a.to_string(), &b.to_string());
@@ -808,11 +826,11 @@ mod tests {
             let (points, closed, span, d) = place(&vals, &e, count, None).unwrap();
             (deviation(&vals, &e, span, &points, closed, d).unwrap(), shown_off(&vals, &e, span, &points, closed, d))
         };
-        let (found, refused) = shown_off_at(None, "sqrt(400 - x^2)", (-20.0, 20.0), 0.01, 348);
+        let (found, off) = shown_off_at(None, "sqrt(400 - x^2)", (-20.0, 20.0), 0.01, 348);
         assert!(!matches!(found, Found::Within(_)), "proven at 348 points now: pick a count it isn't");
-        assert_eq!(refused, None);
-        let (_, refused) = shown_off_at(None, "sin(800 * pi * x)", (0.0, 1.0), 0.01, 9);
-        assert!(refused.is_some_and(|why| why.contains("further than the tolerance of 0.01 mm from the spline")));
+        assert_eq!(off, None);
+        let (_, off) = shown_off_at(None, "sin(800 * pi * x)", (0.0, 1.0), 0.01, 9);
+        assert!(off.is_some_and(|why| why.contains("further than the tolerance of 0.01 mm from the spline")));
     }
 
     /// A piece exactly the tolerance away is not ruled out, along an axis or across one, nor one

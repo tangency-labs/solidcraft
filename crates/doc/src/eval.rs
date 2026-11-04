@@ -12508,6 +12508,8 @@ fn eval_sketch(
     if let Some(w) = report.wires.as_ref().filter(|w| !w.ok) {
         warns.push(w.failure(|f| format!("the 3D sketch constraints conflict ({f})")));
     }
+    // An equation curve its points no longer follow is drawn, and said (#10414).
+    warns.extend(doc.equation_curves_off(vals, &sk));
     if !warns.is_empty() {
         *warning = Some(warns.join("; "));
     }

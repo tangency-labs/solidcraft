@@ -258,19 +258,24 @@ fn a_curve_its_parameters_break_is_an_error_not_a_crash() {
 
 /// A parameter that makes a saved curve too fine for its points (#10414): at k = 0 the curve is
 /// flat and takes 9 points; at k = 800 every one of those samples is a zero of the wave, so the
-/// same points would draw it flat, 1 mm off. The sketch reports it instead, until k goes back.
+/// same points draw it flat, 1 mm off. The sketch still builds, with its points on the formulas,
+/// and warns, until k goes back. A design saved before the proof with such a curve opens the same.
 #[test]
-fn a_parameter_that_makes_a_curve_too_fine_for_its_points_is_an_error() {
+fn a_parameter_that_makes_a_curve_too_fine_for_its_points_warns() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "k", "expression": "0 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
     let r = run(&mut s, "sketch.equation_curve", json!({"explicit": true, "y": "sin(k / 1 mm * pi * x)", "start": 0, "end": 1}));
     assert_eq!(r["points"], 9, "{r}");
+    let id = r["curve"].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
     no_trouble(&s);
     run(&mut s, "parameters.change", json!({"name": "k", "expression": "800 mm"}));
     let r = s.model.results.iter().find(|r| r.name == "S").unwrap();
-    assert!(r.error.as_deref().is_some_and(|e| e.contains("further than the tolerance")), "{:?}", r.error);
+    assert!(r.error.is_none(), "{:?}", r.error);
+    let warning = r.warning.as_deref().unwrap_or_default();
+    assert!(warning.contains(&format!("equation curve {id}")) && warning.contains("further than the tolerance of 0.01 mm"), "{warning}");
+    assert!(curve_points(&s, &id).iter().all(|p| p.y.abs() < 1e-9), "the samples are the wave's zeros");
     run(&mut s, "parameters.change", json!({"name": "k", "expression": "0 mm"}));
     no_trouble(&s);
 }
@@ -315,11 +320,12 @@ fn a_variable_in_its_ranges_unit_follows_the_parameter_and_the_design_unit() {
     run(&mut s, "document.units", json!({"units": "in"}));
     no_trouble(&s);
     assert_parabola(&s, &id, 20.0);
-    // A parameter given in inches, in an inch design (about the same size: much larger, the
-    // curve's 14 points would no longer keep it within its tolerance, which is an error).
-    run(&mut s, "parameters.change", json!({"name": "a", "expression": "0.8 in"}));
-    no_trouble(&s);
-    assert_parabola(&s, &id, 20.32);
+    // A parameter given in inches, in an inch design: the curve follows it, and its 14 points no
+    // longer keep it within its tolerance, which the sketch says.
+    run(&mut s, "parameters.change", json!({"name": "a", "expression": "2 in"}));
+    let r = s.model.results.iter().find(|r| r.name == "S").unwrap();
+    assert!(r.error.is_none() && r.warning.as_deref().is_some_and(|w| w.contains("edit the curve to fit it again")), "{:?} {:?}", r.error, r.warning);
+    assert_parabola(&s, &id, 50.8);
 }
 
 /// A plain end is in the design's unit, so it moves when the unit changes (#9333).
