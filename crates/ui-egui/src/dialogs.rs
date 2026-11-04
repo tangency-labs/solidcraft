@@ -967,10 +967,14 @@ impl Dialog {
                 Kind::Split,
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
-            "solid.thread" => Dialog::new(
-                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
-                crate::dialogs_thread::inputs(),
-            ),
+            "solid.thread" => {
+                let mut d = Dialog::new(
+                    Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
+                    crate::dialogs_thread::inputs(),
+                );
+                d.extra.insert("continuous_flanks".into(), json!(app.preferences.thread_continuous_flanks));
+                d
+            }
             "material.assign" => {
                 Dialog::new(Kind::Material { index: usize::MAX, editor: Default::default() }, vec![SelInput::new("Bodies", BODIES, true)])
             }

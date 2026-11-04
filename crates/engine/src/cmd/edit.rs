@@ -1750,6 +1750,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
+    if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("continuous_flanks").or_insert_with(|| json!(continuous_flanks));
+    }
     // A thread saved before holes were sized by their nominal diameter keeps the size it had
     // when it is edited without naming one.
     if let FeatureKind::Thread { old_auto_size: true, .. } = &old.kind

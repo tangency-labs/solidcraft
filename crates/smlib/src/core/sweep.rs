@@ -1421,7 +1421,7 @@ fn screw_placed(m: &Screw, c: &Profile, a: f64) -> Profile {
 /// by span (SM_API's curve sweep carries the profile on its own frame, which along a helix turns
 /// it away from the screw motion), lines parallel to the axis as exact cylinder pieces, the caps
 /// where the motion starts and ends, all stitched and oriented.
-fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, tolerance: f64) -> solidcore::Result<Out<Brep>> {
+fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, tolerance: f64, join_spline_walls: bool) -> solidcore::Result<Out<Brep>> {
     let curves = match parse(k, profile) {
         Ok(c) => c,
         Err(e) => return Ok(Err(e)),
@@ -1514,8 +1514,8 @@ fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, toleranc
     }
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
     // A radial law's knots can change the wall's tangent, so retain those face boundaries. Half
-    // turns are only cylinder seams: the other walls join their existing NURBS spans across them.
-    for group in pieces.chunk_by(|a, _| !m.angles.contains(&a.last())) {
+    // turns are only cylinder seams: join the other walls' spans when explicitly requested.
+    for group in pieces.chunk_by(|a, _| join_spline_walls && !m.angles.contains(&a.last())) {
         for (i, (c, wall)) in curves.iter().zip(&walls).enumerate() {
             let r = radius.get(i).copied().unwrap_or(0.0);
             let (Some(first), Some(last)) = (group.first(), group.last()) else { continue };
@@ -1567,6 +1567,7 @@ pub(crate) fn screw_sweep(
     turns: f64,
     law: Option<&[(f64, f64)]>,
     tolerance: f64,
+    join_spline_walls: bool,
 ) -> Result<Body> {
     if !screw_ok(origin, pitch, turns, tolerance) {
         return Err(Error::Argument);
@@ -1594,7 +1595,7 @@ pub(crate) fn screw_sweep(
             angles: law.iter().map(|(t, _)| TAU * t).collect(),
             offsets: law.iter().map(|(_, o)| *o).collect(),
         };
-        screw(k, profile, m, turns, tolerance)
+        screw(k, profile, m, turns, tolerance, join_spline_walls)
     })
 }
 

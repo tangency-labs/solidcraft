@@ -1689,11 +1689,14 @@ mod imp {
         pitch: f64,
         turns: f64,
         law: &[(f64, f64)],
+        continuous_flanks: bool,
     ) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
+        let options =
+            solidcraft_smlib::sweeps::ScrewSweepOptions { law: (!law.is_empty()).then_some(law), join_spline_walls: continuous_flanks, tolerance };
         let brep =
-            Brep::screw_sweep_radial(&c, p(origin), p(axis), pitch, turns, law, tolerance).map_err(|e| failed("screw sweep with a radial law", e))?;
+            Brep::screw_sweep_with_options(&c, p(origin), p(axis), pitch, turns, options).map_err(|e| failed("screw sweep with a radial law", e))?;
         let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)

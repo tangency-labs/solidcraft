@@ -1049,6 +1049,8 @@ macro_rules! preference_settings {
 preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// Face layout for newly created modelled threads; saved features keep their choice.
+    thread_continuous_flanks: bool = true, PAGE_DESIGN => check_id("prefs.thread_continuous_flanks");
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
