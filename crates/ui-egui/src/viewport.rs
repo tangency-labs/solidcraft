@@ -3648,11 +3648,13 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
     // In the translucent pass (after the grid and edges) so it covers them.
     let proj = display_proj(app);
     let display = crate::sketch_display::profile_region(app, sketch, index, &plane, &proj);
+    let before = sc.trans.len();
     for [a, b, c] in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut 65_536)) {
         sc.trans_tri(w(a), [0.0; 3], col);
         sc.trans_tri(w(b), [0.0; 3], col);
         sc.trans_tri(w(c), [0.0; 3], col);
     }
+    solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, sc.trans.len().saturating_sub(before) as u64);
     for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
         for part in crate::sketch_display::boundary_parts(lp, &plane, &proj, app.viewport.pixels_per_point()) {
             for pair in part.windows(2) {
@@ -7179,6 +7181,21 @@ mod tests {
             assert_eq!(value, 0, "{counter:?}: {warm:?}");
         }
         assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state().unwrap()));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[5,6]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.session.selection = vec![Sel::Profile { sketch, index: 0 }];
+        h.frames(2);
+        let ((), selected) = capture(|| {
+            h.app.cam.yaw += 0.05;
+            h.frame();
+        });
+        assert!(selected.complete(), "{selected:?}");
+        assert!(selected.get(Counter::DisplayTriangleBytes) > 0, "selected profile triangles must be counted: {selected:?}");
+        for (counter, value) in selected.iter().filter(|(counter, _)| *counter != Counter::DisplayTriangleBytes) {
+            assert_eq!(value, 0, "{counter:?}: {selected:?}");
+        }
     }
     use crate::navigation::*;
 
