@@ -1049,7 +1049,7 @@ fn coil_turns_about_a_picked_axis() {
     let h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
     assert_eq!(d.inputs.get(1).map(|i| i.label), Some("Axis (optional)"));
-    let sketch = h.app.session.world_state().sketches[0].feature;
+    let sketch = h.app.session.world_state().unwrap().sketches[0].feature;
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert!(p.get("axis").is_none(), "no axis picked keeps the default: {p}");
