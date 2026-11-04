@@ -428,6 +428,19 @@ The agent reaches the open design only through SolidCraft's own tools (the
   an attached selection (and are shown the same way), and the box is empty again afterwards.
   **Cancel** keeps what was picked before.
 
+## Custom instructions
+
+Preferences → AI → **Custom instructions** holds your own text for the agent: how you like to
+work, rules to keep to ("don't start a new design from the chat", "sketch on XZ with explicit
+plane vectors"). Every chat starts with it, after SolidCraft's own note about where the agent
+is, by the same route that note takes: the system prompt of an endpoint's requests, or the
+session an ACP agent opens. An agent that reads neither doesn't get it. A change applies from
+the next chat (**Connect** or **New chat**), not to the one running. Blank text adds nothing;
+at most 4000 characters are kept.
+
+They are for this chat only: an MCP client you run yourself keeps its own instruction files,
+and one text applies to every design.
+
 ## Permissions
 
 Preferences → AI → **Permissions** decides what the agent may do without asking, for every agent;

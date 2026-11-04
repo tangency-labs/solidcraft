@@ -471,6 +471,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 agents_section(app, ui);
             }
+            instructions_section(app, ui);
             panel_section(app, ui);
             connecting_section(app, ui);
         });
@@ -493,6 +494,21 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::help_icon(ui, tr(help));
             });
         }
+    });
+}
+
+/// Custom instructions (#8220): text every new chat's system note carries.
+fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::settings_section(ui, "instructions", tr("ai.prefs.instructions"), |ui| {
+        let id = egui::Id::new("prefs_agent_instructions");
+        let text = &mut app.preferences.agent_instructions;
+        let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
+        if response.has_focus() {
+            // Typed text belongs to the field, not to Preferences search.
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
+        crate::scenario::publish_target("prefs:agent_instructions", response.rect);
+        ui_kit::text(ui, tr("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
     });
 }
 
@@ -1355,7 +1371,7 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "panel", "assistant_connecting", "agent_pointer"] {
+            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
                 let section = scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
                 assert!((section.height() - (crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_2)).abs() <= 1.0);

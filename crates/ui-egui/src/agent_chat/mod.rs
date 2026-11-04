@@ -1041,7 +1041,8 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         },
     };
     match started {
-        Ok(b) => {
+        Ok(mut b) => {
+            b.set_instructions(&app.preferences.agent_instructions);
             app.preferences.agent_last = entry.id.clone();
             chat.backend = Some(b);
             chat.argv = entry.argv.clone();
@@ -1489,6 +1490,8 @@ pub fn new_chat(app: &mut SolveApp) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
         if let Some(b) = chat.backend.as_mut() {
+            // Instructions edited since the last session apply from this one on.
+            b.set_instructions(&app.preferences.agent_instructions);
             b.new_session();
         }
     }
@@ -2361,7 +2364,8 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 }
 
 /// `ui.agent_chat` on the control channel (tests and screenshots): `enabled`, `command`,
-/// `connect_at_start` and `open_at_start` (the launch preferences), `open`,
+/// `connect_at_start` and `open_at_start` (the launch preferences), `instructions` (the custom
+/// instructions, #8220), `open`,
 /// `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
 /// next message), `remove_file` (index), `send`, `attach_view`, `attach_selection`, `pick`,
 /// `permission` (an option id, or `"cancel"`), `approve` (`true`/`false`, the oldest held
@@ -2378,6 +2382,10 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(b) = p.get("open_at_start").and_then(Value::as_bool) {
         app.preferences.agent_chat_open_at_start = b;
+    }
+    if let Some(text) = p.get("instructions") {
+        let Some(text) = text.as_str() else { return Err("instructions must be text".into()) };
+        app.preferences.agent_instructions = text.chars().take(acp::INSTRUCTIONS_LIMIT).collect();
     }
     if let Some(m) = p.get("permissions") {
         let Some(mode) = m.as_str().and_then(agents::Mode::parse) else { return Err("permissions must be ask, edits or all".into()) };
@@ -2630,6 +2638,7 @@ pub fn status(app: &SolveApp) -> Value {
     if let Some(state) = state.as_object_mut() {
         state.insert("modelsNote".into(), json!(c.models_note));
         state.insert("customModels".into(), json!(custom_models_accepted(app)));
+        state.insert("instructions".into(), json!(app.preferences.agent_instructions));
     }
     state
 }

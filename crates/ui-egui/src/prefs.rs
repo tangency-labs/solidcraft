@@ -1557,6 +1557,9 @@ preference_settings! {
     agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
     agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
+    /// Custom instructions (#8220): text the agent chat adds to its system note when a session
+    /// starts (`agent_chat::acp::system_note`). No page reset discards this user-authored text.
+    agent_instructions: String = String::new();
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
