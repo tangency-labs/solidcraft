@@ -1933,9 +1933,16 @@ impl SurfaceConversion {
 
     /// The folded sheet: its solid, sewn from the flat's pieces carried into space.
     pub fn solid(&self) -> Result<Body> {
+        Ok(self.named_solid()?.0)
+    }
+
+    /// [`Self::solid`], with its faces' names (see [`crate::sheet::FaceNamer`]).
+    pub(crate) fn named_solid(&self) -> Result<(Body, Vec<Option<String>>)> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
-        crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &mut FlatWork::new())
+        let pieces = self.pieces()?;
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &self.development, pieces);
+        crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &mut FlatWork::new(), &|p, r| namer.name(p, r))
     }
 }
 
@@ -2015,6 +2022,10 @@ pub struct SurfaceSheet {
     /// feature builds the body from the sheet again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub altered_by: Option<String>,
+    /// Its body's faces' names, by face, as its builder made them (see
+    /// [`crate::sheet::FaceNamer`]): none unfolded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub face_names: Vec<Option<String>>,
     /// Holes drilled along its flat panels into their rims (#560), each in its panel's frame
     /// (`base` and `axis` in the chart, `base.z` its depth into the material): cut where the
     /// panel lies, folded or flat.
@@ -2134,10 +2145,13 @@ impl SurfaceSheet {
             labels: Vec::new(),
             bores: Vec::new(),
             altered_by: None,
+            face_names: Vec::new(),
             perforations: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
-        Ok((sheet, c.solid()?))
+        let (solid, names) = c.named_solid()?;
+        sheet.face_names = names;
+        Ok((sheet, solid))
     }
 
     /// A sheet of one flat panel, `region` in `plane`, its material the rule's thickness along the
@@ -2267,6 +2281,7 @@ impl SurfaceSheet {
             labels: Vec::new(),
             bores: Vec::new(),
             altered_by: None,
+            face_names: Vec::new(),
             perforations: Vec::new(),
         };
         let solid = sheet.build()?;
@@ -2444,22 +2459,51 @@ impl SurfaceSheet {
             self.loose.iter().filter_map(|l| dev.placements.get(l.panel).copied().flatten().map(|at| at.region(&l.region))).collect();
         self.regions.extend(loose);
         if self.unfolded {
+            self.face_names = Vec::new();
             let base = self.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
             let frames: Vec<Option<Rigid3>> = dev.placements.iter().map(|p| p.map(|r| crate::sheet_surface_cuts::lift(&base, &r))).collect();
             let body = self.recessed(self.flat_solid()?, &frames)?;
             return self.bored(body, &frames);
         }
         let folded = fold_onto(&self.sheet, &dev, &self.places)?;
-        let mut body = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work)?;
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces);
+        let (mut body, mut names) = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work, &|p, r| namer.name(p, r))?;
         // Each loose piece where its panel is folded to.
         for l in &self.loose {
             let frame = folded.places.get(l.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a loose piece's panel has no place".into()))?;
             let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a loose piece's panel has no plane".into()))?;
             let piece = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&l.region), 0.0, self.thickness)?;
             body = solidcraft_kernel::boolean(&body, &piece, solidcraft_kernel::BoolOp::Union)?.ok_or_else(|| DocError::Invalid("a loose piece".into()))?;
+            names = crate::sheet::carried(&names, &body);
         }
-        let body = self.recessed(body, &folded.places)?;
-        self.bored(body, &folded.places)
+        let (body, names) = self.recessed_named(body, names, &folded.places)?;
+        let (body, names) = self.bored_named(body, names, &folded.places)?;
+        self.face_names = names;
+        Ok(body)
+    }
+
+    /// [`Self::recessed`], carrying `names`, its faces' names, through each cut.
+    fn recessed_named(&self, body: Body, names: Vec<Option<String>>, frames: &[Option<Rigid3>]) -> Result<(Body, Vec<Option<String>>)> {
+        let mut out = (body, names);
+        for r in &self.recesses {
+            let one = SurfaceSheet { recesses: vec![r.clone()], ..self.clone() };
+            let body = one.recessed(out.0, frames)?;
+            out.1 = crate::sheet::carried(&out.1, &body);
+            out.0 = body;
+        }
+        Ok(out)
+    }
+
+    /// [`Self::bored`], carrying `names`, its faces' names, through each bore.
+    fn bored_named(&self, body: Body, names: Vec<Option<String>>, frames: &[Option<Rigid3>]) -> Result<(Body, Vec<Option<String>>)> {
+        let mut out = (body, names);
+        for b in &self.bores {
+            let one = SurfaceSheet { bores: vec![b.clone()], ..self.clone() };
+            let body = one.bored(out.0, frames)?;
+            out.1 = crate::sheet::carried(&out.1, &body);
+            out.0 = body;
+        }
+        Ok(out)
     }
 
     /// `body` with the sheet's bores cut from it, each from its panel where `frames` put it.

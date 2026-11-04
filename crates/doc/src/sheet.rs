@@ -22,6 +22,7 @@ use crate::{DocError, Document, IDENTITY, Mat, Result, apply_point, apply_vector
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
 pub use face_names::body_sheet_face_names;
+pub(crate) use face_names::{FaceNamer, FaceRole, carried};
 
 // Bound the aggregate geometry, including sampled curves and intermediate clipping pieces.
 // These are work limits, never geometry truncation: a larger input returns a useful error.

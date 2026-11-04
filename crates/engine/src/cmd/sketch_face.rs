@@ -131,7 +131,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             // face's name to follow it.
             let on_sheet = || match state.sheets.iter().find(|sheet| sheet.body == body.name) {
                 Some(sheet) => sheet.panel_face_at(local_point, tolerance * 10.0),
-                None => state.surface_sheets.iter().find(|sheet| sheet.body == body.name)?.panel_face_at(local_point, tolerance * 10.0),
+                None => state.surface_sheets.iter().find(|sheet| sheet.body == body.name)?.panel_face_at(&body.body, local_point, tolerance * 10.0),
             };
             if !fixed && let Some((face, plane)) = on_sheet() {
                 if chosen.is_some() || sheet_face.is_some() {

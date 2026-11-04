@@ -765,69 +765,19 @@ impl SurfaceSheet {
         })
     }
 
-    /// The flat face of the sheet a point lies on (the body's coordinates, within `tol`, kept
-    /// below a quarter of the thickness): its persistent name, `<panel>:top` for its face on the
-    /// sheet's surface and `<panel>:bottom` for the other (`flat:…` unfolded), and its plane (see
-    /// [`Self::panel_face`]).
-    pub fn panel_face_at(&self, p: Vec3, tol: f64) -> Option<(String, Plane)> {
-        let t = self.thickness;
-        let tol = tol.min(t * 0.25);
-        let dev = develop(&self.sheet, 0).ok()?;
-        let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
-        for (panel, frame) in self.sheet.panels.iter().zip(&frames) {
-            let (Surface::Plane, Some(frame)) = (&panel.surface, frame) else { continue };
-            let q = frame.inverse().point(p);
-            let top = q.z.abs() < (q.z - t).abs();
-            if (if top { q.z.abs() } else { (q.z - t).abs() }) > tol || !panel.region.contains(Vec2::new(q.x, q.y)) {
-                continue;
-            }
-            let name = format!("{}:{}", if self.unfolded { "flat" } else { panel.name.as_str() }, if top { "top" } else { "bottom" });
-            let plane = self.panel_face(&name)?;
-            return Some((name, plane));
-        }
-        // A rim: the nearest straight edge of a panel, through its thickness.
-        if self.unfolded {
+    /// The face of the sheet's body `body` a point lies on (the body's coordinates, within `tol`),
+    /// found exactly on the body, with the name the sheet's builder gave it and its plane (see
+    /// [`Self::panel_face`]). None for a face the sheet names none (a hole's wall), and while the
+    /// sheet is flat.
+    pub fn panel_face_at(&self, body: &solidcraft_kernel::Body, p: Vec3, tol: f64) -> Option<(String, Plane)> {
+        if self.face_names.len() != body.face_count() || self.altered_by.is_some() {
             return None;
         }
-        let mut best: Option<(f64, String)> = None;
-        for (i, a, b, rim) in self.rims() {
-            let (Some(frame), Some(panel)) = (frames.get(i).copied().flatten(), self.sheet.panels.get(i)) else { continue };
-            let q = frame.inverse().point(p);
-            if q.z < -tol || q.z > t + tol {
-                continue;
-            }
-            let (q2, d) = (Vec2::new(q.x, q.y), b - a);
-            let along = (q2 - a).dot(d) / d.dot(d).max(1e-18);
-            if !(-1e-9..=1.0 + 1e-9).contains(&along) {
-                continue;
-            }
-            let off = (a + d * along).dist(q2);
-            if off <= tol && best.as_ref().is_none_or(|(o, _)| off < *o) {
-                best = Some((off, format!("{}:rim.{rim}", panel.name)));
-            }
-        }
-        if let Some((_, name)) = best {
-            let plane = self.panel_face(&name)?;
-            return Some((name, plane));
-        }
-        // An end of a bend: within its zone's end, between its faces.
-        let fold = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
-        for z in &dev.zones {
-            let (Some(Some(bent)), Some(joint)) = (fold.bends.get(z.joint), self.sheet.joints.get(z.joint)) else { continue };
-            let Some((flat, depth, _)) = bent.unwrapped(p) else { continue };
-            if depth < -tol || depth > t + tol {
-                continue;
-            }
-            for k in 0..2 {
-                let s = Seg2::Line { a: z.near[k], b: z.far[k] };
-                if s.point_at(s.closest_param(flat).clamp(0.0, 1.0)).dist(flat) <= tol {
-                    let name = format!("{}:bend.end{}", self.sheet.panels.get(joint.b.panel)?.name, 1 - k);
-                    let plane = self.panel_face(&name)?;
-                    return Some((name, plane));
-                }
-            }
-        }
-        None
+        let q = solidcraft_geom::brep::query::Query::new(body.record());
+        let (_, f) = q.faces_at(p, tol).into_iter().next()?;
+        let name = self.face_names.get(f)?.clone()?;
+        let plane = self.panel_face(&name)?;
+        Some((name, plane))
     }
 
     /// The plane of the end of the bend that makes panel `panel` at its start (`k` 0, at its

@@ -15,6 +15,8 @@ use solidcraft_develop::{Bent, Development, Fold};
 use solidcraft_geom::LINEAR_TOL;
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
+use crate::sheet::FaceRole;
+
 use crate::sheet::FlatWork;
 use crate::sheet_surface::Piece;
 use crate::{DocError, Result};
@@ -87,8 +89,16 @@ struct Folded<'a> {
 }
 
 /// The folded solid of a developed sheet `t` thick: each of its flat's `pieces` (see
-/// [`crate::sheet_surface::pieces`]), carried into space by `fold`.
-pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Region2)], work: &mut FlatWork) -> Result<Body> {
+/// [`crate::sheet_surface::pieces`]), carried into space by `fold`; and the name `name` gives each
+/// face of it, by the piece and the part of it the face was made for.
+pub(crate) fn solid(
+    dev: &Development,
+    fold: &Fold,
+    t: f64,
+    pieces: &[(Piece, Region2)],
+    work: &mut FlatWork,
+    name: &dyn Fn(Piece, FaceRole) -> Option<String>,
+) -> Result<(Body, Vec<Option<String>>)> {
     let f = Folded { dev, fold, t };
     let cells = cells(pieces.to_vec(), work)?;
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
@@ -110,6 +120,7 @@ pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Re
         Ok(false)
     };
     let mut faces = Vec::new();
+    let mut names = Vec::new();
     for (ci, c) in cells.iter().enumerate() {
         // Each run at both depths, once.
         let runs: Vec<Vec<Run>> = c.loops().map(|l| runs(l)).collect();
@@ -134,6 +145,7 @@ pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Re
                 surface: f.surface(c.piece, &samples, depth, curved)?,
                 probe: Some((p, p - f.at(c.piece, center, inside)?)),
             });
+            names.push(name(c.piece, FaceRole::Cap { surface: side == 0 }));
         }
         // Walls along runs no other cell shares.
         for (run, [bottom, top]) in runs.iter().flatten().zip(edges.iter().flatten()) {
@@ -151,11 +163,17 @@ pub(crate) fn solid(dev: &Development, fold: &Fold, t: f64, pieces: &[(Piece, Re
             let pm = f.at(c.piece, mid, t / 2.0)?;
             let outward = f.at(c.piece, mid + Vec2::new(along.y, -along.x).normalized().unwrap_or_default() * 1e-3, t / 2.0)? - pm;
             faces.push(FaceSpec { loops: vec![vec![bottom.clone(), up_b, top.reversed(), down_a]], surface, probe: Some((pm, outward)) });
+            names.push(name(c.piece, FaceRole::Wall { a, b }));
         }
     }
     // Until the kernel sews faces that touch along an edge face to face (#1597): two walls on one
     // edge are refused as "ambiguous edge contact", so no edge may get a wall from both sides.
-    Ok(kernel::sew_touching(&faces)?)
+    let (body, from) = kernel::sew_touching_traced(&faces)?;
+    let names = match from {
+        Some(from) => from.iter().map(|&k| names.get(k).cloned().flatten()).collect(),
+        None => vec![None; body.face_count()],
+    };
+    Ok((body, names))
 }
 
 /// The pieces as cells: edges shorter than the model's tolerance dropped (the sew welds their

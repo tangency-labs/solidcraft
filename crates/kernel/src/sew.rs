@@ -764,6 +764,14 @@ pub fn sew_touching(faces: &[FaceSpec]) -> Result<Body> {
     sew_impl(faces, true, None).map(|(body, _)| body)
 }
 
+/// [`sew_touching`], with the face of `faces` each face of the body was sewn from (by its place in
+/// `faces`; `None` when that could not be followed): what lets the caller name the body's faces
+/// by what it made each from.
+pub fn sew_touching_traced(faces: &[FaceSpec]) -> Result<(Body, Option<Vec<usize>>)> {
+    let _span = solidcraft_profile::span("kernel", "sew_touching");
+    sew_impl(faces, true, None)
+}
+
 /// Separate boundary sheets at a shared geometric edge without moving it.
 /// Optional transient sources follow only unchanged produced face identities.
 /// Also reports the face each face of the body was built from (by its place in `faces`; `None`
