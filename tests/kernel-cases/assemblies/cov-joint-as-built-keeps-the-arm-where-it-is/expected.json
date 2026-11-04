@@ -1,0 +1,44 @@
+{
+ "sources": [],
+ "what": "an as-built revolute on an arm lifted 20 mm, then driven 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Arm moved by (0,0,20) first, then joint.as_built revolute about z through the origin: it stays at (20,0,25); a drive to 90 turns it to (0,20,25)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      25.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      25.0
+     ]
+    }
+   }
+  }
+ ]
+}

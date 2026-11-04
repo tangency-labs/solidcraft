@@ -1,5 +1,6 @@
 //! One disclosure drawing for sections, trees, cards and window folds.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, Painter, Pos2, Rect, Response, Ui, pos2, vec2};
 
 /// Content visible: down. Content hidden: right. No animation, matching kit sections.
@@ -36,7 +37,7 @@ fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str
     }
     disclosure(ui.painter(), rect.center(), open, if response.hovered() || response.has_focus() { t.form_ink } else { t.form_dim });
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, label));
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
 }
 
 /// Dropdowns always point down, independently of popup state. Preserve their existing size.
@@ -64,7 +65,7 @@ pub(crate) fn strip_toggle(ui: &mut Ui, expanded: bool, label: &str) -> Response
         ui.painter().galley(pos2(rect.left() + t.control_height + t.space_6, rect.center().y - title.size().y / 2.0), title, t.form_ink);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
 }
 
 #[cfg(test)]

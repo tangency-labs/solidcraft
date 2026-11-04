@@ -102,8 +102,26 @@ pub fn tool_definitions() -> Vec<Value> {
              enabled right now. Ids are dotted and lower-case (solid.extrude, sketch.create, \
              solid.fillet, sketch.inspect, timeline.rollback). Optional case-insensitive \
              substring `filter` over id, label, tab and panel (not the parameter docs, so a command id \
-             finds that command rather than every command whose docs mention it).",
-            obj(json!({"filter": string("Substring to match, e.g. \"sketch\", \"fillet\", \"pattern\"")}), &[]),
+             finds that command rather than every command whose docs mention it). Narrow it further with `prefix` \
+             (start of the id) and `panel` (a whole panel or tab name); shrink each entry with `compact` (id and label) \
+             or `fields`; page it with `limit` and `offset`, which make the reply {commands, total, offset, next_offset}. \
+             With none of these the reply is the whole catalog, about 350 KB.",
+            obj(
+                json!({
+                    "filter": string("Substring to match, e.g. \"sketch\", \"fillet\", \"pattern\""),
+                    "prefix": string("Case-insensitive start of the command id, e.g. \"sketch.\""),
+                    "panel": string("A whole toolbar panel or tab name, case-insensitive, e.g. \"Modify\" or \"SKETCH\""),
+                    "compact": {"type": "boolean", "description": "Each entry is only {id, label} (default false)"},
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": COMMAND_FIELDS},
+                        "description": "Keep only these keys of each entry; overrides `compact`",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "description": "At most this many commands; the reply becomes {commands, total, offset, next_offset}"},
+                    "offset": {"type": "integer", "minimum": 0, "description": "Skip this many matches first (default 0); with it the reply is paged as with `limit`"},
+                }),
+                &[],
+            ),
             Effect::ReadOnly,
         ),
         tool(
@@ -146,8 +164,8 @@ pub fn tool_definitions() -> Vec<Value> {
             "Run commands in order, stopping at the first error. Each step is {command, params}: an engine command id \
              (as list_commands lists them). A step may also name one of these tools with that tool's arguments as params, \
              and runs the engine command it stands for: set_parameter (parameters.change; `value` or `expression`), \
-             list_commands (engine.commands, with `filter`), describe_command (engine.describe), execute ({command, params}), \
-             measure (inspect.measure), \
+             list_commands (engine.commands, narrowed by its arguments), describe_command (engine.describe), execute ({command, params}), \
+             measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
              rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
@@ -206,6 +224,7 @@ pub fn tool_definitions() -> Vec<Value> {
             obj(
                 json!({
                     "body": string("Body name (default: all bodies)"),
+                    "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
                 }),
@@ -303,6 +322,34 @@ pub fn tool_definitions() -> Vec<Value> {
                     "axes": {"type": "boolean", "description": "false: leave the origin's three axes out of the render (see `grid`). Axes hidden with browser.visibility stay hidden"},
                 }),
                 &[],
+            ),
+            Effect::Files,
+        ),
+        tool(
+            "compare_picture",
+            "Compare with a reference picture",
+            "Compare the model's outline with the part in a reference picture — a concept render, a product photo, one view off a design board. \
+             The model's outline is `inspect.silhouette` from `view` (default front), `camera` and `bodies`; the picture's part is found by growing \
+             the background in from the border, so a backdrop's gradual shading stays background. The compare is outline only: holes are not \
+             compared — both the picture's and the model's holes are filled. `reference` is a PNG or JPEG inside the server's \
+             folders. `crop_px` / `crop_fraction` take one view off a board: [x, y, w, h] in pixels or as fractions 0..1 of the picture; \
+             `part_fills_crop: true` says the crop box is the part itself, for a crop that tightly frames it. `fit` names \
+             the dimension the scale comes from (\"width\", \"height\", \"both\"; default \"width\") — one uniform scale, never stretched per axis; \
+             \"both\" scales by width and reports `aspect_mismatch` when the shapes differ. Returns as text the overlap (0..1) and the model's top, \
+             bottom, left and right edges against the picture's in mm at nine stations (positive where the model reaches past the picture), and as \
+             an image the overlay PNG: model red, picture blue.",
+            obj(
+                json!({
+                    "reference": string("PNG or JPEG to match, inside the server's folders"),
+                    "view": string("Standard view (front, top, right, iso, ...) the picture is seen from (default front)"),
+                    "camera": {"type": "object", "description": "Look from this camera instead: {target: [x,y,z], yaw, pitch, distance, fov?} (radians, mm; as view.apply). A photo taken in perspective gets an fov"},
+                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
+                    "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
+                    "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
+                    "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
+                }),
+                &["reference"],
             ),
             Effect::Files,
         ),
@@ -485,6 +532,13 @@ fn text_result(v: &Value, is_error: bool) -> Value {
     let mut r = json!({"content": [{"type": "text", "text": text}]});
     if is_error {
         r["isError"] = json!(true);
+        if let Some(reason) = v
+            .as_str()
+            .and_then(solidcraft_engine::panels::commands::structured_error)
+            .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
+        {
+            r["structuredContent"] = json!({"panel_error":reason});
+        }
     }
     r
 }
@@ -496,6 +550,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
         "screenshot" => return screenshot(b, a),
+        "compare_picture" => return compare_picture(b, a),
         "batch" => return batch(b, a),
         "check_parameters" => return check_parameters(b, a),
         "execute" => return execute(b, a),
@@ -728,6 +783,11 @@ fn command_error(command: &str, error: String) -> String {
         return error;
     }
     let id = command.split(['{', '(']).next().unwrap_or(command).trim();
+    // An id that is exactly a registered tool name confuses the two namespaces: name the
+    // distinction and its recovery instead of offering unrelated closest-command suggestions.
+    if id == command.trim() && is_tool_name(id) {
+        return tool_name_error(id);
+    }
     let packed = id != command.trim();
     let normalize = |s: &str| s.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect::<String>();
     let normalized = normalize(id);
@@ -761,6 +821,29 @@ fn command_error(command: &str, error: String) -> String {
     message
 }
 
+/// Whether `name` is exactly a registered MCP tool name, read from the tool definitions
+/// themselves so the two namespaces can never drift apart.
+fn is_tool_name(name: &str) -> bool {
+    tool_definitions().iter().any(|t| t["name"].as_str() == Some(name))
+}
+
+/// The reply when a rejected command id is exactly a tool name: the recovery belongs to the
+/// tool namespace, not to a typo's closest-command suggestions.
+fn tool_name_error(id: &str) -> String {
+    format!(
+        "unknown command `{id}`: `{id}` is an MCP tool, not an engine command id. Use MCP tools/list for its tool schema, or list_commands for engine command ids."
+    )
+}
+
+/// A `describe_command` rejection of an id that is exactly a tool name gets the namespace
+/// hint; every other error is left exactly as the engine said it.
+fn describe_error(id: &str, error: String) -> String {
+    if error.starts_with(&format!("unknown command `{id}`")) && is_tool_name(id) {
+        return tool_name_error(id);
+    }
+    error
+}
+
 fn command_distance(a: &str, b: &str) -> usize {
     let mut row: Vec<usize> = (1..=b.len()).collect();
     for (i, ca) in a.bytes().enumerate() {
@@ -784,15 +867,33 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
+fn measure_params(a: &Map<String, Value>) -> Value {
+    let mut p = pick(a, &["names_only"]);
+    if let Some(body) = str_arg(a, "body") {
+        p["bodies"] = json!([body]);
+    }
+    p
+}
+
+/// `summary` narrows measured bodies; a `names_only` list has nothing to narrow.
+fn measure_summary_wanted(a: &Map<String, Value>) -> bool {
+    let flag = |k: &str| a.get(k).and_then(Value::as_bool).unwrap_or(false);
+    flag("summary") && !flag("names_only")
+}
+
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
     match name {
         "list_commands" => {
+            let query = CommandQuery::parse(a)?;
             let all = b.call("engine.commands", json!({}))?;
-            Ok(filter_commands(all, str_arg(a, "filter")))
+            Ok(query.apply(all))
         }
         "describe_command" => {
             let id = str_arg(a, "id").ok_or("`id` is required")?;
-            exec(b, "engine.describe", json!({"command": id}))
+            // The engine rejects the requested id inside its own error, so the tool-name
+            // hint must inspect the `id`, not the outer `engine.describe` command `exec` sees.
+            exec(b, "engine.describe", json!({"command": id})).map_err(|e| describe_error(id, e))
         }
         "execute" => {
             let id = str_arg(a, "command").ok_or("`command` is required")?;
@@ -824,12 +925,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             if let Some(items) = a.get("items") {
                 return exec(b, "inspect.measure", json!({ "items": items }));
             }
-            let p = match str_arg(a, "body") {
-                Some(body) => json!({"bodies": [body]}),
-                None => json!({}),
-            };
-            let m = exec(b, "inspect.measure", p)?;
-            Ok(if a.get("summary").and_then(Value::as_bool).unwrap_or(false) { measure_summary(m) } else { m })
+            let m = exec(b, "inspect.measure", measure_params(a))?;
+            Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
         }
         "body_topology" => {
             let p = pick(a, &["body"]);
@@ -863,11 +960,100 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
 
 /// The command catalog filtered by a case-insensitive substring of id, label, panel or tab
 /// (`list_commands`; not the parameter docs, which name other commands, #269).
-fn filter_commands(all: Value, filter: Option<&str>) -> Value {
-    let Some(f) = filter.map(str::to_lowercase).filter(|f| !f.is_empty()) else { return all };
-    let hit =
-        |c: &Value| ["id", "label", "panel", "tab"].iter().any(|k| c.get(*k).and_then(Value::as_str).is_some_and(|s| s.to_lowercase().contains(&f)));
-    Value::Array(all.as_array().map(|v| v.iter().filter(|c| hit(c)).cloned().collect()).unwrap_or_default())
+/// The keys of a `list_commands` entry, which `fields` may keep.
+const COMMAND_FIELDS: &[&str] = &["id", "label", "tab", "panel", "icon", "shortcut", "params", "enabled", "disabled_reason", "planned"];
+
+/// How `list_commands` narrows the catalog (#11726): which commands, which keys of each, and
+/// which page. The default keeps the whole catalog as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct CommandQuery {
+    filter: Option<String>,
+    prefix: Option<String>,
+    panel: Option<String>,
+    fields: Option<Vec<String>>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+impl CommandQuery {
+    fn parse(a: &Map<String, Value>) -> Result<Self, String> {
+        let text = |k: &str| -> Result<Option<String>, String> {
+            match a.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(s)) => Ok(Some(s.to_lowercase()).filter(|s| !s.is_empty())),
+                Some(_) => Err(format!("`{k}` must be a string")),
+            }
+        };
+        let count = |k: &str, least: u64| -> Result<Option<usize>, String> {
+            match a.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v
+                    .as_u64()
+                    .filter(|n| *n >= least)
+                    .map(|n| Some(usize::try_from(n).unwrap_or(usize::MAX)))
+                    .ok_or_else(|| format!("`{k}` must be a whole number of at least {least}")),
+            }
+        };
+        let compact = match a.get("compact") {
+            None | Some(Value::Null) => false,
+            Some(v) => v.as_bool().ok_or("`compact` must be true or false")?,
+        };
+        let fields = match a.get("fields") {
+            None | Some(Value::Null) => compact.then(|| vec!["id".to_string(), "label".to_string()]),
+            Some(Value::Array(v)) => {
+                let mut keep = Vec::new();
+                for f in v {
+                    let name = f.as_str().filter(|n| COMMAND_FIELDS.contains(n)).ok_or_else(|| {
+                        let shown: String = f.to_string().chars().take(64).collect();
+                        format!("`fields` takes the entry keys {}; not {shown}", COMMAND_FIELDS.join(", "))
+                    })?;
+                    if !keep.iter().any(|k| k == name) {
+                        keep.push(name.to_string());
+                    }
+                }
+                Some(keep)
+            }
+            Some(_) => return Err("`fields` must be a list of entry keys".into()),
+        };
+        Ok(Self {
+            filter: text("filter")?,
+            prefix: text("prefix")?,
+            panel: text("panel")?,
+            fields,
+            limit: count("limit", 1)?,
+            offset: count("offset", 0)?,
+        })
+    }
+
+    fn matches(&self, c: &Value) -> bool {
+        let field = |k: &str| c.get(k).and_then(Value::as_str).map(str::to_lowercase).unwrap_or_default();
+        self.filter.as_ref().is_none_or(|f| ["id", "label", "panel", "tab"].iter().any(|k| field(k).contains(f.as_str())))
+            && self.prefix.as_ref().is_none_or(|p| field("id").starts_with(p.as_str()))
+            && self.panel.as_ref().is_none_or(|p| field("panel") == *p || field("tab") == *p)
+    }
+
+    /// The catalog narrowed: a list, or `{commands, total, offset, next_offset}` when paged.
+    fn apply(&self, all: Value) -> Value {
+        let Value::Array(all) = all else { return all };
+        let hits: Vec<Value> = all.into_iter().filter(|c| self.matches(c)).collect();
+        let total = hits.len();
+        let offset = self.offset.unwrap_or(0).min(total);
+        let take = self.limit.unwrap_or(usize::MAX);
+        let page: Vec<Value> = hits
+            .into_iter()
+            .skip(offset)
+            .take(take)
+            .map(|c| match (&self.fields, c) {
+                (Some(keep), Value::Object(m)) => Value::Object(m.into_iter().filter(|(k, _)| keep.contains(k)).collect()),
+                (_, c) => c,
+            })
+            .collect();
+        if self.limit.is_none() && self.offset.is_none() {
+            return Value::Array(page);
+        }
+        let end = offset + page.len();
+        json!({"commands": page, "total": total, "offset": offset, "next_offset": (end < total).then_some(end)})
+    }
 }
 
 /// `pending`: the end of a request still running when its call returned (bridged only; a
@@ -897,8 +1083,8 @@ fn pending(b: &mut dyn Backend) -> Result<Value, String> {
 
 /// How a tool step's result is cut down to what the tool itself would reply.
 enum Narrow {
-    /// A `list_commands` step's catalog, filtered as the tool filters it.
-    Commands(String),
+    /// A `list_commands` step's catalog, narrowed as the tool narrows it.
+    Commands(CommandQuery),
     /// A `measure {summary: true}` step's reply, as `measure_summary` shapes it.
     MeasureSummary,
 }
@@ -906,7 +1092,7 @@ enum Narrow {
 impl Narrow {
     fn apply(&self, v: Value) -> Value {
         match self {
-            Narrow::Commands(f) => filter_commands(v, Some(f)),
+            Narrow::Commands(q) => q.apply(v),
             Narrow::MeasureSummary => measure_summary(v),
         }
     }
@@ -918,12 +1104,24 @@ impl Narrow {
 /// `command` means the step is an engine command already.
 fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
     let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
+    // Any other key would be dropped and the command run without its parameters, failing (if at
+    // all) with an error about a parameter that seems to be there: `args` for `params`.
+    if let Some(k) = step.as_object().into_iter().flat_map(Map::keys).find(|k| !matches!(k.as_str(), "command" | "id" | "params")) {
+        if k == "expect" {
+            return Err("unknown key `expect` in a step: `expect` is the batch's argument, checked after the last step".into());
+        }
+        let k: String = k.chars().take(64).collect();
+        return Err(format!("unknown key `{k}` in a step: a step is {{command, params}}, its parameters go in `params`"));
+    }
     let empty = Map::new();
     let params = step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}));
     let a = params.as_object().unwrap_or(&empty);
     let mapped = |c: &str, p: Value| Ok((c.to_string(), p, None));
     match command {
-        "list_commands" => Ok(("engine.commands".into(), json!({}), str_arg(a, "filter").map(|f| Narrow::Commands(f.to_string())))),
+        "list_commands" => {
+            let query = CommandQuery::parse(a)?;
+            Ok(("engine.commands".into(), json!({}), (query != CommandQuery::default()).then_some(Narrow::Commands(query))))
+        }
         "set_parameter" => {
             let mut p = pick(a, &["name", "unit", "comment"]);
             p["expression"] = parameter_value(a)?;
@@ -939,12 +1137,16 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         }
         "measure" => match a.get("items") {
             Some(items) => mapped("inspect.measure", json!({"items": items})),
-            None => {
-                let p = str_arg(a, "body").map_or(json!({}), |body| json!({"bodies": [body]}));
-                let summary = a.get("summary").and_then(Value::as_bool).unwrap_or(false);
-                Ok(("inspect.measure".into(), p, summary.then_some(Narrow::MeasureSummary)))
-            }
+            None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
+        "compare_picture" => {
+            // A batch step gets the numbers; the overlay PNG would be a base64 blob in text.
+            let mut p = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+            if let Some(obj) = p.as_object_mut() {
+                obj.entry("overlay".to_string()).or_insert(json!(false));
+            }
+            mapped("inspect.compare_picture", p)
+        }
         "inspect_design" => mapped("document.inspect", json!({"measure": a.get("measure").and_then(Value::as_bool).unwrap_or(true)})),
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
@@ -973,6 +1175,7 @@ const TOOL_STEPS: &[&str] = &[
     "batch",
     "body_topology",
     "check_parameters",
+    "compare_picture",
     "crash_reports",
     "describe_command",
     "execute",
@@ -1076,12 +1279,36 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     }
 }
 
+fn layout_step(step: &Value) -> bool {
+    let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or_default();
+    let command = if command == "execute" {
+        step.get("params").and_then(|params| params.get("command")).and_then(Value::as_str).unwrap_or_default()
+    } else {
+        command
+    };
+    command.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout"))
+}
+
+fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> (Value, bool) {
+    use solidcraft_engine::panels::{commands, error};
+    let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
+    reply["not_run_count"] = json!(count);
+    reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
+    (reply, true)
+}
+
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let Some(steps) = a.get("commands").and_then(Value::as_array) else {
         return (json!("`commands` must be an array of {command, params}"), true);
     };
     if steps.len() > MAX_BATCH {
+        if a.get("rollback").and_then(Value::as_bool).unwrap_or(true) && steps.iter().any(layout_step) {
+            return atomic_layout_refusal(steps.len(), solidcraft_engine::panels::Rule::CollectionLimit, "atomic layout batch step count cap");
+        }
         return (json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
     }
     let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
@@ -1132,6 +1359,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         }
     }
     let steps = &mapped;
+    let atomic_layout = rollback && steps.iter().any(layout_step);
     // A step the batch would refuse at its turn refuses it now, before anything runs (#5853).
     // Only where the commands run in this process: a running app may be another version, with
     // commands this one lacks, and checks the batch against its own registry when it gets it.
@@ -1166,7 +1394,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         o.insert("timings".into(), Value::Bool(true));
         o.insert("profile".into(), Value::Bool(profile));
     }
-    if params.to_string().len() + 64 * 1024 <= solidcraft_engine::MAX_LINE {
+    let fits_transport = params.to_string().len().saturating_add(64 * 1024) <= solidcraft_engine::MAX_LINE;
+    if fits_transport {
         match b.call("engine.batch", params) {
             Ok(mut r) => {
                 if let Some(failed) = r.get_mut("failed")
@@ -1181,6 +1410,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
+            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
             // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
             // the `pending` tool gets its result.
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
@@ -1192,6 +1422,20 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 return (Value::String(msg), true);
             }
         }
+    }
+    // Application layout is outside document checkpoints. Neither an unavailable
+    // batch endpoint nor an oversized transport request authorizes a sequential
+    // emulation of an atomic layout/mixed transaction.
+    if atomic_layout {
+        return atomic_layout_refusal(
+            steps.len(),
+            if fits_transport { solidcraft_engine::panels::Rule::Capability } else { solidcraft_engine::panels::Rule::CollectionLimit },
+            if fits_transport {
+                "authoritative atomic layout batch capability is unavailable"
+            } else {
+                "atomic layout batch exceeds transport size cap"
+            },
+        );
     }
     let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());
@@ -1726,6 +1970,28 @@ fn screenshot(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
             {"type": "image", "data": base64(&png), "mimeType": "image/png"},
             {"type": "text", "text": info.to_string()},
         ]}),
+        Err(e) => text_result(&Value::String(e), true),
+    }
+}
+
+/// `compare_picture`: run the engine comparison and hand the overlay PNG back as an MCP
+/// image block, the numbers as text — an agent sees the picture, not a base64 blob.
+fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+    params["overlay"] = json!(true);
+    match exec(b, "inspect.compare_picture", params) {
+        Ok(v) => {
+            let overlay = v.get("overlay_png").and_then(Value::as_str).unwrap_or_default().to_string();
+            let mut info = v;
+            if let Some(obj) = info.as_object_mut() {
+                obj.remove("overlay_png");
+            }
+            let mut content = vec![json!({"type": "text", "text": info.to_string()})];
+            if !overlay.is_empty() {
+                content.insert(0, json!({"type": "image", "data": overlay, "mimeType": "image/png"}));
+            }
+            json!({"content": content})
+        }
         Err(e) => text_result(&Value::String(e), true),
     }
 }

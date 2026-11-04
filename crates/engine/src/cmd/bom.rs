@@ -19,7 +19,11 @@ use solidcraft_doc::metadata::{BOM_KEYS, BOM_TYPE, MAX_KEYS, Owner, check_text, 
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
+use crate::schema::bom::{Bom, BomChild, BomParams, BomRow};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+const BOM_CONTRACT: TypedContract<BomParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.metadata", "Part Properties", read).icon("settings").noundo().doc_only().params(
@@ -33,8 +37,14 @@ pub static COMMANDS: &[CommandSpec] = &[
          properties?: {name: text, …} (free properties; empty or null removes). All or nothing, one undo step → component, \
          metadata, properties, changed: [keys]",
     ),
-    CommandSpec::new("assembly.bom", "Bill of Materials", bom).at("SOLID", "INSPECT").icon("bom").noundo().params(
-        "component?: id or name (default the design); levels?: flat (default: every part at any depth, counted through its \
+    CommandSpec::new("assembly.bom", "Bill of Materials", crate::checked!("assembly.bom", bom))
+        .at("SOLID", "INSPECT")
+        .icon("bom")
+        .noundo()
+        .contract(&BOM_CONTRACT)
+        .output(output_schema_for::<Bom>)
+        .params(
+            "component?: id or name (default the design); levels?: flat (default: every part at any depth, counted through its \
          subassemblies) | top (the component's direct children, subassemblies as one row each); group_by?: [\"part_number\"] \
          (default; components without a part number get a row per definition) | [\"definition\"]; group_children?: true (a component \
          with a part number is one row, the parts placed inside it listed under it as children: [{item, part_number, description, \
@@ -43,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          counts here), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased \
          parts are listed too, under it with group_children and a part number) → rows: [{item, part_number, description, revision, \
          bom_type, count, definition, components, properties, children?}] sorted by part number, total_occurrences (children included)",
-    ),
+        ),
 ];
 
 /// Longest free property name, in bytes.
@@ -434,36 +444,56 @@ fn bom(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let mut total: u64 = 0;
-    let rows: Vec<Value> = rows(s, &ix, &counts, o.group, &kits)
+    let rows: Vec<BomRow> = rows(s, &ix, &counts, o.group, &kits)
         .into_iter()
         .enumerate()
         .map(|(i, r)| {
             total += r.count;
-            let mut v = json!({"item": i + 1, "part_number": r.part_number, "description": r.description, "revision": r.revision,
-                "bom_type": r.bom_type.as_str(), "count": r.count, "definition": r.names.join("; "), "components": r.components,
-                "properties": r.properties});
-            if !r.kit.is_empty() {
-                let children: Vec<Value> = self::rows(s, &ix, &r.kit, Group::PartNumber, &BTreeMap::new())
+            let children = (!r.kit.is_empty()).then(|| {
+                self::rows(s, &ix, &r.kit, Group::PartNumber, &BTreeMap::new())
                     .into_iter()
                     .enumerate()
                     .map(|(j, c)| {
                         let count = c.count.saturating_mul(r.count);
                         total += count;
-                        json!({"item": format!("{}.{}", i + 1, j + 1), "part_number": c.part_number, "description": c.description,
-                            "revision": c.revision, "bom_type": c.bom_type.as_str(), "each": c.count, "count": count,
-                            "definition": c.names.join("; ")})
+                        BomChild {
+                            item: format!("{}.{}", i + 1, j + 1),
+                            part_number: c.part_number,
+                            description: c.description,
+                            revision: c.revision,
+                            bom_type: c.bom_type.as_str().to_string(),
+                            each: c.count,
+                            count,
+                            definition: c.names.join("; "),
+                        }
                     })
-                    .collect();
-                v["children"] = Value::Array(children);
+                    .collect()
+            });
+            BomRow {
+                item: i + 1,
+                part_number: r.part_number,
+                description: r.description,
+                revision: r.revision,
+                bom_type: r.bom_type.as_str().to_string(),
+                count: r.count,
+                definition: r.names.join("; "),
+                components: r.components,
+                properties: r.properties,
+                children,
             }
-            v
         })
         .collect();
-    let mut out = Map::new();
-    out.insert("component".into(), json!(root));
-    out.insert("levels".into(), json!(if o.levels == Levels::Top { "top" } else { "flat" }));
-    out.insert("group_by".into(), json!([if o.group == Group::Definition { "definition" } else { "part_number" }]));
-    out.insert("group_children".into(), json!(o.fold));
+    let mut out = Bom {
+        component: root,
+        levels: if o.levels == Levels::Top { "top" } else { "flat" }.to_string(),
+        group_by: vec![if o.group == Group::Definition { "definition" } else { "part_number" }.to_string()],
+        group_children: o.fold,
+        path: None,
+        format: None,
+        rows,
+        total_occurrences: total,
+        param_warnings: Vec::new(),
+    };
     if let Some(path) = str_(p, "path") {
         let format = match str_(p, "format").map(str::to_ascii_lowercase) {
             Some(f) => f,
@@ -471,18 +501,17 @@ fn bom(s: &mut Session, p: &Value) -> Result<Value> {
             None if path.to_ascii_lowercase().ends_with(".csv") => "csv".into(),
             None => return Err(bad(cmd, "`path` must end in .csv or .json, or give `format`")),
         };
+        let rows = out.rows.iter().map(|r| serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<Value>>>()?;
         let text = match format.as_str() {
             "csv" => csv(&rows),
             "json" => serde_json::to_string_pretty(&json!({"rows": rows, "total_occurrences": total})).map_err(|e| bad(cmd, e.to_string()))?,
             other => return Err(bad(cmd, format!("unknown format `{other}` (csv or json)"))),
         };
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        out.insert("path".into(), json!(path));
-        out.insert("format".into(), json!(format));
+        out.path = Some(path.to_string());
+        out.format = Some(format);
     }
-    out.insert("rows".into(), Value::Array(rows));
-    out.insert("total_occurrences".into(), json!(total));
-    Ok(Value::Object(out))
+    serde_json::to_value(out).map_err(|e| bad(cmd, e.to_string()))
 }
 
 #[cfg(test)]

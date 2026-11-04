@@ -1,0 +1,66 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 50,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      0,
+      0,
+      5
+     ]
+    },
+    "name": "FinSketch",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20,
+     -1
+    ],
+    "p1": [
+     45,
+     1
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "FinSketch",
+    "distance": 10,
+    "operation": "join",
+    "targets": [
+     "Plate"
+    ],
+    "name": "Fin"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "Fin"
+    ],
+    "axis": "Z",
+    "count": 40,
+    "angle": "360 deg"
+   }
+  }
+ ]
+}

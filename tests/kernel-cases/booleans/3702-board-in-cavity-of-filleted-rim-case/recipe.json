@@ -1,0 +1,68 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": "25 mm",
+    "height": "10 mm",
+    "body_name": "Case"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": "21.5 mm",
+    "height": "8 mm",
+    "base": [
+     0,
+     0,
+     2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Case"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      25,
+      10
+     ]
+    ],
+    "radius": "1.5 mm",
+    "body": "Case"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "20 mm",
+    "width": "15 mm",
+    "height": "0.2 mm",
+    "center": [
+     0,
+     0,
+     5
+    ],
+    "body_name": "Board",
+    "operation": "new_body"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Case",
+    "tools": [
+     "Board"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  }
+ ]
+}

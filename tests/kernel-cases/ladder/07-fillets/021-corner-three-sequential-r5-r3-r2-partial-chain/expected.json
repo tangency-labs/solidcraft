@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "rounds r5 and r3 on the two top edges at a corner, the r3 on its edge alone (Tangent chain off, so it ends where the edge runs on into the r5 round's end arc), then r2 on the vertical edge under them, run on up into the corner",
+ "source": "invariants",
+ "method": "as 020 with a radius that fits (r < 3, the smaller top round): the r2 runs up the vertical edge and on along the side's arc on the r5 round and the seam between the two rounds, tapering to a point where they become tangent. Faces: the box's 6 and the two top rounds, + 3 for the r2 (along the vertical edge, up the arc, along the seam); one valid body inside the box",
+ "body_count": 1,
+ "faces": 11,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ }
+}

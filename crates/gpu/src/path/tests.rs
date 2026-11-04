@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_render::{Camera, ProductMesh, StandardView, surface::OpaqueSurface};
 
@@ -590,6 +591,25 @@ fn path_devices_are_vulkan_or_metal_only() {
     if crate::select::path_backends().is_empty() {
         assert!(picked.is_none());
     }
+}
+
+/// #6706: executors opened side by side never compile the path pipeline at the same time.
+#[test]
+fn path_pipelines_compile_one_at_a_time() {
+    use std::sync::atomic::AtomicUsize;
+    let inside = AtomicUsize::new(0);
+    let most = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                let _compiling = one_compile_at_a_time();
+                most.fetch_max(inside.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(5));
+                inside.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    });
+    assert_eq!(most.load(Ordering::SeqCst), 1);
 }
 
 #[test]

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#541"
+ ],
+ "what": "a solid.box cut straight through a 100 x 60 x 2.5 sheet was refused, though the same rectangle as an extrude cut works",
+ "source": "analytic",
+ "method": "V = 100*60*2.5 - 10*10*2.5 = 14750",
+ "body_count": 1,
+ "volume_mm3": 14750.0
+}

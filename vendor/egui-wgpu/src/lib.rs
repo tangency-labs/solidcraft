@@ -140,8 +140,8 @@ impl SurfaceConfig {
 /// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
 /// fails: from then on every call on the device fails quietly, and the device's lost callback
 /// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
-/// (`PendingWrites::activate`), so the painter first submits nothing ([`DeviceLost::probe`]):
-/// that submission meets the loss instead, and the frame's uploads are skipped.
+/// (`PendingWrites::activate`), so the painter first probes the device ([`DeviceLost::probe`]):
+/// the probe meets the loss instead, and the frame's uploads are skipped.
 #[derive(Clone, Debug, Default)]
 pub struct DeviceLost {
     lost: Arc<std::sync::atomic::AtomicBool>,
@@ -183,13 +183,23 @@ impl DeviceLost {
         self.lost.clone()
     }
 
-    /// Whether the device is lost, asking the driver first: an empty submission reaches the
-    /// driver, so a loss it reports is marked here rather than met by the next upload.
-    pub fn probe(&self, queue: &wgpu::Queue) -> bool {
+    /// Whether the device is lost, asking the driver first, so a loss it reports is marked here
+    /// rather than met by the next upload.
+    ///
+    /// The probe opens a command list, as the upload would: a queue write's first call into the
+    /// driver is `begin_encoding`, and on D3D12 that is where a reset device says so. An empty
+    /// submission only signals a fence: #6528 met a reset D3D12 device in the upload right after
+    /// one. wgpu handles a failed `begin_encoding` in a command encoder's `finish` (it loses the
+    /// device, and the lost callback marks it); only its queue writes unwrap it.
+    pub fn probe(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         if self.is_lost() {
             return true;
         }
-        queue.submit([]);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("device lost probe"),
+        });
+        encoder.insert_debug_marker("device lost probe");
+        queue.submit([encoder.finish()]);
         self.is_lost()
     }
 }

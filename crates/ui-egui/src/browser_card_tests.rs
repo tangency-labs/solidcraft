@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::{Harness, handle_at, rect_of};
+use crate::semantic_content::{self, ContentOwner, ContentRequest};
 use crate::shell::{LayoutMode, SHELL_GAP};
 
 #[test]
@@ -43,6 +44,27 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     }
 }
 
+/// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
+/// the Browser shows, and a body made later can be dropped into it.
+#[test]
+fn a_new_group_in_a_folder_with_nothing_in_it_yet_shows() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.settle();
+    assert!(handle_at("row:Bodies").is_none(), "no bodies, no Bodies folder");
+    // What the root's New Group item runs.
+    group_action(&mut h.app, "ui.newGroup", &json!({"component": 0}));
+    h.settle();
+    let group = h.app.session.doc.browser_groups.first().map(|g| (g.id, g.name.clone())).expect("New Group makes a group");
+    assert!(handle_at(&format!("row:{} (0)", group.1)).is_some(), "the new group shows in the Browser");
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"handle":"row:One"},{"handle":format!("row:{} (0)", group.1)}]})).unwrap();
+    h.settle();
+    let items = h.app.session.doc.browser_group(group.0).map(|g| g.items.len()).unwrap_or(0);
+    assert_eq!(items, 1, "the body went into the group");
+}
+
 /// #10005: F2 on a group picked in the Browser opens its Rename box, as for other rows, and the
 /// typed name renames the group, at the top level and inside a component; a body selected
 /// alongside does not take the rename from the clicked group.
@@ -57,13 +79,15 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
             (h, 0)
         };
+        // The group's row sits inside a placement, which starts closed (#9274).
+        h.app.preferences.browser_components_open = true;
         let body = h.app.session.model.state().bodies[0].name.clone();
         let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":[body],"name":"Group"})).unwrap()["group"]
             .as_u64()
             .unwrap();
         h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
         h.settle();
-        let world_body = h.app.session.world_state().bodies[0].name.clone();
+        let world_body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
         h.app.run("select.set", json!({"items":[Sel::Body { name: world_body.clone() }]})).unwrap();
         h.step(&json!({"click":{"handle":"row:Group (1)"}})).unwrap();
         h.step(&json!({"key":"F2"})).unwrap();
@@ -81,8 +105,33 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
         assert!(h.app.menu.rename.is_none());
         let names: Vec<&str> = h.app.session.doc.browser_groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, ["Fasteners"], "component {inside_component}: Enter renames the group; status {:?}", h.app.status);
-        assert!(h.app.session.world_state().body(&world_body).is_some(), "the body keeps its name");
+        assert!(crate::open_meshing::session_world(&h.app.session).body(&world_body).is_some(), "the body keeps its name");
     }
+}
+
+/// #10654: a refused inline rename keeps the editor open and says why, instead of closing
+/// silently and leaving the old name.
+#[test]
+fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+    h.app.menu.rename = Some(crate::context_menu::Rename {
+        what: crate::context_menu::RenameWhat::Body("B".into()),
+        text: "A".into(),
+        at: egui::Pos2::ZERO,
+        focused: true,
+        inline: true,
+    });
+    h.frames(2);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("another body is called"), "{text}");
+    assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
 }
 
 #[test]
@@ -676,10 +725,10 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
 /// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
 #[test]
 fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
-    use solidcraft_engine::geom::Vec3;
     let solid = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
-    let mesh = solid.tessellate(0.01).unwrap();
+    let mesh = solid.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -722,7 +771,7 @@ fn browser_occurrence_clicks_fill_align_components_input() {
     h.app.start("solid.align");
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.kind = crate::dialogs::Kind::Align { flip: false, components: true, axes: [true; 3] };
+        d.kind = crate::dialogs::Kind::Align { flip: false, components: true, axes: [true; 3], angle: String::new() };
         d.inputs[0].label = "Components";
         d.active = 0;
     }
@@ -744,6 +793,8 @@ fn browser_occurrence_clicks_fill_align_components_input() {
 #[test]
 fn row_eyes_line_up_at_the_right_end_unless_the_preference_keeps_them_left() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Top"})).unwrap();
     let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Inner"})).unwrap();
@@ -981,4 +1032,1171 @@ fn eye_drag_from_the_origin_is_its_own_undo_step_and_leaves_an_earlier_show_alon
     assert!(origin_hidden(&h), "the Origin's eye is not an undo step: it keeps what the drag set");
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(body_hidden(&h, "One"), "the show is its own undo step: undoing it hides One again");
+}
+
+/// #9953: hiding or showing a sketch or body dynamically dims/undims the row without needing a full row rebuild.
+#[test]
+fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.settle();
+
+    // Toggle body hidden via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(body_hidden(&h, "One"));
+
+    // Toggle body shown again via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(!body_hidden(&h, "One"));
+}
+
+/// Draw content without either panel host. Changing submission order does not change IDs,
+/// screen placement or the input stream, so these exercise the adapters' shared boundary.
+fn semantic_frame(h: &mut Harness, owners: &[ContentOwner], events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+    semantic_frame_switch(h, owners, events, modifiers, None);
+}
+
+fn semantic_frame_switch(h: &mut Harness, owners: &[ContentOwner], events: Vec<egui::Event>, modifiers: egui::Modifiers, tab: Option<usize>) {
+    semantic_frame_transitions(h, owners, events, modifiers, tab, None);
+}
+
+fn semantic_frame_transitions(
+    h: &mut Harness,
+    owners: &[ContentOwner],
+    events: Vec<egui::Event>,
+    modifiers: egui::Modifiers,
+    tab: Option<usize>,
+    after_content: Option<usize>,
+) {
+    let raw = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0))),
+        focused: true,
+        events: std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect(),
+        ..Default::default()
+    };
+    h.ctx
+        .run_ui(raw, |ui| {
+            crate::scenario::clear_handles();
+            publish_row_prefs(&h.app, ui.ctx());
+            eye_drag_frame(&mut h.app, ui.ctx());
+            semantic_content::begin(&mut h.app, ui.ctx());
+            if let Some(tab) = tab {
+                crate::documents::switch(&mut h.app, tab);
+            }
+            for &owner in owners {
+                let x = if owner == ContentOwner::BROWSER { 10.0 } else { 450.0 };
+                let mut content = ui.new_child(
+                    egui::UiBuilder::new().id_salt(("semantic-test", owner)).max_rect(Rect::from_min_size(pos2(x, 10.0), vec2(400.0, 850.0))),
+                );
+                let request = if owner == ContentOwner::HISTORY {
+                    ContentRequest::ActiveBodiesOrigin
+                } else {
+                    ContentRequest::Browser { shrink_height: false }
+                };
+                semantic_content::show(&mut h.app, &mut content, owner, request);
+            }
+            if let Some(tab) = after_content {
+                crate::documents::switch(&mut h.app, tab);
+            }
+            semantic_content::finalize(&mut h.app, ui.ctx());
+            // App paths may converge after an early return; finalization must be idempotent.
+            semantic_content::finalize(&mut h.app, ui.ctx());
+            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::new("semantic-test-discard"))).unwrap_or(false) {
+                ui.ctx().request_discard("repeat semantic layout after input");
+            }
+        })
+        .textures_delta
+        .clear();
+}
+
+fn semantic_at(owner: ContentOwner, label: &str) -> Pos2 {
+    semantic_content::output(owner).rows.into_iter().find(|(name, ..)| name == label).unwrap().1.center()
+}
+
+fn semantic_control(owner: ContentOwner, handle: &str) -> Pos2 {
+    let rows = semantic_content::output(owner).rows;
+    crate::scenario::handles(handle)
+        .into_iter()
+        .find(|(name, point)| name == handle && rows.iter().any(|(_, rect, ..)| rect.contains(*point)))
+        .unwrap()
+        .1
+}
+
+fn semantic_button(at: Pos2, button: egui::PointerButton, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::PointerButton { pos: at, button, pressed, modifiers }
+}
+
+fn semantic_click(h: &mut Harness, owners: &[ContentOwner], at: Pos2, modifiers: egui::Modifiers) {
+    semantic_frame(h, owners, vec![egui::Event::PointerMoved(at)], modifiers);
+    semantic_frame(h, owners, vec![semantic_button(at, egui::PointerButton::Primary, true, modifiers)], modifiers);
+    semantic_frame(h, owners, vec![semantic_button(at, egui::PointerButton::Primary, false, modifiers)], modifiers);
+}
+
+#[test]
+fn history_bodies_and_origin_work_with_browser_hidden() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.ui.show_browser = false;
+    h.app.preferences.timeline_left = true;
+    h.app.preferences.timeline_left_width = 260.0;
+    h.app.preferences.timeline_origin_bodies = true;
+    h.app.tree.expanded.insert("origin".into());
+    h.frames(4);
+    assert!(drawn_rows().is_empty() && drawn_occurrences().is_empty());
+    let body = semantic_at(ContentOwner::HISTORY, "One");
+    h.step(&json!({"move":[body.x, body.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_bodies, ["One"]);
+    h.step(&json!({"click":[body.x, body.y]})).unwrap();
+    assert_eq!(h.app.session.selection, [Sel::Body { name: "One".into() }]);
+    let eye = semantic_control(ContentOwner::HISTORY, "eye:One");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":[eye.x, eye.y]})).unwrap();
+    assert!(body_hidden(&h, "One"));
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    let plane = semantic_at(ContentOwner::HISTORY, "XY");
+    h.step(&json!({"move":[plane.x, plane.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_plane.as_deref(), Some("XY"));
+    h.step(&json!({"click":[plane.x, plane.y]})).unwrap();
+    assert_eq!(h.app.session.selection, [Sel::Plane { name: "XY".into() }]);
+    h.step(&json!({"click":[plane.x, plane.y],"button":"right"})).unwrap();
+    assert_eq!(h.app.menu.target, Target::OriginPlane { name: "XY".into() });
+    crate::context_menu::close(&mut h.app);
+    h.frames(2);
+    let body = semantic_at(ContentOwner::HISTORY, "Two");
+    h.step(&json!({"click":[body.x, body.y],"button":"right"})).unwrap();
+    assert_eq!(h.app.menu.target, Target::Body { name: "Two".into() });
+    crate::context_menu::close(&mut h.app);
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.start("solid.combine");
+    h.frames(2);
+    for name in ["One", "Two"] {
+        let body = semantic_at(ContentOwner::HISTORY, name);
+        h.step(&json!({"click":[body.x, body.y]})).unwrap();
+    }
+    let dialog = h.app.dialog.as_ref().unwrap();
+    assert_eq!(dialog.inputs[0].items, [Sel::Body { name: "One".into() }]);
+    assert_eq!(dialog.inputs[1].items, [Sel::Body { name: "Two".into() }]);
+    assert!(h.app.session.selection.is_empty(), "tool picks do not leak into document selection");
+}
+
+#[test]
+fn semantic_owner_submission_order_preserves_hover_selection_picks_and_single_visibility_command() {
+    for owners in [[ContentOwner::BROWSER, ContentOwner::HISTORY], [ContentOwner::HISTORY, ContentOwner::BROWSER]] {
+        for owner in [ContentOwner::BROWSER, ContentOwner::HISTORY] {
+            let mut h = Harness::new();
+            three_bodies(&mut h);
+            for _ in 0..3 {
+                semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+            }
+            let body = semantic_at(owner, "One");
+            semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(body)], egui::Modifiers::NONE);
+            assert_eq!(h.app.viewport.hover_bodies, ["One"], "{owners:?}, {owner:?}");
+            let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+            semantic_click(&mut h, &owners, body, ctrl);
+            assert_eq!(h.app.session.selection, [Sel::Body { name: "One".into() }], "Ctrl must toggle exactly once");
+            let eye = semantic_control(owner, "eye:Two");
+            let undo = h.app.session.undo.len();
+            semantic_click(&mut h, &owners, eye, egui::Modifiers::NONE);
+            assert_eq!(h.app.session.undo.len(), undo + 1, "visibility command runs once");
+            assert!(body_hidden(&h, "Two"));
+            h.app.run("select.clear", json!({})).unwrap();
+            h.app.start("solid.combine");
+            for name in ["One", "Three"] {
+                let body = semantic_at(owner, name);
+                semantic_click(&mut h, &owners, body, egui::Modifiers::NONE);
+            }
+            let dialog = h.app.dialog.as_ref().unwrap();
+            assert_eq!(dialog.inputs[0].items, [Sel::Body { name: "One".into() }]);
+            assert_eq!(dialog.inputs[1].items, [Sel::Body { name: "Three".into() }]);
+            assert!(h.app.session.selection.is_empty());
+        }
+    }
+}
+
+#[test]
+fn absent_semantic_owners_expire_geometry_and_hover_without_losing_selection_or_folds() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.tree.expanded.insert("origin".into());
+    let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let body = semantic_at(ContentOwner::HISTORY, "One");
+    semantic_click(&mut h, &owners, body, egui::Modifiers::NONE);
+    assert_eq!(h.app.viewport.hover_bodies, ["One"]);
+    let selected = h.app.session.selection.clone();
+    let folds = (h.app.tree.collapsed.clone(), h.app.tree.expanded.clone());
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    assert!(h.app.viewport.hover_bodies.is_empty() && h.app.viewport.hover_plane.is_none());
+    for owner in owners {
+        let output = semantic_content::output(owner);
+        assert!(output.rows.is_empty() && output.occurrences.is_empty());
+    }
+    assert_eq!(h.app.session.selection, selected);
+    assert_eq!((h.app.tree.collapsed.clone(), h.app.tree.expanded.clone()), folds);
+    // Unrelated viewport contributors must survive frames with no semantic presentations.
+    h.app.viewport.hover_bodies = vec!["external contributor".into()];
+    h.app.viewport.hover_plane = Some("external plane".into());
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    assert_eq!(h.app.viewport.hover_bodies, ["external contributor"]);
+    assert_eq!(h.app.viewport.hover_plane.as_deref(), Some("external plane"));
+    // Egui hit-tests the previous pass: register the reappearing rows before moving to one.
+    semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    let body = semantic_at(ContentOwner::HISTORY, "One");
+    semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(body)], egui::Modifiers::NONE);
+    assert!(
+        h.app.viewport.hover_bodies.contains(&"external contributor".into()) && h.app.viewport.hover_bodies.contains(&"One".into()),
+        "hover contributors: {:?}",
+        h.app.viewport.hover_bodies
+    );
+    let plane = semantic_at(ContentOwner::HISTORY, "XY");
+    semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(plane)], egui::Modifiers::NONE);
+    assert_eq!(h.app.viewport.hover_plane.as_deref(), Some("XY"));
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    assert_eq!(h.app.viewport.hover_bodies, ["external contributor"]);
+    assert_eq!(h.app.viewport.hover_plane.as_deref(), Some("external plane"));
+}
+
+#[test]
+fn semantic_shift_and_ctrl_ranges_use_each_owners_anchor_and_complete_previous_order() {
+    for owners in [[ContentOwner::BROWSER, ContentOwner::HISTORY], [ContentOwner::HISTORY, ContentOwner::BROWSER]] {
+        for (owner, other) in [(ContentOwner::BROWSER, ContentOwner::HISTORY), (ContentOwner::HISTORY, ContentOwner::BROWSER)] {
+            let mut h = Harness::new();
+            three_bodies(&mut h);
+            for _ in 0..3 {
+                semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+            }
+            let first = semantic_at(owner, "One");
+            semantic_click(&mut h, &owners, first, egui::Modifiers::NONE);
+            let unrelated = semantic_at(other, "Three");
+            semantic_click(&mut h, &owners, unrelated, egui::Modifiers::NONE);
+            let middle = semantic_at(owner, "Two");
+            semantic_click(&mut h, &owners, middle, egui::Modifiers { shift: true, ..Default::default() });
+            assert_eq!(h.app.session.selection, [Sel::Body { name: "One".into() }, Sel::Body { name: "Two".into() }]);
+            // Start below the target, so the current order is incomplete at the Shift click.
+            let last = semantic_at(owner, "Three");
+            semantic_click(&mut h, &owners, last, egui::Modifiers::NONE);
+            let first = semantic_at(owner, "One");
+            semantic_click(&mut h, &owners, first, egui::Modifiers { shift: true, ctrl: true, ..Default::default() });
+            let names: BTreeSet<_> = h.app.session.selection.iter().filter_map(|selection| picked_body(selection).map(str::to_owned)).collect();
+            assert_eq!(names, BTreeSet::from(["One".into(), "Two".into(), "Three".into()]));
+        }
+    }
+}
+
+#[test]
+fn browser_body_reveal_survives_history_only_and_unrelated_presentations() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    reveal_body(&mut h.app, "Three");
+    for owners in [&[ContentOwner::HISTORY][..], &[][..], &[ContentOwner::HISTORY][..]] {
+        semantic_frame(&mut h, owners, Vec::new(), egui::Modifiers::NONE);
+        assert_eq!(h.app.tree.reveal.as_deref(), Some("Three"));
+    }
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = false;
+    h.app.preferences.browser_collapsed = true;
+    h.frames(3);
+    assert_eq!(h.app.tree.reveal.as_deref(), Some("Three"), "collapsed Browser does not acknowledge a row");
+    h.app.preferences.browser_collapsed = false;
+    for _ in 0..4 {
+        semantic_frame(&mut h, &[ContentOwner::HISTORY, ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+    }
+    assert!(h.app.tree.reveal.is_none());
+    assert!(drawn_rows().iter().any(|(label, ..)| label == "Three"));
+}
+
+#[test]
+fn history_reveal_survives_hidden_and_nonmatching_content_in_all_existing_compositions() {
+    for (left, combined) in [(false, false), (true, false), (false, true)] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Target","body_name":"Body"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        h.app.preferences.timeline_left = left;
+        h.app.preferences.history_in_browser = combined;
+        h.app.ui.show_timeline = false;
+        h.app.ui.show_browser = false;
+        h.app.tree.timeline_reveal = Some(feature);
+        h.frames(3);
+        assert_eq!(h.app.tree.timeline_reveal, Some(feature));
+        semantic_frame(&mut h, &[ContentOwner::HISTORY], Vec::new(), egui::Modifiers::NONE);
+        assert_eq!(h.app.tree.timeline_reveal, Some(feature), "Bodies/Origin is not a feature presentation");
+        if combined {
+            h.app.ui.show_browser = true;
+            h.app.preferences.browser_collapsed = false;
+            h.app.tree.collapsed.insert("c0/history".into());
+            h.frames(3);
+            assert_eq!(h.app.tree.timeline_reveal, Some(feature), "a folded combined History retains the request");
+            h.app.tree.collapsed.remove("c0/history");
+        } else {
+            h.app.ui.show_timeline = true;
+        }
+        h.frames(8);
+        assert!(h.app.tree.timeline_reveal.is_none(), "left={left}, combined={combined}");
+    }
+}
+
+#[test]
+fn native_feature_reveal_waits_for_its_intended_browser_composition() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body"})).unwrap();
+    let id = h.app.session.doc.features[0].id;
+    reveal_feature(&mut h.app, id, "Body");
+    h.app.preferences.history_in_browser = true;
+    h.frames(3);
+    assert!(h.app.tree.reveal_feature.is_some(), "combined History does not consume a native Features request");
+    h.app.preferences.history_in_browser = false;
+    h.frames(4);
+    assert!(h.app.tree.reveal_feature.is_none());
+}
+
+#[test]
+fn eye_capture_disappearance_finishes_one_undo_group_and_does_not_transfer_to_another_owner() {
+    for owner in [ContentOwner::BROWSER, ContentOwner::HISTORY] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+        for _ in 0..3 {
+            semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+        }
+        let first = semantic_control(owner, "eye:One");
+        let undo = h.app.session.undo.len();
+        semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(first)], egui::Modifiers::NONE);
+        semantic_frame(
+            &mut h,
+            &owners,
+            vec![semantic_button(first, egui::PointerButton::Primary, true, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        let middle = semantic_control(owner, "eye:Two");
+        for at in [first + vec2(0.0, 7.0), middle] {
+            semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
+        }
+        assert!(h.ctx.data(|data| data.get_temp::<bool>(crate::ui_kit::eye_drag_id())).is_some());
+        assert!(body_hidden(&h, "One") && body_hidden(&h, "Two") && !body_hidden(&h, "Three"));
+        let other = if owner == ContentOwner::BROWSER { ContentOwner::HISTORY } else { ContentOwner::BROWSER };
+        let other_eye = semantic_control(other, "eye:Three");
+        semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+        assert!(h.ctx.data(|data| data.get_temp::<bool>(crate::ui_kit::eye_drag_id())).is_none());
+        assert!(h.app.tree.eye_press.is_none());
+        assert_eq!(h.app.session.undo.len(), undo + 1, "disappearance closes the existing drag group");
+        semantic_frame(&mut h, &[other], vec![egui::Event::PointerMoved(other_eye)], egui::Modifiers::NONE);
+        assert!(!body_hidden(&h, "Three"), "the vanished owner's eye target cannot transfer to another presentation");
+        semantic_frame(
+            &mut h,
+            &owners,
+            vec![semantic_button(other_eye, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Two") && !body_hidden(&h, "Three"));
+    }
+}
+
+#[test]
+fn shared_body_origin_rows_keep_their_geometry_labels_and_composition() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.tree.expanded.insert("origin".into());
+    let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let browser = semantic_content::output(ContentOwner::BROWSER);
+    let history = semantic_content::output(ContentOwner::HISTORY);
+    let labels: Vec<_> = history.rows.iter().map(|(label, ..)| label.as_str()).collect();
+    assert_eq!(labels, ["Bodies", "One", "Two", "Three", "Origin", "O", "X", "Y", "Z", "XY", "XZ", "YZ"]);
+    for (label, rect, fold, open) in history.rows {
+        let (_, browser_rect, browser_fold, browser_open) = browser.rows.iter().find(|(name, ..)| *name == label).unwrap();
+        assert_eq!(rect.height(), browser_rect.height(), "{label}: existing shared row height");
+        assert_eq!(fold.is_some(), browser_fold.is_some(), "{label}: existing disclosure composition");
+        assert_eq!(open, *browser_open, "{label}: canonical fold state");
+    }
+    assert_eq!(drawn_rows(), browser.rows, "legacy automation remains Browser-only");
+}
+
+#[test]
+fn semantic_drop_runs_once_in_either_owner_submission_order() {
+    for owners in [[ContentOwner::BROWSER, ContentOwner::HISTORY], [ContentOwner::HISTORY, ContentOwner::BROWSER]] {
+        for owner in [ContentOwner::BROWSER, ContentOwner::HISTORY] {
+            let mut h = Harness::new();
+            three_bodies(&mut h);
+            let group = h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Destination"})).unwrap()["group"].as_u64().unwrap();
+            for _ in 0..3 {
+                semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+            }
+            let from = semantic_at(owner, "One");
+            let to = semantic_at(owner, "Destination (0)");
+            let undo = h.app.session.undo.len();
+            semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
+            semantic_frame(
+                &mut h,
+                &owners,
+                vec![semantic_button(from, egui::PointerButton::Primary, true, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            for at in [from + vec2(8.0, 0.0), to] {
+                semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
+            }
+            semantic_frame(
+                &mut h,
+                &owners,
+                vec![semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            assert!(h.app.session.doc.browser_group(group).unwrap().has_item("One"));
+            assert_eq!(h.app.session.undo.len(), undo + 1, "{owners:?}, {owner:?}: exactly one drop command");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert!(!h.app.session.doc.browser_group(group).unwrap().has_item("One"));
+        }
+    }
+}
+
+#[test]
+fn disappearing_semantic_drag_owner_releases_only_its_payload_and_widget_capture() {
+    for owner in [ContentOwner::BROWSER, ContentOwner::HISTORY] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        for _ in 0..3 {
+            semantic_frame(&mut h, &[owner], Vec::new(), egui::Modifiers::NONE);
+        }
+        let from = semantic_at(owner, "One");
+        semantic_frame(&mut h, &[owner], vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
+        semantic_frame(
+            &mut h,
+            &[owner],
+            vec![semantic_button(from, egui::PointerButton::Primary, true, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+        );
+        semantic_frame(&mut h, &[owner], vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))], egui::Modifiers::NONE);
+        assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+        semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+        assert!(!egui::DragAndDrop::has_any_payload(&h.ctx));
+        assert!(h.ctx.dragged_id().is_none());
+        assert!(semantic_content::output(owner).rows.is_empty());
+    }
+}
+
+#[test]
+fn pending_semantic_reveals_expire_when_their_targets_are_removed() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body"})).unwrap();
+    let feature = h.app.session.doc.features[0].id;
+    let other = h
+        .app
+        .run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"operation":"new_body","body_name":"Other"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    h.app.run("timeline.suppress", json!({"feature":other})).unwrap();
+    reveal_body(&mut h.app, "Body");
+    reveal_feature(&mut h.app, feature, "Body");
+    h.app.tree.reveal = Some("Body".into());
+    h.app.tree.timeline_reveal = Some(feature);
+    h.app.run("selection.delete", json!({"items":[Sel::Feature { id: feature }]})).unwrap();
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    assert!(h.app.tree.reveal.is_none() && h.app.tree.reveal_feature.is_none() && h.app.tree.timeline_reveal.is_none());
+}
+
+#[test]
+fn semantic_row_commands_are_consumed_once_across_layout_repeats() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let at = semantic_control(ContentOwner::HISTORY, "eye:One");
+    let undo = h.app.session.undo.len();
+    semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
+    semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
+    h.ctx.data_mut(|data| data.insert_temp(egui::Id::new("semantic-test-discard"), true));
+    semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
+    assert!(body_hidden(&h, "One"), "a repeated layout cannot toggle the eye back on");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+}
+
+#[test]
+fn invisible_browser_content_keeps_its_reveal_and_publishes_no_geometry() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    reveal_body(&mut h.app, "Three");
+    let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0))), ..Default::default() };
+    h.ctx
+        .run_ui(raw, |ui| {
+            semantic_content::begin(&mut h.app, ui.ctx());
+            ui.set_opacity(0.0);
+            semantic_content::show(&mut h.app, ui, ContentOwner::BROWSER, ContentRequest::Browser { shrink_height: false });
+            semantic_content::finalize(&mut h.app, ui.ctx());
+        })
+        .textures_delta
+        .clear();
+    assert_eq!(h.app.tree.reveal.as_deref(), Some("Three"));
+    assert!(drawn_rows().is_empty() && drawn_occurrences().is_empty());
+}
+
+#[test]
+fn combined_history_reveal_opens_and_acknowledges_the_features_placement() {
+    let (mut h, _, occurrence) = crate::test_support::component_box();
+    let feature = h.app.session.model.state().body("Body1").unwrap().feature;
+    h.app.preferences.history_in_browser = true;
+    h.app.tree.close_row(&occurrence_key(&[occurrence]));
+    reveal_in_history(&mut h.app, feature);
+    h.app.tree.timeline_reveal = Some(feature);
+    h.frames(6);
+    assert!(is_open(&h.app, &occurrence_key(&[occurrence]), true));
+    assert!(h.app.tree.reveal_feature.is_none() && h.app.tree.timeline_reveal.is_none());
+    let name = &h.app.session.doc.feature(feature).unwrap().name;
+    assert!(drawn_rows().iter().any(|(label, ..)| label == name));
+}
+
+#[test]
+fn browser_editors_have_one_app_owned_host_when_both_presentations_are_hidden() {
+    let (mut h, _, occurrence) = crate::test_support::component_box();
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.tree.occurrence_move = Some(OccMove::new(occurrence));
+    h.frames(4);
+    assert!(drawn_rows().is_empty());
+    let fields = crate::scenario::handles("occurrence-move:distance:0");
+    assert_eq!(
+        fields.iter().filter(|(name, _)| name == "occurrence-move:distance:0").count(),
+        1,
+        "the editor is hosted once despite both panels being hidden"
+    );
+    assert!(h.app.tree.occurrence_move.as_ref().unwrap().baseline.is_some());
+}
+
+#[test]
+fn body_reveal_waits_through_rollback_until_its_creator_is_presented_again() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    reveal_body(&mut h.app, "Three");
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    for _ in 0..3 {
+        semantic_frame(&mut h, &[ContentOwner::HISTORY, ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+        assert_eq!(h.app.tree.reveal.as_deref(), Some("Three"), "rollback is not removal");
+    }
+    h.app.run("timeline.roll_to", json!({})).unwrap();
+    for _ in 0..4 {
+        semantic_frame(&mut h, &[ContentOwner::HISTORY, ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+    }
+    assert!(h.app.tree.reveal.is_none());
+}
+
+/// Make an actual second document tab with identical semantic names and IDs. Return to A;
+/// tests can switch during an input frame without rebuilding or rendering B first.
+fn matching_semantic_tab(h: &mut Harness) -> (usize, String, usize) {
+    let original = h.app.docs.active;
+    let incoming = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+    let original_session = h.app.session.uid;
+    crate::documents::open_tab(&mut h.app, incoming).unwrap();
+    assert_ne!(h.app.session.uid, original_session);
+    let tab = h.app.docs.active;
+    let document = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    crate::documents::switch(&mut h.app, original);
+    (tab, document, undo)
+}
+
+fn semantic_drag_start(h: &mut Harness, owners: &[ContentOwner], from: Pos2) {
+    semantic_frame(h, owners, vec![egui::Event::PointerMoved(from)], egui::Modifiers::NONE);
+    semantic_frame(h, owners, vec![semantic_button(from, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
+    semantic_frame(h, owners, vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))], egui::Modifiers::NONE);
+}
+
+fn semantic_occurrence_at(owner: ContentOwner, occurrence: u64) -> Pos2 {
+    semantic_content::output(owner).occurrences.into_iter().find(|(path, ..)| path.last() == Some(&occurrence)).unwrap().2.center()
+}
+
+#[test]
+fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can_drop() {
+    for after_begin in [false, true] {
+        for owner in [ContentOwner::BROWSER, ContentOwner::HISTORY] {
+            let mut h = Harness::new();
+            three_bodies(&mut h);
+            h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Destination"})).unwrap();
+            let (tab, document, undo) = matching_semantic_tab(&mut h);
+            let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+            for _ in 0..3 {
+                semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+            }
+            let from = semantic_at(owner, "One");
+            let to = semantic_at(owner, "Destination (0)");
+            semantic_drag_start(&mut h, &owners, from);
+            let outgoing = h.app.session.uid;
+            let payload = egui::DragAndDrop::payload::<Drag>(&h.ctx).unwrap();
+            assert_eq!(payload.source.session, outgoing);
+            let stale_payload = (*payload).clone();
+            if !after_begin {
+                crate::documents::switch(&mut h.app, tab);
+            }
+            semantic_frame_switch(
+                &mut h,
+                &owners,
+                vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+                after_begin.then_some(tab),
+            );
+            assert_ne!(h.app.session.uid, outgoing);
+            assert_eq!(h.app.session.doc.to_json(), document);
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(h.ctx.dragged_id().is_none());
+            // Even a delayed payload reintroduced after cancellation must fail provenance
+            // validation; matching body/group names cannot make it belong to the new tab.
+            egui::DragAndDrop::set_payload(&h.ctx, stale_payload);
+            semantic_frame(
+                &mut h,
+                &owners,
+                vec![semantic_button(to, egui::PointerButton::Primary, true, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            semantic_frame(
+                &mut h,
+                &owners,
+                vec![semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            assert_eq!(h.app.session.doc.to_json(), document);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+    }
+}
+
+#[test]
+fn switching_documents_cancels_occurrence_payloads_with_matching_component_and_path_ids() {
+    for after_begin in [false, true] {
+        let (mut h, _, occurrence) = crate::test_support::component_box();
+        let destination = h.app.run("component.create", json!({"name":"Destination"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let (tab, document, undo) = matching_semantic_tab(&mut h);
+        let owners = [ContentOwner::BROWSER];
+        for _ in 0..3 {
+            semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+        }
+        let from = semantic_occurrence_at(ContentOwner::BROWSER, occurrence);
+        let to = semantic_occurrence_at(ContentOwner::BROWSER, destination);
+        semantic_drag_start(&mut h, &owners, from);
+        assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+        if !after_begin {
+            crate::documents::switch(&mut h.app, tab);
+        }
+        semantic_frame_switch(
+            &mut h,
+            &owners,
+            vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+            after_begin.then_some(tab),
+        );
+        assert_eq!(h.app.session.doc.to_json(), document);
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+        assert!(h.ctx.dragged_id().is_none());
+    }
+}
+
+#[test]
+fn switching_documents_clears_combined_history_drag_even_when_feature_ids_match() {
+    for after_begin in [false, true] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        h.app.preferences.history_in_browser = true;
+        let source = h.app.session.doc.features[2].id;
+        let target = h.app.session.doc.features[0].id;
+        let (tab, document, undo) = matching_semantic_tab(&mut h);
+        let owners = [ContentOwner::BROWSER];
+        for _ in 0..3 {
+            semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+        }
+        let from = semantic_control(ContentOwner::BROWSER, &format!("row:browser-feature:c0:{source}"));
+        let to = semantic_control(ContentOwner::BROWSER, &format!("row:browser-feature:c0:{target}"));
+        semantic_drag_start(&mut h, &owners, from);
+        assert!(!h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().feature_drags.is_empty());
+        if !after_begin {
+            crate::documents::switch(&mut h.app, tab);
+        }
+        semantic_frame_switch(
+            &mut h,
+            &owners,
+            vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+            egui::Modifiers::NONE,
+            after_begin.then_some(tab),
+        );
+        assert_eq!(h.app.session.doc.to_json(), document);
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().feature_drags.is_empty());
+        assert!(h.ctx.dragged_id().is_none());
+    }
+}
+
+#[test]
+fn document_switch_drops_shift_anchors_without_changing_the_incoming_document_or_undo() {
+    for owner in [ContentOwner::BROWSER, ContentOwner::HISTORY] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        let (tab, document, undo) = matching_semantic_tab(&mut h);
+        let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+        for _ in 0..3 {
+            semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+        }
+        let at = semantic_at(owner, "One");
+        semantic_click(&mut h, &owners, at, egui::Modifiers::NONE);
+        assert!(h.app.tree.content.owner(owner).unwrap().anchor.is_some());
+        semantic_frame_switch(&mut h, &owners, Vec::new(), egui::Modifiers::NONE, Some(tab));
+        assert!(h.app.tree.content.owner(owner).unwrap().anchor.is_none());
+        let at = semantic_at(owner, "Two");
+        semantic_click(&mut h, &owners, at, egui::Modifiers { shift: true, ..Default::default() });
+        assert_eq!(h.app.session.selection, [Sel::Body { name: "Two".into() }], "A's One anchor cannot extend B's selection");
+        assert_eq!(h.app.session.doc.to_json(), document);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn switching_documents_finishes_eye_undo_group_in_the_outgoing_session_only() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let original = h.app.docs.active;
+    let (tab, document, undo_b) = matching_semantic_tab(&mut h);
+    let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let undo_a = h.app.session.undo.len();
+    let one = semantic_control(ContentOwner::BROWSER, "eye:One");
+    let two = semantic_control(ContentOwner::BROWSER, "eye:Two");
+    semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(one)], egui::Modifiers::NONE);
+    semantic_frame(&mut h, &owners, vec![semantic_button(one, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
+    for point in [one + vec2(0.0, 7.0), two] {
+        semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(point)], egui::Modifiers::NONE);
+    }
+    assert!(body_hidden(&h, "One") && body_hidden(&h, "Two"));
+    semantic_frame_switch(&mut h, &owners, Vec::new(), egui::Modifiers::NONE, Some(tab));
+    let three = semantic_control(ContentOwner::BROWSER, "eye:Three");
+    semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(three)], egui::Modifiers::NONE);
+    semantic_frame(&mut h, &owners, vec![semantic_button(three, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
+    assert_eq!(h.app.session.doc.to_json(), document);
+    assert_eq!(h.app.session.undo.len(), undo_b);
+    assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Two") && !body_hidden(&h, "Three"));
+    crate::documents::switch(&mut h.app, original);
+    assert_eq!(h.app.session.undo.len(), undo_a + 1, "only the outgoing session receives the merged drag undo group");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Two"));
+}
+
+#[test]
+fn switching_semantic_documents_preserves_unrelated_payload_and_capture() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let (tab, _, _) = matching_semantic_tab(&mut h);
+    let owners = [ContentOwner::BROWSER];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let from = semantic_at(ContentOwner::BROWSER, "One");
+    semantic_drag_start(&mut h, &owners, from);
+    let external = egui::Id::new("external capture");
+    egui::DragAndDrop::set_payload(&h.ctx, "external payload".to_string());
+    h.ctx.set_dragged_id(external);
+    crate::documents::switch(&mut h.app, tab);
+    assert_eq!(egui::DragAndDrop::payload::<String>(&h.ctx).as_deref().map(String::as_str), Some("external payload"));
+    assert_eq!(h.ctx.dragged_id(), Some(external));
+}
+
+#[test]
+fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_target() {
+    for group_source in [false, true] {
+        for keep_source in [false, true] {
+            let mut h = Harness::new();
+            three_bodies(&mut h);
+            if group_source {
+                h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Source","items":["One"]})).unwrap();
+            }
+            let destination =
+                h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Destination"})).unwrap()["group"].as_u64().unwrap();
+            let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+            for _ in 0..3 {
+                semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+            }
+            let from = semantic_at(ContentOwner::BROWSER, if group_source { "Source (1)" } else { "One" });
+            let to = semantic_at(ContentOwner::HISTORY, "Destination (0)");
+            let document = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            semantic_drag_start(&mut h, &owners, from);
+            assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            let presented = if keep_source { &owners[..] } else { &[ContentOwner::HISTORY][..] };
+            semantic_frame(
+                &mut h,
+                presented,
+                vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            if keep_source {
+                assert_ne!(h.app.session.doc.to_json(), document, "cross-owner drops remain valid while both owners are presented");
+                assert_eq!(h.app.session.undo.len(), undo + 1);
+                if !group_source {
+                    assert!(h.app.session.doc.browser_group(destination).unwrap().has_item("One"));
+                }
+            } else {
+                assert_eq!(h.app.session.doc.to_json(), document);
+                assert_eq!(h.app.session.undo.len(), undo);
+            }
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(h.ctx.dragged_id().is_none());
+        }
+    }
+}
+
+#[test]
+fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapter() {
+    for reorder in [false, true] {
+        for keep_source in [false, true] {
+            let (mut h, _, occurrence) = crate::test_support::component_box();
+            let destination = h.app.run("component.create", json!({"name":"Destination"})).unwrap()["occurrence"].as_u64().unwrap();
+            h.app.run("component.activate", json!({"component":0})).unwrap();
+            let adapter = ContentOwner(2);
+            let owners = [ContentOwner::BROWSER, adapter];
+            for _ in 0..3 {
+                semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+            }
+            // Move the later placement before the earlier one for a real reorder change.
+            let (source, target) = if reorder { (destination, occurrence) } else { (occurrence, destination) };
+            let from = semantic_occurrence_at(ContentOwner::BROWSER, source);
+            let mut to = semantic_occurrence_at(adapter, target);
+            if reorder {
+                to.y -= crate::ui_kit::TREE_ROW_HEIGHT * 0.4;
+            }
+            let document = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            semantic_drag_start(&mut h, &owners, from);
+            assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+            let presented = if keep_source { &owners[..] } else { std::slice::from_ref(&adapter) };
+            semantic_frame(
+                &mut h,
+                presented,
+                vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+                egui::Modifiers::NONE,
+            );
+            if keep_source {
+                assert_ne!(h.app.session.doc.to_json(), document);
+                assert_eq!(h.app.session.undo.len(), undo + 1);
+            } else {
+                assert_eq!(h.app.session.doc.to_json(), document);
+                assert_eq!(h.app.session.undo.len(), undo);
+            }
+            assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+            assert!(h.ctx.dragged_id().is_none());
+        }
+    }
+}
+
+#[test]
+fn session_switch_after_target_rows_render_discards_their_already_queued_drop() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Destination"})).unwrap();
+    let (tab, document, undo) = matching_semantic_tab(&mut h);
+    let owners = [ContentOwner::BROWSER, ContentOwner::HISTORY];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let from = semantic_at(ContentOwner::BROWSER, "One");
+    let to = semantic_at(ContentOwner::HISTORY, "Destination (0)");
+    semantic_drag_start(&mut h, &owners, from);
+    semantic_frame_transitions(
+        &mut h,
+        &owners,
+        vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+        egui::Modifiers::NONE,
+        None,
+        Some(tab),
+    );
+    assert_eq!(h.app.session.doc.to_json(), document);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(semantic_content::output(ContentOwner::BROWSER).rows.is_empty());
+    assert!(semantic_content::output(ContentOwner::HISTORY).rows.is_empty());
+}
+
+#[test]
+fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.run("browser.group", json!({"component":0,"folder":"bodies","name":"Destination"})).unwrap();
+    let incoming = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+    let document = incoming.doc.to_json();
+    let undo = incoming.undo.len();
+    let owners = [ContentOwner::BROWSER];
+    for _ in 0..3 {
+        semantic_frame(&mut h, &owners, Vec::new(), egui::Modifiers::NONE);
+    }
+    let from = semantic_at(ContentOwner::BROWSER, "One");
+    semantic_click(&mut h, &owners, from, egui::Modifiers::NONE);
+    let to = semantic_at(ContentOwner::BROWSER, "Destination (0)");
+    semantic_drag_start(&mut h, &owners, from);
+    assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+    h.app.session.replace_design(incoming);
+    semantic_frame(
+        &mut h,
+        &owners,
+        vec![egui::Event::PointerMoved(to), semantic_button(to, egui::PointerButton::Primary, false, egui::Modifiers::NONE)],
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(h.app.session.doc.to_json(), document);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().anchor.is_none());
+    assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+    assert!(h.ctx.dragged_id().is_none());
+}
+
+fn reveal_browser_at_height(h: &mut Harness, height: f32) {
+    let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() };
+    h.ctx
+        .run_ui(raw, |ui| {
+            semantic_content::begin(&mut h.app, ui.ctx());
+            let mut content = ui.new_child(
+                egui::UiBuilder::new().id_salt("reveal-document-test").max_rect(Rect::from_min_size(pos2(10.0, 10.0), vec2(400.0, height))),
+            );
+            semantic_content::show(&mut h.app, &mut content, ContentOwner::BROWSER, ContentRequest::Browser { shrink_height: false });
+            semantic_content::finalize(&mut h.app, ui.ctx());
+        })
+        .textures_delta
+        .clear();
+}
+
+fn assert_no_pending_reveals(h: &Harness) {
+    assert!(h.app.tree.reveal.is_none());
+    assert!(h.app.tree.reveal_source.is_none());
+    assert!(h.app.tree.reveal_feature.is_none());
+    assert!(h.app.tree.timeline_reveal.is_none());
+    assert!(h.app.tree.view_pick.is_none());
+}
+
+fn queue_all_document_reveals(h: &mut Harness) -> u64 {
+    let feature = h.app.session.model.state().body("Three").unwrap().feature;
+    reveal_body(&mut h.app, "Three");
+    reveal_feature(&mut h.app, feature, "Three");
+    // Keep both independently pending presentations, with the body's real provenance from
+    // reveal_body. Public request fields also remain supported for existing adapters.
+    h.app.tree.reveal = Some("Three".into());
+    request_timeline_reveal(&mut h.app, feature);
+    h.app.tree.view_pick = Some(feature);
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    feature
+}
+
+#[test]
+fn body_reveals_park_with_each_document_and_cannot_scroll_a_matching_incoming_browser() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let original = h.app.docs.active;
+    let original_uid = h.app.session.uid;
+    let (tab, _, _) = matching_semantic_tab(&mut h);
+    crate::documents::switch(&mut h.app, tab);
+    for _ in 0..3 {
+        reveal_browser_at_height(&mut h, 120.0);
+    }
+    let root = h.app.session.doc.name.clone();
+    let incoming_root = semantic_at(ContentOwner::BROWSER, &root);
+    assert!(!drawn_rows().iter().any(|(label, ..)| label == "Three"), "the target starts outside the scroll viewport");
+    crate::documents::switch(&mut h.app, original);
+    reveal_body(&mut h.app, "Three");
+    h.app.ui.show_browser = false;
+    h.app.tree.view_pick = Some(h.app.session.doc.features[2].id);
+    semantic_frame_transitions(&mut h, &[ContentOwner::HISTORY], Vec::new(), egui::Modifiers::NONE, None, Some(tab));
+    assert_no_pending_reveals(&h);
+    for _ in 0..8 {
+        reveal_browser_at_height(&mut h, 120.0);
+    }
+    assert_eq!(semantic_at(ContentOwner::BROWSER, &root), incoming_root, "B must not scroll in response to A's same-named body");
+    reveal_body(&mut h.app, "Two");
+    h.app.ui.show_browser = false;
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    assert_eq!(h.app.tree.reveal.as_deref(), Some("Two"));
+    crate::documents::switch(&mut h.app, original);
+    assert_eq!(h.app.tree.reveal.as_deref(), Some("Three"));
+    assert_eq!(h.app.tree.reveal_source.as_ref().unwrap().session, original_uid);
+    assert!(h.app.tree.view_pick.is_none());
+    for _ in 0..30 {
+        reveal_browser_at_height(&mut h, 120.0);
+    }
+    assert!(h.app.tree.reveal.is_none(), "A acknowledges its restored target only after scrolling presents it");
+    crate::documents::switch(&mut h.app, tab);
+    assert_eq!(h.app.tree.reveal.as_deref(), Some("Two"), "B's independent request survives A's acknowledgment");
+    for _ in 0..30 {
+        reveal_browser_at_height(&mut h, 120.0);
+    }
+    assert!(h.app.tree.reveal.is_none());
+}
+
+#[test]
+fn native_feature_reveals_restore_only_in_their_document_even_when_feature_ids_match() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let original = h.app.docs.active;
+    let target_a = h.app.session.doc.features[2].id;
+    let target_b = h.app.session.doc.features[0].id;
+    let (tab, _, _) = matching_semantic_tab(&mut h);
+    reveal_feature(&mut h.app, target_a, "Three");
+    h.app.ui.show_browser = false;
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    semantic_frame_switch(&mut h, &[ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE, Some(tab));
+    assert_no_pending_reveals(&h);
+    assert!(h.app.session.doc.feature(target_a).is_some(), "matching numeric IDs do exist in B");
+    reveal_feature(&mut h.app, target_b, "One");
+    h.app.ui.show_browser = false;
+    crate::documents::switch(&mut h.app, original);
+    assert_eq!(h.app.tree.reveal_feature.as_ref().map(|target| target.id), Some(target_a));
+    for _ in 0..4 {
+        semantic_frame(&mut h, &[ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+    }
+    assert!(h.app.tree.reveal_feature.is_none());
+    crate::documents::switch(&mut h.app, tab);
+    assert_eq!(h.app.tree.reveal_feature.as_ref().map(|target| target.id), Some(target_b));
+    for _ in 0..4 {
+        semantic_frame(&mut h, &[ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+    }
+    assert!(h.app.tree.reveal_feature.is_none());
+}
+
+#[test]
+fn timeline_reveals_remain_per_document_in_bottom_vertical_and_combined_history() {
+    for (left, combined) in [(false, false), (true, false), (false, true)] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        let original = h.app.docs.active;
+        let target_a = h.app.session.doc.features[2].id;
+        let target_b = h.app.session.doc.features[0].id;
+        let (tab, _, _) = matching_semantic_tab(&mut h);
+        h.app.preferences.timeline_left = left;
+        h.app.preferences.history_in_browser = combined;
+        if combined {
+            reveal_in_history(&mut h.app, target_a);
+        }
+        request_timeline_reveal(&mut h.app, target_a);
+        h.app.tree.view_pick = Some(target_a);
+        h.app.ui.show_timeline = false;
+        h.app.ui.show_browser = false;
+        h.frames(2);
+        semantic_frame_switch(&mut h, &[], Vec::new(), egui::Modifiers::NONE, Some(tab));
+        assert_no_pending_reveals(&h);
+        h.app.ui.show_timeline = true;
+        h.app.ui.show_browser = combined;
+        h.frames(4);
+        assert!(h.app.tree.timeline_reveal.is_none());
+        request_timeline_reveal(&mut h.app, target_b);
+        h.app.ui.show_timeline = false;
+        h.app.ui.show_browser = false;
+        h.frames(2);
+        semantic_frame_switch(&mut h, &[], Vec::new(), egui::Modifiers::NONE, Some(original));
+        assert_eq!(h.app.tree.timeline_reveal, Some(target_a));
+        assert!(h.app.tree.view_pick.is_none());
+        if combined {
+            assert_eq!(h.app.tree.reveal_feature.as_ref().map(|target| target.id), Some(target_a));
+        }
+        h.app.ui.show_timeline = true;
+        h.app.ui.show_browser = combined;
+        h.frames(8);
+        assert!(h.app.tree.timeline_reveal.is_none(), "left={left}, combined={combined}: A acknowledges its own request");
+        assert!(h.app.tree.reveal_feature.is_none());
+        crate::documents::switch(&mut h.app, tab);
+        assert_eq!(h.app.tree.timeline_reveal, Some(target_b));
+        h.frames(8);
+        assert!(h.app.tree.timeline_reveal.is_none(), "B acknowledges its independent request");
+    }
+}
+
+#[test]
+fn closing_a_document_destroys_its_parked_reveals_and_clears_stale_view_pick() {
+    for active in [false, true] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        let original = h.app.docs.active;
+        let (tab, _, _) = matching_semantic_tab(&mut h);
+        queue_all_document_reveals(&mut h);
+        if !active {
+            crate::documents::switch(&mut h.app, tab);
+        }
+        crate::documents::close(&mut h.app, original, true);
+        assert_eq!(h.app.docs.count(), 1);
+        assert_no_pending_reveals(&h);
+        let replacement = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+        crate::documents::open_tab(&mut h.app, replacement).unwrap();
+        assert_no_pending_reveals(&h);
+        for _ in 0..3 {
+            semantic_frame(&mut h, &[ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+        }
+        assert_no_pending_reveals(&h);
+    }
+}
+
+#[test]
+fn last_close_blank_adoption_and_direct_replacement_discard_outgoing_reveal_requests() {
+    for replacement in ["last-close", "blank-adopt", "direct"] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        let incoming = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+        queue_all_document_reveals(&mut h);
+        match replacement {
+            "last-close" => {
+                let original = h.app.docs.active;
+                crate::documents::close(&mut h.app, original, true);
+                assert_no_pending_reveals(&h);
+                crate::documents::adopt(&mut h.app, incoming);
+                assert_no_pending_reveals(&h);
+            }
+            "blank-adopt" => {
+                h.app.session.replace_design(solidcraft_engine::Session::default());
+                crate::documents::adopt(&mut h.app, incoming);
+                assert_no_pending_reveals(&h);
+            }
+            _ => h.app.session.replace_design(incoming),
+        }
+        for _ in 0..3 {
+            semantic_frame(&mut h, &[ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
+        }
+        assert_no_pending_reveals(&h);
+        assert!(h.app.session.model.state().body("Three").is_some(), "the incoming target still exists; matching names cannot preserve A's request");
+    }
+}
+
+#[test]
+fn unpresented_app_requests_have_provenance_before_a_direct_session_replacement() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let document = (*h.app.session.doc).clone();
+    h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
+    // Existing callers can set the public request fields before the first UI frame.
+    h.app.tree.reveal = Some("Three".into());
+    h.app.tree.timeline_reveal = Some(document.features[2].id);
+    h.app.tree.view_pick = Some(document.features[2].id);
+    h.app.session.replace_design(solidcraft_engine::Session::new(document));
+    semantic_frame(&mut h, &[ContentOwner::HISTORY], Vec::new(), egui::Modifiers::NONE);
+    assert_no_pending_reveals(&h);
+}
+
+#[test]
+fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_removed() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let original = h.app.docs.active;
+    let owner = h.app.session.uid;
+    let (tab, _, _) = matching_semantic_tab(&mut h);
+    let feature = queue_all_document_reveals(&mut h);
+    crate::documents::switch(&mut h.app, tab);
+    let parked = h.app.docs.background_mut().find(|slot| slot.session.uid == owner).unwrap();
+    parked.session.execute("selection.delete", &json!({"items":[Sel::Feature { id: feature }]})).unwrap();
+    assert_no_pending_reveals(&h);
+    assert!(h.app.session.doc.feature(feature).is_some(), "B retains the matching feature");
+    crate::documents::switch(&mut h.app, original);
+    assert_eq!(h.app.tree.timeline_reveal, Some(feature), "the request returns to A before ordinary target pruning");
+    semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
+    assert_no_pending_reveals(&h);
 }

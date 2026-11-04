@@ -1,0 +1,50 @@
+{
+ "sources": [],
+ "what": "a planar joint driven to x 3, y 4 and 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); planar with frame z = +z, x = +x: M = T(3,4,0)\u00b7Rz(90): (20,0,5) -> (0,20,5) -> (3,24,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 3.0
+     },
+     {
+      "value": 4.0
+     },
+     {
+      "value": 90.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      3.0,
+      24.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       -2.0,
+       4.0,
+       0.0
+      ],
+      "max": [
+       8.0,
+       44.0,
+       10.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}
