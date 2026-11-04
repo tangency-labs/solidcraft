@@ -868,3 +868,23 @@ fn transform_scales_about_a_picked_center() {
     assert!((lo.0 - 10.0).abs() < 1e-6 && (lo.1 - 10.0).abs() < 1e-6, "the picked corner stayed: {lo:?}");
     assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
 }
+
+/// Starting Extrude while a corner dialog is pending must not replace that dialog with the Extrude
+/// one over a still-open sketch: the corner dialog takes the request, applies its corners and
+/// finishes the sketch, and Extrude does not start.
+#[test]
+fn starting_another_command_leaves_a_pending_corner_to_finish_the_sketch() {
+    let mut h = fixture();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let mut d = picked(&h, "sketch.fillet");
+    d.inputs[0].items =
+        h.app.session.doc.sketch(sketch).unwrap().points.iter().filter(|p| p.id != "origin").map(|p| Sel::SketchPoint { id: p.id.clone() }).collect();
+    h.app.dialog = Some(d);
+    h.frames(4);
+    h.app.start("solid.extrude");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::SketchModify(Mod::Corner { .. }))), "the corner dialog is kept");
+    h.settle();
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.dialog.is_none(), "no Extrude dialog over the finished sketch");
+    assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 8, "all four corners are kept");
+}

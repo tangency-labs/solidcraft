@@ -1460,7 +1460,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let _ = app.run("select.set", json!({"items": selection}));
             }
         }
-        "ui.finishSketch" => app.finish_sketch(),
+        "ui.finishSketch" => {
+            app.finish_sketch();
+        }
         "ui.cancelSketch" => app.cancel_sketch(),
         "ui.relinkSource" => {
             if let Some(component) = id_of(&p, "component") {

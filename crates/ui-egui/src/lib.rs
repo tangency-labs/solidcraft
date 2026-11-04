@@ -2010,7 +2010,11 @@ impl SolveApp {
                     }
                 }
             }
-            self.finish_sketch();
+            if !self.finish_sketch() {
+                // The corner dialog's OK finishes the sketch; the user picks the tool again.
+                self.pre_command_cam = None;
+                return;
+            }
             // A feature committed before the marker is back would go in where the sketch was.
             if self.deferred.is_some() {
                 self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
@@ -2361,11 +2365,13 @@ impl SolveApp {
     /// Finish the active sketch: stop editing and restore the history marker Edit Sketch moved.
     /// The camera goes where the "When a sketch ends" preference says (#7038); by default it
     /// stays where it is, however the sketch is left.
-    pub fn finish_sketch(&mut self) {
+    /// Returns false when a pending corner dialog took the request: its OK finishes the sketch.
+    pub fn finish_sketch(&mut self) -> bool {
         if self.session.active_sketch.is_some() && self.dialog.as_mut().is_some_and(dialogs::Dialog::request_sketch_finish) {
-            return;
+            return false;
         }
         self.leave_sketch("sketch.finish");
+        true
     }
 
     /// Cancel Sketch (#3838): leave the sketch without its changes. When the command refuses (the
