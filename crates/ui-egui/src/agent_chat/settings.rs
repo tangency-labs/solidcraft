@@ -693,8 +693,8 @@ fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui_kit::settings_section(ui, "mcp_agents", tr("ui.mcp_agents"), |ui| {
         ui.horizontal(|ui| {
-            let response = ui_kit::checkbox(ui, tr("ui.mcp_compact"), &mut app.preferences.mcp_compact)
-                .backing_on_hover_text(tr("ui.mcp_compact_note"));
+            let response =
+                ui_kit::checkbox(ui, tr("ui.mcp_compact"), &mut app.preferences.mcp_compact).backing_on_hover_text(tr("ui.mcp_compact_note"));
             crate::scenario::publish_handle("prefs:mcp_compact", response.rect.center());
             ui_kit::help_icon(ui, tr("ui.mcp_compact_note"));
         });

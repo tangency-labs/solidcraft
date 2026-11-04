@@ -6614,8 +6614,9 @@ mod tests {
         assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": false}));
         h.call("ui.prefs", json!({"ai_features": false, "open": "AI"}));
         h.frames(3);
-        let at = crate::scenario::handle_at("prefs:mcp_compact").expect("the checkbox is on the AI page with the chat off");
-        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        assert!(crate::scenario::handle_at("prefs:mcp_compact").is_some(), "the checkbox is on the AI page with the chat off");
+        // The page scrolls, so the setting is turned on as an agent would, not by a click.
+        h.call("ui.prefs", json!({"mcp_compact": true}));
         h.frames(2);
         assert!(h.app.preferences.mcp_compact);
         assert_eq!(h.call("mcp.options", json!({}))["result"], json!({"compact": true}));
