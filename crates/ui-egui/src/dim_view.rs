@@ -1275,6 +1275,12 @@ pub fn preview_solve(app: &SolveApp) -> Option<u64> {
     EDIT.with(|e| e.try_borrow().ok()?.as_ref().filter(|e| e.typed)?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.solve))
 }
 
+/// The sketch drawn at a typed value (the open one), while there is one: its design curves are
+/// not where they are drawn, the other sketches' are.
+pub fn previewed_sketch(app: &SolveApp) -> Option<u64> {
+    preview_solve(app).and(app.session.active_sketch)
+}
+
 /// Is the inline editor open (it has the keyboard)?
 pub fn editing() -> bool {
     EDIT.with(|e| e.borrow().is_some())

@@ -1988,3 +1988,25 @@ fn the_status_after_a_dimension_is_in_the_interface_language() {
     }
     crate::dim_view::cancel();
 }
+
+/// A selected curve of the sketch is not lit where the design has it while a value is typed, as
+/// a selected profile is not.
+#[test]
+fn a_typed_value_does_not_light_a_selected_design_curve() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sketch = h.app.session.active_sketch.unwrap();
+    let id = solved(&h).curves[0].id.clone();
+    for sel in [
+        solidcraft_engine::Sel::SketchCurve { id: id.clone(), sketch: None },
+        solidcraft_engine::Sel::SketchCurve { id: id.clone(), sketch: Some(sketch) },
+        solidcraft_engine::Sel::ExternalSketchCurve { sketch, id: id.clone() },
+    ] {
+        h.app.session.selection = vec![sel.clone()];
+        assert!(crate::viewport::build_highlight(&h.app).overlay.is_empty(), "{sel:?}: no curve lit while the value is typed");
+    }
+    crate::dim_view::cancel();
+    assert!(!crate::viewport::build_highlight(&h.app).overlay.is_empty(), "lit once the value is let go");
+}

@@ -4280,7 +4280,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             // A curve picked into a dialog from another sketch than the active one names it.
-            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) } => {
+            // Not the curves of the sketch drawn at a typed value: the design has them elsewhere.
+            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) }
+                if crate::dim_view::previewed_sketch(app) != Some(*sketch) =>
+            {
                 let sel_edge = feedback.color(c4(t.sel_edge));
                 if let Some(ss) = st.sketch(*sketch)
                     && let Some(ci) = ss.sketch.curve_index(id)
@@ -4298,7 +4301,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     }
                 }
             }
-            Sel::SketchCurve { id, .. } => {
+            Sel::SketchCurve { id, .. } if crate::dim_view::previewed_sketch(app).is_none() => {
                 if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
