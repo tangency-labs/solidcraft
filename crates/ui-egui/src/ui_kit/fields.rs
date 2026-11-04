@@ -57,18 +57,30 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let t = Tokens::get();
     let reserve = (t.control_height * 0.75).round();
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
-    let rect = response.rect;
-    let column = egui::Rect::from_min_max(egui::pos2((rect.right() - reserve).max(rect.left()), rect.top()), rect.max);
+    let row = label(ui).to_owned();
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits)) {
+        *value = next;
+    }
+    enter
+}
+
+/// The up and down step arrows at the right edge of a field (`rect`), in a column `width` wide:
+/// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it. Returns what the
+/// clicked arrow stepped to. Tokens: `control_border`, `control_radius`, `selected_bg`,
+/// `form_ink`, `form_dim`.
+fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, next: impl Fn(i64) -> Option<V>) -> Option<V> {
+    let t = Tokens::get();
+    let column = egui::Rect::from_min_max(egui::pos2((rect.right() - width).max(rect.left()), rect.top()), rect.max);
     let painter = ui.painter_at(rect);
     painter.vline(column.left(), column.y_range().shrink(t.space_4), egui::Stroke::new(1.0, t.control_border));
-    let row = label(ui).to_owned();
+    let mut stepped = None;
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
-        let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let next = next(delta);
+        let arrow = ui.interact(half, ui.id().with(("sc_count_step", row, name)), egui::Sense::click());
         let enabled = ui.is_enabled() && next.is_some();
-        // The arrows stand inside the editor, which claims the text cursor across its whole
-        // rect: they are not text, so each one takes the ordinary cursor back after it. The
-        // pointer is read from the rect rather than from the hover the editor competes for.
+        // The arrows stand inside the field, which claims the pointer across its whole rect:
+        // they are not text, so each one takes the ordinary cursor back after it. The pointer
+        // is read from the rect rather than from the hover the field competes for.
         let over = ui.rect_contains_pointer(half);
         if over {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
@@ -77,7 +89,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
         }
         let ink = if enabled { t.form_ink } else { t.form_dim };
-        let (c, w, h) = (half.center(), (reserve * 0.18).max(2.0), (half.height() * 0.2).max(2.0));
+        let (c, w, h) = (half.center(), (width * 0.18).max(2.0), (half.height() * 0.2).max(2.0));
         let tip = if delta > 0 { -h } else { h };
         painter.add(egui::Shape::convex_polygon(
             vec![egui::pos2(c.x, c.y + tip * 0.5), egui::pos2(c.x + w, c.y - tip * 0.5), egui::pos2(c.x - w, c.y - tip * 0.5)],
@@ -85,13 +97,13 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             egui::Stroke::NONE,
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(&row))));
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{} {sign}", crate::i18n::tr_label(row))));
         scenario::publish_handle(&format!("dialog:{row} {name}"), half.center());
-        if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
-            *value = next;
+        if enabled && arrow.clicked() {
+            stepped = next;
         }
     }
-    enter
+    stepped
 }
 
 /// `text` stepped by `delta` whole numbers within `limits`, or None when it does not evaluate
@@ -1496,6 +1508,31 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
         info
     });
     super::layout::publish_geometry(ui, &response);
+    response
+}
+
+/// [`number_field`] for a whole number, with the step arrows a count field has at its right edge
+/// (#11829): an arrow steps the value by one within `range`, as Up and Down do. The field grows
+/// by the arrows' column, so its text keeps its room. Tokens: `control_height`, number_field and
+/// step arrow tokens.
+pub(crate) fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, suffix: &str) -> Response {
+    let reserve = (Tokens::get().control_height * 0.75).round();
+    let mut response = ui
+        .scope(|ui| {
+            ui.spacing_mut().interact_size.x += reserve;
+            number_field(ui, value, range.clone(), 1.0, suffix)
+        })
+        .inner;
+    let row = label(ui).to_owned();
+    let (now, lo, hi) = (value.to_f64(), range.start().to_f64(), range.end().to_f64());
+    let next = |delta: i64| {
+        let next = (now.round() + delta as f64).clamp(lo, hi);
+        (next != now).then_some(next)
+    };
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, next) {
+        *value = T::from_f64(next);
+        response.mark_changed();
+    }
     response
 }
 

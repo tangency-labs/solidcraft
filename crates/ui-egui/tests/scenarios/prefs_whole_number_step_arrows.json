@@ -1,0 +1,19 @@
+[
+  {"note": "#11829: Length decimals, Angle decimals and Parameter list rows under Preferences > Design have step arrows at their right edge, as a pattern's quantity has: each click steps by one and stops at the field's limits."},
+  {"click": {"handle": "titlebar:preferences"}},
+  {"click": {"handle": "prefs:page:Design"}},
+  {"expect": {"prefs": {"dialog": "Design", "length_decimals": 2, "angle_decimals": 1, "parameter_list_rows": 50}}},
+  {"click": {"handle": "dialog:Length decimals up"}},
+  {"expect": {"prefs": {"length_decimals": 3}}},
+  {"click": {"handle": "dialog:Length decimals down"}},
+  {"click": {"handle": "dialog:Length decimals down"}},
+  {"expect": {"prefs": {"length_decimals": 1}}},
+  {"click": {"handle": "dialog:Angle decimals up"}},
+  {"expect": {"prefs": {"angle_decimals": 2}}},
+  {"click": {"handle": "dialog:Angle decimals down"}},
+  {"click": {"handle": "dialog:Angle decimals down"}},
+  {"click": {"handle": "dialog:Angle decimals down"}},
+  {"expect": {"prefs": {"angle_decimals": 0}}},
+  {"click": {"handle": "dialog:Rows down"}},
+  {"expect": {"prefs": {"parameter_list_rows": 49}}}
+]
