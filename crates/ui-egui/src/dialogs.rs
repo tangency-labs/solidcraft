@@ -465,6 +465,8 @@ pub struct HoleOpts {
     /// A tapped hole's drill when it is not the tap maker's for the size (the command's
     /// `diameter`); none: the tap maker's.
     pub drill: Option<String>,
+    /// Counterbore: the thickness of each 3D-printing bridge layer below its floor; empty for none.
+    pub bridge: String,
 }
 
 impl Default for HoleOpts {
@@ -484,6 +486,7 @@ impl Default for HoleOpts {
             modeled: false,
             ease_out: crate::dialogs_thread::Ease::default(),
             drill: None,
+            bridge: String::new(),
         }
     }
 }
@@ -5484,6 +5487,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     1 => {
                         params["cb_diameter"] = json!(cb_diameter);
                         params["cb_depth"] = json!(cb_depth);
+                        let bridge = opts.bridge.trim();
+                        if !bridge.is_empty() {
+                            if !app.session.doc.eval(bridge, ValueKind::Length).is_ok_and(|t| t > 0.0) {
+                                return Err("the bridge layer must be a positive length, such as 0.2 mm, or empty for none".into());
+                            }
+                            params["bridge"] = json!(bridge);
+                        }
                     }
                     2 => {
                         params["cs_diameter"] = json!(cs_diameter);
@@ -6485,8 +6495,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     *dep = dd.to_string();
                 }
                 match hole {
-                    HoleKind::Counterbore { cb_diameter: a, cb_depth: b, tip_angle } => {
+                    HoleKind::Counterbore { cb_diameter: a, cb_depth: b, tip_angle, bridge } => {
                         *kind = 1;
+                        opts.bridge = bridge.as_ref().map(ToString::to_string).unwrap_or_default();
                         *cb_diameter = a.to_string();
                         *cb_depth = b.to_string();
                         if let Some(angle) = tip_angle {
@@ -7423,6 +7434,39 @@ mod refused_ok_tests {
             h.frames(2);
             assert!(crate::scenario::rect_of("dialog:widget:Drill Point").is_none());
         }
+    }
+
+    #[test]
+    fn bridge_shows_for_counterbores_only_and_sends_a_valid_layer() {
+        let mut h = hole_dialog();
+        let commands = |h: &Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap());
+        let set_bridge = |h: &mut Harness, text: &str| {
+            if let Kind::Hole { opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+                opts.bridge = text.into();
+            }
+            h.frames(2);
+        };
+        h.frames(2);
+        assert!(crate::scenario::rect_of("dialog:widget:Bridge").is_none(), "a simple hole has no bridge layers");
+        if let Kind::Hole { kind, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            *kind = 1;
+        }
+        h.frames(2);
+        assert!(crate::scenario::rect_of("dialog:widget:Bridge").is_some());
+        assert!(commands(&h).unwrap()[0].1.get("bridge").is_none(), "empty by default: no bridge");
+        set_bridge(&mut h, "0.2 mm");
+        assert_eq!(commands(&h).unwrap()[0].1["bridge"], "0.2 mm");
+        for bad in ["0", "-0.2 mm", "abc"] {
+            set_bridge(&mut h, bad);
+            assert!(commands(&h).is_err(), "bridge {bad:?} is refused");
+        }
+        set_bridge(&mut h, "0.2 mm");
+        if let Kind::Hole { kind, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            *kind = 2;
+        }
+        h.frames(2);
+        assert!(crate::scenario::rect_of("dialog:widget:Bridge").is_none(), "a countersink has no bridge layers");
+        assert!(commands(&h).unwrap()[0].1.get("bridge").is_none());
     }
 
     /// What the dialog shows in red once the live preview has finished: its own error, else the

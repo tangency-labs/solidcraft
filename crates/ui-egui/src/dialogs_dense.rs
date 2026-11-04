@@ -728,6 +728,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     opts.angled = tip == 1;
                 });
             }
+            // Counterbore only: the thickness of the layers a 3D printer bridges across its
+            // floor; empty for none.
+            if *kind == 1 {
+                enter |= hint_row(ui, "Bridge", &mut opts.bridge, tr("None"));
+            }
             // The section through the hole, each size beside its dimension (#2171).
             let to_object = to_object_on(&d.inputs);
             enter |= crate::dialogs_hole::rows(ui, &mut d.kind, to_object, &eval);
