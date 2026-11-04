@@ -1899,6 +1899,7 @@ pub fn test_for_iso_circles(
     let mut z_axis = Vec3::ZERO;
     let mut x_axis = Vec3::ZERO;
     let mut ref_origin = Point3::ZERO;
+    let mut ref_rad = 0.0;
     let mut this_common_line_point = Vec3::UNDEF;
     let mut this_common_line_vec = Vec3::UNDEF;
     let mut start_ang_deg1 = 0.0;
@@ -1957,6 +1958,7 @@ pub fn test_for_iso_circles(
             z_axis = this_ref_frame.z_axis();
             x_axis = this_ref_frame.x_axis();
             ref_origin = this_ref_frame.origin();
+            ref_rad = rad;
             start_ang_deg1 = start_ang_deg;
             end_ang_deg1 = end_ang_deg;
             continue;
@@ -2013,12 +2015,20 @@ pub fn test_for_iso_circles(
 
         // find line of intersection between two isoCurve planes
         if out.common_axis {
-            // not upstream (opt-in): normals within the angle tolerance and planes within tol_3d
-            // are one plane, whose line is only rounding; other planes are intersected as usual
-            let same_plane = k.fixes.iso_circle_planes_parallel_within_angle_tolerance
-                && z_axis.cross(this_ref_frame.z_axis()).length() < ang_tol_rad
-                && (this_ref_frame.origin() - ref_origin).dot(z_axis).abs() <= tol_3d;
-            let planes = if same_plane {
+            // not upstream (WR-739): planes whose normals are within the angle tolerance are
+            // parallel, so the line upstream gets from them (off the axis by rounding / angle) is
+            // rounding. Within tol_3d of each other over both whole circles (see `circles_in_one_plane`) they are one plane, beyond it two,
+            // whatever `intersect_two_planes` judges on its own coordinate-scaled tolerance; a
+            // line it still finds is kept. Other planes are intersected as usual.
+            let tilt = z_axis.cross(this_ref_frame.z_axis()).length();
+            let near_parallel = tilt < ang_tol_rad;
+            let planes = if near_parallel
+                && circles_in_one_plane(
+                    (ref_origin, z_axis, ref_rad),
+                    (this_ref_frame.origin(), this_ref_frame.z_axis(), rad),
+                    tilt,
+                    tol_3d,
+                ) {
                 Ok(PlanesIntersection::Parallel { coincident: true })
             } else {
                 intersect_two_planes(
@@ -2027,6 +2037,12 @@ pub fn test_for_iso_circles(
                     this_ref_frame.origin(),
                     this_ref_frame.z_axis(),
                 )
+                .map(|p| match p {
+                    PlanesIntersection::Parallel { .. } if near_parallel => {
+                        PlanesIntersection::Parallel { coincident: false }
+                    }
+                    p => p,
+                })
             };
             let (success, coincident) = match planes {
                 Ok(PlanesIntersection::Line { point, direction }) => {
@@ -2051,6 +2067,12 @@ pub fn test_for_iso_circles(
                     out.common_axis = false;
                 }
             } else {
+                // not upstream (WR-739): a plane with no line (parallel, not coincident) has no common
+                // line with the others; `this_common_line_*` are then the last `Line` answer's, stale
+                if !success && !coincident {
+                    out.common_axis = false;
+                    continue;
+                }
                 // compare subsequent common lines against 1st common line
                 let line_point = out.common_line_point.unwrap_or(Vec3::UNDEF);
                 let line_vec = out.common_line_vec.unwrap_or(Vec3::UNDEF);
@@ -2573,5 +2595,109 @@ mod tests {
         // the generator direction is not circular
         let g = test_for_iso_circles(&k, s.base(), SurfParamType::U, 1e-6, 1e-6).unwrap();
         assert!(!g.found_circles);
+    }
+
+    /// WR-739 with a small `tolerance_scale`: a cylinder 2e-12 high at z = 4 has parallel circle planes
+    /// further apart than `tol_3d` (1e-13) but within the coordinate-scaled tolerance
+    /// `intersect_two_planes` judges coincidence by. They are two planes with no common line, so
+    /// there is no common axis (it stayed true, with no line written).
+    #[test]
+    fn near_parallel_planes_beyond_tol_3d_are_not_coincident_by_the_helper_tolerance() {
+        let k = k();
+        let mut l = Line::from_points(
+            Vec3::new(1.0, 0.0, 4.0),
+            Vec3::new(1.0, 0.0, 4.0 + 2e-12),
+            3,
+        );
+        l.make_nurb().unwrap();
+        let s = SurfOfRevolution::create_canonical(&k, Curve::from(l), Vec3::ZERO, Vec3::Z, false)
+            .unwrap();
+        let r = test_for_iso_circles(&k, s.base(), SurfParamType::V, 1e-13, 1e-9).unwrap();
+        assert!(r.found_circles && r.parallel_planes);
+        assert!(!r.common_axis);
+        assert!(r.common_line_point.is_none());
+    }
+
+    /// WR-739: iso circles in `z = 0` (first), in `y = 0` (its plane meets the first
+    /// along the X axis, which is saved as the common line), and then, last, in `z = 5`,
+    /// parallel to the first plane and not coincident with it. That plane has no common
+    /// line with the others, so there is no common axis (it stayed true: the comparison
+    /// used the stale line of the last `Line` answer, the saved one). The surface is
+    /// degree 1 in `v` with doubled interior knots, three constant pieces.
+    #[test]
+    fn a_later_parallel_non_coincident_plane_has_no_common_axis() {
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let k = k();
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        // quarter circle of radius 1 about (0, 0, z) in the plane `z = z0`, or in `y = 0`
+        let arc = |plane_y0: bool, z0: f64| {
+            let q = |x: f64, y: f64| {
+                let (y, z) = if plane_y0 { (0.0, y) } else { (y, z0) };
+                CPoint::new(x, y, z, 1.0)
+            };
+            [
+                q(1.0, 0.0),
+                CPoint::new(
+                    w,
+                    if plane_y0 { 0.0 } else { w },
+                    if plane_y0 { w } else { z0 * w },
+                    w,
+                ),
+                q(0.0, 1.0),
+            ]
+        };
+        let pieces = [arc(false, 0.0), arc(true, 0.0), arc(false, 5.0)];
+        let net: Vec<Vec<CPoint>> = (0..3)
+            .map(|i| pieces.iter().flat_map(|a| [a[i], a[i]]).collect())
+            .collect();
+        let nurb = NurbSurface::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0],
+        )
+        .unwrap();
+        let s = BSplineSurface::from_nurb(nurb, false);
+        let r = test_for_iso_circles(&k, &s, SurfParamType::V, 1e-9, 1e-9).unwrap();
+        assert!(r.found_circles);
+        assert!(!r.common_axis);
+    }
+}
+
+/// WR-739: nearly parallel iso-circle planes (`tilt` = |n1 x n2|) are one plane when every point of
+/// each circle is within `tol_3d` of the other circle's plane: that circle's centre offset from the
+/// other plane plus its own radius * tilt. Each circle is bounded by its own radius.
+fn circles_in_one_plane(
+    (o1, n1, r1): (Point3, Vec3, f64),
+    (o2, n2, r2): (Point3, Vec3, f64),
+    tilt: f64,
+    tol_3d: f64,
+) -> bool {
+    let d = o2 - o1;
+    d.dot(n1).abs() + r2 * tilt <= tol_3d && d.dot(n2).abs() + r1 * tilt <= tol_3d
+}
+
+#[cfg(test)]
+mod circles_in_one_plane_tests {
+    use super::*;
+
+    /// Coincident centres, radii 100 and 1, tilt 1e-7, tol 1e-6: the small circle stays within
+    /// tol (1e-7) of the large one's plane, the large one reaches 1e-5 from the small one's.
+    #[test]
+    fn the_larger_circles_extent_also_counts() {
+        let o = Point3::ZERO;
+        assert!(!circles_in_one_plane(
+            (o, Vec3::Z, 100.0),
+            (o, Vec3::Z, 1.0),
+            1e-7,
+            1e-6
+        ));
+        assert!(circles_in_one_plane(
+            (o, Vec3::Z, 1.0),
+            (o, Vec3::Z, 1.0),
+            1e-7,
+            1e-6
+        ));
     }
 }

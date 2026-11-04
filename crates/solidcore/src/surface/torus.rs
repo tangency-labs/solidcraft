@@ -2252,11 +2252,11 @@ mod tests {
     }
 
     /// A half torus of minor radius 0.1 at coordinates of about 200: the minor circles at its
-    /// two ends lie in one plane to rounding, which `iso_circle_planes_parallel_within_angle_tolerance`
-    /// takes for parallel (not a line off the axis), so it is found.
+    /// two ends lie in one plane to rounding, which `test_for_iso_circles` takes for parallel (not
+    /// a line off the axis, WR-739), so it is found.
     #[test]
     fn small_far_half_torus_is_found_with_near_parallel_iso_planes() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(197.06, 33.35, 56.318),
             Vec3::new(0.0, 1.0, 0.0),
@@ -2268,19 +2268,15 @@ mod tests {
         let nurbs = plain(&t);
         assert!(Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
             .unwrap()
-            .is_none());
-        k.fixes.iso_circle_planes_parallel_within_angle_tolerance = true;
-        assert!(Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
-            .unwrap()
             .is_some());
     }
 
     /// A torus with a very short sweep (1e-4 rad) has end circles whose normals differ by less than
-    /// the angle tolerance but whose planes cross at the axis: they are not one plane, so the
-    /// option must leave them to the intersection and the torus is found either way.
+    /// the angle tolerance but whose planes cross at the axis: they are not one plane, so they are
+    /// left to the intersection and the torus is found.
     #[test]
     fn short_sweep_torus_is_found_with_near_parallel_iso_planes() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(0.0, 0.0, 1.0),
@@ -2290,10 +2286,6 @@ mod tests {
         let t = Torus::create_canonical(&k, &frame, 5.8, 0.1, TorusOptions::default(), Some(&dom))
             .unwrap();
         let nurbs = plain(&t);
-        assert!(Torus::is_nurb_surface_torus(&k, &nurbs, 1000.0)
-            .unwrap()
-            .is_some());
-        k.fixes.iso_circle_planes_parallel_within_angle_tolerance = true;
         assert!(Torus::is_nurb_surface_torus(&k, &nurbs, 1000.0)
             .unwrap()
             .is_some());
