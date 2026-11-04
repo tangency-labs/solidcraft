@@ -171,6 +171,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         origin_plane_names(app, ui, label_width);
+        ui_kit::settings_section(ui, "forms", app.tr("prefs.forms"), |ui| {
+            setting::forms_greedy_selection(app, ui);
+            setting::forms_match_adjacent(app, ui);
+            setting::forms_surface_partition(app, ui);
+            let response = setting::forms_mesh_while_dragging(app, ui).on_hover_text(app.tr("prefs.forms_mesh_while_dragging_help"));
+            crate::scenario::publish_target("prefs:forms_mesh_while_dragging", response.rect);
+            ui_kit::settings_form(ui, label_width, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("prefs.forms_cad_tolerance"), app.tr("prefs.forms_cad_tolerance_help"), |ui| {
+                    let response = ui_kit::settings_number(ui, &mut app.preferences.forms_cad_tolerance, 0.000001..=1.0, 0.001);
+                    crate::scenario::publish_target("prefs:forms_cad_tolerance", response.rect);
+                });
+            });
+        });
         ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
             let response = setting::update_changed_links(app, ui);
             crate::scenario::publish_target("prefs:update_changed_links", response.rect);

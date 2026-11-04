@@ -380,8 +380,67 @@ pub(crate) fn tensor_sheet(n: &NurbsSurface) -> Result<Body> {
         parts.edges.push(b::Edge { nurbs: None, curve, interval, vertices: [index(a)?, index(z)?], tolerance: parts.tolerance, uses: Vec::new() });
         uses.push(b::OrientedEdge { edge: index(i)?, forward, pcurve: uv_line(pa, pz, interval) });
     }
-    parts.faces.push((b::Face { nurbs: None, surface: spline_surface(n), domain: n.domain(), loops: vec![b::Loop::Edges { edges: uses }] }, true));
+    let face = b::Face { nurbs: None, surface: spline_surface(n), domain: n.domain(), loops: vec![b::Loop::Edges { edges: uses }] };
+    parts.faces.push((face, true));
     surface_body(&parts.canonical()?.brep)
+}
+
+/// A planar tensor patch can have parallel boundary tangents at a corner even
+/// though the bounded sheet is regular. Use a regular analytic support for that
+/// sheet, retaining every original 3D boundary and its parameterization. The
+/// entire positive-weight control hull, rather than surface samples, certifies
+/// planarity. The allowance is floating-point roundoff, not the fit tolerance.
+pub(crate) fn planar_tensor_face(n: &NurbsSurface, edges: &[b::Edge], face: &mut b::Face) -> Result<()> {
+    use solidcraft_geom::tess::EvalSurface;
+    let [[u0, u1], [v0, v1]] = n.domain();
+    let eval = EvalSurface::from(n);
+    let Some((origin, du, dv)) = eval.derivs((u0 + u1) * 0.5, (v0 + v1) * 0.5) else { return Ok(()) };
+    let Some(u) = du.normalized() else { return Ok(()) };
+    let Some(tangent) = dv.normalized() else { return Ok(()) };
+    let Some(normal) = u.cross(tangent).normalized() else { return Ok(()) };
+    let v = normal.cross(u);
+    let controls = n.homogeneous();
+    if controls.iter().any(|h| !h.w.is_finite() || h.w <= 0.0) {
+        return Ok(());
+    }
+    let scale = controls.iter().filter_map(|h| h.project()).map(|p| p.x.abs().max(p.y.abs()).max(p.z.abs())).fold(1.0, f64::max);
+    let roundoff = 64.0 * f64::EPSILON * scale;
+    if controls.iter().any(|h| h.project().is_none_or(|p| !p.is_finite() || (p - origin).dot(normal).abs() > roundoff)) {
+        return Ok(());
+    }
+    let projected = |p: Vec3| [(p - origin).dot(u), (p - origin).dot(v)];
+    let project = |curve: &b::Curve| -> Result<Curve2> {
+        match curve {
+            b::Curve::Spline { knots, points } => {
+                Ok(Curve2::Spline { knots: knots.clone(), points: points.iter().map(|p| projected(v3(*p))).collect() })
+            }
+            b::Curve::RationalSpline { knots, homogeneous } => Ok(Curve2::RationalSpline {
+                knots: knots.clone(),
+                homogeneous: homogeneous
+                    .iter()
+                    .map(|h| {
+                        let xyz = Vec3::new(h[0], h[1], h[2]) - origin * h[3];
+                        [xyz.dot(u), xyz.dot(v), h[3]]
+                    })
+                    .collect(),
+            }),
+            _ => Err(invalid("a tensor boundary is not a spline")),
+        }
+    };
+    let mut loops = face.loops.clone();
+    for boundary in &mut loops {
+        let b::Loop::Edges { edges: uses } = boundary else { return Err(invalid("a tensor boundary has no edges")) };
+        for edge_use in uses {
+            let edge = edges.get(edge_use.edge as usize).ok_or_else(|| invalid("a tensor boundary edge reference"))?;
+            edge_use.pcurve = project(&edge.curve)?;
+        }
+    }
+    let domain = uv_box(&loops).ok_or_else(|| invalid("a planar tensor face has no area"))?;
+    face.nurbs = None;
+    face.surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(u), v_axis: a3(v) };
+    face.domain = domain;
+    face.loops = loops;
+    Ok(())
 }
 
 // ---- Patches ----------------------------------------------------------------------------
@@ -536,6 +595,139 @@ pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
         }
     }
     best.map(|(_, f)| f as usize).ok_or_else(|| invalid("no face there"))
+}
+
+/// One closed free rim selected through exact curve evaluations, in record edge order.
+fn supported_cap_chain(body: &Body, at: &[Vec3], tolerance: f64) -> Result<Chain> {
+    let r = body.record();
+    if r.edges.len().saturating_mul(at.len()) > 5_000_000 {
+        return Err(KernelError::TooLarge("supported cap edge-pick budget exceeded".into()));
+    }
+    let mut picked = Vec::new();
+    for &point in at {
+        let nearest = r
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.uses.len() == 1)
+            .filter_map(|(i, edge)| {
+                let curve = CurveEval::new(edge.parameters()).ok()?;
+                let distance =
+                    [curve.point(edge.interval[0])?, curve.point(edge.interval[1])?].into_iter().map(|p| p.dist(point)).fold(f64::INFINITY, f64::min);
+                let distance = nearest_parameter(&curve, edge.interval, point).map_or(distance, |(_, d)| distance.min(d));
+                Some((distance, i))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let (_, edge) =
+            nearest.filter(|(distance, _)| *distance <= tolerance).ok_or_else(|| invalid("the supported cap pick is not on a free edge"))?;
+        if !picked.contains(&edge) {
+            picked.push(edge);
+        }
+    }
+    let ends = |i: usize| r.edges.get(i).map(|edge| edge.vertices).ok_or_else(|| invalid("supported cap edge reference"));
+    let mut degree = std::collections::BTreeMap::<u32, usize>::new();
+    for &edge in &picked {
+        for vertex in ends(edge)? {
+            *degree.entry(vertex).or_default() += 1;
+        }
+    }
+    if degree.values().any(|&count| count != 2) {
+        return Err(invalid("pick one closed unbranched free rim"));
+    }
+    let first = picked.pop().ok_or_else(|| invalid("the supported cap rim is empty"))?;
+    let [start, mut current] = ends(first)?;
+    let mut chain = vec![(first, true)];
+    while current != start {
+        let next = picked
+            .iter()
+            .position(|&edge| ends(edge).is_ok_and(|vertices| vertices.contains(&current)))
+            .ok_or_else(|| invalid("the supported cap rim is disconnected"))?;
+        let edge = picked.remove(next);
+        let vertices = ends(edge)?;
+        let forward = vertices[0] == current;
+        current = vertices[usize::from(forward)];
+        chain.push((edge, forward));
+    }
+    if !picked.is_empty() {
+        return Err(invalid("pick exactly one free rim for a supported cap"));
+    }
+    Ok(chain)
+}
+
+/// Close one rim on an existing exact support surface, retaining the original
+/// rim curves and support surface record. History is over `[body, support]`.
+pub fn patch_edges_on_face(body: &Body, at: &[Vec3], support: &Body, face: usize, tolerance: f64) -> Result<Body> {
+    body.require_brep("supported cap")?;
+    support.require_brep("supported cap")?;
+    if at.is_empty() || at.len() > 4096 || at.iter().any(|p| !p.is_finite()) || !tolerance.is_finite() || !(1e-9..=1.0).contains(&tolerance) {
+        return Err(invalid("a supported cap needs 1..4096 finite edge picks and a bounded tolerance"));
+    }
+    crate::guard("supported cap", || {
+        let original = support.record().faces.get(face).ok_or_else(|| invalid("support face index is outside the body"))?;
+        let geometry = crate::face_geometry(support, face)?;
+        let boundary = match original.loops.get(geometry.outer) {
+            Some(b::Loop::Edges { edges }) => edges,
+            _ => return Err(invalid("support outer wire is missing")),
+        };
+        let mut chain = supported_cap_chain(body, at, tolerance)?;
+        let &(first, forward) = chain.first().ok_or_else(|| invalid("the cap rim is empty"))?;
+        let edge = body.record().edges.get(first).ok_or_else(|| invalid("supported cap edge reference"))?;
+        let curve = CurveEval::new(edge.parameters()).map_err(|e| invalid(e.to_string()))?;
+        let t = (edge.interval[0] + edge.interval[1]) * 0.5;
+        let (point, tangent) =
+            curve.jet(t).map(|jet| (jet.point, jet.tangent)).ok_or_else(|| invalid("the cap rim has no regular finite tangent"))?;
+        let tangent = if forward { tangent } else { -tangent };
+        let orientation = boundary
+            .iter()
+            .filter_map(|use_| {
+                let edge = support.record().edges.get(use_.edge as usize)?;
+                let curve = CurveEval::new(edge.parameters()).ok()?;
+                let (parameter, gap) = nearest_parameter(&curve, edge.interval, point)?;
+                let direction = curve.jet(parameter)?.tangent * if use_.forward { 1.0 } else { -1.0 };
+                Some((gap, direction.dot(tangent)))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let (gap, orientation) = orientation.ok_or_else(|| invalid("cannot orient the cap against its support boundary"))?;
+        if gap > tolerance || !orientation.is_finite() || orientation.abs() < 1e-20 {
+            return Err(invalid("the cap rim does not follow the support boundary"));
+        }
+        if orientation < 0.0 {
+            chain = chain.into_iter().rev().map(|(edge, forward)| (edge, !forward)).collect();
+        }
+        let uses: Vec<_> = chain
+            .iter()
+            .map(|&(i, forward)| {
+                let edge = body.record().edges.get(i).ok_or_else(|| invalid("supported cap edge reference"))?;
+                Ok(solidcraft_geom::brep::pcurve::EdgeUse {
+                    edge: index(i)?,
+                    curve: edge.parameters(),
+                    interval: edge.interval,
+                    forward,
+                    tolerance: edge.tolerance,
+                    given: None,
+                })
+            })
+            .collect::<Result<_>>()?;
+        let mut pcurves = solidcraft_geom::brep::pcurve::pcurves_within(&original.surface, &[uses], tolerance, Some(original.domain))
+            .map_err(|e| invalid(format!("supported cap pcurves: {e}")))?;
+        let pcs = pcurves.pop().ok_or_else(|| invalid("supported cap pcurves are missing"))?;
+        let edges = chain
+            .iter()
+            .zip(pcs)
+            .map(|(&(edge, forward), pcurve)| Ok(b::OrientedEdge { edge: index(edge)?, forward, pcurve }))
+            .collect::<Result<_>>()?;
+        let mut cap = original.clone();
+        cap.loops = vec![b::Loop::Edges { edges }];
+        let mut parts = Parts::of(body.record(), &[])?;
+        parts.tolerance = tolerance.max(body.record().tolerance).max(support.record().tolerance);
+        let forward = face_sides(support.record()).get(face).copied().ok_or_else(|| invalid("support face orientation is missing"))?;
+        parts.faces.push((cap, forward));
+        let canonical = parts.canonical()?;
+        let made = Body::from_record(canonical.brep)?;
+        let origins: Vec<_> = canonical.edges.iter().map(|&edge| record::pieces_of(0, [edge])).collect();
+        let history = record::of_faces(made.record(), 2, vec![record::from_face(1, face, Change::Kept)], &origins);
+        made.with_history(history, &[body, support])
+    })
 }
 
 /// The faces picked by points on them (each once, in the order picked); every face when no point
@@ -1254,25 +1446,6 @@ mod imp {
         r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
     }
 
-    /// Whether two records of one body number its faces, edges and vertices alike: the same
-    /// loops of the same edges, run the same ways, and each edge between the same vertices.
-    fn same_numbering(a: &Brep, b: &Brep) -> bool {
-        let loops = |f: &b::Face| -> Vec<Vec<(u32, bool)>> {
-            f.loops
-                .iter()
-                .map(|l| match l {
-                    b::Loop::Edges { edges } => edges.iter().map(|u| (u.edge, u.forward)).collect(),
-                    b::Loop::Vertex { vertex } => vec![(*vertex, true)],
-                })
-                .collect()
-        };
-        a.faces.len() == b.faces.len()
-            && a.edges.len() == b.edges.len()
-            && a.vertices.len() == b.vertices.len()
-            && a.faces.iter().zip(&b.faces).all(|(x, y)| loops(x) == loops(y))
-            && a.edges.iter().zip(&b.edges).all(|(x, y)| x.vertices == y.vertices)
-    }
-
     /// The record `r` sewn by SMLib at `tol` (`smlib_stitch`), with its history over `[r]` (faces
     /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
     /// `r` does.
@@ -1300,13 +1473,15 @@ mod imp {
     /// The record `r` sewn at `tol`, the result taken when `accept` (given SMLib's input and
     /// result) does.
     fn stitched_with(r: &Brep, tol: f64, accept: impl Fn(&SmBrep, &SmBrep) -> Result<()>) -> Result<(Body, Option<History>)> {
-        let brep = SmBrep::from_record(r, true).map_err(sm("stitch"))?;
-        let (back, order) = brep.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
+        // Import can rotate a loop's start, reverse a support's orientation, or
+        // choose a different canonical traversal without changing its topology.
+        // Use the same verified record/native correspondence as booleans.
+        let (brep, order) = crate::native::smlib_record_ordered(r)?;
         let tagged = brep.tagged(0).map_err(sm("stitch"))?;
         let (sewn, _closed) = tagged.stitch(tol).map_err(sm("stitch"))?;
         accept(&brep, &sewn)?;
         let (record, kept) = sewn.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
-        let h = if same_numbering(r, &back) { sewn.history().ok().and_then(|raw| raw.history(&[order], &kept).ok()) } else { None };
+        let h = order.and_then(|order| sewn.history().ok().and_then(|raw| raw.history(&[order], &kept).ok()));
         Ok((Body::from_smlib_record(record)?, h))
     }
 
@@ -1618,6 +1793,32 @@ mod tests {
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)
+    }
+
+    #[test]
+    fn stitch_retains_exact_history_when_import_changes_loop_starts() {
+        let source = box_solid(Vec3::new(-1.0, -1.0, -2.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        let mut record = source.record().clone();
+        for face in &mut record.faces {
+            for boundary in &mut face.loops {
+                if let b::Loop::Edges { edges } = boundary {
+                    edges.rotate_left(1);
+                }
+            }
+        }
+        // A changed first use also changes canonical edge/vertex visitation.
+        // Renumber the complete record before passing it to the native import.
+        let record = record.canonical().unwrap().brep;
+        Body::from_record(record.clone()).expect("rotated loops form a valid canonical source");
+        let (sewn, history) = imp::stitched(&record, 1e-6).unwrap();
+        let history = history.expect("cyclic loop starts preserve verified topology correspondence");
+        history.check_counts((sewn.face_count(), sewn.edge_count()), &[(record.faces.len(), record.edges.len())]).unwrap();
+        assert_eq!(sewn.face_count(), record.faces.len());
+        assert_eq!(sewn.edge_count(), record.edges.len());
+        assert!(history.faces.iter().all(|face| matches!(face.origins.as_slice(), [FaceOrigin::Face { operand: 0, .. }])));
+        assert!(history.edges.iter().all(|edge| !edge.origins.is_empty()));
+        assert!(sewn.validity().is_empty());
+        assert!((measure(&sewn).unwrap().volume - 8.0).abs() < 1e-8);
     }
 
     /// Walls swept from an open line, an open arc and a closed square: areas are length × height,

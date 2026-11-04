@@ -1049,6 +1049,14 @@ macro_rules! preference_settings {
 preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// Toggle Form elements without holding a selection modifier.
+    forms_greedy_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_greedy_selection");
+    forms_match_adjacent:bool = false, PAGE_DESIGN => check_tr("prefs.forms_match_adjacent");
+    /// Keep subdivision feedback during a drag; false requests fitted CAD while interacting.
+    forms_mesh_while_dragging: bool = true, PAGE_DESIGN => check_tr("prefs.forms_mesh_while_dragging");
+    forms_surface_partition:bool = true, PAGE_DESIGN => check_tr("prefs.forms_surface_partition");
+    /// Fit tolerance for new interactive Forms; saved features retain their tolerance.
+    forms_cad_tolerance: f64 = 0.05, PAGE_DESIGN, accept(0.000001..=1.0);
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -4159,6 +4167,9 @@ fn prepare_preferences(
     }
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
+    }
+    if !accepted::forms_cad_tolerance(&new) {
+        return Err("`forms_cad_tolerance` must be 0.000001…1 mm".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

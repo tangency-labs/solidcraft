@@ -21,6 +21,9 @@ use crate::{IoError, Result, design_metadata::replace};
 const VERSION: &str = "solidcraft-container/1";
 const LEGACY_VERSION: &str = "solvecraft-container/1";
 const PREVIEW_VERSION: &str = "solidcraft-preview/1";
+const FORM_DRAFT_ENTRY: &str = "recovery/form.json";
+/// Maximum expanded size of the editor source in a recovery package.
+pub const MAX_FORM_DRAFT_BYTES: usize = 64 << 20;
 const MAX_ENTRIES: usize = 10_000;
 /// The design file limit in force ([`crate::limits`]): the largest design file read or saved.
 fn max_design() -> usize {
@@ -93,7 +96,9 @@ struct PackageWriter {
 /// The uncompressed size a part may have. STEP and mesh blobs may be larger than the
 /// design file because they are stored compressed when they would not fit otherwise.
 fn part_limit(name: &str) -> usize {
-    if name.ends_with(".step") {
+    if name == FORM_DRAFT_ENTRY {
+        MAX_FORM_DRAFT_BYTES
+    } else if name.ends_with(".step") {
         max_step_part()
     } else if name.ends_with(".mesh") {
         max_mesh_part()
@@ -260,7 +265,13 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design())
+    write_container(doc, compression, preview, geometry, thumbnail, None, max_design())
+}
+
+/// Write an autosave. The recovery-only editor data and base design are in the
+/// same package so a single atomic replacement can never mix their revisions.
+pub fn write_recovery_container(doc: &Document, draft: Option<&[u8]>) -> Result<Vec<u8>> {
+    write_container(doc, DesignCompression::Fast, None, None, None, draft, max_design())
 }
 
 /// [`write_design_container_with_thumbnail`] within `budget` bytes for the optional caches (the
@@ -271,6 +282,7 @@ fn write_container(
     preview: Option<&DesignPreview>,
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
+    draft: Option<&[u8]>,
     budget: usize,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
@@ -347,6 +359,9 @@ fn write_container(
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
+    if let Some(draft) = draft {
+        writer.part(FORM_DRAFT_ENTRY, draft, true)?;
+    }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save.
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
@@ -745,6 +760,18 @@ impl<R: Read + Seek> DesignContainerReader<R> {
 
 pub(super) fn read(bytes: &[u8]) -> Result<Document> {
     DesignContainerReader::new(Cursor::new(bytes))?.read_document()
+}
+
+/// Read the document and its editor source from one recovery package.
+/// Legacy plain JSON and packages without an editor open normally.
+pub fn read_recovery_container(bytes: &[u8]) -> Result<(Document, Option<Vec<u8>>)> {
+    if !is_design_container(bytes) {
+        return Ok((crate::read_design(bytes)?, None));
+    }
+    let mut reader = PackageReader::new(Cursor::new(bytes))?;
+    let doc = read_document(&mut reader)?;
+    let draft = reader.has_part(FORM_DRAFT_ENTRY).then(|| reader.limited_part(FORM_DRAFT_ENTRY, MAX_FORM_DRAFT_BYTES)).transpose()?;
+    Ok((doc, draft))
 }
 
 /// Open from disk (or browser VFS), publishing only provisional display before
@@ -1280,12 +1307,12 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, None, 70_000).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, None, crate::MAX_DESIGN_BYTES).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
     }
 

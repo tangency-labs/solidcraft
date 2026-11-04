@@ -42,6 +42,26 @@ impl Walk for i8 {}
 impl Walk for f64 {}
 impl Walk for usize {}
 impl Walk for u32 {}
+impl<T: Walk> Walk for Box<T> {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        self.as_ref().walk_exprs(f)
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        self.as_mut().walk_exprs_mut(f)
+    }
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        self.as_ref().walk_refs(f)
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.as_mut().walk_refs_mut(f)
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        self.as_ref().walk_geometry(f)
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        self.as_mut().walk_geometry_mut(f)
+    }
+}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}

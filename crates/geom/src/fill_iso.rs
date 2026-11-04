@@ -42,7 +42,7 @@
 //!   `p` is one of multiplicity `m + q − p` at degree `q`, NURBS Book §5.5), and the breaks
 //!   refinement adds are simple knots, so the fill is as smooth across them as its degree allows.
 //!   The degree is the sides' highest, and at least one more than the highest continuity order
-//!   n asked (G1 quadratic … G4 quintic), so the fill's own derivatives up to order n are
+//!   n asked (G1 quadratic … G4 quintic), and at least quadratic for guide points, so the fill's own derivatives up to order n are
 //!   continuous across the knots refinement adds.
 //! - **The start**: each patch is the bilinearly blended Coons patch of its sides (S. A. Coons,
 //!   1967), built on the Greville abscissae (a linear function is reproduced exactly there), the
@@ -1272,7 +1272,7 @@ struct Station {
 }
 
 impl Station {
-    /// The continuity order its conditions ask: 1 (G1) … 4 (G4).
+    /// The continuity order its conditions ask: 0 at incompatible corners, else G1 … G4.
     fn order(&self) -> usize {
         self.order
     }
@@ -1280,7 +1280,7 @@ impl Station {
 
 /// What a station asks, by how near it is to corners whose neighbours agree to less (see
 /// [`corner_orders`]): within [`CLASH_SHARE`] of such a corner the orders above the corner's
-/// agreement (at least G1) are not asked, and over the next [`CLASH_SHARE`] they come back
+/// agreement are not asked, and over the next [`CLASH_SHARE`] they come back
 /// smoothly (`fade` from 0 to 1, a smoothstep), so the fill is not strained where they start;
 /// where the corner's tangent planes disagree the station is not held to the angle tolerance.
 struct Asked {
@@ -1300,7 +1300,7 @@ impl Asked {
             if distance >= 2.0 * CLASH_SHARE {
                 continue;
             }
-            a.full = a.full.min(agreed.max(1));
+            a.full = a.full.min(agreed);
             let x = ((distance - CLASH_SHARE) / CLASH_SHARE).clamp(0.0, 1.0);
             a.fade = a.fade.min(x * x * (3.0 - 2.0 * x));
             if agreed == 0 && distance < CLASH_SHARE {
@@ -1476,7 +1476,11 @@ pub fn iso_fill(
     if order > MAX_CONTINUITY {
         return invalid(format!("a patch's continuity is at most G{MAX_CONTINUITY}"));
     }
-    let degree = if order == 0 { 1 } else { (order + 1).min(MAX_SPLINE_DEGREE) };
+    // A linear patch has no free interior until it is refined, but its new C0 knots
+    // are constrained tangent below. A tangent-continuous piecewise-linear field is
+    // still globally bilinear, so it cannot follow any off-surface guide. Quadratics
+    // allow a smooth interior without changing the exact boundary rows.
+    let degree = (order + 1).max(if spec.points.is_empty() { 1 } else { 2 }).min(MAX_SPLINE_DEGREE);
     if !(spec.corner_turn.is_finite() && spec.corner_turn >= 0.0) {
         return invalid("the corner turn must be a finite angle");
     }
@@ -1695,7 +1699,10 @@ fn stations(
 /// The fill's free control points by least squares (module docs), and what they achieve.
 fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult<(Quilt, Achieved, Along)> {
     if quilt.unknowns == 0 {
-        return Ok((quilt, Achieved::default(), Along::default()));
+        let located = spec.points.iter().map(|point| nearest(&quilt, *point)).collect::<Vec<_>>();
+        let count = quilt.patches.iter().map(|patch| station_count(&patch.spaces[0])).max().unwrap_or(0);
+        let (report, along) = measure(&quilt, stations, spec.points, &located, count)?;
+        return Ok((quilt, report, along));
     }
     let most = Quilt::most_unknowns(!quilt.spokes.is_empty());
     if quilt.unknowns > most {
@@ -1712,6 +1719,13 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     let span = |p: &Patch| p.spaces.clone().map(|s| 1.0 / breaks(&s).len().saturating_sub(1).max(1) as f64);
     let rounds = if top >= 2 { ROUNDS_PER_ORDER * top } else { ROUNDS };
     let smooth = knot_line_rows(&quilt, spec.angle_tol)?;
+    // The fairing term resolves the conditions' null space. Its bias must be
+    // smaller than the requested guide accuracy, including on large parts or at
+    // tighter tolerances; refining the same biased problem cannot fix that bias.
+    let mut points = quilt.patches.iter().flat_map(|patch| patch.net.iter().copied()).chain(spec.points.iter().copied());
+    let first = points.next().unwrap_or(Vec3::ZERO);
+    let (lo, hi) = points.fold((first, first), |(lo, hi), point| (lo.min(point), hi.max(point)));
+    let regularization = if spec.points.is_empty() { 1e-7 } else { 1e-7f64.min(0.01 * spec.tol / lo.dist(hi).max(spec.tol)) };
     for round in 0..rounds {
         let mut rows: Vec<Row> = smooth.clone();
         for s in stations {
@@ -1748,7 +1762,8 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
             let Some(on) = quilt.patches.get(*patch) else { continue };
             on_each_axis(&mut rows, &[(*patch, on.row(uv[0], uv[1], 0, 0)?)], *p, 1.0);
         }
-        let solved = least_squares(&quilt, &rows, &energy)?;
+
+        let solved = least_squares(&quilt, &rows, &energy, regularization)?;
         quilt.set(&solved);
         located = spec.points.iter().map(|p| nearest(&quilt, *p)).collect();
         (report, along) = measure(&quilt, stations, spec.points, &located, spoke_count)?;
@@ -1834,9 +1849,10 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
         })
         .collect::<SplineResult<_>>()?;
     let Some(first) = derivative.first() else { return Ok(()) };
-    rows.push(Row { terms: along(s.patch, first, n), value: 0.0, weight: 1.0 });
+    let fade = if s.full >= 1 { 1.0 } else { s.fade };
+    rows.push(Row { terms: along(s.patch, first, n), value: 0.0, weight: fade });
     for (dir, value) in [(w, s.speed), (t, s.slide)] {
-        rows.push(Row { terms: along(s.patch, first, dir), value, weight: HERMITE_WEIGHT });
+        rows.push(Row { terms: along(s.patch, first, dir), value, weight: fade * HERMITE_WEIGHT });
     }
     let Some(jet) = s.across.jet else { return Ok(()) };
     let c = linkage(patch, s, jet.order)?;
@@ -1928,7 +1944,7 @@ fn gram(s: &Space, m: usize) -> SplineResult<Vec<Vec<Vec<f64>>>> {
 
 /// The free points minimising the weighted rows' squares plus a vanishing multiple of the
 /// patches' energy, the loop's rows held: the normal equations, solved by Cholesky.
-fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -> SplineResult<Vec<Vec3>> {
+fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>], regularization: f64) -> SplineResult<Vec<Vec3>> {
     let dim = 3 * quilt.unknowns;
     let slot = |p: usize, flat: usize| quilt.slots.get(p).and_then(|s| s.get(flat)).copied().flatten();
     let mut a = if quilt.spokes.is_empty() { Normal::new(dim, bandwidth(quilt, rows, energy)) } else { Normal::Blocks(BlockNormal::new(quilt)) };
@@ -1966,7 +1982,7 @@ fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>
     // The energy decides what the rows leave free; with no rows it is all there is.
     let energy_trace: f64 =
         energy.iter().enumerate().flat_map(|(p, e)| e.iter().filter(move |(x, y, _)| x == y && slot(p, *x).is_some())).map(|(_, _, e)| 3.0 * e).sum();
-    let lambda = if condition_trace > 0.0 && energy_trace > 0.0 { 1e-7 * condition_trace / energy_trace } else { 1.0 };
+    let lambda = if condition_trace > 0.0 && energy_trace > 0.0 { regularization * condition_trace / energy_trace } else { 1.0 };
     for (p, entries) in energy.iter().enumerate() {
         for &(f, g, e) in entries {
             let Some(x) = slot(p, f) else { continue };

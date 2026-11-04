@@ -42,6 +42,7 @@ pub mod simplify;
 pub mod spline_space;
 pub mod srgb;
 pub mod stderr;
+pub mod subdivision;
 pub mod tess;
 pub mod title_block;
 pub mod tspline;
