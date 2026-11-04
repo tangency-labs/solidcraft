@@ -2161,6 +2161,9 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
     let group = h.app.run("browser.group", json!({"component": 0, "folder": "bodies", "items": ["Blk"]})).unwrap()["group"].as_u64().unwrap();
     let bad_group = format!("no group {group} under `c7`");
+    // A plane menu is for construction geometry only, not the box.
+    let block = h.app.session.doc.features[0].id;
+    let bad_plane = format!("no plane `{block}`");
     // A part's folders are drawn under its placement, never under a `c<id>` row of its own.
     let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
     let placement = h.app.session.doc.occurrence_of(part).unwrap().id;
@@ -2178,6 +2181,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         (json!({"type": "folder", "component": 0, "folder": "drawings", "scope": "c0"}), "no `drawings` folder of component 0 under `c0`"),
         (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
         (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),
+        (json!({"type": "plane", "id": block}), bad_plane.as_str()),
         (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("c{part}")}), bad_part.as_str()),
         (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:0{placement}")}), bad_alias.as_str()),
     ] {
