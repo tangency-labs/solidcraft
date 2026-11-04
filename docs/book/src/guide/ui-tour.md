@@ -1,6 +1,16 @@
 # A tour of the window
 
-![The SolidCraft window](../generated/sample-plate.png)
+<img class="dark-ui" src="../media/ui-tour/window.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
+<img class="light-ui" src="../media/ui-tour/window.light.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
+
+**1** Title bar · **2** Toolbar · **3** Browser · **4** Viewport · **5** Axis view ·
+**6** Navigation bar · **7** Timeline · **8** Command search
+
+To get around the view, drag with the right button to orbit, drag with the middle button to pan
+and turn the wheel to zoom at the pointer. The house above the axis view goes back to the Home
+view.
+
+<video src="../media/ui-tour/navigate.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Orbiting the sample plate with a right drag, panning with a middle drag, zooming with the wheel, then clicking Home"></video>
 
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
