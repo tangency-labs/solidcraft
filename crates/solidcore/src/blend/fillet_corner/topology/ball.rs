@@ -1,16 +1,16 @@
-//! The blend corner's Ball topology: three rounds of one radius at a vertex of three
-//! planes, each round's rails crossing its neighbours' on their common faces, each round
-//! ending on its own section, and a fourth face (the ball's sphere) closing the corner.
+//! The blend corner's Ball topology: `n >= 3` rounds of one radius at a vertex of `n`
+//! faces, each round's rails crossing its neighbours' on their common faces, each round
+//! ending on its own section, and the ball's sphere closing the corner.
 //!
 //! Upstream: none (pinned SMLib has no Ball). The fork's
-//! `source/SMLib/src/SmBlendCornerBall.cpp` (tangency-labs/smlib 79d4763, unchanged to
-//! 5e8c9c1; smlib#79 step 4c).
+//! `source/SMLib/src/SmBlendCornerBall.cpp` (tangency-labs/smlib 79d4763, smlib#79 step 4c;
+//! `n` rounds 278bf77, smlib#125).
 //!
 //! | Rust | Fork |
 //! |------|------|
 //! | `FilletCorner::make_ball_topology` (crate) | `SmBlendCorner::MakeBallTopology` |
 //!
-//! Deviations: the solvers of the three rounds are resolved by the caller
+//! Deviations: the solvers of the rounds are resolved by the caller
 //! (`GetFilletSolverOfEdgeuse` of each ring edge use, else of its mate), and passed in
 //! [`BallTopologyEnv`]. Opt-in: `Kernel::fixes.fillet_blend_corner` (WR-697). There is no
 //! recursion.
@@ -40,9 +40,9 @@ pub(crate) struct BallTopologyEnv<'a> {
     pub(crate) pseudo: &'a mut FilletBrep,
     /// This corner's identity in the executive's corner store.
     pub(crate) corner: FilletCornerId,
-    /// The loaded solver of each of the corner's three ring edge uses (or its mate),
+    /// The loaded solver of each of the corner's `n` ring edge uses (or its mate),
     /// in ring order.
-    pub(crate) solvers: [&'a FilletSolver; 3],
+    pub(crate) solvers: Vec<&'a FilletSolver>,
 }
 
 impl FilletCorner {
@@ -54,7 +54,7 @@ impl FilletCorner {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a corner that is not a Ball of three ring edge uses;
+    /// `SM_ERR` for a corner that is not a Ball of three or more ring edge uses (one solver each);
     /// [`SolidError::null_pointer`] where the fork dereferences missing topology (`NER`);
     /// those of the solver and pseudo-topology operations.
     pub(crate) fn make_ball_topology(&mut self, env: BallTopologyEnv<'_>) -> Result<()> {
@@ -73,19 +73,21 @@ impl FilletCorner {
         } = env;
         let nul = || SolidError::null_pointer(OP_NX2);
         let all = self.all_eus.clone().ok_or_else(nul)?;
+        let n = all.len();
         if !self
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_ball)
-            || all.len() != 3
+            || n < 3
+            || solvers.len() != n
         {
             return Err(SolidError::sm_err(OP_NX2));
         }
         self.ball = Some(BallCorner::default());
         // sm_BallRingFaces: face i between edge uses i - 1 and i
-        let mut faces = Vec::with_capacity(3);
-        let mut geoms = Vec::with_capacity(3);
-        for ii in 0..3 {
-            let prev = all.get((ii + 2) % 3).copied();
+        let mut faces = Vec::with_capacity(n);
+        let mut geoms = Vec::with_capacity(n);
+        for ii in 0..n {
+            let prev = all.get((ii + n - 1) % n).copied();
             let this = all.get(ii).copied();
             faces.push(face_by_two_edgeuses(target, prev, this, None)?);
         }
@@ -95,7 +97,7 @@ impl FilletCorner {
         }
 
         // the contacts: rounds i - 1 and i's rails on face i
-        for ii in 0..3 {
+        for ii in 0..n {
             let face = faces.get(ii).copied().flatten().ok_or_else(nul)?;
             let fv = new_corner_vertex(k, pseudo, corner)?;
             {
@@ -103,7 +105,7 @@ impl FilletCorner {
                 v.set_point_class(PointClassType::Face, Some(EntityRef::Face(face)));
                 v.set_fillet_vertex_type(FilletVertexType::RailXRail);
             }
-            let prev = (ii + 2) % 3;
+            let prev = (ii + n - 1) % n;
             for round in [prev, ii] {
                 let (Some(&g), Some(&fs)) = (geoms.get(round), solvers.get(round)) else {
                     return Err(nul());
@@ -127,10 +129,10 @@ impl FilletCorner {
         // patch of its own
         self.blending = true;
         self.bevel = false;
-        for ii in 0..3 {
+        for ii in 0..n {
             let (Some(&from), Some(&to), Some(&g)) = (
                 self.vertices.get(ii),
-                self.vertices.get((ii + 1) % 3),
+                self.vertices.get((ii + 1) % n),
                 geoms.get(ii),
             ) else {
                 return Err(nul());

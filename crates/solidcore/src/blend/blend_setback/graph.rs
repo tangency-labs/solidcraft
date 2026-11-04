@@ -20,7 +20,9 @@
 //! `m_bUncertified` are [`super::FillStats`]. A probe that asks neither the fill nor its
 //! margin answers feasibility with an empty fill, as the fork's leaves `rFill` empty.
 
-use super::certify::{affine_net, certified_convex, net_surface, t_make, AffinePatch};
+use super::certify::{
+    affine_net, certified_convex, net_surface, sides_on_planes, t_make, AffinePatch,
+};
 use super::convexity::{patch_curvatures, sector_conditions, SectorConditions};
 use super::qp::{dual_qp_rows, QpOutcome};
 use super::{
@@ -824,7 +826,8 @@ pub(super) fn graph_g1(
             // SER(netsAt): SM_ERR
             return Err(sm_err().into());
         };
-        if certified_convex(&nets, e, GRAPH_DEPTH)?.is_err() {
+        let plane_sides = sides_on_planes(&nets, n, &faces, cycle_face);
+        if certified_convex(&nets, &plane_sides, e, GRAPH_DEPTH)?.is_err() {
             continue;
         }
         if d == 9 && probe.is_none() {

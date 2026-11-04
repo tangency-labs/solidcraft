@@ -31,6 +31,7 @@
 //! | [`BSplineCurve::deform_to_end_point_targets`], [`InValueType`] | `SmBSplineCurve::DeformToEndPointTargets`, `SmInValueType` |
 //! | [`BSplineCurve::remove_knots`]                         | `SmBSplineCurve::RemoveKnots`                  |
 //! | [`BSplineCurve::reparametrize_with_arc_length`]        | `SmBSplineCurve::ReparametrizeWithArcLength`   |
+//! | [`BSplineCurve::make_non_rational`]                    | `SmBSplineCurve::MakeNonRational`              |
 //! | [`BSplineCurve::scale`]                                | `SmBSplineCurve::Scale(double)`                |
 //! | [`BSplineCurve::scale_knot_vector`]                    | `SmBSplineCurve::ScaleKnotVector`              |
 //! | [`BSplineCurve::synchronize_knots_of_curves`]          | `SmBSplineCurve::SyncronizeKnotsOfCurves`      |
@@ -38,7 +39,7 @@
 //!
 //! The other functions of the file (`ApproximatePoints`,
 //! `CreateFromHermiteCurve`, `C1NonRationalCubicInterpolate`, `ForceThroughPoint`,
-//! `MakeNonRational`, `Multiply*`, `SmoothJoin`, `InsertKnotsByDistance`, `RefineCurve`,
+//! `Multiply*`, `SmoothJoin`, `InsertKnotsByDistance`, `RefineCurve`,
 //! `Scale(SmVector3d&, SmPoint3d&)`, `TestDegenerate`, ...) belong to other units.
 //!
 //! Deviations:
@@ -157,7 +158,7 @@ use crate::nurbs::crv_geom::ToleranceKind;
 use crate::nurbs::crv_tool::p2::{make_compatible_adj_knots, make_compatible_knot_tol};
 use crate::nurbs::geom::{normalize, PI};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
-use crate::nurbs::math::{translate_sum2_pts, CPoint, NOW};
+use crate::nurbs::math::{translate_sum2_pts, CPoint, NOW, NOZ};
 use crate::nurbs::nurbs_crv::{copy_nurb_curve, crv_trim, to_euclid};
 use crate::nurbs::spiral::{approx_spiral, Hand, SpiralSpec};
 use crate::surface::surface::p2::{drop_vectors, SurfaceEvaluate};
@@ -188,6 +189,7 @@ const OP_COMPAT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::make_curves_
 const OP_DEFORM: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::deform_to_end_point_targets";
 const OP_REMOVE_KNOTS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::remove_knots";
 const OP_REPARAM: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::reparametrize_with_arc_length";
+const OP_MAKE_NON_RATIONAL: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::make_non_rational";
 const OP_SCALE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale";
 const OP_SCALE_KNOTS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale_knot_vector";
 const OP_SYNC: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::synchronize_knots_of_curves";
@@ -2180,6 +2182,32 @@ impl BSplineCurve {
     /// `SM_ERR` without a NURB.
     pub fn scale(&mut self, scale_factor: f64) -> Result<()> {
         self.nurb_mut(OP_SCALE)?.scale_cpts(scale_factor);
+        Ok(())
+    }
+
+    /// Divides each weighted control point by its weight and drops the weight
+    /// (`MakeNonRational`): the curve keeps its shape only where its weights are all one
+    /// weight. (Upstream's warning for an ellipse or circle has no counterpart: such a
+    /// curve is not a [`BSplineCurve`] here.)
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB.
+    pub fn make_non_rational(&mut self) -> Result<()> {
+        let cur = self
+            .get_or_create_gw_nurb()
+            .map_err(|_| SolidError::sm_err(OP_MAKE_NON_RATIONAL))?;
+        for cp in cur.cpts_mut() {
+            if cp.w != NOW {
+                let w = cp.w;
+                cp.x /= w;
+                cp.y /= w;
+                if cp.z != NOZ {
+                    cp.z /= w;
+                }
+                cp.w = NOW;
+            }
+        }
         Ok(())
     }
 

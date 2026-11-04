@@ -2265,15 +2265,19 @@ impl<'target> FilletSession<'target> {
                 // edge there blended, are the blend corner's Ball
                 // (SmBlendCorner::ClassifyBall, in SmFilletCorner::Create's three-solver
                 // case before the 3x3 corner); a failed classification builds no corner.
-                // A chamfer corner's rounds are not circular, so ClassifyBall finds no
-                // Ball there before any test that could fail.
+                // Since smlib#125 (278bf77) four or more rounds that one ball touches are
+                // the Ball too (ClassifyBall in the NxN case, before ClassifySetBack, where
+                // every edge use is a solver's). A chamfer corner's rounds are not
+                // circular, so ClassifyBall finds no Ball there before any test that could
+                // fail.
                 if k.fixes.fillet_blend_corner
                     && matches!(
                         corner.kind,
                         FilletCornerKind::ConvexNByN | FilletCornerKind::ConcaveNByN
                     )
-                    && corner.solver_eus.as_ref().map_or(0, Vec::len) == 3
-                    && corner.all_eus.as_ref().map_or(0, Vec::len) == 3
+                    && corner.all_eus.as_ref().map_or(0, Vec::len) >= 3
+                    && corner.solver_eus.as_ref().map_or(0, Vec::len)
+                        == corner.all_eus.as_ref().map_or(0, Vec::len)
                     && !corner.chamfer
                 {
                     let lookup = SweptSessionSolvers {
@@ -2281,13 +2285,22 @@ impl<'target> FilletSession<'target> {
                         executive: Some(executive),
                     };
                     let all_eus = corner.all_eus.clone().unwrap_or_default();
+                    // a vertex asked to be set back is no Ball, by either door: marked
+                    // (AddSetBackVertex, IsSetBackVertex) or asked a fill (SetSetBackFill,
+                    // which only the Setback builds; solidcore#2365)
+                    let set_back = set_back_vertices.contains(&vertex)
+                        || crate::blend::blend_corner::setback::set_back_fill_of(
+                            set_back_fills,
+                            vertex,
+                        )
+                        .is_some();
                     let event = crate::blend::blend_corner::ball::classify_ball(
                         k,
                         target,
                         vertex,
                         &edgeuses,
                         &all_eus,
-                        set_back_vertices.contains(&vertex),
+                        set_back,
                         &lookup,
                     );
                     match event {
@@ -2370,6 +2383,29 @@ impl<'target> FilletSession<'target> {
                         }
                         Ok(_) => {}
                     }
+                }
+                // solidcore-native (WR-697 addendum; the fork refuses this only in its capi): a
+                // corner asked to be set back (SetSetBackFill) that builds no setback at all
+                // (neither the Setback nor an N x N corner) would drop it silently, so it is
+                // refused, decided from the request and the classification alone (the second
+                // door, SetSetBackDist on the made corner, is refused by `do_filleting` on
+                // the same `builds_setback`).
+                if k.fixes.fillet_blend_corner
+                    && crate::blend::blend_corner::setback::set_back_fill_of(
+                        set_back_fills,
+                        vertex,
+                    )
+                    .is_some()
+                    && !crate::blend::blend_corner::setback::builds_setback(&corner)
+                {
+                    let location = crate::topology::vertex::point(target, vertex).ok();
+                    return Ok(CornerCreation::Refused {
+                        location,
+                        error: crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
+                        comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT.to_owned(),
+                        fit_edge: None,
+                        fit: None,
+                    });
                 }
                 // The fork's (WR-697, e647dac): with GetSweptTurns() a blend corner's
                 // Turn is Swept, or refused with its reason (SmBlendCorner::Classify)
@@ -2749,10 +2785,15 @@ impl<'target> FilletSession<'target> {
 
     /// The fork's `SetSetBackFill` (smlib#104 61547af): the corner at `vertex` set back
     /// `setback` along each of its edges, with an ease `ease` before it (0: none): asked
-    /// before [`Self::do_fillet`], which then makes that corner the blend corner's Setback,
-    /// filled by the setback split, where it can (with `Kernel::fixes.fillet_blend_corner`);
-    /// unless it is left `open`, when it stays the corner patch the caller removes. Without
-    /// the flag it changes nothing.
+    /// before [`Self::do_fillet`], which then makes that corner the blend corner's Setback
+    /// (the vertex is no Ball, as one marked with [`Self::add_set_back_vertex`] is not),
+    /// filled by the setback split, where it can (with `Kernel::fixes.fillet_blend_corner`).
+    /// Left `open`, a G1 corner is the Setback's hole (its spring curves, no fill, ef57570);
+    /// only a G2 corner (eased, or curvature-continuous sections) stays the fill's patches
+    /// the caller removes. A corner asked for here that is not the Setback is refused
+    /// (`CornerUnsupported`), except an N x N corner, which ignores the request as before
+    /// (it builds a setback given with [`Self::set_corner_setback`] on its own setback
+    /// path). Without the flag it changes nothing.
     pub fn set_set_back_fill(&mut self, vertex: VertexId, setback: f64, ease: f64, open: bool) {
         self.objects
             .set_back_fills
@@ -2850,7 +2891,11 @@ impl<'target> FilletSession<'target> {
             .collect()
     }
 
-    /// `SmFilletCorner::SetSetBackDist` on one live corner.
+    /// `SmFilletCorner::SetSetBackDist` on one live corner. With
+    /// `Kernel::fixes.fillet_blend_corner`, a setback (`distance > 0`) set on a corner that
+    /// builds none (neither the blend corner's Setback nor an N x N corner,
+    /// `blend_corner::setback::builds_setback`) is refused by [`Self::do_filleting`]
+    /// (`CornerUnsupported`) rather than built without it.
     ///
     /// # Errors
     /// An unresolved corner identity.
@@ -6058,8 +6103,8 @@ impl SessionObjects<'_> {
             .get(id.0 as usize)
             .and_then(|corner| corner.all_eus.clone())
             .ok_or_else(|| SolidError::null_pointer("SmBlendCorner::MakeBallTopology"))?;
-        let mut solver_ids = [FilletSolverId(0); 3];
-        for (slot, index) in solver_ids.iter_mut().zip(0..3) {
+        let mut solver_ids = vec![FilletSolverId(0); all.len()];
+        for (slot, index) in solver_ids.iter_mut().zip(0..) {
             let eu = all
                 .get(index)
                 .copied()
@@ -6092,8 +6137,10 @@ impl SessionObjects<'_> {
                 .map(SolverObject::base)
                 .ok_or_else(|| invalid("corner solver is not live"))
         };
-        let [a, b, c] = solver_ids;
-        let solvers = [live(a)?, live(b)?, live(c)?];
+        let solvers = solver_ids
+            .iter()
+            .map(|&id| live(id))
+            .collect::<Result<Vec<_>>>()?;
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner is not live"))?;

@@ -34,6 +34,7 @@
 
 use super::original_trim::OriginalSurfaceDeletion;
 use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
+use crate::blend::fillet_cliff_overflow::Refusal;
 use crate::blend::fillet_executive::p3::{
     ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
@@ -649,6 +650,24 @@ impl FilletSession<'_> {
         mut error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
         self.sync_self_intersection_handler();
+        // solidcore-native (WR-697 addendum; the fork refuses this only in its capi): a
+        // setback set on a made corner (SetSetBackDist) that builds none (neither the
+        // Setback nor an N x N corner) would be dropped silently, so it is refused, as
+        // `create_corners` refuses one asked with SetSetBackFill at such a corner
+        if k.fixes.fillet_blend_corner
+            && self
+                .objects
+                .corners
+                .iter()
+                .any(crate::blend::blend_corner::setback::asked_setback_not_built)
+        {
+            self.note_refusal(Refusal {
+                code: FilletErrorType::CornerUnsupported,
+                reason: None,
+                comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
+            });
+            return Err(failure());
+        }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
             Some((
@@ -686,9 +705,12 @@ impl FilletSession<'_> {
             session.objects.target.set_editing_enabled(true);
             // The fork's (WR-703, `eb883ad`): a feature standing inside a round's band is kept:
             // the round is trimmed round it in place and sewn in instead of merged.
+            // (not with an open G1 setback corner: the fork's ef57570)
+            let open_setback = session.has_open_setback();
             if k.fixes.fillet_keep_features
                 && !session.executive.cliff_overflow
                 && !session.executive.open_ends.iter().any(|end| end.section)
+                && !open_setback
             {
                 let kept = session.keep_features_in_bands(k);
                 if !matches!(kept, Ok(false)) {
@@ -708,14 +730,18 @@ impl FilletSession<'_> {
             // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
             // place instead; a WR-674 section end is still subtracted, unless
             // `fillet_section_end_trim_at_creases` (WR-706) trims it too
+            // The fork's ef57570 (smlib#125, `fillet_blend_corner`): so is an open G1 setback
+            // corner's hole made (no patches: its spring curves are imprinted on its faces
+            // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
-            let trimmed = if sectioned {
-                k.fixes.fillet_section_end_trim_at_creases
-                    && k.fixes.fillet_overflow_trim_at_creases
-                    && k.fixes.fillet_round_ends_at_tangent_continuation
-            } else {
-                session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
-            };
+            let trimmed = open_setback
+                || if sectioned {
+                    k.fixes.fillet_section_end_trim_at_creases
+                        && k.fixes.fillet_overflow_trim_at_creases
+                        && k.fixes.fillet_round_ends_at_tangent_continuation
+                } else {
+                    session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
+                };
             if trimmed {
                 let result = session.trim_at_creases(k);
                 session.objects.target.set_editing_enabled(editing);

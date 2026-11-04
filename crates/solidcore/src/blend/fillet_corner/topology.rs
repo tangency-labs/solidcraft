@@ -1173,7 +1173,9 @@ impl FilletCorner {
         ) {
             return Err(invalid("requires a convex or concave NxN corner"));
         }
-        // Determine if this is a setback corner
+        // Determine if this is a setback corner (with `fillet_blend_corner` too: the fork's
+        // dc757a6 drops this path, which solidcore keeps, as the blend corner's Setback does not
+        // build every corner it builds; `asked_setback_not_built`)
         let is_set_back = self.set_back_dist > self.approx_tol_3d * 100.0;
 
         // All the edges of corner are filletted

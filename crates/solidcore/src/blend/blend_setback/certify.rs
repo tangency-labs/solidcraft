@@ -7,7 +7,9 @@
 //! [`super::graph::GRAPH_DEPTH`] from its callers), the fork's own bound.
 //! `std::min_element` is the first least coefficient by `<`, as the fork's.
 
-use super::{binomial, el, el_mut, el_ref, euclid, sm_err, smax, tensor_elevate, Net, Tensor};
+use super::{
+    binomial, el, el_mut, el_ref, euclid, sm_err, smax, tensor_elevate, Face, Net, Tensor,
+};
 use crate::error::Result;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::KnotType;
@@ -456,17 +458,100 @@ pub(super) fn affine_fundamentals(p: &AffinePatch, e: Vec3) -> Result<AffineFund
     Ok(AffineFundamentals { q0, qj, o })
 }
 
+/// `sm_SbSidesOnPlanes` (smlib#125 3e10318): the sides of the setback patches (nets
+/// `0 .. n - 1`) G1 to a plane by construction: patch `m`'s side `v = 0` on face `m`,
+/// `v = 1` on face `m + 1` (`cycle_face`: the cycle's faces), each marked where its first
+/// two rows of control points (the side and its cross derivative) lie on that face's
+/// plane, to rounding at their scale. Two flags per net, `false` for every other net and
+/// side.
+pub(super) fn sides_on_planes(
+    nets: &[Net],
+    n: usize,
+    faces: &[Face],
+    cycle_face: &[usize],
+) -> Vec<bool> {
+    let mut on = vec![false; 2 * nets.len()];
+    let mut m = 0;
+    while m < n && m < nets.len() && n <= cycle_face.len() {
+        for e in 0..2 {
+            let Some(&f) = cycle_face.get((m + e) % n) else {
+                continue;
+            };
+            let Some(face) = faces.get(f) else {
+                continue;
+            };
+            let Ok(normal) = face.normal.unitize() else {
+                continue;
+            };
+            let Some(net) = nets.get(m) else {
+                continue;
+            };
+            if net.q < 1 {
+                continue;
+            }
+            let mut is_on = true;
+            'rows: for i in 0..=net.p {
+                for jj in 0..2 {
+                    let j = if e == 0 { jj } else { net.q - jj };
+                    let Some(h) = net.pts.get(i * (net.q + 1) + j) else {
+                        is_on = false;
+                        break 'rows;
+                    };
+                    if !(h[3].abs() > 0.0) {
+                        is_on = false;
+                        break 'rows;
+                    }
+                    let x = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+                    let d = x - face.point;
+                    let scale = 1.0 + x.length() + face.point.length();
+                    is_on = d.dot(normal).abs() <= 1.0e-12 * scale;
+                    if !is_on {
+                        break 'rows;
+                    }
+                }
+            }
+            if let Some(slot) = on.get_mut(2 * m + e) {
+                *slot = is_on;
+            }
+        }
+        m += 1;
+    }
+    on
+}
+
 /// `sm_SbCertifiedConvex`: the fill's shape certified from its nets: on every patch
 /// `o = det(H, Hu, Hv, (e, 0))` of one sign s and `s l`, `s n`, `l n - m^2 >= 0` (each to
 /// `1e-12` of its coefficients' scale), from Bernstein coefficients halving up to `depth`
 /// times. `Err(patch)` (`rlPatch`): the first patch not certified.
+///
+/// `plane_sides[2 p + e]` (`e = 0`: side `v = 0`, `e = 1`: side `v = 1`; smlib#125
+/// 3e10318) marks a side of patch `p` that is G1 to a plane by the patch's construction
+/// ([`sides_on_planes`]). Along such a side the normal is the plane's, so `N_u = 0`, and
+/// `L = -S_u . N_u` and `M = -S_v . N_u` vanish identically: their Bernstein rows on that
+/// side are set to exactly 0 rather than read from rounding. Every other side keeps its
+/// computed rows.
 pub(super) fn certified_convex(
     nets: &[Net],
+    plane_sides: &[bool],
     e: Vec3,
     depth: usize,
 ) -> Result<core::result::Result<(), usize>> {
     for (p, net) in nets.iter().enumerate() {
-        let [fl, fm, fn_, fo] = fundamentals(net, e)?;
+        let [mut fl, mut fm, fn_, fo] = fundamentals(net, e)?;
+        for side in 0..2 {
+            if !plane_sides.get(2 * p + side).copied().unwrap_or(false) {
+                continue;
+            }
+            // a side G1 to a plane: N_u = 0 there, so L = -S_u . N_u = 0 and M = -S_v . N_u = 0
+            for t in [&mut fl, &mut fm] {
+                let q = t.q;
+                for i in 0..=t.p {
+                    if let Some(c) = t.c.get_mut(i * (q + 1) + if side == 0 { 0 } else { q }) {
+                        *c = 0.0;
+                    }
+                }
+            }
+        }
         let d_o = t_scale(&fo);
         let mut neg_o = fo.clone();
         for x in &mut neg_o.c {

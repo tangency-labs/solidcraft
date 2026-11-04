@@ -30,7 +30,8 @@ impl SessionObjects<'_> {
             .corners
             .get(id.0 as usize)
             .ok_or_else(|| invalid("corner is not live"))?;
-        // Determine if this is a setback corner
+        // Determine if this is a setback corner (kept with `fillet_blend_corner`, where the
+        // fork's dc757a6 drops it: `asked_setback_not_built`)
         if corner.set_back_dist > corner.approx_tol_3d * 100.0 {
             // Let SmFilletConvexNxNCorner handle setbacks
             return self.make_convex_nxn_corner_topology(k, id, executive);

@@ -8,6 +8,8 @@
 //! |-------------------------------------|--------------------------------------|
 //! | `FilletSession::trim_at_creases`    | `SmFilletExecutive::TrimAtCreases`   |
 //! | `is_tangent_edge` (private)         | `SmFilletSolver::IsTangentEdge` (bacd0bb) |
+//! | `FilletSession::has_open_setback`   | `SmFilletExecutive::HasOpenSetBack` (ef57570) |
+//! | `open_setback_springs` (private)    | `TrimAtCreases`' open setback corners' spring curves and hole edges (ef57570) |
 //!
 //! Deviations:
 //! - **The sheet leaves the session.** As in `subtract_removal_region`, the sheet (the
@@ -34,6 +36,11 @@
 //!   there and the sheet is sewn to it. The fork drops such a crease as not inside the
 //!   face, leaves the sheet's piece past the face, and refuses at the sewing (a disc 2 high
 //!   rounded 2.001: the crease runs 2.5e-7 inside the bottom edge). Without it the caller subtracts the round, as before.
+//! - **Open setbacks and each round's side (the fork's ef57570, ce748fa; smlib#125).** An
+//!   open G1 setback corner's spring curves are imprinted with the sheet's boundary and its
+//!   hole's `3 n` edges stay free; a concave round's sheet lies in the void it fills. Only
+//!   `fixes.fillet_blend_corner` builds such corners, and only with it is a round's side
+//!   read: without it every round takes material off, as before.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,12 +48,14 @@ use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::{
     cut_fillet_at_open_end, section_edge, section_end, section_end_face, Refusal, SectionEnd,
 };
+use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::p3::NoRoomReason;
-use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomId};
+use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType, FilletGeomId};
 use crate::blend::fillet_overflow::{
     creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face,
     pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
 };
+use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
@@ -189,6 +198,53 @@ const fn refusal(
 }
 
 impl FilletSession<'_> {
+    /// `SmFilletExecutive::HasOpenSetBack` (the fork's ef57570): whether a corner is an
+    /// open G1 setback (its hole made by the trim's imprint, no patches).
+    pub(super) fn has_open_setback(&self) -> bool {
+        self.executive.corners.iter().any(|c| {
+            matches!(c, FilletObject::Corner(id)
+                if self.objects.corners.get(id.0 as usize).is_some_and(FilletCorner::is_setback_open))
+        })
+    }
+
+    /// The open G1 setback corners' spring curves (`SM_FE_PRECOMPUTED` edges with a
+    /// curve), each with the face it lies on, and the edges their holes leave free: `3 n`
+    /// for each (its `n` sections and `2 n` spring halves).
+    fn open_setback_springs(&self) -> Result<(Vec<(FaceId, Curve)>, u32)> {
+        let mut springs = Vec::new();
+        let mut free = 0_u32;
+        for c in &self.executive.corners {
+            let FilletObject::Corner(id) = *c else {
+                continue;
+            };
+            let Some(corner) = self
+                .objects
+                .corners
+                .get(id.0 as usize)
+                .filter(|corner| corner.is_setback_open())
+            else {
+                continue;
+            };
+            for &e in &corner.edges {
+                let fe = self.objects.pseudo.fillet_edge(e)?;
+                let Some(face) = fe.original_face() else {
+                    continue;
+                };
+                if fe.fillet_edge_type() != FilletEdgeType::Precomputed {
+                    continue;
+                }
+                if let Some(curve) = edge::curve(self.objects.pseudo.brep(), e)? {
+                    springs.push((face, curve.clone()));
+                }
+            }
+            if let Some(all) = corner.all_eus.as_ref() {
+                let n = u32::try_from(all.len()).map_err(|_| invalid("corner too large"))?;
+                free = free.saturating_add(n.saturating_mul(3));
+            }
+        }
+        Ok((springs, free))
+    }
+
     /// The fork's fit for a blend whose corners take the whole of its edge (a3d6d81): for a
     /// constant ball, the edge's length over what its corners take per unit radius at both
     /// ends (`sm_CornerTakesPerRadius`, over the solvers of the same radius), less the fit
@@ -622,6 +678,24 @@ impl FilletSession<'_> {
         }
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
 
+        // each round's side of the body (the fork's ce748fa, with `fillet_blend_corner`): a
+        // convex blend's sheet lies in the material it takes off, a concave blend's (an open
+        // setback corner's concave rounds) in the void it fills. A sheet face of no round (a
+        // corner's) takes the blends' one side.
+        let mut adds = vec![false; solvers.len()];
+        let (mut any_adds, mut any_takes) = (false, false);
+        if k.fixes.fillet_blend_corner {
+            for (a, &e) in adds.iter_mut().zip(blended_edges) {
+                *a = is_concave_edge(k, self.objects.target, e)?;
+                if *a {
+                    any_adds = true;
+                } else {
+                    any_takes = true;
+                }
+            }
+        }
+        let (open_springs, open_free) = self.open_setback_springs()?;
+
         // 1, 2: each sheet face split along its creases, the pieces outside the body
         // (beyond the cliffs, or past an end) deleted, whether a crease split it or not
         let body_tol = self.objects.target.tolerance();
@@ -775,7 +849,20 @@ impl FilletSession<'_> {
                         ),
                     );
                 }
-                if !inside {
+                let mut piece_adds = any_adds;
+                if let Some(&i) = round_of.get(&s) {
+                    piece_adds = adds.get(i).copied().unwrap_or(false);
+                } else if any_adds && any_takes {
+                    return refuse(
+                        note,
+                        refusal(
+                            FilletErrorType::CornerUnsupported,
+                            None,
+                            "Fillet Error: a corner's face between blends that add and blends that take off material, past their faces or at an open setback, is not built",
+                        ),
+                    );
+                }
+                if if piece_adds { inside } else { !inside } {
                     with_kernel_callbacks(k, &mut sheet, |k, b, env| delete(k, b, env, p))?;
                 } else if let Some(&i) = round_of.get(&s) {
                     kept_rounds.insert(i);
@@ -893,6 +980,13 @@ impl FilletSession<'_> {
             for &e in &lamina_edges {
                 if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
                     on.push(edge_curve(k, &sheet, e)?);
+                }
+            }
+            // an open G1 setback corner's spring curves on this face: with the rails they
+            // bound the corner's hole on it (the fork's ef57570)
+            for (sf, curve) in &open_springs {
+                if *sf == f {
+                    on.push(curve.clone());
                 }
             }
             if on.is_empty() {
@@ -1188,16 +1282,18 @@ impl FilletSession<'_> {
                     edge::set_tolerance(b, e, sewn_tol, true, true)?;
                 }
             }
+            // an open G1 setback corner's hole: its n sections and 2 n spring halves stay
+            // free (the fork's ef57570)
             let mut maybe_open = false;
-            if stitched.lamina_edges == 0 {
+            if stitched.lamina_edges == open_free {
                 let mut marks = Marks::default();
                 let oriented =
                     p3::orient_trimmed_surfaces(k, b, env, &mut marks, true, false, None)?;
                 maybe_open = oriented.maybe_not_closed_solid;
             }
-            if stitched.lamina_edges != 0
-                || maybe_open
-                || !crate::topology::brep::p2::is_manifold_solid(b)?
+            if stitched.lamina_edges != open_free
+                || (open_free == 0
+                    && (maybe_open || !crate::topology::brep::p2::is_manifold_solid(b)?))
             {
                 return refuse(
                     note,
