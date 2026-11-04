@@ -41,6 +41,14 @@ pub struct GroundAo {
 }
 
 impl GroundAo {
+    pub(super) fn visible_from(&self, back: [f32; 3]) -> bool {
+        if !back.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let cam = solidcraft_render::Camera { up: self.up, ..Default::default() };
+        cam.to_frame(solidcore_record::Vec3::new(f64::from(back[0]), f64::from(back[1]), f64::from(back[2]))).z > 0.0
+    }
+
     pub fn new(bounds: solidcraft_geom::Aabb3, height: f64, up: solidcraft_render::UpAxis, radius: f32) -> Option<Self> {
         if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !height.is_finite() || !radius.is_finite() || radius <= 0.0 {
             return None;
@@ -364,6 +372,20 @@ fn target_size(enabled: bool, pixels: [f32; 2], device_limit: u32) -> [u32; 2] {
 #[cfg(test)]
 mod tests {
     use super::{GroundAo, target_size};
+
+    #[test]
+    fn receiver_visibility_follows_the_camera_side_in_both_up_axes() {
+        use solidcore_record::Vec3;
+        let bounds = solidcraft_geom::Aabb3 { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
+        for up in [solidcraft_render::UpAxis::Y, solidcraft_render::UpAxis::Z] {
+            let cam = solidcraft_render::Camera { up, ..Default::default() };
+            let ground = GroundAo::new(bounds, 0.0, up, 1.0).unwrap();
+            assert!(ground.visible_from(cam.from_frame(Vec3::Z).to_f32()));
+            assert!(!ground.visible_from(cam.from_frame(-Vec3::Z).to_f32()));
+            assert!(!ground.visible_from(cam.from_frame(Vec3::X).to_f32()));
+            assert!(!ground.visible_from([f32::NAN; 3]));
+        }
+    }
 
     #[test]
     fn a_growing_preview_keeps_the_current_sampling_margin_at_the_fixed_ground_height() {

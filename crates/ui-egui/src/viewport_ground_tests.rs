@@ -33,12 +33,14 @@ fn ground_ao_is_independent_of_the_ellipse_and_respects_visibility_and_view_styl
     app.ui.ground_shadow = false;
     app.cam.pitch = 0.6;
     let key = scene_key(&app);
-    assert!(build_scene(&app).ground_ao.is_none());
+    let ground = build_scene(&app).ground_ao;
+    assert!(ground.is_some(), "cache receiver data independently of its frame visibility");
+    assert_eq!(ao_radius(&app), 0.0);
     let revision = app.session.revision;
     app.run("view.ambient_occlusion", json!({"enabled":true})).unwrap();
-    assert_ne!(scene_key(&app), key, "AO must invalidate the receiver scene");
+    assert_eq!(scene_key(&app), key, "AO only changes frame visibility, not model geometry");
     assert_eq!(app.session.revision, revision, "AO is a preference, not a design edit");
-    let ground = build_scene(&app).ground_ao;
+    assert_eq!(build_scene(&app).ground_ao, ground);
     assert_eq!(ground.unwrap().vertices(None).len(), 6 * crate::gpu::TRI_SIZE);
     app.ui.ground_shadow = true;
     assert_eq!(build_scene(&app).ground_ao, ground);
@@ -53,7 +55,7 @@ fn ground_ao_is_independent_of_the_ellipse_and_respects_visibility_and_view_styl
     assert!(build_scene(&app).ground_ao.is_none());
     app.ui.visual_style = 0;
     app.cam.pitch = -0.5;
-    assert!(build_scene(&app).ground_ao.is_none());
+    assert_eq!(build_scene(&app).ground_ao, ground, "the renderer hides the receiver below the ground");
     app.cam.pitch = 0.5;
     app.session.visibility.hidden_bodies.push("Foot".into());
     assert!(build_scene(&app).ground_ao.is_none());

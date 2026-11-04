@@ -60,10 +60,11 @@ fn face_hover_and_clicks_follow_device_rotation_on_each_axis() {
 /// Crossing the ground used to rebuild every body even with the shadow switched off.
 #[test]
 fn flips_reuse_the_model_and_only_switch_shadow_visibility() {
-    for shadow in [false, true] {
+    for (shadow, ao) in [false, true].into_iter().flat_map(|shadow| [false, true].map(|ao| (shadow, ao))) {
         let ctx = crate::fonts::test_context();
         let mut app = app();
         app.ui.ground_shadow = shadow;
+        app.preferences.ambient_occlusion = ao;
         frame(&mut app, &ctx);
         let model_key = app.viewport.key;
         let above = app.viewport.sketch_slot.lock().unwrap().take().unwrap();
@@ -96,6 +97,9 @@ fn flips_reuse_the_model_and_only_switch_shadow_visibility() {
         assert!(app.viewport.slot.lock().unwrap().is_none(), "toggling a shadow must not rebuild the model");
         let toggled = app.viewport.sketch_slot.lock().unwrap().take().unwrap();
         assert_eq!(!toggled.shadow.is_empty(), !shadow);
+        app.preferences.ambient_occlusion = !ao;
+        frame(&mut app, &ctx);
+        assert!(app.viewport.slot.lock().unwrap().is_none(), "toggling AO must not rebuild model geometry");
     }
 }
 

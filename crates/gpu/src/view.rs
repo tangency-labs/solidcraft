@@ -2087,7 +2087,7 @@ pub struct Renderer {
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
     ground_ao: wgpu::RenderPipeline,
-    ground_ao_key: Option<(u64, u64, bool, u32)>,
+    ground_ao_key: Option<(u64, u64, bool, u32, bool)>,
     tri: wgpu::RenderPipeline,
     /// `tri` and `tri_cut` for planned bodies (positions and normals from the GPU evaluation,
     /// colours per vertex, indexed).
@@ -3521,12 +3521,14 @@ impl Renderer {
             res.model.sort_glass(queue, cb.back);
         }
         res.model.cull(queue, &cb.view_proj, cb.size_px);
-        let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits());
+        let ground_visible = res.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
+        let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
         if res.ground_ao_key != Some(ground_key) {
             let preview = if cb.pv_hide { None } else { cb.preview_bounds };
             res.model.ground_ao = res
                 .model
                 .ground_input
+                .filter(|_| ground_visible)
                 .and_then(|ground| upload(device, "sc_ground_ao", &ground.vertices_with_radius(preview, cb.ao_radius), TRI_SIZE));
             res.ground_ao_key = Some(ground_key);
         }
