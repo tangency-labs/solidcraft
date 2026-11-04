@@ -85,7 +85,7 @@ fn an_image_draws_under_the_views_on_its_rectangle() {
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
 
     let reply = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
-    let svg = reply["svg"].as_str().unwrap();
+    let svg = reply["text"].as_str().unwrap();
     assert_eq!(svg.matches("<image ").count(), 1, "{}", &svg[..200]);
     // On the A3 sheet, whose y runs down in an SVG: 297 - 32.7.
     let at = "<image x=\"10\" y=\"264.3\" width=\"25.4\" height=\"12.7\" preserveAspectRatio=\"none\" href=\"data:image/png;base64,";
@@ -95,7 +95,7 @@ fn an_image_draws_under_the_views_on_its_rectangle() {
     assert_eq!(pixels.dimensions(), (300, 150));
     assert_eq!((pixels.get_pixel(0, 0).0, pixels.get_pixel(149, 149).0), (RED, RED));
     assert_eq!((pixels.get_pixel(150, 0).0, pixels.get_pixel(299, 149).0), (BLUE, BLUE));
-    assert!(!run(&mut s, "drawing.export", json!({"sheet": ids::encode(elsewhere)}))["svg"].as_str().unwrap().contains("<image "));
+    assert!(!run(&mut s, "drawing.export", json!({"sheet": ids::encode(elsewhere)}))["text"].as_str().unwrap().contains("<image "));
 }
 
 /// A file that doesn't decode refuses the sheet it sits on, naming the placement, and writes
