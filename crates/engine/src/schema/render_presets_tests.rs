@@ -97,3 +97,20 @@ fn preset_commands_reply_with_their_schemas() {
         assert!(error.contains("`acknowledge_omision`"), "{level:?}: {error}");
     }
 }
+
+/// `set` names the render setup's fields: `patched_settings` reads the patched setup as a
+/// `RenderSetup`, which refuses any other key, so the schema refuses a misspelt one too (and
+/// more than 13 at once).
+#[test]
+fn the_set_schema_names_the_setup_fields() {
+    let root = input_schema_for::<PresetParams>();
+    let root = root.as_value();
+    let set = &root["properties"]["set"];
+    for (patch, takes) in
+        [(json!({}), true), (json!({"width": 640, "height": 480, "job": {"method": "gpu_path"}}), true), (json!({"widht": 640}), false)]
+    {
+        assert_eq!(conforms(root, set, &patch), takes, "{patch}");
+    }
+    // `conforms` doesn't read `maxProperties`, so the limit is pinned here.
+    assert_eq!((set["maxProperties"].as_u64(), set["properties"].as_object().map(|p| p.len())), (Some(13), Some(super::SETUP_FIELDS.len())), "{set}");
+}

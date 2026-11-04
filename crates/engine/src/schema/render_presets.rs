@@ -14,10 +14,37 @@ fn no_change() -> Value {
 
 /// `set`: changes to the setup, as `render.settings.set` takes them. `patched_settings` in
 /// `cmd/render.rs` refuses anything but an object of at most 13 fields, with its own message.
+/// The fields of a render setup, as `render.settings.get` gives them. A `set` patch may give up
+/// to 13 of them; `patched_settings` reads the patched setup as a `RenderSetup`, which refuses any
+/// other key.
+const SETUP_FIELDS: &[&str] = &[
+    "backend",
+    "mode",
+    "camera",
+    "width",
+    "height",
+    "format",
+    "exposure_ev",
+    "environment_rotation",
+    "environment_intensity",
+    "background",
+    "job",
+    "surfaces",
+    "optics",
+    "stage",
+];
+
+/// Each setup field, without its own schema: `patched_settings` checks the values.
+fn setup_properties() -> serde_json::Map<String, Value> {
+    SETUP_FIELDS.iter().map(|field| (field.to_string(), Value::Object(serde_json::Map::new()))).collect()
+}
+
 fn set_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "Changes to the setup before the studio is fitted, as `render.settings.set` takes them: an object of at most 13 setup fields. The setup must render with the GPU path tracer. Default: none.",
+        "description": "Changes to the setup before the studio is fitted, as `render.settings.set` takes them: at most 13 of the setup's fields. The setup they make must render with the GPU path tracer. Default: none.",
         "type": "object",
+        "properties": setup_properties(),
+        "additionalProperties": false,
         "maxProperties": 13,
         "default": {}
     })
