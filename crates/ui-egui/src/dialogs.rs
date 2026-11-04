@@ -788,7 +788,7 @@ impl Dialog {
     }
 
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
-    fn refuse(&mut self, app: &SolveApp, error: String) {
+    pub(crate) fn refuse(&mut self, app: &SolveApp, error: String) {
         self.refused = Some(Refused::now(app, self));
         self.error = Some(error);
     }

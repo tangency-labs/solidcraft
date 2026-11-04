@@ -52,14 +52,22 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
 
 /// The hole at `key` moved to the face place a click with `hits` would take (snapped as the
 /// pick is), unless that face already has another hole; held by a reference edge, as far along
-/// the edge as the pick is.
+/// the edge as the pick is, and where the edge's line leaves the face first, refused with why.
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
     let s = &app.session;
     let Some(to) = face_pick(d, s, hits) else { return false };
     match crate::hole_refs::freedom(s, d, key) {
         Freedom::Plane => crate::hole_place::move_place(d, s, key, to),
         Freedom::Line(_) => match to {
-            Sel::Face { point, .. } => crate::hole_refs::drag_to(s, d, key, point),
+            Sel::Face { point, .. } => match crate::hole_refs::drag_to(s, d, key, point) {
+                Ok(()) => true,
+                // As a pick there says (see `hole_place::pick_moves`), until the inputs change.
+                Err(crate::hole_refs::Stuck::OffFace) => {
+                    d.refuse(app, crate::hole_place::HELD_OFF_ITS_LINE.to_string());
+                    false
+                }
+                Err(crate::hole_refs::Stuck::Not) => false,
+            },
             _ => false,
         },
     }
