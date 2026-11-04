@@ -224,9 +224,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         parts.push((egui::Rect::from_center_size(*c, Screen::splat(HANDLE * 3.0)), Part::Corner(u, v), egui::CursorIcon::ResizeNwSe));
     }
     parts.push((egui::Rect::from_center_size(knob, Screen::splat(HANDLE * 3.0)), Part::Turn, egui::CursorIcon::Crosshair));
-    // While Center waits for a pick, a click goes to the sketch: a rectangle's corner, the
-    // point most often picked there, is under a corner handle (#11718).
-    if d.active == 1 && app.viewport.transform_drag.is_none() {
+    // While Center waits for its pick, a click goes to the sketch: a rectangle's corner, the
+    // point most often picked there, is under a corner handle (#11718). Once it has one, the
+    // handles work again; Clear (×) empties it to pick another point there.
+    if d.active == 1 && d.inputs.get(1).is_some_and(|i| i.items.is_empty()) && app.viewport.transform_drag.is_none() {
         return;
     }
     for (i, (rect, part, cursor)) in parts.into_iter().enumerate() {

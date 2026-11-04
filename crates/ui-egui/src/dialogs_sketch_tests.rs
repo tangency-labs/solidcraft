@@ -707,6 +707,7 @@ fn transform_scales_about_a_picked_center() {
     h.frames(3);
     let picked = h.app.dialog.as_ref().unwrap().inputs[1].items.clone();
     assert_eq!(picked, vec![Sel::SketchPoint { id: corner.clone() }], "the corner is the Center");
+    assert!(crate::scenario::handle_at("transform:handle:5").is_some(), "with Center picked, the handles work again");
     if let Some(Kind::SketchModify(Mod::Transform { factor, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         *factor = "2".into();
     }
