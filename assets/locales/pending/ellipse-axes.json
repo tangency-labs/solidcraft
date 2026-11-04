@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.sketch.ellipse_axes": "Draw ellipses with their axes",
+    "prefs.sketch.ellipse_axes_note": "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its minor radius wherever the value is pulled, drawn and labelled R as before."
+  },
+  "ar": {
+    "prefs.sketch.ellipse_axes": "رسم القطوع الناقصة مع محاورها",
+    "prefs.sketch.ellipse_axes_note": "المحوران الأكبر والأصغر كخطوط مساعدة، لتحديد أبعاد أنصاف المحاور والمحاور. عند الإيقاف: القطع الناقص وحده، ويعطي D عليه نصف قطره الأصغر أينما سُحبت القيمة، مرسومًا ومُعلَّمًا بـ R كما في السابق."
+  },
+  "de": {
+    "prefs.sketch.ellipse_axes": "Ellipsen mit ihren Achsen zeichnen",
+    "prefs.sketch.ellipse_axes_note": "Haupt- und Nebenachse als Konstruktionslinien, damit Halbachsen und Achsen bemaßt werden können. Aus: nur die Ellipse, und D darauf ergibt ihren Nebenradius, wohin der Wert auch gezogen wird, gezeichnet und mit R beschriftet wie bisher."
+  },
+  "he": {
+    "prefs.sketch.ellipse_axes": "שרטוט אליפסות עם הצירים שלהן",
+    "prefs.sketch.ellipse_axes_note": "הציר הראשי והציר המשני כקווי עזר, כדי שאפשר יהיה לתת מידות לחצאי הצירים ולצירים. כבוי: האליפסה בלבד, ו-D עליה נותן את הרדיוס המשני שלה בכל מקום שאליו נגרר הערך, משורטט ומסומן R כמו קודם."
+  },
+  "ja": {
+    "prefs.sketch.ellipse_axes": "楕円を軸と一緒に描く",
+    "prefs.sketch.ellipse_axes_note": "長軸と短軸をコンストラクション線として描き、半軸と軸に寸法を付けられるようにします。オフ: 楕円のみを描き、D で短半径を寸法にします。値をどこへ引いても、これまでどおり R 付きで描かれます。"
+  },
+  "ko": {
+    "prefs.sketch.ellipse_axes": "타원을 축과 함께 그리기",
+    "prefs.sketch.ellipse_axes_note": "장축과 단축을 구성선으로 그려 반축과 축에 치수를 지정할 수 있습니다. 끄면: 타원만 그리며, D는 값을 어디로 끌든 단반경을 주며, 이전처럼 R로 표시되어 그려집니다."
+  },
+  "pl": {
+    "prefs.sketch.ellipse_axes": "Rysuj elipsy z osiami",
+    "prefs.sketch.ellipse_axes_note": "Oś wielka i mała jako linie konstrukcyjne, aby można było wymiarować półosie i osie. Wyłączone: sama elipsa, a D na niej daje promień małej półosi, gdziekolwiek przeciągnąć wartość, rysowany i oznaczony R jak dotąd."
+  },
+  "vi": {
+    "prefs.sketch.ellipse_axes": "Vẽ hình elip kèm các trục",
+    "prefs.sketch.ellipse_axes_note": "Trục lớn và trục nhỏ dưới dạng đường gióng dựng hình, để có thể ghi kích thước bán trục và trục. Tắt: chỉ vẽ hình elip, và D trên nó cho bán kính nhỏ dù kéo giá trị đến đâu, được vẽ và ghi nhãn R như trước."
+  },
+  "zh": {
+    "prefs.sketch.ellipse_axes": "绘制椭圆时带上轴线",
+    "prefs.sketch.ellipse_axes_note": "将长轴和短轴绘制为构造线，以便标注半轴和轴。关闭：仅绘制椭圆，对其按 D 得到短半径，无论将数值拖到何处，都像以前一样绘制并标注 R。"
+  }
+}

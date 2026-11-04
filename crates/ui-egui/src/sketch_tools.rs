@@ -981,12 +981,17 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 }
 
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
-/// the corner commands resolve them in from a `point` parameter. Construction curves are
-/// ignored when more than two meet. Each side must be a line, or an arc for a fillet.
+/// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
+/// side (the engine refuses it), and construction curves are ignored when more than two meet.
+/// Each side must be a line, or an arc for a fillet.
 pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
-    let candidates =
-        sk.curves.iter().enumerate().filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+    let candidates = sk
+        .curves
+        .iter()
+        .enumerate()
+        // The cheap end test first: the axis test scans the constraints.
+        .filter(|(ci, c)| c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi) && !sk.is_linked_curve(*ci) && !sk.is_ellipse_axis(*ci));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.
@@ -1397,7 +1402,7 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
     let params = match (t.cmd, p.as_slice()) {
         ("sketch.line.midpoint", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
         ("sketch.arc.tangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
-        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0)}),
+        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0), "axes": app.preferences.ellipse_axes}),
         ("sketch.conic", [a, b, x]) => {
             // The typed Rho box, or the parabola the command defaults to.
             let rho = crate::sketch_dims::locked_value(app, t, "Rho").unwrap_or(0.5);

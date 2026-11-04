@@ -173,15 +173,17 @@ fn clicked_extend_endpoint_reaches_exact_ellipse_and_preserves_support() {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.ellipse", json!({"center":[20,0],"major":[30,0],"minor_radius":5})).unwrap();
     h.app.run("sketch.constraint.fix", json!({"entity":"e1"})).unwrap();
-    h.app.run("sketch.line", json!({"points":[[0,3],[5,3]],"connect":false,"infer":false})).unwrap();
+    // The ellipse's construction axes come first, so the line's id is read from the reply.
+    let line =
+        h.app.run("sketch.line", json!({"points":[[0,3],[5,3]],"connect":false,"infer":false})).unwrap()["curves"][0].as_str().unwrap().to_string();
     h.frames(2);
     h.step(&json!({"start":"sketch.extend"})).unwrap();
     h.step(&json!({"click":{"world":[5,3,0]}})).unwrap();
     let st = h.app.session.world_state().unwrap();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    let end = ss.sketch.point(ss.sketch.resolve_point("l1.end").unwrap()).unwrap();
+    let end = ss.sketch.point(ss.sketch.resolve_point(&format!("{line}.end")).unwrap()).unwrap();
     assert!(end.dist(Vec2::new(12.0, 3.0)) < 1e-7, "clicked endpoint must extend: {end:?}, {:?}", h.app.status);
-    assert_eq!(ss.sketch.point(ss.sketch.resolve_point("l1.start").unwrap()), Some(Vec2::new(0.0, 3.0)));
+    assert_eq!(ss.sketch.point(ss.sketch.resolve_point(&format!("{line}.start")).unwrap()), Some(Vec2::new(0.0, 3.0)));
 }
 
 #[test]
@@ -1028,5 +1030,27 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
         assert!(ss.sketch.curves.iter().enumerate().any(|(i, _)| {
             ss.sketch.radius(i).is_some_and(|r| (r - 3.0).abs() < 1e-7) && ss.sketch.center(i).is_some_and(|c| c.dist(want) < 1e-6)
         }));
+    }
+}
+
+/// An ellipse's axis is never a side of a Fillet or Chamfer corner (the engine refuses it), so a
+/// line drawn from the major end is no corner the picker offers.
+#[test]
+fn an_ellipse_axis_end_is_no_corner_to_pick() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let e = h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    let major_end = {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let CurveKind::Ellipse { m, .. } = sk.curves[sk.curve_index(&e).unwrap()].kind else { panic!("an ellipse") };
+        sk.points[m].id.clone()
+    };
+    h.app.run("sketch.line", json!({"points":[major_end, [40,10]],"connect":false,"infer":false})).unwrap();
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let pi = sk.resolve_point(&major_end).unwrap();
+    for arcs_ok in [true, false] {
+        assert_eq!(crate::sketch_tools::corner_curves(sk, pi, arcs_ok), None, "the axis and the line are no corner (arcs_ok {arcs_ok})");
     }
 }

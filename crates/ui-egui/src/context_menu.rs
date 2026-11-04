@@ -1306,7 +1306,9 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
     v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
-    v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(json!({ "entities": ents })).on(ents.len() <= 2));
+    let mut dimension = json!({ "entities": ents });
+    crate::dim_view::ellipse_as_before(app.preferences.ellipse_axes, &mut dimension);
+    v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(dimension).on(ents.len() <= 2));
     // One arc alone: Sketch Dimension gives its radius, this its length along the curve (#6039).
     if let [arc] = ents.as_slice()
         && ss.sketch.curve_index(arc).and_then(|i| ss.sketch.curves.get(i)).is_some_and(|c| matches!(c.kind, CurveKind::Arc { .. }))

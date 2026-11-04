@@ -90,6 +90,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.line_hover_tangent_arc",
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
+            "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
         ];
@@ -127,6 +128,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.center_arc_follows_cursor,
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
+                check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,
                     "sketch_auto_dimensions",
