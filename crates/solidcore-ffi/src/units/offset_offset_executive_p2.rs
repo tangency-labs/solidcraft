@@ -81,6 +81,11 @@
 //! origin xyz and size xyz. Selection origins are `0` source, `1` foreign,
 //! `2` null (with index `-1`). There are no caller-supplied knots or weights.
 //!
+//! Output is `[-2]` for an input the Rust kernel refuses before building anything
+//! ([`Outcome::Refused`]): the solid, extended, static or API offset of a non-null
+//! source by a distance that is not a finite length of at least the source's B-rep
+//! tolerance (solidcore's `OffsetExecutive::check_resolvable`; the C++ runs such inputs
+//! for tens of seconds, HANG-53).
 //! Output is `[-1, status]` ONLY for a fixture-construction rejection. A box
 //! constructor can report success after ignoring face-creation failures; actual
 //! face/edge/vertex counts other than 6/12/8 are rejected with `SM_ERR` (`1001`).
@@ -433,6 +438,9 @@ pub enum Outcome {
         /// Never an FFI argument/exception status.
         status: i32,
     },
+    /// Fixtures built, and the input is one the Rust kernel refuses before building
+    /// anything (see the module protocol); the native operation is not called.
+    Refused,
     /// Fixture built; includes actual before/after data even for native errors.
     Built(Box<Snapshot>),
 }
@@ -808,7 +816,13 @@ fn decode(raw: &[f64], operation: Operation, attributed: bool) -> Result<Outcome
         return Err(invalid("native snapshot exceeds output budget"));
     }
     let mut rd = Reader { remaining: raw };
-    let tag = rd.integer(-1, 0)?;
+    let tag = rd.integer(-2, 0)?;
+    if tag == -2 {
+        if !rd.remaining.is_empty() {
+            return Err(invalid("invalid native refusal"));
+        }
+        return Ok(Outcome::Refused);
+    }
     if tag == -1 {
         let status = rd.status()?;
         if !rd.remaining.is_empty() || status == NATIVE_SUCCESS {
@@ -959,11 +973,32 @@ pub fn eval_measured(
     query: VolumeQuery,
 ) -> Result<(Outcome, Option<Volumes>), FfiError> {
     let input = pack(request)?;
+    let raw = call_measured(&input, query)?;
+    decode_measured(&raw, request)
+}
+
+/// [`eval_measured`] in a fresh forked child ([`crate::isolate::fresh_process`]), as
+/// [`eval_in_child`].
+///
+/// # Errors
+///
+/// As [`eval_measured`], plus [`FfiError::Status`]`(`[`SC_ERR_CHILD_CRASHED`](crate::SC_ERR_CHILD_CRASHED)`)`
+/// when the child crashed.
+pub fn eval_measured_in_child(
+    request: &Request,
+    query: VolumeQuery,
+) -> Result<(Outcome, Option<Volumes>), FfiError> {
+    let input = pack(request)?;
+    let raw = crate::isolate::fresh_process(move || call_measured(&input, query))?;
+    decode_measured(&raw, request)
+}
+
+fn call_measured(input: &[f64], query: VolumeQuery) -> Result<Vec<f64>, FfiError> {
     let code = match query {
         VolumeQuery::Result => 0,
         VolumeQuery::SourceFirst => 1,
     };
-    let raw = call_with_buffer(4096, |out, len| {
+    call_with_buffer(4096, |out, len| {
         if out.len() > MAX_OUTPUT_VALUES {
             return crate::SC_ERR_ARG;
         }
@@ -978,11 +1013,17 @@ pub fn eval_measured(
                 &raw mut *len,
             )
         }
-    })?;
-    // a fixture rejection (`-1 status`) ends before the volumes
+    })
+}
+
+fn decode_measured(
+    raw: &[f64],
+    request: &Request,
+) -> Result<(Outcome, Option<Volumes>), FfiError> {
+    // a fixture rejection (`-1 status`) or a refusal (`-2`) ends before the volumes
     if raw.first().is_some_and(|&tag| tag < 0.0) {
         return Ok((
-            decode(&raw, request.operation, request.attributed.is_some())?,
+            decode(raw, request.operation, request.attributed.is_some())?,
             None,
         ));
     }

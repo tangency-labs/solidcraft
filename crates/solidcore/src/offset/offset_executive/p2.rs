@@ -50,6 +50,9 @@
 //! Every entry point carries the source B-rep's own attributes ([`Brep::add_attribute`])
 //! through the caller's stores to the returned B-rep (`attributes`).
 //! There is no new recursion; all owned loops are bounded by existing arena/relation lengths.
+//! Not upstream: the static offset, solid offset and extended offset refuse, before
+//! anything is built, an offset distance below the input's B-rep tolerance
+//! (`check_resolvable`; HANG-53).
 //!
 //! Cancellation: the solid, extended and shell paths poll the kernel's cancel token (#2136, #2372) per face, edge use, vertex and stitch pass; the static offset's status collapse passes `Cancelled` through, and the shell and offset APIs return `Cancelled`, not `Ok`, under a fired token.
 
@@ -61,7 +64,8 @@ use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldKernelAdapter, ManifoldNotificationKeys,
     ManifoldState,
 };
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::offset::OffsetFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
@@ -252,9 +256,9 @@ fn refuse_folding_offset(
     let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
     match certify_regular(kernel, base, offset.offset_distance(), Some(uv_box))? {
         Regularity::Regular => Ok(()),
-        Regularity::Folds { largest } => Err(crate::error::Failure::new(
+        Regularity::Folds { largest } => Err(Failure::new(
             operation,
-            crate::error::offset::OffsetFailure::Folds {
+            OffsetFailure::Folds {
                 face,
                 distance: offset.offset_distance(),
                 largest,
@@ -275,6 +279,9 @@ pub fn offset_brep(
     options: OffsetOptions,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
+    let mut executive = configured_executive(original, options);
+    // before `collapse_offset_status`, which would make the refusal a generic failure
+    executive.check_resolvable(OP_OFFSET, original)?;
     // (not upstream) the source's own attributes go to the caller's stores, as
     // upstream's live on the objects the offset copies
     attributes::seed_attributes(
@@ -292,7 +299,6 @@ pub fn offset_brep(
         && kernel.fixes.offset_splits_corner_vertices
         && options.merge_results
         && brep_is_manifold_solid(original)?;
-    let mut executive = configured_executive(original, options);
     executive.use_creator_tangency_tol(kernel);
     let mut result = collapse_offset_status(executive.do_solid_offset(
         kernel,
@@ -563,6 +569,7 @@ impl OffsetExecutive {
             return self.do_extended_offset(kernel, original, notifications);
         }
         let original = required(original, OP_SOLID)?;
+        self.check_resolvable(OP_SOLID, original)?;
         with_doing_boolean(kernel, |kernel| {
             self.allocate_offset_brep(kernel, notifications)?;
             // `sLoopPoints` keeps the last copied shell face's vertex-loop points
@@ -719,6 +726,7 @@ impl OffsetExecutive {
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<Brep> {
         let original = required(original, OP_EXTENDED)?;
+        self.check_resolvable(OP_EXTENDED, original)?;
         self.allocate_offset_brep(kernel, notifications)?;
         let faces = bp1::faces(original, None)?;
         for id in faces {
@@ -1170,6 +1178,33 @@ impl OffsetExecutive {
             crate::topology::brep::p3::squeeze_edge(kernel, offset, env, offset_edge, v1)
         })?;
         Ok(true)
+    }
+
+    /// (not upstream) Refuses, before anything is built, an offset distance the model
+    /// cannot resolve: one that is not a finite length of at least `original`'s B-rep
+    /// tolerance, the distance below which the model does not tell two points apart (an
+    /// offset that close lies within tolerance of the face it comes from). HANG-53:
+    /// upstream spends tens of seconds subdividing its offset surfaces toward a distance
+    /// of `1e-300`.
+    ///
+    /// # Errors
+    ///
+    /// [`OffsetFailure::DistanceUnresolved`] naming the distance and the tolerance, of
+    /// kind [`crate::error::ErrorKind::InvalidInput`].
+    fn check_resolvable(&self, operation: &'static str, original: &Brep) -> Result<()> {
+        let distance = self.offset_distance();
+        let resolution = original.tolerance();
+        if !(distance.is_finite() && distance >= resolution) {
+            return Err(Failure::new(
+                operation,
+                OffsetFailure::DistanceUnresolved {
+                    distance,
+                    resolution,
+                },
+            )
+            .into_error());
+        }
+        Ok(())
     }
 
     fn allocate_offset_brep(
@@ -3218,7 +3253,14 @@ mod tests {
                 run_shell_offset(
                     &mut kernel,
                     &mut original,
-                    ShellOptions::default(),
+                    // a thickness the input resolves, so the call reaches the shell helper
+                    ShellOptions {
+                        offset: OffsetOptions {
+                            distance: 0.25,
+                            ..OffsetOptions::default()
+                        },
+                        ..ShellOptions::default()
+                    },
                     &[],
                     &mut notifications.context(),
                 )
@@ -3231,7 +3273,11 @@ mod tests {
                 offset_brep(
                     &mut kernel,
                     &mut original,
-                    OffsetOptions::default(),
+                    // a distance the input resolves, so the call reaches the status collapse
+                    OffsetOptions {
+                        distance: 0.25,
+                        ..OffsetOptions::default()
+                    },
                     &mut notifications.context(),
                 )
             },
@@ -4311,7 +4357,11 @@ mod tests {
                 offset_brep(
                     &mut kernel,
                     &mut original,
-                    OffsetOptions::default(),
+                    // a distance the input resolves, so the call reaches the status collapse
+                    OffsetOptions {
+                        distance: 0.25,
+                        ..OffsetOptions::default()
+                    },
                     &mut notifications.context(),
                 )
             },

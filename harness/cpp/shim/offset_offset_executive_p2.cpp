@@ -5,7 +5,8 @@
 // Protocol/DTOs: crates/solidcore-ffi/src/units/offset_offset_executive_p2.rs.
 // Deviations: bounded analytic fixtures, traversal IDs and sampled observations;
 // no native implementation/helper is included or reimplemented. SC_OK is zero,
-// native SM_SUCCESS is 1000. [-1,status] is ONLY a fixture-construction rejection.
+// native SM_SUCCESS is 1000. [-1,status] is ONLY a fixture-construction rejection;
+// [-2] is an input the Rust kernel refuses before building anything (`Refused`).
 //
 // Ownership: observe actual per-case B-rep construction/destruction notifications.
 // Each distinct live allocation is reclaimed once, including private native
@@ -65,6 +66,12 @@ constexpr size_t max_output = 262144;
 constexpr size_t no_allocation = static_cast<size_t>(-1);
 struct Argument {};
 struct Rejected { SmStatus status; };
+// The Rust kernel refuses, before anything is built, an offset distance that is not a
+// finite length of at least the source's B-rep tolerance (solidcore's
+// `OffsetExecutive::check_resolvable`). The C++ has no such check and spends tens of
+// seconds subdividing toward a distance of 1e-300 (HANG-53). The same inputs are
+// refused here, before the C++ runs them, so the two sides stay aligned.
+struct Refused {};
 
 void finite(double v) { if (!std::isfinite(v)) throw Argument{}; }
 struct Reader {
@@ -695,6 +702,19 @@ void put_operand_state(std::vector<double>& out, SmBrep* brep) {
 // A measured snapshot ends with `operand_state... operand_len pre_status pre_volume
 // post_status post_volume`, the operand state read right after the (optional) query and
 // before the call (`put_operand_state`).
+// Whether the Rust kernel refuses `p` on `source` (see `Refused`): the calls that reach
+// its check are the solid and extended offsets (the member distance) and the static and
+// API offsets (the absolute distance). The shells refuse a distance below twice the
+// tolerance first, natively. A null source never reaches the check.
+bool refused(const Program& p, SmBrep* source) {
+    if (!source) return false;
+    double distance = 0.0;
+    if (p.member()) distance = p.member_distance;
+    else if (p.operation == 0 || p.operation == 5) distance = std::fabs(p.distance);
+    else return false;
+    return !(std::isfinite(distance) && distance >= source->GetTolerance());
+}
+
 void run(const Program& p, std::vector<double>& out, int volume_query) {
     SmContext& ctx = *SmApiGetOrCreateContext();
     BooleanRestore restore(ctx); // outlives all per-case B-rep destruction
@@ -702,6 +722,7 @@ void run(const Program& p, std::vector<double>& out, int volume_query) {
     SmBrep* source = build(p.source,ctx,p.tolerance);
     SmBrep* foreign = build(p.foreign,ctx,p.tolerance);
     size_t source_token = allocations.token(source), foreign_token = allocations.token(foreign);
+    if (refused(p, source)) throw Refused{};
     SmTArray<SmFace*> source_faces, foreign_faces, selectors;
     SmTArray<const SmFace*> api_selectors;
     if (source && p.attributed >= 0) tag_source(source, ctx, (SmAttributeBehaviorType)p.attributed);
@@ -823,6 +844,7 @@ int32_t eval_impl(const double* input, int64_t input_len, int volume_query, doub
         std::vector<double> result;
         try { run(p,result,volume_query); }
         catch (const Rejected& rejected) { result = {-1,(double)rejected.status}; }
+        catch (const Refused&) { result = {-2}; }
         if (result.size() > max_output) throw std::length_error("native output budget");
         return sc_copy_out(result.data(),(int64_t)result.size(),out,cap,out_len);
     } catch (const Argument&) {

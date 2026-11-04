@@ -1,8 +1,13 @@
 //! `--fuzz N`: adversarial probing of a unit's FFI guard.
 //!
 //! Fuzz case `i` of unit `u` starts from one of the unit's normal cases (fixtures and
-//! generated cases), chosen by a [`Rng`] seeded with [`fuzz_seed`]`(u, i)`, and [`mutate`]s
-//! one to three JSON leaves or arrays of its inputs: floats become `0`, `-0`, `±1`,
+//! generated cases) and [`mutate`]s one to three JSON leaves or arrays of its inputs. The
+//! base case is chosen by its name, not its place in the list: each base `b` draws a
+//! weight from a [`Rng`] seeded with [`fuzz_seed`]`(u, b, i)` and the largest weight wins
+//! (rendezvous hashing), and the winner's generator goes on to make the mutations. Adding
+//! a base case therefore changes only the fuzz cases it wins (about one in `n + 1`), and
+//! removing one only those it had; every other case keeps its base and its mutations.
+//! Mutations: floats become `0`, `-0`, `±1`,
 //! `±1e-300` or `±1e300` (or `"NaN"`/`"inf"`/`"-inf"` when the unit's inputs already carry
 //! such strings), integers become `-1`, `0`, `2^31`, `2^32`, `i64::MIN`/`MAX` or the
 //! length of an input array, arrays are emptied, truncated or get an element duplicated,
@@ -67,9 +72,15 @@ pub const INTS: [i64; 6] = [-1, 0, 1 << 31, 1 << 32, i64::MIN, i64::MAX];
 /// Prefix of the child's protocol lines on stdout (anything else there is upstream output).
 const MARK: &str = "@fuzz ";
 
-/// Seed of fuzz case `index` of `unit`: `fnv1a64("fuzz:" + unit) + index`.
-pub fn fuzz_seed(unit: &str, index: usize) -> u64 {
-    fnv1a64(&format!("fuzz:{unit}")).wrapping_add(index as u64)
+/// Seed of fuzz case `index` of `unit` drawn from the base case named `base`:
+/// `fnv1a64("fuzz:" + unit + ":" + base) + index`.
+pub fn fuzz_seed(unit: &str, base: &str, index: usize) -> u64 {
+    base_hash(unit, base).wrapping_add(index as u64)
+}
+
+/// The part of [`fuzz_seed`] that does not depend on the case index.
+fn base_hash(unit: &str, base: &str) -> u64 {
+    fnv1a64(&format!("fuzz:{unit}:{base}"))
 }
 
 /// What a mutation site holds.
@@ -237,20 +248,30 @@ pub struct FuzzCase {
     pub case: Case,
     /// Name of the case it was mutated from.
     pub base: String,
-    /// Seed ([`fuzz_seed`]).
+    /// Seed ([`fuzz_seed`] of `base`).
     pub seed: u64,
     /// The mutations applied, e.g. `/knots truncated to 2`, `/degree = -1`.
     pub mutations: Vec<String>,
 }
 
-/// `n` fuzz cases of `unit` derived from `bases` (empty if `bases` is).
+/// `n` fuzz cases of `unit` derived from `bases` (empty if `bases` is). Case `i` mutates
+/// the base whose generator, seeded with [`fuzz_seed`]`(unit, base name, i)`, draws the
+/// largest first value (the first such base on a tie), with that generator.
 pub fn fuzz_cases(unit: &str, bases: &[Case], n: usize) -> Vec<FuzzCase> {
     let non_finite = bases.iter().any(|c| carries_non_finite(&c.inputs));
+    let hashes: Vec<u64> = bases.iter().map(|b| base_hash(unit, &b.name)).collect();
     (0..n)
         .filter_map(|i| {
-            let seed = fuzz_seed(unit, i);
-            let mut rng = Rng::new(seed);
-            let base = rng.choose(bases)?;
+            let mut best: Option<(u64, &Case, u64, Rng)> = None;
+            for (base, hash) in bases.iter().zip(&hashes) {
+                let seed = hash.wrapping_add(i as u64);
+                let mut rng = Rng::new(seed);
+                let weight = rng.next_u64();
+                if best.as_ref().is_none_or(|b| weight > b.0) {
+                    best = Some((weight, base, seed, rng));
+                }
+            }
+            let (_, base, seed, mut rng) = best?;
             let (inputs, mutations) = mutate(&base.inputs, &mut rng, non_finite);
             Some(FuzzCase {
                 case: Case {
@@ -983,13 +1004,50 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.len(), 50);
         assert_eq!(a[7].case.name, "fuzz00007");
-        assert_eq!(a[7].seed, fuzz_seed("fake.unit", 7));
+        assert_eq!(a[7].seed, fuzz_seed("fake.unit", &a[7].base, 7));
         assert_ne!(fuzz_cases("other.unit", &bases, 50), a);
         assert!(a.iter().all(|c| !c.mutations.is_empty()));
         assert!(a.iter().any(|c| c.base == "a") && a.iter().any(|c| c.base == "b"));
         // A prefix of a longer run is the shorter run.
         assert_eq!(fuzz_cases("fake.unit", &bases, 20), a[..20]);
         assert!(fuzz_cases("fake.unit", &[], 5).is_empty());
+    }
+
+    #[test]
+    fn a_new_base_case_changes_only_the_cases_it_wins() {
+        let bases: Vec<Case> = (0..20)
+            .map(|k| {
+                case(
+                    &format!("b{k:02}"),
+                    json!({"x": f64::from(k) + 0.5, "n": [1, 2]}),
+                )
+            })
+            .collect();
+        let before = fuzz_cases("fake.unit", &bases, 300);
+        // A fixture added in the middle of the list, as a new file sorts in.
+        let mut more = bases.clone();
+        more.insert(7, case("new", json!({"y": 2.5, "m": [3]})));
+        let after = fuzz_cases("fake.unit", &more, 300);
+        let mut moved = 0;
+        for (b, a) in before.iter().zip(&after) {
+            if a.base == "new" {
+                moved += 1;
+            } else {
+                assert_eq!(a, b, "a case the new base did not win changed");
+            }
+        }
+        // About one case in 21 moves to the new base, and only those.
+        assert!((5..=30).contains(&moved), "{moved} cases moved");
+        // Removing it again restores every case.
+        assert_eq!(fuzz_cases("fake.unit", &bases, 300), before);
+        // Every base is drawn.
+        for b in &bases {
+            assert!(
+                before.iter().any(|c| c.base == b.name),
+                "{} never drawn",
+                b.name
+            );
+        }
     }
 
     #[test]

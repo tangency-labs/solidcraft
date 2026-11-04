@@ -11,12 +11,13 @@
 //! | [`OffsetFailure::WallsTouch`]          | `SM_ERR_OFFSET_WALLS_TOUCH` (fork a759622) |
 //! | [`OffsetFailure::LoopsCross`]          | `SM_ERR_BAD_INTERSECTIONS` (WR-345)       |
 //! | [`OffsetFailure::EdgeVanishes`]        | `SM_ERR_OFFSET_EDGE_VANISHES` (fork 34318f4) |
+//! | [`OffsetFailure::DistanceUnresolved`]  | `SM_ERR_INVALID_INPUT` (solidcore-native) |
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep.
 
 use super::{
-    EntityRef, ErrorKind, SM_ERR, SM_ERR_BAD_INTERSECTIONS, SM_ERR_OFFSET_EDGE_VANISHES,
-    SM_ERR_OFFSET_WALLS_TOUCH,
+    EntityRef, ErrorKind, SM_ERR, SM_ERR_BAD_INTERSECTIONS, SM_ERR_INVALID_INPUT,
+    SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH,
 };
 use crate::topology::{EdgeId, FaceId};
 
@@ -57,6 +58,15 @@ pub enum OffsetFailure {
         edge: Option<EdgeId>,
         /// A face the edge bounds, when the edge itself is not known.
         face: Option<FaceId>,
+    },
+    /// The offset distance is not a finite length at least the input B-rep's tolerance,
+    /// the distance below which the model does not tell two points apart: an offset
+    /// that close lies within tolerance of the face it comes from.
+    DistanceUnresolved {
+        /// The offset distance asked for (its magnitude, as the executive takes it).
+        distance: f64,
+        /// The smallest distance the input resolves: its B-rep tolerance.
+        resolution: f64,
     },
 }
 
@@ -110,6 +120,7 @@ impl OffsetFailure {
             Self::EdgeVanishes { edge, face } => edge
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
+            Self::DistanceUnresolved { .. } => None,
         }
     }
 
@@ -120,6 +131,7 @@ impl OffsetFailure {
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
+            Self::DistanceUnresolved { .. } => SM_ERR_INVALID_INPUT,
         }
     }
 
@@ -131,6 +143,7 @@ impl OffsetFailure {
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
+            Self::DistanceUnresolved { .. } => ErrorKind::InvalidInput,
         }
     }
 
@@ -235,6 +248,15 @@ impl core::fmt::Display for OffsetFailure {
                      the edge would vanish, a change of topology the offset does not make"
                 )
             }
+            Self::DistanceUnresolved {
+                distance,
+                resolution,
+            } => write!(
+                f,
+                "invalid input: offset distance {distance:e} is not a finite length of at \
+                 least {resolution:e}, the B-rep tolerance (the smallest distance the model \
+                 resolves)"
+            ),
         }
     }
 }

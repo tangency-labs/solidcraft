@@ -179,8 +179,12 @@ applies) and changes one to three leaves or arrays of its inputs: floats to
 unit's inputs already use those strings), integers to `-1`, `0`, `2^31`,
 `2^32`, `i64::MIN`, `i64::MAX` or the length of an input array; arrays are
 emptied, truncated or get an element duplicated; flags are flipped. Strings are
-left alone. The seed is `fnv1a64("fuzz:" + unit) + i`, so a run is
-reproducible and `--fuzz 300` is a prefix of `--fuzz 1000`.
+left alone. The base case is chosen by name, not by its place in the list:
+each base `b` seeds a generator with `fnv1a64("fuzz:" + unit + ":" + b) + i`,
+the base whose generator draws the largest first value wins (rendezvous
+hashing), and that generator makes the mutations. A run is reproducible,
+`--fuzz 300` is a prefix of `--fuzz 1000`, and adding a fixture changes only
+the cases it wins (about one in `n + 1` for `n` bases) instead of every case.
 
 Cases run in batches of 100 in a child process (`difftest --fuzz-exec`, hidden)
 with a 4 GiB address-space limit, so a segfault, abort or hang ends the batch

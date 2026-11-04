@@ -1767,6 +1767,13 @@ fn native_outcome(input: &Inputs, outcome: ffi::Outcome) -> HResult<Output> {
         ffi::Outcome::Rejected { status } => Ok(Output::rejected(format!(
             "native fixture constructor status_{status}"
         ))),
+        // The Rust side refuses the same input (`OffsetFailure::DistanceUnresolved`); the
+        // C++ would run it for tens of seconds (HANG-53).
+        ffi::Outcome::Refused => Ok(Output::rejected(
+            "the offset distance is below the source's B-rep tolerance: the Rust kernel \
+             refuses it before building anything (HANG-53: the C++ subdivides toward it \
+             for tens of seconds), so the C++ is not run",
+        )),
         ffi::Outcome::Built(snapshot) => native_output(input, &snapshot),
     }
 }
@@ -2205,15 +2212,54 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
     Ok(output)
 }
 
-/// The calls the C++ crash trap runs in a fresh child: an API shell of a file sheet
-/// with merged results, where `SmOffsetExecutive::PiecewiseMerge` reaches UB-241
-/// (`SmProtoTopologyManager::GlueCoincidentBrepVertices` keeps gluing a vertex it has
-/// deleted; `AddressSanitizer`: SEGV in `sm_RmFromSpatialTree` via `SmBrep::GlueVertices`). Only a
-/// call that actually crashes there is rejected; the others compare as usual.
-fn crash_trapped(input: &Inputs) -> bool {
-    input.operation == Operation::ApiShell
+/// Why the C++ side of `input` runs in a fresh child process (the crash trap), if it
+/// does: a crash there is a rejected case, not a dead run. Only a call that actually
+/// crashes is rejected; the others compare as usual.
+///
+/// - Every call that reaches `SmOffsetExecutive::DoExtendedOffset` (the extended
+///   offset, and every other operation extending convex edges, which dispatches to
+///   it): its native crashes on hostile inputs (the nightly fuzz) end that case only.
+/// - An API shell of a file sheet with merged results, where
+///   `SmOffsetExecutive::PiecewiseMerge` reaches UB-241
+///   (`SmProtoTopologyManager::GlueCoincidentBrepVertices` keeps gluing a vertex it has
+///   deleted; `AddressSanitizer`: SEGV in `sm_RmFromSpatialTree` via `SmBrep::GlueVertices`).
+fn crash_trap(input: &Inputs) -> Option<&'static str> {
+    if input.operation == Operation::ApiShell
         && input.config.merge_results
         && matches!(input.source, Some(Fixture::File { .. }))
+    {
+        Some(
+            "UB-241: SmApiShellBrepFull crashed in the crash trap's fresh child process \
+             (GlueCoincidentBrepVertices glues a vertex it has deleted; SIGSEGV in \
+             sm_RmFromSpatialTree)",
+        )
+    } else if input.operation == Operation::Extended || input.config.extend_convex {
+        Some(
+            "the C++ crashed in SmOffsetExecutive::DoExtendedOffset, run in the crash \
+             trap's fresh child process",
+        )
+    } else {
+        None
+    }
+}
+
+/// The C++ outcome, or the crash trap's rejection when the trapped child crashed.
+fn trapped<T>(
+    input: &Inputs,
+    in_process: impl FnOnce() -> Result<T, solidcore_ffi::FfiError>,
+    in_child: impl FnOnce() -> Result<T, solidcore_ffi::FfiError>,
+) -> HResult<Result<T, &'static str>> {
+    let Some(why) = crash_trap(input) else {
+        return in_process()
+            .map(Ok)
+            .map_err(|error| bad(format!("native p2 adapter: {error}")));
+    };
+    match in_child() {
+        Err(solidcore_ffi::FfiError::Status(solidcore_ffi::SC_ERR_CHILD_CRASHED)) => Ok(Err(why)),
+        other => other
+            .map(Ok)
+            .map_err(|error| bad(format!("native p2 adapter: {error}"))),
+    }
 }
 
 impl UnitDiff for Runner {
@@ -2223,26 +2269,22 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, case: &Case) -> HResult<Output> {
         let input: Inputs = case.parse()?;
         // FFI argument errors are NEVER constructor rejections or native statuses.
+        let request = input.native();
         let Some(query) = input.volume_query else {
-            let outcome = if crash_trapped(&input) {
-                match ffi::eval_in_child(&input.native()) {
-                    Err(solidcore_ffi::FfiError::Status(solidcore_ffi::SC_ERR_CHILD_CRASHED)) => {
-                        return Ok(Output::rejected(
-                            "UB-241: SmApiShellBrepFull crashed in the crash trap's fresh \
-                             child process (GlueCoincidentBrepVertices glues a vertex it \
-                             has deleted; SIGSEGV in sm_RmFromSpatialTree)",
-                        ));
-                    }
-                    other => other,
-                }
-            } else {
-                ffi::eval(&input.native())
-            }
-            .map_err(|error| bad(format!("native p2 adapter: {error}")))?;
-            return native_outcome(&input, outcome);
+            return match trapped(&input, || ffi::eval(&request), || ffi::eval_in_child(&request))? {
+                Ok(outcome) => native_outcome(&input, outcome),
+                Err(why) => Ok(Output::rejected(why)),
+            };
         };
-        let (outcome, volumes) = ffi::eval_measured(&input.native(), query.native())
-            .map_err(|error| bad(format!("native p2 adapter: {error}")))?;
+        let measured = trapped(
+            &input,
+            || ffi::eval_measured(&request, query.native()),
+            || ffi::eval_measured_in_child(&request, query.native()),
+        )?;
+        let (outcome, volumes) = match measured {
+            Ok(measured) => measured,
+            Err(why) => return Ok(Output::rejected(why)),
+        };
         let output = native_outcome(&input, outcome)?;
         Ok(match volumes {
             Some(v) => output
