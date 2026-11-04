@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.thread_continuous_flanks": "جوانب متصلة للقلاوظ المجسّم الجديد",
+    "prefs.thread_continuous_flanks_tip": "استخدم وجهًا واحدًا لكل جانب في القلاوظ الجديد. عطّل الخيار للإبقاء على أوجه نصف الدورة. يحتفظ القلاوظ الموجود بتقسيم الأوجه المحفوظ."
+  },
+  "de": {
+    "prefs.thread_continuous_flanks": "Durchgehende Flanken für neue modellierte Gewinde",
+    "prefs.thread_continuous_flanks_tip": "Neue Gewinde erhalten eine Fläche pro Flanke. Ausschalten, um Flächen je halber Umdrehung beizubehalten. Bestehende Gewinde behalten ihre gespeicherte Flächenaufteilung."
+  },
+  "en": {
+    "prefs.thread_continuous_flanks": "Continuous flanks for new modeled threads",
+    "prefs.thread_continuous_flanks_tip": "Use one face per flank on new threads. Turn off to keep half-turn faces. Existing threads keep their saved layout."
+  },
+  "he": {
+    "prefs.thread_continuous_flanks": "דפנות רציפות לתבריגים מלאים חדשים",
+    "prefs.thread_continuous_flanks_tip": "השתמש בפאה אחת לכל דופן בתבריגים חדשים. כבה כדי לשמור על פאות של חצי סיבוב. תבריגים קיימים שומרים על חלוקת הפאות השמורה שלהם."
+  },
+  "ja": {
+    "prefs.thread_continuous_flanks": "新しい実体ねじのフランク面を連続させる",
+    "prefs.thread_continuous_flanks_tip": "新しいねじの各フランク面を1つの面にします。オフにすると半回転ごとの面を保持します。既存のねじは保存された面構成を保持します。"
+  },
+  "ko": {
+    "prefs.thread_continuous_flanks": "새 모델링 나사산에 연속 플랭크 사용",
+    "prefs.thread_continuous_flanks_tip": "새 나사산의 각 플랭크에 하나의 면을 사용합니다. 끄면 반 회전마다 나뉜 면을 유지합니다. 기존 나사산은 저장된 면 구성을 유지합니다."
+  },
+  "vi": {
+    "prefs.thread_continuous_flanks": "Mặt sườn liên tục cho ren được mô hình hóa mới",
+    "prefs.thread_continuous_flanks_tip": "Dùng một mặt cho mỗi sườn của ren mới. Tắt để giữ các mặt theo từng nửa vòng. Ren hiện có giữ cách chia mặt đã lưu."
+  },
+  "zh": {
+    "prefs.thread_continuous_flanks": "新建实体螺纹使用连续牙侧面",
+    "prefs.thread_continuous_flanks_tip": "新建螺纹的每个牙侧使用一个面。关闭后保留每半圈一个面的划分。现有螺纹保留已保存的面划分。"
+  }
+}

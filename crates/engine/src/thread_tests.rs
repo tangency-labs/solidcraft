@@ -1140,6 +1140,70 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
     assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("`ease_in` is gone"));
 }
 
+#[test]
+fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
+    use solidcore_record::brep::Surface;
+
+    // Captured from the segmented build before continuous_flanks existed, including the old
+    // groove-before-chamfer construction. Picks near both chamfered ends exercise its order.
+    let cases = [
+        ("none", vec![("F2:face:12", Vec3::new(4.7828951862188696, -0.0057530612776590315, 1.6606274291037717))]),
+        (
+            "both",
+            vec![
+                ("F2:face:41", Vec3::new(0.09242260275006192, 4.273234209721337, 0.23586874398281996)),
+                ("F2:face:7", Vec3::new(0.9625365002593353, -4.6849682261915895, 6.262443362555148)),
+                ("F2:face:51", Vec3::new(-0.0924226027501412, 4.273234209721336, 11.764131256017183)),
+            ],
+        ),
+    ];
+    for (tip, picks) in cases {
+        let mut thread = json!({
+            "designation": "M10x1.5", "face": [5, 0, 6], "face_names": ["F1:side"],
+            "id": 2, "modeled": true, "name": "Thread1", "suppressed": false, "type": "thread"
+        });
+        if tip != "none" {
+            thread["tip"] = json!(tip);
+        }
+        let mut saved: Value = serde_json::from_str(&solidcraft_doc::Document::default().to_json()).unwrap();
+        saved["features"] = json!([
+            {
+                "axis": [0, 0, 1], "base": [0, 0, 0], "body_names": ["Shaft"], "height": "12",
+                "id": 1, "name": "Cylinder1", "operation": "new_body", "param_names": ["d1", "d2"],
+                "radius": "5", "suppressed": false, "type": "cylinder"
+            }, thread
+        ]);
+        saved["next_id"] = json!(3);
+        saved["params"] = json!([]);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        let check_picks = |session: &Session| {
+            let rebuilt = session.model.state();
+            let shaft = rebuilt.body("Shaft").unwrap();
+            for (name, pick) in &picks {
+                let (face, point) = solidcraft_doc::naming::face_on_body(shaft, name, *pick).unwrap();
+                assert!(point.dist(*pick) < 0.01, "{tip}: {name} must stay on its original flank: {point:?}");
+                assert!(
+                    matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }),
+                    "{tip}: {name} must not select a cylinder"
+                );
+            }
+        };
+        check_picks(&reopened);
+        run(
+            &mut reopened,
+            "timeline.redefine",
+            json!({
+                "feature": 2, "command": "solid.thread",
+                "params": {"face": [5, 0, 6], "designation": "M10x1.5", "modeled": true, "tip": tip}
+            }),
+        );
+        assert!(matches!(reopened.doc.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+        check_picks(&reopened);
+        let saved_again = solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap();
+        assert!(matches!(saved_again.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+    }
+}
+
 /// A modelled M10 thread keeps each flank as one B-spline face across all turns. Cylinder seams
 /// must not split either flank into separate faces for selection, meshing or STEP export.
 #[test]

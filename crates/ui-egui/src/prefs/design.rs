@@ -89,6 +89,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "value_boxes_in_view",
                     "Show values beside their handles in the view",
                 ),
+                (
+                    setting::thread_continuous_flanks,
+                    "prefs.thread_continuous_flanks_tip",
+                    "thread_continuous_flanks",
+                    "Continuous flanks for new modeled threads",
+                ),
             ] {
                 ui.horizontal_wrapped(|ui| {
                     let response = setting(app, ui).backing_on_hover_text(app.tr(help));
