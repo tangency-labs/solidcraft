@@ -120,7 +120,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let close_label = if compact { "" } else { "Close draft" };
     let (closed, mut action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
-        .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
+        // Opens at the top middle, and its title band drags it off what the report is about
+        // (#9916).
+        .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
         .fields()
         .keep_open_on_escape()
         .actions(tr_label(open_label), tr_label(close_label), Some(tr_label("Copy report")))

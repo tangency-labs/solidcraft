@@ -9,6 +9,8 @@
 #[cfg(target_arch = "wasm32")]
 mod api;
 #[cfg(any(target_arch = "wasm32", test))]
+mod channel;
+#[cfg(any(target_arch = "wasm32", test))]
 mod disk;
 #[cfg(target_arch = "wasm32")]
 mod easyprint;
@@ -152,8 +154,15 @@ impl PrefsWriter {
 /// tab of the page when one tab writes). Other keys, and settings taken away (clearing the site's
 /// data), leave this tab's settings as they are.
 #[cfg(any(target_arch = "wasm32", test))]
-fn settings_written(key: Option<&str>, value: Option<String>) -> Option<String> {
-    value.filter(|_| key == Some(solidcraft_ui_egui::prefs::STORAGE_KEY))
+fn settings_written(own_key: &str, key: Option<&str>, value: Option<String>) -> Option<String> {
+    // Tabs of another channel write to the same storage, under their own key.
+    value.filter(|_| key == Some(own_key))
+}
+
+/// The settings key of `channel` (see [`channel`]).
+#[cfg(target_arch = "wasm32")]
+fn prefs_key() -> String {
+    channel::key(solidcraft_ui_egui::prefs::STORAGE_KEY)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -162,6 +171,7 @@ mod web {
 
     use solidcraft_engine::Session;
     use solidcraft_engine::io::vfs;
+    use solidcraft_ui_egui::ui_kit::BackingTooltipExt as _;
     use solidcraft_ui_egui::{Services, SolveApp, ui_kit};
     use wasm_bindgen::JsCast as _;
 
@@ -262,7 +272,7 @@ mod web {
     fn hear_settings_from_other_tabs(window: &web_sys::Window, ctx: &egui::Context, inbox: PrefsInbox) {
         let ctx = ctx.clone();
         let on_storage = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::StorageEvent)>::new(move |e: web_sys::StorageEvent| {
-            if let Some(prefs) = crate::settings_written(e.key().as_deref(), e.new_value()) {
+            if let Some(prefs) = crate::settings_written(&crate::prefs_key(), e.key().as_deref(), e.new_value()) {
                 inbox.set(Some(prefs));
                 ctx.request_repaint();
             }
@@ -273,8 +283,10 @@ mod web {
     }
 
     const JAPANESE_FONT_PATH: &str = "./fonts/BIZUDPGothic-Regular.ttf";
+    const CHINESE_SC_FONT_PATH: &str = "./fonts/CraftUI-SC.otf";
+    const CHINESE_TC_FONT_PATH: &str = "./fonts/CraftUI-TC.otf";
 
-    type FontLoadResult = Rc<std::cell::RefCell<Option<Result<Vec<u8>, String>>>>;
+    type FontLoadResult = Rc<std::cell::RefCell<Option<Result<(String, Vec<u8>), String>>>>;
 
     struct Shell {
         app: SolveApp,
@@ -292,11 +304,17 @@ mod web {
         rename_focus: bool,
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
-        /// On-demand CJK font: fetched only when a CJK language is selected.
+        /// On-demand script fonts: fetched only when a CJK language is selected.
         font: solidcraft_ui_egui::fonts::CjkFontLoader,
         font_result: FontLoadResult,
-        /// The fetched CJK font's bytes: kept so a language change can re-order the fallbacks.
+        /// The fetched Japanese font's bytes: kept so a language change can re-order the fallbacks.
         cjk_bytes: Option<Vec<u8>>,
+        /// The fetched Chinese font's bytes (Simplified or Traditional for this session).
+        chinese_bytes: Option<Vec<u8>>,
+        /// Which Chinese face `chinese_bytes` is: `"zh"` or `"zh-TW"`.
+        chinese_kind: Option<&'static str>,
+        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, or `"zh-TW"`).
+        font_fetch_kind: Option<&'static str>,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
         space_mouse: SpaceMouse,
@@ -326,8 +344,7 @@ mod web {
             }
             let prefs = self.persisted_prefs();
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
-            let stored =
-                web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(solidcraft_ui_egui::prefs::STORAGE_KEY, &prefs));
+            let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
                 log::warn!("settings: the browser's storage did not take them; they are saved again later");
                 self.prefs_writer = crate::PrefsWriter::default();
@@ -367,7 +384,8 @@ mod web {
             // Designs opened from the computer's disk (the files window): open them.
             let opened: Vec<_> = self.files.opened.borrow_mut().drain(..).collect();
             for path in opened {
-                self.app.open_path(&path);
+                // A few features a frame, with progress and Cancel (#10198).
+                self.app.open_path_async(&path);
                 self.files.panel.set(false);
             }
             // Recent designs whose file is gone are dropped from the list.
@@ -408,7 +426,7 @@ mod web {
                     path
                 };
                 match intent {
-                    Intent::Open => self.app.open_path(&path),
+                    Intent::Open => self.app.open_path_async(&path),
                     Intent::Insert | Intent::Theme => self.app.drop_path(&path),
                 }
                 self.files.panel.set(false);
@@ -483,7 +501,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -537,7 +555,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -547,7 +565,7 @@ mod web {
                                             self.rename_focus = true;
                                         }
                                         if ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small)
-                                            .on_hover_text("A copy in a file you choose; the stored design stays here")
+                                            .backing_on_hover_text("A copy in a file you choose; the stored design stays here")
                                             .clicked()
                                         {
                                             act = Some(("save_copy", e.name.clone()));
@@ -572,7 +590,7 @@ mod web {
             let path = format!("{}{name}", files::OPFS);
             match what {
                 "open" => {
-                    self.app.open_path(&path);
+                    self.app.open_path_async(&path);
                     self.files.panel.set(false);
                 }
                 "insert" => {
@@ -674,68 +692,107 @@ mod web {
             files::autosave(&self.files, None);
         }
 
-        /// Fetch and install the CJK font when a CJK language is selected. If that fails, this
+        /// Whether the shell already has the on-demand face the live language needs.
+        fn script_font_ready(&self) -> bool {
+            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language)) {
+                Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
+                Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
+                Some("ja") => self.cjk_bytes.is_some(),
+                _ => true,
+            }
+        }
+
+        /// Fetch and install a script font when a CJK language is selected. If that fails, this
         /// session falls back to English (no tofu); the saved language preference is kept.
         fn tick_font(&mut self, ctx: &egui::Context) {
             let done = self.font_result.borrow_mut().take();
             if let Some(res) = done {
+                let kind = self.font_fetch_kind.take();
                 let installed = match res {
-                    Ok(bytes) => {
-                        solidcraft_engine::sketch::fallback::provide_web_font(bytes.clone());
-                        self.cjk_bytes = Some(bytes);
+                    Ok((path, bytes)) => {
+                        match kind {
+                            Some("zh") => {
+                                self.chinese_bytes = Some(bytes);
+                                self.chinese_kind = Some("zh");
+                            }
+                            Some("zh-TW") => {
+                                self.chinese_bytes = Some(bytes);
+                                self.chinese_kind = Some("zh-TW");
+                            }
+                            _ => {
+                                solidcraft_engine::sketch::fallback::provide_web_font(bytes.clone());
+                                self.cjk_bytes = Some(bytes);
+                            }
+                        }
+                        log::info!("loaded web script font from {path}");
                         true
                     }
                     Err(err) => {
-                        log::warn!("failed to fetch CJK font from {JAPANESE_FONT_PATH}: {err}");
-                        solidcraft_engine::sketch::fallback::web_font_failed();
+                        let path = match kind {
+                            Some("zh") => CHINESE_SC_FONT_PATH,
+                            Some("zh-TW") => CHINESE_TC_FONT_PATH,
+                            _ => JAPANESE_FONT_PATH,
+                        };
+                        log::warn!("failed to fetch script font from {path}: {err}");
+                        if !matches!(kind, Some("zh" | "zh-TW")) {
+                            solidcraft_engine::sketch::fallback::web_font_failed();
+                        }
                         false
                     }
                 };
-                if installed {
-                    log::info!("loaded web CJK font from {JAPANESE_FONT_PATH}");
-                } else if solidcraft_ui_egui::fonts::needs_cjk_font(&self.app.preferences.language) {
-                    log::warn!("CJK font unavailable; showing English for this session");
+                let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+                if !installed && solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
+                    log::warn!("script font unavailable; showing English for this session");
                 }
                 self.font.finished(installed, &mut self.app.preferences.language);
                 self.apply_fonts(ctx);
                 ctx.request_repaint();
             }
-            if self.font.tick(&mut self.app.preferences.language) {
-                self.fetch_font(ctx);
+            let ready = self.script_font_ready();
+            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            if self.font.tick(&mut self.app.preferences.language, ready) {
+                self.fetch_font(ctx, solidcraft_ui_egui::fonts::web_script_font_kind(effective).unwrap_or("ja"));
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
-            if self.app.preferences.language != self.font_language {
+            if solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language) != self.font_language {
                 self.apply_fonts(ctx);
             }
         }
 
-        /// Set up the UI fonts for the live language, keeping the fetched CJK font as a fallback
-        /// (it leads only for a CJK UI, see [`solidcraft_ui_egui::fonts::install_cjk_font_for`]).
+        /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
+        /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
-            match self.cjk_bytes.clone() {
-                Some(bytes) => {
-                    solidcraft_ui_egui::fonts::install_cjk_font_for(ctx, bytes, &self.app.preferences.language);
-                }
-                None => solidcraft_ui_egui::fonts::setup_fonts(ctx),
+            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
+                solidcraft_ui_egui::fonts::setup_fonts(ctx);
+            } else {
+                solidcraft_ui_egui::fonts::install_web_script_fonts(ctx, self.cjk_bytes.clone(), self.chinese_bytes.clone(), effective);
             }
-            self.font_language.clone_from(&self.app.preferences.language);
+            self.font_language = effective.to_owned();
         }
 
-        /// CJK text on screen with no CJK font yet (an English UI showing a Japanese name), or a
-        /// drawing's text waiting for one: fetch the font, so the text does not stay tofu (#720).
+        /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name), or a
+        /// drawing's text waiting for one: fetch the Japanese font, so the text does not stay tofu (#720).
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
             let wanted = solidcraft_ui_egui::fonts::painted_cjk(ctx) || solidcraft_engine::sketch::fallback::web_font_wanted();
             if self.font.watching_text() && wanted && self.font.text_needs_font() {
-                self.fetch_font(ctx);
+                self.fetch_font(ctx, "ja");
             }
         }
 
-        fn fetch_font(&self, ctx: &egui::Context) {
+        fn fetch_font(&mut self, ctx: &egui::Context, kind: &'static str) {
+            let path = match kind {
+                "zh" => CHINESE_SC_FONT_PATH,
+                "zh-TW" => CHINESE_TC_FONT_PATH,
+                _ => JAPANESE_FONT_PATH,
+            };
+            self.font_fetch_kind = Some(kind);
             let slot = self.font_result.clone();
             let ctx = ctx.clone();
+            let path = path.to_owned();
             wasm_bindgen_futures::spawn_local(async move {
-                let res = fetch_font_bytes(JAPANESE_FONT_PATH).await;
+                let res = fetch_font_bytes(&path).await.map(|bytes| (path, bytes));
                 *slot.borrow_mut() = Some(res);
                 ctx.request_repaint();
             });
@@ -791,14 +848,15 @@ mod web {
             self.store_prefs(&ctx);
         }
         fn persist_egui_memory(&self) -> bool {
-            self.launch.persists()
+            // eframe keeps this under one fixed key: only stable uses it, so a pre-release never rewrites it.
+            self.launch.persists() && crate::channel::current().is_empty()
         }
         fn save(&mut self, storage: &mut dyn eframe::Storage) {
             if !self.launch.persists() {
                 return;
             }
             let prefs = self.persisted_prefs();
-            storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs);
+            storage.set_string(&crate::prefs_key(), prefs);
         }
     }
 
@@ -808,7 +866,7 @@ mod web {
 
     /// Where `?webgl` is remembered. The installed app starts from its manifest's start URL, which
     /// has no query, so the choice has to outlive the page it was made on.
-    const WEBGL_KEY: &str = "solidcraft.webgl";
+    const WEBGL_KEY: &str = "solidcraft.webgl"; // stored under crate::channel::key
 
     /// Render with WebGL2: asked for now (`?webgl`, remembered) or before (until `?webgpu`).
     fn webgl() -> bool {
@@ -816,17 +874,17 @@ mod web {
         let q = query();
         if crate::query_flag(&q, "webgl") {
             if let Some(s) = &storage {
-                let _ = s.set_item(WEBGL_KEY, "1");
+                let _ = s.set_item(&crate::channel::key(WEBGL_KEY), "1");
             }
             return true;
         }
         if crate::query_flag(&q, "webgpu") {
             if let Some(s) = &storage {
-                let _ = s.remove_item(WEBGL_KEY);
+                let _ = s.remove_item(&crate::channel::key(WEBGL_KEY));
             }
             return false;
         }
-        storage.and_then(|s| s.get_item(WEBGL_KEY).ok().flatten()).is_some()
+        storage.and_then(|s| s.get_item(&crate::channel::key(WEBGL_KEY)).ok().flatten()).is_some()
     }
 
     /// Fetch font bytes asynchronously through the browser.
@@ -925,7 +983,7 @@ mod web {
                         if launch.persists() {
                             hear_settings_from_other_tabs(&window, &cc.egui_ctx, other_tab_prefs.clone());
                         }
-                        if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
+                        if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
@@ -965,6 +1023,9 @@ mod web {
                             font: Default::default(),
                             font_result: Rc::new(std::cell::RefCell::new(None)),
                             cjk_bytes: None,
+                            chinese_bytes: None,
+                            chinese_kind: None,
+                            font_fetch_kind: None,
                             font_language,
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
@@ -1125,9 +1186,10 @@ mod tests {
     #[test]
     fn only_settings_another_tab_wrote_are_loaded() {
         let key = solidcraft_ui_egui::prefs::STORAGE_KEY;
-        assert_eq!(settings_written(Some(key), Some("{}".into())).as_deref(), Some("{}"));
-        assert_eq!(settings_written(Some("solidcraft.webgl"), Some("1".into())), None);
-        assert_eq!(settings_written(Some(key), None), None, "removed settings leave this tab's");
-        assert_eq!(settings_written(None, None), None, "clearing all storage leaves this tab's settings");
+        assert_eq!(settings_written(key, Some(key), Some("{}".into())).as_deref(), Some("{}"));
+        assert_eq!(settings_written(key, Some("solidcraft.webgl"), Some("1".into())), None);
+        assert_eq!(settings_written(key, Some(key), None), None, "removed settings leave this tab's");
+        assert_eq!(settings_written(key, None, None), None, "clearing all storage leaves this tab's settings");
+        assert_eq!(settings_written(key, Some("rc:solidcraft.prefs"), Some("{}".into())), None, "another channel's settings are not loaded");
     }
 }

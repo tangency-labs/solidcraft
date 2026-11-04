@@ -3,7 +3,7 @@
 //! optional so that a projected view can follow its parent.
 
 use serde::{Deserialize, Deserializer, Serialize};
-use solidcraft_geom::Plane;
+use solidcore_record::Plane;
 use solidcraft_geom::drawing_view::{Invalid, NamedView, Scale, basis_looking};
 use solidcraft_render::VisualStyle;
 

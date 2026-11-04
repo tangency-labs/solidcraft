@@ -1,6 +1,126 @@
 use super::*;
 use std::sync::mpsc::channel;
 
+fn transcript_clipboard_harness(layout: crate::shell::LayoutMode) -> crate::scenario::Harness {
+    let mut h = narrow_chat();
+    h.app.ui.layout = layout;
+    h.app.preferences.agent_chat_width = 500.0;
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Transcript clipboard sentinel".into() });
+    h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    h.frames(4);
+    h
+}
+
+fn transcript_text_position(h: &crate::scenario::Harness) -> egui::Pos2 {
+    let mut at = None;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape
+                && text.galley.text() == "Transcript clipboard sentinel"
+            {
+                at = Some(text.pos + egui::vec2(15.0, 7.0));
+            }
+        });
+    }
+    at.expect("the assistant message is visible")
+}
+
+fn transcript_click(h: &mut crate::scenario::Harness, pos: egui::Pos2) {
+    h.frame_with(vec![
+        egui::Event::PointerMoved(pos),
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+    ]);
+    h.frame_with(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+}
+
+#[test]
+fn transcript_copy_and_cut_do_not_touch_the_cad_clipboard() {
+    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        let mut h = transcript_clipboard_harness(layout);
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        assert!(h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "select real label text");
+        assert!(!h.ctx.egui_wants_keyboard_input(), "a selectable label is not a text editor");
+        // Moving the mouse away does not transfer the keyboard back to the model.
+        h.frame_with(vec![egui::Event::PointerMoved(egui::pos2(500.0, 500.0))]);
+        let undo = h.app.session.undo.len();
+        h.frame_with(vec![egui::Event::Copy]);
+        assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == "Transcript")), "copy selected text");
+        assert!(h.app.copied_bodies.is_empty(), "{layout:?}: copying text must not copy a CAD body");
+        h.frame_with(vec![egui::Event::Cut]);
+        assert!(h.app.cut.is_empty(), "{layout:?}: cutting read-only text must not cut a CAD body");
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn transcript_paste_does_not_insert_a_previously_copied_body() {
+    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        let mut h = transcript_clipboard_harness(layout);
+        h.frame_with(vec![egui::Event::Copy]);
+        assert!(!h.app.copied_bodies.is_empty(), "prime the real CAD clipboard");
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let undo = h.app.session.undo.len();
+        h.frame_with(vec![egui::Event::Paste("text from another app".into())]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 1, "{layout:?}: text paste must not paste CAD geometry");
+        assert_eq!(h.app.session.undo.len(), undo);
+        // A deliberate click outside the panel returns ownership to CAD.
+        transcript_click(&mut h, egui::pos2(700.0, 500.0));
+        h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2, "{layout:?}: CAD paste still works after returning to the model");
+    }
+}
+
+#[test]
+fn transcript_key_events_do_not_run_cad_shortcuts() {
+    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        let mut h = transcript_clipboard_harness(layout);
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        };
+        h.frame_with(vec![key(egui::Key::C)]);
+        assert!(h.app.copied_bodies.is_empty(), "{layout:?}: key-event copy also belongs to the chat");
+        h.frame_with(vec![key(egui::Key::X)]);
+        assert!(h.app.cut.is_empty(), "{layout:?}: key-event cut also belongs to the chat");
+        assert!(crate::edit_clipboard::copy(&mut h.app));
+        h.frame_with(vec![key(egui::Key::V)]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 1, "{layout:?}: key-event paste stays out of CAD");
+        // A quick tap can have no modifiers held by the end of the frame. It must not
+        // fall through to the plain A (Appearance) shortcut while selecting chat text.
+        h.frame_with(vec![key(egui::Key::A)]);
+        assert!(h.app.dialog.is_none(), "{layout:?}: selecting text must not open Appearance");
+    }
+}
+
+#[test]
+fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
+    for hidden in ["closed", "minimized", "disabled"] {
+        let mut h = transcript_clipboard_harness(crate::shell::LayoutMode::Floating);
+        h.frame_with(vec![egui::Event::Copy]);
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        match hidden {
+            "closed" => h.app.agent_chat.open = false,
+            "minimized" => h.app.preferences.agent_chat_minimized = true,
+            _ => h.app.preferences.ai_features = false,
+        }
+        h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2, "{hidden}: the invisible panel must not retain CAD keys");
+    }
+}
+
 fn chat() -> AgentChat {
     let mut c = AgentChat::default();
     c.state = Some(State::Ready);
@@ -17,6 +137,8 @@ fn app_with_discovered_login() -> SolveApp {
             argv: vec!["qwen".into(), "--acp".into()],
             version: None,
             login: discover::Login::LooksLoggedIn,
+            problem: None,
+            install: "npm install -g @qwen-code/qwen-code",
         }],
         ..Default::default()
     });
@@ -96,6 +218,38 @@ fn agent_login_refresh_returns_to_unverified_discovery() {
     frame(&mut app);
     assert_eq!(agents::current(&app).unwrap().login, "login_found");
     assert!(!app.agent_chat.settings.tests.contains_key("qwen"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_sign_in_proven_in_one_tab_holds_in_every_tab() {
+    // #9293: discovery found no login file before the user signed in from the panel. The chat's
+    // proof of the sign-in belongs to the window, so a new tab doesn't ask for it again.
+    let mut app = app_with_discovered_login();
+    if let Some(d) = app.agent_chat.detection.as_mut() {
+        d.found[0].login = discover::Login::NotLoggedIn;
+    }
+    assert_eq!(assistant_mark(&app), AssistantMark::NeedsAuth);
+    app.agent_chat.on_event(Event::Ready { agent: "Qwen Code".into(), images: false });
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert_eq!(app.agent_chat.state(), State::Off, "a new tab starts its own conversation");
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    assert_eq!(assistant_mark(&app), AssistantMark::Ready, "no sign-in mark in the new tab");
+
+    // Evidence from the new tab is the newest, also back in the first one.
+    app.agent_chat.running_id = "qwen".into();
+    app.agent_chat.on_event(Event::AuthRequired { methods: vec![] });
+    crate::documents::switch(&mut app, 0);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out");
+    app.agent_chat.on_event(Event::Ready { agent: "Qwen Code".into(), images: false });
+
+    // A replacement design starts a fresh conversation, not a fresh sign-in.
+    crate::documents::reset_chat(&mut app);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    crate::documents::close(&mut app, 0, true);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in", "closing a tab keeps the window's evidence");
 }
 
 #[test]
@@ -504,15 +658,46 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
             PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
         ]
     };
-    on_permission(&mut app, 1, "mcp__solidcraft__batch".into(), opts());
-    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft__batch")));
-    on_permission(&mut app, 2, "Run ls".into(), opts());
+    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft-app__batch")));
+    on_permission(&mut app, 2, "Run ls".into(), None, opts());
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
     let n = app.agent_chat.items.len() - 1;
     answer_permission(&mut app, n, Some("always"));
     assert!(agents::always_allowed(&app.preferences, "claude", "Run ls"));
-    on_permission(&mut app, 3, "Run ls".into(), opts());
+    on_permission(&mut app, 3, "Run ls".into(), None, opts());
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
+}
+
+/// A title that only mentions SolidCraft is no tool of SolidCraft's: in every mode but Allow
+/// everything the user is asked, and the mode still answers when it says to.
+#[test]
+fn a_title_that_mentions_solidcraft_goes_through_the_users_mode() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.running_id = "codex".into();
+    let opts = || vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }];
+    let titles = [
+        ("run solidcraft-cli; ls", Some("execute")),
+        ("run solidcraft-cli; ls", None),
+        ("Edit ~/.local/share/solidcraft/agent-chat/work/notes.txt", Some("edit")),
+        ("mcp__solidcraft__batch", Some("other")),
+        ("mcp__solidcraft-app__batch", Some("execute")),
+    ];
+    for mode in [agents::Mode::Ask, agents::Mode::Edits] {
+        app.preferences.agent_permissions.insert("codex".into(), mode);
+        for (title, kind) in titles {
+            on_permission(&mut app, 1, title.into(), kind, opts());
+            assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "{mode:?}: {title}");
+            app.agent_chat.items.clear();
+        }
+        // The chat's own tool stays a single question, the gate's.
+        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+        assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "{mode:?}");
+        app.agent_chat.items.clear();
+    }
+    app.preferences.agent_permissions.insert("codex".into(), agents::Mode::All);
+    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "Allow everything answers it");
 }
 
 // ---- Messages typed while the agent works ----
@@ -560,6 +745,9 @@ impl ChatBackend for Script {
     }
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         self.calls.lock().unwrap().push(format!("permission: {key} {option:?}"));
+    }
+    fn set_config_option(&mut self, id: &str, value: &str) {
+        self.calls.lock().unwrap().push(format!("set_config_option: {id}={value}"));
     }
     fn authenticate(&mut self, _: &str) {}
     fn shutdown(&mut self, _: bool) {}
@@ -667,7 +855,8 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
     crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
     script.report(Event::Permission {
         key: 7,
-        title: "mcp__solidcraft__batch".into(),
+        title: "mcp__solidcraft-app__batch".into(),
+        kind: None,
         options: vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }],
     });
     ended(&script, "auth");
@@ -679,6 +868,203 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
     assert_eq!(app.agent_chat.waiting(), 0);
     assert_eq!(script.prompts().len(), 1, "a cancelled turn must not retry after sign-in");
     assert!(app.agent_chat.turn.is_none() && app.agent_chat.queued.is_none());
+}
+
+/// Exercise the chat endpoint's gate and the real dispatch paths, including the animated
+/// pointer and asynchronous file loads. The scripted backend never needs a model account.
+fn chat_tool(app: &mut SolveApp, tx: &Sender<ControlRequest>, ctx: &egui::Context, method: &str, params: Value) -> Value {
+    let reply = ask(tx, method, params);
+    pump_tools(app);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        app.drain_control(ctx);
+        app.now += 1.0;
+        crate::agent_cursor::step(app, ctx);
+        crate::file_load::tick(app, ctx);
+        app.poll_control_jobs(ctx);
+        match reply.try_recv() {
+            Ok(response) => return response,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("the chat's tool reply was dropped"),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        assert!(std::time::Instant::now() < deadline, "the chat's tool did not finish");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn an_agents_new_design_keeps_its_conversation_and_continues() {
+    // #7526: the old reset disconnected the backend inside its own file.new request.
+    for (method, params, animate) in [
+        ("engine.execute", json!({"command": "file.new"}), false),
+        ("engine.execute", json!({"command": "FILE.NEW"}), false),
+        ("engine.execute", json!({"command": "file.new"}), true),
+        ("engine.batch", json!({"commands": [{"command": "file.new"}, boxed(0.0)]}), false),
+        ("engine.batch", json!({"commands": [{"command": "file.new"}, boxed(0.0)]}), true),
+    ] {
+        let (mut app, script, ctx) = app_with_script();
+        let (tx, rx) = channel();
+        app.agent_chat.tools_rx = Some(rx);
+        app.preferences.ai_permissions = agents::Mode::All;
+        app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+        send(&mut app, &ctx, "create another design".into());
+        let active = app.agent_chat.turn.as_ref().unwrap().active.clone();
+        app.ui.agent_cursor.show = animate;
+        crate::scenario::publish_handle("toolbar:file.new", egui::pos2(80.0, 100.0));
+        crate::scenario::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
+        let response = chat_tool(&mut app, &tx, &ctx, method, params);
+        assert_eq!(response["ok"], true, "{response}");
+        assert!(app.agent_chat.backend.is_some(), "the agent must receive its own replacement's reply");
+        assert!(active.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "create another design")));
+        assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+        let response = chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(30.0));
+        assert_eq!(response["ok"], true, "the same agent continues: {response}");
+        assert_eq!(app.agent_chat.turn.as_ref().unwrap().changes, 2, "a replacement does not reset the turn's change budget");
+        let count = if method == "engine.batch" { 2 } else { 1 };
+        assert_eq!(app.session.doc.features.len(), count);
+        ended(&script, "");
+        poll(&mut app, &ctx);
+        assert_eq!(app.session.undo.len(), 1, "only the new design's edits form this turn's undo step");
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(app.session.doc.features.is_empty(), "undo must not resurrect the previous design");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_agents_opened_design_keeps_its_conversation_and_undo_ownership() {
+    for blank in [true, false] {
+        let dir = std::env::temp_dir().join(format!("solidcraft-chat-open-{}-{blank}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("next.solidcraft");
+        let mut next = solidcraft_engine::Session::default();
+        next.execute("solid.box", &boxed(100.0)["params"]).unwrap();
+        next.execute("file.save_as", &json!({"path": path})).unwrap();
+        let (mut app, script, ctx) = app_with_script();
+        let (tx, rx) = channel();
+        app.agent_chat.tools_rx = Some(rx);
+        app.preferences.ai_permissions = agents::Mode::All;
+        if !blank {
+            app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+            app.run("file.save_as", json!({"path": dir.join("first.solidcraft")})).unwrap();
+        }
+        send(&mut app, &ctx, "open another design and add a box".into());
+        let active = app.agent_chat.turn.as_ref().unwrap().active.clone();
+        if !blank {
+            assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+            assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+        }
+        let response =
+            chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": path}, "allow_paths": [dir]}));
+        assert_eq!(response["ok"], true, "{response}");
+        assert!(app.agent_chat.backend.is_some(), "opening the file must carry the initiating chat");
+        assert!(active.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(app.docs.count(), if blank { 1 } else { 2 });
+        if !blank {
+            let response = chat_tool(
+                &mut app,
+                &tx,
+                &ctx,
+                "engine.execute",
+                json!({
+                    "command": "doc.open", "params": {"path": dir.join("first.solidcraft")}, "allow_paths": [dir]
+                }),
+            );
+            assert_eq!(response["ok"], false, "another tab must keep its own conversation: {response}");
+            assert!(response["error"].as_str().unwrap().contains("already open in another tab"));
+            assert_eq!(app.docs.active, 1);
+        }
+        assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(130.0))["ok"], true);
+        assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(150.0))["ok"], true);
+        assert_eq!(app.session.doc.features.len(), 3);
+        ended(&script, "");
+        poll(&mut app, &ctx);
+        assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+        assert_eq!(app.session.undo.len(), 1);
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.session.doc.features.len(), 1, "the opened design's existing body survives undo");
+        if !blank {
+            crate::documents::switch(&mut app, 0);
+            assert_eq!(app.session.doc.features.len(), 3);
+            assert_eq!(app.session.undo.len(), 2, "the first design keeps its own grouped agent edits");
+            app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(app.session.doc.features.len(), 1);
+            assert!(app.agent_chat.backend.is_none(), "the endpoint moved with the conversation");
+            crate::documents::switch(&mut app, 1);
+            assert!(app.agent_chat.backend.is_some());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn an_agents_failed_new_design_batch_restores_its_undo_boundary() {
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    send(&mut app, &ctx, "try another design".into());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+    let before = app.session.doc.clone();
+    let response = chat_tool(
+        &mut app,
+        &tx,
+        &ctx,
+        "engine.batch",
+        json!({"commands": [
+            {"command": "file.new"},
+            {"command": "sketch.line", "params": {"points": [[0, 0], [10, 10]]}}
+        ]}),
+    );
+    assert_eq!(response["result"]["completed"], 1, "the new design ran before the failure: {response}");
+    assert_eq!(response["result"]["rolled_back"], true);
+    assert!(Arc::ptr_eq(&app.session.doc, &before));
+    assert!(app.agent_chat.backend.is_some());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(app.session.undo.len(), 2, "edits before and after the failed batch share one turn");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), 1);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_agents_cancelled_open_cannot_replace_the_design_later() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-chat-cancel-open-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("next.solidcraft");
+    solidcraft_engine::Session::default().execute("file.save_as", &json!({"path": path})).unwrap();
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    let original = app.session.doc.clone();
+    send(&mut app, &ctx, "open another design".into());
+    let (started_tx, started_rx) = channel();
+    let (release_tx, release_rx) = channel();
+    app.file_load.worker_gate = Some((started_tx, release_rx));
+    let reply = ask(&tx, "engine.execute", json!({"command": "doc.open", "params": {"path": path}, "allow_paths": [dir]}));
+    pump_tools(&mut app);
+    app.drain_control(&ctx);
+    started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    cancel(&mut app);
+    ended(&script, "cancelled");
+    poll(&mut app, &ctx);
+    release_tx.send(()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !app.file_load.idle() && std::time::Instant::now() < deadline {
+        crate::file_load::tick(&mut app, &ctx);
+        std::thread::yield_now();
+    }
+    assert!(app.file_load.idle());
+    assert_eq!(reply.try_recv().unwrap()["ok"], false, "a stopped turn cannot finish its pending open");
+    assert!(Arc::ptr_eq(&app.session.doc, &original));
+    assert_eq!(app.docs.count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -899,6 +1285,51 @@ fn stop_keeps_the_queue() {
     assert!(app.agent_chat.pending.is_empty());
 }
 
+#[test]
+fn an_unresponsive_cancel_exit_keeps_the_queue_and_completed_changes() {
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    let before = app.session.doc.clone();
+    send(&mut app, &ctx, "two boxes".into());
+    let replies: Vec<_> = [0.0, 20.0].into_iter().map(|x| ask(&tx, "engine.execute", boxed(x))).collect();
+    frame(&mut app);
+    for reply in replies {
+        assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    let completed = app.session.doc.clone();
+    let statuses = [Some(ToolStatus::Completed), Some(ToolStatus::Failed), Some(ToolStatus::Pending), Some(ToolStatus::InProgress), None];
+    for (id, status) in statuses.into_iter().enumerate() {
+        script.report(Event::Tool { id: id.to_string(), title: Some("search".into()), kind: None, status, input: None, output: None });
+    }
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "later".into());
+    cancel(&mut app);
+    script.report(Event::Exited { tail: vec![tr("ui.agent_chat_cancel_timeout").to_string()] });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Exited);
+    assert!(app.agent_chat.backend.is_none() && app.agent_chat.turn.is_none());
+    assert_eq!(texts(&app), ["later"]);
+    assert_eq!(script.prompts().len(), 1, "disconnect must not send the queue");
+    assert!(Arc::ptr_eq(&app.session.doc, &completed), "completed changes stay in the design");
+    let statuses: Vec<_> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Tool { status, .. } => Some(*status),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        [Some(ToolStatus::Completed), Some(ToolStatus::Failed), Some(ToolStatus::Failed), Some(ToolStatus::Failed), Some(ToolStatus::Failed)]
+    );
+    let changes = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { steps: 2, .. })).expect("the completed changes are grouped");
+    undo_changes(&mut app, changes);
+    assert!(Arc::ptr_eq(&app.session.doc, &before), "the completed changes still undo together");
+}
+
 /// Send now: cancel first, the prompt only after the agent has ended the cancelled turn, with a
 /// note that the previous step was interrupted (shown without it in the conversation).
 #[test]
@@ -1117,9 +1548,136 @@ done
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
+/// session and on the one New chat opens.
+#[cfg(unix)]
+#[test]
+fn an_acp_agent_offering_the_standard_field_gets_the_system_note_in_every_session() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentCapabilities":{"sessionCapabilities":{"systemPrompt":{}}},"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) n=$((n+1)); printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n" ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    new_chat(&mut app);
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    let sessions: Vec<Value> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["method"] == "session/new")
+        .collect();
+    assert_eq!(sessions.len(), 2);
+    for session in &sessions {
+        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(acp::SYSTEM_NOTE));
+    }
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn models_reply(current: &str) -> Event {
     let m = |id: &str| acp::ModelInfo { id: id.into(), name: id.to_uppercase(), description: String::new() };
     Event::Models { current: current.into(), available: vec![m("fast"), m("smart")] }
+}
+
+/// An endpoint's listing whose ids read `vendor/model` and whose names (the descriptions here) read
+/// `Vendor: Model`, as OpenRouter's, names its providers; the rows then read the model's name with
+/// the id as the tooltip. One vendor is one flat list.
+#[test]
+fn an_endpoints_vendor_named_listing_names_its_providers() {
+    let m = |id: &str, description: &str| acp::ModelInfo { id: id.into(), name: id.into(), description: description.into() };
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra")), Some(("OpenAI".into(), "GPT-6.1 Terra".into())));
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra\nmore")), Some(("OpenAI".into(), "GPT-6.1 Terra".into())));
+    assert_eq!(model_provider(&m("gpt-6.1-terra", "OpenAI: GPT-6.1 Terra")), None, "no vendor in the id");
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: ")), None, "no name");
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "")), None);
+    assert_eq!(
+        model_provider(&m("openai/gpt-6.1-terra", "Provider: Host • current")),
+        Some(("Host".into(), "openai/gpt-6.1-terra".into())),
+        "an agent's own word first"
+    );
+    let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("qwen/qwen3.8-flash", "Qwen: Qwen3.8 Flash"), m("free-model", "")]);
+    assert_eq!(
+        rows,
+        [
+            ("GPT-6.1 Terra".to_string(), Some("OpenAI".to_string()), "openai/gpt-6.1-terra".to_string()),
+            ("Qwen3.8 Flash".to_string(), Some("Qwen".to_string()), "qwen/qwen3.8-flash".to_string()),
+            ("free-model".to_string(), Some(tr("ui.agent_chat_provider_other").to_string()), String::new()),
+        ]
+    );
+    let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("openai/gpt-5.6-luna", "OpenAI: GPT-5.6 Luna")]);
+    assert_eq!(rows[0], ("openai/gpt-6.1-terra".to_string(), None, "OpenAI: GPT-6.1 Terra".to_string()), "one vendor is one flat list");
+}
+
+/// Models from several providers fold under their providers inside the picker: the current model's
+/// provider is open and the others folded; a header opens or folds its group; a typed search opens
+/// every group with a match but one folded by hand; the provider asked for over the control channel
+/// is open at the next opening.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_header_groups_models_by_provider_and_folds_them() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "claude".into();
+    let m = |id: &str, name: &str| acp::ModelInfo { id: id.into(), name: name.into(), description: String::new() };
+    script.report(Event::Models {
+        current: "a".into(),
+        available: vec![m("a", "Host · Alpha"), m("c", "Nous Portal · Gamma"), m("b", "Host · Beta"), m("d", "Nous Portal · Delta")],
+    });
+    h.frames(4);
+    assert!(handle_at("agent_chat:provider").is_none(), "no provider drop-down of its own");
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:group:Host").is_some() && handle_at("agent_chat:model:group:Nous Portal").is_some());
+    assert!(handle_at("agent_chat:model:a").is_some() && handle_at("agent_chat:model:b").is_some(), "the current model's provider is open");
+    assert!(handle_at("agent_chat:model:c").is_none() && handle_at("agent_chat:model:d").is_none(), "the other provider is folded");
+    h.step(&json!({"click": {"handle": "agent_chat:model:group:Nous Portal"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:c").is_some(), "a header opens its group");
+    h.step(&json!({"click": {"handle": "agent_chat:model:group:Host"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:a").is_none(), "and folds it");
+    h.step(&json!({"text": "ta"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:b").is_none(), "a fold made by hand stays while searching, Beta or not");
+    assert!(handle_at("agent_chat:model:d").is_some() && handle_at("agent_chat:model:c").is_none(), "Delta matches, Gamma does not");
+    h.step(&json!({"click": {"handle": "agent_chat:model:d"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: d"]);
+    assert_eq!(h.app.agent_chat.model, "d");
+    assert!(handle_at("agent_chat:model:search").is_none(), "a choice closes it");
+
+    control(&mut h.app, &h.ctx, &json!({"provider": "Host"})).unwrap();
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:a").is_some(), "the provider asked for is open");
+    assert!(handle_at("agent_chat:model:d").is_some(), "and the current model's");
 }
 
 /// Choosing a model tells the agent, shows it as current and remembers it for this agent; a model
@@ -1143,6 +1701,399 @@ fn choosing_a_model_sets_it_and_remembers_it() {
     poll(&mut app, &ctx);
     assert_eq!(app.agent_chat.model, "fast");
     assert_eq!(app.agent_chat.models.len(), 2, "the list stays");
+}
+
+/// A scripted endpoint: its agent is configured, and it is running with these models.
+#[cfg(not(target_arch = "wasm32"))]
+fn endpoint_with_script() -> (SolveApp, Script, egui::Context) {
+    let (mut app, script, ctx) = app_with_script();
+    let endpoint = "http://localhost:11434/v1";
+    app.agent_chat.running_id = "api-1".into();
+    app.agent_chat.running_endpoint = endpoint.into();
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: endpoint.into(),
+        model: "fast".into(),
+        ..Default::default()
+    });
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    (app, script, ctx)
+}
+
+/// A typed model goes straight to an endpoint, joins the list for the next connection and becomes
+/// the agent's default.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_model_goes_to_an_endpoint_and_is_remembered() {
+    let (mut app, script, _ctx) = endpoint_with_script();
+    assert!(custom_models_accepted(&app));
+    assert!(set_custom_model(&mut app, "  openai/gpt-x "));
+    assert_eq!(script.calls(), ["set_model: openai/gpt-x"]);
+    assert_eq!(app.agent_chat.models.first().map(|m| m.id.as_str()), Some("openai/gpt-x"));
+    assert_eq!(app.agent_chat.models_cache.get("http://localhost:11434/v1").and_then(|l| l.first()).map(|m| m.id.as_str()), Some("openai/gpt-x"));
+    assert_eq!(app.preferences.agents.iter().find(|a| a.id == "api-1").unwrap().model, "openai/gpt-x");
+    assert_eq!(app.preferences.agent_models.get("api-1").map(String::as_str), Some("openai/gpt-x"));
+    assert_eq!(status(&app)["model"], "openai/gpt-x");
+    assert_eq!(status(&app)["customModels"], true);
+    let listed = app.agent_chat.models.len();
+    assert!(set_custom_model(&mut app, "smart"));
+    assert_eq!(app.agent_chat.models.len(), listed, "a listed id goes the usual way");
+    assert_eq!(app.agent_chat.model, "smart");
+}
+
+/// A typed model is only sent when it could be a model at all, and the list stays within its cap.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_model_that_cannot_be_one_is_not_sent() {
+    let (mut app, script, _ctx) = endpoint_with_script();
+    for text in ["", "   ", "x".repeat(MODEL_ID_CAP + 1).as_str(), "bell\u{7}", "two\nlines"] {
+        assert!(!set_custom_model(&mut app, text), "{text:?}");
+    }
+    assert!(script.calls().is_empty());
+    assert!(set_custom_model(&mut app, &"x".repeat(MODEL_ID_CAP)));
+    app.agent_chat.models =
+        (0..MODEL_LIST_CAP).map(|i| acp::ModelInfo { id: format!("m{i}"), name: String::new(), description: String::new() }).collect();
+    assert!(set_custom_model(&mut app, "one-more"));
+    assert_eq!(app.agent_chat.models.len(), MODEL_LIST_CAP);
+    assert_eq!(app.agent_chat.models.first().map(|m| m.id.as_str()), Some("one-more"));
+}
+
+/// An agent with a model option gets a typed model through it. Nothing changes until it answers,
+/// and a refusal leaves the old model with the agent's reason in the chat.
+#[test]
+fn a_typed_model_is_sent_to_a_modern_agent_and_a_rejection_keeps_the_old_one() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "modern".into();
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    poll(&mut app, &ctx);
+    assert!(custom_models_accepted(&app));
+    assert!(set_custom_model(&mut app, "claude-x"));
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=claude-x"]);
+    assert!(app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(!set_custom_model(&mut app, "claude-y"), "one request at a time");
+
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Err("no such model".into()) });
+    poll(&mut app, &ctx);
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(
+        app.agent_chat
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("claude-x") && text.contains("no such model"))),
+        "the notice names the model and the reason"
+    );
+    assert!(!app.preferences.agent_models.contains_key("modern"));
+    assert_eq!(app.agent_chat.typed_model, None);
+
+    // An agent that takes it says so in its snapshot, and that is what is remembered.
+    assert!(set_custom_model(&mut app, "claude-x"));
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("claude-x")) });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "claude-x");
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("claude-x"));
+}
+
+/// A legacy agent shows a typed model at once; a refusal puts everything back and says why.
+#[test]
+fn a_typed_model_is_sent_to_a_legacy_agent_and_a_rejection_reverts_it() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.agent_models.insert("claude".into(), "fast".into());
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(set_custom_model(&mut app, "zzz"));
+    assert_eq!(script.calls(), ["set_model: zzz"]);
+    assert_eq!(app.agent_chat.model, "zzz");
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("zzz"));
+
+    script.report(Event::ModelRejected("no such model".into()));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["fast", "smart"]);
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("fast"));
+    assert!(
+        app.agent_chat
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("zzz") && text.contains("no such model"))),
+        "the notice names the model and the reason"
+    );
+
+    // A listed model the agent refuses goes back too, and nothing was remembered before it here.
+    app.preferences.agent_models.remove("claude");
+    set_model(&mut app, "smart");
+    script.report(Event::ModelRejected("x".repeat(MODELS_NOTE_CAP * 2)));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.len(), 2);
+    assert!(!app.preferences.agent_models.contains_key("claude"));
+    let Some(Item::Notice { text, .. }) = app.agent_chat.items.last() else { panic!("no notice") };
+    assert_eq!(text.chars().count(), MODELS_NOTE_CAP);
+
+    // The agent confirming its model ends the wait: a later refusal has nothing to put back.
+    assert!(set_custom_model(&mut app, "zzz"));
+    script.report(Event::Models { current: "zzz".into(), available: vec![] });
+    script.report(Event::ModelRejected("late".into()));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "zzz");
+}
+
+/// An agent that lists no models and has no model option cannot be sent one; a stopped one neither.
+#[test]
+fn an_agent_without_models_takes_no_typed_model() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "other".into();
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert!(!custom_models_accepted(&app));
+    assert_eq!(status(&app)["customModels"], false);
+    assert!(!set_custom_model(&mut app, "zzz"));
+    assert!(script.calls().is_empty());
+    script.report(Event::ConfigOptions(vec![]));
+    poll(&mut app, &ctx);
+    assert!(!custom_models_accepted(&app), "its options name no model");
+
+    let (mut app, script, ctx) = app_with_script();
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(custom_models_accepted(&app));
+    app.agent_chat.backend = None;
+    assert!(!custom_models_accepted(&app));
+    assert!(!set_custom_model(&mut app, "zzz"));
+}
+
+/// The control channel's `model`: a listed one as before, an unlisted one when the agent takes
+/// typed models, otherwise ignored as before.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_control_channel_sends_an_unlisted_model_where_it_can_go() {
+    let (mut app, script, ctx) = endpoint_with_script();
+    let reply = control(&mut app, &ctx, &json!({"model": "smart"})).unwrap();
+    assert_eq!(reply["model"], "smart");
+    let reply = control(&mut app, &ctx, &json!({"model": "unlisted"})).unwrap();
+    assert_eq!(reply["model"], "unlisted");
+    assert_eq!(reply["customModels"], true);
+    assert_eq!(reply["modelsNote"], Value::Null);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: unlisted"]);
+
+    let (mut app, script, ctx) = app_with_script();
+    let reply = control(&mut app, &ctx, &json!({"model": "unlisted"})).unwrap();
+    assert_eq!(reply["model"], "");
+    assert_eq!(reply["customModels"], false);
+    assert!(script.calls().is_empty());
+}
+
+/// The header's picker on an agent that lists models: it searches, a row chooses, and what was typed
+/// can be chosen too. The control and the popup stay in a narrow chat's window.
+#[test]
+fn the_header_model_picker_searches_and_takes_a_typed_model() {
+    use crate::scenario::{handle_at, rect_of};
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "claude".into();
+    script.report(models_reply("fast"));
+    h.frames(4);
+    let panel = rect_of("agent_chat:panel").expect("the panel");
+    let control = rect_of("agent_chat:model").expect("the picker");
+    assert!(control.left() >= panel.left() && control.right() <= panel.right(), "{control:?} in {panel:?}");
+    assert!(handle_at("agent_chat:model:search").is_none(), "closed");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    for name in ["search", "fast", "smart"] {
+        assert!(handle_at(&format!("agent_chat:model:{name}")).is_some(), "{name}");
+    }
+    assert!(handle_at("agent_chat:model:custom").is_none(), "nothing typed");
+    let search = rect_of("agent_chat:model:search").expect("the search box");
+    assert!(search.left() >= 0.0 && search.right() <= 1600.0, "inside the harness's window: {search:?}");
+
+    h.step(&json!({"text": "SMA"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:fast").is_none() && handle_at("agent_chat:model:smart").is_some());
+    assert!(handle_at("agent_chat:model:custom").is_some(), "the typed text is not a listed model");
+    h.step(&json!({"click": {"handle": "agent_chat:model:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(h.app.agent_chat.model, "smart");
+    assert!(handle_at("agent_chat:model:search").is_none(), "a choice closes it");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "agent_chat:model:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: zzz"]);
+    assert_eq!(h.app.agent_chat.model, "zzz");
+    disconnect(&mut h.app);
+}
+
+/// The picker on an agent with a model option goes by the same names. A row and a typed model both
+/// go through the option, and other options stay plain dropdowns.
+#[test]
+fn the_header_model_option_searches_and_takes_a_typed_model() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    h.frames(4);
+    assert_eq!(handle_at("agent_chat:model"), handle_at("agent_chat:config:some.provider.model"));
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    for name in ["search", "fast", "smart"] {
+        assert!(handle_at(&format!("agent_chat:model:{name}")).is_some(), "{name}");
+        assert_eq!(handle_at(&format!("agent_chat:model:{name}")), handle_at(&format!("agent_chat:config:some.provider.model:{name}")));
+    }
+    h.step(&json!({"click": {"handle": "agent_chat:model:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=smart"]);
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.model, "smart");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:custom").is_some());
+    h.step(&json!({"click": {"handle": "agent_chat:model:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls().last().map(String::as_str), Some("set_config_option: some.provider.model=zzz"));
+    assert_eq!(h.app.agent_chat.model, "smart", "not until the agent says so");
+    assert!(h.app.agent_chat.config_pending);
+    disconnect(&mut h.app);
+}
+
+/// Nothing typed can be chosen where it could not be sent, and the reason a listing failed shows
+/// in the popup.
+#[test]
+fn the_header_model_picker_offers_no_typed_model_it_cannot_send_and_shows_why_listing_failed() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.models = vec![acp::ModelInfo { id: "fast".into(), name: "fast".into(), description: String::new() }];
+    h.app.agent_chat.model = "fast".into();
+    h.app.agent_chat.models_note = Some("Couldn't list models: offline".into());
+    h.frames(4);
+    assert!(!custom_models_accepted(&h.app));
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("Couldn't list models: offline").is_some());
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:search").is_some());
+    assert!(handle_at("agent_chat:model:custom").is_none());
+}
+
+/// A running endpoint's card uses the chat's list and changes the chat's model.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_card_of_a_running_endpoint_changes_the_chats_model() {
+    use crate::scenario::handle_at;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ai_features = true;
+    h.app.agent_chat.detection = Some(Default::default());
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "api-1".into();
+    h.app.agent_chat.running_endpoint = "http://localhost:1/v1".into();
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        name: "Endpoint".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:1/v1".into(),
+        model: "fast".into(),
+        ..Default::default()
+    });
+    script.report(models_reply("fast"));
+    h.step(&json!({"call": "ui.prefs", "params": {"open": "AI"}})).unwrap();
+    h.frames(4);
+    // The permission cards put endpoint controls below the fixed page's viewport.
+    for _ in 0..32 {
+        let at = handle_at("prefs:ai_model:api-1").unwrap();
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        if body.contains(at) {
+            break;
+        }
+        h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":if at.y < body.top() {100} else {-100}}));
+        h.frames(30);
+    }
+    assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains(handle_at("prefs:ai_model:api-1").unwrap()));
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("prefs:ai_model:api-1:smart").is_some());
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(h.app.agent_chat.model, "smart");
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: zzz"]);
+    assert_eq!(h.app.preferences.agents.iter().find(|a| a.id == "api-1").map(|a| a.model.as_str()), Some("zzz"));
+    disconnect(&mut h.app);
+}
+
+/// A listing that fails says why and leaves last time's list, with the configured model in it; the
+/// next connection starts without the note.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_listing_that_fails_says_why_and_keeps_the_list_of_last_time() {
+    let (mut app, script, ctx) = app_with_script();
+    let endpoint = "http://localhost:11434/v1";
+    app.agent_chat.running_endpoint = endpoint.into();
+    script.report(Event::ModelsNote(None));
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.models_note, None);
+    let ids = |app: &SolveApp| app.agent_chat.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&app), ["fast", "smart"]);
+
+    let only = |id: &str| acp::ModelInfo { id: id.into(), name: id.into(), description: String::new() };
+    script.report(Event::ModelsNote(Some("x".repeat(MODELS_NOTE_CAP + 10))));
+    script.report(Event::Models { current: "local".into(), available: vec![only("local")] });
+    poll(&mut app, &ctx);
+    let note = app.agent_chat.models_note.clone().unwrap();
+    assert!(note.starts_with(&trf("ui.agent_chat_models_failed", &[("error", "x")])), "{note}");
+    assert_eq!(note.chars().count(), MODELS_NOTE_CAP);
+    assert_eq!(ids(&app), ["local", "fast", "smart"]);
+    assert_eq!(app.agent_chat.model, "local");
+    assert_eq!(app.agent_chat.models_cache.get(endpoint).map(Vec::len), Some(2), "the failed listing is not remembered");
+
+    script.report(Event::ModelsNote(Some("again".into())));
+    script.report(Event::Models { current: "fast".into(), available: vec![only("fast")] });
+    poll(&mut app, &ctx);
+    assert_eq!(ids(&app), ["local", "fast", "smart"], "a model already listed is not listed twice");
+
+    // A real listing on an endpoint that cannot be reached.
+    let mut app = app_with_endpoints();
+    app.agent_chat.models_note = Some("from before".into());
+    app.agent_chat.agent_id = Some("api-1".into());
+    connect(&mut app, &ctx);
+    assert_eq!(app.agent_chat.models_note, None);
+    let start = std::time::Instant::now();
+    while app.agent_chat.models.is_empty() && start.elapsed() < std::time::Duration::from_secs(10) {
+        poll(&mut app, &ctx);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(app.agent_chat.models_note.as_deref().is_some_and(|note| note.contains("offline")), "{:?}", app.agent_chat.models_note);
+    assert_eq!(ids(&app), ["m"]);
+    assert!(models_shown(&app));
+    disconnect(&mut app);
 }
 
 /// The next session puts back the model chosen last time, when the agent offers it.
@@ -1239,6 +2190,367 @@ fn hostile_provider_names_are_bounded() {
     assert_eq!(model_provider(&m("model".into(), "Provider: A\nsecond line • current")).map(|p| p.0), Some("A".into()));
 }
 
+fn modern_options(model: &str) -> Vec<acp::ConfigOption> {
+    vec![
+        acp::ConfigOption {
+            id: "some.provider.model".into(),
+            name: "Model".into(),
+            description: String::new(),
+            category: "model".into(),
+            current_value: model.into(),
+            options: ["fast", "smart"]
+                .into_iter()
+                .map(|v| acp::ConfigChoice { value: v.into(), name: v.into(), description: String::new(), group: None })
+                .collect(),
+        },
+        acp::ConfigOption {
+            id: "custom-mode-key".into(),
+            name: "Mode".into(),
+            description: String::new(),
+            category: "mode".into(),
+            current_value: "ask".into(),
+            options: ["ask", "plan"]
+                .into_iter()
+                .map(|v| acp::ConfigChoice { value: v.into(), name: v.into(), description: String::new(), group: None })
+                .collect(),
+        },
+    ]
+}
+
+#[test]
+fn modern_snapshots_replace_provider_choices_and_ignore_legacy_updates() {
+    let (mut app, script, ctx) = app_with_script();
+    script.report(Event::Models { current: "plain".into(), available: provider_models() });
+    poll(&mut app, &ctx);
+    set_model_provider(&mut app, "Host");
+    script.report(Event::ConfigOptions(modern_options("smart")));
+    script.report(Event::Models { current: "plain".into(), available: provider_models() });
+    script.report(Event::Modes { current: "old-mode".into(), available: vec![("old-mode".into(), "Old mode".into())] });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "smart");
+    assert_eq!(app.agent_chat.mode, "ask");
+    assert!(app.agent_chat.model_provider.is_none());
+    assert!(model_providers(&app).is_empty());
+    assert_eq!(listed_models(&app).into_iter().map(|(m, _)| m.id).collect::<Vec<_>>(), ["fast", "smart"]);
+    script.report(Event::ConfigOptions(vec![]));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.config_options, Some(vec![]));
+    assert!(app.agent_chat.models.is_empty() && app.agent_chat.modes.is_empty());
+    set_model(&mut app, "plain");
+    set_mode(&mut app, "old-mode");
+    assert!(script.calls().is_empty(), "an empty modern snapshot never falls back to stale legacy choices");
+}
+
+#[test]
+fn modern_acknowledgements_stay_with_their_document_without_resuming_its_queue() {
+    let (mut app, first, ctx) = app_with_script();
+    app.agent_chat.running_id = "first-modern".into();
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+    app.preferences.agent_models.insert("first-modern".into(), "smart".into());
+    new_chat(&mut app);
+    send(&mut app, &ctx, "first request".into());
+    first.report(Event::ConfigOptions(modern_options("fast")));
+    first.report(Event::Ready { agent: "first-modern".into(), images: false });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.config_pending && app.agent_chat.queued.is_some());
+
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert!(app.agent_chat.config_options.is_none() && !app.agent_chat.config_pending);
+    let second = Script::default();
+    app.agent_chat.backend = Some(Box::new(second.clone()));
+    app.agent_chat.state = Some(State::Ready);
+    app.agent_chat.running_id = "second-modern".into();
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+    set_model(&mut app, "smart");
+    first.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.config_pending, "the hidden tab's acknowledgement cannot unlock this one");
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(!app.preferences.agent_models.contains_key("second-modern"));
+    second.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    poll(&mut app, &ctx);
+    assert_eq!(app.preferences.agent_models.get("second-modern").map(String::as_str), Some("smart"));
+
+    crate::documents::switch(&mut app, 0);
+    assert!(app.agent_chat.config_pending, "pending configuration belongs to the conversation");
+    poll(&mut app, &ctx);
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "smart");
+    assert_eq!(app.preferences.agent_models.get("first-modern").map(String::as_str), Some("smart"));
+    assert_eq!(texts(&app), ["first request"]);
+    assert!(app.agent_chat.queued.is_none() && app.agent_chat.stopped);
+    assert!(first.prompts().is_empty() && second.prompts().is_empty(), "a late configuration reply cannot resume a departed tab's prompt");
+}
+
+#[test]
+fn closing_a_pending_modern_chat_preserves_the_surviving_api_endpoint_and_saved_models() {
+    for close_active in [false, true] {
+        let (mut app, modern, ctx) = app_with_script();
+        app.agent_chat.running_id = "modern".into();
+        app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+        app.preferences.agent_models.insert("modern".into(), "fast".into());
+        set_model(&mut app, "smart");
+        assert!(app.agent_chat.config_pending);
+
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        let endpoint = "http://127.0.0.1:12345/v1";
+        let api = Script::default();
+        app.agent_chat.backend = Some(Box::new(api.clone()));
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.running_id = "endpoint-agent".into();
+        app.agent_chat.running_endpoint = endpoint.into();
+        app.preferences.agents.push(agents::AgentConfig {
+            id: "endpoint-agent".into(),
+            kind: agents::Kind::Api,
+            base_url: endpoint.into(),
+            model: "fast".into(),
+            ..Default::default()
+        });
+        api.report(models_reply("fast"));
+        poll(&mut app, &ctx);
+        set_model(&mut app, "smart");
+        let cached = app.agent_chat.models_cache.get(endpoint).cloned().unwrap();
+        modern.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+        modern.report(Event::ConfigOptions(vec![]));
+        if close_active {
+            crate::documents::switch(&mut app, 0);
+            assert!(app.agent_chat.config_pending);
+        }
+        crate::documents::close(&mut app, 0, true);
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.running_id, "endpoint-agent");
+        assert_eq!(app.agent_chat.running_endpoint, endpoint);
+        assert!(app.agent_chat.config_options.is_none() && !app.agent_chat.config_pending);
+        assert_eq!(app.agent_chat.model, "smart");
+        assert_eq!(app.agent_chat.models_cache.get(endpoint), Some(&cached));
+        assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("fast"));
+        assert_eq!(app.preferences.agent_models.get("endpoint-agent").map(String::as_str), Some("smart"));
+        assert_eq!(app.preferences.agents.iter().find(|a| a.id == "endpoint-agent").unwrap().model, "smart");
+        assert_eq!(api.calls(), ["set_model: smart"], "the closed chat's events cannot reach the surviving backend");
+
+        // Reusing the same agent in a fresh design must restore only the last confirmed model.
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        assert!(app.agent_chat.config_options.is_none() && !app.agent_chat.config_pending);
+        let fresh = Script::default();
+        app.agent_chat.backend = Some(Box::new(fresh.clone()));
+        app.agent_chat.state = Some(State::Starting);
+        app.agent_chat.running_id = "modern".into();
+        fresh.report(Event::ConfigOptions(modern_options("fast")));
+        fresh.report(Event::Ready { agent: "modern".into(), images: false });
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.model, "fast");
+        assert!(!app.agent_chat.config_pending);
+        assert!(fresh.calls().is_empty(), "an unacknowledged choice from the closed chat is not restored");
+        assert_eq!(app.agent_chat.models_cache.get(endpoint), Some(&cached));
+    }
+}
+
+#[test]
+fn document_disconnect_paths_clear_modern_configuration_and_pending_requests() {
+    let assert_cleared = |app: &SolveApp| {
+        assert!(app.agent_chat.backend.is_none());
+        assert!(app.agent_chat.config_options.is_none() && !app.agent_chat.config_pending);
+        assert!(app.agent_chat.models.is_empty() && app.agent_chat.modes.is_empty());
+        assert!(app.agent_chat.model.is_empty() && app.agent_chat.mode.is_empty());
+        assert!(app.agent_chat.model_provider.is_none());
+        assert_eq!(app.agent_chat.state(), State::Off);
+    };
+    let (mut app, _, _) = app_with_script();
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+    set_model(&mut app, "smart");
+    disconnect(&mut app);
+    assert_cleared(&app);
+
+    for quitting in [false, true] {
+        let (mut app, first, ctx) = app_with_script();
+        app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+        set_model(&mut app, "smart");
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        app.agent_chat.backend = Some(Box::new(Script::default()));
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+        set_model(&mut app, "smart");
+        first.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+        if quitting {
+            shutdown(&mut app);
+        } else {
+            app.preferences.ai_features = false;
+            poll(&mut app, &ctx);
+        }
+        assert_cleared(&app);
+        crate::documents::switch(&mut app, 0);
+        assert_cleared(&app);
+        assert!(app.preferences.agent_models.is_empty(), "an unpolled acknowledgement is discarded with its backend");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn modern_config_requests_roundtrip_success_rejection_malformed_and_retry() {
+    let dir = std::env::temp_dir().join(format!("sc-chat-config-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("requests.jsonl");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s1","configOptions":[{"id":"vendor.model-key","name":"Model","category":"model","type":"select","currentValue":"fast","options":[{"value":"fast","name":"Fast"},{"value":"smart","name":"Smart"}]}]}}\n' "$id" ;;
+    *'"method":"session/set_config_option"'*)
+      n=$((n+1))
+      case "$n" in
+        1|4) v=smart; [ "$n" = 4 ] && v=fast; printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"vendor.model-key","name":"Model","category":"model","type":"select","currentValue":"%s","options":[{"value":"fast","name":"Fast"},{"value":"smart","name":"Smart"}]}]}}\n' "$id" "$v" ;;
+        2) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32001,"message":"rejected"}}\n' "$id" ;;
+        3) printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"type":"select"}]}}\n' "$id" ;;
+      esac ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".into(), "-c".into(), script.into(), "fake".into(), log.to_string_lossy().into_owned()];
+    let (wake_tx, wake_rx) = channel();
+    let start = backend::StartContext {
+        cwd: dir.clone(),
+        bridge: None,
+        tools: None,
+        wake: Box::new(move || {
+            let _ = wake_tx.send(());
+        }),
+    };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.running_id = "modern".into();
+    app.agent_chat.state = Some(State::Starting);
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            poll(app, &ctx);
+            if done(app) {
+                return;
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!left.is_zero(), "timed out; status={}", status(app));
+            wake_rx.recv_timeout(left).expect("backend wake");
+        }
+    };
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    assert_eq!(app.agent_chat.model, "fast");
+    for (value, expected, saved) in [("smart", "smart", "smart"), ("fast", "smart", "smart"), ("smart", "smart", "smart"), ("fast", "fast", "fast")] {
+        set_model(&mut app, value);
+        assert!(app.agent_chat.config_pending);
+        until(&mut app, &|a| !a.agent_chat.config_pending);
+        assert_eq!(app.agent_chat.model, expected);
+        assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some(saved));
+    }
+    disconnect(&mut app);
+    let requests: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let configs: Vec<_> = requests.iter().filter(|v| v["method"] == "session/set_config_option").collect();
+    assert_eq!(configs.len(), 4);
+    assert_eq!(
+        configs.iter().map(|v| v["params"].clone()).collect::<Vec<_>>(),
+        ["smart", "fast", "smart", "fast"].map(|value| json!({"sessionId":"s1","configId":"vendor.model-key","value":value}))
+    );
+    assert!(!requests.iter().any(|v| v["method"] == "session/set_model"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn modern_controls_route_by_category_and_wait_for_acknowledgement() {
+    let (mut app, script, _) = app_with_script();
+    app.agent_chat.running_id = "modern".into();
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+    set_model(&mut app, "smart");
+    assert!(app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(!app.preferences.agent_models.contains_key("modern"));
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=smart"]);
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+    assert!(app.agent_chat.config_pending, "a notification does not acknowledge the request");
+    app.agent_chat.on_event(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "smart");
+    app.preferences.agent_models.insert("modern".into(), app.agent_chat.model.clone());
+    set_mode(&mut app, "ask");
+    assert_eq!(script.calls().last().map(String::as_str), Some("set_config_option: custom-mode-key=ask"));
+}
+
+#[test]
+fn modern_rejection_and_malformed_success_unlock_without_changing_confirmed_value() {
+    let (mut app, script, _) = app_with_script();
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("fast")));
+    set_model(&mut app, "smart");
+    app.agent_chat.on_event(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Err("rejected".into()) });
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    set_model(&mut app, "smart");
+    app.agent_chat.on_event(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Err("malformed snapshot".into()) });
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(script.calls().len(), 2);
+}
+
+#[test]
+fn modern_saved_model_restore_waits_for_ack_and_manual_confirmation_persists() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "modern".into();
+    app.preferences.agent_models.insert("modern".into(), "smart".into());
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    script.report(Event::Ready { agent: "modern".into(), images: false });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("smart"));
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=smart"]);
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "smart");
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("smart"));
+}
+
+#[test]
+fn modern_model_restore_then_mode_restore_are_acknowledged_before_queued_prompt() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "modern".into();
+    app.preferences.agent_models.insert("modern".into(), "smart".into());
+    app.agent_chat.restore_mode = Some("plan".into());
+    app.agent_chat.queued = Some(("describe the model".into(), false, None, Vec::new()));
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    script.report(Event::Ready { agent: "modern".into(), images: false });
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=smart"]);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("smart"));
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls().get(1).map(String::as_str), Some("set_config_option: custom-mode-key=plan"));
+    assert!(app.agent_chat.queued.is_some(), "prompt waits for mode confirmation");
+    let mut confirmed = modern_options("smart");
+    confirmed[1].current_value = "plan".into();
+    script.report(Event::ConfigOptionFinished { id: "custom-mode-key".into(), result: Ok(confirmed) });
+    poll(&mut app, &ctx);
+    assert!(script.calls().iter().any(|s| s == "prompt: describe the model"));
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("smart"));
+}
+
+#[test]
+fn invalidated_modern_sessions_do_not_expose_stale_legacy_choices() {
+    for event in [Event::AuthRequired { methods: vec![] }, Event::Exited { tail: vec![] }] {
+        let (mut app, _, _) = app_with_script();
+        app.agent_chat.on_event(Event::ConfigOptions(modern_options("smart")));
+        app.agent_chat.config_pending = true;
+        app.agent_chat.on_event(event);
+        assert!(app.agent_chat.config_options.is_none() && !app.agent_chat.config_pending);
+        assert!(app.agent_chat.models.is_empty() && app.agent_chat.modes.is_empty());
+        assert!(app.agent_chat.model.is_empty() && app.agent_chat.mode.is_empty());
+    }
+    let (mut app, _, _) = app_with_script();
+    app.agent_chat.on_event(Event::ConfigOptions(modern_options("smart")));
+    new_chat(&mut app);
+    assert_eq!(app.agent_chat.restore_mode.as_deref(), Some("ask"));
+    assert!(app.agent_chat.config_options.is_none() && app.agent_chat.models.is_empty());
+}
+
 /// An agent that reports no models gets no picker; another agent's choice is not applied to it.
 #[test]
 fn an_agent_without_models_shows_no_picker() {
@@ -1300,6 +2612,63 @@ done
         assert!(t.elapsed() < std::time::Duration::from_secs(20));
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An agent that lists `models` but does not serve the unstable `session/set_model` answers
+/// "method not found": the choice stays and no error shows (#9970). Other errors still show, as
+/// the refusal of the model they were about.
+#[cfg(unix)]
+#[test]
+fn set_model_method_not_found_shows_no_error() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-model-unserved-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s1","models":{"currentModelId":"fast","availableModels":[{"modelId":"fast","name":"Fast"},{"modelId":"smart","name":"Smart"}]}}}\n' "$id" ;;
+    *'"method":"session/set_model"'*)
+      n=$((n+1))
+      if [ "$n" = 1 ]; then printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"\\"Method not found\\": session/set_model"}}\n' "$id"
+      else printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32001,"message":"model unavailable"}}\n' "$id"; fi ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    app.agent_chat.running_id = "fake".into();
+    let ctx = crate::fonts::test_context();
+    let errors = |app: &SolveApp| -> Vec<String> {
+        app.agent_chat.items.iter().filter_map(|i| if let Item::Notice { text, error: true } = i { Some(text.clone()) } else { None }).collect()
+    };
+    let t = std::time::Instant::now();
+    while !(app.agent_chat.state() == State::Ready && models_shown(&app)) {
+        poll(&mut app, &ctx);
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "agent not ready: {}", status(&app));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    set_model(&mut app, "smart");
+    set_model(&mut app, "fast");
+    // Replies come in order: once the second one's error shows, the first reply was handled too.
+    let t = std::time::Instant::now();
+    let refused = trf("ui.agent_chat_model_rejected", &[("model", "fast"), ("error", "model unavailable")]);
+    while !errors(&app).contains(&refused) {
+        poll(&mut app, &ctx);
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "no error for the second choice: {:?}", errors(&app));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(errors(&app), [refused], "method not found is no error to show");
+    assert!(app.agent_chat.state().running(), "the chat goes on");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().matches("session/set_model").count(), 2);
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1540,6 +2909,162 @@ fn narrow_chat() -> crate::scenario::Harness {
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
     h
+}
+
+/// The rows `a_selection_held_at_the_edge_scrolls_and_keeps_its_start` draws that are in view:
+/// each row's number, where its text is, and the conversation's view.
+fn rows_in_view(h: &crate::scenario::Harness) -> Vec<(usize, egui::Rect, egui::Rect)> {
+    let mut rows = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape
+                && let Some(n) = text.galley.text().strip_prefix("Parts list row ").and_then(|n| n.parse::<usize>().ok())
+            {
+                let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                if clipped.clip_rect.intersects(at) {
+                    rows.push((n, at, clipped.clip_rect));
+                }
+            }
+        });
+    }
+    rows.sort_by_key(|r| r.0);
+    rows
+}
+
+/// #11527: a text selection held at the conversation's edge scrolls it, and keeps its start once
+/// that has scrolled out of view, so Copy takes the hidden rows too. Resting there with no button
+/// down, or after letting go, scrolls nothing.
+#[test]
+fn a_selection_held_at_the_edge_scrolls_and_keeps_its_start() {
+    let mut h = narrow_chat();
+    for n in 0..80 {
+        h.app.agent_chat.items.push(Item::Agent { thought: false, text: format!("Parts list row {n}") });
+    }
+    h.frames(4);
+    let rows = rows_in_view(&h);
+    let (&(top, _, view), &(last, last_at, _)) = (rows.first().expect("rows in view"), rows.last().expect("rows in view"));
+    assert_eq!(last, 79, "the conversation shows its end");
+    let edge = egui::pos2(last_at.left() + 10.0, view.top() + 4.0);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, top, "no button down: the pointer at the edge scrolls nothing");
+
+    // Start the selection at the end of the last row and hold it at the top edge.
+    let start = last_at.right_center() - egui::vec2(1.0, 0.0);
+    h.frame_with(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    for _ in 0..600 {
+        if !rows_in_view(&h).iter().any(|r| r.0 == last) {
+            break;
+        }
+        h.frame();
+    }
+    let rows = rows_in_view(&h);
+    assert!(!rows.iter().any(|r| r.0 == last), "holding the selection at the top scrolls the last row out of view");
+    let reached = rows[0].0;
+    assert!(reached < top, "row {reached} is in view, it was {top}");
+    h.frame_with(vec![press(edge, false)]);
+    let after = rows_in_view(&h)[0].0;
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, after, "letting go stops the scrolling");
+    assert!(h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the selection keeps its start out of view");
+
+    h.frame_with(vec![egui::Event::Copy]);
+    let copied = h
+        .output
+        .commands
+        .iter()
+        .find_map(|c| if let egui::OutputCommand::CopyText(text) = c { Some(text.clone()) } else { None })
+        .expect("Copy takes the selection");
+    // The selection's moving end is under the pointer, in the first row or two in view.
+    for n in [reached + 2, 78] {
+        assert!(copied.contains(&format!("Parts list row {n}\n")), "row {n} is copied whole: {copied:?}");
+    }
+    assert!(copied.trim_end().ends_with("Parts list row 79"), "the selection ends where it started, out of view: {copied:?}");
+}
+
+/// #11527: only a drag towards the edge scrolls. Holding a press on the line at the top edge, a
+/// double click there, or a drag from there into the conversation leaves it where it is.
+#[test]
+fn a_press_at_the_edge_without_a_drag_towards_it_scrolls_nothing() {
+    let mut h = narrow_chat();
+    // One paragraph taller than the conversation: every point in view is on its text.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Bill of materials ".repeat(400) });
+    h.frames(4);
+    // Where the answer's text starts, the conversation's view, and the first line wholly in view
+    // (egui itself scrolls a pressed line that is cut off at the edge into view).
+    let answer = |h: &crate::scenario::Harness| {
+        let mut found = None;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape
+                    && text.galley.text().starts_with("Bill of materials")
+                    && clipped.clip_rect.intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                {
+                    let line = text.galley.rows.iter().map(|r| r.rect().translate(text.pos.to_vec2())).find(|r| r.top() >= clipped.clip_rect.top());
+                    found = Some((text.pos.y, clipped.clip_rect, line.expect("a line wholly in view")));
+                }
+            });
+        }
+        found.expect("the answer is in view")
+    };
+    let (rest, view, line) = answer(&h);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let edge = egui::pos2(view.left() + 40.0, line.center().y);
+    assert!(edge.y < view.top() + 32.0, "the first line in view is by the edge");
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a press held at the edge scrolls nothing");
+    h.frame_with(vec![press(edge, false)]);
+    for _ in 0..2 {
+        h.frame_with(vec![press(edge, true)]);
+        h.frame_with(vec![press(edge, false)]);
+    }
+    h.frames(10);
+    assert_eq!(answer(&h).0, rest, "a double click at the edge scrolls nothing");
+    let inside = edge + egui::vec2(0.0, 20.0);
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(inside)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a drag from the edge into the conversation scrolls nothing");
+    h.frame_with(vec![press(inside, false)]);
+    // Towards the edge it does.
+    let middle = view.center();
+    h.frame_with(vec![egui::Event::PointerMoved(middle), press(middle, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(30);
+    assert!(answer(&h).0 > rest, "a drag to the top edge scrolls the answer down");
+    h.frame_with(vec![press(edge, false)]);
+}
+
+/// #10172: before a connection, what the panel draws under the agent switcher (the Agent row
+/// with Add agent and Refresh) keeps the panel's side margin, docked and floating: nothing starts
+/// at the panel's edge or is cut off at the other one.
+#[test]
+fn the_agent_list_keeps_the_panels_side_margin() {
+    use crate::shell::LayoutMode;
+    for layout in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = narrow_chat();
+        h.app.ui.layout = layout;
+        h.frames(3);
+        h.frame();
+        let panel = crate::scenario::rect_of("agent_chat:panel").expect("the panel");
+        let mut texts = Vec::new();
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |s| {
+                if let egui::Shape::Text(t) = s {
+                    texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.rect.size())));
+                }
+            });
+        }
+        let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
+        let margin = crate::theme::Tokens::get().space_12 - 0.5;
+        let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
+        assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
+        let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
+        assert!(refresh.right() <= panel.right() - margin, "{layout:?}: Refresh at {refresh:?} in {panel:?}");
+    }
 }
 
 /// Every chip and the text box sit inside the panel.
@@ -1858,7 +3383,7 @@ fn box_selection(app: &mut SolveApp) -> Vec<solidcraft_engine::Sel> {
     app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).expect("a box");
     let face = app.session.execute("model.faces", &json!({"body": "Body1"})).expect("faces")["faces"][0].clone();
     let edge = app.session.execute("model.edges", &json!({"body": "Body1"})).expect("edges")["edges"][0].clone();
-    let at = |v: &Value| solidcraft_engine::geom::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
+    let at = |v: &Value| solidcore_record::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
     vec![
         Sel::Face { body: "Body1".into(), index: face["index"].as_u64().unwrap_or(0) as usize, point: at(&face["point"]) },
         Sel::Edge { body: "Body1".into(), index: edge["index"].as_u64().unwrap_or(0) as usize, point: at(&edge["mid"]) },
@@ -1936,8 +3461,8 @@ fn a_huge_selection_is_counted_not_dropped_silently() {
     assert_eq!((both.items.len(), both.total()), (context::MAX_ITEMS, 200));
     // Unknown bodies, faces and features are described by what is known, without panicking.
     let odd = [
-        Sel::Face { body: "Nope".into(), index: usize::MAX, point: solidcraft_engine::geom::Vec3::new(f64::NAN, f64::INFINITY, 0.0) },
-        Sel::Edge { body: "Nope".into(), index: 7, point: solidcraft_engine::geom::Vec3::new(0.0, 0.0, 0.0) },
+        Sel::Face { body: "Nope".into(), index: usize::MAX, point: solidcore_record::Vec3::new(f64::NAN, f64::INFINITY, 0.0) },
+        Sel::Edge { body: "Nope".into(), index: 7, point: solidcore_record::Vec3::new(0.0, 0.0, 0.0) },
         Sel::Feature { id: u64::MAX },
         Sel::Plane { name: "XY".into() },
         Sel::SketchCurve { id: "c1".into(), sketch: None },
@@ -2076,6 +3601,34 @@ fn a_connection_that_never_gets_ready_says_connection_failed_and_offers_retry() 
     connect(&mut app, &ctx);
     assert_eq!(app.agent_chat.state(), State::Failed);
     assert!(app.preferences.agent_last.is_empty(), "only an agent that started is remembered");
+
+    // A found agent that failed its version check (#9034): the picker says it doesn't start, and
+    // connecting says why and how to install it again, besides the system's own message.
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let reason = "This version of opencode.exe is not compatible with the version of Windows you're running.";
+    app.agent_chat.detection = Some(discover::Detection {
+        found: vec![discover::Found {
+            id: "opencode",
+            name: "OpenCode",
+            argv: vec!["solidcraft-no-such-agent-9034".into(), "acp".into()],
+            version: None,
+            login: discover::Login::Unknown,
+            problem: Some(reason.into()),
+            install: "npm install -g opencode-ai",
+        }],
+        ..Default::default()
+    });
+    let entry = agents::current(&app).unwrap();
+    assert!(entry.detail().contains(reason), "{}", entry.detail());
+    connect(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Failed);
+    let told = |needle: &str| app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.contains(needle)));
+    assert!(told(reason) && told("npm install -g opencode-ai") && told("OpenCode"), "{:?}", app.agent_chat.items);
+    assert_eq!(status(&app)["agents"][0]["problem"], reason);
+    // One that answered has nothing to say.
+    let mut fine = entry.clone();
+    fine.problem = None;
+    assert_eq!(fine.problem_hint(), None);
 
     // No agent at all: the picker opens on what to install.
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
@@ -2402,15 +3955,19 @@ fn the_picks_go_with_the_next_message_once() {
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
 }
 
-/// Two clicks on two rims are two things, not four edges (a click on a rim selects both halves for
-/// the commands; the chat counts and describes what was clicked).
+/// Two clicks on two rims are two things (the chat counts and describes what was clicked). The
+/// cylinder is a circle drawn as two half arcs, extruded: one wall, each rim one closed edge.
 #[test]
 fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     use solidcraft_engine::Sel;
     let (mut app, script, ctx) = app_with_script();
-    app.run("solid.cylinder", json!({"radius": 10, "height": 20})).expect("a cylinder");
+    app.run("sketch.create", json!({"plane": "XY"})).expect("a sketch");
+    app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 10]})).expect("an arc");
+    app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [10, 0], "through": [0, -10]})).expect("an arc");
+    app.run("sketch.finish", json!({})).expect("the sketch");
+    app.run("solid.extrude", json!({"distance": 20})).expect("a cylinder");
     let (name, top, bottom, mid_top, mid_bottom) = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let body = &st.bodies[0];
         let mesh = body.mesh();
         let rim_at = |z: f64| mesh.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - z).abs() < 1e-6)).expect("a rim");
@@ -2419,21 +3976,22 @@ fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     };
     crate::viewport::select(&mut app, Some(Sel::Edge { body: name.clone(), index: top, point: mid_top }), false, false);
     crate::viewport::select(&mut app, Some(Sel::Edge { body: name, index: bottom, point: mid_bottom }), true, false);
-    assert_eq!(app.session.selection.len(), 4, "two clicks selected four halves");
+    assert_eq!(app.session.selection.len(), 2, "two clicks selected the two rims");
     assert_eq!(selected_count(&mut app), 2, "the checkbox counts the two clicks");
 
     app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "these two rims".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("2 item(s)"), "{prompt}");
-    assert_eq!(prompt.matches("(2 pieces)").count(), 2, "{prompt}");
-    // A rim of radius 10 is about 62.8 mm round (the kernel's own figure), both halves together.
-    assert!(prompt.contains("Edge 62.") && prompt.contains("mm (2 pieces)"), "{prompt}");
+    assert!(!prompt.contains("pieces)"), "{prompt}");
+    // A rim of radius 10 is about 62.8 mm round (the kernel's own figure), the whole circle.
+    assert_eq!(prompt.matches("Edge 62.").count(), 2, "{prompt}");
     let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
     assert_eq!(context.items.len(), 2);
     assert_eq!(context.total(), 2);
-    // The detail still names the piece indices the tools take.
-    assert!(context.items.iter().all(|i| i.detail.contains("indices [")), "{:?}", context.items);
+    // The detail names the index the tools take.
+    let indices = [top, bottom].map(|i| format!("index {i}, "));
+    assert!(context.items.iter().zip(&indices).all(|(item, index)| item.detail.contains(index)), "{:?}", context.items);
 }
 
 /// The same for a surface the kernel splits at a seam: one click on the cylinder's wall is one item.
@@ -2447,7 +4005,7 @@ fn a_split_wall_clicked_once_is_one_item() {
         .and_then(|faces| faces.iter().find(|f| f["cylinder"]["radius"].is_number()).cloned())
         .expect("the wall");
     let at = &wall["point"];
-    let point = solidcraft_engine::geom::Vec3::new(at[0].as_f64().unwrap_or(0.0), at[1].as_f64().unwrap_or(0.0), at[2].as_f64().unwrap_or(0.0));
+    let point = solidcore_record::Vec3::new(at[0].as_f64().unwrap_or(0.0), at[1].as_f64().unwrap_or(0.0), at[2].as_f64().unwrap_or(0.0));
     crate::viewport::select(
         &mut app,
         Some(Sel::Face { body: "Body1".into(), index: wall["index"].as_u64().unwrap_or(0) as usize, point }),
@@ -2663,6 +4221,27 @@ fn no_tool_turn_warning_leaves_answers_and_incomplete_turns_quiet() {
     }
 }
 
+/// A turn that ends with nothing shown because the reply hit its length limit, or the model
+/// declined, says so instead of blaming tool support (#9495).
+#[test]
+fn a_cut_off_or_declined_reply_says_so_instead_of_blaming_tools() {
+    for (reason, said) in [("max_tokens", "ui.agent_chat_reply_cut_off"), ("refusal", "ui.agent_chat_reply_declined")] {
+        let (mut app, _, _) = app_with_script();
+        app.agent_chat.tools_port = Some(12345);
+        start_turn(&mut app, "Make a box".into(), false, None, vec![]);
+        app.agent_chat.on_event(Event::TurnEnded { reason: reason.into() });
+        end_turn(&mut app);
+        assert!(status(&app)["turnWarning"].is_null(), "{reason}");
+        let notices: Vec<&str> = app
+            .agent_chat
+            .items
+            .iter()
+            .filter_map(|i| if let Item::Notice { text, error: false } = i { Some(text.as_str()) } else { None })
+            .collect();
+        assert_eq!(notices, [tr(said)], "{reason}");
+    }
+}
+
 // ---- Tool calls in words (#1457) ----
 
 fn in_mm() -> summary::Units<'static> {
@@ -2849,4 +4428,178 @@ fn a_screenshot_card_hides_the_path_until_details() {
     h.call("ui.click", json!({"x": card.x, "y": card.y}));
     h.frames(3);
     assert!(h.widget("Result").is_some() && h.widget(path).is_some(), "Details holds the full path");
+}
+
+/// The composer's input box fills its parent composer area on all four sides, in every layout:
+/// the only inset left is the text's own padding inside the box (no second margin around it).
+#[test]
+fn the_composer_box_fills_its_parent_in_every_layout() {
+    use crate::scenario::rect_of;
+    for (layout, popped) in [("floating", false), ("docked", false), ("floating", true), ("docked", true)] {
+        let mut h = narrow_chat();
+        h.call("ui.resize", json!({"width": 1600, "height": 1000}));
+        h.call("ui.set", json!({"layout": layout}));
+        h.app.preferences.agent_chat_popped = popped;
+        h.app.agent_chat.state = Some(State::Ready);
+        h.frames(4);
+        let footer = rect_of("agent_chat:composer_footer").unwrap_or_else(|| panic!("{layout} popped={popped}: the composer area"));
+        let boxed = rect_of("agent_chat:composer_box").expect("the input box");
+        let (l, r, t, b) =
+            (boxed.left() - footer.left(), footer.right() - boxed.right(), boxed.top() - footer.top(), footer.bottom() - boxed.bottom());
+        for (edge, gap) in [("left", l), ("right", r), ("top", t), ("bottom", b)] {
+            assert!(gap.abs() <= 1.0, "{layout} popped={popped}: box {edge} edge is {gap} from its parent ({boxed:?} in {footer:?})");
+        }
+        let input = rect_of("agent_chat:input").expect("the text");
+        assert!(input.left() > boxed.left() + 2.0, "{layout} popped={popped}: the text keeps its own padding");
+        let send = rect_of("agent_chat:send").expect("Send");
+        assert!(boxed.contains_rect(send), "{layout} popped={popped}: Send stays inside the box");
+    }
+}
+
+/// The composer hint (idle and busy, in every language) stays on one row, even at the narrowest
+/// panel, and is cut with an ellipsis instead of wrapping.
+#[test]
+fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
+    let mut h = narrow_chat();
+    h.app.agent_chat.state = Some(State::Ready);
+    h.frames(4);
+    let width = crate::scenario::rect_of("agent_chat:input").expect("the text box").width();
+    let ctx = crate::fonts::test_context();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/locales");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let language = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let _scope = crate::i18n::scope(&language);
+        for key in ["ui.agent_chat_placeholder", "ui.agent_chat_placeholder_busy"] {
+            let hint = crate::i18n::tr(key).to_owned();
+            let mut rows = 0;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * crate::theme::Tokens::get().form_inset).rows.len();
+            });
+            output.textures_delta.clear();
+            assert_eq!(rows, 1, "{language} {key} at {width} wide: {hint}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 20, "every language was checked");
+}
+
+/// The room tool windows get beside the docked Assistant, in a view that came out inside out
+/// (the window of #9492): the Assistant's side gives way instead of panicking in `f32::clamp`.
+#[test]
+fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.ui.layout = crate::shell::LayoutMode::Floating;
+    app.preferences.ai_features = true;
+    app.agent_chat.open = true;
+    app.preferences.agent_chat_popped = false;
+    app.agent_chat.panel_rect = Some(egui::Rect::from_min_max(egui::pos2(100.0, 40.0), egui::pos2(150.0, 600.0)));
+    let inside_out = egui::Rect::from_min_max(egui::pos2(264.1875, 40.0), egui::pos2(159.0, 600.0));
+    for side in ["right", "left"] {
+        app.preferences.agent_chat_side = side.into();
+        let free = tool_space(&app, inside_out);
+        assert!(free.min.x.is_finite() && free.max.x.is_finite(), "{side}: {free:?}");
+    }
+}
+
+// ---- Copy message (#10675) ----
+
+/// A chat with a multi-paragraph prompt and a Markdown reply, both drawn.
+fn chat_with_copiable_messages() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::User {
+        text: "make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm".into(),
+        image: false,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```".into() });
+    h.frames(3);
+    h
+}
+
+/// The text the last frame copied to the clipboard, if any.
+fn copied_text(h: &crate::scenario::Harness) -> Option<String> {
+    h.output.commands.iter().rev().find_map(|c| match c {
+        egui::OutputCommand::CopyText(t) => Some(t.clone()),
+        _ => None,
+    })
+}
+
+fn click_at(h: &mut crate::scenario::Harness, at: egui::Pos2, button: egui::PointerButton) {
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: false, modifiers: egui::Modifiers::NONE }]);
+}
+
+/// The visible button on a sent prompt copies the whole prompt, as entered.
+#[test]
+fn the_copy_message_button_copies_the_prompt_as_entered() {
+    let mut h = chat_with_copiable_messages();
+    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
+/// fenced code, not the laid-out text.
+#[test]
+fn the_copy_message_button_copies_the_reply_as_original_markdown() {
+    let mut h = chat_with_copiable_messages();
+    let at = crate::scenario::handle_at("agent_chat:copy:1").expect("the reply's Copy message button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
+}
+
+/// Right-clicking a message opens its menu, and its row copies the same whole reply.
+#[test]
+fn right_clicking_a_message_offers_copy_message() {
+    let mut h = chat_with_copiable_messages();
+    let msg = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    click_at(&mut h, msg.center(), egui::PointerButton::Secondary);
+    h.frames(1); // let the popup settle at its final place before clicking its row
+    let item = crate::scenario::handle_at("agent_chat:copy_menu:1").expect("the right-click menu's Copy message row");
+    click_at(&mut h, item, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
+}
+
+/// A reply that is still streaming copies the stable text received so far.
+#[test]
+fn a_streaming_reply_copies_the_text_received_so_far() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "half a repl".into() });
+    h.frames(3);
+    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the streaming reply's button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("half a repl"));
+}
+
+/// A picture-only prompt has no text to copy: no button, no menu, and a thought has none
+/// either — the clipboard is never overwritten with an empty string.
+#[test]
+fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::User {
+        text: String::new(),
+        image: true,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
+    h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering".into() });
+    h.frames(3);
+    assert!(crate::scenario::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
+    assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
+    assert!(h.widget("Copy message").is_none(), "nothing to click");
 }

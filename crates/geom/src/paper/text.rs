@@ -36,7 +36,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::{Budget, Invalid, MAX_COORDINATE_MM, Result, Scene, pieces, require};
-use crate::{EPS, Loop2, Seg2, Vec2};
+use crate::EPS;
+use crate::prelude::*;
+use solidcore_record::{Loop2, Seg2, Vec2};
 
 /// The most glyphs a run may place: sketch text's 1000 characters, four glyphs each.
 pub const MAX_RUN_GLYPHS: usize = 4000;

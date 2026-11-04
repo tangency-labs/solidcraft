@@ -10,7 +10,8 @@
 //! conditioned up to the walk's quarter turns).
 
 use super::{GridPath, GridPoint, Invalid, Piece, Result};
-use crate::{Seg2, Vec2};
+use crate::prelude::*;
+use solidcore_record::{Seg2, Vec2};
 
 /// The most points one path may flatten to.
 pub const MAX_POINTS: usize = 1 << 20;
@@ -68,8 +69,8 @@ mod tests {
     use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
     use super::*;
-    use crate::Seg2;
     use crate::paper::{Grid, GridItem, Group, Item, ObjectKind, Scene};
+    use solidcore_record::Seg2;
 
     /// The scene's one stroke along `seg` on the nanometre grid.
     fn on_grid(seg: Seg2) -> GridPath {

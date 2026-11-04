@@ -1,13 +1,13 @@
 {
   "source": "analytic",
-  "method": "as 77 with the radius running from 4 (x=0) down to 0 (x=40), where the round closes to the corner: V = abc - (1 - pi/4) L a^2 / 3; the round is three-sided and the corner at x=40 stays",
+  "method": "as 77 with the radius running from 4 (x=0) down to 0 (x=40), where the round closes to the corner: the round is three-sided and the corner at x=40 stays (no ball reaches that section). The round is the union of the balls rolled along the edge, ball s touching both faces at r(s), the law continued past the edge's ends along its end slopes: each section loses the corner points no ball reaches, up to rho(x, t), the nearest entry into a ball along the ray from the edge at the angle t. V, moments and areas integrated by Gauss-Legendre panels in x and t",
   "body_count": 1,
-  "volume_mm3": 23954.21827485812,
-  "area_mm2": 5162.286695397177,
+  "volume_mm3": 23954.36853310061,
+  "area_mm2": 5162.354039819598,
   "center_of_mass": [
-    20.019112176659895,
-    15.027387550737057,
-    9.98216853759289
+    20.01904932991088,
+    15.027299360361303,
+    9.982225304594138
   ],
   "bbox": {
     "min": [

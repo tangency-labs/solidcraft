@@ -40,25 +40,7 @@ pub(crate) fn expression(doc: &Document, text: &str, kind: Kind) -> String {
     }
     let normalized = doc.with_design_unit(text, kind);
     if kind == Kind::Length && unit(doc) != "mm" && normalized == text && doc.eval(text, Kind::Unitless).is_ok() {
-        // A decimal comma is numeric only outside parentheses. Preserve function-argument
-        // commas while moving the expression inside the unit multiplication's parentheses.
-        let mut depth = 0usize;
-        let grouped: String = text
-            .chars()
-            .map(|c| match c {
-                '(' => {
-                    depth = depth.saturating_add(1);
-                    c
-                }
-                ')' => {
-                    depth = depth.saturating_sub(1);
-                    c
-                }
-                ',' if depth == 0 => '.',
-                _ => c,
-            })
-            .collect();
-        format!("({grouped}) * 1 {}", unit(doc))
+        format!("({text}) * 1 {}", unit(doc))
     } else {
         normalized
     }
@@ -95,6 +77,17 @@ pub(crate) fn model(doc: &Document, mm: f64) -> String {
     format!("{} {unit}", mm / scale)
 }
 
+/// A computed length shown in an editable field or a message, in the design's unit, to a
+/// millionth of it with trailing zeros dropped ("3 mm", not "3.000000 mm" or 2.9999999999999996):
+/// for a value the field shows but sends only once the user edits it.
+pub(crate) fn shown(doc: &Document, mm: f64) -> String {
+    let unit = unit(doc);
+    let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
+    let text = format!("{:.6}", mm / scale);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
+}
+
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
 /// part designations never go through length conversion. Keep this list shared by submission
 /// and feature refill, so a bare stored millimetre cannot become inches just by pressing OK.
@@ -106,7 +99,14 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
     use crate::dialogs_surface::Surf;
     match kind {
         D::Extrude { distance, distance2, to_offset, start, wall, wall2, .. } => vec![distance, distance2, to_offset, start, wall, wall2],
-        D::Fillet { radius, distance2, .. } => vec![radius, distance2],
+        D::Fillet { radius, distance2, setback, .. } => {
+            // A setback not typed (or emptied) stands for the command's default and stays so.
+            let mut lengths = vec![radius, distance2];
+            if let Some(setback) = setback.as_mut().filter(|s| !s.trim().is_empty()) {
+                lengths.push(setback);
+            }
+            lengths
+        }
         D::Shell { thickness } => vec![thickness],
         D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
@@ -237,6 +237,21 @@ pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut 
             {
                 *value = json!(convert(text));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_decimal_comma_survives_the_design_unit() {
+        // The unit wraps the text in parentheses, where a comma stays decimal (#9408).
+        let doc = Document { units: "in".into(), ..Document::default() };
+        for (text, inches) in [("2,5", 2.5), ("(2,5)", 2.5), ("-(10-0,5)/2", -4.75), ("2,5 + max(1,2)", 4.5)] {
+            let mm = eval(&doc, text, Kind::Length).unwrap();
+            assert!((mm - inches * 25.4).abs() < 1e-9, "{text}: {mm}");
         }
     }
 }

@@ -731,7 +731,8 @@ struct Step {
 /// contents under it when asked); an inseparable part is one row, and in parts only its purchased
 /// parts are listed beside it; a normal part is a row in the structured views, in all levels with
 /// what it holds under it, and in parts only a subassembly is listed through its parts unless it
-/// has bodies of its own. A folded part is one row holding all it holds.
+/// has bodies of its own. A folded part is one row holding all it holds, what it holds listed under
+/// it (of an inseparable one, its purchased parts).
 fn classify(view: View, walk: Walk, bom_type: BomType, shape: Shape) -> Step {
     let nothing = Step { row: false, inside: None, kit: false, holds: Holds::All };
     let row = |holds| Step { row: true, holds, ..nothing };
@@ -745,6 +746,7 @@ fn classify(view: View, walk: Walk, bom_type: BomType, shape: Shape) -> Step {
         }
         (BomType::Purchased, _) => row(Holds::All),
         (_, Walk::PurchasedOnly) => Step { inside: contents(Walk::PurchasedOnly), ..nothing },
+        (BomType::Inseparable, Walk::Listed) if shape.folded => Step { inside: contents(Walk::PurchasedOnly), kit: true, ..row(Holds::All) },
         (BomType::Inseparable, Walk::Listed) => match view {
             View::PartsOnly => Step { inside: contents(Walk::PurchasedOnly), ..row(Holds::AllButPurchased) },
             View::FirstLevel | View::AllLevels => row(Holds::All),

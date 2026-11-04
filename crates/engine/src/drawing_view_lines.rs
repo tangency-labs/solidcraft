@@ -7,12 +7,15 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind};
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
-use solidcraft_geom::{Aabb2, EPS, Plane, Seg2, Similarity2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, EPS, Similarity2};
+use solidcraft_kernel::PlanarPiece;
 
 use super::ShownSet;
 use crate::mesh_lines::{self, Ask, Origin, Owner, Scene, View};
@@ -248,14 +251,7 @@ fn exact_arcs(shown: &ShownSet, scene: &Scene, basis: &Plane, runs: &[(Owner, Ve
         let Some(body) = shown.bodies.get(first as usize).and_then(|b| shown.body(b)) else { continue };
         let edges: Vec<usize> = edges.into_iter().collect();
         let exact = body.body.planar_edges(basis, &edges);
-        let arcs = edges
-            .iter()
-            .zip(exact)
-            .filter_map(|(edge, segs)| match segs.as_deref() {
-                Some([arc @ Seg2::Arc { .. }]) => Some((*edge, *arc)),
-                _ => None,
-            })
-            .collect();
+        let arcs = edges.iter().zip(exact).filter_map(|(edge, pieces)| one_arc(pieces.as_deref()?).map(|arc| (*edge, arc))).collect();
         found.insert(key, (first, arcs));
     }
     let mut out = HashMap::new();
@@ -271,6 +267,26 @@ fn exact_arcs(shown: &ShownSet, scene: &Scene, basis: &Plane, runs: &[(Owner, Ve
         }
     }
     out
+}
+
+/// An edge's pieces as one arc: the kernel gives a whole circle as two half circles. `None` unless
+/// every piece is an arc of one circle, each going on from where the last one ended.
+fn one_arc(pieces: &[PlanarPiece]) -> Option<Seg2> {
+    let arcs = |piece: &PlanarPiece| match *piece {
+        PlanarPiece::Seg(Seg2::Arc { center, radius, start, sweep }) => Some((center, radius, start, sweep)),
+        _ => None,
+    };
+    let (center, radius, start, mut sweep) = arcs(pieces.first()?)?;
+    for piece in pieces.get(1..)? {
+        let (c, r, s, turn) = arcs(piece)?;
+        let on_from_last = (start + sweep - s).rem_euclid(std::f64::consts::TAU);
+        let on_from_last = on_from_last.min(std::f64::consts::TAU - on_from_last);
+        if c.dist(center) > radius * 1e-9 || (r - radius).abs() > radius * 1e-9 || on_from_last > 1e-9 {
+            return None;
+        }
+        sweep += turn;
+    }
+    Some(Seg2::Arc { center, radius, start, sweep })
 }
 
 /// A placement's turn: its matrix's rotation, bit for bit.

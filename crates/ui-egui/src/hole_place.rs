@@ -12,14 +12,17 @@
 //! centre that drags it across the model (snapping as a pick would) and takes it out when
 //! clicked, and a pick elsewhere on a face that already has a hole moves the hole there.
 
+use crate::ui_kit::BackingTooltipExt as _;
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use egui::{Pos2, vec2};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -158,7 +161,7 @@ pub(crate) fn snap_hits(app: &SolveApp, proj: &Proj, pos: Pos2, hits: &mut Vec<H
     if !snapping(app) || crate::drag_snap::suppressed() {
         return;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let face = hits.iter().position(|h| matches!(h, Hit::Face { .. }));
     let at_face = face.and_then(|i| match hits.get(i) {
         Some(Hit::Face { body, index, .. }) => {
@@ -192,7 +195,7 @@ pub(crate) fn snap_hits(app: &SolveApp, proj: &Proj, pos: Pos2, hits: &mut Vec<H
 
 /// The snap a face place sits on, if any.
 fn snap_under(app: &SolveApp, body: &str, index: usize, point: Vec3) -> (Arc<Vec<Snap>>, Option<Snap>) {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(b) = st.body(body) else { return (Arc::new(Vec::new()), None) };
     let snaps = face_snaps(&b.mesh(), index);
     let on = snaps.iter().find(|s| s.at.dist(point) <= 1e-9 * (1.0 + s.at.len())).cloned();
@@ -303,7 +306,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         crate::icons::markers::hole_handle(painter, c, if hot { t.accent } else { t.manipulator }, hot);
         crate::scenario::publish_handle(&format!("hole:{n}"), c);
         if !r.dragged() {
-            r.on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
+            r.backing_on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
         }
     }
     if let Some((i, to)) = moved
@@ -351,7 +354,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
 
     /// A square face (two triangles) at z = 5 with a round edge about (2, 3) on it.
     fn mesh() -> Mesh {

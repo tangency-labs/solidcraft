@@ -2,7 +2,8 @@
 //! Uniform solid-angle sampling deliberately has no luminance CDF or extra pixel copy.
 
 use super::{DecodedHdr, HdrError, HdrErrorCode, MAX_HDR_HEIGHT, MAX_HDR_PIXELS, MAX_HDR_WIDTH, Result};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
 fn invalid(message: &str) -> HdrError {

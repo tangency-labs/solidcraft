@@ -8,7 +8,8 @@
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT, "shift"?, "alt"?, "ctrl"?, "cmd"?}`,
 //!   `{"hold": AT, "frames"?}` (press and hold still: Select Other),
-//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT, ...], "shift"?, "ctrl"?, "steps"?}` (through any points between, `steps` moves
+//!   each) where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
@@ -39,6 +40,7 @@
 //!
 //! The same files drive the live app over the control channel for screenshots.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -177,6 +179,7 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        crate::i18n::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
             ctx: {
@@ -433,7 +436,7 @@ impl Harness {
         for i in 0..240 {
             self.frame();
             let now = basis(&self.app.cam);
-            let ang = |a: solidcraft_engine::geom::Vec3, b: solidcraft_engine::geom::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            let ang = |a: solidcore_record::Vec3, b: solidcore_record::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
             let d = ang(prev.0, now.0).max(ang(prev.2, now.2));
             if d > worst.0 {
                 worst = (d, i);
@@ -447,6 +450,19 @@ impl Harness {
             }
         }
         Err(format!("view_anim {v}: still animating after 240 frames"))
+    }
+
+    /// A drag step's first and last points, and the screen points it passes through between them
+    /// (a lasso's loop, #4376).
+    fn drag_points(&mut self, d: &Value) -> Result<([f64; 2], [f64; 2], Vec<Value>), String> {
+        let pts = d.as_array().map(Vec::as_slice).unwrap_or_default();
+        let start = self.at(pts.first().unwrap_or(&Value::Null))?;
+        let end = self.at(pts.get(pts.len().saturating_sub(1).max(1)).unwrap_or(&Value::Null))?;
+        let mut via = Vec::new();
+        for q in pts.iter().skip(1).take(pts.len().saturating_sub(2)) {
+            via.push(json!(self.at(q)?));
+        }
+        Ok((start, end, via))
     }
 
     /// Run one step.
@@ -504,13 +520,12 @@ impl Harness {
                 let [x, y] = self.at(at)?;
                 self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
             } else if let Some(d) = s.get("drag") {
-                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+                let ([x0, y0], [x1, y1], via) = self.drag_points(d)?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")}),
-                )
+                let mut p =
+                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
+                p["via"] = Value::Array(via);
+                self.call("ui.drag", p)
             } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
                 let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
                 let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
@@ -582,6 +597,20 @@ impl Harness {
             } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
                 // "crash": the app dies (its autosave lock goes with it, the entry stays);
                 // "close": it closes normally. Then a new app starts on the same folders.
+                if how == "crash" {
+                    // The work so far is autosaved before the crash: the write runs on a worker
+                    // thread, which a loaded machine had not finished (#10690). The autosave's
+                    // own ticks write it; a bounded wait, so an autosave that stopped writing
+                    // still fails the recovery that follows.
+                    for _ in 0..600 {
+                        let caught_up = self.app.autosave.as_ref().and_then(|a| a.active.as_ref()).is_none_or(|a| a.caught_up(&self.app.session));
+                        if caught_up {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        self.frames(1);
+                    }
+                }
                 let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
@@ -884,14 +913,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 }
             }
             "dialog" => {
-                let d = &ui["dialog"];
+                // A word of the dialog's state as the code holds it: scenarios check fields that
+                // `ui.inspect` reports only as the command OK runs.
+                let d = h.app.dialog.as_ref().map(|d| format!("{d:?}"));
                 let ok = match v {
-                    Value::Null => d.is_null(),
-                    Value::String(w) => d.as_str().is_some_and(|d| d.contains(w.as_str())),
+                    Value::Null => d.is_none() && ui["dialog"].is_null(),
+                    Value::String(w) => d.as_deref().is_some_and(|d| d.contains(w.as_str())),
                     _ => false,
                 };
                 if !ok {
-                    return Err(format!("dialog: got {d}, want {v}"));
+                    return Err(format!("dialog: got {d:?}, want {v}"));
                 }
             }
             "tool" => {
@@ -1095,6 +1126,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 for (pk, pv) in v.as_object().into_iter().flatten() {
                     if got[pk.as_str()] != *pv {
                         return Err(format!("preference {pk}: got {}, want {pv}", got[pk.as_str()]));
+                    }
+                }
+            }
+            "theme_colors" => {
+                // Read the applied tokens after the scenario frame, not the source theme file.
+                let tokens = crate::theme::Tokens::get();
+                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens);
+                for (key, want) in v.as_object().into_iter().flatten() {
+                    if resolved["colors"][key] != *want {
+                        return Err(format!("theme colour {key}: got {}, want {want}", resolved["colors"][key]));
                     }
                 }
             }

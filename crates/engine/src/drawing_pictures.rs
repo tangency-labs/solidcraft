@@ -11,13 +11,14 @@
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
 
+use solidcore_record::Vec2;
 use solidcraft_doc::canvas::base64_decode;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::image::{ImageFile, SheetImage};
 use solidcraft_doc::ids;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::{Group, Item, MAX_IMAGE_PIXELS, ObjectKind, Picture, Pictures};
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
-use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_render::sheet_image;
 
 use crate::Session;

@@ -7,27 +7,48 @@ use solidcraft_doc::config::{Column, ConfigRow, MAX_COLUMNS, MAX_ROWS};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::config::{ConfigActivation, ConfigRowParams, ConfigTable, ConfigTableParams, ConfigTableReply, ConfigTableRow, ConfigTarget};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const TABLE_CONTRACT: TypedContract<ConfigTableParams> = TypedContract::new();
+const ROW_CONTRACT: TypedContract<ConfigRowParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("config.configure", "Configure", configure).at("SOLID", "CONFIGURE").icon("params").params(
         "params?: [parameter names]; features?: [feature names]; materials?: [body names]; appearances?: [body names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
     ),
-    CommandSpec::new("config.table", "Display Configuration Table", show)
+    CommandSpec::new("config.table", "Display Configuration Table", crate::checked!("config.table", show))
         .at("SOLID", "CONFIGURE")
         .icon("configuration_table")
         .noundo()
+        .contract(&TABLE_CONTRACT)
+        .output(output_schema_for::<ConfigTableReply>)
         .params("→ columns (param:<name> or suppress:<feature>), rows, the active row and whether the design still matches it"),
     CommandSpec::new("config.column", "Configuration Column", column).icon("configuration_table").params("param? | feature? | material? | appearance? (target name); delete?: bool"),
     CommandSpec::new("config.row", "Configuration Row", row).icon("configuration_table").params(
         "name; from? (row to copy; default current values); values?: {column key: expression, suppression, material name, appearance name or Look object}; rename?; delete?: bool",
     ),
-    CommandSpec::new("config.activate", "Activate Configuration", activate).icon("activate").params("row: name — sets its parameter values and suppressions"),
-    CommandSpec::new("config.preview", "Preview Configuration", preview).icon("eye").noundo().params("row: name — validates a rebuild without changing the design or history"),
+    CommandSpec::new("config.activate", "Activate Configuration", crate::checked!("config.activate", activate))
+        .icon("activate")
+        .contract(&ROW_CONTRACT)
+        .output(output_schema_for::<ConfigActivation>)
+        .params("row: name — sets its parameter values and suppressions"),
+    CommandSpec::new("config.preview", "Preview Configuration", crate::checked!("config.preview", preview))
+        .icon("eye")
+        .noundo()
+        .contract(&ROW_CONTRACT)
+        .output(output_schema_for::<ConfigActivation>)
+        .params("row: name — validates a rebuild without changing the design or history"),
     CommandSpec::new("config.rule", "Configuration Rule", rule).icon("configuration_table").params(
         "rule?: {id,name,enabled,condition,effect}; rules?: [rule…] (added or replaced together, then the rows checked once); id? + delete?; id? + index? (ordered move)",
     ),
-    CommandSpec::new("config.rules", "Configuration Rules", show).icon("list").noundo().params("ordered typed rules, rows and active state"),
+    CommandSpec::new("config.rules", "Configuration Rules", crate::checked!("config.rules", show))
+        .icon("list")
+        .noundo()
+        .contract(&TABLE_CONTRACT)
+        .output(output_schema_for::<ConfigTableReply>)
+        .params("ordered typed rules, rows and active state"),
 ];
 
 fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
@@ -77,7 +98,7 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
         }
         let body_name = value.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "face body required"))?;
         let point = value.get("point").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "finite face point required"))?;
-        let world = s.world_state();
+        let world = s.world_state()?;
         let body = world.body(body_name).ok_or_else(|| bad(cmd, "no face body"))?;
         if body.body.is_mesh() {
             return Err(bad(cmd, "mesh faces have no supported semantic lineage"));
@@ -166,14 +187,21 @@ fn configure(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn show(s: &mut Session, _p: &Value) -> Result<Value> {
+    let table = table(s, "config.table")?;
+    to_reply("config.table", ConfigTableReply { table, param_warnings: Vec::new() })
+}
+
+fn to_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The table as the read-only commands, and an activation after its switch, return it.
+fn table(s: &Session, cmd: &str) -> Result<ConfigTable> {
     let t = &s.doc.configs;
     let keys: Vec<String> = t.columns.iter().map(|c| s.doc.config_key(c)).collect();
-    let rows: Vec<Value> = t
-        .rows
-        .iter()
-        .map(|r| json!({"name": r.name, "values": keys.iter().zip(&r.cells).map(|(k, v)| (k.clone(), json!(v))).collect::<serde_json::Map<_, _>>()}))
-        .collect();
-    let targets: Vec<Value> = t
+    let rows =
+        t.rows.iter().map(|r| ConfigTableRow { name: r.name.clone(), values: keys.iter().cloned().zip(r.cells.iter().cloned()).collect() }).collect();
+    let targets = t
         .columns
         .iter()
         .map(|column| {
@@ -190,13 +218,22 @@ fn show(s: &mut Session, _p: &Value) -> Result<Value> {
                 }
                 _ => s.doc.config_key(column),
             };
-            json!({"key":s.doc.config_key(column),"label":label,"target":column})
+            let target = serde_json::to_value(column).map_err(|e| bad(cmd, e.to_string()))?;
+            Ok(ConfigTarget { key: s.doc.config_key(column), label, target })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
+    let rules = t.rules.iter().map(|r| serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
     let styles = s.doc.configuration_style_status(&s.model.state());
-    Ok(
-        json!({"columns": keys, "targets":targets, "rows": rows, "rules": t.rules, "active": t.active, "matches": s.doc.configuration_matches() && styles.is_ok(), "style_status":styles.as_ref().ok(),"style_error":styles.err().map(|error|error.to_string())}),
-    )
+    Ok(ConfigTable {
+        columns: keys,
+        targets,
+        rows,
+        rules,
+        active: t.active.clone(),
+        matches: s.doc.configuration_matches() && styles.is_ok(),
+        style_error: styles.as_ref().err().map(|error| error.to_string()),
+        style_status: styles.ok(),
+    })
 }
 
 fn column(s: &mut Session, p: &Value) -> Result<Value> {
@@ -293,6 +330,27 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if rename.as_ref().is_some_and(|n| n != &name && s.doc.configs.rows.iter().any(|r| &r.name == n)) {
         return Err(bad(cmd, "configuration name already exists"));
+    }
+    for (column, value) in s.doc.configs.columns.iter().zip(&cells) {
+        if matches!(column, Column::Suppress(_)) {
+            solidcraft_doc::config::suppression_cell(value).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+    }
+    let changes: Vec<_> = s
+        .doc
+        .configs
+        .columns
+        .iter()
+        .zip(&cells)
+        .filter_map(|(column, value)| match column {
+            Column::Param(name) => Some((name.clone(), value.clone())),
+            _ => None,
+        })
+        .collect();
+    if !changes.is_empty() {
+        // Check the final parameter graph without activating the row or rebuilding geometry.
+        let mut trial = s.doc.as_ref().clone();
+        trial.change_params_atomic(&changes).map_err(|e| bad(cmd, e.to_string()))?;
     }
     let t = &mut s.doc_mut().configs;
     let validated_name = rename.clone().unwrap_or_else(|| name.clone());
@@ -396,6 +454,12 @@ fn rule(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn activate(s: &mut Session, p: &Value) -> Result<Value> {
+    to_reply("config.activate", activation(s, p)?)
+}
+
+/// Switch to the row `p` names and say what that did, as `config.activate` and
+/// `config.preview` return it.
+fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
     let cmd = "config.activate";
     let r = str_(p, "row").ok_or_else(|| bad(cmd, "`row` is required"))?.to_string();
     let mut trial = s.scratch();
@@ -421,19 +485,18 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc = trial.doc;
     s.settle_value_edit(&solved)?;
     let errors: Vec<String> = s.model.results.iter().filter_map(|x| x.error.clone()).collect();
-    let mut out = show(s, p)?;
-    out["errors"] = json!(errors);
-    out["trace"] = json!(trace);
-    out["styles"] = json!(styles);
-    Ok(out)
+    let trace = trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
+    Ok(ConfigActivation { table: table(s, cmd)?, errors, trace, styles, preview: None, parameters: None, param_warnings: Vec::new() })
 }
 
 fn preview(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "config.preview";
     let mut trial = s.scratch();
-    let mut out = activate(&mut trial, p)?;
-    out["preview"] = json!(true);
-    out["parameters"] = json!(trial.doc.param_rows());
-    Ok(out)
+    let mut out = activation(&mut trial, p)?;
+    out.preview = Some(true);
+    out.parameters =
+        Some(trial.doc.param_rows().iter().map(|r| serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?);
+    to_reply(cmd, out)
 }
 
 #[cfg(test)]
@@ -665,6 +728,124 @@ mod tests {
     }
 
     #[test]
+    fn configuration_rows_reject_invalid_parameter_expressions_without_changes() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"L", "expression":"10 mm"}));
+        run(&mut s, "config.configure", json!({"params":["L"]}));
+        let before = s.doc.clone();
+        let undo_len = s.undo.len();
+        for expression in ["abc", "1/", "1/0"] {
+            for params in [
+                json!({"name":"Bad", "values":{"param:L":expression}}),
+                json!({"name":"Copy", "from":"Default", "values":{"L":expression}}),
+                json!({"name":"Default", "rename":"Renamed", "values":{"L":expression}}),
+            ] {
+                let error = s.execute("config.row", &params).expect_err("invalid expressions must be rejected when saving a row");
+                assert!(error.to_string().contains("parameter `L`"), "{params}: {error}");
+                assert_eq!(s.doc, before, "{params}");
+                assert_eq!(s.undo.len(), undo_len, "{params}");
+            }
+        }
+    }
+
+    #[test]
+    fn configuration_rows_reject_invalid_suppression_without_changes() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY", "name":"TestSketch"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "config.configure", json!({"features":["TestSketch"]}));
+        let before = s.doc.clone();
+        let undo_len = s.undo.len();
+        for value in [json!("banana"), json!(""), json!(2), json!(-1)] {
+            for params in [
+                json!({"name":"Bad", "values":{"suppress:TestSketch":value}}),
+                json!({"name":"Copy", "from":"Default", "values":{"TestSketch":value}}),
+                json!({"name":"Default", "rename":"Renamed", "values":{"TestSketch":value}}),
+            ] {
+                let error = s.execute("config.row", &params).expect_err("invalid suppression must be rejected when saving a row");
+                assert!(error.to_string().contains("suppression must be true or false"), "{params}: {error}");
+                assert_eq!(s.doc, before, "{params}");
+                assert_eq!(s.undo.len(), undo_len, "{params}");
+            }
+        }
+    }
+
+    #[test]
+    fn configuration_rows_validate_inherited_suppression_and_allow_repair() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY", "name":"TestSketch"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "config.configure", json!({"features":["TestSketch"]}));
+        // A row saved by an older reader may already contain invalid suppression text.
+        s.doc_mut().configs.rows[0].cells[0] = "banana".into();
+        let before = s.doc.clone();
+        let undo_len = s.undo.len();
+        for params in [json!({"name":"Copy", "from":"Default"}), json!({"name":"Default", "rename":"Renamed"})] {
+            let error = s.execute("config.row", &params).expect_err("inherited invalid suppression must also be checked");
+            assert!(error.to_string().contains("suppression must be true or false"), "{params}: {error}");
+            assert_eq!(s.doc, before, "{params}");
+            assert_eq!(s.undo.len(), undo_len, "{params}");
+        }
+        run(&mut s, "config.row", json!({"name":"Default", "values":{"TestSketch":false}}));
+        assert_eq!(s.doc.configs.rows[0].cells[0], "false");
+        run(&mut s, "config.activate", json!({"row":"Default"}));
+        assert!(!s.doc.features[0].suppressed);
+    }
+
+    #[test]
+    fn configuration_rows_keep_supported_suppression_spellings() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY", "name":"TestSketch"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "config.configure", json!({"features":["TestSketch"]}));
+        for (value, suppressed) in [
+            (json!(true), true),
+            (json!(false), false),
+            (json!(1), true),
+            (json!(0), false),
+            (json!("true"), true),
+            (json!("false"), false),
+            (json!(" YES "), true),
+            (json!(" No "), false),
+            (json!("1"), true),
+            (json!("0"), false),
+        ] {
+            let before = s.doc.features.clone();
+            run(&mut s, "config.row", json!({"name":"Accepted", "values":{"suppress:TestSketch":value}}));
+            assert_eq!(s.doc.features, before, "saving a row does not activate it");
+            let text = value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
+            assert_eq!(s.doc.configs.rows[1].cells[0], text, "accepted spellings are preserved");
+            run(&mut s, "config.activate", json!({"row":"Accepted"}));
+            assert_eq!(s.doc.features[0].suppressed, suppressed, "{value}");
+        }
+    }
+
+    #[test]
+    fn configuration_rows_validate_the_final_parameter_graph_without_activating_it() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"L", "expression":"10 mm"}));
+        run(&mut s, "parameters.add", json!({"name":"W", "expression":"L + 2 mm"}));
+        run(&mut s, "config.configure", json!({"params":["L", "W"]}));
+        let before = s.doc.clone();
+        // Changing L first would make a cycle with W's current expression. The final row is valid.
+        run(&mut s, "config.row", json!({"name":"Reordered", "values":{"L":"W + 2 mm", "W":"20 mm"}}));
+        assert_eq!(s.doc.params, before.params);
+        assert_eq!(s.doc.configs.active, before.configs.active);
+        let saved = s.doc.clone();
+        let undo_len = s.undo.len();
+        assert!(s.execute("config.row", &json!({"name":"Cycle", "from":"Reordered", "values":{"W":"L"}})).is_err());
+        assert_eq!(s.doc, saved);
+        assert_eq!(s.undo.len(), undo_len);
+        run(&mut s, "config.activate", json!({"row":"Reordered"}));
+        let (values, errors) = s.doc.param_values();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(values["L"].v, 22.0);
+        assert_eq!(values["W"].v, 20.0);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc, saved);
+    }
+
+    #[test]
     fn configured_feature_inputs_and_suppression_match_typed_cells() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length":10, "width":10, "height":10}));
@@ -746,9 +927,7 @@ mod tests {
         // Bad input.
         assert!(s.execute("config.row", &json!({"name": "X", "values": {"nope": 1}})).is_err());
         assert!(s.execute("config.activate", &json!({"row": "Missing"})).is_err());
-        run(&mut s, "config.row", json!({"name": "Broken", "values": {"length": "1/"}}));
-        assert!(s.execute("config.activate", &json!({"row": "Broken"})).is_err());
-        run(&mut s, "config.row", json!({"name": "Broken", "delete": true}));
+        assert!(s.execute("config.row", &json!({"name": "Broken", "values": {"length": "1/"}})).is_err());
         run(&mut s, "config.column", json!({"feature": fillet, "delete": true}));
         assert_eq!(run(&mut s, "config.table", json!({}))["columns"].as_array().map(Vec::len), Some(1));
     }

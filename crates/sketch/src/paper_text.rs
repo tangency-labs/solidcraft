@@ -41,10 +41,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
+use solidcore_record::{Loop2, Vec2};
 use solidcraft_geom::paper::text::{
     Cluster, Embed, Font, FontFlags, FontGlyph, FontMetrics, MAX_FONT_FAMILY, MAX_POSTSCRIPT_NAME, PlacedGlyph, TextRun, is_postscript_char,
 };
-use solidcraft_geom::{Loop2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::fallback::{self, Han, Query};
 use crate::fonts::{DEFAULT_FONT_FAMILY, FontData, check_family, face_at, face_family, find_style_in, font_data, font_dirs, normalize};

@@ -22,7 +22,9 @@
 
 use super::cubic_pieces::cubic_pieces;
 use super::{Clip, Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces, require};
-use crate::{Aabb2, Seg2, Vec2};
+use crate::Aabb2;
+use crate::prelude::*;
+use solidcore_record::{Seg2, Vec2};
 
 /// The largest number put on a grid, in millimetres either way: far past any scene's 2e5.
 const MAX_NUMBER_MM: f64 = 9e9;

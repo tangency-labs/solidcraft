@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the plane through two box edges that meet at a corner",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the top edges y 0, z 20 (along X) and x 40, z 20 (along Y) meet at (40,0,20): the top, z = 20",
+ "construction": {
+  "E": {
+   "plane": {
+    "through": [
+     1,
+     1,
+     20
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

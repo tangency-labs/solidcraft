@@ -9,11 +9,13 @@
 //! `L = T_A · F_a` and the parent-side joint frame `L · M(q)`, the chain inverted (reversed, axes
 //! negated, so each URDF value still equals SolidCraft's).
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointKind};
 use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::Mesh;
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
 

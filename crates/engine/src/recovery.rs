@@ -281,6 +281,14 @@ impl Autosaver {
         Ok(true)
     }
 
+    /// Whether the last autosave holds `s` as it is now, with no write still running: what a
+    /// crash now would leave for the next launch to offer. A finished write counts once a
+    /// [`Self::tick`] has taken its outcome.
+    pub fn caught_up(&self, s: &Session) -> bool {
+        self.writing.is_none()
+            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == s.visibility)
+    }
+
     /// Autosave when the interval has passed, or right away after a big operation. The design
     /// is written on a worker thread; true when this call started a write.
     pub fn tick(&mut self, s: &Session, big: bool) -> Result<bool> {
@@ -462,6 +470,19 @@ mod tests {
         let d = std::env::temp_dir().join(format!("solidcraft-recovery-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    /// Ticks (bounded) until the autosave a tick started has been written and taken up, as the
+    /// app's own frames would. A tick right after the one that started a write can find it still
+    /// running under load and take nothing up, so a test that then changes the session (marking
+    /// it saved) and checks the files would race the worker.
+    fn tick_until_caught_up(a: &mut Autosaver, s: &Session) {
+        let began = Instant::now();
+        while !a.caught_up(s) {
+            assert!(began.elapsed() < Duration::from_secs(30), "the autosave never caught up");
+            std::thread::sleep(Duration::from_millis(1));
+            a.tick(s, false).unwrap();
+        }
     }
 
     #[test]
@@ -686,6 +707,7 @@ mod tests {
         let mut a = Autosaver::new(&d, Duration::ZERO).unwrap();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         assert!(a.tick(&s, false).unwrap());
+        tick_until_caught_up(&mut a, &s);
         s.mark_saved();
         a.tick(&s, false).unwrap();
         assert!(!file(&d, &a.id, solidcraft_io::DESIGN_EXT).exists());

@@ -60,7 +60,7 @@ impl PunctualLightOptions {
     #[cfg(feature = "raytrace-cpu")]
     pub(crate) fn light(self) -> crate::raytrace::Result<crate::raytrace::punctual::PunctualLight> {
         use crate::raytrace::punctual::{PunctualLight, SpotCone};
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let [x, y, z] = self.position_mm;
         let [r, g, b] = self.color;
         let cone = self

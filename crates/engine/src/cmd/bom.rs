@@ -18,10 +18,11 @@ use solidcraft_doc::metadata::{BOM_KEYS, BOM_QUANTITY, BOM_TYPE, MATERIAL, MAX_K
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
-use crate::schema::bom::{OccurrenceBomTypeParams, OccurrenceBomTypeResult};
+use crate::schema::bom::{BomParams, OccurrenceBomTypeParams, OccurrenceBomTypeResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const BOM_CONTRACT: TypedContract<BomParams> = TypedContract::new();
 const OCCURRENCE_BOM_TYPE_CONTRACT: TypedContract<OccurrenceBomTypeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -54,7 +55,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          (as its component again). One undo step → occurrence, bom_type (its own, or same_as_component), effective (the type it \
          counts as), changed",
     ),
-    CommandSpec::new("assembly.bom", "Bill of Materials", bom).at("SOLID", "INSPECT").icon("bom").noundo().params(
+    CommandSpec::new("assembly.bom", "Bill of Materials", crate::checked!("assembly.bom", bom))
+        .at("SOLID", "INSPECT")
+        .icon("bom")
+        .noundo()
+        .contract(&BOM_CONTRACT)
+        .output(output_schema_for::<crate::schema::bom::Bom>)
+        .params(
         "component?: id or name (default the design); levels?: flat (default: every part at any depth, counted through its \
          subassemblies) | top (the component's direct children, subassemblies as one row each) | all (as top, each subassembly's \
          own rows listed after it, to any depth: items 1.1, 1.1.1, as in the CSV); show_purchased_contents?: true (in all, a \
@@ -69,7 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          a .csv (columns item, part_number, description, revision, count, definition, material, quantity) or .json file (children as \
          items 1.1, 1.2…); format?: csv|json (default from the path). Each placement counts as \
          its occurrence's bom_type, else its component's: phantom has no row (what it holds counts here; its own bodies, \
-         if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too); placements \
+         if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too, under it with group_children and a part number); placements \
          of one component that count as different types are different rows → rows: [{item, part_number, description, revision, \
          bom_type, count, definition, material (the physical materials of the definitions' own bodies, \"; \" between them; a \
          row that weighs what is placed inside it shows the one material all of that shares, else \"\"), mass_g?, quantity? \
@@ -82,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          (the view's item numbers are saved: assembly.bom.renumber). In a numbered view each level is listed by item number \
          and a row says provisional (its number not saved yet: a row added since shows the next number at its level, saved \
          by the next change), locked and duplicate when true",
-    ),
+        ),
     CommandSpec::new("assembly.bom.renumber", "Renumber Items", renumber).icon("bom").params(
         "component?, levels?, group_by?, group_children?, show_purchased_contents?: the view, as assembly.bom takes them; \
          start?: 1; step?: 1 (whole numbers, 1 to 999999); order?: list (default: by part number, as an unnumbered view \

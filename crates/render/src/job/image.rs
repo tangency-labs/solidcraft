@@ -5,12 +5,14 @@
 //! pixel windows, each handed back as straight-alpha sRGB rows). It prepares once (appearances,
 //! projected triangles, glass sorted back to front) and then draws each tile.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use serde::Serialize;
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::pixel_grid::{MAX_SIDE_PX, PixelGrid};
-use solidcraft_geom::{Plane, Vec2, Vec3, srgb};
+use solidcraft_geom::srgb;
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
 use crate::{Camera, FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};

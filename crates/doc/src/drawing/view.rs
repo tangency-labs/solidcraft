@@ -18,9 +18,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::{Plane, Vec2};
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::{Plane, Vec2};
 use solidcraft_render::VisualStyle;
 
 use super::{Drawing, add_by_id, in_id_order, require};

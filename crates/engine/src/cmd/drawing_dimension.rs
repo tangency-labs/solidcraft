@@ -8,11 +8,12 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{Candidate, Dimension, DimensionKind, Silhouette, Status, TextPlace, check_chain_length};
 use solidcraft_doc::ids;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;

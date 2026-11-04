@@ -15,9 +15,10 @@
 //! Consumers retain geometric normals for ray spawning and optical boundaries.
 //! No shading-normal energy correction, multiple scattering or transmission is modeled.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::surface::{MIN_ROUGHNESS, OpaqueSurface, SurfaceError, unit_direction};
 

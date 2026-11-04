@@ -4,7 +4,7 @@
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use super::*;
-use crate::MAX_BEZIER_CTRL;
+use solidcore_record::MAX_BEZIER_CTRL;
 
 fn p(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)

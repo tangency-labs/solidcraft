@@ -13,9 +13,11 @@ workspace = true
 trust-unknown-source = []
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
+solidcraft-profile = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
@@ -34,6 +36,10 @@ cadmpeg-registry = { workspace = true }
 png = { workspace = true }
 tiny-skia = { workspace = true }
 
+# The model cache's key (build.rs).
+[build-dependencies]
+sha2 = { workspace = true }
+
 # A plain fsync where a network share refuses Apple's full flush (src/safe_write.rs); already in
 # the tree through tempfile.
 [target.'cfg(target_vendor = "apple")'.dependencies]
@@ -45,3 +51,4 @@ gethostname = { workspace = true }
 
 [dev-dependencies]
 solidcraft-sketch = { workspace = true }
+solidcraft-testkit = { workspace = true }

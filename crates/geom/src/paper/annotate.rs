@@ -15,7 +15,8 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::ops::RangeInclusive;
 
 use super::{Invalid, Item, MAX_COORDINATE_MM, MAX_SIDE_MM, Result, require};
-use crate::{Loop2, Region2, Seg2, Vec2};
+use crate::prelude::*;
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 /// A leader's dot on a surface, in line widths across (ISO 128-2 clause 9).
 pub const DOT_PER_LINE_WIDTH: f64 = 5.0;

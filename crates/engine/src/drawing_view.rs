@@ -11,11 +11,12 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
+use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::drawing::view::ResolvedView;
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
-use solidcraft_geom::{Aabb2, EPS, Plane, Vec2};
+use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_render::VisualStyle;
 
 use crate::params::bad;
@@ -48,6 +49,8 @@ pub enum Unmeasured {
     /// The assembly places more than a view walks, so a view of it would leave parts out.
     PastWalkLimit,
     NoBodies,
+    /// The bodies of the assembly can't be placed.
+    NotPlaced,
 }
 
 impl Unmeasured {
@@ -56,6 +59,7 @@ impl Unmeasured {
         match self {
             Unmeasured::PastWalkLimit => "past_walk_limit",
             Unmeasured::NoBodies => "no_bodies",
+            Unmeasured::NotPlaced => "not_placed",
         }
     }
 }
@@ -68,6 +72,7 @@ impl fmt::Display for Unmeasured {
                 "the assembly is deeper than {MAX_PLACEMENT_DEPTH} levels or has more than {MAX_PLACEMENTS} placements: a view of it would leave parts out"
             ),
             Unmeasured::NoBodies => f.write_str("the view's source has no bodies"),
+            Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
         }
     }
 }
@@ -151,7 +156,7 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
     if !s.doc.placements_complete() {
         return Err(Unmeasured::PastWalkLimit);
     }
-    let state = s.world_state();
+    let state = s.world_state().map_err(|_| Unmeasured::NotPlaced)?;
     // The world state names each placed body as this walk does, so its name finds its path.
     let mut placed: BTreeMap<String, (Vec<u64>, String)> =
         s.doc.body_frames_with_source(&s.model.state()).into_iter().map(|(name, body, _, path, _)| (name, (path, body))).collect();

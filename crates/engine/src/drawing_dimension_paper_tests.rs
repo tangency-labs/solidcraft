@@ -1,8 +1,9 @@
+use solidcore_record::Vec3;
 use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, Silhouette, Status};
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
 use solidcraft_geom::paper::Scene;
-use solidcraft_geom::{Aabb2, Vec3};
 
 use super::*;
 

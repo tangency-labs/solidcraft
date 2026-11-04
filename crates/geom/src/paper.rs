@@ -55,6 +55,7 @@
 //! number finite and at most 1e5 mm in size. A fill is kept or dropped whole: one crossing its
 //! clip's edge isn't supported yet.
 
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use std::borrow::Cow;
@@ -62,7 +63,8 @@ use std::collections::BTreeMap;
 use std::f64::consts::FRAC_PI_2;
 
 use crate::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
-use crate::{Aabb2, EPS, Region2, Seg2, Vec2};
+use crate::{Aabb2, EPS};
+use solidcore_record::{Region2, Seg2, Vec2};
 
 pub mod annotate;
 pub mod clip;

@@ -30,6 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::view::{ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet};
@@ -39,7 +40,8 @@ use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
-use solidcraft_geom::{Aabb2, ArcMap, Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb2, ArcMap};
 
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Styles, Unmeasured, paper_group};
@@ -595,12 +597,12 @@ pub struct ViewStanding {
 /// is on. It reads the cache: nothing is drawn. A view that drew but didn't fit its sheet's scene is
 /// as the last assembly left it, while that is still its sheet's scene ([`Cache::assembled`]).
 pub fn standing(s: &Session, d: &Drawing) -> Vec<ViewStanding> {
-    let state = s.world_state();
+    let state = s.world_state().ok();
     let cache = &s.drawing_scenes;
     let assembled = cache.assembled(d).unwrap_or_default();
     let in_assembly = |id: u64| assembled.binary_search_by_key(&id, |v| v.view).ok().and_then(|at| assembled.get(at));
     let one = |view: &Arc<View>| {
-        let fresh = d.resolve_view(view.id).is_ok_and(|resolved| cache.fresh(view.id, &state, &resolved));
+        let fresh = d.resolve_view(view.id).is_ok_and(|resolved| state.as_ref().is_some_and(|state| cache.fresh(view.id, state, &resolved)));
         let (status, reason) = match cache.views.get(&view.id).filter(|_| fresh) {
             Some(entry) => {
                 let status = in_assembly(view.id).map_or(&entry.drawn.status, |v| &v.status);
@@ -618,7 +620,7 @@ pub fn standing(s: &Session, d: &Drawing) -> Vec<ViewStanding> {
 pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     forget_closed(s);
     let d = s.drawing(CMD)?.clone();
-    let state = s.world_state();
+    let state = s.world_state()?;
     let units = s.doc.drawing_units(&d).to_string();
     let cache = &mut s.drawing_scenes;
     if let Some(last) = &cache.last
@@ -665,7 +667,7 @@ pub fn step(s: &mut Session) -> bool {
     forget_closed(s);
     let (Ok(d), Some(sheet)) = (s.drawing(CMD).cloned(), s.drawing_scenes.sheet) else { return false };
     let Ok(on) = views_on(&d, sheet) else { return false };
-    let state = s.world_state();
+    let Ok(state) = s.world_state() else { return false };
     let units = s.doc.drawing_units(&d).to_string();
     let waiting: Vec<(u64, ResolvedView)> =
         on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, *view)).collect();

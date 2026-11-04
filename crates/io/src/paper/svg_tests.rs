@@ -1,9 +1,11 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_doc::canvas::base64_decode;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::{Clip, Dashes, Group, Item, NoPictures, ObjectKind, Picture, Pictures, Scene};
 use solidcraft_geom::pixel_grid::GridWindow;
-use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
 
 use super::*;
 use crate::paper::png::tests::{Image, Provider, read};
@@ -96,7 +98,7 @@ fn cubics_and_parabolas_are_written_and_other_curves_as_cubics() {
     assert_eq!(first_d(&sheet(vec![stroke(vec![cubic], false, 0.25)])), "M0 297C10 277 30 277 40 297");
     let parabola = Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 1.0 };
     assert_eq!(first_d(&sheet(vec![stroke(vec![parabola], false, 0.25)])), "M0 297Q10 287 20 297");
-    let mut controls = [p(0.0, 0.0); solidcraft_geom::MAX_BEZIER_CTRL];
+    let mut controls = [p(0.0, 0.0); solidcore_record::MAX_BEZIER_CTRL];
     controls[..5].copy_from_slice(&[p(0.0, 0.0), p(5.0, 10.0), p(10.0, 0.0), p(15.0, 10.0), p(20.0, 0.0)]);
     let quartic = Seg2::Bezier { n: 4, p: controls };
     for curve in [0.5, 2.0].map(|w| Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w }).into_iter().chain([quartic]) {

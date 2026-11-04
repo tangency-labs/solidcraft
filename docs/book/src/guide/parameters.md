@@ -65,9 +65,9 @@ abs sign min max floor ceil round trunc mod exp ln log log10 pow hypot` (`log` i
 conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
 and `90 deg / 1 rad` is π/2, and a fraction of numbers before a unit is one value too (`1/2 in`
 is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, while
-`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too, outside parentheses: `2,5 mm` is
-`2.5 mm` (inside a function's parentheses the comma separates its arguments, so write
-`max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
+`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too: `2,5 mm` is
+`2.5 mm`, and `-(width-0,5)/2` is `-(width-0.5)/2` (directly in a function's parentheses the
+comma separates its arguments, so write `max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
 `3 7/16 in` are 2.125 in and 3.4375 in (a whole number, a space, then a proper fraction of whole
 numbers). A length where an angle is expected (or the other way round) is an
 error, not a silent conversion. Cycles are reported with their path (`a → b → a`), renaming a

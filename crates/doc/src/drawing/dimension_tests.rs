@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 use solidcraft_geom::drawing_view::NamedView;
 

@@ -8,9 +8,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::EPS;
 use crate::drawing_view::{Invalid, PARALLEL, require};
+use crate::prelude::*;
 use crate::section::{MAX_NUMBER, validate_plane};
-use crate::{EPS, Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 
 type Result<T> = std::result::Result<T, Invalid>;
 

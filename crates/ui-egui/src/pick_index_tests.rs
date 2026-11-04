@@ -27,7 +27,7 @@ fn indexed_picks_match_the_full_scan() {
         app.ui.perspective = perspective;
         app.cam.yaw = yaw;
         app.cam.pitch = pitch;
-        app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 15.0, 12.0);
+        app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.0);
         app.cam.distance = 110.0;
         let proj = projection(&app, rect);
         for j in 0..48 {
@@ -54,9 +54,9 @@ fn indexed_picks_match_the_full_scan() {
 fn indexes_follow_the_model_state() {
     let mut app = assembly();
     let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0));
-    app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 15.0, 12.0);
+    app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.0);
     let proj = projection(&app, rect);
-    let centre = proj.to_screen(solidcraft_engine::geom::Vec3::new(20.0, 15.0, 10.0)).unwrap();
+    let centre = proj.to_screen(solidcore_record::Vec3::new(20.0, 15.0, 10.0)).unwrap();
     pick(&app, &proj, centre);
     assert!(app.viewport.pick_index.len() >= 1);
     app.session.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [-20, -20, 0], "operation": "new_body"})).unwrap();
@@ -110,7 +110,7 @@ fn pick_timing_on_curved_models() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let component = app.run("file.insert_mesh", json!({"path": path.to_string_lossy()})).unwrap()["component"].clone();
         app.run("component.activate", json!({"component":"root"})).unwrap();
-        let size = app.session.world_state().bodies[0].mesh_bounds().size();
+        let size = crate::open_meshing::session_world(&app.session).bodies[0].mesh_bounds().size();
         let step = size.x.max(size.y) * 1.3;
         for k in 1..25 {
             app.run("occurrence.copy", json!({"component":component,"translate":[f64::from(k % 5) * step, f64::from(k / 5) * step, 0.0]})).unwrap();
@@ -120,7 +120,7 @@ fn pick_timing_on_curved_models() {
     for (name, mut app, pitch) in scenes {
         app.set_origin_shown(false);
         (app.cam.yaw, app.cam.pitch) = (0.6, pitch);
-        let st = app.session.world_state();
+        let st = app.session.world_state().unwrap();
         app.cam.fit(&st.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh_bounds())));
         let (tris, segs) = st
             .bodies

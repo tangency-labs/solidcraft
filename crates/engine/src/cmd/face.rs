@@ -3,8 +3,10 @@
 //! edges become lines, circular edges circles or arcs, anything else a chain of lines.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::{EmbossFace, apply_point, mat_inverse, mat_mul};
-use solidcraft_geom::{Mesh, Vec2, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
@@ -109,7 +111,7 @@ fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// The outward normal of the planar face at the world point `p`: on the model as the view
 /// places it (moved components where they are shown).
 pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_state(&s.world_state(), p, None).ok().flatten()?;
+    let (m, f, d, _) = face_at_state(&*s.world_state().ok()?, p, None).ok().flatten()?;
     let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
@@ -149,7 +151,7 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
     match face_ref_form(v).map_err(|why| bad(cmd, why))? {
         FaceRefForm::Point(p) => Ok(p),
         FaceRefForm::Name(name) => {
-            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state() };
+            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state()? };
             solidcraft_doc::naming::named_face_point(&st, body, name).map_err(|why| bad(cmd, why))
         }
     }
@@ -254,7 +256,7 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
     }
     let state = s.model.state();
     let mut picked = Vec::new();
-    let mut common: Option<(String, solidcraft_geom::Plane)> = None;
+    let mut common: Option<(String, solidcore_record::Plane)> = None;
     for &point in points {
         if !point.is_finite() {
             return Err(bad(cmd, "faces must be finite points"));

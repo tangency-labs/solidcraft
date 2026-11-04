@@ -6,9 +6,10 @@
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_geom::paper::text::{Embed, Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::fallback::{Han, Query};
 use crate::fonts::font_data;

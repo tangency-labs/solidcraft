@@ -356,6 +356,7 @@ pub const SECTIONS: &[Section] = &[
         ],
     },
     // Sketch dimensions are driven by parameters, so they are one click away while sketching.
+    Section { tab: "SKETCH", panel: "INSPECT", promoted: 1, ids: &["sketch.inspect"] },
     Section { tab: "SKETCH", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "SKETCH", panel: "FINISH SKETCH", promoted: 2, ids: &["sketch.finish", "sketch.cancel"] },
     // New Sketch leads the tab, as on MODEL: a sheet part starts from a sketch (#3250).
@@ -517,6 +518,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sketch.create", "New Sketch"),
     ("sketch.dimension", "Dimension"),
     ("sketch.finish", "Finish Sketch"),
+    ("sketch.inspect", "Sketch Report"),
     ("sketch.pattern.circular", "Circular"),
     ("sketch.pattern.rectangular", "Rectangular"),
     ("sketch.rectangle.two_point", "Rectangle"),
@@ -1204,8 +1206,8 @@ mod tests {
         assert!(crate::scenario::handle_at("tab:MODEL").is_none());
         assert_eq!(h.app.ui.tab, "SURFACE", "the first tab still shown is selected");
 
-        // Settings › Interface lists the standard tabs too.
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        // Settings › Layout lists the standard tabs too.
+        h.call("ui.prefs", json!({"open":"Layout"}));
         crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:MODEL");
         h.step(&json!({"click":{"handle":"prefs:toolbar_tab:MODEL"}})).unwrap();
         assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
@@ -1331,7 +1333,7 @@ mod tests {
         assert_eq!(visible_tabs(&h.app), ["SKETCH"]);
         assert_eq!(h.app.ui.tab, "SKETCH");
 
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.call("ui.prefs", json!({"open":"Layout"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         h.call("ui.prefs", json!({"button":"ok"}));
         assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
@@ -1507,16 +1509,16 @@ mod tests {
         h.frames(3);
         let links = h.app.session.execute("component.links", &json!({})).unwrap();
         assert_eq!(links["links"][0]["name"], "part1", "{links}");
-        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
         h.step(&json!({"choose_file": "part2.step"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
         for _ in 0..600 {
-            if h.app.session.world_state().bodies.len() == 2 {
+            if h.app.session.world_state().unwrap().bodies.len() == 2 {
                 break;
             }
             h.frames(1);
         }
-        assert_eq!(h.app.session.world_state().bodies.len(), 2, "the STEP file's body is inserted");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 2, "the STEP file's body is inserted");
     }
 
     /// Every way into a sketch (New Sketch on the ribbon then a plane, a double-click in the

@@ -19,10 +19,19 @@ const ICON: f32 = 20.0;
 /// right of it, and so does the sketch tools' coordinate readout (`tools::preview`, drawn from
 /// [`READOUT`] below right). From the hot spot to the badge's bottom-left corner:
 const OFFSET: Vec2 = vec2(12.0, -8.0);
-/// Where the sketch tools' coordinate readout starts, down and right of the hot spot.
-const READOUT: f32 = 10.0;
+/// Where the sketch tools' coordinate readout starts, down and right of the hot spot: right of
+/// the system arrow, which hangs below it about 12 points wide at the default size and about 18
+/// at the next larger one, and would cover the first value (#9480).
+pub(crate) const READOUT: Vec2 = vec2(26.0, 10.0);
 /// The gap to the hot spot when the badge flips to the left of the pointer.
 const FLIPPED_GAP: f32 = 6.0;
+
+/// Where the coordinate readout of a sketch tool's point at `point` (screen) starts: [`READOUT`]
+/// from the pointer while it is over `view`, else from the point. The point snaps away from the
+/// pointer, so a readout placed from it could still slide under the arrow.
+pub(crate) fn readout_at(painter: &egui::Painter, view: Rect, point: Pos2) -> Pos2 {
+    painter.ctx().pointer_hover_pos().filter(|p| view.contains(*p)).unwrap_or(point) + READOUT
+}
 
 /// The command whose tool or dialog is running: the one a click in the viewport goes to.
 pub(crate) fn command(app: &SolveApp) -> Option<&'static str> {
@@ -50,7 +59,7 @@ fn badge_rect(at: Pos2, bounds: Rect, readout_height: f32) -> Rect {
         min.x = at.x - FLIPPED_GAP - BADGE;
     }
     if min.y < bounds.top() {
-        min.y = at.y + READOUT + readout_height + FLIPPED_GAP;
+        min.y = at.y + READOUT.y + readout_height + FLIPPED_GAP;
     }
     Rect::from_min_size(min, vec2(BADGE, BADGE))
 }
@@ -86,10 +95,10 @@ mod tests {
     }
 
     #[test]
-    fn navigation_preference_restores_tool_badge_on_cancel_and_defaults() {
+    fn tools_preference_restores_tool_badge_on_cancel_and_defaults() {
         let mut h = Harness::new();
         h.app.home.open = false;
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
@@ -97,7 +106,7 @@ mod tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.ui.tool_cursor);
         h.app.ui.tool_cursor = true;
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert!(!h.app.ui.tool_cursor);
         h.call("ui.prefs", json!({"button":"cancel"}));
@@ -105,24 +114,86 @@ mod tests {
     }
 
     #[test]
+    fn tools_preference_keeps_applied_tool_badge_after_restart() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Tools"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(h.app.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"ok"}));
+
+        let mut restarted = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        restarted.load_prefs(&h.app.prefs());
+        assert!(restarted.ui.tool_cursor, "an explicitly enabled tool badge survives a restart");
+
+        // Turning it off must replace a previously saved true value too.
+        h.call("ui.prefs", json!({"open":"Tools"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(!h.app.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        restarted.load_prefs(&h.app.prefs());
+        assert!(!restarted.ui.tool_cursor, "Apply also saves turning the tool badge off");
+    }
+
+    #[test]
+    fn tools_preference_does_not_save_unapplied_tool_badge_changes() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let saved = |h: &Harness| serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap()["tool_cursor"].clone();
+        h.call("ui.prefs", json!({"open":"Tools"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(h.app.ui.tool_cursor);
+        assert_eq!(saved(&h), false, "periodic saves and quit keep the last applied value");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert_eq!(saved(&h), true);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.ui.tool_cursor);
+        assert_eq!(saved(&h), true, "Restore Defaults also waits for Apply or OK");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.ui.tool_cursor);
+        assert_eq!(saved(&h), true, "Cancel preserves the applied choice in the settings file");
+    }
+
+    #[test]
+    fn saved_tool_badge_requires_a_boolean_and_old_settings_keep_the_default() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.load_prefs("{}");
+        assert!(!app.ui.tool_cursor, "settings from before the option was saved keep it off");
+        for enabled in [true, false] {
+            app.load_prefs(&json!({"tool_cursor":enabled}).to_string());
+            assert_eq!(app.ui.tool_cursor, enabled);
+            for invalid in [json!({}), json!({"tool_cursor":null}), json!({"tool_cursor":"true"}), json!({"tool_cursor":1})] {
+                app.load_prefs(&invalid.to_string());
+                assert_eq!(app.ui.tool_cursor, enabled, "missing or malformed flags leave the current setting alone");
+            }
+        }
+    }
+
+    #[test]
     fn badge_shows_the_running_tool_beside_the_pointer() {
         let mut h = Harness::new();
         h.settle();
-        // Off by default: a running tool shows no badge until Navigation preferences turn it on.
+        // Off by default: a running tool shows no badge until Tools preferences turn it on.
         assert!(!h.app.ui.tool_cursor, "the badge is on by default");
         h.step(&json!({"start": "sketch.create"})).unwrap();
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "off by default, yet a badge is drawn at {badge:?}");
         h.step(&json!({"key": "Escape"})).unwrap();
         h.settle();
-        // The board's Display menu omits this preference; Navigation keeps its checkbox.
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        // The board's Display menu omits this preference; Tools keeps its checkbox.
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click": {"handle": "view:tool_cursor"}})).unwrap();
         h.call("ui.prefs", json!({"button":"ok"}));
         h.frames(2);
-        assert!(h.app.ui.tool_cursor, "the Navigation preferences checkbox did not turn the badge on");
+        assert!(h.app.ui.tool_cursor, "the Tools preferences checkbox did not turn the badge on");
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "no tool runs, yet a badge is drawn at {badge:?}");
 
@@ -141,9 +212,9 @@ mod tests {
         assert_eq!(icon(&h.app), Some(icon_of("sketch.circle.center")));
         let badge = badge.unwrap();
         // The coordinate readout starts READOUT below and right of the pointer: no overlap.
-        assert!(badge.bottom() < at.y + READOUT, "the badge {badge:?} covers the readout under {at:?}");
+        assert!(badge.bottom() < at.y + READOUT.y, "the badge {badge:?} covers the readout under {at:?}");
 
-        // Turned off in Navigation preferences.
+        // Turned off in Tools preferences.
         h.app.ui.tool_cursor = false;
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "turned off, yet a badge is drawn at {badge:?}");
@@ -173,10 +244,33 @@ mod tests {
         for at in [middle, pos2(795.0, 300.0), pos2(400.0, 5.0), pos2(795.0, 5.0), pos2(5.0, 595.0), pos2(795.0, 595.0)] {
             let badge = badge_rect(at, bounds, line);
             assert!(bounds.contains_rect(badge), "at {at:?}: {badge:?} leaves {bounds:?}");
-            let readout = Rect::from_min_size(at + vec2(READOUT, READOUT), vec2(120.0, line));
+            let readout = Rect::from_min_size(at + READOUT, vec2(120.0, line));
             assert!(!badge.intersects(readout), "at {at:?}: {badge:?} covers the readout {readout:?}");
             assert!(!badge.contains(at), "at {at:?}: {badge:?} covers the hot spot");
         }
+    }
+
+    /// A line's coordinate readout starts right of the system arrow, which hangs below and
+    /// right of the hot spot about 12 × 19 points at the default size and 18 × 28 at the next
+    /// larger one, wherever the point snaps (#9480).
+    #[test]
+    fn the_coordinate_readout_starts_right_of_the_pointer_arrow() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        let c = h.app.viewport.rect.map(|r| r.center()).unwrap();
+        // Off a grid point, so the point snaps away from the pointer.
+        for at in [c, c + vec2(5.0, 3.0), c + vec2(-4.0, 6.0)] {
+            h.step(&json!({"move": [at.x, at.y]})).unwrap();
+            h.frames(2);
+            let readout = rect_of("viewport:readout").expect("the readout is drawn");
+            let arrow = Rect::from_min_size(at, vec2(19.0, 29.0));
+            assert!(!readout.intersects(arrow), "at {at:?}: the readout {readout:?} is under the arrow {arrow:?}");
+            assert!(readout.top() > at.y, "at {at:?}: the readout {readout:?} is not below the hot spot");
+        }
+        h.step(&json!({"key": "Escape"})).unwrap();
     }
 
     /// Every interactive tool's command has an icon to show.

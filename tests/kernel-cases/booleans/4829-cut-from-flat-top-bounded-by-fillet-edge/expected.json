@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4829"
+ ],
+ "what": "a cylinder r10 x 40 with its top edge filleted r2, cut 14 mm down from its flat top face (the R8 disc, bounded by the fillet's edge): ~30 s, then 'boolean Cut: no result'",
+ "source": "analytic",
+ "method": "the round removes the corner region (1-pi/4) 2^2 at radius 10 - (2 - (2/6)/(1-pi/4)) (Pappus); the cut removes the R8 disc x 14: V = pi 100 40 - removed - pi 64 14. The top face is used up: faces side, bottom, round, pocket wall, pocket floor = 5",
+ "body_count": 1,
+ "faces": 5,
+ "volume_mm3": 9699.9778
+}

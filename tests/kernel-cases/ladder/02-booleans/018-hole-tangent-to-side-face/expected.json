@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a through hole r10 tangent to the front face: the front face pinched to a line",
+ "source": "analytic",
+ "method": "the hole touches y=0 along the line x=30: removed pi r^2 20, the material behind keeps one body",
+ "body_count": 1,
+ "volume_mm3": 41716.81469282
+}
