@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use crate::Session;
@@ -637,4 +638,670 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"]);
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Trim/Extend (frame.trim)
+
+/// A 45 × 45 bar: its volume is 2025 mm² × its length.
+fn bar45() -> Value {
+    json!({"kind": "bar", "width": 45, "height": 45})
+}
+
+/// The member bodies a `frame.member` run made (not every body of the model), in line order.
+fn made(r: &Value) -> Vec<String> {
+    r["created_bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect()
+}
+
+/// A member of 45 × 45 bar per line, each line its own 3D sketch line (a separate feature per
+/// group, so each group's bodies are known by its `body_name`).
+fn members_3d(s: &mut Session, name: &str, lines: &[([f64; 3], [f64; 3])]) -> Vec<String> {
+    run(s, "sketch.create", json!({"plane": "XY", "name": name}));
+    run(s, "sketch.options", json!({"sketch_3d": true}));
+    for (a, b) in lines {
+        run(s, "sketch.line3d", json!({"points": [a, b]}));
+    }
+    run(s, "sketch.finish", json!({}));
+    made(&run(s, "frame.member", json!({"sketch": name, "profile": bar45(), "body_name": name})))
+}
+
+/// The T-slot tower of #4003 in 45 × 45 bar, footprint `w`: 4 uprights 1500 long at the corners,
+/// rings of 4 rails (bottoms at 0, 700 and 1455) flush with the outside, and 2 cross members in the
+/// middle ring at x = w / 2. Every line runs through its profile's centre, 22.5 in from the
+/// outside. Returns (uprights, rails, cross members).
+fn tower(s: &mut Session, w: f64) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let (c, f) = (22.5, w - 22.5);
+    let uprights = members_3d(
+        s,
+        "Upright",
+        &[([c, c, 0.0], [c, c, 1500.0]), ([f, c, 0.0], [f, c, 1500.0]), ([f, f, 0.0], [f, f, 1500.0]), ([c, f, 0.0], [c, f, 1500.0])],
+    );
+    let mut lines = Vec::new();
+    for z in [22.5, 722.5, 1477.5] {
+        lines.extend([([c, c, z], [f, c, z]), ([c, f, z], [f, f, z]), ([c, c, z], [c, f, z]), ([f, c, z], [f, f, z])]);
+    }
+    let rails = members_3d(s, "Rail", &lines);
+    let cross = members_3d(s, "Cross", &[([w / 2.0, c, 722.5], [w / 2.0, f, 722.5]), ([w / 2.0 + 100.0, c, 722.5], [w / 2.0 + 100.0, f, 722.5])]);
+    (uprights, rails, cross)
+}
+
+/// Butt the rails against the uprights, then the cross members against the middle ring's rails
+/// along X (the 5th and 6th rails).
+fn butt_tower(s: &mut Session, uprights: &[String], rails: &[String], cross: &[String]) -> (Value, Value) {
+    let a = run(s, "frame.trim", json!({"members": rails, "to": uprights}));
+    let b = run(s, "frame.trim", json!({"members": cross, "to": [rails[4], rails[5]]}));
+    (a, b)
+}
+
+#[test]
+fn a_side_given_must_face_the_member() {
+    let mut s = Session::default();
+    // A post along Y at x = 0 and a rail along X from x = 100 that falls short of it. The post's
+    // profile x is world −X (y × d with y up and d along +Y), so its left side faces +X.
+    let post = members_3d(&mut s, "Post", &[([0.0, -100.0, 0.0], [0.0, 100.0, 0.0])]);
+    let rail = members_3d(&mut s, "Rail", &[([100.0, 0.0, 0.0], [300.0, 0.0, 0.0])]);
+    // Its start extends to the post's side facing it (x = 22.5) by default, and so with that side.
+    let f = run(&mut s, "frame.trim", json!({"members": rail, "to": post}))["feature"].clone();
+    let left = json!({"members": rail, "to": [{"member": post[0], "side": "left"}]});
+    run(&mut s, "timeline.redefine", json!({"feature": f, "command": "frame.trim", "params": left}));
+    // The far side faces away from the rail, and the top runs along it: both refused.
+    for side in ["right", "top"] {
+        let p = json!({"members": rail, "to": [{"member": post[0], "side": side}]});
+        let err = s.execute("timeline.redefine", &json!({"feature": f, "command": "frame.trim", "params": p})).unwrap_err().to_string();
+        assert!(err.contains("faces away"), "{side}: {err}");
+    }
+}
+
+#[test]
+fn bad_trims_are_refused_with_the_reason() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    for (p, why) in [
+        (json!({"to": uprights}), "`members`"),
+        (json!({"members": rails}), "`to`"),
+        (json!({"members": [], "to": uprights}), "`members`"),
+        (json!({"members": ["Block"], "to": uprights}), "not a frame member"),
+        (json!({"members": rails, "to": ["Block"]}), "not a frame member"),
+        (json!({"members": [rails[0], rails[0]], "to": uprights}), "twice"),
+        (json!({"members": rails, "to": uprights, "end": "middle"}), "`end`"),
+        (json!({"members": rails, "to": uprights, "gap": -1}), "`gap`"),
+        (json!({"members": rails, "to": uprights, "gap": "a lot"}), "gap"),
+        (json!({"members": rails, "to": [{"member": uprights[0], "side": "front"}]}), "`side`"),
+        // The uprights' feature is Member1; the sketch it runs along is named Upright.
+        (json!({"members": [{"feature": "Member1", "line": "nope"}], "to": rails}), "nope"),
+        (json!({"members": [{"feature": "Upright", "line": "l1"}], "to": rails}), "not a frame member feature"),
+        // A cross member meets no upright.
+        (json!({"members": cross, "to": uprights}), "meets none"),
+        (json!({"members": [rails[0]], "to": [rails[0]]}), "itself"),
+        // The first rail's start meets the upright, and YZ (x = 0) is nearer its start too.
+        (json!({"members": [rails[0]], "to": [uprights[0], {"plane": "YZ"}]}), "both trim"),
+    ] {
+        let err = s.execute("frame.trim", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+    }
+    // A member a later feature changed is not rebuilt (its change would be lost).
+    run(&mut s, "solid.move", json!({"bodies": [rails[0]], "translate": [0, 0, 5]}));
+    let err = s.execute("frame.trim", &json!({"members": [rails[0]], "to": uprights})).unwrap_err().to_string();
+    assert!(err.contains("changed after"), "{err}");
+    // The moved target's original sketch line is stale too: it must not silently trim
+    // another member to the side where the target used to be.
+    let err = s.execute("frame.trim", &json!({"members": [rails[2]], "to": [rails[0]]})).unwrap_err().to_string();
+    assert!(err.contains("changed after"), "{err}");
+    // Not while a sketch is open.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    assert!(s.execute("frame.trim", &json!({"members": [rails[1]], "to": uprights})).is_err());
+}
+
+#[test]
+fn a_rotated_square_member_is_not_rebuilt_even_when_its_bounds_match() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    run(&mut s, "solid.move", json!({"bodies": m, "axis": [1, 0, 0], "angle": 90}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    let doc = s.doc.to_json();
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok(), "the new cache is adopted");
+    let mut legacy = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+    for state in legacy.records["states"].as_array_mut().unwrap() {
+        for member in state["frame_members"].as_array_mut().unwrap() {
+            member.as_object_mut().unwrap().remove("unmodified");
+        }
+    }
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &legacy).is_err(), "old identity checks require reevaluation");
+    for mut session in [
+        s,
+        Session::new(solidcraft_doc::Document::from_json(&doc).unwrap()),
+        Session::opened(solidcraft_doc::Document::from_json(&doc).unwrap(), Some(&saved)),
+        Session::opened(solidcraft_doc::Document::from_json(&doc).unwrap(), Some(&legacy)),
+    ] {
+        let body = session.model.state().body("Bar").unwrap().body.clone();
+        let features = session.doc.features.len();
+        let err = session
+            .execute(
+                "frame.trim",
+                &json!({"members": m,
+            "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("changed after"), "{err}");
+        assert_eq!(session.doc.features.len(), features);
+        assert!(body.same(&session.model.state().body("Bar").unwrap().body));
+    }
+}
+
+#[test]
+fn a_transferred_member_cannot_be_rebuilt_in_its_original_component_frame() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let c = run(&mut s, "component.create", json!({"name": "Child", "grounded": false}));
+    let component = c["component"].as_u64().unwrap();
+    run(&mut s, "component.move_bodies", json!({"component": component, "bodies": m}));
+    run(&mut s, "occurrence.move", json!({"occurrence": c["occurrence"], "translate": [100, 0, 0], "capture": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    let json = s.doc.to_json();
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+    for mut session in [s, Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), Some(&saved))] {
+        let body = session.model.state().body("Bar").unwrap().clone();
+        assert!(body.transferred && body.component == component);
+        let before = session.doc.to_json();
+        let err = session
+            .execute(
+                "frame.trim",
+                &json!({"members": m,
+            "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("changed after"), "{err}");
+        assert_eq!(session.doc.to_json(), before);
+        let state = session.model.state();
+        let after = state.body("Bar").unwrap();
+        assert!(after.body.same(&body.body) && after.component == component && after.transferred);
+    }
+}
+
+#[test]
+fn trims_undo_reopen_and_keep_their_members_through_the_saved_model() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    let full = s.doc.to_json();
+    butt_tower(&mut s, &uprights, &rails, &cross);
+    let before = s.doc.to_json();
+    // Reopened from its JSON (evaluated again) and from its saved model (adopted as saved).
+    let json = s.doc.to_json();
+    let saved = s.model.saved(&s.doc).expect("a saved model");
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok(), "the cache must actually be adopted");
+    for adopted in [None, Some(&saved)] {
+        let mut r = Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), adopted);
+        assert_eq!(r.doc.to_json(), before);
+        // The members are still known to a trim after reopening: the upright's top end moves
+        // down to z = 1499.
+        run(&mut r, "frame.trim", json!({"members": [uprights[0]], "to": [{"plane": {"origin": [0, 0, 1499], "normal": [0, 0, 1]}}]}));
+    }
+    // A model saved before members were recorded knows none: it is not adopted, the design is
+    // evaluated again, and a trim still finds its members.
+    let mut old = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+    for st in old.records["states"].as_array_mut().unwrap() {
+        st.as_object_mut().unwrap().remove("frame_members");
+    }
+    let mut r = Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), Some(&old));
+    run(&mut r, "frame.trim", json!({"members": [uprights[0]], "to": [{"plane": {"origin": [0, 0, 1499], "normal": [0, 0, 1]}}]}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), full, "both trims undone");
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn a_renamed_trimmed_member_stays_trimmed() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    butt_tower(&mut s, &uprights, &rails, &cross);
+    run(&mut s, "body.rename", json!({"body": rails[0], "name": "Front rail"}));
+    assert!(s.model.state().frame_member("Front rail").is_some());
+    assert!(s.model.state().frame_member(&cross[0]).is_some());
+}
+
+#[test]
+fn a_member_name_given_again_means_the_new_member() {
+    // A member removed, and a new member along another line given its name.
+    let mut s = Session::default();
+    let old = members_3d(&mut s, "Rail", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    run(&mut s, "solid.remove", json!({"bodies": old}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Second"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 200, 0], [100, 200, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let new = made(&run(&mut s, "frame.member", json!({"sketch": "Second", "profile": bar45(), "body_name": "Rail"})));
+    assert_eq!(old, new);
+    // The name is the new member's: it extends to x = 150, where it runs.
+    run(&mut s, "frame.trim", json!({"members": new, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}));
+    assert_eq!(s.model.state().frame_member(&new[0]).unwrap().body, new[0]);
+}
+
+#[test]
+fn a_trimmed_member_keeps_its_face_names() {
+    // What later features picked on a member stays picked when a trim goes in before them.
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let names = |s: &Session| solidcraft_doc::naming::face_names(s.model.state().body(&m[0]).unwrap()).to_vec();
+    let before = names(&s);
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}));
+    assert_eq!(names(&s), before);
+}
+
+#[test]
+fn a_slanted_trim_keeps_each_side_face_attached_to_the_same_side() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let side_names = |s: &Session| {
+        let st = s.model.state();
+        let b = st.body("Bar").unwrap();
+        solidcraft_doc::naming::face_names(b)
+            .iter()
+            .enumerate()
+            .filter_map(|(k, n)| {
+                let normal = b.body.planar_face(k)?.normal();
+                (normal.x.abs() < 1e-9).then_some((n.clone(), normal))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let before = side_names(&s);
+    assert_eq!(before.len(), 4);
+    run(
+        &mut s,
+        "frame.trim",
+        json!({"members": m,
+        "to": {"plane": {"origin": [80, 0, 0], "normal": [1, 0, 1]}}}),
+    );
+    let after = side_names(&s);
+    assert_eq!(after.keys().collect::<Vec<_>>(), before.keys().collect::<Vec<_>>());
+    for (name, normal) in before {
+        assert!(after[&name].dot(normal) > 1.0 - 1e-9, "{name}: {:?} vs {normal:?}", after[&name]);
+    }
+}
+
+/// Hostile values in every parameter of `frame.trim`, on a real tower so they get past the member
+/// lookups: refused, never a panic or an internal error.
+#[test]
+fn hostile_trims_are_refused_not_crashed() {
+    let mut s = Session::default();
+    let (uprights, rails, _) = tower(&mut s, 600.0);
+    let hostile = [
+        json!(null),
+        json!(1e308),
+        json!(-1e308),
+        json!(f64::MAX),
+        json!("1e400 mm"),
+        json!("-1e300 mm"),
+        json!(""),
+        json!([]),
+        json!({}),
+        json!([[]]),
+        json!([{"feature": 1e300, "line": []}]),
+        json!([{"member": {"feature": "Member1", "line": "l1"}, "side": 7}]),
+        json!([{"plane": {"origin": [1e308, 0, 0], "normal": [0, 0, 0]}}]),
+        json!([{"plane": {"origin": [0, 0, 0], "normal": [1e-300, 0, 0]}}]),
+        json!([{"plane": {"face": [1e308, 1e308, 1e308]}}]),
+        json!([{"plane": {"face": [0, 0, 0], "body": "Upright", "index": 1e300}}]),
+        json!([{"plane_ref": {"type": "custom", "plane": {"origin": [0, 0, 0], "x_dir": [0, 0, 0], "y_dir": [0, 0, 0]}}}]),
+        json!([{"plane_ref": {"type": "custom", "plane": {"origin": [1e308, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1e-300, 0]}}}]),
+        json!([{"plane_ref": {"type": "offset", "base": {"type": "origin", "name": "XY"}, "distance": "1e400 mm"}}]),
+        json!([{"plane_ref": 7}]),
+        json!([{"member": "nope", "side": "left"}]),
+        json!([{"member": {"feature": "Member1"}, "side": "left"}]),
+        json!("x".repeat(100_000)),
+    ];
+    let good = json!({"members": [rails[0]], "to": uprights});
+    for key in ["members", "to", "end", "gap"] {
+        for v in &hostile {
+            let mut p = good.clone();
+            p[key] = v.clone();
+            if let Err(crate::EngineError::Internal(id, msg)) = s.execute("frame.trim", &p) {
+                panic!("{id} {p}: {msg}");
+            }
+        }
+    }
+    // Planes the members run along, through or far from: refused or built, never a panic.
+    for plane in [
+        json!({"origin": [0, 0, 0], "normal": [0, 1, 0]}),
+        json!({"origin": [0, 0, 1e6], "normal": [1, 0, 1e-7]}),
+        json!({"origin": [300, 0, 0], "normal": [1, 0, 0]}),
+    ] {
+        let p = json!({"members": [rails[0]], "to": {"plane": plane}, "gap": 1000});
+        match s.execute("frame.trim", &p) {
+            Err(crate::EngineError::Internal(id, msg)) => panic!("{id} {p}: {msg}"),
+            // Built: take it back, so the next plane trims the rail as the tower made it.
+            Ok(_) => run(&mut s, "edit.undo", json!({})),
+            Err(_) => json!(null),
+        };
+    }
+}
+
+/// What a trim recipe must give: its bodies, their total volume and box, or a refusal.
+enum Trimmed {
+    Built { bodies: usize, volume: f64, bbox: Option<([f64; 3], [f64; 3])> },
+    Refused(&'static str),
+}
+
+/// Trims land each member's ends where a hand-derived answer puts them: the members' total
+/// volume and box after each recipe, worked out from where the ends must be, or the refusal the
+/// last step must give. Member targets follow their lines through parameter edits, face and plane
+/// targets follow the face or plane through moves, transfers and renames, and a world plane means
+/// the same place for a member drawn in a moved component.
+#[test]
+fn trims_put_member_ends_where_the_hand_derived_answer_says() {
+    use Trimmed::{Built, Refused};
+    let cases = [
+        (
+            // x+y=0 and x-y=30 cross inside y in [-22.5,22.5].
+            "crossing ends refused",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [30, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [0, 0, 0], "normal": [1, 1, 0]}}, "end": "start"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [30, 0, 0], "normal": [1, 1, 0]}}, "end": "end"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [30, 0, 0], "normal": [1, -1, 0]}}, "end": "end"}]
+            ]),
+            Refused("ends cross"),
+        ),
+        (
+            // Mean length 150-(-20)=170 over 10x10 section.
+            "extend start and slanted end",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [100, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 10, "height": 10}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 1]}}}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [-20, 0, 0], "normal": [1, 0, 0]}}, "end": "start"}]
+            ]),
+            Built { bodies: 1, volume: 17000.0, bbox: Some(([-20.0, -5.0, -5.0], [155.0, 5.0, 5.0])) },
+        ),
+        (
+            // 10 squared section extends to x=150-2; V=100*148.
+            "extend with gap",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [100, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 10, "height": 10}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}, "gap": 2}]
+            ]),
+            Built { bodies: 1, volume: 14800.0, bbox: Some(([0.0, -5.0, -5.0], [148.0, 5.0, 5.0])) },
+        ),
+        (
+            // Plate V=200*200*30; post V=2025*(300-30).
+            "face target follows edit",
+            json!([
+                ["parameters.add", {"name": "T", "expression": "10 mm"}],
+                ["solid.box", {"length": 200, "width": 200, "height": "T", "corner": [0, 0, 0], "body_name": "Plate"}],
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 100, 100], [100, 100, 300]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["frame.trim", {"members": ["Post"], "to": {"plane": {"face": [50, 50, 10]}}}],
+                ["parameters.change", {"name": "T", "expression": "30 mm"}]
+            ]),
+            Built { bodies: 2, volume: 1746750.0, bbox: Some(([0.0, 0.0, 0.0], [200.0, 200.0, 300.0])) },
+        ),
+        (
+            // 2 posts of 400 mm plus a rail of 800-90=710 mm, all section 2025 mm2.
+            "footprint parameter",
+            json!([
+                ["parameters.add", {"name": "W", "expression": "600 mm"}],
+                ["sketch.create", {"plane": "XY", "name": "Posts"}],
+                ["sketch.line", {"points": [[22.5, 0], [22.5, 400]]}],
+                ["sketch.line", {"points": [["W - 22.5 mm", 0], ["W - 22.5 mm", 400]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "Posts", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["sketch.create", {"plane": "XY", "name": "Rail"}],
+                ["sketch.line", {"points": [[22.5, 200], ["W - 22.5 mm", 200]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "Rail", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Rail"}],
+                ["frame.trim", {"members": ["Rail"], "to": ["Post", "Post (2)"]}],
+                ["parameters.change", {"name": "W", "expression": "800 mm"}]
+            ]),
+            Built { bodies: 3, volume: 3057750.0, bbox: Some(([0.0, 0.0, -22.5], [800.0, 400.0, 22.5])) },
+        ),
+        (
+            // Post V=2025*200; rail V=2025*(300-32.5).
+            "moved member face",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, -100, 0], [0, 100, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 0, 0], [300, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["solid.move", {"bodies": ["Post"], "translate": [10, 0, 0]}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"face": [32.5, 0, 0]}}}]
+            ]),
+            Built { bodies: 2, volume: 946687.5, bbox: None },
+        ),
+        (
+            // 45 squared section, every section ray retains 30 mm; V=2025*30.
+            "parallel slanted ends",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [30, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [0, 0, 0], "normal": [1, 1, 0]}}, "end": "start"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [30, 0, 0], "normal": [1, 1, 0]}}, "end": "end"}]
+            ]),
+            Built { bodies: 1, volume: 60750.0, bbox: Some(([-22.5, -22.5, -22.5], [52.5, 22.5, 22.5])) },
+        ),
+        (
+            // Rail runs x=150..300; V=2025*(200+150).
+            "renamed construction plane",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, -100, 0], [0, 100, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 0, 0], [300, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["construct.plane.offset", {"base": "YZ", "offset": 150, "name": "Cut"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": "Cut"}}],
+                ["timeline.rename", {"feature": "Cut", "name": "Renamed cut"}]
+            ]),
+            Built { bodies: 2, volume: 708750.0, bbox: None },
+        ),
+        (
+            // Replacement is 150 mm long at y=200, with section 2025 mm2.
+            "reused member name",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "RailLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [100, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "RailLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Rail"}],
+                ["solid.remove", {"bodies": ["Rail"]}],
+                ["sketch.create", {"plane": "XY", "name": "ReplacementLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 200, 0], [100, 200, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "ReplacementLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Rail"}],
+                ["frame.trim", {"members": ["Rail"], "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}]
+            ]),
+            Built { bodies: 1, volume: 303750.0, bbox: Some(([0.0, 177.5, -22.5], [150.0, 222.5, 22.5])) },
+        ),
+        (
+            // Root sketch maps into component frame; world member stays on X, from 160 to 300 after trimming.
+            "rotated component world plane",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 0, 0], [300, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["component.create", {"name": "Frame", "grounded": false}],
+                ["occurrence.move", {"occurrence": "Frame:1", "axis": [0, 0, 1], "angle": "90 deg", "translate": [40, 70, 0], "capture": true}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [160, 0, 0], "normal": [1, 0, 0]}}}]
+            ]),
+            Built { bodies: 1, volume: 283500.0, bbox: Some(([160.0, -22.5, -22.5], [300.0, 22.5, 22.5])) },
+        ),
+        (
+            // A rotation changes body identity despite equal bounds of a square section.
+            "rotated member refused",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [100, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["solid.move", {"bodies": ["Bar"], "axis": [1, 0, 0], "angle": 90}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}]
+            ]),
+            Refused("changed after"),
+        ),
+        (
+            // x+z=150 over centred 10x10 section; mean length 150.
+            "slanted end",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [100, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 10, "height": 10}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 1]}}}]
+            ]),
+            Built { bodies: 1, volume: 15000.0, bbox: Some(([0.0, -5.0, -5.0], [155.0, 5.0, 5.0])) },
+        ),
+        (
+            // Transferred member cannot be rebuilt in its original component frame.
+            "transferred member refused",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, 0, 0], [100, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["component.create", {"name": "Child", "grounded": false}],
+                ["component.move_bodies", {"component": "Child", "bodies": ["Bar"]}],
+                ["occurrence.move", {"occurrence": "Child:1", "translate": [100, 0, 0], "capture": true}],
+                ["component.activate", {"component": "root"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}]
+            ]),
+            Refused("changed after"),
+        ),
+        (
+            // Transfer retains post at x=0, rail ends at x=22.5; V=2025*(200+277.5).
+            "transferred target face",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, -100, 0], [0, 100, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 0, 0], [300, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["component.create", {"name": "Child"}],
+                ["component.move_bodies", {"component": "Child", "bodies": ["Post"]}],
+                ["component.activate", {"component": "root"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"plane": {"face": [22.5, 0, 0]}}}]
+            ]),
+            Built { bodies: 2, volume: 966937.5, bbox: None },
+        ),
+        (
+            // The root sketch line stays at world (100,100), z=100..300. A world plane at z=60 extends the post to length 240; V=2025*240. Component translation changes only the local representation.
+            "translated component world plane",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 100, 100], [100, 100, 300]]}],
+                ["sketch.finish", {}],
+                ["component.create", {"name": "Frame", "grounded": false}],
+                ["occurrence.move", {"occurrence": "Frame:1", "translate": [0, 0, 100], "capture": true}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["frame.trim", {"members": ["Post"], "to": {"plane": {"origin": [0, 0, 60], "normal": [0, 0, 1]}}}]
+            ]),
+            Built { bodies: 1, volume: 486000.0, bbox: Some(([77.5, 77.5, 60.0], [122.5, 122.5, 300.0])) },
+        ),
+        (
+            // Post length 200, rail 300-22.5; V=2025*(200+277.5).
+            "trim to member side",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, -100, 0], [0, 100, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 0, 0], [300, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": ["Post"]}]
+            ]),
+            Built { bodies: 2, volume: 966937.5, bbox: Some(([-22.5, -100.0, -22.5], [300.0, 100.0, 22.5])) },
+        ),
+        (
+            // The far side normal points away from the rail.
+            "wrong side refused",
+            json!([
+                ["sketch.create", {"plane": "XY", "name": "PostLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[0, -100, 0], [0, 100, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "PostLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Post"}],
+                ["sketch.create", {"plane": "XY", "name": "BarLine"}],
+                ["sketch.options", {"sketch_3d": true}],
+                ["sketch.line3d", {"points": [[100, 0, 0], [300, 0, 0]]}],
+                ["sketch.finish", {}],
+                ["frame.member", {"sketch": "BarLine", "profile": {"kind": "bar", "width": 45, "height": 45}, "body_name": "Bar"}],
+                ["frame.trim", {"members": ["Bar"], "to": {"member": "Post", "side": "right"}}]
+            ]),
+            Refused("faces away"),
+        ),
+    ];
+    for (what, steps, want) in cases {
+        let mut s = Session::default();
+        let steps = steps.as_array().unwrap();
+        let (last, before) = steps.split_last().unwrap();
+        for step in before {
+            run(&mut s, step[0].as_str().unwrap(), step[1].clone());
+        }
+        match want {
+            Refused(why) => {
+                let err = s.execute(last[0].as_str().unwrap(), &last[1]).unwrap_err().to_string();
+                assert!(err.contains(why), "{what}: {err}");
+            }
+            Built { bodies: count, volume, bbox } => {
+                run(&mut s, last[0].as_str().unwrap(), last[1].clone());
+                let got = bodies(&mut s);
+                assert_eq!(got.len(), count, "{what}: {got:?}");
+                let v: f64 = got.iter().map(|b| b.1).sum();
+                assert!(rel(v, volume) < 1e-6, "{what}: volume {v}, want {volume}");
+                if let Some((lo, hi)) = bbox {
+                    let min = got.iter().fold([f64::INFINITY; 3], |m, b| std::array::from_fn(|i| m[i].min(b.2[i])));
+                    let max = got.iter().fold([f64::NEG_INFINITY; 3], |m, b| std::array::from_fn(|i| m[i].max(b.3[i])));
+                    assert!(near3(min, lo) && near3(max, hi), "{what}: box {min:?} {max:?}, want {lo:?} {hi:?}");
+                }
+            }
+        }
+    }
 }
