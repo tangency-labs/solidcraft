@@ -6352,6 +6352,17 @@ fn face_sel_in(
     (d <= tolerance).then(|| Sel::Face { body: body.name.clone(), index, point })
 }
 
+/// The chip of a reopened extent reference (an extrude's or revolve's To Object, an extrude's
+/// From Object) stored at `stored`, shown at `point`: the face its stored name finds there, as
+/// the rebuild does, else the shown face at the point (a point on a face boundary can pick
+/// either), else the bare point, whose chip reads as sketch coordinates.
+fn reference_sel(s: &Session, name: Option<&String>, stored: Vec3, point: Vec3) -> Sel {
+    name.filter(|n| solidcraft_engine::doc::naming::locate_face(&s.model.state(), n, stored).is_some_and(|hit| hit.on_point))
+        .and_then(|n| named_refill(s, None, n, stored, false))
+        .or_else(|| shown_face_sel(s, point))
+        .unwrap_or(Sel::Vertex { body: String::new(), point })
+}
+
 /// Resolve a stored name on the current input body before placing its pick in the viewport.
 /// Keep the resolved index: a face point can lie on a boundary shared with another face.
 fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool) -> Option<Sel> {
@@ -6610,14 +6621,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
+            // The face names follow the points: To's first, then From's.
+            let mut names = f.face_names.iter();
             for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from)] {
                 if let Some(point) = point {
                     set_object_input(&mut d.inputs, &mut d.active, label, true);
-                    // The face the point is on, as it was picked: a bare point's chip reads
-                    // as sketch coordinates, (0.00, 0.00) mm with no sketch open.
-                    let point = solidcraft_engine::doc::apply_point(&frame, point.0);
+                    let sel = reference_sel(s, names.next(), point.0, solidcraft_engine::doc::apply_point(&frame, point.0));
                     if let Some(input) = d.inputs.iter_mut().find(|i| i.label == label) {
-                        input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
+                        input.items = vec![sel];
                     }
                 }
             }
@@ -6656,9 +6667,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(point) = to {
                 set_to_object(&mut d.inputs, &mut d.active, true);
-                let point = solidcraft_engine::doc::apply_point(&frame, point.0);
+                let sel = reference_sel(s, f.face_names.first(), point.0, solidcraft_engine::doc::apply_point(&frame, point.0));
                 if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TO_OBJECT) {
-                    input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
+                    input.items = vec![sel];
                 }
             }
             let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();

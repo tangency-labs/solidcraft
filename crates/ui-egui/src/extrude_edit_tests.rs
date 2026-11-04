@@ -690,3 +690,29 @@ fn reopened_to_object_shows_its_face_under_the_extent_type() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(5.0, 5.0, 15.0)));
 }
+
+/// A To Object point on an edge is on two faces: the reopened chip is the face its stored name
+/// finds, the one the rebuild ends on, whichever of the two the shown mesh puts nearer.
+#[test]
+fn reopened_to_object_on_an_edge_shows_its_named_face() {
+    use solidcraft_engine::kernel::{FaceSurface, face_surface};
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[0,0,15],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    let mut h = make_in(h, json!({"to":[10,5,15]}));
+    let st = h.app.session.model.state();
+    let lid = st.body("Lid").unwrap();
+    let names = solidcraft_engine::doc::naming::face_names(lid);
+    let face = |pick: fn(&FaceSurface) -> bool| (0..names.len()).find(|&i| face_surface(&lid.body, i).as_ref().is_some_and(pick)).unwrap();
+    let bottom = face(|f| matches!(f, FaceSurface::Plane { normal, .. } if normal.z < -0.5));
+    let side = face(|f| matches!(f, FaceSurface::Plane { normal, .. } if normal.x > 0.5));
+    let id = h.app.session.doc.find_feature("Depth").unwrap().id;
+    for named in [bottom, side] {
+        h.app.session.doc_mut().feature_mut(id).unwrap().face_names = vec![names[named].clone()];
+        open(&mut h);
+        let d = h.app.dialog.as_ref().unwrap();
+        let to = d.inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first()).cloned();
+        assert!(matches!(&to, Some(solidcraft_engine::Sel::Face { body, index, .. }) if body == "Lid" && *index == named), "named {named}: {to:?}");
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        assert!(h.app.dialog.is_none());
+    }
+}
