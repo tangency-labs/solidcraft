@@ -194,6 +194,12 @@ pub(crate) fn on(app: &SolveApp) -> bool {
     app.preferences.placement_handles
 }
 
+/// A pick the shared handles take as a move: a Cylinder held by one reference edge moves along it
+/// (see `primitive::pick_held`). Only with the handles on; off, the pick is the dialog's, as before.
+pub(crate) fn pick_held(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
+    on(app) && primitive::pick_held(app, d, sel)
+}
+
 /// The face place a click with `hits` would add to the dialog's first input: snapped to a sketch
 /// point as a click is when the input takes points; none when nothing there is a face.
 pub(crate) fn face_pick(d: &Dialog, s: &Session, hits: &[Hit]) -> Option<Sel> {
