@@ -192,6 +192,23 @@ fn a_bare_size_is_read_in_the_design_unit_by_the_marker() {
     assert!((typed(&h, "corner").x - (40.0 - 25.4)).abs() < 1e-3, "{:?}", typed(&h, "corner"));
 }
 
+/// An empty placement field is 0, as OK sends it: while one is cleared to be retyped the marker
+/// stays where the other two put it, for the Centre and the Corner alike.
+#[test]
+fn an_empty_placement_field_counts_as_zero_for_the_marker() {
+    let mut h = plate();
+    start(&mut h, "solid.box");
+    let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+    h.app.dialog.as_mut().unwrap().extra.insert("center".into(), json!(["", "100", "200"]));
+    let (base, _) = place(&h);
+    assert!(base.dist(Vec3::new(0.0, 100.0, 200.0 - size.z / 2.0)) < 1e-6, "centre with x empty: {base:?}");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.extra.remove("center");
+    d.extra.insert("corner".into(), json!(["300", "", "400"]));
+    let (base, _) = place(&h);
+    assert!(base.dist(Vec3::new(300.0 + size.x / 2.0, size.y / 2.0, 400.0)) < 1e-6, "corner with y empty: {base:?}");
+}
+
 /// A size typed as a bare expression ("2 * 1") is in the design's unit, as OK reads it: in an
 /// inch design the corner a drop writes is 1 in back from the point, not 1 mm.
 #[test]
