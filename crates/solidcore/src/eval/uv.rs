@@ -172,12 +172,17 @@ pub(crate) fn wrap_into(x: f64, (a, b): (f64, f64)) -> f64 {
 
 impl Domain {
     /// `uv` clamped into the bounded ranges of directions that are not periodic.
+    /// Two NaN bounds produce NaN in that direction instead of panicking.
     #[must_use]
     pub fn clamp(&self, uv: [f64; 2]) -> [f64; 2] {
         let mut out = uv;
         for ((x, range), period) in out.iter_mut().zip(self.range).zip(self.period) {
             if let (Some((a, b)), None) = (range, period) {
-                *x = x.clamp(a.min(b), a.max(b));
+                *x = if a.is_nan() && b.is_nan() {
+                    f64::NAN
+                } else {
+                    x.clamp(a.min(b), a.max(b))
+                };
             }
         }
         out
@@ -429,6 +434,47 @@ pub fn degenerate_within(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn domain_clamping_propagates_two_nan_bounds_in_each_direction() {
+        for bad in 0..2 {
+            let mut dom = Domain {
+                range: [Some((0.0, 1.0)), Some((-2.0, 2.0))],
+                period: [None, None],
+            };
+            dom.range[bad] = Some((f64::NAN, f64::NAN));
+            let actual = dom.clamp([3.0, -3.0]);
+            assert!(actual[bad].is_nan());
+            assert_eq!(actual[1 - bad], [1.0, -2.0][1 - bad]);
+        }
+        let dom = Domain {
+            range: [Some((f64::NAN, f64::NAN)); 2],
+            period: [None, None],
+        };
+        assert!(dom.clamp([0.5, 0.5]).iter().all(|x| x.is_nan()));
+    }
+
+    #[test]
+    fn domain_clamping_retains_valid_and_unclamped_ranges() {
+        let mut dom = Domain {
+            range: [Some((2.0, -2.0)), Some((0.0, 1.0))],
+            period: [None, None],
+        };
+        assert_eq!(dom.clamp([3.0, -3.0]), [2.0, 0.0]);
+        assert_eq!(dom.clamp([-3.0, 3.0]), [-2.0, 1.0]);
+        assert_eq!(dom.clamp([0.5, 0.5]), [0.5, 0.5]);
+
+        dom.range = [None, Some((f64::NAN, f64::NAN))];
+        dom.period = [None, Some(1.0)];
+        assert_eq!(dom.clamp([3.0, -3.0]), [3.0, -3.0]);
+
+        // min/max retain the finite endpoint when just one bound is NaN.
+        dom.range = [Some((f64::NAN, 2.0)), Some((-2.0, f64::NAN))];
+        dom.period = [None, None];
+        assert_eq!(dom.clamp([3.0, -3.0]), [2.0, -2.0]);
+        dom.range = [Some((f64::NEG_INFINITY, f64::INFINITY)); 2];
+        assert_eq!(dom.clamp([3.0, -3.0]), [3.0, -3.0]);
+    }
 
     #[test]
     fn closure_rejects_impossible_degrees_without_overflowing() {
