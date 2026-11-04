@@ -141,26 +141,42 @@ pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>
 /// A Box dropped by its placement marker at `p` on a face with normal `n`: the current placement
 /// (the corner or the centre) written so the box stands on the face, centred on `p` across it
 /// (only centred on `p` on a face square to no axis), as a pre-selected face places it. `size` is
-/// the box's length, width and height (mm). Returns the point written, in the design's length
-/// unit as the fields show it.
-pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3) -> Option<Value> {
+/// the box's length, width and height (mm), `texts` the same as typed: a size that is an
+/// expression stays one in the place (as `dialogs::box_corner` keeps it), so the box keeps
+/// standing there when the size changes. Returns the point written, in the design's length unit
+/// as the fields show it.
+pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3, texts: [&str; 3]) -> Option<Value> {
     if !p.is_finite() {
         return None;
     }
-    // How much of the size lies behind `p` along each axis: none (or all) along the face's
-    // normal, half across it.
-    let back = |c: f64, size: f64, axis: Vec3| match n.dot(axis) {
-        d if d > 1.0 - 1e-9 => c,
-        d if d < -1.0 + 1e-9 => c - size,
-        _ => c - size * 0.5,
-    };
-    let corner = Vec3::new(back(p.x, size.x, Vec3::X), back(p.y, size.y, Vec3::Y), back(p.z, size.z, Vec3::Z));
     let index = keys("solid.box").iter().position(|k| extra.contains_key(*k)).unwrap_or(0);
-    let at = if index == 0 { corner } else { corner + size * 0.5 };
+    // How much of the size lies behind `p` along each axis: for the corner none (or all) along
+    // the face's normal and half across it; the centre is half a size further on.
+    let behind = |axis: Vec3| {
+        let corner = match n.dot(axis) {
+            d if d > 1.0 - 1e-9 => 0.0,
+            d if d < -1.0 + 1e-9 => 1.0,
+            _ => 0.5,
+        };
+        if index == 0 { corner } else { corner - 0.5 }
+    };
     // A drop is only as exact as the pointer: to the micrometre, so the fields read 45 mm, not
     // 44.999991 mm.
     let um = |v: f64| coord(s, (v * 1e3).round() / 1e3);
-    let coords = [um(at.x), um(at.y), um(at.z)];
+    let at = |c: f64, size: f64, text: &str, axis: Vec3| {
+        let f = behind(axis);
+        // A size typed as `l = 20` is placed by its value: `l` exists only once the box does.
+        let text = solidcraft_engine::doc::expr::definition(text).map_or(text, |(_, rhs)| rhs).trim();
+        if f == 0.0 || text.is_empty() || solidcraft_engine::doc::expr::is_literal(text) {
+            return um(c - f * size);
+        }
+        match f {
+            1.0 => format!("{} - ({text})", um(c)),
+            0.5 => format!("{} - ({text}) / 2", um(c)),
+            _ => format!("{} + ({text}) / 2", um(c)),
+        }
+    };
+    let coords = [at(p.x, size.x, texts[0], Vec3::X), at(p.y, size.y, texts[1], Vec3::Y), at(p.z, size.z, texts[2], Vec3::Z)];
     store("solid.box", extra, index, &coords);
     Some(json!(coords))
 }

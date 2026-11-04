@@ -209,6 +209,10 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
         return false;
     };
     let sz = box_size(app, d);
+    let texts = ["length", "width", "height"].map(|k| match &d.kind {
+        Kind::Primitive { fields, .. } => fields.iter().find(|f| f.0 == k).map(|f| f.1.clone()).unwrap_or_default(),
+        _ => String::new(),
+    });
     let Kind::Primitive { cmd, at, .. } = &mut d.kind else { return false };
     match *cmd {
         "solid.cone" | "solid.coil" if n.is_none() => return false,
@@ -221,7 +225,7 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
                 if n.is_some_and(|n| !STANDS_ON.iter().any(|axis| square_to(n, *axis))) {
                     return false;
                 }
-                crate::primitive_placement::dropped(s, &mut d.extra, p, n.unwrap_or(Vec3::Z), sz);
+                crate::primitive_placement::dropped(s, &mut d.extra, p, n.unwrap_or(Vec3::Z), sz, [&texts[0], &texts[1], &texts[2]]);
             } else {
                 *at = Some((p, n));
             }
