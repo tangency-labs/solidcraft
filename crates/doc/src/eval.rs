@@ -7123,6 +7123,7 @@ fn chamfer_with(
     })
 }
 
+/// Evaluate one feature against the prior model state and preserve traced identities for later references.
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -7992,9 +7993,8 @@ fn eval_feature(
             }
             let converted = kernel::convert_prismatic_mesh(&source.body, tolerance)?;
             let converted = converted.with_color(source.body.color());
-            let input = source.body.mesh(&kernel::MeshTolerance::chord(tolerance))?;
-            let input = serde_json::to_vec(&input).map_err(|e| DocError::Invalid(format!("mesh reconstruction identity: {e}")))?;
-            let converted = crate::lineage::reconstructed_tool(converted, &input, tolerance);
+            let (positions, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+            let converted = crate::lineage::reconstructed_tool(converted, positions, triangles, tolerance);
             let result = ModelBody::traced_new(source.name.clone(), converted, f.id);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;

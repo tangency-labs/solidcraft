@@ -11,6 +11,7 @@ pub(super) struct Circle {
     radius: f64,
 }
 
+/// Extract bounded closed loops from triangles on a planar section, refusing ambiguous boundary adjacency.
 fn section(mesh: &TriMesh, plane: &Plane, height: f64, epsilon: f64) -> Option<Vec<Vec<Vec2>>> {
     let axis = plane.normal();
     let mut edges = BTreeMap::<(u32, u32), usize>::new();
@@ -95,6 +96,7 @@ pub(super) fn hints(mesh: &TriMesh, axis: Vec3, tolerance: f64, epsilon: f64) ->
     out
 }
 
+/// Certify one consistently turning circular run against vertex residuals, sample angles and chord deviation.
 fn arc(points: &[Vec2], circle: Circle, tolerance: f64, epsilon: f64) -> Option<Seg2> {
     if points.len() < 5 {
         return None;
@@ -124,9 +126,11 @@ fn arc(points: &[Vec2], circle: Circle, tolerance: f64, epsilon: f64) -> Option<
     Some(Seg2::Arc { center, radius, start: p.y.atan2(p.x), sweep })
 }
 
+/// Read circular parameters from an arc; other segment kinds provide no circle hint.
 fn circle_of(s: &Seg2) -> Option<Circle> {
     if let Seg2::Arc { center, radius, .. } = s { Some(Circle { center: *center, radius: *radius }) } else { None }
 }
+/// Choose the analytic junction nearest the original vertex, refusing movement beyond tolerance.
 fn join(a: &Seg2, b: &Seg2, near: Vec2, tolerance: f64) -> Option<Vec2> {
     let mut points = Vec::new();
     match (circle_of(a), circle_of(b)) {
@@ -168,6 +172,7 @@ fn join(a: &Seg2, b: &Seg2, near: Vec2, tolerance: f64) -> Option<Vec2> {
     points.into_iter().filter(|p| p.dist(near) <= tolerance).min_by(|a, b| a.dist(near).total_cmp(&b.dist(near)))
 }
 
+/// Recover a section from certified circle hints and fall back to its independently fitted source loop.
 fn fitted(points: &[Vec2], models: &[Circle], tolerance: f64, epsilon: f64) -> Loop2 {
     let original = fit_loop(points, tolerance, epsilon);
     if points.len() < 5 || models.is_empty() {
@@ -250,10 +255,12 @@ fn fitted(points: &[Vec2], models: &[Circle], tolerance: f64, epsilon: f64) -> L
     Loop2 { segs: out }
 }
 
+/// Measure distance to a finite segment, including its endpoints.
 fn line_distance(a: Vec2, b: Vec2, p: Vec2) -> f64 {
     let line = Seg2::Line { a, b };
     line.point_at(line.closest_param(p)).dist(p)
 }
+/// Certify projected polygon coverage against line or circular walls, including chord and angular bounds.
 fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
     curves.iter().any(|curve| match curve {
         Seg2::Line { a, b } => points.iter().all(|p| line_distance(*a, *b, *p) <= tolerance),
@@ -312,6 +319,7 @@ fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
     })
 }
 
+/// Recover a bounded straight extrusion only when all projected side triangles match certified section curves.
 pub(super) fn extrusion(mesh: &TriMesh, axis: Vec3, tolerance: f64, models: &[Circle]) -> Result<Option<Body>> {
     if models.is_empty() {
         return Ok(None);

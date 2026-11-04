@@ -1150,3 +1150,17 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
         assert_eq!(names(&Document::from_json(&doc.to_json()).unwrap()), first, "reopened");
     }
 }
+
+/// Freeze the persisted v4 face-role encoding independently of display-mesh fields and serde layout.
+#[test]
+fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
+    let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
+    let traced = crate::lineage::reconstructed_tool(body, &positions, &[[0, 1, 2]], 0.01);
+    let lineage = traced.lineage.unwrap();
+    let crate::lineage::Operand::Made(roles) = lineage.operands[0].as_ref() else { panic!("made faces") };
+    assert_eq!(roles.len(), 6);
+    for (face, names) in roles.iter().enumerate() {
+        assert_eq!(names, &[format!("mesh:a25b75f4027054604e22932a73d09f6373cecd85bd8a0e0633be33cc156e16f6:face:{face}")]);
+    }
+}

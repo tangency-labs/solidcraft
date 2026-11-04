@@ -10,10 +10,12 @@ const MAX_DEPTH: usize = 8;
 const MAX_COMPONENTS: usize = 32;
 const MAX_FACES: usize = 256;
 
+/// Start bounded shoulder decomposition with one shared cut budget and original-mesh circle hints.
 pub(super) fn reconstruct(mesh: &TriMesh, tolerance: f64) -> Result<Option<Body>> {
     recover(mesh, mesh, tolerance, 0, &mut 0, &mut BTreeMap::new())
 }
 
+/// Rank at most sixteen canonical face-normal directions by triangle area to bound the reconstruction search.
 fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
     let mut out = BTreeMap::new();
     for t in &mesh.triangles {
@@ -36,6 +38,7 @@ fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
     out
 }
 
+/// Try certified extrusions before splitting at existing shoulders, sharing cut, depth and recovered-face budgets.
 fn recover(
     mesh: &TriMesh,
     root: &TriMesh,
@@ -173,6 +176,7 @@ struct CutMesh {
     epsilon: f64,
 }
 impl CutMesh {
+    /// Reuse a cut vertex within epsilon across neighboring grid cells and report vertex-index overflow.
     fn point(&mut self, p: Vec3) -> Result<u32> {
         let e = self.epsilon;
         let key = ((p.x / e).floor() as i64, (p.y / e).floor() as i64, (p.z / e).floor() as i64);
@@ -192,6 +196,7 @@ impl CutMesh {
         self.grid.entry(key).or_default().push(i);
         Ok(i)
     }
+    /// Weld a clipped triangle, discard degenerate corners and enforce the clipping triangle budget.
     fn triangle(&mut self, a: Vec3, b: Vec3, c: Vec3) -> Result<()> {
         if (b - a).cross(c - a).len() <= self.epsilon.powi(2) {
             return Ok(());
@@ -207,6 +212,7 @@ impl CutMesh {
     }
 }
 
+/// Clip to one half-space and cap its planar cut, refusing ambiguous, oversized or unclosed boundaries.
 fn half(mesh: &TriMesh, axis: Vec3, height: f64, positive: bool, epsilon: f64) -> Result<Option<TriMesh>> {
     let mut out = CutMesh { mesh: TriMesh::default(), grid: BTreeMap::new(), epsilon };
     let sign = if positive { 1. } else { -1. };
@@ -314,6 +320,7 @@ fn half(mesh: &TriMesh, axis: Vec3, height: f64, positive: bool, epsilon: f64) -
 }
 
 type EdgeUses = BTreeMap<(u32, u32), Vec<(u32, u32, usize)>>;
+/// Index oriented edge uses and their owning triangles for closedness and component checks.
 fn edge_map(mesh: &TriMesh) -> EdgeUses {
     let mut edges = EdgeUses::new();
     for (i, t) in mesh.triangles.iter().enumerate() {
@@ -323,9 +330,11 @@ fn edge_map(mesh: &TriMesh) -> EdgeUses {
     }
     edges
 }
+/// Require each mesh edge to have exactly two uses with opposite winding.
 fn closed(mesh: &TriMesh) -> bool {
     edge_map(mesh).values().all(|v| matches!(v.as_slice(),[(a,b,_),(c,d,_)] if a==d && b==c))
 }
+/// Split edge-connected pieces with compact vertex indices, requiring two uses per edge and bounded component count.
 fn components(mesh: &TriMesh) -> Result<Option<Vec<TriMesh>>> {
     let edges = edge_map(mesh);
     let mut neighbours = vec![Vec::new(); mesh.triangles.len()];

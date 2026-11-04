@@ -537,6 +537,7 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
     h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
 }
 
+/// Prepare a synthetic imported mesh and its conversion dialog for desktop background-apply tests.
 fn imported_mesh_for_conversion() -> Harness {
     use solidcore_record::Vec3;
     use solidcraft_engine::{
@@ -571,6 +572,7 @@ fn imported_mesh_for_conversion() -> Harness {
     h
 }
 
+/// A conversion without a preview must compute outside the window thread and adopt its result later.
 #[test]
 fn mesh_conversion_computes_beside_the_window_without_a_live_preview() {
     let mut h = imported_mesh_for_conversion();
@@ -588,6 +590,7 @@ fn mesh_conversion_computes_beside_the_window_without_a_live_preview() {
     assert!(!h.app.session.model.state().body("Mesh").unwrap().body.is_mesh());
 }
 
+/// Cancelling a pending conversion must leave the original mesh and document unchanged.
 #[test]
 fn cancelling_background_mesh_conversion_keeps_the_imported_mesh() {
     let mut h = imported_mesh_for_conversion();

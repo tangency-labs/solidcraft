@@ -32,6 +32,7 @@ fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
     }
 }
 
+/// Create the conversion feature in its owning component and restore the original authoring context.
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "mesh.convert";
     let state = s.model.state();

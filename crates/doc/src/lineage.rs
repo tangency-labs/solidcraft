@@ -448,14 +448,27 @@ pub(crate) fn part_tool(body: Body, part: &str) -> Traced {
 
 /// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
 /// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
-/// `source` is the serialized original mesh body, never a B-rep display tessellation.
-/// Bump the domain version if the reconstruction algorithm changes its face ordering.
-pub(crate) fn reconstructed_tool(body: Body, source: &[u8], tolerance: f64) -> Traced {
+/// Identity uses the original shared-vertex positions and triangle indices, independent of display
+/// normals, split vertices and serde fields. The v4 encoding is little-endian: tolerance bits,
+/// u64 vertex count, xyz f64 bit patterns, u64 triangle count, then each triangle's u32 indices.
+/// Bump the domain version if this encoding or the reconstruction's face ordering changes.
+pub(crate) fn reconstructed_tool(body: Body, positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64) -> Traced {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
-    hash.update(b"solidcraft-mesh-reconstruction-v3");
+    hash.update(b"solidcraft-mesh-reconstruction-v4");
     hash.update(tolerance.to_le_bytes());
-    hash.update(source);
+    hash.update((positions.len() as u64).to_le_bytes());
+    for p in positions {
+        for coordinate in [p.x, p.y, p.z] {
+            hash.update(coordinate.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((triangles.len() as u64).to_le_bytes());
+    for triangle in triangles {
+        for index in triangle {
+            hash.update(index.to_le_bytes());
+        }
+    }
     let digest = format!("{:x}", hash.finalize());
     let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
     Traced::made(body, Some(roles))

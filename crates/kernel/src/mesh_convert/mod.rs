@@ -18,6 +18,7 @@ const MAX_BOUNDARY: usize = 8192;
 /// outline with 49 holes) is at most 1225 pairs and 2450 booleans.
 const MAX_LOOPS: usize = 50;
 
+/// Prefix reconstruction failures consistently for command and feature error reporting.
 fn invalid(message: &str) -> KernelError {
     KernelError::Invalid(format!("mesh conversion: {message}"))
 }
@@ -83,6 +84,7 @@ pub fn convert_prismatic_mesh(body: &Body, tolerance: f64) -> Result<Body> {
     })
 }
 
+/// Merge nearby source vertices, discard degenerate triangles and unused vertices, and enforce bounded welding work.
 fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
     if mesh.triangles.len() > MAX_TRIANGLES {
         return Err(over_budget(mesh.triangles.len()));
@@ -168,6 +170,7 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
     crate::mesh_body(&kept_positions, &triangles)
 }
 
+/// Certify matching caps and straight walls before building an analytic prism with valid nesting and volume.
 fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Result<Option<Body>> {
     let (lo, hi) = mesh.positions.iter().map(|p| p.dot(axis)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), h| (lo.min(h), hi.max(h)));
     let height = hi - lo;
@@ -367,6 +370,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
     Ok(Some(body))
 }
 
+/// Reject fitted boundaries that cross or change containment, with a cap on pairwise Boolean work.
 fn certify_nesting(raw: &[Loop2], fitted: &[Loop2], epsilon: f64, size: f64) -> Result<()> {
     if raw.len() > MAX_LOOPS {
         return Err(KernelError::Invalid(format!(
@@ -408,6 +412,7 @@ fn certify_nesting(raw: &[Loop2], fitted: &[Loop2], epsilon: f64, size: f64) -> 
     Ok(())
 }
 
+/// Recover full circles or partial arcs only after sample and chord checks; otherwise retain polygon corners.
 fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
     // Fit a complete circular boundary only with enough samples to distinguish it
     // from a polygon. Certify the chord deviation, not just the vertex residual.
@@ -525,6 +530,7 @@ fn partial_arc(points: &[Vec2], tolerance: f64, epsilon: f64) -> Option<solidcor
     Some(Seg2::Arc { center, radius, start, sweep })
 }
 
+/// Replace certified circular runs while keeping their actual endpoints and the remaining polygon edges.
 fn fit_partial_arcs(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
     use solidcore_record::Seg2;
     let n = points.len();
@@ -569,11 +575,13 @@ fn fit_partial_arcs(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
 mod tests {
     use super::*;
 
+    /// Tessellate an analytic test body into a mesh body to exercise reconstruction through its public entry point.
     fn mesh_of(body: &Body) -> Body {
         let mesh = body.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         crate::mesh_body(&mesh.positions, &mesh.triangles).unwrap()
     }
 
+    /// Check that arbitrary orientations retain planes, holes and analytic round walls.
     #[test]
     fn reconstructs_planes_holes_and_round_walls_in_arbitrary_orientation() {
         let region = Region2 {
@@ -603,6 +611,7 @@ mod tests {
         assert!((fine_volume(&reopened.bodies[0].body) - expected).abs() < 0.02);
     }
 
+    /// Keep exact planar boxes and preserve polygon corners when samples cannot certify a circle.
     #[test]
     fn planar_boxes_are_exact_and_coarse_polygons_are_not_rounded() {
         let source = crate::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
@@ -633,6 +642,7 @@ mod tests {
         assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9, "sweep {sweep}");
     }
 
+    /// Refuse unsupported or hostile mesh inputs without returning a partial reconstruction.
     #[test]
     fn refuses_open_nonprismatic_and_hostile_inputs() {
         let open = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
@@ -674,6 +684,7 @@ mod tests {
         assert!(refused.to_string().contains("no triangle of any area"), "{refused}");
     }
 
+    /// An oversized input explains both its triangle count and the supported reconstruction family.
     #[test]
     fn a_mesh_over_the_budget_says_how_big_it_is_and_what_converts() {
         // #346: a freeform mesh just over the limit (a strip of 50001 triangles) is refused with
@@ -690,6 +701,7 @@ mod tests {
         assert!(err.contains("150001 vertices") && err.contains("150000"), "{err}");
     }
 
+    /// Boundary smoothing must preserve disjoint loops and the containment of holes.
     #[test]
     fn fitting_cannot_open_a_hole_through_a_nearby_wall() {
         let outer = Loop2::polygon(&[Vec2::new(-1., -1.), Vec2::new(1., -1.), Vec2::new(1., 1.), Vec2::new(-1., 1.)]);
@@ -705,6 +717,7 @@ mod tests {
         assert!(certify_nesting(&[outer.clone(), inner], &[outer, fitted], 1e-6, 3.).is_err());
     }
 
+    /// Build a synthetic perforated plate with a controlled number of nesting checks.
     fn perforated_plate(rows: usize, cols: usize) -> Body {
         let w = cols as f64 * 4. + 2.;
         let h = rows as f64 * 4. + 2.;
@@ -719,6 +732,7 @@ mod tests {
         crate::extrude_planar_regions(&Plane::XY, &[Region2 { outer, holes }], 0., 3.).unwrap()
     }
 
+    /// Refuse loop counts beyond the certificate budget before quadratic work grows without bound.
     #[test]
     fn many_holes_are_refused_promptly_instead_of_stalling() {
         // 400 holes would be ~80k loop pairs and ~160k planar booleans.
@@ -733,6 +747,7 @@ mod tests {
         assert!((crate::measure(&result).unwrap().volume - (30. * 30. - 49. * 4.) * 3.).abs() < 1e-6);
     }
 
+    /// Recover an analytic cylindrical notch while retaining its independently derived volume.
     #[test]
     fn restores_a_partial_circular_notch_without_faceting_its_wall() {
         use solidcore_record::Seg2;
@@ -754,6 +769,7 @@ mod tests {
         assert!((crate::measure(&converted).unwrap().volume - (240. - 8. * std::f64::consts::PI) * 5.).abs() < 0.01);
     }
 
+    /// Certify joined parts on different axes without losing their notches or circular walls.
     #[test]
     fn reconstructs_a_plate_with_perpendicular_notched_extrusions() {
         use solidcore_record::Seg2;
@@ -799,6 +815,7 @@ mod tests {
         }
     }
 
+    /// Build a stepped cylindrical mesh whose two sections use different angular sampling phases.
     fn phase_shifted_stepped_cylinder() -> Body {
         let n = 96usize;
         let mut positions = Vec::new();
@@ -826,6 +843,7 @@ mod tests {
         crate::mesh_body(&positions, &triangles).unwrap()
     }
 
+    /// Section recovery must not require the two cylinders to share angular mesh vertices.
     #[test]
     fn reconstructs_a_stepped_cylinder_with_different_tessellation_phases() {
         let mesh = phase_shifted_stepped_cylinder();
@@ -837,6 +855,7 @@ mod tests {
         assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("cylinder"), Some(&2));
     }
 
+    /// STL-like f32 rounding and a rigid rotation must retain the same certified analytic sections.
     #[test]
     fn rotated_f32_stepped_cylinder_preserves_the_analytic_shape() {
         let source = phase_shifted_stepped_cylinder();
@@ -859,6 +878,7 @@ mod tests {
         assert!(converted.face_count() < 16);
     }
 
+    /// Reject radial damage that lies outside the selected reconstruction tolerance.
     #[test]
     fn radial_damage_outside_tolerance_is_refused() {
         let source = phase_shifted_stepped_cylinder();

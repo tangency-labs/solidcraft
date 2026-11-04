@@ -2,6 +2,7 @@ use super::*;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 
+/// Import an original synthetic box mesh for command, persistence and face-attachment tests.
 fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
@@ -632,6 +633,7 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
 }
 
+/// Preserve perpendicular analytic bores and attached sketches through moves, undo and cache-free reopen.
 #[test]
 fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
@@ -720,6 +722,7 @@ fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
     check_sketches(&s, 5.);
 }
 
+/// Changed mesh inputs or fit tolerance must invalidate old face anchors instead of reusing an ordinal.
 #[test]
 fn reconstructed_face_attachments_do_not_retarget_when_reconstruction_inputs_change() {
     let mut s = imported_box();
@@ -752,4 +755,29 @@ fn reconstructed_face_attachments_do_not_retarget_when_reconstruction_inputs_cha
     assert!(s.model.results.iter().any(|r| r.id == id && r.error.is_some()), "a changed tolerance must not reuse a recovered face ordinal");
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Unused source vertices are absent from display meshes but still distinguish reconstruction inputs.
+#[test]
+fn reconstructed_face_identity_tracks_vertices_omitted_from_the_display_mesh() {
+    let mut first = imported_box().doc.as_ref().clone();
+    let FeatureKind::MeshImport { meshes, .. } = &mut first.features[0].kind else { panic!("mesh import") };
+    let mut positions = meshes[0].positions.to_vec();
+    positions.extend([1., 1., 1.]);
+    meshes[0].positions = positions.into();
+    let mut second = first.clone();
+    let FeatureKind::MeshImport { meshes, .. } = &mut second.features[0].kind else { panic!("mesh import") };
+    *std::sync::Arc::make_mut(&mut meshes[0].positions).last_mut().unwrap() = 2.;
+    let display = |doc: &Document| {
+        let s = Session::new(doc.clone());
+        serde_json::to_value(s.model.state().body("Mesh").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap()).unwrap()
+    };
+    assert_eq!(display(&first), display(&second), "the changed vertex is not used for display");
+    let names = |doc: Document| {
+        let mut s = Session::new(doc);
+        run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        solidcraft_doc::naming::face_names(s.model.state().body("Mesh").unwrap()).as_ref().clone()
+    };
+    assert_ne!(names(first), names(second), "source changes must not reuse recovered face identities");
 }
