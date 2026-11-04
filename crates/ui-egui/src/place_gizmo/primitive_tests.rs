@@ -92,6 +92,29 @@ fn marker_stands_a_new_box_on_the_face_through_its_corner_fields() {
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 
+/// Sizes that are expressions stay expressions in the dropped corner, as a pre-selected face's
+/// box keeps them (`box_corner`), so the box stays centred on the drop when a parameter they
+/// name changes.
+#[test]
+fn a_dropped_box_keeps_its_size_expressions_so_it_stays_centred_when_they_change() {
+    let mut h = plate();
+    h.app.run("parameters.add", json!({"name": "side", "expression": "20 mm"})).unwrap();
+    start(&mut h, "solid.box");
+    if let Some(Kind::Primitive { fields, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+        && let Some(f) = fields.iter_mut().find(|f| f.0 == "length")
+    {
+        f.1 = "side".into();
+    }
+    assert!(drop_on(&mut h, [40.0, 25.0, 10.0]));
+    assert!(typed(&h, "corner").dist(Vec3::new(30.0, 15.0, 10.0)) < 1e-3, "{:?}", typed(&h, "corner"));
+    ok(&mut h);
+    h.app.run("parameters.change", json!({"name": "side", "expression": "40 mm"})).unwrap();
+    h.settle();
+    let (_, kind) = last(&h);
+    let FeatureKind::Box { corner, .. } = &kind else { panic!("a Box: {kind:?}") };
+    assert!((point(&h, corner).x - 20.0).abs() < 1e-3, "still centred on x = 40: {corner:?}");
+}
+
 #[test]
 fn marker_moves_a_box_placed_by_its_centre_through_its_centre_fields() {
     let mut h = plate();
@@ -124,12 +147,12 @@ fn a_dropped_box_stands_out_from_a_side_face_and_under_the_underside() {
     let s = solidcraft_engine::Session::default();
     let mut extra = serde_json::Map::new();
     let size = Vec3::new(20.0, 10.0, 6.0);
-    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(80.0, 25.0, 5.0), Vec3::X, size);
+    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(80.0, 25.0, 5.0), Vec3::X, size, [""; 3]);
     assert_eq!(written, Some(json!(["80 mm", "20 mm", "2 mm"])), "out from the +X side, centred across it");
     assert_eq!(extra.get("corner"), written.as_ref());
     extra.remove("corner");
     extra.insert("center".into(), json!(["0", "0", "0"]));
-    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(40.0, 25.0, 0.0), -Vec3::Z, size);
+    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(40.0, 25.0, 0.0), -Vec3::Z, size, [""; 3]);
     assert_eq!(written, Some(json!(["40 mm", "25 mm", "-3 mm"])), "below the underside: the centre half the height down");
     assert!(!extra.contains_key("corner"), "the choice of Center stays");
 }
@@ -141,7 +164,7 @@ fn a_dropped_box_in_a_metre_design_is_written_in_metres_at_the_dropped_place() {
     let mut s = solidcraft_engine::Session::default();
     s.execute("document.units", &json!({"units": "m"})).unwrap();
     let mut extra = serde_json::Map::new();
-    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(80.0123, 25.4567, 5.0), Vec3::Z, Vec3::new(20.0, 10.0, 6.0));
+    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(80.0123, 25.4567, 5.0), Vec3::Z, Vec3::new(20.0, 10.0, 6.0), [""; 3]);
     assert_eq!(written, Some(json!(["0.070012 m", "0.020457 m", "0.005 m"])), "centred across the top face, in metres");
     let Some(serde_json::Value::Array(corner)) = extra.get("corner") else { panic!("the corner: {extra:?}") };
     let at: Vec<f64> = corner.iter().map(|c| s.doc.eval(c.as_str().unwrap(), solidcraft_engine::doc::expr::Kind::Length).unwrap()).collect();
