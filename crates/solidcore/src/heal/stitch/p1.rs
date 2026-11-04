@@ -61,6 +61,10 @@
 //! - `UnifyNormals` ignores `NormalizedEvaluate`'s status and goes on with `sPnt` / `sDir`
 //!   as they were: `SmVector3d`'s default `SM_UNDEF_DOUBLE` (defined; the 3D evaluation
 //!   writes them only after its last status), [`Point3::UNDEF`] / [`Vec3::UNDEF`] here.
+//!   Not upstream: the sample loop over the caller's `ULONG` count of each lamina edge
+//!   use checks the kernel's cancel token on every sample, so a huge count (`u64::MAX`
+//!   ran without end, #2490 fuzz) can be cancelled; only a cancelled call returns early
+//!   (`Cancelled`), no result changes.
 //! - `SmBrep::GlueVertices`, `RemoveFaces` (with the B-rep's own editing flag) and
 //!   `StitchAndOrient` call `topology.brep_p5`, which defers at its own barriers;
 //!   `GlueEdgesGeneral` calls `topology.brep_p7` on a default record per arena object
@@ -1576,7 +1580,8 @@ impl<'c> Stitch<'c> {
     /// # Errors
     ///
     /// Those of the B-rep box, the edge tree, the curve evaluations and drops, the
-    /// binormal evaluations and the swaps (`SER`); a null pointer upstream dereferences.
+    /// binormal evaluations and the swaps (`SER`); a null pointer upstream dereferences;
+    /// `Cancelled` when the kernel's token is cancelled during the sampling.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn unify_normals(
         &mut self,
@@ -1645,6 +1650,8 @@ impl<'c> Stitch<'c> {
                         continue;
                     }
                     for j in 0..num_samples {
+                        // not upstream: a huge caller count can be cancelled (module docs)
+                        k.check_cancelled("heal::stitch::p1::Stitch::unify_normals")?;
                         #[allow(clippy::cast_precision_loss)] // upstream ULONG to double
                         let param = (j as f64 + 1.0) / (num_samples as f64 + 2.0);
                         let orig_ivl = edge::interval(b, eu_edge)?;
