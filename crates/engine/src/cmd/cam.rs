@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("cam.op.pocket", "2D Pocket", pocket_cmd).icon("hole").params(
         "setup; name; tool (number); sketch?: id or name, with profiles?; faces?; or outer/regions; holes?; \
-         stepover? (default half the tool diameter); climb? (default true; conventional is refused in clearing yet); stock_to_leave?; tolerance?; ramp_angle?: deg; \
+         stepover? (default half the tool diameter); climb? (default true); stock_to_leave?; tolerance?; ramp_angle?: deg; \
          clearance?; retract?; top?; bottom; stepdown?; feed?; plunge_feed?; spindle_rpm?; coolant?",
     ),
     CommandSpec::new("cam.op.adaptive", "Adaptive Clear", adaptive_cmd).icon("hole").params(

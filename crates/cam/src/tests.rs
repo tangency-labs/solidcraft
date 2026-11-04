@@ -174,7 +174,7 @@ fn pocket_stays_inside_the_walls_and_clears_everything_the_tool_can_reach() {
 fn pocket_goes_round_an_island() {
     let island = Loop2::circle(v(30.0, 20.0), 5.0);
     let regions = [Region2 { outer: rect(0.0, 0.0, 60.0, 40.0).outer, holes: vec![island] }];
-    let params = PocketParams { stepover: 3.0, climb: true, stock_to_leave: 0.5, tolerance: 0.01, ramp_angle: 0.0 };
+    let params = PocketParams { stepover: 3.0, climb: false, stock_to_leave: 0.5, tolerance: 0.01, ramp_angle: 0.0 };
     let path = pocket(&regions, &tool(6.0), &params, &cut(0.0, -2.0, 2.0)).unwrap();
     let shape = Shape::from_regions(&regions, 0.01).unwrap();
     let pts = cutting_points(&path, 0.0);
@@ -807,23 +807,36 @@ fn adaptive_splits_a_pocket_at_a_narrow_passage() {
 }
 
 #[test]
-fn clearing_runs_in_the_climb_direction_only_until_the_planner_walks_both() {
-    // The clearing engine holds a wrong-side safehold in conventional
-    // direction (a planner defect, not a milling rule): the operations
-    // refuse the request instead of handing the planner a crash.
+fn conventional_clearing_walks_pockets_and_islands() {
+    // Conventional (CW) clearing completes on plain pockets and pockets
+    // with islands: the walk mirrors climb and every step honours the
+    // direction (wrong-side steps are rejected and resumed, never
+    // machined).
     let regions = [rect(0.0, 0.0, 40.0, 30.0)];
     let pocket_params = PocketParams { stepover: 2.5, climb: false, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
     let adaptive_params = AdaptiveParams { stepover: 2.5, climb: false, stock_to_leave: 0.0, tolerance: 0.01 };
     let c = cut(0.0, -5.0, 2.0);
-    let pocket_refused = pocket(&regions, &tool(6.0), &pocket_params, &c).unwrap_err().to_string();
-    assert!(pocket_refused.contains("not supported yet"), "{pocket_refused}");
-    let adaptive_refused = adaptive(&regions, &tool(6.0), &adaptive_params, &c).unwrap_err().to_string();
-    assert!(adaptive_refused.contains("not supported yet"), "{adaptive_refused}");
-    // The same operations run in climb direction.
-    let climb = PocketParams { climb: true, ..pocket_params };
-    assert!(pocket(&regions, &tool(6.0), &climb, &c).is_ok());
-    let climb = AdaptiveParams { climb: true, ..adaptive_params };
-    assert!(adaptive(&regions, &tool(6.0), &climb, &c).is_ok());
+    let conventional = pocket(&regions, &tool(6.0), &pocket_params, &c).unwrap();
+    assert_eq!(conventional.stats().lowest_z, Some(-5.0));
+    let conventional = adaptive(&regions, &tool(6.0), &adaptive_params, &c).unwrap();
+    assert_eq!(conventional.stats().lowest_z, Some(-5.0));
+
+    // An island pocket in conventional direction, and the same in climb
+    // for comparison.
+    let island = [Region2 {
+        outer: rect(0.0, 0.0, 60.0, 40.0).outer,
+        holes: vec![Loop2::polygon(&[v(25.0, 15.0), v(35.0, 15.0), v(35.0, 25.0), v(25.0, 25.0)])],
+    }];
+    let island_params = PocketParams { stepover: 2.5, climb: false, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let conventional_island = pocket(&island, &tool(6.0), &island_params, &cut(0.0, -2.0, 2.0)).unwrap();
+    let climb_island = pocket(&island, &tool(6.0), &PocketParams { climb: true, ..island_params }, &cut(0.0, -2.0, 2.0)).unwrap();
+    // Both walk the island: mirrored winding, floor coverage on par.
+    let turns = |path: &Toolpath| {
+        let pts = cutting_points(path, -1.99);
+        pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.x * b.y - b.x * a.y).sum::<f64>()
+    };
+    assert!(turns(&conventional_island) * turns(&climb_island) < 0.0, "the walks mirror");
+    assert!(conventional_island.stats().cut_length >= climb_island.stats().cut_length * 0.9, "conventional covers the floor like climb");
 }
 
 #[test]

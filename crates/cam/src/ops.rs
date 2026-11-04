@@ -67,13 +67,6 @@ pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut
     if !(params.stepover >= 1.0e-3) || !(params.stepover <= tool.diameter) {
         return invalid("the stepover must be between 1 micron and the tool diameter");
     }
-    if !params.climb {
-        // The clearing planner walks islands and walls in climb direction
-        // only: a conventional request would hand it a direction its
-        // adaptive stepper cannot walk yet (it holds a wrong-side
-        // safehold), so the operation refuses rather than guessing.
-        return Err(crate::CamError::Unsupported("not supported yet: conventional (non-climb) pocket clearing".into()));
-    }
     if regions.is_empty() {
         return invalid("the operation has no regions");
     }
@@ -122,9 +115,6 @@ pub fn adaptive(regions: &[Region2], tool: &Tool, params: &AdaptiveParams, cut: 
     // offsetting stack's numerics for nothing machinable.
     if !(params.stepover >= 1.0e-3) || !(params.stepover <= tool.diameter) {
         return invalid("the stepover must be between 1 micron and the tool diameter");
-    }
-    if !params.climb {
-        return Err(crate::CamError::Unsupported("not supported yet: conventional (non-climb) adaptive clearing".into()));
     }
     if !params.stock_to_leave.is_finite() || !(0.0..=crate::params::MAX_COORD).contains(&params.stock_to_leave) {
         return invalid("the stock to leave must be 0 or more");
