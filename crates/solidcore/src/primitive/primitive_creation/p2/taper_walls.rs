@@ -794,7 +794,9 @@ pub(super) struct WallsInput<'a> {
     pub composite: &'a CompositeCurve,
     /// The curves it was made from (its lines and circles).
     pub inputs: &'a [Curve],
-    /// Unit normal of the profile's plane.
+    /// The unit normal the height runs along (`CreateTaperExtrude`'s): the profile's
+    /// plane's, or near it where `CreateTaperExtrude` snapped a normal near Z to Z (the
+    /// draft then leans off the plane: `profile_plane`).
     pub normal: Vec3,
     /// `+` along the normal, `-` opposite.
     pub height: f64,
@@ -885,10 +887,69 @@ fn read_walls(
     Ok(Ok(walls))
 }
 
+/// The unit normal of the profile's plane, on the side of `d`, the direction the height
+/// runs along: `d` itself when every wall lies within `tol` of the plane through the
+/// profile's first corner normal to `d` (an arc by its largest distance from it,
+/// `|(c - p) . d| + r |(x . d, y . d)|`), else the plane the walls span (an arc's axis,
+/// or the cross of the two lines' directions furthest from parallel). The two differ
+/// where `CreateTaperExtrude` snapped the computed normal of a profile on a plane tilted
+/// from XY (`|n.z| > 0.98`) to Z: the draft leans, each section in a plane parallel to
+/// the profile's, moved along `d` (#2497; the fork takes `d` for the plane's normal, so
+/// a leaning draft's seams leave their walls and it is refused).
+fn profile_plane(walls: &[Wall], d: Vec3, tol: f64) -> Result<Vec3> {
+    let first = at_ref(walls, 0)?.start;
+    let off = |q: Point3| (q - first).dot(d).abs();
+    let in_plane = walls.iter().all(|w| {
+        if w.arc {
+            off(w.center) + w.radius * w.x.dot(d).hypot(w.y.dot(d)) <= tol
+        } else {
+            off(w.start) <= tol && off(w.end) <= tol
+        }
+    });
+    if in_plane {
+        return Ok(d);
+    }
+    let m = if let Some(arc) = walls.iter().find(|w| w.arc) {
+        arc.axis
+    } else {
+        let mut best = Vec3::ZERO;
+        for (i, wa) in walls.iter().enumerate() {
+            for wb in walls.iter().skip(i + 1) {
+                let c = wa.dir.cross(wb.dir);
+                if c.length_squared() > best.length_squared() {
+                    best = c;
+                }
+            }
+        }
+        best.unitize()?
+    };
+    Ok(if m.dot(d) < 0.0 { -m } else { m })
+}
+
+/// A leaning draft's lines (the profile's plane `n` not normal to `d`): each line's
+/// offset, `side offset d x dir`, becomes its part in the profile's plane,
+/// `side offset (d . n) n x dir`, so the far end's section lies in a plane parallel to
+/// the profile's, offset as an arc's is (`shrink = side offset (d . axis)`). A line's
+/// offset lies in the plane already when it is normal to `d`.
+fn lean_offsets(walls: &mut [Wall], n: Vec3, d: Vec3) {
+    if n == d {
+        return;
+    }
+    for w in walls.iter_mut().filter(|w| !w.arc) {
+        w.offset -= w.offset.dot(n) * n;
+    }
+}
+
 /// Tangent planes: where a corner opens a gap, an arc's end continues along its
 /// tangent line, a wall of no length on the profile (a line's wall continues as
 /// itself) (the `bTangent` step of `sm_CreateCurvatureKeepingWalls`).
-fn with_tangent_planes(walls: &[Wall], n: Vec3, offset: f64, side: f64) -> Result<Vec<Wall>> {
+fn with_tangent_planes(
+    walls: &[Wall],
+    n: Vec3,
+    d: Vec3,
+    offset: f64,
+    side: f64,
+) -> Result<Vec<Wall>> {
     let count = walls.len();
     let mut out = Vec::new();
     for i in 0..count {
@@ -921,7 +982,7 @@ fn with_tangent_planes(walls: &[Wall], n: Vec3, offset: f64, side: f64) -> Resul
                     start: b.start,
                     end: b.start,
                     dir,
-                    offset: side * offset * n.cross(dir),
+                    offset: side * offset * d.cross(dir),
                     ..Wall::default()
                 });
             }
@@ -1218,10 +1279,10 @@ fn walls_closing_at_apexes(
     target: BrepId,
     input: &WallsInput<'_>,
     mut walls: Vec<Wall>,
+    n: Vec3,
+    h: Vec3,
 ) -> Result<Walls> {
-    let n = input.normal;
     let tol = input.tol;
-    let h = input.height * n;
     let count = walls.len();
 
     // The section at every height is the walls' sections, each from where it crosses the
@@ -1763,16 +1824,20 @@ pub(super) fn curvature_keeping_walls(
         -1.0
     };
 
-    // the walls
+    // the walls, and the plane they lie in (`n` from here on; the height `h` runs along
+    // the draft's normal, `d`)
     let mut walls = match read_walls(a.kernel(kernel_brep)?, input)? {
         Ok(walls) => walls,
         Err(refusal) => return Ok(Err(refusal)),
     };
+    let d = n;
+    let n = profile_plane(&walls, d, tol)?;
     if input.tangent {
-        walls = with_tangent_planes(&walls, n, input.offset, side)?;
+        walls = with_tangent_planes(&walls, n, d, input.offset, side)?;
     }
+    lean_offsets(&mut walls, n, d);
     if a.kernel(kernel_brep)?.fixes.taper_wall_closes_at_apex {
-        return walls_closing_at_apexes(a, kernel_brep, target, input, walls);
+        return walls_closing_at_apexes(a, kernel_brep, target, input, walls, n, h);
     }
     let count = walls.len();
 
