@@ -749,6 +749,7 @@ pub fn sync_backend(app: &mut SolveApp) {
 /// Cooperative work belongs to the frame loop, never to a status/control request. Keep
 /// scheduling frames even after leaving Render so a browser job can finish in Design.
 pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    library::poll_import(app, ctx);
     if let Some(text) = app.render_workspace.clipboard_text.take() {
         ctx.copy_text(text);
     }

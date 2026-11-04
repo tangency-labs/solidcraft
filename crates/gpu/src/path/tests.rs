@@ -308,9 +308,9 @@ fn gpu_thin_lens_focus_and_defocus_match_geometric_oracle() {
         compilation_options: Default::default(),
         cache: None,
     });
-    for (yaw, pitch, roll) in [(0.0, 0.0, 0.0), (-0.45, 0.5, 0.7)] {
+    for (yaw, pitch, roll, fov) in [(0.0, 0.0, 0.0, 0.7), (-0.45, 0.5, 0.7, 0.7), (-0.45, 0.5, 0.7, 2.0)] {
         let mut request = request(2);
-        request.camera = Camera { distance: 12.0, fov: 0.7, yaw, pitch, roll, ..Default::default() };
+        request.camera = Camera { distance: 12.0, fov, yaw, pitch, roll, ..Default::default() };
         let camera = request.camera;
         let lens = solidcraft_render::job::ThinLens { aperture_radius_mm: 0.4, focus_distance_mm: 9.0 };
         let options = JobOptions { lens: Some(lens), ..Default::default() };
@@ -340,6 +340,20 @@ fn gpu_thin_lens_focus_and_defocus_match_geometric_oracle() {
                 let direction = vec(rays[1]) - Vec3::new(2.0, 2.0, 2.0);
                 let disk = (right * (azimuth * std::f64::consts::TAU).cos() + up * (azimuth * std::f64::consts::TAU).sin())
                     * (radial.sqrt() * lens.aperture_radius_mm);
+                // Differentiate independently constructed f64 rays with the lens
+                // point fixed; the production helper keeps no camera live state.
+                let direction_at = |x: f64, y: f64| {
+                    ((right * x + up * y) * (camera.half_height() * lens.focus_distance_mm / camera.distance) - back * lens.focus_distance_mm - disk)
+                        .normalized()
+                        .unwrap()
+                };
+                let h = 1e-3;
+                for (slot, dx, dy) in [(2, h, 0.), (3, 0., -h)] {
+                    // request(2) makes one pixel exactly one unit of normalized UV.
+                    let expected = (direction_at(ux + dx, uy + dy) - direction_at(ux - dx, uy - dy)) / (2.0 * h);
+                    let actual = vec(rays[slot]) - Vec3::new(16., 16., 16.);
+                    assert!((actual - expected).len() < 4e-6, "fov={fov},uv=({ux},{uy}),slot={slot}: {actual:?} vs {expected:?}");
+                }
                 assert!((origin - eye - disk).len() < 3e-6);
                 let focus_hit = origin + direction * ((focal - origin).dot(back) / direction.dot(back));
                 assert!((focus_hit - focal).len() < 5e-6, "focus {focus_hit:?} != {focal:?}");
@@ -525,11 +539,14 @@ fn gpu_solid_and_thin_slabs_match_absorbing_interreflection_oracle() {
 
 #[test]
 fn shader_validates_without_a_device() {
-    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
-    let parameters = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("Params")).unwrap().1;
-    let naga::TypeInner::Struct { span, .. } = &parameters.inner else { panic!("Params must be a struct") };
-    assert_eq!(*span as usize, PARAMETER_BYTES);
-    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+    for source in [SHADER, SINGLE_MEDIUM_SHADER] {
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let parameters = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("Params")).unwrap().1;
+        let naga::TypeInner::Struct { span, .. } = &parameters.inner else { panic!("Params must be a struct") };
+        assert_eq!(*span as usize, PARAMETER_BYTES);
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+        assert_eq!(module.entry_points.iter().find(|entry| entry.name == "main").unwrap().workgroup_size, [PATH_WORKGROUP_SIZE, 1, 1]);
+    }
 }
 
 /// #6705: native compilers inline every call. With 33 inlined BVH walks in `main` (three path
@@ -1852,6 +1869,13 @@ fn gpu_hdr_and_sun_shadow_mis_preserve_index_matched_energy() {
 }
 
 fn texture_fixture(frame: solidcraft_render::job::textures::PlanarFrame) -> Arc<solidcraft_render::job::textures::RuntimeTextures> {
+    texture_fixture_filtering(frame, false)
+}
+
+fn texture_fixture_filtering(
+    frame: solidcraft_render::job::textures::PlanarFrame,
+    portable: bool,
+) -> Arc<solidcraft_render::job::textures::RuntimeTextures> {
     use image::ImageEncoder;
     use solidcraft_render::{
         job::textures::{RuntimeTextures, TextureBinding, TextureMap},
@@ -1860,7 +1884,7 @@ fn texture_fixture(frame: solidcraft_render::job::textures::PlanarFrame) -> Arc<
     let map = |pixels: &[u8], role| {
         let mut bytes = Vec::new();
         image::codecs::png::PngEncoder::new(&mut bytes).write_image(pixels, 2, 2, image::ExtendedColorType::Rgba8).unwrap();
-        TextureMap::new(bytes, role).unwrap()
+        if portable { TextureMap::new_portable(bytes, role).unwrap() } else { TextureMap::new(bytes, role).unwrap() }
     };
     Arc::new(
         RuntimeTextures::new(vec![TextureBinding {
@@ -1899,6 +1923,54 @@ fn texture_admission_rejects_glass_and_stale_identity_and_honors_cancellation() 
     assert!(admission(&scene, &input, JobOptions::default()).is_err());
 }
 #[test]
+fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
+    let mut variants = std::collections::BTreeSet::new();
+    for opaque in [false, true] {
+        for maps in [false, true] {
+            for nested in [false, true] {
+                let slot = scene_pipeline_variant(opaque, maps, nested);
+                assert_eq!(slot.is_none(), opaque && !maps, "only opaque/no-map uses the eager base");
+                assert!(slot.is_none_or(|index| index < SCENE_PIPELINE_CACHE_SLOTS));
+                variants.insert(slot);
+            }
+            if opaque {
+                assert_eq!(scene_pipeline_variant(opaque, maps, false), scene_pipeline_variant(opaque, maps, true));
+            } else {
+                assert_ne!(
+                    scene_pipeline_variant(opaque, maps, false),
+                    scene_pipeline_variant(opaque, maps, true),
+                    "single and nested medium stacks require distinct programs"
+                );
+            }
+        }
+    }
+    assert_eq!(variants.len(), SCENE_PIPELINE_CACHE_SLOTS + 1);
+    let mut scene = sphere(white());
+    let options = JobOptions::default();
+    assert!(use_opaque_pipeline(&scene, options));
+    scene.meshes[0].transmission = Some(clear_glass());
+    assert!(!use_opaque_pipeline(&scene, options));
+    scene.meshes[0].transmission = None;
+    scene.meshes[0].faces.push(solidcraft_render::FaceAppearance {
+        face: 0,
+        color: [255; 3],
+        opacity: 1.0,
+        surface: Some(white()),
+        transmission: Some(clear_glass()),
+    });
+    assert!(!use_opaque_pipeline(&scene, options));
+    scene.meshes[0].faces[0].transmission = None;
+    assert!(use_opaque_pipeline(&scene, options));
+    scene.meshes[0].faces[0].opacity = 0.5;
+    assert!(!use_opaque_pipeline(&scene, options));
+    scene.meshes[0].faces.clear();
+    assert!(!use_opaque_pipeline(&scene, JobOptions { volume: Some(Default::default()), ..options }));
+    assert!(use_opaque_pipeline(
+        &scene,
+        JobOptions { volume: Some(solidcraft_render::job::volume::HomogeneousVolume { extinction_per_mm: 0.0, ..Default::default() }), ..options }
+    ));
+}
+#[test]
 fn gpu_planar_color_and_normal_maps_match_cpu_sampling_oracle() {
     use solidcraft_render::job::textures::{PlanarFrame, sample_map};
     let Some(executor) = executor() else { return };
@@ -1914,7 +1986,7 @@ fn gpu_planar_color_and_normal_maps_match_cpu_sampling_oracle() {
         layout: Some(&layout),
         module: &shader,
         entry_point: Some("texture_reference"),
-        compilation_options: Default::default(),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
         cache: None,
     });
     for handed in [1., -1.] {
@@ -2928,6 +3000,517 @@ fn identical_maps_pack_once_for_multiple_gpu_bodies() {
     assert_ne!(a, b, "bindings keep separate coordinate records");
     assert_eq!(word(a + 3), word(b + 3), "one color payload");
     assert_eq!(word(a + 12), word(b + 12), "one normal payload");
+    assert_eq!(textures::packed_bytes(&input, 2), bytes.len() as u64, "admission does not charge unused mip tails or duplicate legacy maps");
+}
+
+#[test]
+fn packed_legacy_and_portable_gpu_maps_keep_distinct_policies_in_both_orders() {
+    use image::ImageEncoder;
+    use solidcraft_render::{
+        job::textures::{PlanarFrame, RuntimeTextures, TextureMap},
+        texture_input::MapRole,
+    };
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&[128, 64, 32, 255].repeat(15), 5, 3, image::ExtendedColorType::Rgba8).unwrap();
+    let legacy = TextureMap::new(encoded.clone(), MapRole::BaseColor).unwrap();
+    let portable = TextureMap::new_portable(encoded, MapRole::BaseColor).unwrap();
+    let original = texture_fixture(PlanarFrame { origin: [0.; 3], u: [1., 0., 0.], v: [0., 1., 0.] });
+    for maps in [[legacy.clone(), portable.clone()], [portable.clone(), legacy.clone()]] {
+        let bindings = maps
+            .iter()
+            .enumerate()
+            .map(|(index, map)| {
+                let mut binding = original.bindings()[0].clone();
+                binding.body_index = index;
+                binding.body_name = format!("Policy {index}");
+                binding.base_color = Some(map.clone());
+                binding.normal = None;
+                binding
+            })
+            .collect();
+        let input = RuntimeTextures::new(bindings).unwrap();
+        let bytes = textures::flatten(Some(&input), 2, Vec3::ZERO, &CancelToken::default()).unwrap();
+        let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()) as usize;
+        let descriptors = [word(word(5) + 3), word(word(6) + 3)];
+        assert_ne!(descriptors[0], descriptors[1], "same bytes and role retain separate filtering policies");
+        // Header + two body records, then exactly one legacy base and one 5x3 -> 2x1 -> 1x1 chain.
+        assert_eq!(bytes.len(), 8 * 4 + 2 * 24 * 4 + (8 * 4 + 15 * 16) + (16 * 4 + 18 * 16));
+        assert_eq!(textures::packed_bytes(&input, 2), bytes.len() as u64);
+        for (descriptor, map) in descriptors.into_iter().zip(maps) {
+            assert_eq!(word(descriptor), if map.gpu_mip_filtering() { 3 } else { 1 });
+            assert_eq!(word(descriptor + 2), usize::from(map.gpu_mip_filtering()));
+            let base = word(descriptor + 4) * 4;
+            let expected: Vec<_> = map.decode(&CancelToken::default()).unwrap().iter().flat_map(|value| value.to_le_bytes()).collect();
+            assert_eq!(&bytes[base..base + expected.len()], expected, "level-zero encoded-role interpretation stays exact");
+        }
+    }
+}
+
+#[test]
+fn packed_gpu_mips_preserve_odd_size_linear_color_and_data_means() {
+    use image::ImageEncoder;
+    use solidcraft_render::{
+        job::textures::{PlanarFrame, RuntimeTextures, TextureMap},
+        texture_input::MapRole,
+    };
+    let mut encoded = Vec::new();
+    let pixels: Vec<u8> = (0..15).flat_map(|i| [if i & 1 == 0 { 64 } else { 192 }, 128, 255, 0]).collect();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&pixels, 5, 3, image::ExtendedColorType::Rgba8).unwrap();
+    let original = texture_fixture(PlanarFrame { origin: [0.; 3], u: [1., 0., 0.], v: [0., 1., 0.] });
+    let mut binding = original.bindings()[0].clone();
+    binding.base_color = Some(TextureMap::new_portable(encoded.clone(), MapRole::BaseColor).unwrap());
+    binding.normal = None;
+    binding.roughness = Some(TextureMap::new_portable(encoded, MapRole::Roughness).unwrap());
+    let input = RuntimeTextures::new(vec![binding]).unwrap();
+    let bytes = textures::flatten(Some(&input), 1, Vec3::ZERO, &CancelToken::default()).unwrap();
+    let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()) as usize;
+    let record = word(5);
+    let color = word(record + 3);
+    let data = word(record + 16);
+    assert_ne!(color, data, "the same encoded source retains distinct role interpretation");
+    for (descriptor, linear) in [(color, true), (data, false)] {
+        assert_eq!(word(descriptor), 3, "5x3 -> 2x1 -> 1x1");
+        let last = descriptor + 4 + 2 * 4;
+        assert_eq!((word(last + 1), word(last + 2)), (1, 1));
+        let expected = (0..15)
+            .map(|i| {
+                let value = if i & 1 == 0 { 64 } else { 192 };
+                if linear { solidcraft_render::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
+            })
+            .sum::<f64>()
+            / 15.;
+        let actual = f32::from_le_bytes(bytes[word(last) * 4..word(last) * 4 + 4].try_into().unwrap());
+        assert!((f64::from(actual) - expected).abs() < 1e-7, "{actual} vs {expected}");
+    }
+    assert!((bytes.capacity() as u64) < input.working_bytes(), "the admitted preparation includes the full packed chain capacity");
+}
+
+#[test]
+fn gpu_trilinear_minification_matches_singular_value_lod_and_repeat_oracle() {
+    use solidcraft_render::{
+        job::textures::PlanarFrame,
+        texture_lod::select_isotropic_lod,
+        texture_sampling::{
+            TextureView,
+            mips::{MAX_MIP_TAIL_BYTES, MipChain},
+        },
+    };
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("texture_mip_reference"),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
+        cache: None,
+    });
+    let frame = PlanarFrame { origin: [0.; 3], u: [2., 0., 0.], v: [0., 2., 0.] };
+    let source = texture_fixture_filtering(frame, true);
+    let pixels = source.bindings()[0].base_color.as_ref().unwrap().decode(&CancelToken::default()).unwrap();
+    let base = TextureView::new(&pixels, [2, 2]).unwrap();
+    let chain = MipChain::prepare(base, MAX_MIP_TAIL_BYTES, || false).unwrap();
+    for portable in [true, false] {
+        let source = texture_fixture_filtering(frame, portable);
+        for (point, dx, dy) in [
+            (Vec3::new(0.5, 0.5, 0.), [0., 0.], [0., 0.]),
+            (Vec3::new(-0.01, 0.125, 0.), [0.75, 0.], [0., 0.25]),
+            (Vec3::new(0.01, 0.125, 0.), [0.75, 0.], [0., 0.25]),
+            (Vec3::new(-0.25, 1.125, 0.), [0.4, -0.5], [0.5, 0.25]),
+            (Vec3::new(0., 0., 0.), [4., 0.], [0., 4.]),
+            // Legacy sampling must bypass LOD arithmetic even when a finite gradient
+            // would overflow its texel-space multiplication. This is not a portable-footprint case.
+            (Vec3::new(0.5, 0.5, 0.), [3e38, 0.], [0., 3e38]),
+        ] {
+            let extreme = dx[0] > 1e30;
+            if portable && extreme {
+                continue;
+            }
+            let mut input = request(2);
+            input.textures = Some(source.clone());
+            let mut task = Task::new(context.clone(), sphere(white()), input, JobOptions::default(), CancelToken::default()).unwrap();
+            let mut params = vec![0; 32];
+            scene::vector(&mut params, point, 0.);
+            scene::vector(&mut params, Vec3::new(dx[0], dx[1], 0.), 0.);
+            scene::vector(&mut params, Vec3::new(dy[0], dy[1], 0.), 0.);
+            scene::vector(&mut params, Vec3::Z, 0.);
+            context.queue.write_buffer(&task.uniform, 0, &params);
+            let mut encoder = context.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, &task.bind, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            context.queue.submit([encoder.finish()]);
+            task.sample = 1;
+            let actual = task.read_linear().unwrap();
+            let lod = if portable { select_isotropic_lod([2, 2], dx, dy).unwrap().lod } else { 0. };
+            let expected = if portable {
+                chain.sample_repeat_lod_opaque(frame.uv(point).unwrap(), lod).unwrap()
+            } else {
+                base.sample_repeat_opaque(frame.uv(point).unwrap()).unwrap()
+            };
+            assert!((f64::from(actual[1][0]) - lod).abs() < 1e-6, "GPU LOD {actual:?} vs {lod}");
+            for (a, b) in actual[0].iter().zip(expected) {
+                assert!((f64::from(*a) - b).abs() < 2e-6, "GPU portable={portable} {actual:?} vs {expected:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_scalar_faces_preserve_legacy_roles_and_suppress_only_portable_roles() {
+    use image::ImageEncoder;
+    use solidcraft_render::{
+        FaceAppearance,
+        job::textures::{PlanarFrame, RuntimeTextures, TextureMap, sample_map},
+        texture_input::MapRole,
+    };
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = |entry_point| {
+        context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            module: &shader,
+            entry_point: Some(entry_point),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
+            cache: None,
+        })
+    };
+    let color_normal_pipeline = pipeline("texture_reference");
+    let scalar_pipeline = pipeline("texture_scalar_reference");
+    let frame = PlanarFrame { origin: [0.; 3], u: [2., 0., 0.], v: [0., 2., 0.] };
+    let point = Vec3::new(-0.25, 1.125, 0.);
+    let uv = frame.uv(point).unwrap();
+    let scalar = |value, role, portable| {
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes).write_image(&[value, value, value, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
+        if portable { TextureMap::new_portable(bytes, role).unwrap() } else { TextureMap::new(bytes, role).unwrap() }
+    };
+    for color_portable in [false, true] {
+        for normal_portable in [false, true] {
+            let fixture = texture_fixture_filtering(frame, color_portable);
+            let normal_fixture = texture_fixture_filtering(frame, normal_portable);
+            let mut binding = fixture.bindings()[0].clone();
+            binding.normal = normal_fixture.bindings()[0].normal.clone();
+            binding.roughness = Some(scalar(192, MapRole::Roughness, color_portable));
+            binding.metallic = Some(scalar(64, MapRole::Metallic, normal_portable));
+            let color = sample_map(&binding.base_color.as_ref().unwrap().decode(&CancelToken::default()).unwrap(), [2, 2], uv).unwrap();
+            let normal = sample_map(&binding.normal.as_ref().unwrap().decode(&CancelToken::default()).unwrap(), [2, 2], uv).unwrap();
+            let mut input = request(2);
+            input.textures = Some(Arc::new(RuntimeTextures::new(vec![binding]).unwrap()));
+            let face_color = Vec3::new(0.2, 0.4, 0.6);
+            let face = OpaqueSurface::new(face_color, 0.3, 0.2, 1.7).unwrap();
+            let mut scene = sphere(white());
+            scene.meshes[0].faces.push(FaceAppearance { face: 0, color: [255; 3], opacity: 1., surface: Some(face), transmission: None });
+            let mut task = Task::new(context.clone(), scene, input, JobOptions::default(), CancelToken::default()).unwrap();
+            let mut params = vec![0; 32];
+            scene::vector(&mut params, point, 0.);
+            scene::vector(&mut params, Vec3::ZERO, 0.);
+            scene::vector(&mut params, Vec3::Z, 0.);
+            scene::vector(&mut params, Vec3::Z, 0.);
+            context.queue.write_buffer(&task.uniform, 0, &params);
+            let run = |task: &mut Task, pipeline: &wgpu::ComputePipeline| {
+                let mut encoder = context.device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, &task.bind, &[]);
+                    pass.dispatch_workgroups(1, 1, 1);
+                }
+                context.queue.submit([encoder.finish()]);
+                task.sample = 1;
+                task.read_linear().unwrap()
+            };
+            let actual = run(&mut task, &color_normal_pipeline);
+            let expected = [face_color.x, face_color.y, face_color.z];
+            for (channel, value) in expected.into_iter().enumerate() {
+                let expected = if color_portable { value } else { value * color[channel] };
+                assert!((f64::from(actual[0][channel]) - expected).abs() < 2e-6, "mixed face color {color_portable}/{normal_portable}: {actual:?}");
+            }
+            let expected = if normal_portable { Vec3::Z } else { frame.mapped_normal(Vec3::Z, Vec3::Z, normal, 0.75).unwrap() };
+            for (actual, expected) in actual[1].iter().zip([expected.x + 2., expected.y + 2., expected.z + 2.]) {
+                assert!((f64::from(*actual) - expected).abs() < 3e-6, "mixed face normal {color_portable}/{normal_portable}");
+            }
+            let actual = run(&mut task, &scalar_pipeline);
+            let expected = [if normal_portable { 0.3 } else { 64. / 255. }, if color_portable { 0.2 } else { 192. / 255. }, 1.7];
+            for (actual, expected) in actual[0].iter().zip(expected) {
+                assert!((f64::from(*actual) - expected).abs() < 2e-6, "mixed face scalars {color_portable}/{normal_portable}");
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_wood_minification_converges_to_mean_and_preserves_scalar_face_override() {
+    use image::ImageEncoder;
+    use solidcraft_render::{
+        FaceAppearance,
+        job::textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
+        texture_input::MapRole,
+    };
+    let Some(executor) = executor() else { return };
+    // Reuse the established closed slab fixture as an opaque wooden plank.
+    let mut scene = glass_slab(false);
+    scene.meshes[0].name = "wood diagnostic".into();
+    scene.meshes[0].surface = Some(white());
+    scene.meshes[0].transmission = None;
+    let mesh = Arc::make_mut(&mut scene.meshes[0].mesh);
+    for position in &mut mesh.positions {
+        position.z -= 0.5;
+    }
+    mesh.tri_face = (0..mesh.triangles.len() as u32).collect();
+    scene.bounds = mesh.bounds();
+    let pixels: Vec<u8> = (0..64)
+        .flat_map(|i| {
+            let v = if i & 1 == 0 { 0 } else { 255 };
+            [v, v, v, 255]
+        })
+        .collect();
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&pixels, 8, 8, image::ExtendedColorType::Rgba8).unwrap();
+    let map = TextureMap::new_portable(encoded, MapRole::BaseColor).unwrap();
+    let binding = |repeat| TextureBinding {
+        body_index: 0,
+        body_name: "wood diagnostic".into(),
+        frame: PlanarFrame { origin: [0.; 3], u: [repeat, 0., 0.], v: [0., repeat, 0.] },
+        normal_strength: 1.,
+        base_color: Some(map.clone()),
+        normal: None,
+        roughness: None,
+        metallic: None,
+        base_color_mode: BaseColorMode::Replace,
+        flip_v: false,
+    };
+    let render = |scene: ProductScene, source: Option<TextureBinding>, fov: f64, pitch: f64, lens: bool| {
+        let mut image = request(16);
+        image.camera.fov = fov;
+        image.camera.pitch = pitch;
+        image.textures = source.map(|b| Arc::new(RuntimeTextures::new(vec![b]).unwrap()));
+        let options = JobOptions {
+            samples: 1,
+            max_depth: 1,
+            lens: lens.then_some(solidcraft_render::job::ThinLens { aperture_radius_mm: 0.15, focus_distance_mm: 4.0 }),
+            ..Default::default()
+        };
+        let mut task = Task::new(executor.context.clone(), scene, image, options, CancelToken::default()).unwrap();
+        task.complete_sample().unwrap();
+        let pixels = task.read_linear().unwrap();
+        assert!(pixels.iter().all(|pixel| pixel[3] == 1.0), "the plank must fill every output pixel");
+        pixels
+    };
+    let mut flat = scene.clone();
+    flat.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0., 1., 1.).unwrap());
+    for (fov, pitch, lens) in [(0., std::f64::consts::FRAC_PI_2, false), (0.7, 0.65, false), (0.7, 0.65, true)] {
+        let expected = render(flat.clone(), None, fov, pitch, lens);
+        let minified = render(scene.clone(), Some(binding(0.25)), fov, pitch, lens);
+        for (pixel, (actual, expected)) in minified.iter().zip(&expected).enumerate() {
+            for (a, b) in actual.iter().take(3).zip(expected) {
+                assert!((a - b).abs() < 2e-5, "pixel={pixel}, fov={fov}, pitch={pitch},lens={lens}: minified {actual:?} vs {expected:?}");
+            }
+        }
+    }
+    let close = render(scene.clone(), Some(binding(4.)), 0., std::f64::consts::FRAC_PI_2, false);
+    let spread = close.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max) - close.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+    assert!(spread > 0.1, "magnified grain must retain contrast: {spread}");
+    let mut overridden = scene;
+    overridden.meshes[0].faces = vec![FaceAppearance {
+        face: 0,
+        color: [64, 128, 192],
+        opacity: 1.,
+        surface: Some(OpaqueSurface::new(Vec3::new(0.1, 0.2, 0.3), 0., 1., 1.).unwrap()),
+        transmission: None,
+    }];
+    let scalar = render(overridden.clone(), None, 0., std::f64::consts::FRAC_PI_2, false);
+    let mapped = render(overridden, Some(binding(0.25)), 0., std::f64::consts::FRAC_PI_2, false);
+    let explicit: Vec<_> = scalar.iter().zip(&mapped).filter(|(a, _)| a[2] > a[0] * 2.).collect();
+    assert!(explicit.len() > 32, "the diagnostic must cover explicit face pixels");
+    for (a, b) in explicit {
+        assert_eq!(a, b, "a scalar face suppresses inherited maps");
+    }
+}
+
+#[test]
+fn gpu_mapped_wood_preserves_index_matched_sheet_and_solid_transport() {
+    use image::ImageEncoder;
+    use solidcraft_render::{
+        job::textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
+        texture_input::MapRole,
+    };
+    let Some(executor) = executor() else { return };
+    let mut board = glass_slab(false).meshes.remove(0);
+    board.name = "mixed wood board".into();
+    board.surface = Some(white());
+    board.transmission = None;
+    for position in &mut Arc::make_mut(&mut board.mesh).positions {
+        position.z -= 0.5;
+    }
+    let pixels: Vec<u8> = (0..64)
+        .flat_map(|i| {
+            let c = if i & 1 == 0 { 0 } else { 255 };
+            [c, c, c, 255]
+        })
+        .collect();
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&pixels, 8, 8, image::ExtendedColorType::Rgba8).unwrap();
+    let resources = Arc::new(
+        RuntimeTextures::new(vec![TextureBinding {
+            body_index: 0,
+            body_name: board.name.clone(),
+            frame: PlanarFrame { origin: [0.; 3], u: [0.25, 0., 0.], v: [0., 0.25, 0.] },
+            normal_strength: 1.,
+            base_color: Some(TextureMap::new_portable(encoded, MapRole::BaseColor).unwrap()),
+            normal: None,
+            roughness: None,
+            metallic: None,
+            base_color_mode: BaseColorMode::Replace,
+            flip_v: false,
+        }])
+        .unwrap(),
+    );
+    // At IOR1, zero extinction and no scatter, either glass boundary is the
+    // exact identity. The mean map reflectance .5 receives three fixed lights.
+    let expected = 0.5 * (3.0 * 0.8 + 1.0 * 0.6 + 1.5 * 0.8) / std::f64::consts::PI;
+    for mapped in [false, true] {
+        for thin in [true, false] {
+            let mut glass = glass_slab(thin).meshes.remove(0);
+            glass.name = "index matched glazing".into();
+            for position in &mut Arc::make_mut(&mut glass.mesh).positions {
+                position.z += 1.0;
+            }
+            glass.surface = Some(OpaqueSurface::new(Vec3::ZERO, 0., 1., 1.).unwrap());
+            glass.transmission =
+                Some(solidcraft_render::transmission::Transmission::new(Vec3::ZERO, thin.then_some(0.)).unwrap().with_shadow_transmission(true));
+            let mut scene = ProductScene { bounds: board.mesh.bounds().union(&glass.mesh.bounds()), meshes: vec![board.clone(), glass] };
+            if !mapped {
+                scene.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0., 1., 1.).unwrap());
+            }
+            let mut image = request(16);
+            image.textures = mapped.then(|| resources.clone());
+            let mut task = Task::new(
+                executor.context.clone(),
+                scene,
+                image,
+                JobOptions { samples: 1, max_depth: if thin { 2 } else { 3 }, ..Default::default() },
+                CancelToken::default(),
+            )
+            .unwrap();
+            assert!(!task.opaque_scene);
+            assert_eq!(task.has_textures, mapped);
+            task.complete_sample().unwrap_or_else(|error| panic!("thin={thin},mapped={mapped}: {error:?}"));
+            for (pixel, value) in task.read_linear().unwrap_or_else(|error| panic!("thin={thin},mapped={mapped}: {error:?}")).iter().enumerate() {
+                assert_eq!(value[3], 1.0, "thin={thin},mapped={mapped},pixel={pixel}");
+                for actual in value.iter().take(3) {
+                    assert!((f64::from(*actual) - expected).abs() < 2e-5, "thin={thin},mapped={mapped},pixel={pixel}: {value:?} vs {expected}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_mapped_wood_keeps_fine_detail_behind_large_index_matched_solid_glass() {
+    use image::ImageEncoder;
+    use solidcraft_render::{
+        job::textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
+        texture_input::MapRole,
+    };
+    let Some(executor) = executor() else { return };
+    let mut board = glass_slab(false).meshes.remove(0);
+    board.name = "fine wood diagnostic".into();
+    board.surface = Some(white());
+    board.transmission = None;
+    for position in &mut Arc::make_mut(&mut board.mesh).positions {
+        position.z -= 2.0;
+    }
+    let mut glass = glass_slab(false).meshes.remove(0);
+    glass.name = "large index matched glazing".into();
+    for position in &mut Arc::make_mut(&mut glass.mesh).positions {
+        position.x *= 50.0;
+        position.y *= 50.0;
+    }
+    glass.surface = Some(OpaqueSurface::new(Vec3::ZERO, 0., 1., 1.).unwrap());
+    glass.transmission = Some(solidcraft_render::transmission::Transmission::new(Vec3::ZERO, None).unwrap().with_shadow_transmission(true));
+    // Each 2x2-texel block has a flat bilinear centre. The two camera patches
+    // below see adjacent white/black details, not the texture's averaged mean.
+    let pixels: Vec<u8> = (0..16)
+        .flat_map(|y| {
+            (0..16).flat_map(move |x| {
+                let value = if (x / 2 + y / 2) & 1 == 0 { 255 } else { 0 };
+                [value, value, value, 255]
+            })
+        })
+        .collect();
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&pixels, 16, 16, image::ExtendedColorType::Rgba8).unwrap();
+    let resources = Arc::new(
+        RuntimeTextures::new(vec![TextureBinding {
+            body_index: 0,
+            body_name: board.name.clone(),
+            frame: PlanarFrame { origin: [-0.125, -0.125, 0.], u: [2., 0., 0.], v: [0., 2., 0.] },
+            normal_strength: 1.,
+            base_color: Some(TextureMap::new_portable(encoded, MapRole::BaseColor).unwrap()),
+            normal: None,
+            roughness: None,
+            metallic: None,
+            base_color_mode: BaseColorMode::Replace,
+            flip_v: false,
+        }])
+        .unwrap(),
+    );
+    let render = |with_glass, centre_x| {
+        let mut scene = ProductScene { bounds: board.mesh.bounds(), meshes: vec![board.clone()] };
+        if with_glass {
+            scene.bounds = scene.bounds.union(&glass.mesh.bounds());
+            scene.meshes.push(glass.clone());
+        }
+        let mut image = request(32);
+        image.camera.target = Vec3::new(centre_x, 0., -1.5);
+        image.camera.fov = 0.02;
+        image.textures = Some(resources.clone());
+        let mut task = Task::new(
+            executor.context.clone(),
+            scene,
+            image,
+            JobOptions { samples: 1, max_depth: if with_glass { 3 } else { 1 }, seed: 1599, ..Default::default() },
+            CancelToken::default(),
+        )
+        .unwrap();
+        assert_eq!(task.opaque_scene, !with_glass);
+        task.complete_sample().unwrap();
+        task.read_linear().unwrap()
+    };
+    // The camera-to-board path is about 4mm, including a 1mm glass/wood gap.
+    // Closed-glass hit origins split a +/-500mm vertex anchor from the full
+    // barycentric displacement. Ignoring that low component invents roughly
+    // 1400mm of travel and selects coarse checker mips instead of these details.
+    let unit_reflectance = (3.0 * 0.8 + 1.0 * 0.6 + 1.5 * 0.8) / std::f64::consts::PI;
+    for (centre_x, reflectance) in [(0., 1.), (0.25, 0.)] {
+        let direct = render(false, centre_x);
+        let through_glass = render(true, centre_x);
+        for (pixel, (actual, expected)) in through_glass.iter().zip(&direct).enumerate() {
+            assert_eq!(expected[3], 1.0, "direct patch {centre_x}, pixel={pixel}");
+            assert_eq!(actual[3], 1.0, "glazed patch {centre_x}, pixel={pixel}");
+            for (actual, expected) in actual.iter().take(3).zip(expected) {
+                assert!((f64::from(*expected) - reflectance * unit_reflectance).abs() < 2e-5, "direct patch {centre_x}, pixel={pixel}: {expected}");
+                assert!((actual - expected).abs() < 2e-5, "glazed patch {centre_x}, pixel={pixel}: {actual} vs {expected}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -2963,7 +3546,7 @@ fn gpu_scalar_maps_match_linear_reference_without_touching_ior() {
         layout: Some(&layout),
         module: &shader,
         entry_point: Some("texture_scalar_reference"),
-        compilation_options: Default::default(),
+        compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
         cache: None,
     });
     let mut input = request(2);
@@ -3281,6 +3864,13 @@ fn engine_exports_raw_master_from_the_exact_completed_job_without_png_conversion
     drop(handle);
     assert!(host.admitted_bytes() > 0);
     drop(frame);
+    // Completion notification precedes worker-owned resource destruction.
+    // Require the actual reservation to drain after the final frame lease drops.
+    let released_by = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while host.admitted_bytes() != 0 {
+        assert!(std::time::Instant::now() < released_by, "worker did not release its exported frame reservation");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
     assert_eq!(host.admitted_bytes(), 0);
     std::fs::remove_dir_all(root).unwrap();
 }

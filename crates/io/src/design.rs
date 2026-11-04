@@ -334,13 +334,25 @@ fn write_container(
     if !clouds.is_empty() {
         replacements.insert("point_clouds".into(), Value::Array(clouds));
     }
-    if !doc.render.resources.is_empty() {
-        let mut resources = Map::new();
-        for (id, resource) in doc.render.resources.iter() {
-            let blob = writer.blob(resource.bytes(), "hdr", false)?;
-            resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+    if !doc.render.resources.is_empty() || !doc.render.texture_resources.is_empty() {
+        let mut changes = Map::new();
+        if !doc.render.resources.is_empty() {
+            let mut resources = Map::new();
+            for (id, resource) in doc.render.resources.iter() {
+                let blob = writer.blob(resource.bytes(), "hdr", false)?;
+                resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+            }
+            changes.insert("resources".into(), Value::Object(resources));
         }
-        let render = replace(doc.render.as_ref(), fields([("resources", Value::Object(resources))])).map_err(invalid)?;
+        if !doc.render.texture_resources.is_empty() {
+            let mut resources = Map::new();
+            for (id, resource) in doc.render.texture_resources.iter() {
+                let blob = writer.blob(resource.bytes(), "texture", false)?;
+                resources.insert(id.to_string(), json!({"kind":"opaque_texture","data":"","texture_blob":blob,"provenance":resource.provenance()}));
+            }
+            changes.insert("texture_resources".into(), Value::Object(resources));
+        }
+        let render = replace(doc.render.as_ref(), changes).map_err(invalid)?;
         replacements.insert("render".into(), render);
     }
     let metadata = replace(doc, replacements).map_err(invalid)?;
@@ -821,12 +833,14 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     }
     let bytes = reader.document(max_design())?;
     check_hdr_manifest(&bytes)?;
+    check_texture_manifest(&bytes)?;
     let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
     // container-only blob fields may reach the document deserializer.
     let hydrated_hdr = hydrate_hdr_resources(&mut metadata, reader)?;
+    let hydrated_textures = hydrate_texture_resources(&mut metadata, reader)?;
     let hydrated_text;
-    let text = if hydrated_hdr {
+    let text = if hydrated_hdr || hydrated_textures {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -987,6 +1001,135 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
         let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
         let fields = value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?;
         fields.remove("hdr_blob");
+        fields.insert("data".into(), Value::String(encoded));
+    }
+    Ok(!resources.is_empty())
+}
+
+/// Texture manifests are checked before Value allocation, including duplicate keys,
+/// bounded provenance and strict empty-payload/blob markers.
+fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
+    use serde::{
+        Deserialize,
+        de::{MapAccess, Visitor},
+    };
+    use solidcraft_doc::{
+        render_resources::HdrId,
+        render_texture_resources::{MAX_TEXTURE_RESOURCES, TextureProvenance},
+    };
+    #[derive(Default, Deserialize)]
+    struct Render {
+        #[serde(default, deserialize_with = "resources")]
+        texture_resources: (),
+    }
+    #[derive(Deserialize)]
+    struct Metadata {
+        #[serde(default)]
+        render: Render,
+    }
+    fn marker<'de, D: serde::Deserializer<'de>>(d: D, field: &'static str) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        let maximum = match field {
+            "kind" => 14,
+            "data" => 0,
+            _ => 78,
+        };
+        if raw.get().len() > maximum * 6 + 2 {
+            return Err(serde::de::Error::custom("texture metadata marker exceeds its budget"));
+        }
+        let value: String = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        let valid = match field {
+            "kind" => value == "opaque_texture",
+            "data" => value.is_empty(),
+            _ => value
+                .strip_prefix("blobs/")
+                .and_then(|v| v.strip_suffix(".texture"))
+                .is_some_and(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+        };
+        if valid { Ok(()) } else { Err(serde::de::Error::custom("invalid texture metadata marker")) }
+    }
+    fn kind<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "kind")
+    }
+    fn data<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "data")
+    }
+    fn blob<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "blob")
+    }
+    fn provenance<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        if raw.get().len() > 48 * 1024 {
+            return Err(serde::de::Error::custom("texture provenance exceeds its budget"));
+        }
+        let value: TextureProvenance = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        value.validate().map_err(serde::de::Error::custom)
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Entry {
+        #[serde(deserialize_with = "kind")]
+        kind: (),
+        #[serde(deserialize_with = "data")]
+        data: (),
+        #[serde(deserialize_with = "blob")]
+        texture_blob: (),
+        #[serde(deserialize_with = "provenance")]
+        provenance: (),
+    }
+    fn resources<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        struct Resources;
+        impl<'de> Visitor<'de> for Resources {
+            type Value = ();
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("unique bounded texture blob references")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+                let mut keys = BTreeSet::new();
+                while let Some(id) = map.next_key::<HdrId>()? {
+                    if keys.len() >= MAX_TEXTURE_RESOURCES || !keys.insert(id) {
+                        return Err(serde::de::Error::custom("too many or duplicate embedded texture resources"));
+                    }
+                    let Entry { kind: (), data: (), texture_blob: (), provenance: () } = map.next_value()?;
+                }
+                Ok(())
+            }
+        }
+        d.deserialize_map(Resources)
+    }
+    let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
+    Ok(())
+}
+fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+    use solidcraft_doc::{
+        render_resources::{HdrId, encode_hdr_base64},
+        render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
+    };
+    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
+        return Ok(false);
+    };
+    let resources = resources.as_object_mut().ok_or_else(|| invalid("texture resources must be an object"))?;
+    if resources.len() > MAX_TEXTURE_RESOURCES {
+        return Err(invalid("at most 32 embedded texture resources"));
+    }
+    let mut total = 0usize;
+    for (key, value) in resources.iter_mut() {
+        let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
+        if !value.as_object().is_some_and(|fields| fields.len() == 4)
+            || value.get("kind").and_then(Value::as_str) != Some("opaque_texture")
+            || value.get("data").and_then(Value::as_str) != Some("")
+        {
+            return Err(invalid("texture metadata requires opaque_texture, empty data, provenance and one blob"));
+        }
+        let remaining = MAX_TEXTURE_RESOURCE_BYTES.saturating_sub(total).min(MAX_TEXTURE_BYTES);
+        let bytes = reader.limited_blob(value, "texture_blob", "texture", remaining)?;
+        if HdrId::of(bytes) != id {
+            return Err(invalid("texture resource key does not match its blob hash"));
+        }
+        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
+        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
+        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?;
+        fields.remove("texture_blob");
         fields.insert("data".into(), Value::String(encoded));
     }
     Ok(!resources.is_empty())
@@ -2261,6 +2404,93 @@ mod tests {
         let duplicate = format!("{{\"render\":{{\"resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
         entries.insert("document.json".into(), duplicate.into_bytes());
         assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn embedded_texture_container_keeps_exact_blobs_provenance_and_offline_bindings() {
+        use solidcraft_doc::{
+            render_settings::{GpuJob, RenderJob, RenderSetup},
+            render_surface::{EmbeddedSurfaceKind, EmbeddedSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceSource},
+            render_texture_resources::{TextureProvenance, TextureResource},
+        };
+        let source = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let resource = TextureResource::new(
+            source.clone(),
+            TextureProvenance {
+                author: "Original SolidCraft test".into(),
+                source: "original bundled diagnostic".into(),
+                license: "MIT OR Apache-2.0".into(),
+            },
+        )
+        .unwrap();
+        let id = resource.id();
+        let mut doc = document();
+        let render = Arc::make_mut(&mut doc.render);
+        render.texture_resources.insert(resource).unwrap();
+        let mut setup = RenderSetup {
+            job: Some(RenderJob::GpuPath { transparent_background: false, options: Box::new(GpuJob::default()) }),
+            ..Default::default()
+        };
+        setup
+            .surfaces
+            .set(
+                SavedSurface {
+                    target: RenderBodyTarget { definition: "Wood".into(), feature: 7, component: 0, occurrence_path: vec![] },
+                    source: SurfaceSource::Embedded(EmbeddedSurfaceSource {
+                        kind: EmbeddedSurfaceKind::Embedded,
+                        base_color: Some(id),
+                        normal_open_gl: None,
+                        roughness: Some(id),
+                        metallic: None,
+                        flip_v: true,
+                    }),
+                    local_frame: serde_json::from_value(serde_json::json!({"origin":[0.,0.,0.],"u":[240.,0.,0.],"v":[0.,480.,0.]})).unwrap(),
+                    normal_strength: 0.75,
+                },
+                false,
+            )
+            .unwrap();
+        render.setups.insert("Wood".into(), setup);
+        let bytes = write_design_container(&doc).unwrap();
+        assert_eq!(crate::read_design(&bytes).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        let original = parts(&bytes);
+        let blob = format!("blobs/{id}.texture");
+        assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);
+        assert_eq!(original[&blob], source);
+        let metadata: Value = serde_json::from_slice(&original["document.json"]).unwrap();
+        let entry = &metadata["render"]["texture_resources"][id.to_string()];
+        assert_eq!(entry["data"], "");
+        assert_eq!(entry["texture_blob"], blob);
+        assert_eq!(entry["provenance"]["author"], "Original SolidCraft test");
+        assert!(Document::from_json(&metadata.to_string()).is_err());
+        let mut missing = original.clone();
+        missing.remove(&blob);
+        assert!(crate::read_design(&package(&missing)).unwrap_err().to_string().contains("required part"));
+        let mut corrupt = original.clone();
+        corrupt.get_mut(&blob).unwrap()[0] ^= 1;
+        assert!(crate::read_design(&package(&corrupt)).unwrap_err().to_string().contains("hash mismatch"));
+        for (field, value) in
+            [("kind", json!("png")), ("data", json!("AAAA")), ("path", json!("wood.png")), ("texture_blob", json!(format!("blobs/{id}.hdr")))]
+        {
+            let mut entries = original.clone();
+            let mut changed = metadata.clone();
+            changed["render"]["texture_resources"][id.to_string()][field] = value;
+            entries.insert("document.json".into(), serde_json::to_vec(&changed).unwrap());
+            assert!(crate::read_design(&package(&entries)).is_err(), "{field}");
+        }
+        let duplicate = format!("{{\"render\":{{\"texture_resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
+        assert!(check_texture_manifest(duplicate.as_bytes()).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn texture_manifest_refuses_escaped_inline_payload_before_value_materialization() {
+        let id = "0".repeat(64);
+        let escaped = "\\u0041".repeat(4096);
+        let wire = format!(
+            "{{\"render\":{{\"texture_resources\":{{\"{id}\":{{\"kind\":\"opaque_texture\",\"data\":\"{escaped}\",\"texture_blob\":\"blobs/{id}.texture\",\"provenance\":{{}}}}}}}}}}"
+        );
+        assert!(check_texture_manifest(wire.as_bytes()).unwrap_err().to_string().contains("marker exceeds its budget"));
     }
 
     #[test]

@@ -30,6 +30,7 @@ fn handled(id: &str) -> bool {
                 | "render.optics.bind"
                 | "render.optics.unbind"
                 | "render.library.surface.bind"
+                | "render.surface.import"
                 | "render.library.surface.unbind"
                 | "render.library.surface.prepare"
                 | "render.library.physical.prepare"
@@ -299,6 +300,10 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
         "render.library.appearance.apply" | "render.optics.bind" | "render.optics.unbind" => focus(app, object, Some("surfaces")),
         "render.library.surface.bind" | "render.library.surface.prepare" | "render.library.surface.unbind" => {
             focus(app, object, Some("surfaces"));
+        }
+        "render.surface.import" => {
+            focus(app, object, Some("surfaces"));
+            library::reveal_import(app);
         }
         "render.library.physical.prepare" => focus(app, object, Some("physical_profiles")),
         "render.library.studio.prepare" => focus(app, RenderSelection::Lighting, Some("rigs")),
