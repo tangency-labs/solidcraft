@@ -1047,7 +1047,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         // Named apart from a dialog's Close: egui 0.37 names an unnamed widget after its tooltip.
         xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, crate::i18n::tr("ui.close_tab")));
         // A middle click closes the tab, as in a web browser.
-        if resp.middle_clicked() || xresp.backing_on_hover_text("Close").clicked() {
+        if resp.middle_clicked() || xresp.middle_clicked() || xresp.backing_on_hover_text("Close").clicked() {
             shut = Some(i);
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
             pick = Some(i);
@@ -1635,6 +1635,12 @@ mod tests {
         assert_eq!(h.app.docs.count(), 2);
         // The first has nothing to save: it closes at once
         h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "middle"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 1);
+        // A middle click on the ×, which lies over the tab and takes its clicks, closes it too
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "tab:close:0"}, "button": "middle"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
     }
