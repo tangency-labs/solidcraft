@@ -1583,7 +1583,7 @@ preference_settings! {
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
-    /// Toggle rounding for the top bar.
+    /// Whether to round the titlebar's top corners in floating layout.
     floating_titlebar_rounded: bool = true, PAGE_LAYOUT;
 }
 
@@ -5885,6 +5885,7 @@ mod tests {
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
             ("layout", json!("compact"), PAGE_LAYOUT),
+            ("floating_titlebar_rounded", json!(false), PAGE_LAYOUT),
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),
@@ -9091,6 +9092,18 @@ mod tests {
         }
         assert_eq!(h.app.session.revision, revision);
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn floating_titlebar_rounded_defaults_on_and_rejects_malformed_values() {
+        assert!(Prefs::default().floating_titlebar_rounded);
+        assert!(lenient(&json!({"theme":"light"})).floating_titlebar_rounded);
+        assert!(lenient(&json!({"floating_titlebar_rounded":"no"})).floating_titlebar_rounded);
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut app, &json!({"floating_titlebar_rounded":malformed})).is_err());
+            assert!(app.preferences.floating_titlebar_rounded);
+        }
     }
 
     #[test]
