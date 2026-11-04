@@ -749,3 +749,180 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
 }
+
+/// A 60 × 40 × 10 plate with a Ø8 hole at (45, 20), Point to Point picking From.
+fn holed_plate_picking_from() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 4, "height": 12, "base": [45, 20, -1], "operation": "cut"})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h
+}
+
+/// Hovering a hole's rim wakes its centre (#5912): a click there, in the hole's empty middle,
+/// picks the centre exactly.
+#[test]
+fn hovering_a_rim_wakes_its_centre_for_a_click() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { body, point }] if body == "Body1" && point.dist(centre) < 1e-6), "{from:?}");
+}
+
+/// Hovering another edge puts the woken points to sleep and wakes its own: a straight edge's
+/// middle is picked from further away than the edge itself is.
+#[test]
+fn another_edge_wakes_its_own_points_and_the_rest_sleep() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    h.step(&json!({ "move": { "world": [20, 0, 10] } })).unwrap();
+    let woken: Vec<Vec3> = h.app.viewport.woken.points.iter().map(|p| p.at).collect();
+    assert!(!woken.iter().any(|p| p.dist(Vec3::new(45.0, 20.0, 10.0)) < 1e-6), "the rim's centre sleeps: {woken:?}");
+    let middle = Vec3::new(30.0, 0.0, 10.0);
+    assert!(woken.iter().any(|p| p.dist(middle) < 1e-6), "{woken:?}");
+    // 12 points below the middle: past an edge's reach, within a woken point's.
+    let at = h.call("ui.at", json!({ "world": [30, 0, 10] }))["result"].clone();
+    let below = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + 12.0]);
+    h.step(&json!({ "click": below })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{from:?}");
+}
+
+/// A woken point hidden behind a face is not picked, like a vertex there: the click takes the
+/// face in front of it.
+#[test]
+fn a_woken_point_behind_a_face_is_not_picked() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    let hidden = Vec3::new(20.0, 20.0, 0.0);
+    h.app.viewport.woken.points.push(solidcraft_engine::snap::SnapPoint {
+        at: hidden,
+        kind: solidcraft_engine::snap::SnapKind::Middle,
+        body: String::new(),
+    });
+    h.step(&json!({ "click": { "world": [20, 20, 0] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(!matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(hidden) < 1e-6), "{from:?}");
+}
+
+/// Crossing a face on the way from a rim to its centre keeps the centre awake: only another
+/// edge or curve puts a rim's points to sleep.
+#[test]
+fn crossing_a_face_keeps_a_rims_centre_awake() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    h.step(&json!({ "move": { "world": [53, 24, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(centre) < 1e-6), "{from:?}");
+}
+
+/// Snap points are on by default; with the preference off, hovering a rim wakes nothing and a
+/// click in the hole's middle picks nothing there, as before (#5912).
+#[test]
+fn snap_points_are_on_by_default_and_sleep_with_the_preference_off() {
+    assert!(crate::prefs::Prefs::default().snap_points, "on by default");
+    let mut h = holed_plate_picking_from();
+    h.app.preferences.snap_points = false;
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(!from.iter().any(|s| matches!(s, Sel::Vertex { point, .. } if point.dist(centre) < 1e-6)), "{from:?}");
+}
+
+/// An input that doesn't take snap points (Rotate's axis) wakes none.
+#[test]
+fn an_axis_input_wakes_no_points() {
+    let mut h = holed_plate_picking_from();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(ROTATE, &h.app.session.doc);
+    d.inputs = inputs(ROTATE);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+}
+
+/// A pointer hover of the plate's face at `p`, as the viewport finds it.
+fn face_hit(h: &crate::scenario::Harness, p: Vec3) -> crate::viewport::Hit {
+    let Some(Sel::Face { body, index, point }) = crate::dialogs::face_sel(&h.app.session, p) else { panic!("no face at {p:?}") };
+    crate::viewport::Hit::Face { body, index, point }
+}
+
+/// Whether a point is among the woken ones.
+fn woken_has(h: &crate::scenario::Harness, p: Vec3) -> bool {
+    h.app.viewport.woken.points.iter().any(|w| w.at.dist(p) < 1e-6)
+}
+
+/// An item that offers nothing the woken points lack keeps them: a hole's rim, hovered after the
+/// hole's wall, keeps the wall's two centres.
+#[test]
+fn an_item_that_offers_nothing_new_keeps_the_points() {
+    let mut h = holed_plate_picking_from();
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(41.0, 20.0, 5.0)));
+    crate::snap_wake::update(&mut h.app, false, None);
+    let (top, bottom) = (Vec3::new(45.0, 20.0, 10.0), Vec3::new(45.0, 20.0, 0.0));
+    assert!(woken_has(&h, top) && woken_has(&h, bottom), "{:?}", h.app.viewport.woken);
+    let Some(Sel::Edge { body, index, point }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 10.0)) else { panic!("the rim") };
+    h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body, index, mid: point, point });
+    crate::snap_wake::update(&mut h.app, false, None);
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, bottom), "{:?}", h.app.viewport.woken);
+}
+
+/// On the way to a woken point (within reach of it, or inside a woken rim's circle), another edge
+/// under the pointer doesn't take over: a rim seen through a hole doesn't replace the rim being
+/// travelled across.
+#[test]
+fn another_edge_within_reach_of_a_woken_point_keeps_them() {
+    let mut h = holed_plate_picking_from();
+    let rim = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 10.0)).unwrap();
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let screen = |p: Vec3| proj.to_screen(p).unwrap();
+    let Some(Sel::Edge { body, index, point }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 0.0)) else { panic!("the far rim") };
+    h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body, index, mid: point, point });
+    let points = solidcraft_engine::snap::snap_points(&h.app.session, &rim);
+    h.app.viewport.woken = crate::snap_wake::Woken { item: Some(rim), points, kept_over: None };
+    crate::snap_wake::update(&mut h.app, false, Some((&proj, screen(centre))));
+    assert!(woken_has(&h, centre), "at the centre: {:?}", h.app.viewport.woken);
+    crate::snap_wake::update(&mut h.app, false, Some((&proj, screen(Vec3::new(10.0, 10.0, 10.0)))));
+    assert!(!woken_has(&h, centre), "far from it the far rim takes over: {:?}", h.app.viewport.woken);
+}
+
+/// Held Shift (Keep Snap Points) keeps the woken points over another body's face; let go, that
+/// face wakes its own. A vertex of another body puts woken points to sleep.
+#[test]
+fn shift_keeps_the_points_and_another_bodys_vertex_puts_them_to_sleep() {
+    let mut h = holed_plate_picking_from();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new"})).unwrap();
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(20.0, 10.0, 10.0)));
+    crate::snap_wake::update(&mut h.app, false, None);
+    let plate = h.app.viewport.woken.clone();
+    assert!(plate.points.iter().any(|p| p.body == "Body1"), "{plate:?}");
+
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(85.0, 5.0, 10.0)));
+    crate::snap_wake::update(&mut h.app, true, None);
+    assert_eq!(h.app.viewport.woken, plate, "Shift held");
+    crate::snap_wake::update(&mut h.app, false, None);
+    assert!(h.app.viewport.woken.points.iter().all(|p| p.body != "Body1") && woken_has(&h, Vec3::new(85.0, 5.0, 10.0)), "{:?}", h.app.viewport.woken);
+
+    h.app.viewport.woken = plate;
+    h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: "Body2".into(), point: Vec3::new(80.0, 0.0, 10.0) });
+    crate::snap_wake::update(&mut h.app, false, None);
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+}
