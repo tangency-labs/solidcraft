@@ -14,6 +14,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
     out["error"].as_str().map(str::to_string).unwrap_or_else(|| panic!("{id} should fail: {out}"))
 }
 
+/// Profile capture includes declared personal preferences and excludes computer-local state.
 #[test]
 fn a_profile_holds_personal_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
@@ -160,6 +161,7 @@ fn a_profile_holds_personal_settings_but_not_the_machine() {
     assert_eq!(sanitize(&doc).unwrap(), doc, "a captured profile passes its own checks unchanged");
 }
 
+/// Personal design and tool values survive export, import and application on another setup.
 #[test]
 fn personal_design_and_tool_settings_survive_profile_export_import_and_apply() {
     let mut h = Harness::new();
@@ -188,21 +190,53 @@ fn personal_design_and_tool_settings_survive_profile_export_import_and_apply() {
     }
 }
 
+/// Sparse profiles preserve absent values and report edits only to settings they actually store.
 #[test]
 fn older_profiles_leave_newly_supported_settings_unchanged() {
     let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
     h.app.preferences.default_units = "in".into();
     h.app.preferences.extrude_view_isometric = true;
     h.app.preferences.dark_parts_shading = true;
     let old = json!({"format":FORMAT, "name":"Older", "preferences":{"zoom_reverse":true}});
     run(&mut h, "settings.profile.import", json!({"profile":old}));
+    let stored = h.app.settings_profiles.prefs();
+    h.app.settings_profiles.load(&stored);
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Older"}));
     assert_eq!(out["skipped"], json!([]));
     assert_eq!(h.app.preferences.default_units, "in");
     assert!(h.app.preferences.extrude_view_isometric && h.app.preferences.dark_parts_shading);
     assert!(h.app.preferences.zoom_reverse);
+    h.call("ui.prefs", json!({"open":"General"}));
+    let assert_edited = |h: &mut Harness, edited: bool| {
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:profile:Older:active").is_some());
+        for handle in ["prefs:profile:Older:edited", "prefs:profile:edited"] {
+            assert_eq!(crate::scenario::rect_of(handle).is_some(), edited, "{handle}");
+        }
+    };
+    assert_edited(&mut h, false);
+    h.app.preferences.default_units = "mm".into();
+    assert_edited(&mut h, false);
+    h.app.preferences.zoom_reverse = false;
+    assert_edited(&mut h, true);
+    h.app.preferences.zoom_reverse = true;
+    assert_edited(&mut h, false);
+    // Non-preference settings still belong to an older profile.
+    h.app.sbox.pinned.push("solid.extrude".into());
+    assert_edited(&mut h, true);
+    run(&mut h, "settings.profile.apply", json!({"name":"Older"}));
+    assert_edited(&mut h, false);
+    assert_eq!(h.app.settings_profiles.prefs()["profiles"], stored["profiles"], "comparison must not fill absent saved keys");
+    run(&mut h, "settings.profile.save", json!({"name":"Older"}));
+    assert_edited(&mut h, false);
+    assert_eq!(h.app.settings_profiles.list[0]["preferences"]["default_units"], "mm", "saving captures newly supported preferences");
+    h.app.preferences.default_units = "in".into();
+    assert_edited(&mut h, true);
 }
 
+/// Summary chips follow declared scope, including mixed pages and migration-only fields.
 #[test]
 fn profile_summary_distinguishes_personal_and_computer_settings_on_mixed_pages() {
     use crate::prefs::ProfileScope::{Computer, Profile};
@@ -217,6 +251,26 @@ fn profile_summary_distinguishes_personal_and_computer_settings_on_mixed_pages()
     assert!(computer.iter().any(|(label, _, partial)| *label == "prefs.assistant" && !partial));
     assert!(!held.iter().any(|(label, _, _)| *label == "prefs.assistant"));
     assert!(held.iter().any(|(label, _, _)| *label == "prefs.profiles_other_settings"));
+}
+
+/// Summary captions keep their existing column while the expanded page chips wrap beside them.
+#[test]
+fn profile_summary_keeps_captions_beside_chips_at_narrow_widths() {
+    for width in [480, 600, 700, 1100] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":width, "height":1000}));
+        h.call("ui.prefs", json!({"language":"en", "open":"General"}));
+        h.frames(3);
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        for key in ["held", "computer"] {
+            let label = crate::scenario::rect_of(&format!("prefs:profiles:{key}:label")).unwrap();
+            let first = crate::scenario::rect_of(&format!("prefs:profiles:{key}:first_chip")).unwrap();
+            assert!((first.left() - body.left() - 90.0).abs() < 0.5, "{width}: {key} retains the caption column");
+            assert!(label.right() <= first.left(), "{width}: {key} caption stays beside the chips");
+            assert!(body.contains_rect(first), "{width}: {key} chips stay inside the page");
+        }
+    }
 }
 
 #[test]
@@ -409,6 +463,7 @@ fn export_and_import_go_through_one_file_and_import_never_switches() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Malformed, oversized and unsupported profile fields are refused or bounded safely.
 #[test]
 fn hostile_profiles_are_refused_or_cut_down_without_panicking() {
     let mut h = Harness::new();
@@ -900,6 +955,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
     }
 }
 
+/// Expanding profile coverage must retain all keys understood by previously saved profiles.
 #[test]
 fn profile_keys_retain_every_previously_saved_setting() {
     let expected = [
@@ -1012,6 +1068,7 @@ fn profile_keys_retain_every_previously_saved_setting() {
     }
 }
 
+/// Moving a preference between pages must not change its profile scope or validation.
 #[test]
 fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let mut h = Harness::new();

@@ -175,6 +175,18 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
     doc
 }
 
+/// Older profiles leave absent preferences alone, so only their saved keys can be edited.
+/// Keep the full comparison for shortcuts, favourites, toolbar and themes.
+fn is_edited(app: &SolveApp, doc: &Value) -> bool {
+    let mut current = capture(app, name_of(doc));
+    if let (Some(saved), Some(preferences)) =
+        (doc.get("preferences").and_then(Value::as_object), current.get_mut("preferences").and_then(Value::as_object_mut))
+    {
+        preferences.retain(|key, _| saved.contains_key(key));
+    }
+    *doc != current
+}
+
 /// An imported theme as a theme file that also keeps the id the profile's `theme` names.
 fn theme_document(theme: &theme_files::ThemeFile) -> Value {
     let mut v = serde_json::to_value(theme).unwrap_or_default();
@@ -481,7 +493,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.spacing_mut().item_spacing.y = t.space_8;
             for name in &names {
                 let active = app.settings_profiles.active.as_ref() == Some(name);
-                let edited = active && app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name));
+                let edited = active && app.settings_profiles.get(name).is_ok_and(|doc| is_edited(app, doc));
                 ui.push_id(name, |ui| {
                     let card = ui_kit::settings_row_card(ui, active, t.control_height + t.space_14, |ui| {
                         ui.spacing_mut().item_spacing.x = t.space_6;
@@ -589,18 +601,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
             {
                 let accent = scope == prefs::ProfileScope::Profile;
                 let key = if accent { "held" } else { "computer" };
-                let stacked = ui.available_width() < 432.0;
-                let layout = if stacked { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
-                let row = ui.with_layout(layout, |ui| {
+                let row = ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = t.space_6;
-                    let caption = if stacked {
-                        ui_kit::text(ui, label, ui_kit::Text::Inline)
-                    } else {
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24 * 3.0 + t.space_12, t.space_24), egui::Sense::hover());
-                        let mut label_ui =
-                            ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-                        ui_kit::text(&mut label_ui, label, ui_kit::Text::Inline)
-                    };
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24 * 3.0 + t.space_12, t.space_24), egui::Sense::hover());
+                    let mut label_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    let caption = ui_kit::text(&mut label_ui, label, ui_kit::Text::Inline);
                     crate::scenario::publish_rect(&format!("prefs:profiles:{key}:label"), caption.rect);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
@@ -683,7 +688,7 @@ pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
 /// General > Profiles; saving a new name remains in that existing section.
 pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
     let active = app.settings_profiles.active.clone();
-    let edited = active.as_ref().is_some_and(|name| app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name)));
+    let edited = active.as_ref().is_some_and(|name| app.settings_profiles.get(name).is_ok_and(|doc| is_edited(app, doc)));
     let current = active.clone().unwrap_or_else(|| app.tr_label("None").to_string());
     let names = app.settings_profiles.names();
     let mut apply = None;

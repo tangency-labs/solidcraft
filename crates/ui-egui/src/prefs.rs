@@ -6260,6 +6260,7 @@ mod tests {
         assert!(app.session.auto_project);
     }
 
+    /// Every stored preference declares one scope and a valid home in the canonical page order.
     #[test]
     fn preferences_structure_order_groups_and_unique_field_homes() {
         assert_eq!(
@@ -7650,6 +7651,7 @@ mod tests {
         }
     }
 
+    /// Sketch controls and page resets change only their declared settings; Cancel restores them.
     #[test]
     fn sketch_cards_tiles_and_session_controls_preserve_apply_defaults_and_cancel() {
         for theme in ["light", "dark"] {
@@ -8630,16 +8632,19 @@ mod tests {
                 let opened = h.call("ui.prefs", json!({"open":"General"}));
                 assert!(opened["error"].is_null(), "{theme} {width}: opening General failed: {opened}");
                 let initial_body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                for target in [
-                    "dialog:widget:Profile name",
-                    "prefs:profile:save",
-                    "prefs:profile:import",
-                    "prefs:profiles:held:row",
-                    "prefs:profiles:computer:row",
-                ] {
+                for target in ["dialog:widget:Profile name", "prefs:profile:save", "prefs:profile:import"] {
                     let rect = crate::scenario::rect_of(target).unwrap();
                     assert!(initial_body.contains_rect(rect), "{theme} {width}: {target} {rect:?} leaves {initial_body:?}");
                 }
+                // More profile pages can extend below the fold; both rows must fit horizontally
+                // and remain fully reachable through the existing page scroll area.
+                for target in ["prefs:profiles:held:row", "prefs:profiles:computer:row"] {
+                    super::reveal_preference(&mut h, target);
+                    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    assert!(body.contains_rect(rect), "{theme} {width}: {target} {rect:?} is not reachable inside {body:?}");
+                }
+                super::reveal_preference(&mut h, "dialog:widget:Profile name");
                 if width == 480 {
                     let name = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
                     let save = crate::scenario::rect_of("prefs:profile:save").unwrap();
