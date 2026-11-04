@@ -94,10 +94,11 @@ fn coil_with_profile(d: &Dialog) -> bool {
     matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.iter().any(|i| !i.items.is_empty())
 }
 
-/// A size field's value (mm), zero when it is missing or does not evaluate.
+/// A size field's value (mm), zero when it is missing or does not evaluate. A bare number is in
+/// the design's unit, as OK reads it.
 fn size(app: &SolveApp, d: &Dialog, key: &str) -> f64 {
     let Kind::Primitive { fields, .. } = &d.kind else { return 0.0 };
-    fields.iter().find(|f| f.0 == key).map(|f| len(app, &f.1)).unwrap_or(0.0)
+    fields.iter().find(|f| f.0 == key).map(|f| len(app, &app.session.doc.with_design_unit(&f.1, ValueKind::Length))).unwrap_or(0.0)
 }
 
 /// The radius, from whichever of `radius` (Edit Feature) or `diameter` (a new one) the dialog holds.
