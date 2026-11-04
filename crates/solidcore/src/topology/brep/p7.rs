@@ -2106,12 +2106,16 @@ pub fn glue_edges_general(
 /// objects.
 ///
 /// The fork's version (tangency-labs/smlib, its law corners): upstream's is `void` and
-/// ignores each step's status; the fork's returns the first failure.
+/// ignores each step's status; the fork's returns the first failure. Not the fork's: the
+/// merge passes over a face it fails to make and still reports every face copied, so each
+/// face must add one copy to the new B-rep before any original is removed, and every copy
+/// must come back (otherwise a face would be lost while the call succeeds).
 ///
 /// # Errors
 ///
-/// `SM_ERR` where a face is not copied; those of the B-rep construction, `SetTolerance`,
-/// `CopyFaces` and `RemoveFaces`.
+/// `SM_ERR` where a face is not copied, or not copied back (nothing is removed when a face
+/// is not copied); those of the B-rep construction, `SetTolerance`, `CopyFaces` and
+/// `RemoveFaces`.
 pub fn unstitch(k: &mut Kernel, b: &mut Brep, faces: Option<&[FaceId]>) -> Result<()> {
     // copy faces one at a time into the second B-rep
     let mut second = super::p3::new_brep(k, -1.0, -1.0)?;
@@ -2122,7 +2126,13 @@ pub fn unstitch(k: &mut Kernel, b: &mut Brep, faces: Option<&[FaceId]>) -> Resul
     };
     for &face in &faces {
         // you have to copy them individually to make them separate
+        let before = p1::faces(&second, None)?.len();
         copy_faces_carrying(k, b, &[face], &mut second)?;
+        // (not the fork's: the merge passes over a face it fails to make, so each face
+        // must have added one copy before any original is removed)
+        if p1::faces(&second, None)?.len() != before + 1 {
+            return Err(SolidError::sm_err(OP_UNSTITCH));
+        }
     }
     let editing = b.editing_enabled();
     b.set_editing_enabled(true);
@@ -2130,8 +2140,16 @@ pub fn unstitch(k: &mut Kernel, b: &mut Brep, faces: Option<&[FaceId]>) -> Resul
     b.set_editing_enabled(editing);
     removed?;
     let back = p1::faces(&second, None)?;
-    copy_faces_carrying(k, &mut second, &back, b)
+    let before = p1::faces(b, None)?.len();
+    copy_faces_carrying(k, &mut second, &back, b)?;
+    // (and every copy must have come back)
+    if p1::faces(b, None)?.len() != before + back.len() {
+        return Err(SolidError::sm_err(OP_UNSTITCH));
+    }
+    Ok(())
 }
+
+const OP_UNSTITCH: &str = "topology::brep::p7::unstitch";
 
 /// `CopyFaces(crFaces, pDest)` with its defaults (the merge) between two B-reps' own
 /// attribute stores (`p2::CopyNotifyState`), `SM_ERR` where a face is not copied (the
@@ -2160,7 +2178,7 @@ fn copy_faces_carrying(
     if all {
         Ok(())
     } else {
-        Err(SolidError::sm_err("topology::brep::p7::unstitch"))
+        Err(SolidError::sm_err(OP_UNSTITCH))
     }
 }
 

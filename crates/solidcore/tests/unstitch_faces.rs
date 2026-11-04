@@ -94,6 +94,30 @@ fn a_face_unstitched_has_edges_of_its_own_and_stitches_back() {
     assert!((volume(&k, &mut b) - 8000.0).abs() <= 1e-9 * 8000.0);
 }
 
+// A face the copy cannot make (the top face without its surface; the merge passes over a
+// face it fails to make) is refused before anything is removed: the body keeps its six
+// faces, twelve edges and eight vertices, the other faces their surfaces.
+#[test]
+fn a_face_the_copy_skips_is_refused_and_the_body_kept() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+    let top = faces(&b, None)
+        .unwrap()
+        .into_iter()
+        .find(|&f| {
+            let s = b.face(f).unwrap().surface.clone().unwrap();
+            let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+            (s.evaluate_point(&k, d.mid()).unwrap().z - 20.0).abs() < 1e-9
+        })
+        .unwrap();
+    b.face_mut(top).unwrap().surface = None;
+    let result = unstitch(&mut k, &mut b, Some(&[top]));
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(counts(&b), (6, 12, 8));
+    assert!(faces(&b, None).unwrap().contains(&top));
+    assert_eq!(lone_edges(&b), 0);
+}
+
 // Every face unstitched: six faces with four edges and four vertices each, every edge on
 // one face; stitched back, the box.
 #[test]
