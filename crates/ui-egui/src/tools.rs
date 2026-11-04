@@ -777,7 +777,7 @@ pub(crate) fn constraint_preselection(
 /// The sketch points and curves Fix takes from a selection (#11663). A box drawn over a sketch
 /// also takes its dimensions and constraint icons; those cannot be fixed and are passed over, so
 /// the geometry boxed with them is still fixed at once. Anything else selected (a body, a
-/// midpoint) leaves the choice to the pick tool. As many entities as the command takes.
+/// midpoint, a curve of another sketch) leaves the choice to the pick tool. As many entities as the command takes.
 fn fix_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<&str>> {
     use solidcraft_engine::Sel::{SketchConstraint, SketchCurve, SketchPoint};
     const MAX_ENTITIES: usize = 10_000;
@@ -785,7 +785,9 @@ fn fix_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<&str>> {
     let mut seen = std::collections::BTreeSet::new();
     for s in selection {
         let id = match s {
-            SketchCurve { id, .. } | SketchPoint { id } => id.as_str(),
+            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
+            // A curve of another sketch: its id alone would name a curve of this one (#3726).
+            SketchCurve { .. } => return None,
             SketchConstraint { .. } => continue,
             _ => return None,
         };
