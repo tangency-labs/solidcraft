@@ -303,4 +303,14 @@ fn the_dimensions_are_drawn_between_the_facing_edge_points() {
             assert!(lo.dist(middle * r0) < 1e-9 && hi.dist(middle * r1) < 1e-9, "radius {r}: {p0:?} {p1:?}");
         }
     }
+    // Concentric full circles have no middle: the dimension stays where it always was, on +X when
+    // the larger circle comes first and on -X when the smaller one does.
+    let mut sk = Sketch::default();
+    let inner = sk.add_circle(v(0.0, 0.0), 10.0, None, None).unwrap();
+    let CurveKind::Circle { c, .. } = sk.curves[inner].kind else { panic!("not a circle") };
+    let outer = sk.add_circle(v(0.0, 0.0), 13.0, Some(c), None).unwrap();
+    for (a, b, x) in [(outer, inner, 1.0), (inner, outer, -1.0)] {
+        let (p0, p1, _) = linear(&sk, &ConstraintKind::CircleCircleDistance { a, b, value: 3.0, circles: TwoCircles::Nested });
+        assert!(p0.dist(v(10.0 * x, 0.0)) < 1e-12 && p1.dist(v(13.0 * x, 0.0)) < 1e-12, "{p0:?} {p1:?}");
+    }
 }

@@ -127,11 +127,11 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
                 }
                 _ => None,
             };
-            let mid = middle(b).or_else(|| middle(a)).unwrap_or(Vec2::X);
-            // The nested branch below measures along -u when `a` is the inner circle, so point the
-            // fallback away from the arc there, and the dimension still lands on the arc.
-            let mid = if matches!(circles, TwoCircles::Nested) && ra < rb { mid * -1.0 } else { mid };
-            let u = unit(cb - ca, mid);
+            // The nested branch below measures along -u when `a` is the inner circle, so point an
+            // arc's middle the other way there, and the dimension still lands on the arc. Full
+            // circles keep the +X fallback they always had.
+            let flip = if matches!(circles, TwoCircles::Nested) && ra < rb { -1.0 } else { 1.0 };
+            let u = unit(cb - ca, middle(b).or_else(|| middle(a)).map_or(Vec2::X, |m| m * flip));
             let (p0, p1) = match circles {
                 TwoCircles::Nested if ra >= rb => (cb + u * rb, ca + u * ra),
                 TwoCircles::Nested => (ca - u * ra, cb - u * rb),
