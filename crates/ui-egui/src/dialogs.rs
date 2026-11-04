@@ -4216,7 +4216,12 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         }
         (Kind::Revolve { axis, .. }, Kind::Revolve { axis: fresh, .. }) => *axis = fresh.clone(),
         (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
-        (Kind::Thread { suggested, of, .. }, Kind::Thread { suggested: fresh_suggested, of: fresh_of, .. }) => {
+        (Kind::Thread { designation, suggested, of, .. }, Kind::Thread { suggested: fresh_suggested, of: fresh_of, .. }) => {
+            // A remembered auto-suggestion belonged to the old face: the new face gets its own.
+            // An authored designation stays.
+            if suggested.as_deref() == Some(designation.as_str()) {
+                *designation = fresh_suggested.clone().unwrap_or_default();
+            }
             *suggested = fresh_suggested.clone();
             *of = fresh_of.clone();
         }
@@ -4247,13 +4252,43 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         (Kind::Frame(previous), Kind::Frame(fresh)) => previous.whole = fresh.whole,
         _ => {}
     }
+    let fresh_mode = mode_inputs_key(&dialog.kind);
     dialog.kind = next;
+    // The remembered mode needs its own inputs (Rotate an Axis, Multiple Hole its points);
+    // the fresh selection of the first input stays.
+    if mode_inputs_key(&dialog.kind) != fresh_mode {
+        let rebuilt = match &dialog.kind {
+            Kind::Move { mode, .. } => Some(crate::dialogs_move::inputs(*mode)),
+            Kind::Hole { opts, .. } if opts.multiple => Some(vec![SelInput::new("Points", selection::POINTS, true)]),
+            Kind::Hole { .. } => Some(single_hole_inputs()),
+            _ => None,
+        };
+        if let Some(mut inputs) = rebuilt {
+            let keep = matches!(dialog.kind, Kind::Move { .. });
+            if keep
+                && let (Some(fresh), Some(first)) = (dialog.inputs.first(), inputs.first_mut())
+            {
+                first.items = fresh.items.clone();
+            }
+            dialog.inputs = inputs;
+            dialog.active = 0;
+        }
+    }
     for key in remembered_extra_keys(&dialog.kind) {
         if let Some(value) = last.extra.get(*key) {
             dialog.extra.insert((*key).to_string(), value.clone());
         } else {
             dialog.extra.remove(*key);
         }
+    }
+}
+
+/// Which mode-dependent input set a dialog shows (`None` for dialogs whose inputs don't change).
+fn mode_inputs_key(kind: &Kind) -> Option<usize> {
+    match kind {
+        Kind::Move { mode, .. } => Some(*mode),
+        Kind::Hole { opts, .. } => Some(usize::from(opts.multiple)),
+        _ => None,
     }
 }
 

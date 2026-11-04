@@ -156,6 +156,49 @@ fn command_dialog_remembers_option_fields() {
 }
 
 #[test]
+fn thread_recall_drops_a_remembered_suggestion_but_keeps_an_authored_size() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut thread = Dialog::for_command(&h.app, "solid.thread").unwrap();
+    if let Kind::Thread { designation, suggested, .. } = &mut thread.kind {
+        *designation = "M6x1".into();
+        *suggested = Some("M6x1".into());
+    }
+    remember(&mut h.app, &thread);
+    let recalled = Dialog::for_command(&h.app, "solid.thread").unwrap();
+    assert!(matches!(&recalled.kind, Kind::Thread { designation, .. } if designation.is_empty()), "{:?}", recalled.kind);
+
+    if let Kind::Thread { designation, .. } = &mut thread.kind {
+        *designation = "M8x1.25".into();
+    }
+    remember(&mut h.app, &thread);
+    let recalled = Dialog::for_command(&h.app, "solid.thread").unwrap();
+    assert!(matches!(&recalled.kind, Kind::Thread { designation, .. } if designation == "M8x1.25"));
+}
+
+#[test]
+fn move_and_hole_recall_rebuild_the_inputs_of_the_remembered_mode() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut rotate = Dialog::for_command(&h.app, "solid.move").unwrap();
+    rotate.kind = crate::dialogs_move::kind(crate::dialogs_move::ROTATE, &h.app.session.doc);
+    rotate.inputs = crate::dialogs_move::inputs(crate::dialogs_move::ROTATE);
+    remember(&mut h.app, &rotate);
+    let recalled = Dialog::for_command(&h.app, "solid.move").unwrap();
+    let labels: Vec<&str> = recalled.inputs.iter().map(|i| i.label).collect();
+    assert!(labels.contains(&"Axis") && !labels.contains(&"Pivot"), "{labels:?}");
+
+    let mut hole = Dialog::for_command(&h.app, "solid.hole").unwrap();
+    if let Kind::Hole { opts, .. } = &mut hole.kind {
+        opts.multiple = true;
+    }
+    remember(&mut h.app, &hole);
+    let recalled = Dialog::for_command(&h.app, "solid.hole").unwrap();
+    assert_eq!(recalled.inputs.len(), 1);
+    assert_eq!(recalled.inputs[0].label, "Points");
+}
+
+#[test]
 fn command_dialog_value_memory_is_off_by_default_and_resets_each_time() {
     let mut h = Harness::new();
     assert!(!h.app.preferences.remember_dialog_values);
