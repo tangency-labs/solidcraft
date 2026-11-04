@@ -717,9 +717,14 @@ mod imp {
 
     /// The profile `pieces` on `plane` swept along `path`, turning with it, or only moving along
     /// it when `translate`. SMLib's sweep follows a smooth path; at a corner (the direction
-    /// jumping) the path is swept piece by piece ([`cornered`]).
+    /// jumping) the path is swept piece by piece ([`cornered`]). A profile drawn away from the
+    /// path's start is first carried there ([`at_path_start`]).
     pub(crate) fn sweep(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Body> {
-        let plane = &at_path_start(plane, pieces, path, translate)?;
+        sweep_from_start(&at_path_start(plane, pieces, path, translate)?, pieces, path, translate)
+    }
+
+    /// [`sweep`] of a profile already where the sweep starts.
+    fn sweep_from_start(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Body> {
         if translate {
             // Every segment's direction of travel, at its ends and between them.
             let bad = || KernelError::Invalid("a path segment has no direction".into());
@@ -1223,11 +1228,14 @@ mod imp {
     /// in another outer loop are cut from the sweep of the rest. Other loops are skinned, and an
     /// arc centred on the line within a loop of other curves still is.
     pub(crate) fn sweep_controlled(plane: &Plane, region: &NumberedRegion, path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
+        let pieces = pieces(region.loops());
+        // A profile drawn away from the path's start is carried there as it is: it is the start
+        // section, and the twist and the scale run from there.
+        let plane = &at_path_start(plane, &pieces, path, ctl.orientation == crate::SweepOrientation::Parallel)?;
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered_controlled(plane, region, path, &runs, ctl);
         }
-        let pieces = pieces(region.loops());
         let start = path.first().map(crate::PathSeg::start).ok_or_else(|| KernelError::Invalid("the path needs 1…1000 segments".into()))?;
         // A circle centred on the twist axis, swept straight along that axis, turns onto itself:
         // its wall is exactly the cylinder, built as one rather than skinned (solidcore#2184: a
@@ -1241,7 +1249,7 @@ mod imp {
         if let Some((_, _, round)) = &axial {
             if round.iter().all(Option::is_some) {
                 // Every loop a circle about the axis: the twist changes nothing.
-                match sweep(plane, &pieces, path, false) {
+                match sweep_from_start(plane, &pieces, path, false) {
                     Ok(body) => return Ok(body),
                     Err(e) => log::debug!(target: "smlib", "twisted sweep of circles about its path, swept untwisted: {e}; skinned instead"),
                 }
