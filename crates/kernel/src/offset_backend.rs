@@ -117,7 +117,8 @@ pub(crate) fn offset_faces(b: &Body, chosen: &[usize], distance: f64) -> Result<
     let at = face_points(b, chosen)?;
     let tol = pick_tolerance(b);
     let pts = points(&at);
-    let (r, h) = run("offset faces", b, None, |s| s.offset_faces(&pts, tol, distance))?;
+    let all_faces = !chosen.is_empty() && chosen.len() == b.face_count();
+    let (r, h) = run("offset faces", b, None, |s| if all_faces { s.offset_sheet(distance) } else { s.offset_faces(&pts, tol, distance) })?;
     let h = h.map(|mut h| {
         for f in &mut h.faces {
             if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {

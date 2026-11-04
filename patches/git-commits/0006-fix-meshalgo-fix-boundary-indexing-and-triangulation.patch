@@ -1,0 +1,412 @@
+From 584317c7365a15026994bd90c3c6fdd38daf29ac Mon Sep 17 00:00:00 2001
+From: Alastair D'Silva <alastair@d-silva.org>
+Date: Mon, 2 Nov 2026 00:51:55 +1100
+Subject: [PATCH 6/9] fix(meshalgo): fix boundary indexing and triangulation
+ ear-clipping
+
+Signed-off-by: Alastair D'Silva <alastair@d-silva.org>
+Assisted-by: Antigravity <antigravity@google.com>
+---
+ .../src/tessellation/triangulation.rs         | 163 ++++++++++++------
+ 1 file changed, 111 insertions(+), 52 deletions(-)
+
+diff --git a/truck-meshalgo/src/tessellation/triangulation.rs b/truck-meshalgo/src/tessellation/triangulation.rs
+index faf3d27a..b74e7135 100644
+--- a/truck-meshalgo/src/tessellation/triangulation.rs
++++ b/truck-meshalgo/src/tessellation/triangulation.rs
+@@ -536,8 +536,20 @@ fn onto_edges(mesh: &mut PolygonMesh, boundary: &PolyBoundary, points: &[Point3]
+     }
+ }
+ 
++#[derive(Clone, Copy, Debug, derive_more::Deref, derive_more::DerefMut)]
++struct SurfacePoint {
++    point: Point3,
++    #[deref]
++    #[deref_mut]
++    uv: Point2,
++}
++
++impl From<(Point2, Point3)> for SurfacePoint {
++    fn from((uv, point): (Point2, Point3)) -> Self { Self { point, uv } }
++}
++
+ #[derive(Debug, Default, Clone)]
+-struct PolyBoundaryPiece(Vec<Point2>);
++struct PolyBoundaryPiece(Vec<SurfacePoint>);
+ 
+ impl PolyBoundaryPiece {
+     fn try_new<S: PreMeshableSurface>(
+@@ -554,7 +566,7 @@ impl PolyBoundaryPiece {
+                 poly_edge.into_iter().take(n)
+             })
+             .collect();
+-        let walk = |mut bdry3d: Vec<Point3>| -> Option<Vec<Point2>> {
++        let walk = |mut bdry3d: Vec<Point3>| -> Option<Vec<SurfacePoint>> {
+             bdry3d.push(bdry3d[0]);
+             let mut previous = None;
+             bdry3d
+@@ -575,17 +587,23 @@ impl PolyBoundaryPiece {
+                     let res = (|| {
+                         if let Some((u0, v0)) = previous {
+                             if !u0.near(&u) && surface.uder(u0, v0).so_small() {
+-                                return vec![Some(Point2::new(u, v0)), Some(Point2::new(u, v))];
++                                return vec![
++                                    Some((Point2::new(u, v0), pt).into()),
++                                    Some((Point2::new(u, v), pt).into()),
++                                ];
+                             } else if !v0.near(&v) && surface.vder(u0, v0).so_small() {
+-                                return vec![Some(Point2::new(u0, v)), Some(Point2::new(u, v))];
++                                return vec![
++                                    Some((Point2::new(u0, v), pt).into()),
++                                    Some((Point2::new(u, v), pt).into()),
++                                ];
+                             }
+                         }
+-                        vec![Some(Point2::new(u, v))]
++                        vec![Some((Point2::new(u, v), pt).into())]
+                     })();
+                     previous = Some((u, v));
+                     res
+                 })
+-                .collect::<Option<Vec<Point2>>>()
++                .collect::<Option<Vec<SurfacePoint>>>()
+         };
+         // SolidCraft: each point is searched from the one before it, but the first has no
+         // hint, and a search without one can miss a point that lies on the surface (a corner of
+@@ -602,7 +620,7 @@ impl PolyBoundaryPiece {
+                 walk(rotated)?
+             }
+         };
+-        let grav = vec.iter().fold(Point2::origin(), |g, p| g + p.to_vec()) / vec.len() as f64;
++        let grav = vec.iter().fold(Point2::origin(), |g, p| g + p.uv.to_vec()) / vec.len() as f64;
+         if let (Some(up), Some((u0, _))) = (up, urange) {
+             let quot = f64::floor((grav.x - u0) / up);
+             vec.iter_mut().for_each(|p| p.x -= quot * up);
+@@ -612,8 +630,8 @@ impl PolyBoundaryPiece {
+             vec.iter_mut().for_each(|p| p.y -= quot * vp);
+         }
+         let last = *vec.last().unwrap();
+-        if !vec[0].near(&last) {
+-            let Point2 { x: u0, y: v0 } = last;
++        if !vec[0].near(&last.uv) {
++            let Point2 { x: u0, y: v0 } = last.uv;
+             if surface.uder(u0, v0).so_small() || surface.vder(u0, v0).so_small() {
+                 vec.push(vec[0]);
+             }
+@@ -641,17 +659,17 @@ fn get_mindiff(u: f64, u0: f64, up: f64) -> f64 {
+ /// only the runs its ray can meet (a long trim loop is otherwise crossed segment by segment
+ /// for every grid point and every triangle).
+ #[derive(Debug, Default, Clone)]
+-struct PolyBoundary(Vec<Vec<Point2>>, Vec<BoundingBox<Point2>>, Vec<Vec<BoundingBox<Point2>>>);
++struct PolyBoundary(Vec<Vec<SurfacePoint>>, Vec<BoundingBox<Point2>>, Vec<Vec<BoundingBox<Point2>>>);
+ 
+ /// Segments per run in [`PolyBoundary`]'s third field.
+ const RUN: usize = 32;
+ 
+ /// The box of each run of [`RUN`] segments of a closed loop (segment `i` joins point `i` to
+ /// point `i + 1`, the last back to the first).
+-fn run_boxes(curve: &[Point2]) -> Vec<BoundingBox<Point2>> {
++fn run_boxes(curve: &[SurfacePoint]) -> Vec<BoundingBox<Point2>> {
+     let n = curve.len();
+     (0..n.div_ceil(RUN))
+-        .map(|k| (k * RUN..((k + 1) * RUN).min(n)).flat_map(|i| [curve[i], curve[(i + 1) % n]]).collect())
++        .map(|k| (k * RUN..((k + 1) * RUN).min(n)).flat_map(|i| [curve[i].uv, curve[(i + 1) % n].uv]).collect())
+         .collect()
+ }
+ 
+@@ -680,7 +698,7 @@ fn ray_meets_box(c: Point2, r: Vector2, bdb: &BoundingBox<Point2>, margin: f64)
+     true
+ }
+ 
+-fn normalize_range(curve: &mut Vec<Point2>, compidx: usize, (u0, u1): (f64, f64)) {
++fn normalize_range(curve: &mut Vec<SurfacePoint>, compidx: usize, (u0, u1): (f64, f64)) {
+     let p = curve[0];
+     let q = curve[curve.len() - 1];
+     let tmp = f64::min(p[compidx], q[compidx]) + TOLERANCE;
+@@ -704,7 +722,7 @@ fn normalize_range(curve: &mut Vec<Point2>, compidx: usize, (u0, u1): (f64, f64)
+     *curve = curve1;
+ }
+ 
+-fn loop_orientation(curve: &[Point2]) -> bool {
++fn loop_orientation(curve: &[SurfacePoint]) -> bool {
+     curve
+         .iter()
+         .circular_tuple_windows()
+@@ -718,16 +736,19 @@ impl PolyBoundary {
+     }
+     // SolidCraft: only the disposable preview supplies fixed seam subdivisions.
+     fn with_steps<S: PreMeshableSurface>(pieces: Vec<PolyBoundaryPiece>, surface: &S, tol: Deflection, steps: Option<usize>) -> Self {
+-        let polyline_on_surface = |surface: &S, p: Point2, q: Point2, tol| {
++        let polyline_on_surface = |surface: &S, p: SurfacePoint, q: SurfacePoint, tol| {
+             if let Some(n) = steps {
+-                (0..=n).map(|i| p + (q - p) * (i as f64 / n as f64)).collect()
++                (0..=n).map(|i| {
++                    let uv = p.uv + (q.uv - p.uv) * (i as f64 / n as f64);
++                    (uv, surface.subs(uv.x, uv.y)).into()
++                }).collect()
+             } else {
+                 polyline_on_surface(surface, p, q, tol)
+             }
+         };
+         let (mut closed, mut open) = (Vec::new(), Vec::new());
+         pieces.into_iter().for_each(|PolyBoundaryPiece(mut vec)| {
+-            match vec[0].distance(vec[vec.len() - 1]) < 1.0e-3 {
++            match vec[0].distance(vec[vec.len() - 1].uv) < 1.0e-3 {
+                 true => {
+                     vec.pop();
+                     closed.push(vec)
+@@ -735,8 +756,8 @@ impl PolyBoundary {
+                 false => open.push(vec),
+             }
+         });
+-        fn connect_edges(vecs: impl IntoIterator<Item = Vec<Point2>>) -> Vec<Point2> {
+-            let closure = |vec: Vec<Point2>| {
++        fn connect_edges(vecs: impl IntoIterator<Item = Vec<SurfacePoint>>) -> Vec<SurfacePoint> {
++            let closure = |vec: Vec<SurfacePoint>| {
+                 let len = vec.len();
+                 vec.into_iter().take(len - 1)
+             };
+@@ -752,8 +773,8 @@ impl PolyBoundary {
+                         normalize_range(&mut curve, 0, (u0, u1));
+                         let p = curve[0];
+                         let q = curve[curve.len() - 1];
+-                        let x = Point2::new(u0, v1);
+-                        let y = Point2::new(u1, v1);
++                        let x = (Point2::new(u0, v1), surface.subs(u0, v1)).into();
++                        let y = (Point2::new(u1, v1), surface.subs(u1, v1)).into();
+                         let vec0 = polyline_on_surface(surface, q, y, tol);
+                         let vec1 = polyline_on_surface(surface, y, x, tol);
+                         let vec2 = polyline_on_surface(surface, x, p, tol);
+@@ -762,8 +783,8 @@ impl PolyBoundary {
+                         normalize_range(&mut curve, 0, (u0, u1));
+                         let p = curve[0];
+                         let q = curve[curve.len() - 1];
+-                        let x = Point2::new(u1, v0);
+-                        let y = Point2::new(u0, v0);
++                        let x = (Point2::new(u1, v0), surface.subs(u1, v0)).into();
++                        let y = (Point2::new(u0, v0), surface.subs(u0, v0)).into();
+                         let vec0 = polyline_on_surface(surface, q, y, tol);
+                         let vec1 = polyline_on_surface(surface, y, x, tol);
+                         let vec2 = polyline_on_surface(surface, x, p, tol);
+@@ -772,8 +793,8 @@ impl PolyBoundary {
+                         normalize_range(&mut curve, 1, (v0, v1));
+                         let p = curve[0];
+                         let q = curve[curve.len() - 1];
+-                        let x = Point2::new(u0, v0);
+-                        let y = Point2::new(u0, v1);
++                        let x = (Point2::new(u0, v0), surface.subs(u0, v0)).into();
++                        let y = (Point2::new(u0, v1), surface.subs(u0, v1)).into();
+                         let vec0 = polyline_on_surface(surface, q, y, tol);
+                         let vec1 = polyline_on_surface(surface, y, x, tol);
+                         let vec2 = polyline_on_surface(surface, x, p, tol);
+@@ -782,8 +803,8 @@ impl PolyBoundary {
+                         normalize_range(&mut curve, 1, (v0, v1));
+                         let p = curve[0];
+                         let q = curve[curve.len() - 1];
+-                        let x = Point2::new(u1, v1);
+-                        let y = Point2::new(u1, v0);
++                        let x = (Point2::new(u1, v1), surface.subs(u1, v1)).into();
++                        let y = (Point2::new(u1, v0), surface.subs(u1, v0)).into();
+                         let vec0 = polyline_on_surface(surface, q, y, tol);
+                         let vec1 = polyline_on_surface(surface, y, x, tol);
+                         let vec2 = polyline_on_surface(surface, x, p, tol);
+@@ -817,10 +838,10 @@ impl PolyBoundary {
+         if !closed.iter().any(|curve| loop_orientation(curve)) {
+             if let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() {
+                 let p = [
+-                    Point2::new(u0, v0),
+-                    Point2::new(u1, v0),
+-                    Point2::new(u1, v1),
+-                    Point2::new(u0, v1),
++                    (Point2::new(u0, v0), surface.subs(u0, v0)).into(),
++                    (Point2::new(u1, v0), surface.subs(u1, v0)).into(),
++                    (Point2::new(u1, v1), surface.subs(u1, v1)).into(),
++                    (Point2::new(u0, v1), surface.subs(u0, v1)).into(),
+                 ];
+                 let vec0 = polyline_on_surface(surface, p[0], p[1], tol);
+                 let vec1 = polyline_on_surface(surface, p[1], p[2], tol);
+@@ -829,7 +850,7 @@ impl PolyBoundary {
+                 closed.push(connect_edges([vec0, vec1, vec2, vec3]));
+             }
+         }
+-        let boxes = closed.iter().map(|curve| curve.iter().collect()).collect();
++        let boxes = closed.iter().map(|curve| curve.iter().map(|p| p.uv).collect()).collect();
+         let runs = closed.iter().map(|curve| run_boxes(curve)).collect();
+         Self(closed, boxes, runs)
+     }
+@@ -862,8 +883,8 @@ impl PolyBoundary {
+                     .flat_map(move |(k, _)| (k * RUN..((k + 1) * RUN).min(n)).map(move |i| (&vec[i], &vec[(i + 1) % n])))
+             })
+             .try_fold(0_i32, move |counter, (p0, p1)| {
+-                let a = p0 - c;
+-                let b = p1 - c;
++                let a = p0.uv - c;
++                let b = p1.uv - c;
+                 let s0 = r.x * a.y - r.y * a.x; // v times a
+                 let s1 = r.x * b.y - r.y * b.x; // v times b
+                 let s2 = a.x * b.y - a.y * b.x; // a times b
+@@ -884,8 +905,27 @@ impl PolyBoundary {
+ 
+     /// Inserts the loops' points into the triangulation; [`Self::add_constraints`] then joins
+     /// them.
+-    fn insert_points(&self, triangulation: &mut Cdt, scale: UvScale) -> Vec<Option<VertexId>> {
+-        self.0.iter().flatten().map(|pt| triangulation.insert(scale.to_cdt(*pt)).ok()).collect()
++    fn insert_points(
++        &self,
++        triangulation: &mut Cdt,
++        scale: UvScale,
++    ) -> (Vec<Option<VertexId>>, HashMap<VertexId, Point3>) {
++        let mut boundary_map = HashMap::default();
++        let poly2tri = self
++            .0
++            .iter()
++            .flatten()
++            .map(|pt| {
++                match triangulation.insert(scale.to_cdt(pt.uv)) {
++                    Ok(v) => {
++                        boundary_map.insert(v, pt.point);
++                        Some(v)
++                    }
++                    Err(_) => None,
++                }
++            })
++            .collect();
++        (poly2tri, boundary_map)
+     }
+ 
+     /// Adds the loops' segments between the vertices [`Self::insert_points`] gave. SolidCraft: a
+@@ -992,7 +1032,7 @@ impl UvScale {
+     const SAMPLES: usize = 5;
+ 
+     fn of(surface: &impl PreMeshableSurface, polyline: &PolyBoundary) -> Self {
+-        let bdb: BoundingBox<Point2> = polyline.0.iter().flatten().collect();
++        let bdb: BoundingBox<Point2> = polyline.0.iter().flatten().map(|p| p.uv).collect();
+         let (min, max) = (bdb.min(), bdb.max());
+         if !(min.x.is_finite() && min.y.is_finite() && max.x.is_finite() && max.y.is_finite()) {
+             return Self::IDENTITY;
+@@ -1072,7 +1112,7 @@ fn trimming_with_steps<S: PreMeshableSurface>(surface: &S, polyboundary: &PolyBo
+     let mut triangulation = Cdt::new();
+     // Display meshes only (see `Deflection::display`).
+     let scale = if tol.display { UvScale::of(surface, polyboundary) } else { UvScale::IDENTITY };
+-    let poly2tri = polyboundary.insert_points(&mut triangulation, scale);
++    let (poly2tri, boundary_map) = polyboundary.insert_points(&mut triangulation, scale);
+     if tol.display {
+         // Every point before any constraint, so no grid point lands on a split's inexact crossing.
+         let grid = insert_surface(&mut triangulation, surface, polyboundary, tol, cap, steps, scale);
+@@ -1089,6 +1129,7 @@ fn trimming_with_steps<S: PreMeshableSurface>(surface: &S, polyboundary: &PolyBo
+         surface,
+         polyboundary,
+         scale,
++        &boundary_map,
+     );
+     // SolidCraft: a face that came out with no triangles at all, though its boundary encloses
+     // an area in space (a lens thinner than the tolerance: its two edges are different curves,
+@@ -1116,7 +1157,7 @@ fn loop_triangles(surface: &impl ParametricSurface3D, polyline: &PolyBoundary) -
+     if !(3..=MAX_LOOP_POINTS).contains(&curve.len()) {
+         return None;
+     }
+-    let positions: Vec<Point3> = curve.iter().map(|p| surface.subs(p.x, p.y)).collect();
++    let positions: Vec<Point3> = curve.iter().map(|p| p.point).collect();
+     if positions.iter().any(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
+         return None;
+     }
+@@ -1238,7 +1279,7 @@ fn insert_surface(
+     steps: Option<usize>,
+     scale: UvScale,
+ ) -> Vec<Vec<Option<VertexId>>> {
+-    let bdb: BoundingBox<Point2> = polyline.0.iter().flatten().collect();
++    let bdb: BoundingBox<Point2> = polyline.0.iter().flatten().map(|p| p.uv).collect();
+     let range = ((bdb.min()[0], bdb.max()[0]), (bdb.min()[1], bdb.max()[1]));
+     if !(range.0 .0.is_finite() && range.0 .1.is_finite() && range.1 .0.is_finite() && range.1 .1.is_finite()) {
+         return Vec::new();
+@@ -1604,6 +1645,7 @@ fn triangulation_into_polymesh<'a>(
+     surface: &impl ParametricSurface3D,
+     polyline: &PolyBoundary,
+     scale: UvScale,
++    boundary_map: &HashMap<VertexId, Point3>,
+ ) -> PolygonMesh {
+     let vert_vec: Vec<_> = vertices.collect();
+     let num_verts = vert_vec.len();
+@@ -1661,7 +1703,11 @@ fn triangulation_into_polymesh<'a>(
+             .map(|(i, v)| {
+                 let p = scale.from_cdt(*v.as_ref());
+                 let uv = Vector2::new(p.x, p.y);
+-                positions.push(gpu_pts[i]);
++                let point = match boundary_map.get(&v.fix()) {
++                    Some(point) => *point,
++                    None => gpu_pts[i],
++                };
++                positions.push(point);
+                 uv_coords.push(uv);
+                 normals.push(gpu_nors[i]);
+                 (v.fix(), i)
+@@ -1674,7 +1720,11 @@ fn triangulation_into_polymesh<'a>(
+             .map(|(i, v)| {
+                 let p = scale.from_cdt(*v.as_ref());
+                 let uv = Vector2::new(p.x, p.y);
+-                positions.push(surface.subs(uv[0], uv[1]));
++                let point = match boundary_map.get(&v.fix()) {
++                    Some(point) => *point,
++                    None => surface.subs(uv[0], uv[1]),
++                };
++                positions.push(point);
+                 uv_coords.push(uv);
+                 normals.push(surface.normal(uv[0], uv[1]));
+                 (v.fix(), i)
+@@ -1707,16 +1757,21 @@ fn triangulation_into_polymesh<'a>(
+ 
+ fn polyline_on_surface(
+     surface: impl PreMeshableSurface,
+-    p: Point2,
+-    q: Point2,
++    p: SurfacePoint,
++    q: SurfacePoint,
+     tol: Deflection,
+-) -> Vec<Point2> {
++) -> Vec<SurfacePoint> {
+     use truck_geometry::prelude::*;
+-    let line = Line(p, q);
+-    let pcurve = PCurve::new(line, surface);
++    let line = Line(p.uv, q.uv);
++    let pcurve = PCurve::new(line, surface.clone());
+     let (vec, _) = pcurve.parameter_division(pcurve.range_tuple(), tol.chord);
+     let vec = halved_while_turning(|t| pcurve.subs(t), vec, tol);
+-    vec.into_iter().map(|t| line.subs(t)).collect()
++    vec.into_iter()
++        .map(|t| {
++            let uv = line.subs(t);
++            (uv, surface.subs(uv.x, uv.y)).into()
++        })
++        .collect()
+ }
+ 
+ /// SolidCraft: `params` with every interval halved while the curve turns more over it than the
+@@ -1792,9 +1847,9 @@ pub mod include_test_hooks {
+             .zip(&b.1)
+             .filter(|(_, bdb)| near(bdb))
+             .flat_map(|(vec, _)| vec.iter().circular_tuple_windows())
+-            .try_fold(0_i32, move |counter, (p0, p1): (&Point2, &Point2)| {
+-                let a = p0 - c;
+-                let b = p1 - c;
++            .try_fold(0_i32, move |counter, (p0, p1): (&SurfacePoint, &SurfacePoint)| {
++                let a = p0.uv - c;
++                let b = p1.uv - c;
+                 let s0 = r.x * a.y - r.y * a.x;
+                 let s1 = r.x * b.y - r.y * b.x;
+                 let s2 = a.x * b.y - a.y * b.x;
+@@ -1822,7 +1877,11 @@ pub mod include_test_hooks {
+     }
+ 
+     fn boundary(loops: Vec<Vec<Point2>>) -> PolyBoundary {
+-        let boxes = loops.iter().map(|l| l.iter().collect()).collect();
++        let loops: Vec<Vec<SurfacePoint>> = loops
++            .into_iter()
++            .map(|l| l.into_iter().map(|p| (p, Point3::origin()).into()).collect())
++            .collect();
++        let boxes = loops.iter().map(|l| l.iter().map(|p| p.uv).collect()).collect();
+         let runs = loops.iter().map(|l| run_boxes(l)).collect();
+         PolyBoundary(loops, boxes, runs)
+     }
+-- 
+2.53.0
+

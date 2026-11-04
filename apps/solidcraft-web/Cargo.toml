@@ -19,6 +19,7 @@ bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 # The profiler, compiled in so any build can say where its time goes (the Profile operations
 # preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
+f3d = ["solidcraft-engine/f3d"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }

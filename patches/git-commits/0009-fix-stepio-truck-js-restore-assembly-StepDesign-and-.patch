@@ -1,0 +1,474 @@
+From cbc48570f1f595f2fb976644713a9ab3439cc171 Mon Sep 17 00:00:00 2001
+From: Alastair D'Silva <alastair@d-silva.org>
+Date: Mon, 2 Nov 2026 00:53:03 +1100
+Subject: [PATCH 9/9] fix(stepio, truck-js): restore assembly StepDesign and
+ add CompleteStepDisplay for SolidCraft compatibility
+
+Signed-off-by: Alastair D'Silva <alastair@d-silva.org>
+Assisted-by: Antigravity <antigravity@google.com>
+---
+ truck-js/src/shape.rs                         |  3 +-
+ .../src/in/step_geometry/geom_impls.rs        | 14 +--
+ truck-stepio/src/out/geometry.rs              | 91 ++++++++++++------
+ truck-stepio/src/out/mod.rs                   | 36 +++++++
+ truck-stepio/src/out/topology.rs              | 95 +++++++++++++++++++
+ truck-stepio/tests/output/geometry.rs         |  7 +-
+ 6 files changed, 208 insertions(+), 38 deletions(-)
+
+diff --git a/truck-js/src/shape.rs b/truck-js/src/shape.rs
+index 98f1ddbd..5c98040e 100644
+--- a/truck-js/src/shape.rs
++++ b/truck-js/src/shape.rs
+@@ -169,7 +169,8 @@ macro_rules! impl_shape {
+                 use truck_stepio::out;
+                 let compressed = self.0.compress();
+                 let model = out::StepModel::from(&compressed);
+-                out::CompleteStepDisplay::new(model, header.into()).to_string()
++                let design = out::StepDesign::from_model(model);
++                out::StepDisplay::new(header.into(), design).to_string()
+             }
+         }
+     };
+diff --git a/truck-stepio/src/in/step_geometry/geom_impls.rs b/truck-stepio/src/in/step_geometry/geom_impls.rs
+index 0e83515b..17bad3a5 100644
+--- a/truck-stepio/src/in/step_geometry/geom_impls.rs
++++ b/truck-stepio/src/in/step_geometry/geom_impls.rs
+@@ -109,13 +109,13 @@ impl ToSameGeometry<Surface> for RevolutedCurve<Curve3D> {
+ fn builder() {
+     use truck_meshalgo::prelude::*;
+     use truck_modeling::builder;
+-    truck_topology::prelude!(Point3, Curve3D, Surface);
++    use truck_modeling::*;
+ 
+     // cube
+     let v = builder::vertices([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]);
+     let e = builder::line(&v[0], &v[1]);
+     let f = builder::tsweep(&e, Vector3::unit_y());
+-    let cube: Solid = builder::tsweep(&f, Vector3::unit_z());
++    let cube = builder::tsweep(&f, Vector3::unit_z());
+     let mut poly = cube.triangulation(0.1).to_polygon();
+     poly.put_together_same_attrs(1.0e-3).remove_unused_attrs();
+     assert_eq!(poly.shell_condition(), ShellCondition::Closed);
+@@ -126,8 +126,8 @@ fn builder() {
+     let mut shell = builder::rsweep(&e, Point3::origin(), Vector3::unit_z(), Rad(7.0));
+     let boundaries = shell.extract_boundaries();
+     assert_eq!(boundaries.len(), 2);
+-    shell.push(builder::try_attach_plane([boundaries[0].inverse()]).unwrap());
+-    shell.push(builder::try_attach_plane([boundaries[1].inverse()]).unwrap());
++    shell.push(builder::try_attach_plane(&[boundaries[0].inverse()]).unwrap());
++    shell.push(builder::try_attach_plane(&[boundaries[1].inverse()]).unwrap());
+     let cylinder = Solid::new(vec![shell]);
+     let mut poly = cylinder.triangulation(0.1).to_polygon();
+     poly.put_together_same_attrs(1.0e-3).remove_unused_attrs();
+@@ -141,8 +141,8 @@ fn builder() {
+         Vector3::unit_y(),
+         Rad(7.0),
+     );
+-    let f = builder::try_attach_plane([w]).unwrap();
+-    let torus: Solid = builder::rsweep(&f, Point3::origin(), Vector3::unit_z(), Rad(7.0));
++    let f = builder::try_attach_plane(&[w]).unwrap();
++    let torus = builder::rsweep(&f, Point3::origin(), Vector3::unit_z(), Rad(7.0));
+     let mut poly = torus.triangulation(0.1).to_polygon();
+     poly.put_together_same_attrs(1.0e-3).remove_unused_attrs();
+     assert_eq!(poly.shell_condition(), ShellCondition::Closed);
+@@ -151,7 +151,7 @@ fn builder() {
+     let v = builder::vertex((-1.0, -1.0, -1.0));
+     let e = builder::tsweep(&v, 2.0 * Vector3::unit_x());
+     let f = builder::tsweep(&e, 2.0 * Vector3::unit_y());
+-    let s: Solid = builder::tsweep(&f, 2.0 * Vector3::unit_z());
++    let s = builder::tsweep(&f, 2.0 * Vector3::unit_z());
+     let mut shell = s.into_boundaries().pop().unwrap();
+     let line = builder::line(
+         &builder::vertex((0.5, 0.0, 1.0)),
+diff --git a/truck-stepio/src/out/geometry.rs b/truck-stepio/src/out/geometry.rs
+index 17bbee17..7a415469 100644
+--- a/truck-stepio/src/out/geometry.rs
++++ b/truck-stepio/src/out/geometry.rs
+@@ -46,6 +46,43 @@ impl DisplayByStep for VectorAsDirection<Vector3> {
+ }
+ impl_const_step_length!(VectorAsDirection<V>, 1, <V>);
+ 
++/// Display struct for outputting matrix as axis placement.
++#[derive(Clone, Copy, Debug)]
++pub struct MatrixAsAxis<M>(pub M);
++
++impl DisplayByStep for MatrixAsAxis<Matrix3> {
++    fn fmt(&self, idx: usize, f: &mut Formatter<'_>) -> Result {
++        let location_idx = idx + 1;
++        let ref_direction_idx = idx + 2;
++        let location = self.0[2].to_point();
++        let ref_direction = VectorAsDirection(self.0[0].truncate());
++        f.write_fmt(format_args!(
++            "#{idx} = AXIS2_PLACEMENT_2D('', #{location_idx}, #{ref_direction_idx});\n",
++        ))?;
++        DisplayByStep::fmt(&location, location_idx, f)?;
++        DisplayByStep::fmt(&ref_direction, ref_direction_idx, f)
++    }
++}
++impl_const_step_length!(MatrixAsAxis<Matrix3>, 3);
++
++impl DisplayByStep for MatrixAsAxis<Matrix4> {
++    fn fmt(&self, idx: usize, f: &mut Formatter<'_>) -> Result {
++        let location_idx = idx + 1;
++        let axis_idx = idx + 2;
++        let ref_direction_idx = idx + 3;
++        let location = self.0[3].to_point();
++        let axis = VectorAsDirection(self.0[2].truncate());
++        let ref_direction = VectorAsDirection(self.0[0].truncate());
++        f.write_fmt(format_args!(
++            "#{idx} = AXIS2_PLACEMENT_3D('', #{location_idx}, #{axis_idx}, #{ref_direction_idx});\n",
++        ))?;
++        DisplayByStep::fmt(&location, location_idx, f)?;
++        DisplayByStep::fmt(&axis, axis_idx, f)?;
++        DisplayByStep::fmt(&ref_direction, ref_direction_idx, f)
++    }
++}
++impl_const_step_length!(MatrixAsAxis<Matrix4>, 4);
++
+ impl<V> DisplayByStep for V
+ where
+     V: InnerSpace<Scalar = f64>,
+@@ -56,7 +93,7 @@ where
+         let direction_idx = idx + 1;
+         f.write_fmt(format_args!(
+             "#{idx} = VECTOR('', #{direction_idx}, {magnitude});\n{direction}",
+-            direction = StepDisplay::new(VectorAsDirection(*self / magnitude), direction_idx),
++            direction = StepDataDisplay::new(VectorAsDirection(*self / magnitude), direction_idx),
+             magnitude = FloatDisplay(magnitude),
+         ))
+     }
+@@ -74,8 +111,8 @@ where
+         let dir_idx = idx + 1 + P::LENGTH;
+         f.write_fmt(format_args!(
+             "#{idx} = LINE('', #{pnt_idx}, #{dir_idx});\n{pnt}{dir}",
+-            pnt = StepDisplay::new(self.0, pnt_idx),
+-            dir = StepDisplay::new(self.1 - self.0, dir_idx),
++            pnt = StepDataDisplay::new(self.0, pnt_idx),
++            dir = StepDataDisplay::new(self.1 - self.0, dir_idx),
+         ))
+     }
+ }
+@@ -128,7 +165,7 @@ where P: Copy + ConstStepLength + DisplayByStep
+             .control_points()
+             .iter()
+             .enumerate()
+-            .map(|(i, p)| StepDisplay::new(*p, idx + 1 + i * P::LENGTH))
++            .map(|(i, p)| StepDataDisplay::new(*p, idx + 1 + i * P::LENGTH))
+             .collect::<Vec<_>>();
+         f.write_fmt(format_args!(
+             "#{idx} = B_SPLINE_CURVE_WITH_KNOTS('', {degree}, {control_points_list}, .UNSPECIFIED., .U., .U., {knot_multiplicities}, {knots}, .UNSPECIFIED.);\n{control_points_instances}",
+@@ -159,7 +196,7 @@ where
+             .control_points()
+             .iter()
+             .enumerate()
+-            .map(|(i, v)| StepDisplay::new(v.to_point(), idx + 1 + i * V::Point::LENGTH))
++            .map(|(i, v)| StepDataDisplay::new(v.to_point(), idx + 1 + i * V::Point::LENGTH))
+             .collect::<Vec<_>>();
+         let weights = self
+             .control_points()
+@@ -264,8 +301,8 @@ impl DisplayByStep for Processor<TrimmedCurve<UnitHyperbola<Point2>>, Matrix3> {
+         let r0 = transform[0].magnitude();
+         let r1 = transform[1].magnitude();
+         let ref_direction_raw = VectorAsDirection(transform[0].truncate() / r0);
+-        let ref_direction = StepDisplay::new(ref_direction_raw, ref_direction_idx);
+-        let location = StepDisplay::new(transform[2].to_point(), location_idx);
++        let ref_direction = StepDataDisplay::new(ref_direction_raw, ref_direction_idx);
++        let location = StepDataDisplay::new(transform[2].to_point(), location_idx);
+         let (r0, r1) = (FloatDisplay(r0), FloatDisplay(r1));
+         f.write_fmt(format_args!(
+             "#{idx} = HYPERBOLA('', #{position_idx}, {r0}, {r1});
+@@ -283,13 +320,13 @@ impl DisplayByStep for Processor<TrimmedCurve<UnitHyperbola<Point3>>, Matrix4> {
+         let location_idx = idx + 2;
+         let axis_idx = idx + 3;
+         let ref_direction_idx = idx + 4;
+-        let location = StepDisplay::new(transform[3].to_point(), location_idx);
++        let location = StepDataDisplay::new(transform[3].to_point(), location_idx);
+         let axis_raw = VectorAsDirection(transform[2].truncate().normalize());
+-        let axis = StepDisplay::new(axis_raw, axis_idx);
++        let axis = StepDataDisplay::new(axis_raw, axis_idx);
+         let r0 = transform[0].magnitude();
+         let r1 = transform[1].magnitude();
+         let ref_direction_raw = VectorAsDirection(transform[0].truncate() / r0);
+-        let ref_direction = StepDisplay::new(ref_direction_raw, ref_direction_idx);
++        let ref_direction = StepDataDisplay::new(ref_direction_raw, ref_direction_idx);
+         let (r0, r1) = (FloatDisplay(r0), FloatDisplay(r1));
+         f.write_fmt(format_args!(
+             "#{idx} = HYPERBOLA('', #{position_idx}, {r0}, {r1});
+@@ -310,8 +347,8 @@ impl DisplayByStep for Processor<TrimmedCurve<UnitParabola<Point2>>, Matrix3> {
+         let r1 = transform[1].magnitude();
+         let focal_dist = FloatDisplay(r1 * r1 / r0);
+         let ref_direction_raw = VectorAsDirection(transform[0].truncate() / r0);
+-        let ref_direction = StepDisplay::new(ref_direction_raw, ref_direction_idx);
+-        let location = StepDisplay::new(transform[2].to_point(), location_idx);
++        let ref_direction = StepDataDisplay::new(ref_direction_raw, ref_direction_idx);
++        let location = StepDataDisplay::new(transform[2].to_point(), location_idx);
+         f.write_fmt(format_args!(
+             "#{idx} = PARABOLA('', #{position_idx}, {focal_dist});
+ #{position_idx} = AXIS2_PLACEMENT_2D('', #{location_idx}, #{ref_direction_idx});
+@@ -328,14 +365,14 @@ impl DisplayByStep for Processor<TrimmedCurve<UnitParabola<Point3>>, Matrix4> {
+         let location_idx = idx + 2;
+         let axis_idx = idx + 3;
+         let ref_direction_idx = idx + 4;
+-        let location = StepDisplay::new(transform[3].to_point(), location_idx);
++        let location = StepDataDisplay::new(transform[3].to_point(), location_idx);
+         let axis_raw = VectorAsDirection(transform[2].truncate().normalize());
+-        let axis = StepDisplay::new(axis_raw, axis_idx);
++        let axis = StepDataDisplay::new(axis_raw, axis_idx);
+         let r0 = transform[0].magnitude();
+         let r1 = transform[1].magnitude();
+         let focal_dist = FloatDisplay(r1 * r1 / r0);
+         let ref_direction_raw = VectorAsDirection(transform[0].truncate() / r0);
+-        let ref_direction = StepDisplay::new(ref_direction_raw, ref_direction_idx);
++        let ref_direction = StepDataDisplay::new(ref_direction_raw, ref_direction_idx);
+         f.write_fmt(format_args!(
+             "#{idx} = PARABOLA('', #{position_idx}, {focal_dist});
+ #{position_idx} = AXIS2_PLACEMENT_3D('', #{location_idx}, #{axis_idx}, #{ref_direction_idx});
+@@ -401,8 +438,8 @@ where
+         let repr_idx = surface_idx + self.surface().step_length();
+         let context_idx = repr_idx + 1;
+         let curve_idx = repr_idx + 2;
+-        let curve = StepDisplay::new(self.curve(), curve_idx);
+-        let surface = StepDisplay::new(self.surface(), surface_idx);
++        let curve = StepDataDisplay::new(self.curve(), curve_idx);
++        let surface = StepDataDisplay::new(self.surface(), surface_idx);
+         f.write_fmt(format_args!(
+             "#{idx} = PCURVE('', #{surface_idx}, #{repr_idx});
+ {surface}#{repr_idx} = DEFINITIONAL_REPRESENTATION('', (#{curve_idx}), #{context_idx});
+@@ -487,9 +524,9 @@ impl DisplayByStep for Plane {
+             "#{idx} = PLANE('', #{axis2_placement_idx});
+ #{axis2_placement_idx} = AXIS2_PLACEMENT_3D('', #{location_idx}, #{z_axis_idx}, #{x_axis_idx});
+ {location}{z_axis}{x_axis}",
+-            location = StepDisplay::new(self.origin(), location_idx),
+-            z_axis = StepDisplay::new(VectorAsDirection(self.normal()), z_axis_idx),
+-            x_axis = StepDisplay::new(VectorAsDirection(self.u_axis().normalize()), x_axis_idx)
++            location = StepDataDisplay::new(self.origin(), location_idx),
++            z_axis = StepDataDisplay::new(VectorAsDirection(self.normal()), z_axis_idx),
++            x_axis = StepDataDisplay::new(VectorAsDirection(self.u_axis().normalize()), x_axis_idx)
+         ))
+     }
+ }
+@@ -587,7 +624,7 @@ where P: Copy + DisplayByStep
+             .iter()
+             .flatten()
+             .enumerate()
+-            .map(|(i, p)| StepDisplay::new(*p, idx + i + 1))
++            .map(|(i, p)| StepDataDisplay::new(*p, idx + i + 1))
+             .collect::<Vec<_>>();
+         let mut counter = 0;
+         let control_points_list = control_points
+@@ -631,7 +668,7 @@ where
+             .iter()
+             .flatten()
+             .enumerate()
+-            .map(|(i, v)| StepDisplay::new(v.to_point(), idx + i + 1))
++            .map(|(i, v)| StepDataDisplay::new(v.to_point(), idx + i + 1))
+             .collect::<Vec<_>>();
+         let mut counter = 0;
+         let control_points_list = self
+@@ -692,8 +729,8 @@ where C: StepLength + DisplayByStep
+         let vector = self.extruding_vector();
+         f.write_fmt(format_args!(
+             "#{idx} = SURFACE_OF_LINEAR_EXTRUSION('', #{curve_idx}, #{vector_idx});{}{}",
+-            StepDisplay::new(curve, curve_idx),
+-            StepDisplay::new(vector, vector_idx),
++            StepDataDisplay::new(curve, curve_idx),
++            StepDataDisplay::new(vector, vector_idx),
+         ))
+     }
+ }
+@@ -722,9 +759,9 @@ where C: StepLength + DisplayByStep
+         f.write_fmt(format_args!(
+             "#{idx} = SURFACE_OF_REVOLUTION('', #{curve_idx}, #{axis_idx});
+ {curve}#{axis_idx} = AXIS1_PLACEMENT('', #{location_idx}, #{dir_idx});\n{location}{dir}",
+-            curve = StepDisplay::new(curve, curve_idx),
+-            location = StepDisplay::new(self.origin(), location_idx),
+-            dir = StepDisplay::new(VectorAsDirection(self.axis()), dir_idx),
++            curve = StepDataDisplay::new(curve, curve_idx),
++            location = StepDataDisplay::new(self.origin(), location_idx),
++            dir = StepDataDisplay::new(VectorAsDirection(self.axis()), dir_idx),
+         ))
+     }
+ }
+diff --git a/truck-stepio/src/out/mod.rs b/truck-stepio/src/out/mod.rs
+index 826e5ee1..c2e9a86d 100644
+--- a/truck-stepio/src/out/mod.rs
++++ b/truck-stepio/src/out/mod.rs
+@@ -398,5 +398,41 @@ mod geometry;
+ mod topology;
+ pub use geometry::MatrixAsAxis;
+ pub use geometry::VectorAsDirection;
++pub use topology::StepModels;
++
++/// Display struct for outputting STEP file format with header (SolidCraft compatibility).
++#[derive(Clone, Debug)]
++pub struct CompleteStepDisplay<T> {
++    display: T,
++    header: StepHeader,
++}
++
++impl<T: Display> Display for CompleteStepDisplay<T> {
++    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
++        f.write_fmt(format_args!(
++            "ISO-10303-21;\n{}DATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
++            self.header, self.display,
++        ))
++    }
++}
++
++impl<T> CompleteStepDisplay<T> {
++    /// constructor
++    #[inline]
++    pub fn new(display: T, header: StepHeaderDescriptor) -> Self {
++        CompleteStepDisplay {
++            display,
++            header: StepHeader {
++                file_name: header.file_name,
++                time_stamp: header.time_stamp,
++                authors: header.authors,
++                organization: header.organization,
++                origination_system: header.organization_system,
++                authorization: header.authorization,
++                schema: "ISO-10303-042".to_string(),
++            },
++        }
++    }
++}
+ 
+ use crate::common::PartAttrs;
+diff --git a/truck-stepio/src/out/topology.rs b/truck-stepio/src/out/topology.rs
+index 8d4d6a5e..9536e11c 100644
+--- a/truck-stepio/src/out/topology.rs
++++ b/truck-stepio/src/out/topology.rs
+@@ -379,3 +379,98 @@ impl<P, C, S> StepLength for StepModel<'_, P, C, S> {
+         }
+     }
+ }
++
++/// Display models with configurations (SolidCraft compatibility).
++#[derive(Clone, Debug, Default)]
++pub struct StepModels<'a, P, C, S> {
++    models: Vec<StepModel<'a, P, C, S>>,
++}
++
++impl<'a, P, C, S> StepModels<'a, P, C, S>
++where
++    P: Copy,
++    C: StepLength,
++    S: StepLength,
++{
++    /// push a shell to step models
++    pub fn push_shell(&mut self, shell: &'a CompressedShell<P, C, S>) {
++        self.models.push(StepModel::from(shell));
++    }
++    /// push a solid to step models
++    pub fn push_solid(&mut self, solid: &'a CompressedSolid<P, C, S>) {
++        self.models.push(StepModel::from(solid));
++    }
++}
++
++impl<'a, P, C, S> FromIterator<&'a CompressedShell<P, C, S>> for StepModels<'a, P, C, S>
++where
++    P: Copy,
++    C: StepLength,
++    S: StepLength,
++{
++    fn from_iter<T: IntoIterator<Item = &'a CompressedShell<P, C, S>>>(iter: T) -> Self {
++        Self {
++            models: iter.into_iter().map(StepModel::from).collect(),
++        }
++    }
++}
++
++impl<'a, P, C, S> FromIterator<&'a CompressedSolid<P, C, S>> for StepModels<'a, P, C, S>
++where
++    P: Copy,
++    C: StepLength,
++    S: StepLength,
++{
++    fn from_iter<T: IntoIterator<Item = &'a CompressedSolid<P, C, S>>>(iter: T) -> Self {
++        Self {
++            models: iter.into_iter().map(StepModel::from).collect(),
++        }
++    }
++}
++
++impl<'a, P, C, S> Display for StepModels<'a, P, C, S>
++where
++    P: DisplayByStep + Copy,
++    C: DisplayByStep + StepLength + StepCurve,
++    S: DisplayByStep + StepLength + StepSurface,
++{
++    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
++        f.pad(
++"#1 = APPLICATION_PROTOCOL_DEFINITION('international standard', 'automotive_design', 2000, #2);
++#2 = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
++#3 = SHAPE_DEFINITION_REPRESENTATION(#4, #10);
++#4 = PRODUCT_DEFINITION_SHAPE('','', #5);
++#5 = PRODUCT_DEFINITION('design','', #6, #9);
++#6 = PRODUCT_DEFINITION_FORMATION('','', #7);
++#7 = PRODUCT('','','', (#8));
++#8 = PRODUCT_CONTEXT('', #2, 'mechanical');
++#9 = PRODUCT_DEFINITION_CONTEXT('part definition', #2, 'design');\n")?;
++        let mut idx = 16;
++        let mut model_indices = Vec::new();
++        for model in &self.models {
++            model_indices.push(idx);
++            idx += model.step_length();
++        }
++        let models_slice = IndexSliceDisplay(model_indices.iter().copied());
++        f.write_fmt(format_args!(
++            "#10 = ADVANCED_BREP_SHAPE_REPRESENTATION('', {models_slice}, #11);\n"
++        ))?;
++        f.pad("#11 = (
++    GEOMETRIC_REPRESENTATION_CONTEXT(3) 
++    GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#15))
++    GLOBAL_UNIT_ASSIGNED_CONTEXT((#12, #13, #14))
++    REPRESENTATION_CONTEXT('Context #1', '3D Context with UNIT and UNCERTAINTY')
++);
++#12 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
++#13 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );
++#14 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );
++#15 = UNCERTAINTY_MEASURE_WITH_UNIT(1.0E-6, #12, 'distance_accuracy_value','confusion accuracy');\n"
++        )?;
++        let mut idx = 16;
++        for model in &self.models {
++            DisplayByStep::fmt(model, idx, f)?;
++            idx += model.step_length();
++        }
++        Ok(())
++    }
++}
+diff --git a/truck-stepio/tests/output/geometry.rs b/truck-stepio/tests/output/geometry.rs
+index 393177cd..301f33e6 100644
+--- a/truck-stepio/tests/output/geometry.rs
++++ b/truck-stepio/tests/output/geometry.rs
+@@ -1,4 +1,5 @@
+ use truck_geometry::prelude::*;
++use truck_modeling::Surface;
+ use truck_stepio::out::*;
+ 
+ fn step_test<T: StepLength>(x: T, ans: &str, length: usize)
+@@ -6,7 +7,7 @@ where for<'a> StepDataDisplay<&'a T>: std::fmt::Display {
+     let display = StepDataDisplay::new(&x, 1);
+     assert_eq!(&display.to_string(), ans);
+     assert_eq!(x.step_length(), length);
+-    let step = StepDisplay::new(Default::default(), display).to_string();
++    let step = CompleteStepDisplay::new(display, Default::default()).to_string();
+     ruststep::parser::parse(&step).unwrap();
+ }
+ 
+@@ -401,9 +402,9 @@ fn intersection_curve() {
+         Point3::new(0.0, 0.0, 1.0),
+     );
+     step_test::<
+-        IntersectionCurve<truck_polymesh::PolylineCurve<Point3>, BSplineSurface<Point3>, Plane>,
++        IntersectionCurve<truck_polymesh::PolylineCurve<Point3>, Surface>,
+     >(
+-        IntersectionCurve::new(surface0, surface1, leader),
++        IntersectionCurve::new(surface0.into(), surface1.into(), leader),
+         "#1 = INTERSECTION_CURVE('', #2, (#5, #12), .CURVE_3D.);
+ #2 = POLYLINE('', (#3, #4));
+ #3 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+-- 
+2.53.0
+

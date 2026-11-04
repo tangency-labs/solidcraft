@@ -4,6 +4,26 @@ Copies of third-party crates that SolidCraft builds with local fixes, wired in w
 `[patch.crates-io]` in the workspace `Cargo.toml`. They keep their own licence; changed lines
 are marked `SolidCraft:` in the source.
 
+## cadmpeg-codec-f3d 0.6.8 (Apache-2.0, cadmpeg contributors, https://github.com/cadmpeg/cadmpeg)
+
+Original package sources from `v0.6.8` (`crates/cadmpeg-codec-f3d`), with the upstream Apache-2.0
+licence retained and golden test snapshots excluded. Drop this copy once upstream `cadmpeg` merges
+the remaining F3D timeline fixes and publishes the next release.
+
+SolidCraft changes (also saved in `patches/vendor-cadmpeg-codec-f3d.patch`):
+- `src/design/decode/scopes/direct_face.rs`: read the 268-byte thickness-first `Shell` outward flag
+  from `bytes[start + 20] == 1 || bytes[start + 21] != 0`.
+- `src/design/profile_select.rs`: fall through to `matching_groups` when `region_members::resolve`
+  returns `None` on whole-loop extrudes carrying a `region_selection` header; allow multi-step ASM
+  history transitions where both the tool-construction step and boolean step have non-empty deltas;
+  return `Loops(supported_holes)` when an extrude selects only an inner hole loop.
+- `src/history.rs`: select `split_plane` from inserted planar faces that separate the split body
+  centers; fall back to `edge_endpoints` midpoints and deleted line edges (excluding shortened
+  edges) when `edge_samples` are absent or selection is `Native`/`HistoricalPartial`; track
+  absorbed tool bodies via vertex absorption.
+- `src/design/decode/presentation.rs`: admit non-null `scene_node_entity`, `physical_marker`, and
+  `Prism` material prefixes when resolving user-assigned body names.
+
 ## egui-wgpu 0.37.0 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
 
 Original package sources from https://github.com/emilk/egui/tree/0.37.0/crates/egui-wgpu,

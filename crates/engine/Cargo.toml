@@ -21,6 +21,8 @@ solver-profiling = ["solidcraft-sketch/solver-profiling"]
 # build can be profiled; it records only once switched on (SOLIDCRAFT_PROFILE=1, the CLI's
 # --profile, the app's preference, diagnostics.profile).
 profile = ["solidcraft-profile/enabled"]
+# Optional Autodesk Fusion (.f3d/.f3z) import through cadmpeg.
+f3d = ["solidcraft-io/f3d"]
 
 [[example]]
 name = "sketch_analysis_bench"

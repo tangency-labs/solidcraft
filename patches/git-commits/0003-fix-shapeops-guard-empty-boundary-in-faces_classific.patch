@@ -1,0 +1,41 @@
+From e5940abca3db80377df6fec7a767e5e4da82e332 Mon Sep 17 00:00:00 2001
+From: Alastair D'Silva <alastair@d-silva.org>
+Date: Sun, 1 Nov 2026 22:58:39 +1100
+Subject: [PATCH 3/9] fix(shapeops): guard empty boundary in
+ faces_classification
+
+---
+ truck-shapeops/src/transversal/faces_classification/mod.rs | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/truck-shapeops/src/transversal/faces_classification/mod.rs b/truck-shapeops/src/transversal/faces_classification/mod.rs
+index aeb674aa..9fdbc6ee 100644
+--- a/truck-shapeops/src/transversal/faces_classification/mod.rs
++++ b/truck-shapeops/src/transversal/faces_classification/mod.rs
+@@ -42,10 +42,13 @@ impl<P, C, S> FacesClassification<P, C, S> {
+         let components = unknown.connected_components();
+         for comp in components {
+             let boundary = comp.extract_boundaries();
++            let Some(first_edge_id) = boundary.first().and_then(|w| w.edge_iter().next()).map(|e| e.id()) else {
++                continue;
++            };
+             if and_boundary
+                 .iter()
+                 .flatten()
+-                .any(|edge| edge.id() == boundary[0][0].id())
++                .any(|edge| edge.id() == first_edge_id)
+             {
+                 comp.iter().for_each(|face| {
+                     *self.status.get_mut(&face.id()).unwrap() = ShapesOpStatus::And;
+@@ -53,7 +56,7 @@ impl<P, C, S> FacesClassification<P, C, S> {
+             } else if or_boundary
+                 .iter()
+                 .flatten()
+-                .any(|edge| edge.id() == boundary[0][0].id())
++                .any(|edge| edge.id() == first_edge_id)
+             {
+                 comp.iter().for_each(|face| {
+                     *self.status.get_mut(&face.id()).unwrap() = ShapesOpStatus::Or;
+-- 
+2.53.0
+

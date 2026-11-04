@@ -11,9 +11,12 @@
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
+#[cfg(feature = "f3d")]
+pub const NATIVE_CAD_EXTS: [&str; 4] = ["fcstd", "3dm", "f3d", "f3z"];
+#[cfg(not(feature = "f3d"))]
 pub const NATIVE_CAD_EXTS: [&str; 2] = ["fcstd", "3dm"];
 
-/// Is this a FreeCAD or Rhino file name (any case)?
+/// Is this a FreeCAD, Rhino or (when enabled) Fusion file name (any case)?
 pub fn is_native_cad_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| NATIVE_CAD_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
@@ -30,6 +33,38 @@ pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<Strin
     )
 }
 
+/// Decode a native CAD file with full depth (sketches, parameters, features, and geometry).
+pub fn native_cad_decode_full(
+    bytes: &[u8],
+    file: &str,
+) -> Result<(String, cadmpeg_ir::CadIr, cadmpeg_ir::report::decode::DecodeReport, cadmpeg_ir::source_fidelity::SourceFidelity), String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg full decode", || convert::decode_full(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+        |e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        },
+    )
+}
+
+/// Convert an already decoded IR document to STEP text.
+pub fn native_cad_ir_to_step(
+    file: &str,
+    format: &str,
+    ir: &cadmpeg_ir::CadIr,
+    fidelity: Option<&cadmpeg_ir::source_fidelity::SourceFidelity>,
+    bytes_len: usize,
+) -> Result<(String, Vec<String>), String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg ir to step", || {
+        convert::ir_to_step(&name, format, ir, fidelity, bytes_len).map_err(solidcraft_kernel::KernelError::Invalid)
+    })
+    .map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => m,
+        e => e.to_string(),
+    })
+}
+
 mod convert {
     use std::io::Cursor;
 
@@ -40,7 +75,15 @@ mod convert {
     use cadmpeg_registry::{DETECTION_PREFIX_LEN, Format, InputCatalog, ResolveSourceError, ResolvedSource, build_encoder, forced_input};
 
     /// The codecs we accept (cadmpeg codec ids), whatever else the registry recognises.
+    #[cfg(feature = "f3d")]
+    const ACCEPTED: [&str; 3] = ["fcstd", "rhino", "f3d"];
+    #[cfg(not(feature = "f3d"))]
     const ACCEPTED: [&str; 2] = ["fcstd", "rhino"];
+
+    #[cfg(feature = "f3d")]
+    const SUPPORTED_DESC: &str = "FreeCAD .FCStd, Rhino .3dm, and Autodesk Fusion .f3d only";
+    #[cfg(not(feature = "f3d"))]
+    const SUPPORTED_DESC: &str = "FreeCAD .FCStd and Rhino .3dm only";
 
     /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
     /// the input. The service profile already admits a detailed part's 8 million entities:
@@ -56,7 +99,7 @@ mod convert {
     /// Decode `bytes` (a file called `name`, extension `ext`) with the codec cadmpeg detects from
     /// the bytes, else the one the extension names, if it is one of `accepted`. Returns the codec id
     /// and the decoded model.
-    pub(super) fn decode(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(String, DecodeResult), String> {
+    pub(super) fn decode(name: &str, ext: &str, bytes: &[u8], accepted: &[&str], depth: DecodeDepth) -> Result<(String, DecodeResult), String> {
         let policy = policy();
         let catalog = InputCatalog::with_builtins();
         let codec = {
@@ -81,12 +124,10 @@ mod convert {
         };
         let format = codec.id().as_str().to_string();
         if !accepted.contains(&format.as_str()) {
-            return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: {format} files are not supported ({SUPPORTED_DESC})"));
         }
 
-        // Decode in memory under the caps, as deep as the STEP writer reads: solids and products,
-        // not the design history, which the import does not keep.
-        let options = DecodeOptions { depth: DecodeDepth::Geometry, policy };
+        let options = DecodeOptions { depth, policy };
         let decoded = codec.decode(&mut Cursor::new(bytes), &options).map_err(|e| match e {
             DecodeFailure::Codec(e) => format!("{name}: could not read this {format} file: {e}"),
             other => format!("{name}: {other}"),
@@ -94,33 +135,46 @@ mod convert {
         Ok((format, decoded))
     }
 
-    pub(super) fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
+    pub(super) fn decode_full(
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(String, cadmpeg_ir::CadIr, cadmpeg_ir::report::decode::DecodeReport, cadmpeg_ir::source_fidelity::SourceFidelity), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
-            return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: not supported ({SUPPORTED_DESC})"));
         }
-        let (format, decoded) = decode(name, &ext, bytes, &ACCEPTED)?;
-        let policy = policy();
+        let (format, decoded) = decode(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         let (ir, report, fidelity) = decoded.into_parts();
-        if !report.geometry_transferred() {
-            return Err(format!("{name}: no geometry could be read from this {format} file"));
-        }
-        let mut warnings: Vec<String> = report.losses.iter().map(|l| format!("{}: {}", l.code, l.message)).collect();
+        Ok((format, ir, report, fidelity))
+    }
+
+    pub(super) fn ir_to_step(
+        name: &str,
+        format: &str,
+        ir: &cadmpeg_ir::CadIr,
+        fidelity: Option<&cadmpeg_ir::source_fidelity::SourceFidelity>,
+        bytes_len: usize,
+    ) -> Result<(String, Vec<String>), String> {
+        let policy = policy();
+        let mut warnings = Vec::new();
 
         // Validate the neutral model, as cadmpeg's own conversion does.
         let arena = DecodeArena::new();
-        let ctx = DecodeContext::for_loaded_input(&arena, &policy, bytes.len() as u64).map_err(|e| e.to_string())?;
-        let validation = validate_neutral_for_decode(&ctx, &ir, Vec::new()).map_err(|e| e.to_string())?;
+        let ctx = DecodeContext::for_loaded_input(&arena, &policy, bytes_len as u64).map_err(|e| e.to_string())?;
+        let validation = validate_neutral_for_decode(&ctx, ir, Vec::new()).map_err(|e| e.to_string())?;
         ctx.finish_session().map_err(|e| e.to_string())?;
         warnings.extend(validation.findings.iter().map(|f| format!("{}: {}", f.severity, f.message)));
-        if !validation.is_ok() {
-            return Err(format!("{name}: the {format} model is invalid ({} errors)", validation.error_count()));
-        }
 
         // Write it as STEP AP214.
-        let plan = build_encoder(Format::Step)
-            .plan(EncodeInput::new(&ir, Some(&fidelity)), TargetRequest::Explicit("ap214"))
-            .map_err(|e| format!("{name}: could not restate as STEP: {e}"))?;
+        let plan = match build_encoder(Format::Step).plan(EncodeInput::new(ir, fidelity), TargetRequest::Explicit("ap214")) {
+            Ok(plan) => plan,
+            Err(e) => {
+                if !validation.is_ok() {
+                    return Err(format!("{name}: the {format} model is invalid ({} errors): {e}", validation.error_count()));
+                }
+                return Err(format!("{name}: could not restate as STEP: {e}"));
+            }
+        };
         let losses = &plan.report().losses;
         if losses.iter().any(|l| l.code.to_string() == "step/export.no-exportable-solids") {
             return Err(format!("{name}: this {format} file has no solids that can be imported"));
@@ -130,6 +184,22 @@ mod convert {
         plan.write_to(&mut out).map_err(|e| e.to_string())?;
         let step = String::from_utf8(out).map_err(|e| e.to_string())?;
         Ok((super::name_unnamed_products(step, name), warnings))
+    }
+
+    pub(super) fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
+            return Err(format!("{name}: not supported ({SUPPORTED_DESC})"));
+        }
+        let (format, decoded) = decode(name, &ext, bytes, &ACCEPTED, DecodeDepth::Geometry)?;
+        let (ir, report, fidelity) = decoded.into_parts();
+        if !report.geometry_transferred() {
+            return Err(format!("{name}: no geometry could be read from this {format} file"));
+        }
+        let mut warnings: Vec<String> = report.losses.iter().map(|l| format!("{}: {}", l.code, l.message)).collect();
+        let (step, step_warnings) = ir_to_step(name, &format, &ir, Some(&fidelity), bytes.len())?;
+        warnings.extend(step_warnings);
+        Ok((step, warnings))
     }
 }
 
