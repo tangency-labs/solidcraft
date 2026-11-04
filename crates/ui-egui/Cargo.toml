@@ -60,6 +60,12 @@ proc-macro2 = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The page's host, so the cloud account menu's "Account settings" link reaches
+# the CloudCraft deployment that served this build. Already in the dependency
+# graph through eframe's web backend.
+web-sys = { version = "0.3", features = ["Window", "Location"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # The offscreen viewport render test opens a device without a window.
 pollster = { workspace = true }

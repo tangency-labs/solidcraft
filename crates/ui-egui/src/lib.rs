@@ -21,6 +21,7 @@ pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
 pub mod cli_link;
+pub mod cloud;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -547,6 +548,12 @@ pub struct SolveApp {
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
     pub services: Services,
+    /// Cloud Open/Save state (see `cloud`). Always empty: no backend is wired into
+    /// this build.
+    pub cloud: cloud::CloudFiles,
+    /// The Save to Cloud window, when open ([`cloud::save_window`]). Never set in
+    /// this build.
+    pub cloud_save_window: bool,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
@@ -821,6 +828,8 @@ impl SolveApp {
             pre_command_cam: None,
             pre_sketch_component: None,
             services,
+            cloud: cloud::CloudFiles::new(),
+            cloud_save_window: false,
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -1206,6 +1215,11 @@ impl SolveApp {
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
             timeline::request_playback(self, action)?;
             return Ok(reply);
+        }
+        // The cloud commands, and `file.save` for a cloud-origin design with
+        // no local file. Everything else goes to the engine as it always did.
+        if let Some(r) = cloud::command(self, id, &params) {
+            return r;
         }
         let t0 = now_ms();
         let revision = self.session.revision;
@@ -3112,6 +3126,9 @@ impl SolveApp {
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
         timeline::tick_playback(self, ui.ctx());
+        cloud::pump(self, ui.ctx());
+        cloud::conflict_modal(self, ui.ctx());
+        cloud::save_window(self, ui.ctx());
         if !self.embedded {
             toolbar::app_bar(self, ui);
         }
