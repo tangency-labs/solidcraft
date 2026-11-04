@@ -527,6 +527,29 @@ the right outcome for a plugin it cannot run.
   `engine.describe` shows the schema. The one-line `params` doc stays accepted until 1.0, so the
   pilots do not wait on #2829; from 1.0 on, `input` is required. A host-drawn form for an entry
   (later work, section 13) is built from the same `input`.
+
+- **Persistent-feature inputs (later work, section 13).** Use one authoritative input
+  declaration for creation, editing saved instances, and programmatic calls. It describes
+  both the saved inputs and the values supplied to the generator after host evaluation;
+  these representations need not be identical. Reuse the existing command-schema types,
+  adding only missing metadata for the following roles:
+  - Expressions: reuse `LengthExpr`, `AngleExpr`, and `NumberExpr`. Retain an expression
+    such as `shaft_diameter + clearance` in the feature instance and track its parameter
+    dependencies. The host evaluates it and converts dimensions to the units defined by
+    the generator's input contract before passing the values to the generator.
+  - Geometry references: retain selected references and their component or occurrence
+    context, resolving them at the feature's timeline position on each evaluation.
+    Changes to referenced geometry trigger rebuilding; missing or ambiguous references
+    produce an error rather than selecting a substitute.
+  - Modification targets: geometry references that also identify what the feature may
+    modify. A threaded hole depends on both its placement point and its target body, so
+    an upstream change to either triggers rebuilding. Selecting a point or face for
+    placement alone does not grant permission to modify its owning body. The host
+    validates the declared target and enforces its scope on commands during evaluation,
+    alongside the command allowlist.
+
+  The host manages expression evaluation, unit conversion, dependency tracking, and target
+  enforcement so plugins do not need separate implementations of these systems.
 - **A conformance kit against the real host.** `solidcraft-cli plugin test <dir>` runs every entry
   headless on the real host (never a fake) with its `example` params, or values generated from
   `input`, and checks that it does not trap, that it stays within the rights of its kind and
