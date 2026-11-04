@@ -22,6 +22,8 @@ use solidcraft_render::VisualStyle;
 use crate::drawing_view::{CHORD_MM, CHORD_RANGE, Stats};
 
 use super::Point2;
+use super::drawing_dimension::EdgeParam;
+use super::types::Point3;
 
 /// The lowest and highest picture resolution a sheet takes, in dots per inch.
 pub const DPI_RANGE: std::ops::RangeInclusive<f64> = 25.0..=2400.0;
@@ -65,6 +67,54 @@ pub struct SnapshotParams {
     pub source: Option<SourceParam>,
     /// Occurrence paths left out of this view, with everything under them (none when not given).
     pub hide: Vec<Vec<u64>>,
+    /// Values to read on the view, as it shows them, with their labels: at most 100.
+    pub measure: Vec<MeasureParam>,
+    /// The length unit of the labels, `mm`, `cm`, `m`, `in` or `ft` (the design's when not given).
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub units: Option<String>,
+    /// The decimals of the labels, 0 to 6 (2 when not given).
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u8")]
+    pub decimals: Option<u8>,
+}
+
+/// A value to read on a view, from model points in the design's frame.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum MeasureParam {
+    /// How far apart two points are along the view's x or y.
+    Linear { along: AlongParam, from: Point3, to: Point3 },
+    /// How far apart two points are as the view shows them.
+    Aligned { from: Point3, to: Point3 },
+    /// The angle of the line `edge` runs, from its first point, as the view shows it.
+    Angle { edge: [Point3; 2], from: AngleFromParam },
+    /// A circle's or an arc's radius: the view must see it face on.
+    Radius { edge: EdgeParam },
+}
+
+/// Which way a linear measurement reads.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AlongParam {
+    X,
+    Y,
+}
+
+/// The line an angle is read from: the view's own, or a line through two model points.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AngleFromParam {
+    View(ViewLineParam),
+    Line([Point3; 2]),
+}
+
+/// One of the view's own lines.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewLineParam {
+    Horizontal,
+    Vertical,
 }
 
 /// What a view draws: occurrence paths from the design's root, each the subtree it places, with
@@ -827,10 +877,36 @@ pub struct SnapshotResult {
     /// The view's picture, when something in it is shaded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<PictureResult>,
+    /// What `measure` asked for, in its order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub measurements: Vec<MeasurementResult>,
     pub source: SourceResult,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A value read on a view.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeasurementResult {
+    /// `linear`, `aligned`, `angle` or `radius`.
+    pub kind: &'static str,
+    /// A length, in model millimetres.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_mm: Option<f64>,
+    /// That length on paper, at the view's scale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paper_mm: Option<f64>,
+    /// An angle, in radians.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_rad: Option<f64>,
+    pub label: String,
+    /// Always `projected`: as the view shows it.
+    pub meaning: &'static str,
+    /// A measured line isn't parallel to the view's plane, so the model's value differs.
+    pub foreshortened: bool,
+    /// `exact`, or `approximate` for an edge found again only by its pieces.
+    pub status: &'static str,
 }
 
 #[cfg(test)]

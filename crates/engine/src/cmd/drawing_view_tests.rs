@@ -1443,6 +1443,112 @@ fn a_scene_with_hidden_reference_lines_is_refused() {
     assert!(e.contains("not supported yet: hidden lines"), "{e}");
 }
 
+/// The readings of `measure` on `v`, each (value, label).
+fn readings(v: &Value) -> Vec<(f64, String)> {
+    let value = |m: &Value| m.get("value_mm").or(m.get("value_rad")).and_then(Value::as_f64).unwrap();
+    v["measurements"].as_array().unwrap().iter().map(|m| (value(m), m["label"].as_str().unwrap().to_string())).collect()
+}
+
+/// From (0, 0, 0) to (30, 40, 0) seen from above, 1:2: 30 along x, 40 along y, 50 as it runs, half
+/// that on paper; a 45 degree line reads 45 degrees from the view's horizontal and from a line along
+/// x; a reply with none says nothing about them. Nothing changes or is evaluated.
+#[test]
+fn a_views_measurements_are_read_as_it_shows_them() {
+    let mut s = block();
+    let (doc, evaluations) = (s.doc.clone(), s.evaluations);
+    let (a, b) = (json!([0, 0, 0]), json!([30, 40, 0]));
+    let v = snap(
+        &mut s,
+        json!({"view": "top", "scale": "1:2", "measure": [
+            {"linear": {"along": "x", "from": a, "to": b}},
+            {"linear": {"along": "y", "from": a, "to": b}},
+            {"aligned": {"from": a, "to": b}},
+            {"angle": {"edge": [[0, 0, 0], [1, 1, 0]], "from": "horizontal"}},
+            {"angle": {"edge": [[0, 0, 0], [1, 1, 0]], "from": [[0, 0, 0], [1, 0, 0]]}},
+        ]}),
+    );
+    let schema = crate::schema::output_schema_for::<crate::schema::drawing_view::SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let got = readings(&v);
+    let want = [(30.0, "30.00"), (40.0, "40.00"), (50.0, "50.00"), (std::f64::consts::FRAC_PI_4, "45.00°"), (std::f64::consts::FRAC_PI_4, "45.00°")];
+    assert_eq!(got.len(), want.len());
+    for ((value, label), (expected, text)) in got.iter().zip(want) {
+        assert!((value - expected).abs() < 1e-9 && label == text, "{got:?}");
+    }
+    let first = &v["measurements"][0];
+    assert_eq!(
+        (&first["kind"], &first["paper_mm"], &first["meaning"], &first["foreshortened"]),
+        (&json!("linear"), &json!(15.0), &json!("projected"), &json!(false)),
+        "{v}"
+    );
+    assert_eq!(v["measurements"][3].get("value_mm"), None, "{v}");
+    assert_eq!(snap(&mut s, json!({"view": "top"})).get("measurements"), None);
+    assert!(Arc::ptr_eq(&doc, &s.doc) && s.evaluations == evaluations);
+}
+
+/// A 50 mm edge of a cube seen in iso reads 50 x sqrt(2/3) = 40.825 and says it is foreshortened;
+/// the label takes the units and decimals asked for.
+#[test]
+fn an_edge_in_iso_reads_foreshortened() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 50}));
+    let edge = json!({"aligned": {"from": [0, 0, 0], "to": [50, 0, 0]}});
+    let v = snap(&mut s, json!({"view": "iso", "measure": [edge], "decimals": 3}));
+    let got = readings(&v);
+    assert!((got[0].0 - 50.0 * (2.0f64 / 3.0).sqrt()).abs() < 1e-9 && got[0].1 == "40.825", "{got:?}");
+    assert_eq!(v["measurements"][0]["foreshortened"], true);
+    let inch = json!({"aligned": {"from": [0, 0, 0], "to": [25.4, 0, 0]}});
+    let v = snap(&mut s, json!({"view": "top", "measure": [inch], "units": "in", "decimals": 3}));
+    assert_eq!(readings(&v)[0].1, "1.000", "{v}");
+}
+
+/// A 20 mm hole reads R10 where the view sees it round, on paper at the view's scale, and is refused
+/// end on, by its place in the list.
+#[test]
+fn a_holes_radius_is_read_face_on_and_refused_end_on() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 7, "base": [20, 20, -1], "operation": "cut", "targets": ["Plate"]}));
+    let rim = json!({"radius": {"edge": [30, 20, 5]}});
+    let v = snap(&mut s, json!({"view": "top", "scale": "2:1", "measure": [rim]}));
+    let got = readings(&v);
+    assert!(got.len() == 1 && (got[0].0 - 10.0).abs() < 1e-9 && got[0].1 == "R10.00", "{v}");
+    let paper = v["measurements"][0]["paper_mm"].as_f64().unwrap();
+    assert!((paper - 20.0).abs() < 1e-9 && v["measurements"][0]["status"] == "exact", "{v}");
+    let e = refused(&mut s, json!({"view": "front", "measure": [{"aligned": {"from": [0, 0, 0], "to": [1, 0, 0]}}, rim]}));
+    assert!(e.contains("measure[1]") && e.contains("isn't a circle in this view"), "{e}");
+    let straight = json!({"radius": {"edge": [0, 20, 5]}});
+    let e = refused(&mut s, json!({"view": "top", "measure": [straight]}));
+    assert!(e.contains("measure[0]"), "{e}");
+}
+
+#[test]
+fn hostile_measurements_are_refused() {
+    let mut s = block();
+    let doc = s.doc.clone();
+    let one = json!({"aligned": {"from": [0, 0, 0], "to": [1, 0, 0]}});
+    let many = vec![one.clone(); 101];
+    let cases = [
+        (json!({"measure": many}), "at most 100"),
+        (json!({"measure": [{"aligned": {"from": [0, 0, 0], "to": [0, 0, 0]}}]}), "measure[0]"),
+        (json!({"view": "top", "measure": [{"aligned": {"from": [0, 0, 0], "to": [0, 0, 5]}}]}), "measure[0]"),
+        (json!({"measure": [{"aligned": {"from": [0, 0, 0], "to": [1e13, 0, 0]}}]}), "measure[0]"),
+        (json!({"measure": [{"linear": {"along": "z", "from": [0, 0, 0], "to": [1, 0, 0]}}]}), "measure"),
+        (json!({"measure": [{"aligned": {"from": [0, 0, 0], "to": ["a", 0, 0]}}]}), "measure"),
+        (json!({"measure": [{"angle": {"edge": [[0, 0, 0], [1, 0, 0]], "from": "horizontal"}}]}), "measure[0]"),
+        (json!({"measure": [{"radius": {"edge": [1e13, 0, 0]}}]}), "measure"),
+        (json!({"measure": [{"nothing": {}}]}), "measure"),
+        (json!({"measure": [one.clone()], "units": "parsec"}), "units"),
+        (json!({"measure": [one.clone()], "decimals": 7}), "decimals"),
+        (json!({"measure": [one], "decimals": -1}), "decimals"),
+    ];
+    for (p, says) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+        assert!(Arc::ptr_eq(&doc, &s.doc), "{p}");
+    }
+}
+
 /// The occurrence paths `v`'s lines name, each once.
 fn line_paths(v: &Value) -> Vec<Value> {
     let mut paths: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["occurrence"].clone()).collect();
