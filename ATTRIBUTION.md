@@ -796,6 +796,8 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/branding/logo/solidcraft-wordmark.svg | SolidCraft contributors | the name SolidCraft set like the loading logo's wordmark (bold, +0.02 em tracking, #15499e) in IBM Plex Sans Bold from assets/fonts/ibm-plex-sans (SIL OFL 1.1, IBM Corp.), outlined to paths; no font file is embedded | MIT OR Apache-2.0 |
 | assets/branding/logo/solidcraft-lockup-horizontal.svg | SolidCraft contributors | assets/branding/logo/solidcraft-mark.svg beside assets/branding/logo/solidcraft-wordmark.svg, in the proportions of assets/branding/web/source/og.png; original artwork | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/onyx.json | SolidCraft contributors | original Onyx stone-grey palette, option overlays and semantic icon-role mapping; existing SolidCraft artwork is unchanged | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/window.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, default dark theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/navigate.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (`--sample`, default dark theme, software renderer) orbiting, panning and zooming, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
