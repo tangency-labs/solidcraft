@@ -37,7 +37,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_LIST_CONTRACT)
         .output(output_schema_for::<TemplateListResult>)
         .params(
-            "→ templates: [{name, title, default: whether drawing.create starts from it for this design}], the built-ins: ISO A4 to A0, each with the ISO border and the built-in title block",
+            "→ templates: [{name, title, assembly: whether it is an assembly's, default: whether drawing.create starts from it for this design}], the built-ins: ISO A4 to A0 for a part and for an assembly, each with the ISO border, the built-in title block and its kind's general tolerances",
         ),
     CommandSpec::new("drawing.list", "List Drawings", list)
         .any_part()
@@ -160,7 +160,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     drawing::check_count(s.doc.drawings.len() + 1).map_err(|e| bad(cmd, e.to_string()))?;
     let name = text(cmd, p, "name")?.map_or_else(|| s.doc.name.clone(), str::to_string);
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
-    let from = text(cmd, p, "template")?.unwrap_or(template::DEFAULT);
+    let from = text(cmd, p, "template")?.unwrap_or_else(|| template::default_for(template::is_assembly(&s.doc)));
     let chosen = template_named(cmd, from)?;
     // Not the id of a drawing undo or redo could bring back either.
     let steps = s.undo.iter().chain(&s.redo).filter_map(|step| step.part);
@@ -251,11 +251,15 @@ fn template_save(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-fn template_list(_s: &mut Session, _p: &Value) -> Result<Value> {
-    let templates = template::BUILT_INS
-        .iter()
-        .map(|&name| TemplateEntry { name: name.into(), title: template::title(name).unwrap_or_default(), default: name == template::DEFAULT })
-        .collect();
+fn template_list(s: &mut Session, _p: &Value) -> Result<Value> {
+    let default = template::default_for(template::is_assembly(&s.doc));
+    let entry = |name: &str| TemplateEntry {
+        name: name.into(),
+        title: template::title(name).unwrap_or_default(),
+        assembly: template::assembly(name).unwrap_or_default(),
+        default: name == default,
+    };
+    let templates = template::BUILT_INS.iter().map(|name| entry(name)).collect();
     serde_json::to_value(TemplateListResult { templates, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 

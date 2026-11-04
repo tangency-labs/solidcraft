@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.template_for_new_part_drawings": "Template for new part drawings",
+    "ui.template_for_new_assembly_drawings": "Template for new assembly drawings"
+  },
+  "ar": {
+    "ui.template_for_new_part_drawings": "قالب لوحات القطع الجديدة",
+    "ui.template_for_new_assembly_drawings": "قالب لوحات التجميعات الجديدة"
+  },
+  "de": {
+    "ui.template_for_new_part_drawings": "Vorlage für neue Teilezeichnungen",
+    "ui.template_for_new_assembly_drawings": "Vorlage für neue Baugruppenzeichnungen"
+  },
+  "he": {
+    "ui.template_for_new_part_drawings": "תבנית לשרטוטי חלקים חדשים",
+    "ui.template_for_new_assembly_drawings": "תבנית לשרטוטי מכלולים חדשים"
+  },
+  "ja": {
+    "ui.template_for_new_part_drawings": "新しい部品図面のテンプレート",
+    "ui.template_for_new_assembly_drawings": "新しいアセンブリ図面のテンプレート"
+  },
+  "ko": {
+    "ui.template_for_new_part_drawings": "새 부품 도면의 템플릿",
+    "ui.template_for_new_assembly_drawings": "새 어셈블리 도면의 템플릿"
+  },
+  "vi": {
+    "ui.template_for_new_part_drawings": "Mẫu cho bản vẽ chi tiết mới",
+    "ui.template_for_new_assembly_drawings": "Mẫu cho bản vẽ cụm lắp ráp mới"
+  },
+  "zh": {
+    "ui.template_for_new_part_drawings": "新零件绘图的模板",
+    "ui.template_for_new_assembly_drawings": "新装配体绘图的模板"
+  }
+}

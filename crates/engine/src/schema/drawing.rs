@@ -82,6 +82,8 @@ pub struct TemplateEntry {
     pub name: String,
     /// What the app calls it.
     pub title: String,
+    /// Whether it is an assembly's: the general tolerances it carries are an assembly's.
+    pub assembly: bool,
     /// Whether `drawing.create` starts from it for this design when no template is named.
     pub default: bool,
 }

@@ -32,7 +32,7 @@ pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
 fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
-    Arc::make_mut(&mut d.sheets[0]).title_block = None;
+    Arc::make_mut(&mut d.sheets[0]).set_title_block(None);
     let mut id_source = solidcraft_doc::ids::IdSource::seeded(4890);
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {

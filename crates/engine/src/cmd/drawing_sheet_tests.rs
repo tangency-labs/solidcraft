@@ -331,9 +331,9 @@ fn a_title_blocks_cells_read_the_model() {
         names.iter().map(|name| cells[*name].0.clone()).collect::<Vec<_>>()
     };
     let read = ["title", "identification_number", "material", "finish", "mass", "sheet", "general_tolerances", "legal_owner"];
-    // The built-in block's general tolerances start empty; with no number of its own, the drawing is
-    // numbered by the component's name.
-    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", "", ""];
+    // The design places components, so its general tolerances are the assembly's note; with no number
+    // of its own, the drawing is numbered by the component's name.
+    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", solidcraft_doc::drawing::template::ASSEMBLY_NOTE, ""];
     assert_eq!(shown(&mut s, &read), expected);
     on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
     on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
