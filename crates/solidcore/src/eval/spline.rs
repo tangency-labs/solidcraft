@@ -63,7 +63,9 @@ pub(crate) fn trig_derivative(t: f64, k: usize) -> (f64, f64) {
 
 /// Whether `knots` fit a spline of degree `p` over `n` control points the evaluator takes.
 pub(crate) fn basis_check(p: usize, n: usize, knots: &[f64]) -> bool {
-    (1..=MAX_SPLINE_DEGREE).contains(&p) && n > p && knots.len() == n + p + 1
+    (1..=MAX_SPLINE_DEGREE).contains(&p)
+        && n > p
+        && n.checked_add(p).and_then(|last| last.checked_add(1)) == Some(knots.len())
 }
 
 /// How far past its knot range, relative to the range's magnitude, a parameter is still the

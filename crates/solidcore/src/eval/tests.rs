@@ -645,6 +645,36 @@ fn a_rational_patch_matches_de_boor() {
 }
 
 #[test]
+fn overflowing_control_counts_are_unevaluable() {
+    let knots = [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]];
+    let ctrl = vec![
+        [0.0, 0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [1.0, 1.0, 0.0, 1.0],
+    ];
+    // The first count overflows n + p; the second overflows the following + 1.
+    for huge in [usize::MAX, usize::MAX - 1] {
+        for direction in 0..2 {
+            let mut count = [2, 2];
+            count[direction] = huge;
+            let inferred = EvalSurface::nurbs([1, 1], knots.clone(), count, ctrl.clone());
+            let explicit = EvalSurface::nurbs_closed(
+                [1, 1],
+                knots.clone(),
+                count,
+                ctrl.clone(),
+                [false, false],
+            );
+            for surface in [inferred, explicit] {
+                assert!(surface.derivs(0.5, 0.5).is_none());
+                assert!(surface.eval(0.5, 0.5).is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn hostile_surfaces_do_not_panic() {
     let bad = [
         EvalSurface::nurbs([9, 1], [vec![0.0; 3], vec![0.0; 3]], [1, 1], vec![]),
