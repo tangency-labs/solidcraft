@@ -455,6 +455,7 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     if ctrl {
         // The model moves with the arrow, as it does under a pan drag.
         if let Some(rect) = app.viewport.rect {
+            let rect = crate::render_workspace::camera_rect(app, rect);
             let step = rect.height() * 0.1;
             let params = json!({"motion": "pan", "delta": [dx * step, dy * step]});
             if result {
@@ -510,6 +511,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Continuous camera changes use the same JSON command as programmatic callers.
 pub(crate) fn camera_motion(app: &mut SolveApp, rect: Rect, mut params: serde_json::Value) {
+    let rect = crate::render_workspace::camera_rect(app, rect);
     let stored_fov = app.cam.fov;
     params["camera"] = json!(projection(app, rect).cam);
     params["viewport"] = json!([rect.width().max(1.0), rect.height().max(1.0)]);
@@ -546,6 +548,10 @@ pub(crate) struct CameraInput {
 /// selectable, so a press that would start a selection navigates as on empty space; with
 /// `caps.orbit` off, bindings that orbit do nothing and pan and zoom work as usual.
 pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
+    // A framed Render image and its gray letterbox share input ownership, but
+    // camera deltas and anchors use the exact image projection's pixel scale.
+    let input_rect = rect;
+    let rect = crate::render_workspace::camera_rect(app, rect);
     let picking = caps.pick;
     let (hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, primary_released, delta) = ui.input(|i| {
         (
@@ -564,16 +570,16 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The axis view handles its own clicks; the model underneath must not see them.
-    let axes = if caps.orbit { axis_rect(app, rect) } else { Rect::NOTHING };
+    let axes = if caps.orbit { axis_rect(app, input_rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
-    let readout = crate::view_angles::readout_rect(ui.ctx(), rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
+    let readout = crate::view_angles::readout_rect(ui.ctx(), input_rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
     // Floating windows and menus own input over the model, including wheel navigation. egui's
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
     // with no window or menu above it.
     let inside = ui.is_enabled()
         && resp.contains_pointer()
-        && ui.rect_contains_pointer(rect)
+        && ui.rect_contains_pointer(input_rect)
         && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
     // The wheel and trackpad gestures go on under a box anchored to the model (a value box such
     // as Extrude's distance, a dimension's editor): it scrolls nothing, and a pan, orbit or zoom
@@ -584,7 +590,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             && !crate::value_step::enabled(ui.ctx())
             && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
             && hover.is_some_and(|p| {
-                rect.contains(p)
+                input_rect.contains(p)
                     && !axes.contains(p)
                     && !readout.is_some_and(|r| r.contains(p))
                     && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
@@ -689,7 +695,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         let empty_space = |app: &SolveApp| {
             app.viewport.context_menu.is_none()
                 && hover.is_some_and(|p| {
-                    if !picking {
+                    // The free canvas owns navigation, including gray letterbox. Its
+                    // invisible continuation of the camera ray contains no pickable scene.
+                    if !picking || !rect.contains(p) {
                         return true;
                     }
                     let proj = projection(app, rect);
@@ -890,6 +898,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 /// for its page; the 3D mouse only reads the device and queues the motion
 /// ([`crate::space_mouse::navigate_frame`]).
 pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
+    let rect = crate::render_workspace::camera_rect(app, rect);
     if app.viewport.device_motion.is_none() && app.viewport.bridge_motion.is_none() {
         return;
     }

@@ -539,3 +539,18 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+### opaque path lighting
+
+Indirect diffuse and specular illumination computed by tracing finite light paths between opaque surfaces. Shown as **Indirect lighting (opaque surfaces)** in Sampling.
+
+- **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
+- **Don't use:** ambient occlusion, glass, full optical parity.
+- **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
+### path depth
+
+The maximum number of shaded surfaces in a rendering path, starting with the first visible surface. A depth of 1 uses direct lighting only; higher values allow more light bounces. This does not count CAD mesh vertices.
+
+- **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
+- **For translators:** a count, not a geometric depth in millimetres or timeline depth.

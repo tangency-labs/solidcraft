@@ -1,0 +1,37 @@
+{
+  "en": {
+    "render.cpu_fixed_retained": "Fixed sampling retained",
+    "render.cpu_progressive_adopt": "Use progressive sampling",
+    "render.cpu_progressive_adopt_help": "Adopting progressive uses one camera sample per pass. Image size, lights and reflection settings stay unchanged.",
+    "render.cpu_progressive_always": "Progressive sampling is always on",
+    "render.cpu_progressive_reflection_adopt": "Set selected reflection attempts to 1 before adopting progressive sampling."
+  },
+  "de": {
+    "render.cpu_fixed_retained": "Feste Abtastung beibehalten",
+    "render.cpu_progressive_adopt": "Progressive Abtastung verwenden",
+    "render.cpu_progressive_adopt_help": "Die progressive Abtastung verwendet ein Kamerasample pro Durchlauf. Bildgröße, Lichtquellen und Reflexionseinstellungen bleiben unverändert.",
+    "render.cpu_progressive_always": "Progressive Abtastung ist immer aktiv",
+    "render.cpu_progressive_reflection_adopt": "Setzen Sie die Reflexionsversuche ausgewählter Körper auf 1, bevor Sie die progressive Abtastung übernehmen."
+  },
+  "ja": {
+    "render.cpu_fixed_retained": "固定サンプリングを維持",
+    "render.cpu_progressive_adopt": "プログレッシブサンプリングを使用",
+    "render.cpu_progressive_adopt_help": "切り替えると各パスで1つのカメラサンプルを使用します。画像サイズ、照明、反射設定は変わりません。",
+    "render.cpu_progressive_always": "プログレッシブサンプリングは常に有効です",
+    "render.cpu_progressive_reflection_adopt": "切り替える前に、選択した反射の試行回数を1に設定してください。"
+  },
+  "ko": {
+    "render.cpu_fixed_retained": "고정 샘플링 유지",
+    "render.cpu_progressive_adopt": "점진적 샘플링 사용",
+    "render.cpu_progressive_adopt_help": "전환하면 패스마다 카메라 샘플 하나를 사용합니다. 이미지 크기, 조명 및 반사 설정은 유지됩니다.",
+    "render.cpu_progressive_always": "점진적 샘플링은 항상 켜져 있습니다",
+    "render.cpu_progressive_reflection_adopt": "전환하기 전에 선택한 반사의 시도 횟수를 1로 설정하세요."
+  },
+  "zh": {
+    "render.cpu_fixed_retained": "保留固定采样",
+    "render.cpu_progressive_adopt": "使用渐进采样",
+    "render.cpu_progressive_adopt_help": "启用后每轮使用一个相机样本。图像大小、灯光和反射设置保持不变。",
+    "render.cpu_progressive_always": "渐进采样始终开启",
+    "render.cpu_progressive_reflection_adopt": "启用渐进采样前，请将所选反射的尝试次数设为1。"
+  }
+}

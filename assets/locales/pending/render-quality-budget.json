@@ -1,0 +1,27 @@
+{
+  "en": {
+    "render.quality_budget_help": "Sets size, samples, depth, seed and noise reduction. Other image settings are kept.",
+    "render.quality_denoise_on": "Noise reduction: On",
+    "render.quality_denoise_off": "Noise reduction: Off"
+  },
+  "de": {
+    "render.quality_budget_help": "Legt Größe, Samples, Tiefe, Startwert und Rauschreduzierung fest. Andere Bildeinstellungen bleiben erhalten.",
+    "render.quality_denoise_on": "Rauschreduzierung: Ein",
+    "render.quality_denoise_off": "Rauschreduzierung: Aus"
+  },
+  "ja": {
+    "render.quality_budget_help": "サイズ、サンプル数、深度、シード、ノイズ低減を設定します。他の画像設定は維持されます。",
+    "render.quality_denoise_on": "ノイズ低減：オン",
+    "render.quality_denoise_off": "ノイズ低減：オフ"
+  },
+  "ko": {
+    "render.quality_budget_help": "크기, 샘플 수, 깊이, 시드 및 노이즈 제거를 설정합니다. 다른 이미지 설정은 유지됩니다.",
+    "render.quality_denoise_on": "노이즈 제거: 켜짐",
+    "render.quality_denoise_off": "노이즈 제거: 꺼짐"
+  },
+  "zh": {
+    "render.quality_budget_help": "设置尺寸、采样数、深度、种子和降噪。其他图像设置保持不变。",
+    "render.quality_denoise_on": "降噪：开启",
+    "render.quality_denoise_off": "降噪：关闭"
+  }
+}

@@ -72,6 +72,7 @@ pub use print_face::PrintFace;
 pub mod project;
 mod project3d;
 pub mod render_aging;
+pub mod render_coat;
 pub mod render_job;
 pub mod render_optics;
 pub mod render_resources;

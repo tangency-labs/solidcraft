@@ -1381,6 +1381,9 @@ const ELEMENTS: &[Element] = &[
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
     }),
+    element!("number_field_preserving", |ui, _| {
+        number_field_preserving(ui, &mut 256_u32, 1..=64, 1.0, "");
+    }),
     element!("number_fields", |ui, _| {
         row(ui, "Target", |ui| {
             number_fields(ui, &mut [-18.0, 125.5, -18.0], -1e9..=1e9, 0.1, "");
@@ -1393,6 +1396,25 @@ const ELEMENTS: &[Element] = &[
         dropdown_menu(ui, "gallery_menu", "Preset", |ui| {
             list_picker(ui, "preset", "Preset", true);
         });
+    }),
+    element!("bounded_dropdown_menu", |ui, state| {
+        let choices = [
+            "CPU lens acceptance with a long captured shot name for the retained image",
+            "GPU lens acceptance with a second long captured shot name for the result",
+        ];
+        let selected = state.selected.min(choices.len() - 1);
+        let width = ui.available_width().min(Tokens::get().form_card_width * 0.75);
+        let response = bounded_dropdown_menu(ui, "gallery_bounded_menu", choices[selected], width, |ui| {
+            for (index, label) in choices.iter().enumerate() {
+                let response = list_picker(ui, &format!("bounded:{index}"), label, selected == index);
+                if response.clicked() {
+                    state.selected = index;
+                    ui.close();
+                }
+                response.on_hover_text(*label);
+            }
+        });
+        response.on_hover_text(choices[selected]);
     }),
     element!("dropdown_menu_with_close_behavior", |ui, s| {
         dropdown_menu_with_close_behavior(ui, "gallery_editable_menu", "Preset", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {

@@ -4,7 +4,7 @@ use crate::{Result, Session, params::bad};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcraft_doc::{
-    render_resources::GpuHdrEnvironment,
+    render_resources::{CpuHdrEnvironment, GpuHdrEnvironment},
     render_settings::{RenderJob, RenderSettings, RenderSetup},
 };
 use solidcraft_render::{
@@ -76,8 +76,8 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     }
     let source = recipe(&input.id, command)?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
-    if !matches!(&setup.job, Some(RenderJob::GpuPath { .. })) {
-        return Err(bad(command, "native studio compositions require an explicitly selected GPU path setup; no executor is substituted"));
+    if !matches!(&setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+        return Err(bad(command, "native studio compositions require an explicitly selected CPU or GPU raytrace setup; no executor is substituted"));
     }
     let old = s.doc.render.setups.get(&input.name);
     let stage_replacement = !setup.stage.is_empty() || old.is_some_and(|saved| !saved.stage.is_empty());
@@ -95,7 +95,13 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     let hdr = source["hdr"].as_str().ok_or_else(|| bad(command, "native composition has no HDR identity"))?;
     let resource = super::library::hdr_resource(hdr, command)?;
     let resource_id = resource.id();
-    let mut lighting = StudioLighting { environment: [0.0; 3], sun: None, area_lights: AreaLights::default() };
+    let mut lighting = StudioLighting {
+        punctual_lights: Default::default(),
+        directional_lights: Default::default(),
+        environment: [0.0; 3],
+        sun: None,
+        area_lights: AreaLights::default(),
+    };
     let mut panels = Vec::new();
     let mut projection = Value::Null;
     if let Some(rig) = source["rig"].as_str() {
@@ -133,16 +139,31 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     });
     setup.stage = Stage::new(panels).map_err(|e| bad(command, e.to_string()))?;
     setup.exposure_ev = source["exposure_ev"].as_f64().ok_or_else(|| bad(command, "native composition exposure missing"))?;
-    if let Some(RenderJob::GpuPath { options, .. }) = &mut setup.job {
-        options.environment = None;
-        options.hdr = Some(GpuHdrEnvironment {
-            resource: resource_id,
-            rotation_rad: super::library::hdr_rotation(0.35, command)?,
-            intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
-            assume_linear_srgb: false,
-        });
-        options.lighting = Some(lighting);
-    }
+    let executor = match &mut setup.job {
+        Some(RenderJob::CpuRaytrace { options, .. }) => {
+            let hdr_samples = options.hdr.map_or(16, |hdr| hdr.samples);
+            super::library::cpu_studio_lighting(options, &lighting, command)?;
+            options.hdr = Some(CpuHdrEnvironment {
+                resource: resource_id,
+                rotation_rad: super::library::hdr_rotation(0.35, command)?,
+                intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
+                samples: hdr_samples,
+            });
+            "cpu-raytrace"
+        }
+        Some(RenderJob::GpuPath { options, .. }) => {
+            options.environment = None;
+            options.hdr = Some(GpuHdrEnvironment {
+                resource: resource_id,
+                rotation_rad: super::library::hdr_rotation(0.35, command)?,
+                intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
+                assume_linear_srgb: false,
+            });
+            options.lighting = Some(lighting);
+            "gpu-path"
+        }
+        _ => return Err(bad(command, "choose CPU or GPU ray tracing")),
+    };
     setup.validate().map_err(|e| bad(command, e.to_string()))?;
     super::staging::apply(&mut product, &setup, command)?;
     super::library::rig_clearance(&product, &lighting, command)?;
@@ -152,7 +173,7 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
     let report = json!({"id":input.id,"name":input.name,"revision":s.revision,"source":source,"setup":setup,
         "resource_sha256":resource_id,"rig_projection":projection,"status":"resolved_native_projection",
-        "document_changed":false,"executor":"gpu-path","requires_lighting_consent":true,"requires_stage_consent":stage_replacement,
+        "document_changed":false,"executor":executor,"requires_lighting_consent":true,"requires_stage_consent":stage_replacement,
         "replaces":["lighting","environment","passive_stage","exposure"],
         "preserves":["camera","output_dimensions","sampling","optical_bindings","geometry","engineering_materials","pose","visibility"],
         "clearance":"conservative subject/stage/emitter AABB separation; not exact contact certification",
@@ -189,15 +210,26 @@ struct Quality {
     id: String,
     variant: String,
     acknowledge_omissions: bool,
+    #[serde(default)]
+    cpu: Option<CpuQuality>,
+}
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct CpuQuality {
+    minimum_budget: solidcraft_render::job::CpuBudget,
+    adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
 }
 pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.quality.prepare";
     let input: Quality = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
-    if input.variant != "fixed_samples_png" || !input.acknowledge_omissions {
+    if !matches!(input.variant.as_str(), "fixed_samples_png" | "cpu_progressive_png") || !input.acknowledge_omissions {
         return Err(bad(
             command,
-            "explicit fixed_samples_png projection and omission acknowledgement are required; full Q-* requirements remain unbound",
+            "an explicit fixed_samples_png or cpu_progressive_png projection and omission acknowledgement are required; full Q-* requirements remain unbound",
         ));
+    }
+    if input.variant == "fixed_samples_png" && input.cpu.is_some() {
+        return Err(bad(command, "CPU budget context requires the cpu_progressive_png projection"));
     }
     let source = super::library::item("quality", &input.id, command)?;
     let number = |path: &[&str]| -> Result<u32> {
@@ -208,6 +240,47 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
         field.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(command, "quality field is not a bounded unsigned integer"))
     };
     let (width, height) = (number(&["resolution", "width"])?, number(&["resolution", "height"])?);
+    if input.variant == "cpu_progressive_png" {
+        if !matches!(input.id.as_str(), "Q-001" | "Q-002" | "Q-003") || source["motion"]["enabled"] != false {
+            return Err(bad(
+                command,
+                "only the three canonical still-image CPU cost budgets are bound; optical/convergence concepts are not CPU presets",
+            ));
+        }
+        let samples = number(&["sampling", "minimum_samples"])?.max(16);
+        let seed = number(&["seed"])?;
+        let context = input.cpu.unwrap_or_default();
+        let production = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: samples, seed });
+        let mut eligible = false;
+        let mut selected = None;
+        let mut refusal = None;
+        for budget in solidcraft_render::job::CpuBudget::ALL {
+            eligible |= budget == context.minimum_budget;
+            if !eligible {
+                continue;
+            }
+            let admitted = solidcraft_render::job::cpu_camera_sampling(production, context.adaptive, budget)
+                .and_then(|sampling| budget.validate_image(width, height, sampling));
+            match admitted {
+                Ok(()) => {
+                    selected = Some(budget);
+                    break;
+                }
+                Err(error) => refusal = Some(error),
+            }
+        }
+        let budget = selected
+            .ok_or_else(|| bad(command, refusal.map_or_else(|| "no existing CPU profile admits this budget".to_string(), |e| e.to_string())))?;
+        return Ok(
+            json!({"id":input.id,"name":source["name"],"variant":input.variant,"status":"cpu_cost_budget_projection_not_full_quality_profile",
+            "revision":s.revision,"document_changed":false,"source_unchanged":true,
+            "settings":{"width":width,"height":height},"cpu_options":{"progressive":{"samples_per_pixel":samples,"seed":seed},"budget":budget},
+            "cpu_context":{"minimum_budget":context.minimum_budget,"adaptive":context.adaptive},
+            "requires_progressive":true,"changed_fields":["width","height","progressive.samples_per_pixel","progressive.seed","budget"],
+            "preserves":["executor","camera","lens","lighting","environment","stage","optical_bindings","surface_maps","aging","exposure","tone_map","finishing","raw_master","denoise","path","adaptive"],
+            "omitted":["catalog_maximum_samples","catalog_transport_depth","catalog_denoise_choice","adaptive_stopping_and_error_target","convergence_certification","time_guarantee"],"source":source}),
+        );
+    }
     let (samples, depth) = (number(&["sampling", "maximum_samples"])?, number(&["transport", "maximum_depth"])?);
     let seed = number(&["seed"])?;
     if solidcraft_render::job::GPU_PATH_LIMITS.fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height)))

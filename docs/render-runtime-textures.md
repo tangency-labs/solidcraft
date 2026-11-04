@@ -1,56 +1,33 @@
-# Runtime planar opaque maps
+# Opaque surface maps
 
-The renderer supports built-in sources, absolute-color mode, explicit V orientation, linear roughness/metallic maps and content-addressed texture sharing. See [built-in library](render-built-in-library.md) for its bounded resource contract. Legacy examples below retain modulation and rows-down defaults.
+Surface maps provide base colour, OpenGL tangent-space normals, roughness and metallic values. Built-in sources can be saved with a shot using stable definition/feature/occurrence identity and pinned version/digests. See [built-in library](render-built-in-library.md). Engineering geometry and material properties are unchanged.
 
-Progressive GPU jobs accept immutable per-body base-color and OpenGL tangent-space
-normal maps. No document, appearance, recovery, or saved material format changes.
-Only explicit runtime commands capture file bytes; queued work does not reopen paths.
+GPU progressive jobs also accept temporary PNG/JPEG paths. For example:
 
 ```json
 {"progressive":true,"raytrace":{"textures":[{"body_index":3,"body_name":"Walnut tabletop","frame":{"origin":[0,0,480],"u":[900,0,0],"v":[0,90,0]},"base_color_srgb":"C:/art/wood.png","normal_opengl":"C:/art/wood-normal.png","normal_strength":0.35}]}}
 ```
 
-Each `u` and `v` world-space vector spans one complete repeat, in millimetres. The
-vectors must be nonzero, orthogonal, and 0.001–1,000,000 mm long. The origin is UV
-zero. Image V increases downwards; normal red and green point along the positive
-projected U and V directions, with handedness preserved. Projection is planar,
-not triplanar: surfaces parallel to the projection axes may stretch. Each body's
-bounding-box corners must remain within ±128 repeats; the frame origin must be
-within 10 million mm of the camera target. These caps limit f32 coordinate loss.
+CPU ray tracing consumes saved built-in maps in opaque direct lighting and the optional progressive Indirect lighting route. In the library, choose a surface and **Save maps to shot**. The same portable binding command works offline without a render host:
 
-Base RGB is explicitly sRGB, converted to linear reflectance before bilinear
-filtering and multiplied by the body's linear base color. Use a white base to
-reproduce the map's color. Normal channels are untransformed linear data. Normal
-strength scales tangent XY in 0..1 before normalization; degenerate vectors, an
-invalid tangent projection, or a normal behind the geometric/view hemisphere
-fall back to the original shading normal. Alpha is ignored by this opaque-only
-consumer. Glass, scalar opacity, roughness, metalness, displacement, height and
-alpha maps are rejected or unsupported; they are not silently interpreted.
+```json
+{"name":"Studio","set":{"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":16,"seed":9}}}},"surface":{"id":"SURF-001","body_index":0,"body_name":"Panel"}}
+```
 
-Sampling uses bilinear level-zero periodic filtering at texel centers, including
-negative UV repeats. There is no mipmapping, anisotropic filter or UV mesh import
-in this increment, so fine distant patterns may alias. PNG/JPEG input is 8-bit,
-maximum 1024×1024 per map. Embedded ICC profiles and nonidentity orientation must
-be normalized beforehand; no implicit color-management guess is made. The sRGB
-base/data normal distinction follows the public
-[Khronos glTF material semantics](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#materials),
-without adopting its document format or copying implementation code.
+Pass this object to `render.library.surface.bind`; it is one Undo step. The target must match `render.scene`, and later Check/Start resolve the saved stable identity again. A missing, hidden, changed or ambiguous target, or a mismatched installed source digest/version, refuses rather than rebinding another body. CPU temporary map paths remain unavailable. CPU maps require an opaque target. With Indirect lighting, Glass may be assigned to another body, but maps and Glass cannot share a target. Selected custom reflections, anisotropic faces and procedural surface-effect overrides remain incompatible; the authored settings stay intact and the request refuses. Raster does not consume these bindings. The optional CPU producer must be installed before a CPU image can start.
 
-At most 16 exact name-and-index body bindings retain 16 MiB encoded capacity and
-32 MiB linear pixel data collectively. Admission counts captured bytes, codec
-scratch, normalized pixels, staging and device storage against the existing job
-budget. Codecs execute on the worker with cancellation checks before/after each
-bounded decode and during conversion/upload preparation. Public status contains
-metadata only; completion or cancellation releases captured source bytes even
-when callers retain job/status/frame handles. GPU preparation also releases
-source bytes after preparing the pixel buffer.
+Each U/V vector spans a complete repeat in world-space millimetres. The frame must be finite, nonzero and orthogonal within its existing tolerance, with repeat lengths 0.001–1,000,000 mm. Every bound body corner must remain within ±128 repeats. GPU additionally bounds the frame origin relative to its rebased camera. The origin is UV zero; image V increases downwards by default. `flip_v` changes lookup orientation without inverting the OpenGL normal basis. Saved built-ins use image-up lookup and absolute base-colour replacement. Legacy temporary bindings keep modulation and rows-down defaults.
 
-The independent progressive device requests six storage buffers per shader
-stage. An adapter limited to fewer cannot install this executor; raster and
-tessellation device requirements remain unchanged.
+Base-colour RGB is sRGB, converted exactly once to linear reflectance before filtering. Normal, roughness and metallic maps are linear data. `base_color_mode: replace` replaces captured RGB; `modulate` multiplies it. Scalar red channels replace roughness/metallic, with the shared roughness minimum 0.045. IOR and captured clear-coat properties survive. Normal strength scales tangent XY in 0..1; invalid tangent projections, degenerate tangent normals, and mapped normals behind the geometric or view hemisphere fall back to the original shading normal. Geometric normals still control offsets and boundaries. Projection is planar, so faces parallel to a projection axis can stretch.
 
-Independent f64 tests cover explicit sRGB decoding, linear normal channels,
-repeat filtering, handedness, degenerate fallback, admission and lifecycle.
-GPU reference tests compare the actual packed storage and WGSL sampler/normal
-frame against those CPU utilities. GPU execution and final visual evidence must
-be reported separately; source/shader validation alone is not rendering proof.
+Both image consumers use repeating bilinear **level zero** at texel centres, including negative UVs. Neither derives a primary/secondary footprint or applies mip/anisotropic filtering. Fine distant patterns can alias. Alpha in map images is validated but ignored by these opaque consumers, including RGB under zero alpha. It is not a cutout or transparent material. Geometry coverage in a transparent PNG output is a separate setting. Glass/opacity, height/displacement and mesh UV import are outside this map contract.
+
+At most 128 distinct body bindings retain 64 MiB encoded capacity and 96 MiB normalized float4 base pixels collectively. Each map is at most 1024×1024. GPU temporary paths accept the existing normalized PNG/JPEG contract; embedded ICC profiles and nonidentity orientation must be normalized beforehand. The built-in inventory is 48 surfaces × four roles: 192 noninterlaced 8-bit, 512×512 PNGs (RGB base/normal, gray scalar maps). CPU preparation accepts their static 8-bit PNG layouts and refuses JPEG/interlace/APNG/other depths rather than guessing a conversion.
+
+Each request deduplicates immutable encoded content by SHA and role. CPU work prepares one source at a time into one shared LOD0 cache. Application-owned vectors reserve exact capacities fallibly; admission includes original source capacities/control metadata, all unique float4 pixels, bounded binding/map/hit metadata and one peak decoder/row workspace. It uses the existing per-job/profile and aggregate host budgets, without a new pool or raised cap. Rows, linear pixels, source/dedup operations and per-hit map roles share the existing cumulative work budget and cancellation token. PNG setup/final parsing remain bounded codec operations; the codec allocation limit is its existing best-effort contract, not a strict wall-time guarantee.
+
+Only explicit captures read file/resource bytes; queued work never reopens a path. CPU and registered-executor resource Arcs are moved into work, while public job/status requests retain only the summary. The builtin CPU factory consumes that full work request. Completed frames, raw EXR masters and cloned status/job handles do not retain map-source Arcs after work release. A terminal phase alone does not prove the worker has released its buffers; `work_released` remains the barrier for retirement/admission. Cancellation, decode failure and late cancellation cannot publish a partial prepared map or completed image.
+
+CPU applies all mapped material/normal values before the hit's direct/GI BRDF, PDF and proposal, and before deterministic denoise guides. The same completed closure is reused for that hit. Maps add no rays or sampling dimensions; all advertised secondary opaque hits use the same map contract. Omitted maps allocate no cache, decoder or hit slot and add no work/film operations. Their original PNG/raw calculation is retained within the unchanged task-state allowance. The independently staged aging consumer is not implicitly supported by this slice; maps-to-aging ordering and combined tests must be qualified before that combination is admitted.
+
+Existing-area regressions specify independent colour/data and normal-frame oracles, actual captured PNG/EXR output, direct GGX response, mapped per-ordinal MIS, secondary-vertex proposals, guide consistency, per-pass prefixes/quanta, exact source-capacity/decoder admission, cancellation and work-release ownership. GPU reference cases exercise packed storage/WGSL sampling separately. Their execution, native visual evidence and platform qualification must be recorded for the actual composed source; formatting or a clean apply check is not a rendering result.

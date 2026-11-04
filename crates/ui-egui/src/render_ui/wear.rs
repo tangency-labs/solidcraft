@@ -8,9 +8,9 @@ use crate::{SolveApp, theme::Tokens, ui_kit};
 use solidcraft_engine::render::job::aging::{AgingKind, AgingLayer, SurfaceClass};
 
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    note(app, ui, "render.effects_gpu_only");
+    note(app, ui, "render.aging_raytrace_help");
     ui.add_space(Tokens::get().space_4);
-    let enabled = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
+    let enabled = matches!(app.render_workspace.view.method, ImageMethod::CpuRaytrace | ImageMethod::GpuRaytrace);
     let response = ui.add_enabled_ui(enabled, |ui| layer_controls(app, ui));
     crate::scenario::publish_rect("render:wear:controls", response.response.rect);
 }
@@ -163,7 +163,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             note(app, ui, "render.aging_target_help");
         });
     }
-    if app.render_workspace.view.method == ImageMethod::GpuRaytrace && before != stack {
+    if matches!(app.render_workspace.view.method, ImageMethod::CpuRaytrace | ImageMethod::GpuRaytrace) && before != stack {
         app.render_workspace.view.studio.aging = stack;
         app.render_workspace.view.dirty = true;
     }

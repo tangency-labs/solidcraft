@@ -4286,9 +4286,11 @@ dependencies = [
 name = "solidcraft-render"
 version = "0.40.0-rc.2"
 dependencies = [
+ "flate2",
  "image",
  "moxcms",
  "png",
+ "robust",
  "serde",
  "serde_json",
  "sha2 0.10.9",

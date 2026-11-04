@@ -250,4 +250,66 @@ mod tests {
         target.occurrence_path = vec![2, 2];
         assert!(target.validate().is_err());
     }
+    #[test]
+    fn saved_cpu_surface_maps_roundtrip_for_opaque_direct_and_path_and_preserve_unsupported_intent() {
+        use crate::render_settings::{CpuJob, RenderJob, RenderSetup};
+        let mut options = CpuJob::default();
+        let mut setup = RenderSetup {
+            job: Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) }),
+            ..Default::default()
+        };
+        setup.surfaces.set(fixture(), false).unwrap();
+        setup.validate().unwrap();
+        let mut direct_document = crate::Document::default();
+        std::sync::Arc::make_mut(&mut direct_document.render).setups.insert("Maps".into(), setup.clone());
+        assert_eq!(crate::Document::from_json(&direct_document.to_json()).unwrap(), direct_document);
+        options.progressive = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: 16, seed: 9 });
+        options.shadows = true;
+        options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3 });
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
+        setup.validate().unwrap();
+        let mut document = crate::Document::default();
+        std::sync::Arc::make_mut(&mut document.render).setups.insert("Maps".into(), setup.clone());
+        assert_eq!(crate::Document::from_json(&document.to_json()).unwrap(), document);
+        options.path = None;
+        let saved_options_wire = serde_json::to_value(&options).unwrap();
+        let mut runtime = options.to_runtime(0.0).unwrap();
+        runtime.reflections = Some(solidcraft_render::job::ReflectionOptions {
+            bodies: vec![solidcraft_render::job::ReflectionBody { body: "Panel".into(), mode: solidcraft_render::job::ReflectionMode::Mirror }],
+            samples: 1,
+            max_bounces: 2,
+        });
+        runtime.validate().unwrap();
+        let runtime_wire = serde_json::to_value(&runtime).unwrap();
+        let error = solidcraft_render::job::textures::validate_cpu_options(&runtime).unwrap_err();
+        assert!(error.message.contains("selected reflections"));
+        assert_eq!(serde_json::to_value(&runtime).unwrap(), runtime_wire, "map refusal preserves the exact runtime selected override");
+        assert_eq!(serde_json::to_value(&options).unwrap(), saved_options_wire, "runtime overrides do not rewrite saved CPU fields");
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
+        setup.validate().unwrap();
+        let mut unknown = serde_json::to_value(&setup).unwrap();
+        unknown["job"]["options"]["reflections"] = serde_json::to_value(&runtime.reflections).unwrap();
+        let error = serde_json::from_value::<RenderSetup>(unknown).unwrap_err();
+        assert!(error.to_string().contains("reflections"), "saved CPU intent must not silently discard runtime-only selected overrides");
+        // Prove the saved field is supported in fixed mode before checking
+        // its incompatibility with still-authored progressive sampling.
+        let mut fixed = options.clone();
+        fixed.progressive = None;
+        fixed.primary_samples = 4;
+        fixed.validate_surface_maps(0.0).unwrap();
+        let surfaces = setup.surfaces.clone();
+        options.primary_samples = 4;
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options) });
+        let wire = serde_json::to_value(&setup).unwrap();
+        assert!(setup.validate().unwrap_err().to_string().contains("CPU progressive requires"));
+        assert_eq!(serde_json::to_value(&setup).unwrap(), wire);
+        assert_eq!(setup.surfaces, surfaces);
+        assert_eq!(setup.surfaces.len(), 1);
+        for job in [None, Some(RenderJob::Raster { transparent_background: false })] {
+            setup.job = job;
+            assert!(setup.validate().is_err());
+            assert_eq!(setup.surfaces, surfaces);
+            assert_eq!(setup.surfaces.len(), 1);
+        }
+    }
 }

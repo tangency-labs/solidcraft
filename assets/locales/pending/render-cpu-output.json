@@ -1,0 +1,37 @@
+{
+  "en": {
+    "render.cpu_opaque_hint": "CPU ray tracing uses an opaque background.",
+    "render.output_master_unavailable": "Select a completed image with raw EXR data to export EXR. Enable raw EXR before rendering new images.",
+    "render.output_presentation_limits": "CPU image effects and EXR output support images up to 8192 pixels wide or high, with at most 16,777,216 pixels in total.",
+    "render.output_raytrace_only": "Image effects require CPU ray tracing or GPU path tracing.",
+    "render.presentation_banner": "Presentation effects work with CPU and GPU ray tracing. Opening this page never changes the method."
+  },
+  "de": {
+    "render.cpu_opaque_hint": "CPU-Raytracing verwendet einen undurchsichtigen Hintergrund.",
+    "render.output_master_unavailable": "Zum EXR-Export ein fertiges Bild mit EXR-Rohdaten auswählen. EXR-Rohdaten vor dem Rendern neuer Bilder aktivieren.",
+    "render.output_presentation_limits": "CPU-Bildeffekte und EXR-Ausgabe unterstützen Bilder mit bis zu 8192 Pixeln Breite oder Höhe und insgesamt höchstens 16.777.216 Pixeln.",
+    "render.output_raytrace_only": "Bildeffekte erfordern CPU-Raytracing oder GPU-Pathtracing.",
+    "render.presentation_banner": "Bildeffekte funktionieren mit CPU- und GPU-Raytracing. Das Öffnen dieser Seite ändert die Methode nicht."
+  },
+  "ja": {
+    "render.cpu_opaque_hint": "CPUレイトレーシングでは不透明な背景を使用します。",
+    "render.output_master_unavailable": "EXRを書き出すには、RAW EXRデータを持つ完成画像を選択してください。新しい画像は、レンダリング前にRAW EXRを有効にしてください。",
+    "render.output_presentation_limits": "CPUの画像効果とEXR出力は、幅・高さとも8192ピクセル以下、合計16,777,216ピクセル以下の画像に対応します。",
+    "render.output_raytrace_only": "画像効果にはCPUレイトレーシングまたはGPUパストレーシングが必要です。",
+    "render.presentation_banner": "画像効果はCPUとGPUのレイトレーシングで使用できます。このページを開いても方式は変わりません。"
+  },
+  "ko": {
+    "render.cpu_opaque_hint": "CPU 레이 트레이싱은 불투명한 배경을 사용합니다.",
+    "render.output_master_unavailable": "EXR을 내보내려면 원본 EXR 데이터가 있는 완성 이미지를 선택하세요. 새 이미지를 렌더링하기 전에 원본 EXR을 활성화하세요.",
+    "render.output_presentation_limits": "CPU 이미지 효과와 EXR 출력은 너비와 높이가 각각 최대 8192픽셀이고 총 16,777,216픽셀 이하인 이미지를 지원합니다.",
+    "render.output_raytrace_only": "이미지 효과에는 CPU 레이 트레이싱 또는 GPU 패스 트레이싱이 필요합니다.",
+    "render.presentation_banner": "이미지 효과는 CPU 및 GPU 레이 트레이싱에서 사용할 수 있습니다. 이 페이지를 열어도 방식이 바뀌지 않습니다."
+  },
+  "zh": {
+    "render.cpu_opaque_hint": "CPU光线追踪使用不透明背景。",
+    "render.output_master_unavailable": "要导出EXR，请选择包含原始EXR数据的已完成图像。渲染新图像前请先启用原始EXR。",
+    "render.output_presentation_limits": "CPU图像效果和EXR输出支持宽度、高度均不超过8192像素且总像素数不超过16,777,216的图像。",
+    "render.output_raytrace_only": "图像效果需要CPU光线追踪或GPU路径追踪。",
+    "render.presentation_banner": "图像效果支持CPU和GPU光线追踪。打开此页面不会更改渲染方式。"
+  }
+}

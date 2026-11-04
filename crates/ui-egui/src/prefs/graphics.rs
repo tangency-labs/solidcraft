@@ -365,6 +365,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
                 setting::render_previous_geometry_budget(app, ui).backing_on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
+                setting::render_legacy_image_defaults(app, ui).backing_on_hover_text(app.tr("prefs.render_legacy_image_defaults_help"));
             });
         });
     });

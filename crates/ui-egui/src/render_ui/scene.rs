@@ -70,7 +70,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     let open = browser::is_open(app, &id, true);
     let label = app.tr(&format!("render.tree_{key}")).to_string();
     let add_label = app.tr(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
-    let pending = app.tr("render.light_backend_limit").to_string();
+    let pending = app.tr("render.method_limit_raster").to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",
         hover_only: false,
@@ -143,6 +143,11 @@ pub(crate) fn light_types(app: &SolveApp) -> Vec<&'static str> {
 }
 pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let view = &app.render_workspace.view;
+    if view.method == ImageMethod::GpuRaytrace && view.studio.environment == studio::Environment::None && view.studio.lighting_enabled {
+        // An explicit constant, including black, is not the implicit studio.
+        // It owns RGB radiance, not the legacy draft rotation/intensity pair.
+        return (app.tr("render.tree_constant").to_string(), String::new());
+    }
     let fixed = || (app.tr("render.tree_fixed_studio").to_string(), view.draft.environment_rotation, view.draft.environment_intensity);
     let source = |input: &hdr::Input| match input {
         hdr::Input::EmbeddedResource { resource } => format!("{} {resource}", app.tr("render.tree_hdr")),
@@ -154,6 +159,7 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let (name, rotation, intensity) = match view.method {
         ImageMethod::CpuRaytrace => match view.cpu.environment {
             cpu::Environment::Hdr => (source(&view.cpu.hdr), view.cpu.rotation_rad, view.cpu.intensity),
+            cpu::Environment::Sky => (app.tr("render.studio_sky").into(), view.cpu.rotation_rad, view.cpu.intensity),
             cpu::Environment::Constant => (app.tr("render.tree_constant").into(), 0.0, view.cpu.intensity),
             cpu::Environment::None => fixed(),
         },

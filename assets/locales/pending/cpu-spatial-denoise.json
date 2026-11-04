@@ -1,0 +1,17 @@
+{
+  "en": {
+    "render.cpu_denoise_help": "Reduces noise in every image update. It may soften fine detail and depth-of-field edges. Raw EXR is unchanged. Adjusting a completed image uses its raw image and does not apply noise reduction again."
+  },
+  "de": {
+    "render.cpu_denoise_help": "Verringert das Rauschen bei jeder Bildaktualisierung. Feine Details und Übergänge der Tiefenschärfe können weicher werden. Die EXR-Rohdaten bleiben unverändert. Nachträgliche Anpassungen eines fertigen Bildes verwenden dessen Rohbild und wenden die Rauschreduzierung nicht erneut an."
+  },
+  "ja": {
+    "render.cpu_denoise_help": "画像が更新されるたびにノイズを減らします。細部や被写界深度によるぼけの境界が柔らかくなる場合があります。RAW EXRは変更されません。完成画像の調整にはそのRAW画像を使用し、ノイズ低減は再適用しません。"
+  },
+  "ko": {
+    "render.cpu_denoise_help": "이미지가 갱신될 때마다 노이즈를 줄입니다. 미세한 디테일과 피사계 심도 경계가 부드러워질 수 있습니다. 원본 EXR은 바뀌지 않습니다. 완성된 이미지를 조정할 때는 해당 원본 이미지를 사용하며 노이즈 감소를 다시 적용하지 않습니다."
+  },
+  "zh": {
+    "render.cpu_denoise_help": "每次图像更新时减少噪点，可能使细节和景深模糊边缘变柔。原始EXR保持不变。调整已完成的图像时使用其原始图像，不会再次降噪。"
+  }
+}

@@ -193,6 +193,24 @@ impl Documents {
     }
 }
 
+/// Route native render completion by the document-lifetime owner, never by the
+/// selected tab or a mutable path/name. The engine capsule verifies its registry.
+pub(crate) fn render_owner(app: &SolveApp, uid: u64) -> Option<&Session> {
+    if app.session.uid == uid { Some(&app.session) } else { app.docs.background().find(|s| s.uid == uid) }
+}
+pub(crate) fn with_render_owner<T>(
+    app: &mut SolveApp,
+    uid: u64,
+    apply: impl FnOnce(&mut Session, &mut crate::render_workspace::ViewState) -> T,
+) -> Option<T> {
+    if app.session.uid == uid {
+        Some(apply(&mut app.session, &mut app.render_workspace.view))
+    } else {
+        let slot = app.docs.background_mut().find(|slot| slot.session.uid == uid)?;
+        Some(apply(&mut slot.session, &mut slot.view.render))
+    }
+}
+
 fn take_view(app: &mut SolveApp) -> DocView {
     DocView {
         render: std::mem::take(&mut app.render_workspace.view),
@@ -596,6 +614,10 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         return;
     }
     app.docs.closing = None;
+    let closing_uid = if i == app.docs.active { Some(app.session.uid) } else { app.docs.slots[i].as_ref().map(|slot| slot.session.uid) };
+    if let Some(uid) = closing_uid {
+        crate::render_workspace::prepare::document_closing(app, uid);
+    }
     if n <= 1 {
         crate::browser::discard_reveals(app);
         crate::semantic_content::leave_document(app);
