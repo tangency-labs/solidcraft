@@ -169,7 +169,7 @@ fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
     if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
         return normal.map(|n| -n);
     }
-    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at))
+    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found

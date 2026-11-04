@@ -3659,10 +3659,11 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
 /// The faces of the model near `p`: for each, how far `p` is from it, the outward normal there
 /// (the surface's own normal for planes, cylinders and spheres, turned the way the face looks out
 /// of its body; the nearest mesh facet's otherwise) and, for a plane, how far `p` is from the
-/// plane itself. Only faces within `reach` of `p`, nearest first.
-fn faces_through(st: &ModelState, p: Vec3, reach: f64) -> Vec<(f64, Vec3, Option<f64>)> {
+/// plane itself. Only faces within `reach` of `p`, nearest first, of the bodies in `scope`
+/// (every body when it is empty).
+fn faces_through(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<(f64, Vec3, Option<f64>)> {
     let mut out: Vec<(f64, Vec3, Option<f64>)> = Vec::new();
-    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh() && in_hole_scope(scope, b)) {
         let m = b.mesh();
         // The nearest facet of each face of this body.
         let mut near: BTreeMap<u32, (f64, Vec3)> = BTreeMap::new();
@@ -3708,13 +3709,29 @@ fn faces_through(st: &ModelState, p: Vec3, reach: f64) -> Vec<(f64, Vec3, Option
     out
 }
 
+/// The faces near `p` a hole placed there goes by (as [`faces_through`]): those of the bodies in
+/// `scope`, the hole's own, when one of them passes within `on` of `p`, else those of every body.
+/// Where a plate's face touches another body both faces pass through `p`, and a hole that drills
+/// the plate goes by the plate's face, never the other body's (#12066). A hole placed on another
+/// body's face, to drill through it into its own body behind, still goes by that face.
+fn hole_faces_through(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[String]) -> Vec<(f64, Vec3, Option<f64>)> {
+    if !scope.is_empty() {
+        let own = faces_through(st, p, reach, scope);
+        if own.first().is_some_and(|(d, _, _)| *d <= on) {
+            return own;
+        }
+    }
+    faces_through(st, p, reach, &[])
+}
+
 /// The way a hole placed at `p` drills: into the material, against the outward normal of the
 /// face `p` lies on. A point on no face (a planar face's centroid outside it, say) takes the
 /// nearest planar face whose plane it lies in, else the face nearest it within its body's pick
-/// tolerance. None when no face is near.
-pub fn hole_direction_at(st: &ModelState, p: Vec3) -> Option<Vec3> {
+/// tolerance. None when no face is near. Where the faces of several bodies pass through `p`, those
+/// of the bodies in `scope` (the bodies the hole drills; empty for every body) decide.
+pub fn hole_direction_at(st: &ModelState, p: Vec3, scope: &[String]) -> Option<Vec3> {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let faces = faces_through(st, p, f64::INFINITY);
+    let faces = hole_faces_through(st, p, f64::INFINITY, size * 1e-4, scope);
     if let Some((d, n, _)) = faces.first()
         && *d <= size * 1e-4
     {
@@ -3731,10 +3748,13 @@ pub fn hole_direction_at(st: &ModelState, p: Vec3) -> Option<Vec3> {
 /// starts on (as designs saved before format 18 can say: their direction was taken from any face
 /// whose plane passed near the point, such as the other side of a thin plate or a face of another
 /// body at the same height), it is mirrored in the face it starts on, so it goes in at the same
-/// angle. A direction that enters a face there, or a spot on no face, is kept.
-fn hole_dir_into_face(st: &ModelState, p: Vec3, dir: Vec3) -> Vec3 {
+/// angle. A direction that enters a face there, or a spot on no face, is kept. Where the faces of
+/// the hole's own bodies (`scope`, see [`hole_drill_scope`]) pass through the spot, only they
+/// count: a hole that names the plate it drills, saved with the direction into a body touching
+/// the plate there, drills the plate (#12066).
+fn hole_dir_into_face(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let faces = faces_through(st, p, size * 1e-5);
+    let faces = hole_faces_through(st, p, size * 1e-5, size * 1e-5, scope);
     if faces.is_empty() || faces.iter().any(|(_, n, _)| n.dot(dir) < -1e-9) {
         return dir;
     }
@@ -4353,6 +4373,13 @@ fn hole_scope(f: &Feature) -> &[String] {
     }
 }
 
+/// The bodies whose faces decide which way a hole placed at a position drills, where they pass
+/// through it: the bodies it cuts when it names them, so a body touching the face there can't
+/// turn it round (#12066). Empty (every body) otherwise, and for `["*"]`.
+fn hole_drill_scope(f: &Feature) -> &[String] {
+    if f.participants.iter().any(|b| b == "*") { &[] } else { &f.participants }
+}
+
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
     scope.is_empty() || scope.contains(&b.name)
 }
@@ -4378,7 +4405,7 @@ fn hole_spots(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> R
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let at = hole_on_surface(st, single_hole_position(vals, st, position, at, points)?, dir, &[]);
             let at = with_references(vals, st, f, at, dir, true)?;
-            let dir = hole_dir_into_face(st, at, dir);
+            let dir = hole_dir_into_face(st, at, dir, hole_drill_scope(f));
             return Ok((vec![hole_on_surface(st, at, dir, &[])], dir));
         }
     };
@@ -4426,7 +4453,7 @@ fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) 
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let p = single_hole_position(vals, st, position, at, points)?;
             let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_on_surface(st, p, dir, &[]), dir, false)? };
-            Ok((vec![p], hole_dir_into_face(st, hole_on_surface(st, p, dir, &[]), dir)))
+            Ok((vec![p], hole_dir_into_face(st, hole_on_surface(st, p, dir, &[]), dir, hole_drill_scope(f))))
         }
     }
 }
