@@ -6882,6 +6882,8 @@ fn eval_feature(
                 // The solve may have moved the curve a text runs along.
                 warns.extend(crate::project::relay_path_texts(&mut sk));
             }
+            // An equation curve its points no longer follow is drawn, and said (#10414).
+            warns.extend(doc.equation_curves_off(vals, &sk));
             if !warns.is_empty() {
                 *warning = Some(warns.join("; "));
             }
