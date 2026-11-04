@@ -1057,12 +1057,13 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let source = if faces.is_empty() {
                 vec![Sel::Body { name: body.to_string() }]
             } else {
-                faces.iter().filter_map(|p| crate::dialogs::face_sel_on(s, Some(&body.to_string()), p.0)).collect()
+                // Every saved face must come back on its body: a partial set would redefine the feature.
+                faces.iter().map(|p| crate::dialogs::face_sel_on(s, Some(body.as_ref()), p.0)).collect::<Option<Vec<_>>>()?
             };
             let mut fill = vec![source];
             if let FeatureKind::SurfaceMatch { target, edges, .. } = kind {
                 fill.push(vec![Sel::Body { name: target.to_string() }]);
-                fill.push(edges.iter().filter_map(|p| crate::dialogs::edge_sel_on(s, Some(&target.to_string()), p.0)).collect());
+                fill.push(edges.iter().map(|p| crate::dialogs::edge_sel_on(s, Some(target.as_ref()), p.0)).collect::<Option<Vec<_>>>()?);
             }
             (Surf::simple_restore(kind)?, fill)
         }
