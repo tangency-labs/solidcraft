@@ -18,8 +18,10 @@ use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
-/// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on, and
-/// bodies whose faces a tapped hole read for its wall.
+/// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
+/// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
+/// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
+/// go).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -31,6 +33,8 @@ pub(super) struct Counts {
     pub cut: usize,
     pub cylinder_search: usize,
     pub tapped_wall: usize,
+    pub miss_intersects: usize,
+    pub cut_tools: usize,
 }
 
 thread_local! {
@@ -45,6 +49,8 @@ thread_local! {
             cut: 0,
             cylinder_search: 0,
             tapped_wall: 0,
+            miss_intersects: 0,
+            cut_tools: 0,
         })
     };
 }
@@ -1483,4 +1489,151 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
     assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
+/// A 1.5 mm disc of 50 mm radius with a 3.5 mm through hole at `radius` on X, patterned `count`
+/// times around Z (#9007). The pattern's id.
+fn disc_with_hole_pattern(doc: &mut Document, radius: f64, count: usize) -> u64 {
+    let disc = FeatureKind::Cylinder {
+        base: point_expr(Vec3::ZERO),
+        axis: Dir(Vec3::Z),
+        radius: "50".into(),
+        height: "1.5".into(),
+        operation: Operation::NewBody,
+        references: Vec::new(),
+    };
+    doc.add_feature(disc, Some("Disc")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [radius, 0, 1.5], "direction": [0, 0, -1], "diameter": "3.5",
+    }))
+    .unwrap();
+    let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+    hole_pattern(doc, hole, count)
+}
+
+fn hole_pattern(doc: &mut Document, hole: u64, count: usize) -> u64 {
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [hole],
+        "pattern": {"type": "circular", "origin": [0, 0, 0], "axis": [0, 0, 1], "count": count.to_string(), "angle": "360 deg"},
+    }))
+    .unwrap();
+    doc.add_feature(pattern, None).unwrap()
+}
+
+fn disc_volume(model: &Model) -> f64 {
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    kernel::measure(&st.bodies[0].body).unwrap().volume
+}
+
+#[test]
+fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
+    // The copies' tools run twice the disc's size along Z, so the kernel's box test, which
+    // grows each box by a share of the tool's size, finds them meeting (#9007); they are still
+    // 4.3 mm apart, centre to centre, and are cut in one go. No copy is intersected with the
+    // disc to see whether it takes material: each passes through the disc's material.
+    let mut doc = Document::new("sieve");
+    let pattern = disc_with_hole_pattern(&mut doc, 20.0, 29);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (1, 0), "{work:?}");
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    let disc = std::f64::consts::PI * 2500.0 * 1.5;
+    let v = disc_volume(&model);
+    assert!((v - (disc - 29.0 * hole)).abs() < 1e-3 * hole, "{v}");
+    // The same copies again, landing in the holes cut already: each is intersected, and each
+    // still counts as a copy that removes no material.
+    let hole_id = doc.features.iter().find(|f| f.name == "Hole").unwrap().id;
+    hole_pattern(&mut doc, hole_id, 29);
+    let work = counted(|| model.evaluate(&doc));
+    let again = model.results.last().unwrap();
+    assert!(again.error.is_none(), "{again:?}");
+    // (The kernel may add a note on a retry of a boolean on faces that lie on each other.)
+    assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("28 of 28 cut copies remove no material")), "{again:?}");
+    assert_eq!(work.miss_intersects, 28, "{work:?}");
+    assert!((disc_volume(&model) - v).abs() < 1e-3 * hole);
+    assert!(model.results.iter().any(|r| r.id == pattern && r.warning.is_none()));
+}
+
+#[test]
+fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
+    // At 8.5 mm radius, 16 copies of a 3.5 mm hole overlap their neighbours: they are not apart,
+    // and each is cut on its own, as before.
+    let mut doc = Document::new("crowded");
+    disc_with_hole_pattern(&mut doc, 8.5, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (15, 0), "{work:?}");
+    // At 9 mm they come within 0.012 mm of each other without touching: their exact shapes are
+    // apart, so they are cut in one go, and all 16 holes are cut.
+    let mut doc = Document::new("close");
+    disc_with_hole_pattern(&mut doc, 9.0, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (1, 0), "{work:?}");
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    let disc = std::f64::consts::PI * 2500.0 * 1.5;
+    let v = disc_volume(&model);
+    assert!((v - (disc - 16.0 * hole)).abs() < 1e-3 * hole, "{v}");
+}
+
+/// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
+/// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
+/// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
+/// surfaces are, and the work.
+fn grooved_ring_faces() -> (usize, Counts) {
+    let mut doc = Document::new("grooves");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: Dir(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    doc.add_feature(cylinder(Vec3::new(0.0, 0.0, -1.0), "16", "57", Operation::Cut), Some("Bore")).unwrap();
+    let groove = doc.add_feature(cylinder(Vec3::new(16.0, 0.0, -1.0), "4", "31", Operation::Cut), Some("Groove")).unwrap();
+    hole_pattern(&mut doc, groove, 10);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    (kernel::measure(&st.bodies[0].body).unwrap().merged.faces, work)
+}
+
+#[test]
+fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_one() {
+    // The ten grooves notch the same round bore. Cut all in one go, they leave it in as many
+    // faces as cutting them one after another does (#9007).
+    let (patterned, work) = grooved_ring_faces();
+    let cut = |a: kernel::Body, b: &kernel::Body| kernel::boolean(&a, b, kernel::BoolOp::Cut).unwrap().unwrap();
+    let ring =
+        cut(kernel::cylinder(Vec3::ZERO, Vec3::Z, 25.0, 55.0).unwrap(), &kernel::cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 16.0, 57.0).unwrap());
+    let groove = kernel::cylinder(Vec3::new(16.0, 0.0, -1.0), Vec3::Z, 4.0, 31.0).unwrap();
+    let one_by_one = (0..10).fold(ring, |ring, k| {
+        let copy = kernel::transform(&groove, Vec3::ZERO, Vec3::ZERO, Vec3::Z, (36.0 * k as f64).to_radians()).unwrap();
+        cut(ring, &copy)
+    });
+    assert_eq!(patterned, kernel::measure(&one_by_one).unwrap().merged.faces);
+    assert_eq!(work.cut_tools, 1, "{work:?}");
+}
+
+#[test]
+fn tools_are_apart_only_when_they_neither_meet_nor_nest() {
+    let rod = |x: f64, y: f64, r: f64| kernel::cylinder(Vec3::new(x, y, -100.0), Vec3::Z, r, 200.0).unwrap();
+    // Long rods whose boxes, grown as the kernel grows them, meet: 0.5 mm apart.
+    assert!(super::tools_clearly_apart(&[rod(0.0, 0.0, 1.0), rod(2.5, 0.0, 1.0)]));
+    // Touching, crossing and nested rods are not apart.
+    assert!(!super::tools_clearly_apart(&[rod(0.0, 0.0, 1.0), rod(2.0, 0.0, 1.0)]));
+    assert!(!super::tools_clearly_apart(&[rod(0.0, 0.0, 1.0), rod(1.5, 0.0, 1.0)]));
+    assert!(!super::tools_clearly_apart(&[rod(0.0, 0.0, 3.0), rod(0.5, 0.0, 1.0)]));
+    let tube = kernel::boolean(&rod(0.0, 0.0, 5.0), &rod(0.0, 0.0, 4.0), kernel::BoolOp::Cut).unwrap().unwrap();
+    assert!(!super::tools_clearly_apart(&[tube.clone(), rod(0.0, 0.0, 4.5)]));
+    // A rod in the tube's bore, clear of its wall, is apart from it.
+    assert!(super::tools_clearly_apart(&[tube, rod(0.0, 0.0, 3.0)]));
 }

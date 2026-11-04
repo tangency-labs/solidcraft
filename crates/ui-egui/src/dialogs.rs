@@ -390,6 +390,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Surface tools and Split Face (`dialogs_surface`).
             Surface(crate::dialogs_surface::Surf),
             SaveMesh(crate::dialogs_save_mesh::SaveMesh),
+            /// The Custom View Navigator panel (`view_gizmo`): the app's navigator, not the design.
+            ViewNavigator(crate::view_gizmo::Form),
             ViewDxf {
                 dashed: bool,
                 tolerance: f64,
@@ -1104,6 +1106,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_surface::start(app, id))
                     .or_else(|| crate::dialogs_save_mesh::start(app, id))
                     .or_else(|| crate::dialogs_view_dxf::start(app, id))
+                    .or_else(|| crate::view_gizmo::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
@@ -2566,6 +2569,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Surface(k) => k.title(),
         Kind::SaveMesh(_) => "SAVE AS MESH",
         Kind::ViewDxf { .. } => "Export Current View as DXF",
+        Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
@@ -4554,6 +4558,9 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     if let Kind::ViewDxf { dashed, tolerance } = &d.kind {
         return crate::dialogs_view_dxf::run(app, *dashed, *tolerance);
     }
+    if let Kind::ViewNavigator(form) = &d.kind {
+        return crate::view_gizmo::run_dialog(app, form, &d.inputs);
+    }
     // Saving asks for a file name first; `Err("")` is the user backing out of that.
     if let Kind::SaveMesh(k) = &d.kind {
         return crate::dialogs_save_mesh::run(app, k, &d.inputs);
@@ -4695,6 +4702,23 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 selected.dedup();
                 if selected == (0..ss.profiles.len()).collect::<Vec<_>>() && sels(d, 0).len() == selected.len() {
                     params["profiles"] = json!("all");
+                }
+            }
+            // A Loft section that was every profile of its sketch stays "all" while the picks are
+            // unchanged: "all" keeps text counters as holes, which its indices would fill.
+            if let FeatureKind::Loft { sections, .. } = &feature.kind
+                && !d.profile_selection_changed
+                && let Some(edited) = params.get_mut("sections").and_then(Value::as_array_mut)
+                && edited.len() == sections.len()
+            {
+                let world = crate::open_meshing::session_world(&app.session);
+                for (sec, out) in sections.iter().zip(edited.iter_mut()) {
+                    let Some(ss) = world.sketch(sec.sketch.0).filter(|_| sec.profiles == ProfileSel::All && sec.point.is_none()) else { continue };
+                    let all: Vec<Value> = (0..ss.profiles.len()).map(|i| json!(i)).collect();
+                    if out.get("sketch").and_then(Value::as_u64) == Some(sec.sketch.0) && out.get("profiles").and_then(Value::as_array) == Some(&all)
+                    {
+                        out["profiles"] = json!("all");
+                    }
                 }
             }
         }
@@ -5095,15 +5119,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Loft { operation, rail_fit } => {
             need(0, "profiles of two or more sketches")?;
-            // Each picked profile is a section, in pick order, two of them from one sketch
-            // included (#8221); a sketch point is a section of its own, an apex the loft closes
-            // to (#4830).
+            // Sections follow the picks. Profiles picked one after another in one sketch are one
+            // section, such as both halves of a split outline (#11720); a later return to that
+            // sketch is a section of its own, so a loft can go there and back (#8221). A sketch
+            // point is a section of its own, an apex the loft closes to (#4830).
             let mut sections: Vec<Value> = Vec::new();
             let (mut profile_sketches, mut apexes) = (Vec::new(), 0);
             for x in sels(d, 0) {
                 match x {
                     Sel::Profile { sketch, index } => {
-                        sections.push(json!({"sketch": sketch, "profiles": [index]}));
+                        let last = sections.last_mut().filter(|sec| sec.get("sketch").and_then(Value::as_u64) == Some(*sketch));
+                        match last.and_then(|sec| sec.get_mut("profiles")).and_then(Value::as_array_mut) {
+                            Some(profiles) => profiles.push(json!(index)),
+                            None => sections.push(json!({"sketch": sketch, "profiles": [index]})),
+                        }
                         profile_sketches.push(*sketch);
                     }
                     Sel::SketchPoint { id } => {
@@ -5624,7 +5653,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
-        Kind::ViewDxf { .. } => return Ok(Vec::new()),
+        Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),

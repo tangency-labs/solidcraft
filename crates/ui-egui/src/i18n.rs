@@ -427,6 +427,41 @@ pub fn tr_diagnostic(text: &str) -> String {
     CURRENT.with(|current| current.get().diagnostic(text))
 }
 
+/// The id of an offset curve an engine error names at the start, `` `{id}` ``.
+fn offset_error_id<'a>(text: &'a str, middle: &str, end: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix('`')?;
+    let (id, rest) = rest.split_once('`')?;
+    (rest.contains(middle) && rest.ends_with(end)).then_some(id)
+}
+
+/// Translate known engine error messages using i18n keys.
+/// If the error message is not recognized, returns it unchanged.
+pub fn tr_engine_error(error: &str) -> String {
+    // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
+    let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    if text == "nothing to break at there" {
+        return tr("sketch.error.nothing_to_break").to_string();
+    }
+    if let Some(id) = offset_error_id(
+        text,
+        " is an offset, and its ends follow its source curves: ",
+        " the source curves instead, or break the offset association first",
+    ) {
+        return format("sketch.error.offset_trim", &[("id", id)]);
+    }
+    if let Some(id) = offset_error_id(
+        text,
+        " is an offset, and its corners follow its source curves: ",
+        " the source corners before offsetting, or break the offset association first",
+    ) {
+        return format("sketch.error.offset_fillet_chamfer", &[("id", id)]);
+    }
+    if text == "a closed curve needs two crossings to trim" {
+        return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    error.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).

@@ -314,6 +314,7 @@ pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
 mod view_confirm;
+pub mod view_gizmo;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_details;
@@ -529,6 +530,8 @@ pub struct SolveApp {
     pub cam: Camera,
     /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
     pub cam_anim: Option<CameraAnim>,
+    /// The custom view navigator's body (kept with the preferences).
+    pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
     pub now: f64,
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
@@ -615,6 +618,9 @@ pub struct SolveApp {
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
     pub start_after_roll: Option<(String, u64)>,
+    /// The ribbon tab before the current `start` moved it to the command's home tab. A command
+    /// that starts nothing (refused with a parameter or status error) puts it back (#10540).
+    pub(crate) command_tab_before_start: Option<String>,
     pub(crate) timeline_playback: Option<timeline::Playback>,
     /// A delete's check of what it takes with it or breaks, computing off the window thread
     /// ([`deferred::DeleteCheck`], #2678).
@@ -671,6 +677,9 @@ pub struct SolveApp {
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
+    /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
+    /// there is no recovery folder. A reopened design that finishes opening is taken off it.
+    pub reopen_guard_dir: Option<std::path::PathBuf>,
     /// Discard all was clicked in the recovery window: its confirmation is showing (#9299).
     pub recovery_discard_all: bool,
     /// The selection's measurement in the view's corner (#7000).
@@ -805,6 +814,7 @@ impl SolveApp {
             shell: Default::default(),
             cam: Camera::default(),
             cam_anim: None,
+            view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
             pre_extrude_cam: None,
@@ -851,6 +861,7 @@ impl SolveApp {
             deferred: None,
             deferred_queue: Vec::new(),
             start_after_roll: None,
+            command_tab_before_start: None,
             timeline_playback: None,
             delete_check: None,
             apply_off_thread: None,
@@ -877,6 +888,7 @@ impl SolveApp {
             disk_prompt: false,
             network_prompt: None,
             recoverable: Vec::new(),
+            reopen_guard_dir: None,
             recovery_discard_all: false,
             quick_measure: Default::default(),
             stand_up: None,
@@ -1054,6 +1066,7 @@ impl SolveApp {
             "agent_cursor": self.ui.agent_cursor,
             "recent_colors": self.ui.recent_colors,
             "preferences": self.preferences,
+            "view_gizmo": self.view_gizmo.stored(),
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
         });
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
@@ -1135,6 +1148,7 @@ impl SolveApp {
         if let Some(p) = v.get("settings_profiles") {
             self.settings_profiles.load(p);
         }
+        self.view_gizmo.load(v.get("view_gizmo"));
         if let Some(mut p) = v.get("preferences").filter(|p| p.is_object()).map(prefs::lenient) {
             if !prefs::MSAA.contains(&p.msaa) {
                 p.msaa = prefs::Prefs::default().msaa;
@@ -1424,6 +1438,8 @@ impl SolveApp {
         // Settings profiles live in the app: the engine only checked the parameters.
         let r = match r {
             Ok(v) if id.starts_with("settings.profile.") => settings_profiles::command(self, id, &v),
+            // The view navigator is the app's too.
+            Ok(v) if id == "view.navigator" => view_gizmo::command(self, &v),
             r => r,
         };
         self.finish_command(id, &r);
@@ -1492,6 +1508,9 @@ impl SolveApp {
                 }
             }
             Err(e) => {
+                // The native menu runs Undo and Redo before `logic` installs the frame scope, so
+                // the error would be translated with the thread default.
+                let _language = i18n::scope(&self.preferences.language);
                 let msg = friendly_error(id, e);
                 self.session.echo(msg.clone());
                 self.set_status(msg, true);
@@ -1519,6 +1538,15 @@ impl SolveApp {
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
         self.start_at(id, None);
+    }
+
+    /// A command that started nothing puts the ribbon back on the tab `start` was called from,
+    /// the way a disabled command never leaves it (#10540). Only a `start` that moved the tab
+    /// has anything to put back.
+    pub(crate) fn restore_command_tab(&mut self) {
+        if let Some(tab) = self.command_tab_before_start.take() {
+            self.ui.tab = tab;
+        }
     }
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
@@ -1568,6 +1596,9 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
+        // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
+        // `logic`): build its hint in the user's language, not the thread default.
+        let _language = crate::i18n::scope(&self.preferences.language);
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -1682,6 +1713,39 @@ impl SolveApp {
         if render_workspace::start_interactive(self, id) {
             return;
         }
+        // A display toggle leaves the current modelling tool and camera in place, and the ribbon
+        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // command search and the VIEW tab's menus must not move the tab either (#10540).
+        if matches!(
+            id,
+            "view.fit"
+                | "view.home"
+                | "view.spin"
+                | "view.grid"
+                | "view.ground_shadow"
+                | "view.navigation_bar"
+                | "view.next_tab"
+                | "view.previous_tab"
+        ) {
+            let _ = self.run(id, json!({}));
+            return;
+        }
+        // A display choice opens its choices, as the navigation bar's menus do: run with no
+        // parameters it could only fail (#8868). The choices menu is not the command's ribbon
+        // place, so the ribbon keeps its tab however the menu was opened (#10540).
+        let choice = match id {
+            "view.visual_style" => Some(context_menu::Target::VisualStyle),
+            "view.tool" => Some(context_menu::Target::ViewTool),
+            _ => None,
+        };
+        if let Some(target) = choice {
+            self.open_choice_menu(opener, target);
+            return;
+        }
+        // The ribbon moves to the command's tab; a command that starts nothing puts it back, so
+        // a refusal is answered on the tab the user started from, as a disabled command above
+        // already is (#10540).
+        self.command_tab_before_start = Some(self.ui.tab.clone());
         workspace::select_command_tab(self, id);
         if id == "occurrence.move" {
             joint_handles::start(self);
@@ -1712,35 +1776,9 @@ impl SolveApp {
             dialogs_library::start_export(self);
             return;
         }
-        // A display toggle leaves the current modelling tool and camera in place.
-        if matches!(
-            id,
-            "view.fit"
-                | "view.home"
-                | "view.spin"
-                | "view.grid"
-                | "view.ground_shadow"
-                | "view.navigation_bar"
-                | "view.next_tab"
-                | "view.previous_tab"
-        ) {
-            let _ = self.run(id, json!({}));
-            return;
-        }
         if id == "view.layout" {
             let mode = if self.ui.layout == shell::LayoutMode::Floating { "compact" } else { "floating" };
             let _ = self.run(id, json!({"mode":mode}));
-            return;
-        }
-        // A display choice opens its choices, as the navigation bar's menus do: run with no
-        // parameters it could only fail (#8868).
-        let choice = match id {
-            "view.visual_style" => Some(context_menu::Target::VisualStyle),
-            "view.tool" => Some(context_menu::Target::ViewTool),
-            _ => None,
-        };
-        if let Some(target) = choice {
-            self.open_choice_menu(opener, target);
             return;
         }
         if id == "view.render_focus" {
@@ -1771,6 +1809,7 @@ impl SolveApp {
         // Send to Slicer always asks which slicer (the dialog pre-selects the last one).
         if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") && !dialogs_save_mesh::available(self) {
             self.set_status(self.tr("ui.send_to_slicer_unavailable").to_string(), true);
+            self.restore_command_tab();
             return;
         }
         if id == "view.perspective" {
@@ -1969,6 +2008,9 @@ impl SolveApp {
             // A feature committed before the marker is back would go in where the sketch was.
             if self.deferred.is_some() {
                 self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
+                // The sketch already took the ribbon back through `sketch_return_tab`; the
+                // deferred start must not undo that when it eventually runs (#10540).
+                self.command_tab_before_start = None;
                 return;
             }
         }
@@ -2076,9 +2118,15 @@ impl SolveApp {
         // Change Part Size with no standard part selected (its dialog had nothing to open on).
         if id == "parts.resize" {
             dialogs_part_size::needs_a_part(self);
+            self.restore_command_tab();
             return;
         }
-        let _ = self.run(id, json!({}));
+        // The command either runs or starts nothing: a refusal (a missing parameter, nothing to
+        // work on) leaves the ribbon on the tab it was started from, as a disabled command does
+        // (#10540).
+        if self.run(id, json!({})).is_err() {
+            self.restore_command_tab();
+        }
     }
 
     /// Does starting `id` open a tool or a dialog?
@@ -2845,6 +2893,9 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // Shortcuts run here, before `ui` installs the language scope: a tool started by its
+        // key must build its translated hint in the user's language, not in English.
+        let _language = crate::i18n::scope(&self.preferences.language);
         panel_runtime::tick_app(self);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
@@ -3424,6 +3475,7 @@ pub fn command_label(id: &str) -> &str {
 pub fn friendly_error(id: &str, e: &str) -> String {
     let label = i18n::tr_label(command_label(id));
     let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
+    let msg = i18n::tr_engine_error(&msg);
     let msg = i18n::tr_label(&msg);
     if msg.starts_with(label) { msg.to_string() } else { format!("{label}: {msg}") }
 }
