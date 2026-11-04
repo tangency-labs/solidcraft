@@ -77,7 +77,7 @@ Units are deliberately separate:
 | `motion_trace_samples` | Attempted motion-trace samples, including those that stop a trace |
 | `sketch_solves`, `sketch_analyses` | Solver entries and dependency/redundancy classifications, at the existing profiler's sites |
 | `model_scene_builds` | Model-scene preparation calls |
-| `display_triangle_bytes` | Packed model-block/shared-mesh/highlight triangle data and indices produced; not GPU transfers |
+| `display_triangle_bytes` | Packed model-block/shared-mesh/sketch-fill/highlight triangle data and indices produced, including reference-plane highlights; not GPU transfers |
 | `name_preparation_jobs`, `name_preparations` | Cold naming entries dispatched and definition-name cells initialized |
 
 Zero evaluated features does not imply zero work: a warm evaluation may still visit every

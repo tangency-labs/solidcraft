@@ -1912,6 +1912,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let lift = ss.plane.normal() * 0.01;
         let profiles = if app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
         let profile_fill = sc.color(c4(tk.profile_fill));
+        let before = sc.trans.len();
         for (index, _) in profiles.iter().enumerate() {
             let display = crate::sketch_display::profile_region(app, sid, index, &ss.plane, proj);
             for tri in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
@@ -1920,6 +1921,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                 }
             }
         }
+        solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, sc.trans.len().saturating_sub(before) as u64);
         // Construction curves are dashed, centerlines dash-dot (lengths follow the grid).
         // When enabled, a finished sketch's own curves sit on a wider halo (#4862) to read on a
         // shaded face. Projected (reference) curves get none: they trace the face's own edges.
@@ -3670,6 +3672,7 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
 /// through bodies), else it is depth-tested like the rest of the scene.
 fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through: bool) {
     let col = sc.color(c4(fill));
+    let before = sc.xray.len().saturating_add(sc.guide_trans.len());
     for i in [0, 1, 2, 0, 2, 3] {
         if let Some(p) = q.get(i) {
             if through {
@@ -3679,6 +3682,10 @@ fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through:
             }
         }
     }
+    solidcraft_work::record(
+        solidcraft_work::Counter::DisplayTriangleBytes,
+        sc.xray.len().saturating_add(sc.guide_trans.len()).saturating_sub(before) as u64,
+    );
     for i in 0..4 {
         let (a, b) = (q[i].to_f32(), q[(i + 1) % 4].to_f32());
         reference_line(sc, a, b, c4(edge), 1.2, through);
@@ -7150,6 +7157,20 @@ pub fn look_at_selection(app: &mut SolveApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reference_plane_highlights_count_triangle_bytes_in_both_depth_modes() {
+        use solidcraft_work::{Counter, capture};
+        let points = [Vec3::ZERO, Vec3::X, Vec3::X + Vec3::Y, Vec3::Y];
+        for through in [false, true] {
+            let mut scene = GpuScene::default();
+            quad(&mut scene, &points, Color32::WHITE, Color32::BLACK, through);
+            let ((), work) = capture(|| quad(&mut scene, &points, Color32::WHITE, Color32::BLACK, through));
+            assert!(work.complete(), "{work:?}");
+            assert_eq!(work.get(Counter::DisplayTriangleBytes), (6 * crate::gpu::TRI_SIZE) as u64, "{work:?}");
+            assert_eq!(scene.xray.len() + scene.guide_trans.len(), 12 * crate::gpu::TRI_SIZE);
+        }
+    }
 
     #[test]
     fn warmed_camera_frame_reuses_geometry_and_packed_model_triangles() {
