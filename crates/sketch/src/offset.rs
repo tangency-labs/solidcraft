@@ -290,7 +290,7 @@ impl Sketch {
             }
             // Which way a piece runs at `p`: a line along itself, an arc anticlockwise round its
             // centre when it follows its source forward.
-            let along = |piece: &(Shape, Vec2, Vec2, Option<bool>), p: Vec2| match (&piece.0, piece.3) {
+            let along = |i: usize, piece: &(Shape, Vec2, Vec2), p: Vec2| match (&piece.0, outline.get(i).and_then(|o| o.3)) {
                 (Shape::Line { a, b }, _) => *b - *a,
                 (Shape::Round { c, .. }, Some(true)) => (p - *c).perp(),
                 (Shape::Round { c, .. }, Some(false)) => (*c - p).perp(),
@@ -308,7 +308,7 @@ impl Sketch {
                 // both crossings are as far from the corner and rounding chose one. The pieces
                 // overlap there: they meet where both are cut short, not where both run on and
                 // cross into a loop.
-                let cut_short = |p: Vec2| (p - x.2).dot(along(x, x.2)) < 0.0 && (p - y.1).dot(along(y, y.1)) > 0.0;
+                let cut_short = |p: Vec2| (p - x.2).dot(along(i, x, x.2)) < 0.0 && (p - y.1).dot(along(j, y, y.1)) > 0.0;
                 match found.as_slice() {
                     [p, q, ..] if (q.dist(guess) - p.dist(guess)).abs() <= 1e-9 * (1.0 + p.dist(*q)) && !cut_short(*p) && cut_short(*q) => Ok(*q),
                     [p, ..] => Ok(*p),
