@@ -932,8 +932,20 @@ fn press_pull_then_curved_face_offsets_it() {
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
 }
 
-/// The dialog the Q shortcut opens says PRESS PULL, not EXTRUDE (#11705), with a planar face
-/// picked first or nothing at all; a plain Extrude still says EXTRUDE.
+/// Whether a `role` accessibility node labeled `text` is drawn inside the published rect
+/// `rect_handle` ("dialog:window" is the panel, "dialog:header" its heading band).
+fn label_in(h: &crate::scenario::Harness, rect_handle: &str, text: &str) -> bool {
+    let Some(rect) = crate::scenario::rect_of(rect_handle) else { return false };
+    let Some(tree) = h.output.accesskit_update.as_ref() else { return false };
+    tree.nodes.iter().any(|(_, n)| {
+        n.role() == egui::accesskit::Role::Label
+            && n.label() == Some(text)
+            && n.bounds().is_some_and(|b| rect.contains(egui::pos2((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0)))
+    })
+}
+
+/// The dialog the Q shortcut opens says Press Pull, not Extrude (#11705), with a planar face
+/// picked first or nothing at all; a plain Extrude still says Extrude.
 #[test]
 fn press_pull_dialog_is_titled_press_pull() {
     let mut app = boxed();
@@ -957,13 +969,19 @@ fn press_pull_dialog_is_titled_press_pull() {
     assert!(!d.press_pull);
     assert_eq!(crate::dialogs::report_title(&d), "EXTRUDE");
 
-    // The heading drawn in the window says it too (its accessibility label is the title).
+    // The heading drawn in the panel says it too, found by role and place in its band.
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
     h.step(&json!({"start": "solid.press_pull"})).unwrap();
     h.frames(2);
-    assert!(h.widget("PRESS PULL").is_some(), "the drawn heading is PRESS PULL");
-    assert!(h.widget("EXTRUDE").is_none(), "not EXTRUDE");
+    assert!(label_in(&h, "dialog:header", "Press Pull"), "the drawn header is Press Pull");
+    assert!(!label_in(&h, "dialog:header", "Extrude"), "the drawn header is not Extrude");
+
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.frames(2);
+    assert!(label_in(&h, "dialog:header", "Extrude"), "a plain Extrude header is Extrude");
 }
 
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the

@@ -2484,10 +2484,16 @@ fn title(k: &Kind) -> &'static str {
     }
 }
 
+/// Whether the dialog is an extrude opened by Press Pull (the Q shortcut), which says
+/// PRESS PULL, not EXTRUDE (#11705).
+fn press_pull_extrude(d: &Dialog) -> bool {
+    d.press_pull && matches!(d.kind, Kind::Extrude { .. })
+}
+
 /// The dialog's title: an extrude opened by Press Pull (the Q shortcut) says PRESS PULL, not
 /// EXTRUDE (#11705).
 fn title_of(d: &Dialog) -> &'static str {
-    if d.press_pull && matches!(d.kind, Kind::Extrude { .. }) { "PRESS PULL" } else { title(&d.kind) }
+    if press_pull_extrude(d) { "PRESS PULL" } else { title(&d.kind) }
 }
 
 fn hint(inp: &SelInput) -> &'static str {
@@ -3685,7 +3691,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
-            let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
+            // A Press Pull's extrude shows the Press Pull command, not Extrude (#11705).
+            let spec = if press_pull_extrude(&d) {
+                solidcraft_engine::find_command("solid.press_pull")
+            } else {
+                dense::command(&d.kind).and_then(solidcraft_engine::find_command)
+            };
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
             let label = if d.editing.is_some() { heading.as_str() } else { label };

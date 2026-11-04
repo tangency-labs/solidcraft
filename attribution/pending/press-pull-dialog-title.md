@@ -1,0 +1,1 @@
+| assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
