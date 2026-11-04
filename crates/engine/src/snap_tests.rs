@@ -268,3 +268,21 @@ fn a_hole_centred_on_its_face_is_both_the_faces_centre_and_the_holes() {
     let rim = here[1].1.edge.unwrap();
     assert!((rim.dist(at) - 4.0).abs() < 1e-9 && (rim.z - 10.0).abs() < 1e-9, "{rim:?}");
 }
+
+#[test]
+fn a_washers_two_rims_keep_a_centre_each() {
+    // A Ø20 × 5 disc with a Ø8 hole through its middle: its top is a washer.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 5, "base": [0, 0, 0]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 7, "base": [0, 0, -1], "operation": "cut"}));
+    let top = face(&s, |p| (p.z - 5.0).abs() < 1e-9);
+    let got = snap_points_from(&s, &top);
+    let at = Vec3::new(0.0, 0.0, 5.0);
+    let mut radii: Vec<f64> = got
+        .iter()
+        .filter(|(p, _)| p.kind == SnapKind::Centre && p.at.dist(at) < 1e-9)
+        .filter_map(|(p, from)| from.edge.map(|e| e.dist(p.at)))
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    assert!(radii.len() == 2 && (radii[0] - 4.0).abs() < 1e-9 && (radii[1] - 10.0).abs() < 1e-9, "one centre per rim: {got:?}");
+}

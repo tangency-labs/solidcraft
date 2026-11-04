@@ -55,8 +55,10 @@ pub struct SnapSource {
     /// A point on the face that offered the point: where the face was picked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub face: Option<Vec3>,
-    /// Which way the point's face looks, as a unit vector out of the material: a flat face's
-    /// outward normal, or for a cylinder's or cone's end centre the axis pointing out of that end.
+    /// Which way the point's face looks, as a unit vector: a flat face's outward normal (out of
+    /// the material), or for a cylinder's or cone's end centre the axis pointing out of that end
+    /// of the face. That is an axis direction, not always out of the material: at a blind hole's
+    /// bottom it points into the material below.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normal: Option<Vec3>,
     /// A point inside the edge the point belongs to: the edge a corner starts, the straight edge a
@@ -95,12 +97,24 @@ pub fn snap_points_from(s: &Session, sel: &Sel) -> Vec<(SnapPoint, SnapSource)> 
         Sel::Face { .. } => face_points(s, sel),
         _ => Vec::new(),
     };
+    // A round edge's centre with the radius its rim has (the rim point is on the circle).
+    let radius = |at: Vec3, from: &SnapSource| from.edge.map(|rim| rim.dist(at));
     let mut out: Vec<(SnapPoint, SnapSource)> = Vec::new();
     for (at, kind, from) in found {
         let tol = SAME * (1.0 + at.len());
         // Only points of one kind are one point: a hole centred on its face is both the face's
-        // centre and the hole's, and only the hole's keeps its rim.
-        if at.is_finite() && !out.iter().any(|(p, _)| p.kind == kind && p.at.dist(at) <= tol) {
+        // centre and the hole's, and only the hole's keeps its rim. Centres are one point only
+        // on one circle: a washer's two rims keep a centre each, while the pieces the kernel
+        // split one circle into are one.
+        let r = radius(at, &from);
+        let one_circle = |other: Option<f64>| match (other, r) {
+            (Some(a), Some(b)) => (a - b).abs() <= tol,
+            (None, None) => true,
+            _ => false,
+        };
+        let same =
+            |(p, f): &(SnapPoint, SnapSource)| p.kind == kind && p.at.dist(at) <= tol && (kind != SnapKind::Centre || one_circle(radius(p.at, f)));
+        if at.is_finite() && !out.iter().any(same) {
             out.push((SnapPoint { at, kind, body: body.clone() }, from));
         }
     }
