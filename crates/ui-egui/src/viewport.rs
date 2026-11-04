@@ -1991,12 +1991,8 @@ struct ShadowGeometry {
 /// rebuilds the model's bodies or uploads their plans and colours again.
 fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> ShadowGeometry {
     let key = scene_key(app);
-    if let Some(geometry) = app
-        .viewport
-        .shadow
-        .lock()
-        .ok()
-        .and_then(|c| c.as_ref().filter(|c| c.key == key && std::sync::Arc::ptr_eq(&c.state, st)).cloned())
+    if let Some(geometry) =
+        app.viewport.shadow.lock().ok().and_then(|c| c.as_ref().filter(|c| c.key == key && std::sync::Arc::ptr_eq(&c.state, st)).cloned())
     {
         return geometry;
     }
