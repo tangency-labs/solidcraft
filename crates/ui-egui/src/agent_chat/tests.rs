@@ -5128,7 +5128,7 @@ fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
     let (mut app, _script, _ctx) = app_with_script();
     app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).expect("a box");
     let faces = app.session.execute("model.faces", &json!({"body": "Body1"})).expect("faces")["faces"].as_array().cloned().unwrap_or_default();
-    let at = |v: &Value| solidcraft_engine::geom::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
+    let at = |v: &Value| solidcore_record::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
     let pick = |f: &Value| Sel::Face { body: "Body1".into(), index: f["index"].as_u64().unwrap_or(0) as usize, point: at(&f["point"]) };
     let (first, last) = (faces.first().expect("faces").clone(), faces.last().expect("faces").clone());
     assert_ne!(first["index"], last["index"]);
