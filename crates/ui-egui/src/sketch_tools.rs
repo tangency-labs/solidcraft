@@ -3,6 +3,7 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
+use crate::i18n::{tr, tr_engine_error};
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -921,9 +922,9 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
             "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
             "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
-            "sketch.trim" => "Trim: click the piece of a curve to remove, or drag across the pieces to remove",
-            "sketch.extend" => "Extend: click a curve near the end to extend (Shift: click two curves to extend both to where they meet)",
-            "sketch.break" => "Break: click a curve where it should split",
+            "sketch.trim" => tr("sketch.hint.trim"),
+            "sketch.extend" => tr("sketch.hint.extend"),
+            "sketch.break" => tr("sketch.hint.break"),
             "sketch.line.midpoint" => "Midpoint line: click the middle, then an end",
             "sketch.arc.tangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
             "sketch.ellipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
@@ -981,12 +982,17 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 }
 
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
-/// the corner commands resolve them in from a `point` parameter. Construction curves are
-/// ignored when more than two meet. Each side must be a line, or an arc for a fillet.
+/// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
+/// side (the engine refuses it), and construction curves are ignored when more than two meet.
+/// Each side must be a line, or an arc for a fillet.
 pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
-    let candidates =
-        sk.curves.iter().enumerate().filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+    let candidates = sk
+        .curves
+        .iter()
+        .enumerate()
+        // The cheap end test first: the axis test scans the constraints.
+        .filter(|(ci, c)| c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi) && !sk.is_linked_curve(*ci) && !sk.is_ellipse_axis(*ci));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.
@@ -1345,7 +1351,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     }
     if tool.cmd == "sketch.circle.two_tangent" && tool.picks.len() == 2 {
         if let Err(error) = crate::sketch_dims::validate(app, tool) {
-            app.set_status(error, true);
+            app.set_status(tr_engine_error(&error), true);
             return;
         }
         if run_entities(app, tool) {
@@ -1361,7 +1367,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
-        app.set_status(error, true);
+        app.set_status(tr_engine_error(&error), true);
         return;
     }
     let p = crate::sketch_dims::placed(app, tool, &p);
@@ -1397,7 +1403,7 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
     let params = match (t.cmd, p.as_slice()) {
         ("sketch.line.midpoint", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
         ("sketch.arc.tangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
-        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0)}),
+        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0), "axes": app.preferences.ellipse_axes}),
         ("sketch.conic", [a, b, x]) => {
             // The typed Rho box, or the parabola the command defaults to.
             let rho = crate::sketch_dims::locked_value(app, t, "Rho").unwrap_or(0.5);
@@ -1639,9 +1645,54 @@ const GLYPH: f32 = 15.0;
 /// a 10 mm feature is then smaller than a glyph.
 pub const MIN_GLYPH_PX_PER_MM: f32 = 2.0;
 
-/// Whether constraint glyphs should draw at this sketch-plane scale (#8980).
-pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: bool) -> bool {
-    !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM
+/// Below `MIN_GLYPH_PX_PER_MM`, glyphs still draw while the sketch's points and curves span at
+/// least this many screen pixels (the larger side of their bounds), twenty glyphs across (#10518):
+/// a large sketch that still fills the view keeps its glyphs; a small one far away loses them, as
+/// before.
+pub const MIN_GLYPH_SPAN_PX: f32 = 20.0 * GLYPH;
+
+/// Whether constraint glyphs should draw at this sketch-plane scale (#8980), given how large the
+/// sketch is on screen (`span_px`, only measured when zoomed out, #10518).
+pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: bool, span_px: impl FnOnce() -> f32) -> bool {
+    !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM || span_px() >= MIN_GLYPH_SPAN_PX
+}
+
+/// The larger side, in screen pixels, of the bounds of the active sketch's points and curves. It
+/// stops measuring once that reaches `MIN_GLYPH_SPAN_PX`, so a large sketch costs no more.
+fn sketch_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 {
+    let sk = &ss.sketch;
+    let at = sk.points.iter().map(|p| p.pos).chain((0..sk.curves.len()).flat_map(|c| sk.polyline(c)));
+    let mut r = egui::Rect::NOTHING;
+    for q in at {
+        if let Some(p) = proj.to_screen(ss.plane.to_world(q)) {
+            r.extend_with(p);
+            if r.width().max(r.height()) >= MIN_GLYPH_SPAN_PX {
+                return r.width().max(r.height());
+            }
+        }
+    }
+    if r.min.x <= r.max.x { r.width().max(r.height()) } else { 0.0 }
+}
+
+/// The constraints that draw a glyph: no dimensions, one MidPoint glyph where lines' midpoints
+/// meet, and a pattern's constraints once, on its first instance.
+fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<Item = &solidcraft_engine::sketch::Constraint> {
+    let mut midpoints = std::collections::HashSet::new();
+    sk.constraints.iter().filter(move |c| {
+        if c.kind.is_dimension() {
+            return false;
+        }
+        if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
+            && !c.driven
+            && !midpoints.insert(p)
+        {
+            return false;
+        }
+        !(matches!(
+            c.kind,
+            solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
+        ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
+    })
 }
 
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
@@ -1659,9 +1710,10 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
     }
-    // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980).
+    // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
+    // sketch still spreads them across the view (#10518).
     if let Some(scale) = sketch_px_per_mm(&ss.plane, proj)
-        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out)
+        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
@@ -1677,27 +1729,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         dim_texts.iter().any(|d| d.intersects(r))
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
-    // The point of each MidPoint glyph drawn so far: lines whose midpoints meet share one glyph.
-    let mut midpoints: Vec<usize> = Vec::new();
-    for c in &ss.sketch.constraints {
-        if c.kind.is_dimension() {
-            continue;
-        }
-        if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
-            && !c.driven
-        {
-            if midpoints.contains(&p) {
-                continue;
-            }
-            midpoints.push(p);
-        }
-        if matches!(
-            c.kind,
-            solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
-        ) && !ss.sketch.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id))
-        {
-            continue;
-        }
+    for c in glyph_constraints(&ss.sketch) {
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
@@ -1923,24 +1955,38 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 
 #[cfg(test)]
 mod glyph_zoom_tests {
-    use super::{MIN_GLYPH_PX_PER_MM, constraint_glyphs_visible_at_scale};
+    use super::{MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, constraint_glyphs_visible_at_scale};
+
+    /// A sketch that is small on screen.
+    fn small() -> f32 {
+        40.0
+    }
 
     #[test]
     fn glyphs_stay_visible_when_zoomed_in() {
-        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM, true));
-        assert!(constraint_glyphs_visible_at_scale(10.0, true));
+        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM, true, small));
+        assert!(constraint_glyphs_visible_at_scale(10.0, true, small));
     }
 
     #[test]
     fn glyphs_hide_below_the_zoom_threshold() {
-        assert!(!constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - f32::EPSILON, true));
-        assert!(!constraint_glyphs_visible_at_scale(0.5, true));
+        assert!(!constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - f32::EPSILON, true, small));
+        assert!(!constraint_glyphs_visible_at_scale(0.5, true, small));
+        assert!(!constraint_glyphs_visible_at_scale(0.5, true, || MIN_GLYPH_SPAN_PX - 1.0));
     }
 
     #[test]
     fn preference_off_keeps_glyphs_at_every_zoom() {
-        assert!(constraint_glyphs_visible_at_scale(0.1, false));
-        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - 1.0, false));
+        assert!(constraint_glyphs_visible_at_scale(0.1, false, small));
+        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - 1.0, false, small));
+    }
+
+    /// A 500 mm sketch zoomed to fit is below two pixels a millimetre yet fills the view: its
+    /// glyphs stay (#10518).
+    #[test]
+    fn glyphs_stay_while_a_large_sketch_fills_the_view() {
+        assert!(constraint_glyphs_visible_at_scale(1.5, true, || 500.0 * 1.5));
+        assert!(constraint_glyphs_visible_at_scale(0.05, true, || MIN_GLYPH_SPAN_PX));
     }
 }
 

@@ -2410,6 +2410,12 @@ pub enum HoleKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
+        /// Printing aid: two bridge layers this thick below the counterbore's floor (a slot along
+        /// X, then a square), so a printer bridges the step instead of sagging into it. Absent:
+        /// a plain counterbore.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bridge layer")]
+        bridge: Option<Expr>,
     },
     Countersink {
         #[walk(length = "Countersink diameter")]

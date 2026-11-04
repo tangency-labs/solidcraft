@@ -50,9 +50,17 @@ struct Keep {
 }
 
 impl Keep {
-    fn push(&mut self, [x, y, z]: [f64; 3], rgb: Option<[u8; 3]>) {
+    fn scaled_point(&self, [x, y, z]: [f64; 3]) -> Option<Vec3> {
         let p = Vec3::new(x, y, z) * self.scale;
-        if ![p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= MAX_COORD) || self.out.points.len() / 3 >= self.max {
+        [p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= MAX_COORD).then_some(p)
+    }
+
+    fn push(&mut self, coordinates: [f64; 3], rgb: Option<[u8; 3]>) {
+        let Some(p) = self.scaled_point(coordinates) else {
+            self.bad += 1;
+            return;
+        };
+        if self.out.points.len() / 3 >= self.max {
             self.bad += 1;
             return;
         }
@@ -129,12 +137,19 @@ fn numbers(line: &str, out: &mut Vec<f64>) -> bool {
 /// Read an XYZ file into `keep`; returns the thinning stride.
 fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
     let text = String::from_utf8_lossy(bytes);
-    let lines = bytes.iter().filter(|b| **b == b'\n').count() as u64 + 1;
-    let stride = lines.div_ceil(keep.max as u64).max(1);
     let mut v = Vec::with_capacity(16);
+    // Count point rows when the physical lines could exceed the cap. A PTS count line,
+    // comments, blank lines and invalid rows are not part of the sampling stride.
+    let stride = if text.lines().nth(keep.max).is_some() {
+        let points = text.lines().filter(|line| numbers(line, &mut v) && v.len() >= 3 && keep.scaled_point([v[0], v[1], v[2]]).is_some()).count();
+        points.div_ceil(keep.max).max(1) as u64
+    } else {
+        1
+    };
     // Where the colour is: after x, y, z (6 numbers), or after an intensity too (7, as PTS).
     let mut rgb_at: Option<Option<usize>> = None;
     let mut data = 0u64;
+    let mut eligible = 0u64;
     for line in text.lines() {
         if !numbers(line, &mut v) {
             if !line.trim().is_empty() && !line.trim_start().starts_with('#') && !line.trim_start().starts_with("//") {
@@ -149,14 +164,19 @@ fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
             }
             continue;
         }
+        data += 1;
+        if keep.scaled_point([v[0], v[1], v[2]]).is_none() {
+            keep.bad += 1;
+            continue;
+        }
         let at = *rgb_at.get_or_insert(match v.len() {
             6 => Some(3),
             n if n >= 7 => Some(4),
             _ => None,
         });
         keep.colored = at.is_some();
-        data += 1;
-        if !(data - 1).is_multiple_of(stride) {
+        eligible += 1;
+        if !(eligible - 1).is_multiple_of(stride) {
             continue;
         }
         let rgb = at.and_then(|i| {
@@ -216,6 +236,42 @@ mod tests {
         assert!((c.points[3] - 25.4).abs() < 1e-6);
         let plain = read_point_cloud(b"0 0 0\n1 0 0\n", "a.xyz", 1.0, 1).unwrap();
         assert_eq!(plain.points.len(), 3, "thinned to one point");
+    }
+
+    #[test]
+    fn pts_thinning_counts_points_without_headers_comments_or_blank_lines() {
+        let pts = b"3\n# scan\n0 0 0 -200 255 0 0\n\n20 0 0 -150 0 255 0\n// end of scan\n40 0 0 -100 0 0 255\n";
+        let full = read_point_cloud(pts, "scan.pts", 1.0, 3).unwrap();
+        assert_eq!(full.source_points, 3);
+        assert_eq!(full.points, [0., 0., 0., 20., 0., 0., 40., 0., 0.]);
+        assert_eq!(full.colors, [255, 0, 0, 0, 255, 0, 0, 0, 255]);
+        assert!(full.warnings.is_empty());
+
+        let thinned = read_point_cloud(pts, "scan.pts", 1.0, 2).unwrap();
+        assert_eq!(thinned.source_points, 3);
+        assert_eq!(thinned.points, [0., 0., 0., 40., 0., 0.]);
+        assert_eq!(thinned.colors, [255, 0, 0, 0, 0, 255]);
+        assert_eq!(thinned.warnings, ["2 of the file's 3 points kept (one in 2)"]);
+    }
+
+    #[test]
+    fn pts_thinning_samples_only_finite_points_within_the_scaled_range() {
+        for (invalid, scale) in [("NaN", 1.), ("inf", 1.), ("1e309", 1.), ("1000000001", 1.), ("1000000", 1e6), ("1e308", 1e6)] {
+            let pts = format!("4\n{invalid} 0 0 -200 255 0 0\n1 0 0 -150 0 255 0\n{invalid} 0 0 -200 255 0 0\n2 0 0 -100 0 0 255\n# scan\n");
+            let full = read_point_cloud(pts.as_bytes(), "scan.pts", scale, 2).unwrap();
+            assert_eq!(full.source_points, 4);
+            assert_eq!(full.origin, Vec3::new(scale, 0., 0.));
+            assert_eq!(full.points, [0., 0., 0., scale as f32, 0., 0.]);
+            assert_eq!(full.colors, [0, 255, 0, 0, 0, 255]);
+            assert_eq!(full.warnings, ["2 point(s) could not be read and were left out"]);
+        }
+
+        let pts = b"5\nNaN 0 0\n1 0 0 -150 0 255 0\nNaN 0 0\n2 0 0 -100 0 0 255\n3 0 0 -50 255 0 0\n# scan\n";
+        let thinned = read_point_cloud(pts, "scan.pts", 1., 2).unwrap();
+        assert_eq!(thinned.source_points, 5);
+        assert_eq!(thinned.points, [0., 0., 0., 2., 0., 0.]);
+        assert_eq!(thinned.colors, [0, 255, 0, 255, 0, 0]);
+        assert_eq!(thinned.warnings, ["2 point(s) could not be read and were left out", "2 of the file's 5 points kept (one in 2)"]);
     }
 
     #[test]

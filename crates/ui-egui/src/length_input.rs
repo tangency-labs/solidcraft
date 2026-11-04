@@ -118,7 +118,9 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
-        D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, .. } => vec![diameter, depth, cb_diameter, cb_depth, cs_diameter],
+        D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
+            vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]
+        }
         D::Primitive { fields, .. } => fields.iter_mut().filter(|(key, _)| *key != "revolutions").map(|(_, value)| value).collect(),
         D::Surface(k) => match k {
             Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => {

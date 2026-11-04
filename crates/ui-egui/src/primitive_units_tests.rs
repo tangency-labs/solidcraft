@@ -286,7 +286,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.fillet", &["2", "2"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
-        ("solid.hole", &["5", "10", "9", "3", "10"]),
+        ("solid.hole", &["5", "10", "9", "3", "10", ""]),
         ("solid.rib", &["2", ""]),
         ("solid.web", &["2", ""]),
         ("solid.emboss", &["1"]),

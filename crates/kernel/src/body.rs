@@ -454,15 +454,18 @@ const MAX_REFUSAL_PROBES: usize = 20_000;
 
 impl Refusal {
     /// The refusal of `record` for `error`, with the face SMLib refuses on its own.
-    fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
+    pub(crate) fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
         if let solidcraft_smlib::Error::Internal(why) = error {
             return Refusal { face: None, surface: None, why: why.clone(), internal: true };
         }
         let _span = solidcraft_profile::span("kernel", "smlib_refusal_face");
-        let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
-        let face = (record.faces.len() <= MAX_REFUSAL_PROBES)
-            .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
-            .flatten();
+        // It is kept with the body for every later reader: a stopped job's probes must not decide it.
+        let face = solidcraft_smlib::stop::unstoppable(|| {
+            let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
+            (record.faces.len() <= MAX_REFUSAL_PROBES)
+                .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
+                .flatten()
+        });
         let surface = face.and_then(|f| record.faces.get(f)).map(|f| SurfaceKind::of(&f.surface));
         Refusal { face, surface, why: error.to_string(), internal: false }
     }
@@ -545,7 +548,10 @@ impl Body {
     pub fn smlib(&self) -> Result<&solidcraft_smlib::Brep> {
         self.require_brep("an SMLib operation")?;
         self.smlib
-            .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
+            .get_or_init(|| {
+                solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true))
+                    .map_err(|e| Refusal::of(&self.record, &e))
+            })
             .as_ref()
             .map_err(
                 |r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) },
