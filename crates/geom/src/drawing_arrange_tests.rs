@@ -144,6 +144,27 @@ fn distribute_gaps_spreads_an_overlap_evenly_too() {
     let boxes = vec![bx(0.0, 0.0, 1.0, 10.0), bx(0.0, 3.0, 1.0, 13.0), bx(0.0, 10.0, 1.0, 20.0)];
     let moves = distribute(&boxes, Axis::Y, Spread::Gaps).unwrap();
     assert_eq!(moves, vec![Vec2::ZERO, Vec2::new(0.0, 2.0), Vec2::ZERO]);
+    let once = apply(&boxes, &moves);
+    assert_eq!(distribute(&once, Axis::Y, Spread::Gaps).unwrap(), vec![Vec2::ZERO; 3]);
+}
+
+#[test]
+fn equal_gaps_cannot_move_a_box_past_another_centre() {
+    // A gap of -16.5 puts the middle box at 33.5–35.5, past the last box.
+    let crossing = [bx(-50.0, 0.0, 50.0, 1.0), bx(9.0, 0.0, 11.0, 1.0), bx(19.0, 0.0, 21.0, 1.0)];
+    let reordered = Err(Invalid("equal gaps would change the boxes' centre order"));
+    assert_eq!(distribute(&crossing, Axis::X, Spread::Gaps), reordered);
+
+    // A tie would also swap the middle box with the pinned last box here. The same
+    // placement keeps both their identities when the input order agrees with the tie.
+    let wide = bx(-22.0, 0.0, 22.0, 1.0);
+    let middle = bx(9.0, 0.0, 11.0, 1.0);
+    let last = bx(18.0, 0.0, 22.0, 1.0);
+    assert_eq!(distribute(&[wide, last, middle], Axis::X, Spread::Gaps), reordered);
+    let ordered = [wide, middle, last];
+    let moves = distribute(&ordered, Axis::X, Spread::Gaps).unwrap();
+    assert_eq!(moves, vec![Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::ZERO]);
+    assert_eq!(distribute(&apply(&ordered, &moves), Axis::X, Spread::Gaps).unwrap(), vec![Vec2::ZERO; 3]);
 }
 
 #[test]
@@ -228,6 +249,27 @@ fn space_stacks_downwards_from_the_top() {
 fn space_with_no_gap_butts_boxes_together() {
     let boxes = vec![bx(0.0, 0.0, 4.0, 1.0), bx(10.0, 0.0, 13.0, 1.0)];
     assert_eq!(space(&boxes, Axis::X, 0.0).unwrap(), vec![Vec2::ZERO, Vec2::new(-6.0, 0.0)]);
+}
+
+#[test]
+fn zero_gap_keeps_a_degenerate_leading_box_in_place_on_repeat() {
+    for (axis, boxes, wanted) in [
+        (Axis::X, [bx(10.0, 0.0, 20.0, 1.0), bx(0.0, 0.0, 0.0, 1.0)], Vec2::new(-10.0, 0.0)),
+        (Axis::Y, [bx(0.0, -20.0, 1.0, -10.0), bx(0.0, 0.0, 1.0, 0.0)], Vec2::new(0.0, 10.0)),
+    ] {
+        let moves = space(&boxes, axis, 0.0).unwrap();
+        assert_eq!(moves, vec![wanted, Vec2::ZERO]);
+        assert_eq!(space(&apply(&boxes, &moves), axis, 0.0).unwrap(), vec![Vec2::ZERO; 2]);
+    }
+
+    // Subtracting a fractional target from a distant edge can round the result back
+    // past the pinned box. That may leave a roundoff correction, but never a swap.
+    let boxes = [bx(100.0, 0.0, 110.0, 1.0), bx(0.1, 0.0, 0.1, 1.0)];
+    let once = apply(&boxes, &space(&boxes, Axis::X, 0.0).unwrap());
+    assert!(once[0].min.x >= 0.1 && close(once[0].min.x, 0.1));
+    let again = space(&once, Axis::X, 0.0).unwrap();
+    assert_eq!(again[1], Vec2::ZERO);
+    assert!(again[0].len() <= 1e-12, "{again:?}");
 }
 
 #[test]

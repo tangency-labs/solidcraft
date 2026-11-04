@@ -5,9 +5,9 @@
 //!
 //! - Every function returns one move per box, in the order given, along one axis only: the other
 //!   coordinate of every move is exactly 0.
-//! - A box already where it belongs moves by exactly 0, so arranging twice moves nothing.
-//! - Boxes in the same place keep the order they were given in, so the result never depends on a
-//!   sort's whim.
+//! - A box already where it belongs stays there, up to floating-point rounding.
+//! - Ties keep input order, except when stacking with zero gap. At a shared edge, boxes of zero
+//!   extent along the stacking axis come before boxes that extend past it.
 //! - Boxes are finite, not empty (a box of zero width or height is a point or a line, and allowed)
 //!   and within the paper's coordinates; at most [`MAX_BOXES`] of them. A move that would take a box
 //!   outside the paper's coordinates is refused, never clamped.
@@ -143,7 +143,7 @@ fn shift(b: &Aabb2, axis: Axis, by: f64) -> Result<Vec2> {
 }
 
 /// The boxes' indices ordered by `key`, those with equal keys in the order given.
-fn order(boxes: &[Aabb2], key: impl Fn(&Aabb2) -> f64) -> Vec<usize> {
+fn order<K: PartialOrd>(boxes: &[Aabb2], key: impl Fn(&Aabb2) -> K) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..boxes.len()).collect();
     // Keys are finite (checked); -0 and 0 compare equal, and the sort is stable.
     indices.sort_by(|&a, &b| {
@@ -174,15 +174,16 @@ pub fn align(boxes: &[Aabb2], line: Line, to: Reference) -> Result<Vec<Vec2>> {
 }
 
 /// The moves that space boxes evenly along `axis`, in the order of their centres. The first and the
-/// last stay where they are; with fewer than three boxes nothing moves.
+/// last stay where they are; with fewer than three boxes nothing moves. If equal gaps would
+/// change the boxes' centre order, the arrangement is refused.
 pub fn distribute(boxes: &[Aabb2], axis: Axis, spread: Spread) -> Result<Vec<Vec2>> {
     check(boxes)?;
     let mut moves = vec![Vec2::ZERO; boxes.len()];
     let order = order(boxes, |b| centre(b, axis));
-    let (Some(&first), Some(&last)) = (order.first(), order.last()) else {
+    let (Some(&first_index), Some(&last_index)) = (order.first(), order.last()) else {
         return Ok(moves);
     };
-    let (Some(first), Some(last)) = (boxes.get(first), boxes.get(last)) else {
+    let (Some(first), Some(last)) = (boxes.get(first_index), boxes.get(last_index)) else {
         return Ok(moves);
     };
     if order.len() < 3 {
@@ -205,11 +206,19 @@ pub fn distribute(boxes: &[Aabb2], axis: Axis, spread: Spread) -> Result<Vec<Vec
             let sizes: f64 = order.iter().filter_map(|&i| boxes.get(i)).map(|b| high(b, axis) - low(b, axis)).sum();
             let gap = (high(last, axis) - low(first, axis) - sizes) / steps;
             let mut next = high(first, axis) + gap;
+            let mut previous = (centre(first, axis), first_index);
+            let reordered = "equal gaps would change the boxes' centre order";
             for (_, &i) in middle {
                 let (Some(b), Some(m)) = (boxes.get(i), moves.get_mut(i)) else { continue };
-                *m = shift(b, axis, next - low(b, axis))?;
+                let by = next - low(b, axis);
+                *m = shift(b, axis, by)?;
+                // Use the moved bounds and the same tie order that a repeated operation sees.
+                let moved = (((low(b, axis) + by) + (high(b, axis) + by)) / 2.0, i);
+                require(previous <= moved, reordered)?;
+                previous = moved;
                 next += high(b, axis) - low(b, axis) + gap;
             }
+            require(previous <= (centre(last, axis), last_index), reordered)?;
         }
     }
     Ok(moves)
@@ -217,32 +226,33 @@ pub fn distribute(boxes: &[Aabb2], axis: Axis, spread: Spread) -> Result<Vec<Vec
 
 /// The moves that stack boxes `gap_mm` apart along `axis`: rightwards from the leftmost box along x,
 /// downwards from the topmost box along y (the order a list of notes is read in). The box it starts
-/// from stays where it is; the others follow in the order of their left (x) or top (y) edges.
+/// from stays where it is; the others follow in the order of their left (x) or top (y) edges. With
+/// zero gap, a point or line that has no extent along the axis precedes a box at the same edge.
 pub fn space(boxes: &[Aabb2], axis: Axis, gap_mm: f64) -> Result<Vec<Vec2>> {
     check(boxes)?;
     require(gap_mm.is_finite() && (0.0..=MAX_SIDE_MM).contains(&gap_mm), "a gap is 0 to 5000 mm")?;
     let mut moves = vec![Vec2::ZERO; boxes.len()];
-    match axis {
-        Axis::X => {
-            let order = order(boxes, |b| b.min.x);
-            let mut next = None;
-            for i in order {
-                let (Some(b), Some(m)) = (boxes.get(i), moves.get_mut(i)) else { continue };
-                let by = next.map_or(0.0, |at: f64| at - b.min.x);
-                *m = shift(b, Axis::X, by)?;
-                next = Some(b.max.x + by + gap_mm);
-            }
-        }
-        Axis::Y => {
-            let order = order(boxes, |b| -b.max.y);
-            let mut next = None;
-            for i in order {
-                let (Some(b), Some(m)) = (boxes.get(i), moves.get_mut(i)) else { continue };
-                let by = next.map_or(0.0, |at: f64| at - b.max.y);
-                *m = shift(b, Axis::Y, by)?;
-                next = Some(b.min.y + by - gap_mm);
-            }
-        }
+    // Use coordinates increasing in the stacking direction.
+    let bounds = |b: &Aabb2| match axis {
+        Axis::X => (b.min.x, b.max.x),
+        Axis::Y => (-b.max.y, -b.min.y),
+    };
+    let sign = if axis == Axis::X { 1.0 } else { -1.0 };
+    let order = order(boxes, |b| {
+        let (start, end) = bounds(b);
+        (start, gap_mm == 0.0 && start != end)
+    });
+    let mut next = None;
+    for i in order {
+        let (Some(b), Some(m)) = (boxes.get(i), moves.get_mut(i)) else { continue };
+        let (start, end) = bounds(b);
+        let by = next.map_or(0.0, |at: f64| {
+            let by = at - start;
+            // Keep the next edge from rounding backwards and changing the stack order.
+            if start + by < at { by.next_up() } else { by }
+        });
+        *m = shift(b, axis, sign * by)?;
+        next = Some(end + by + gap_mm);
     }
     Ok(moves)
 }
