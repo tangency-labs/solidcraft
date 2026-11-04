@@ -276,6 +276,13 @@ fn a_tables_new_records_and_a_runs_reach() {
     assert_eq!(scene_with(&[1, 2]).font_records_beyond(&[font()]), 0);
     // Glyph 2 alone: itself, its loop and its 3 pieces.
     assert_eq!(scene_with(&[1]).font_records_beyond(&[font()]), 5);
+    // A font is found by its id, not by its place: beside a whole font 7, a font 9 holding no glyph
+    // gains as much as font 7 would holding none.
+    let mut nine = font();
+    nine.id = [9; 32];
+    let mut two = scene_with(&[1, 2]);
+    two.add_fonts([Font { glyphs: BTreeMap::new(), ..nine.clone() }]);
+    assert_eq!(two.font_records_beyond(&[nine]), scene_with(&[]).font_records_beyond(&[font()]));
     assert_eq!(run().reach(), 5.5);
 }
 
