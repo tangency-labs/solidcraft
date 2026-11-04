@@ -249,6 +249,8 @@ pub enum Surface {
     /// `origin + v z + r(v) (cos u x + sin u y)`, `r(v) = radius_at_origin + v tan(half_angle)`,
     /// on the side of the apex where r(v) ≥ 0: above it for a positive half angle, below it for
     /// a negative one (a cone narrowing along z, as SMLib makes them) (STEP `CONICAL_SURFACE`).
+    /// Its half angle is at least 10⁻¹² unless the face carries its NURBS form, which is then
+    /// the face's geometry (a cone narrower than that, its apex past 10¹² radii).
     Cone {
         frame: Frame,
         radius_at_origin: f64,
@@ -261,7 +263,8 @@ pub enum Surface {
     /// longitude, v the meridian angle measured from `tube_start` (radians; 0, the outer equator,
     /// in STEP `TOROIDAL_SURFACE` and older records). The tube start is the tube's own reference,
     /// as the frame's x axis is the longitude's: a face's form starts its tube on a quarter line
-    /// from there (`form`).
+    /// from there (`form`). A ring torus (`major_radius > minor_radius`) unless the face carries
+    /// its NURBS form, which is then the face's geometry (a tube that reaches the axis).
     Torus {
         frame: Frame,
         major_radius: f64,
@@ -594,6 +597,45 @@ fn curve(c: &Curve, depth: usize, budget: &mut Budget) -> Result<()> {
         }
     }
 }
+/// A face's own surface: as [`surface`], except that a cone or torus label, which a face always
+/// carries with its NURBS form (the form is the face's geometry and the label a proved name for
+/// it), may be degenerate: a cone of half angle under 10⁻¹² (its apex past 10¹² radii) and a
+/// torus whose tube reaches its axis (`major_radius <= minor_radius`). A bare cone or torus,
+/// with no form to compute from, keeps [`surface`]'s limits.
+fn face_label(s: &Surface, budget: &mut Budget) -> Result<()> {
+    match s {
+        Surface::Cone {
+            frame: f,
+            radius_at_origin,
+            half_angle,
+        } => {
+            budget.add(1)?;
+            frame(f, budget)?;
+            numbers([*radius_at_origin, *half_angle])?;
+            require(
+                *radius_at_origin >= 0. && half_angle.abs() < std::f64::consts::FRAC_PI_2,
+                "cone dimensions",
+            )
+        }
+        Surface::Torus {
+            frame: f,
+            major_radius,
+            minor_radius,
+            tube_start,
+        } => {
+            budget.add(1)?;
+            frame(f, budget)?;
+            radius(*major_radius)?;
+            radius(*minor_radius)?;
+            require(
+                tube_start.is_finite() && tube_start.abs() <= std::f64::consts::TAU,
+                "torus tube start",
+            )
+        }
+        _ => surface(s, 0, budget),
+    }
+}
+
 fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
     require(depth <= MAX_DEPTH, "geometry depth")?;
     budget.add(1)?;
@@ -774,7 +816,11 @@ impl Brep {
             budget.add(e.uses.len())?;
         }
         for f in &self.faces {
-            surface(&f.surface, 0, &mut budget)?;
+            if f.nurbs.is_some() {
+                face_label(&f.surface, &mut budget)?;
+            } else {
+                surface(&f.surface, 0, &mut budget)?;
+            }
             if let Some(n) = &f.nurbs {
                 surface(n, 0, &mut budget)?;
                 require(

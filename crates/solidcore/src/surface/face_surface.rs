@@ -338,9 +338,9 @@ pub struct RecordFace {
 ///   keeps them), frame copied (no cross product), angles in radians, with its NURBS as its
 ///   form, over the kernel's box. Exact class at bound 0: proved on the form
 ///   ([`AnalyticSupport::build`]: `lies_on` and the form's own parametrisation); numbers the
-///   form does not prove give no label, and the face goes as its NURBS. The record has
-///   no cone of half angle under 10⁻¹² nor a torus whose tube reaches its axis: those go as
-///   their NURBS, which is the face exactly.
+///   form does not prove give no label, and the face goes as its NURBS. A cone of
+///   half angle under 10⁻¹² and a torus whose tube reaches its axis keep their label too: the
+///   record takes them on a face that carries its form.
 /// - **Ball patch:** its sphere's label on its net, certified on it
 ///   ([`BallPatch::create_certified`]); a net the certificate refuses goes as its NURBS.
 /// - **B-spline, revolution, extrusion, procedural blend:** its NURBS (a procedural blend's
@@ -421,14 +421,11 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                         placement,
                         base_radius,
                         semi_angle_deg,
-                    } => {
-                        let half_angle = semi_angle_deg.to_radians();
-                        (half_angle.abs() >= 1e-12).then(|| Record::Cone {
-                            frame: frame(&placement),
-                            radius_at_origin: base_radius,
-                            half_angle,
-                        })
-                    }
+                    } => Some(Record::Cone {
+                        frame: frame(&placement),
+                        radius_at_origin: base_radius,
+                        half_angle: semi_angle_deg.to_radians(),
+                    }),
                     A::Sphere { placement, radius } => Some(Record::Sphere {
                         frame: frame(&placement),
                         radius,
@@ -437,7 +434,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                         placement,
                         major_radius,
                         minor_radius,
-                    } => (major_radius > minor_radius).then(|| Record::Torus {
+                    } => Some(Record::Torus {
                         frame: frame(&placement),
                         major_radius,
                         minor_radius,

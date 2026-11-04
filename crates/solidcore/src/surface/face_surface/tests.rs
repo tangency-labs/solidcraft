@@ -340,3 +340,51 @@ fn a_plane_goes_back_on_its_axes_with_its_scales() {
         ([-2.0, 1.0], [[-2.0, 0.0], [0.0, 1.0]], false)
     );
 }
+
+/// Owner ruling (item 8, option B): a cone of half angle under 1e-12 and a torus whose tube
+/// reaches its axis keep their analytic label on their form, both ways, with their own numbers.
+#[test]
+fn degenerate_cone_and_torus_faces_go_round_with_their_label() {
+    let k = k();
+    for (label, domain) in [
+        (
+            Record::Cone {
+                frame: frame(),
+                radius_at_origin: 3.0,
+                half_angle: 1e-13,
+            },
+            [[0.0, PI], [0.0, 2.0]],
+        ),
+        (
+            Record::Torus {
+                frame: frame(),
+                major_radius: 2.0,
+                minor_radius: 3.0,
+                tube_start: 0.0,
+            },
+            [[0.0, PI / 2.0], [-PI / 4.0, PI / 4.0]],
+        ),
+    ] {
+        let (net, d) = form::surface(&label, domain).unwrap();
+        let f = face_surface(&k, &label, Some(&net), d).unwrap();
+        assert!(!is_nurbs(&f), "{label:?}: label dropped");
+        let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+        assert_eq!(r.nurbs.as_ref(), Some(&net), "{label:?}");
+        match (&r.surface, &label) {
+            (
+                Record::Cone {
+                    radius_at_origin,
+                    half_angle,
+                    ..
+                },
+                Record::Cone { .. },
+            ) => {
+                assert_eq!(*radius_at_origin, 3.0);
+                assert!((half_angle - 1e-13).abs() <= 1e-28, "{half_angle}");
+            }
+            (r, l) => assert_eq!(r, l),
+        }
+        let back = face_surface(&k, &r.surface, r.nurbs.as_ref(), r.domain).unwrap();
+        assert_eq!(record_face(&k, &back.surface, &back.uv_domain).unwrap(), r);
+    }
+}

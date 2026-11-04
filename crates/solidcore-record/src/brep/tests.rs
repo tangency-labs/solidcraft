@@ -786,3 +786,57 @@ fn analytic_records_are_unbounded_with_independent_frames() {
         .is_err()
     );
 }
+
+/// Owner ruling (item 8, option B): a face that carries its NURBS form may name it a cone of
+/// half angle under 10⁻¹² or a torus whose tube reaches its axis (the form is the face's
+/// geometry, the label a proved name). The same labels with no form, and as bare surfaces,
+/// are refused.
+#[test]
+fn degenerate_cone_and_torus_labels_are_valid_only_with_their_form() {
+    let form = Surface::Spline {
+        u_knots: vec![-10., -10., 10., 10.],
+        v_knots: vec![-10., -10., 10., 10.],
+        points: vec![
+            vec![[-10., -10., 0.], [-10., 10., 0.]],
+            vec![[10., -10., 0.], [10., 10., 0.]],
+        ],
+    };
+    let labels = [
+        Surface::Cone {
+            frame: a_frame(),
+            radius_at_origin: 2.,
+            half_angle: 1e-13,
+        },
+        Surface::Cone {
+            frame: a_frame(),
+            radius_at_origin: 2.,
+            half_angle: 0.,
+        },
+        Surface::Torus {
+            frame: a_frame(),
+            major_radius: 1.,
+            minor_radius: 2.,
+            tube_start: 0.0,
+        },
+        Surface::Torus {
+            frame: a_frame(),
+            major_radius: 2.,
+            minor_radius: 2.,
+            tube_start: 0.0,
+        },
+    ];
+    for label in labels {
+        let mut b = sheet();
+        b.faces[0].surface = label.clone();
+        b.faces[0].nurbs = Some(form.clone());
+        b.validate()
+            .unwrap_or_else(|e| panic!("{label:?} with its form: {e:?}"));
+        let mut bare = b.clone();
+        bare.faces[0].nurbs = None;
+        assert!(bare.validate().is_err(), "{label:?} without its form");
+        assert!(
+            surface(&label, 0, &mut Budget::input()).is_err(),
+            "{label:?} as a bare surface"
+        );
+    }
+}
