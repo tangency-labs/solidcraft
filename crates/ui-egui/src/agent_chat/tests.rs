@@ -5176,14 +5176,15 @@ fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
 }
 
 /// Editing a queued message: the marks that are left keep their groups (numbered 1, 2, ... again), a
-/// group whose mark was taken out is not placed any more (its items show as chips), and a mark typed
-/// by hand stands for nothing.
+/// mark that was taken out drops its picks as in the message box, a mark typed by hand stands for
+/// nothing, and what Attach selection added (never placed) stays.
 #[test]
 fn editing_a_queued_message_keeps_its_marks_and_groups_together() {
     let (mut app, _script, _ctx) = app_with_script();
     let sels = box_selection(&mut app);
     let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "Body1");
     context.merge(context::describe(&mut app.session, &sels[2..3]).in_group(2, "the feature"));
+    context.merge(context::describe(&mut app.session, &sels[..1]));
     let mut queued = Pending { text: "fit «1: Body1» to «2: the feature» now".into(), image: false, context, files: Vec::new() };
     queued.text = "fit «2: the feature» to «9: typed» now".into();
     queued.regroup();
@@ -5191,8 +5192,9 @@ fn editing_a_queued_message_keeps_its_marks_and_groups_together() {
     assert_eq!(queued.context.groups, vec![(1, "the feature".to_string())]);
     let group_of = |kind: context::Kind| queued.context.items.iter().find(|i| i.kind == kind).map(|i| i.group);
     assert_eq!(group_of(context::Kind::Feature), Some(1), "the feature is the first mark now");
-    assert_eq!(group_of(context::Kind::Body), Some(0), "the body's mark was taken out: it is not placed");
-    assert_eq!(queued.context.items.iter().filter(|i| i.group == 0).count(), 1, "one chip is left for the body");
+    assert_eq!(group_of(context::Kind::Body), None, "the body's mark was taken out: its pick is dropped");
+    let unplaced: Vec<_> = queued.context.items.iter().filter(|i| i.group == 0).map(|i| i.kind).collect();
+    assert_eq!(unplaced, [context::Kind::Element], "the face Attach selection added stays");
 }
 
 /// New chat keeps the box as it is, with the picks its marks stand for.
