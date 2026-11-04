@@ -205,12 +205,16 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
     {
         return Err(KernelError::Invalid("the two guide rails meet a section at the same point".into()));
     }
-    // The sections' normals, turned to agree with the first's.
+    // The sections' normals, turned to face along the loft, so that the stations between two
+    // sections face the same way whichever way their sketches face (#12031). Two sections at 90°
+    // can't agree with each other: the dot product of their normals is 0. A normal across the
+    // loft's direction agrees with the section before it instead.
     let mut normals: Vec<Vec3> = Vec::with_capacity(count);
-    for s in sections {
+    for (s, &v) in sections.iter().zip(&along) {
         let nn = s.plane.normal();
-        let prev = normals.last().copied().unwrap_or(nn);
-        normals.push(if nn.dot(prev) < 0.0 { nn * -1.0 } else { nn });
+        let facing = nn.dot(middle(v)?.1);
+        let flip = if facing.abs() > 1e-3 { facing < 0.0 } else { normals.last().is_some_and(|prev| nn.dot(*prev) < 0.0) };
+        normals.push(if flip { nn * -1.0 } else { nn });
     }
     let spans = count - 1;
     let per = (MAX_WIRES.saturating_sub(count) / spans).clamp(1, MAX_PER_SPAN);
