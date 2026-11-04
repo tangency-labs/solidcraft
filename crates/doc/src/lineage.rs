@@ -448,24 +448,14 @@ pub(crate) fn part_tool(body: Body, part: &str) -> Traced {
 
 /// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
 /// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
+/// `source` is the serialized original mesh body, never a B-rep display tessellation.
 /// Bump the domain version if the reconstruction algorithm changes its face ordering.
-pub(crate) fn reconstructed_tool(body: Body, mesh: &solidcraft_geom::Mesh, tolerance: f64) -> Traced {
+pub(crate) fn reconstructed_tool(body: Body, source: &[u8], tolerance: f64) -> Traced {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
-    hash.update(b"solidcraft-mesh-reconstruction-v2");
+    hash.update(b"solidcraft-mesh-reconstruction-v3");
     hash.update(tolerance.to_le_bytes());
-    hash.update((mesh.positions.len() as u64).to_le_bytes());
-    for p in &mesh.positions {
-        for coordinate in [p.x, p.y, p.z] {
-            hash.update(coordinate.to_le_bytes());
-        }
-    }
-    hash.update((mesh.triangles.len() as u64).to_le_bytes());
-    for triangle in &mesh.triangles {
-        for index in triangle {
-            hash.update(index.to_le_bytes());
-        }
-    }
+    hash.update(source);
     let digest = format!("{:x}", hash.finalize());
     let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
     Traced::made(body, Some(roles))

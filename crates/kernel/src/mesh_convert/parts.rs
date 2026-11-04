@@ -149,9 +149,7 @@ fn recover(
         for body in bodies {
             result = Some(match result {
                 None => body,
-                Some(previous) => {
-                    crate::boolean(&previous, &body, crate::BoolOp::Union)?.ok_or_else(|| invalid("empty reconstructed part union"))?
-                }
+                Some(previous) => crate::boolean(&previous, &body, crate::BoolOp::Union)?.ok_or_else(|| invalid("empty reconstructed part union"))?,
             });
         }
         if let Some(body) = result {

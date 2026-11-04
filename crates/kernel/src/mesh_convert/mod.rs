@@ -8,9 +8,7 @@ use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::{Body, KernelError, Result};
 
-#[path = "mesh_convert_curves.rs"]
 mod curves;
-#[path = "mesh_convert_parts.rs"]
 mod parts;
 
 const MAX_TRIANGLES: usize = 50_000;
@@ -264,7 +262,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
                 return None;
             }
             let (pa, pb, p) = (*positions.get(&a)?, *positions.get(&b)?, *positions.get(&key)?);
-            let line = solidcraft_geom::Seg2::Line { a: pa, b: pb };
+            let line = solidcore_record::Seg2::Line { a: pa, b: pb };
             if line.point_at(line.closest_param(p)).dist(p) > epsilon * 3. {
                 continue;
             }
@@ -465,7 +463,7 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
 
 /// A circular arc through both actual endpoints, independently certified against every
 /// source vertex and chord. Short polygon corners and coarse facets are not rounded.
-fn partial_arc(points: &[Vec2], tolerance: f64, epsilon: f64) -> Option<solidcraft_geom::Seg2> {
+fn partial_arc(points: &[Vec2], tolerance: f64, epsilon: f64) -> Option<solidcore_record::Seg2> {
     use solidcore_record::Seg2;
     if points.len() < 5 {
         return None;
@@ -753,7 +751,7 @@ mod tests {
         assert!(converted.validity().is_empty());
         assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("cylinder"), Some(&1));
         assert!(converted.face_count() < 12, "{}", converted.face_count());
-        assert!((converted.tessellate_with(1e-5, true).unwrap().measure().volume - (240. - 8. * std::f64::consts::PI) * 5.).abs() < 0.01);
+        assert!((crate::measure(&converted).unwrap().volume - (240. - 8. * std::f64::consts::PI) * 5.).abs() < 0.01);
     }
 
     #[test]
@@ -784,7 +782,7 @@ mod tests {
             } else {
                 source.clone()
             };
-            let raw = source.tessellate(0.005).unwrap();
+            let raw = source.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
             let positions: Vec<_> = raw.positions.iter().map(|p| Vec3::new(p.x as f32 as f64, p.y as f32 as f64, p.z as f32 as f64)).collect();
             let mesh = crate::mesh_body(&positions, &raw.triangles).unwrap();
             let converted = convert_prismatic_mesh(&mesh, 0.05).unwrap();
@@ -833,7 +831,7 @@ mod tests {
         let mesh = phase_shifted_stepped_cylinder();
         let converted = convert_prismatic_mesh(&mesh, 0.05).unwrap();
         assert!(converted.validity().is_empty());
-        let volume = converted.tessellate_with(1e-5, true).unwrap().measure().volume;
+        let volume = crate::measure(&converted).unwrap().volume;
         assert!((volume - 896. * std::f64::consts::PI).abs() < 0.03, "{volume}");
         assert!(converted.face_count() < 16, "{}", converted.face_count());
         assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("cylinder"), Some(&2));
@@ -856,7 +854,7 @@ mod tests {
         let source = crate::mesh_body(&positions, &mesh.triangles).unwrap();
         let converted = convert_prismatic_mesh(&source, 0.05).unwrap();
         assert!(converted.validity().is_empty());
-        let volume = converted.tessellate_with(1e-5, true).unwrap().measure().volume;
+        let volume = crate::measure(&converted).unwrap().volume;
         assert!((volume - 896. * std::f64::consts::PI).abs() < 0.03, "{volume}");
         assert!(converted.face_count() < 16);
     }

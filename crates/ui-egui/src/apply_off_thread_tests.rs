@@ -538,14 +538,14 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
 }
 
 fn imported_mesh_for_conversion() -> Harness {
+    use solidcore_record::Vec3;
     use solidcraft_engine::{
         Session,
         doc::{Document, FeatureKind, MeshData},
-        geom::Vec3,
         kernel,
     };
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {

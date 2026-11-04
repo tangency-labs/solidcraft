@@ -634,7 +634,7 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
 
 #[test]
 fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     use solidcraft_kernel::{BoolOp, boolean, box_solid, extrude_planar_regions};
     let base = box_solid(Vec3::ZERO, Vec3::new(20., 16., 2.)).unwrap();
     let wall = box_solid(Vec3::new(4., 0., 2.), Vec3::new(8., 16., 12.)).unwrap();
@@ -644,7 +644,7 @@ fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
         let tool = extrude_planar_regions(&plane, &[circle(center)], start, end).unwrap();
         source = boolean(&source, &tool, BoolOp::Cut).unwrap().unwrap();
     }
-    let mesh = source.tessellate(0.005).unwrap();
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.005)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -669,7 +669,7 @@ fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
         let body = &state.body("Bracket").unwrap().body;
         assert!(!body.is_mesh());
         assert!(body.validity().is_empty());
-        let volume = body.tessellate_with(1e-5, true).unwrap().measure().volume;
+        let volume = solidcraft_kernel::measure(body).unwrap().volume;
         assert!((volume - (1280. - 24. * std::f64::consts::PI)).abs() < 0.02, "{volume}");
         assert!(solidcraft_kernel::measure(body).unwrap().merged.face_types.get("cylinder").copied().unwrap_or(0) >= 2);
         assert!(s.model.results.iter().all(|r| r.error.is_none()));

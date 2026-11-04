@@ -7992,7 +7992,8 @@ fn eval_feature(
             }
             let converted = kernel::convert_prismatic_mesh(&source.body, tolerance)?;
             let converted = converted.with_color(source.body.color());
-            let input = source.body.tessellate(tolerance)?;
+            let input = source.body.mesh(&kernel::MeshTolerance::chord(tolerance))?;
+            let input = serde_json::to_vec(&input).map_err(|e| DocError::Invalid(format!("mesh reconstruction identity: {e}")))?;
             let converted = crate::lineage::reconstructed_tool(converted, &input, tolerance);
             let result = ModelBody::traced_new(source.name.clone(), converted, f.id);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
