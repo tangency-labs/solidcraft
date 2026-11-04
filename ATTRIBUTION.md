@@ -795,6 +795,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/branding/logo/solidcraft-mark-2048.png | SolidCraft contributors | transparent 2048 px render of assets/branding/logo/solidcraft-mark.svg (cairosvg); original artwork | MIT OR Apache-2.0 |
 | assets/branding/logo/solidcraft-wordmark.svg | SolidCraft contributors | the name SolidCraft set like the loading logo's wordmark (bold, +0.02 em tracking, #15499e) in IBM Plex Sans Bold from assets/fonts/ibm-plex-sans (SIL OFL 1.1, IBM Corp.), outlined to paths; no font file is embedded | MIT OR Apache-2.0 |
 | assets/branding/logo/solidcraft-lockup-horizontal.svg | SolidCraft contributors | assets/branding/logo/solidcraft-mark.svg beside assets/branding/logo/solidcraft-wordmark.svg, in the proportions of assets/branding/web/source/og.png; original artwork | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/onyx.json | SolidCraft contributors | original Onyx stone-grey palette, option overlays and semantic icon-role mapping; existing SolidCraft artwork is unchanged | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
