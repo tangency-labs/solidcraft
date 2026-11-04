@@ -39,10 +39,6 @@ component.replace_with_link
 component.revert_position
 component.unlock
 component.update_links
-config.column
-config.configure
-config.row
-config.rule
 contact.check
 contact.create
 contact.disable_all
