@@ -13,9 +13,10 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use egui::{Pos2, Stroke};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::ModelState;
-use solidcraft_engine::geom::{Mesh, Plane, Vec2, Vec3};
+use solidcraft_engine::geom::{Mesh, prelude::*};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
