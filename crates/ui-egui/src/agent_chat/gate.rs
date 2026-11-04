@@ -342,6 +342,10 @@ mod tests {
         for m in ["app.quit", "ui.click", "ui.prefs", "ui.agent_chat", "engine.script", "ui.key", "ui.file"] {
             assert!(matches!(request(m, &json!({}), 0), Verdict::Refuse(_)), "{m}");
         }
+        // How a host page keeps the design (#8517) is not the agent's.
+        for m in ["document.export", "document.import", "document.saved"] {
+            assert!(matches!(request(m, &json!({}), 0), Verdict::Refuse(_)), "{m}");
+        }
     }
 
     #[test]

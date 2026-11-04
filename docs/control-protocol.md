@@ -429,8 +429,15 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
 | `document.inspect` | `measure?`: bool | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links) |
+| `document.export` | — | `{name, revision, dirty, format, text}`: the active design as its file holds it, for a host that keeps the files itself ([browser command API](browser-api.md)). `text` is the design's JSON, what a `.json` design file holds; `format` is `"json"`; `revision` is the one `document.revision` answers for this state. Only reads |
+| `document.import` | `text`: a design's JSON; `name?`: the name it takes | `{name, features, errors, revision}`: replaces the active design with `text`, timeline and parameters as saved; it opens saved, with a new `document_id` and nothing to undo. It does not ask about unsaved changes in the design it replaces: that is the caller's to decide. A text that does not read changes nothing. Waits behind a file loading or a design change, and evaluates on the window thread in the frame it runs |
+| `document.saved` | `revision`: as `document.export` gave it | `{revision, dirty}`: the host saved the design at that revision, so it counts as saved from there. Refused when the design has changed since |
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
+
+`document.export`, `document.import` and `document.saved` are control methods, not commands: they
+act on the app's open design rather than on an engine session, and they are not among the methods
+the agent chat may use.
 
 ### Following the design
 

@@ -175,6 +175,20 @@ Embedded designs do not save designs, preferences, or recovery copies to browser
 storage and do not ask before unloading. **Open in SolidCraft** opens the same link
 in the full app in a new tab. `?embed` without `open` keeps the normal app layout.
 
+Use `embed=editor` instead for a page that keeps the designs itself and has people model in
+the frame. It needs no `open`:
+
+```html
+<iframe src="https://docs.solidcraft.io/app/?embed=editor"
+        width="1280" height="800" title="Modelling"></iframe>
+```
+
+The ribbon, browser tree, timeline and properties stay; the application bar and start page
+do not. Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+W and Ctrl+, do nothing there, because those belong to
+the page; Ctrl+Z and Ctrl+Y still undo and redo. As with `embed`, nothing is kept in browser
+storage: the page moves the design in and out with the `document.export` and
+`document.import` control methods.
+
 ### Self-hosting with Docker
 
 The web app is also a container image, `ghcr.io/tangency-labs/solidcraft-web`, for Linux on x86_64

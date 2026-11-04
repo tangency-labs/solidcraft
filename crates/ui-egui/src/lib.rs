@@ -524,6 +524,11 @@ pub struct SolveApp {
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
     pub embedded: bool,
+    /// Editing embed (#8517): the host page owns the files and the window's chrome. No
+    /// application bar, no start page, no New/Open/Save/Close or Preferences shortcuts; the
+    /// ribbon, browser, timeline and properties stay, and the host reads and replaces the
+    /// design through `document.export` / `document.import`.
+    pub embed_editor: bool,
     pub session: Session,
     pub ui: UiState,
     pub(crate) shell: shell::State,
@@ -930,6 +935,7 @@ impl SolveApp {
             fit_waits: 0,
             flat_view: Default::default(),
             embedded: false,
+            embed_editor: false,
             home: home::HomeState::default(),
             space_mouse: Default::default(),
             file_load: file_load::FileLoad::default(),
@@ -3104,6 +3110,11 @@ impl SolveApp {
             self.ui.show_browser = true;
             self.ui.show_timeline = true;
         }
+        if self.embed_editor {
+            // The host shows one design and has its own way to start one.
+            self.ui.layout = shell::LayoutMode::Docked;
+            self.home.open = false;
+        }
         self.ui.layout.publish(ui.ctx());
         self.preferences.dialog_buttons.publish(ui.ctx());
         self.preferences.toast_place.publish(ui.ctx());
@@ -3112,7 +3123,7 @@ impl SolveApp {
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
         timeline::tick_playback(self, ui.ctx());
-        if !self.embedded {
+        if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
         issue_report::CadInput::block(self, ui, report_input);

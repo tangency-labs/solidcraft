@@ -741,11 +741,90 @@ fn embed_keeps_model_panels_without_application_chrome() {
     assert!(h.app.viewport.rect.is_some());
 }
 
+#[test]
+fn embed_editor_keeps_the_ribbon_and_leaves_files_to_the_host() {
+    let mut h = Harness::new();
+    h.settle();
+    assert!(rect_of("appbar:home").is_some(), "the full app has its application bar");
+    h.app.embed_editor = true;
+    h.app.home.show(h.app.session.revision);
+    h.settle();
+    assert!(!h.app.home.open, "the host shows the design, never the start page");
+    assert_eq!(h.app.ui.layout, LayoutMode::Docked);
+    assert!(rect_of("appbar:home").is_none() && rect_of("titlebar:report").is_none(), "no application bar");
+    assert!(rect_of("button:sketch.create").is_some() && rect_of("browser:card").is_some(), "the modelling surface stays");
+    // With no bar to hold it, command search stays in the ribbon whatever the host's header layout.
+    h.app.header = crate::toolbar::HeaderLayout::COMPACT;
+    h.settle();
+    assert!(rect_of("ribbon:search").is_some() && rect_of("titlebar:search").is_none());
+    h.step(&json!({"click":{"handle":"button:sketch.create"}})).unwrap();
+    assert!(h.app.dialog.is_some(), "and its commands work");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    // New, Open, Save, Close and Preferences belong to the host page.
+    let (docs, revision) = (h.app.docs.count(), h.app.session.revision);
+    for key in ["N", "O", "S", "W", "Comma"] {
+        h.step(&json!({"key":key,"cmd":true})).unwrap();
+    }
+    h.settle();
+    assert_eq!((h.app.docs.count(), h.app.session.revision), (docs, revision));
+    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.open, "{}", h.call("ui.inspect", json!({})));
+    // Undo stays the design's own.
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    h.step(&json!({"key":"Z","cmd":true})).unwrap();
+    assert!(h.app.session.doc.features.is_empty(), "Ctrl+Z undoes in the embed too");
+}
+
 /// A design with a finished sketch nothing uses yet, so Extrude opens ready for OK.
 fn sketched(h: &mut Harness) {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
+}
+
+#[test]
+fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
+    let mut h = Harness::new();
+    h.app.embed_editor = true;
+    sketched(&mut h);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    let kept = h.call("document.export", json!({}));
+    assert_eq!(kept["ok"], true, "{kept}");
+    let kept = &kept["result"];
+    assert_eq!((kept["format"].as_str(), kept["dirty"].as_bool()), (Some("json"), Some(true)));
+    assert_eq!(kept["revision"], h.call("document.revision", json!({}))["result"]["revision"], "the revision that follows the design");
+    let text = kept["text"].as_str().unwrap().to_string();
+    let timeline = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    let before = timeline(&h);
+    assert!(before.len() >= 2, "{before:?}");
+    // The host says it saved: the design is saved from there, until the next change.
+    let at = kept["revision"].as_u64().unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["result"]["dirty"], false);
+    assert!(!h.app.session.is_dirty());
+    assert_eq!(h.call("document.saved", json!({"revision": at + 7}))["ok"], false, "another revision is refused");
+    // Something else is drawn and left open; the kept design comes back in its place, saved,
+    // timeline and all, and what was going on in the other leaves with it.
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["ok"], false, "the design changed since");
+    h.call("ui.start", json!({"command":"sketch.create"}));
+    h.settle();
+    assert!(h.app.dialog.is_some(), "{}", h.call("ui.inspect", json!({})));
+    let (docs, id) = (h.app.docs.count(), h.app.session.document_id.clone());
+    let back = h.call("document.import", json!({"text": text, "name": "Bracket"}));
+    assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(back["result"]["errors"], 0);
+    assert_eq!(back["result"]["revision"], h.call("document.revision", json!({}))["result"]["revision"]);
+    assert_eq!(timeline(&h), before);
+    assert_eq!((h.app.session.doc.name.as_str(), h.app.session.is_dirty(), h.app.docs.count()), ("Bracket", false, docs));
+    assert_ne!(h.app.session.document_id, id, "another design, as one opened is");
+    assert!(h.app.session.undo.is_empty(), "the undo history is the opened design's own");
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+    h.settle();
+    for bad in [json!({}), json!({"text": "{"}), json!({"text": "not a design"})] {
+        assert_eq!(h.call("document.import", bad.clone())["ok"], false, "{bad}");
+        assert_eq!(timeline(&h), before, "a refused import leaves the design as it was");
+    }
 }
 
 /// Dialogs › In the left column (#6707): Extrude takes the place of the browser and the History
