@@ -536,8 +536,9 @@ mod tests {
             assert_eq!((n, colored), (3, true));
             assert_eq!(v[1], ([1.5, 0.0, 0.0], Some([10, 20, 255])));
             assert_eq!(v[2].0, [0.0, 2.5, -3.0]);
-            // A file with a face is not thinned: its face would lose a corner.
-            assert!(vertices(&binary(big), 2).is_err());
+            // A thinned file leaves its face out: it would lose a corner.
+            let thin = crate::ply_complex::read_ply_cloud(&binary(big), 2).unwrap();
+            assert_eq!((thin.positions.len(), thin.complex.triangle_count(), thin.cells_left_out), (2, 0, 1));
             let (mesh, warnings) = read_ply_mesh(&binary(big), "Tri").unwrap();
             assert!(warnings.is_empty());
             assert_eq!(mesh[0].triangles, [[0, 1, 2]]);

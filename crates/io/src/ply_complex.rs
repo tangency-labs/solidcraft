@@ -3,8 +3,8 @@
 //! with theirs. Positions are `x`, `y`, `z` and colours `red`, `green`, `blue`; every other
 //! scalar property becomes a column named as in the file, whole-numbered when its type is an
 //! integer. A comment `property: 0 name, 1 name` names the values of a whole-numbered property.
-//! A file with edges or faces is read whole, since thinning its vertices would cut them; a file
-//! of points alone keeps every `stride`th vertex.
+//! A file whose vertices fit keeps them all, with its edges and faces. One with more keeps every
+//! `stride`th vertex and leaves its edges and faces out, since thinning would cut them.
 
 use solidcraft_doc::point_cloud::{Column, Complex, Floats, Indices, MAX_CELLS, MAX_COLUMNS, Names, On};
 
@@ -24,6 +24,8 @@ pub(crate) struct PlyCloud {
     pub vertices: u64,
     /// Faces whose indices could not be read.
     pub bad_faces: usize,
+    /// Edges and faces in the file, left out because its vertices were thinned.
+    pub cells_left_out: u64,
 }
 
 fn integer(s: Scalar) -> bool {
@@ -52,23 +54,17 @@ fn index(v: f64, n: usize) -> Option<u32> {
     (v >= 0.0 && v < n as f64 && v.fract() == 0.0).then(|| u32::try_from(v as u64).ok()).flatten()
 }
 
-/// Read a PLY file, keeping every `stride`th vertex when it has no edges or faces, and refusing
-/// one with edges or faces and more than `max_points` vertices.
+/// Read a PLY file: every vertex with the edges and faces when they fit in `max_points`, else
+/// every `stride`th vertex alone.
 pub(crate) fn read_ply_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud> {
     let h = header(bytes)?;
     let vertex = h.elements.iter().find(|e| e.name == "vertex").ok_or_else(|| invalid("no `vertex` element"))?;
-    let has_cells = h.elements.iter().any(|e| (e.name == "edge" || e.name == "face") && e.count > 0);
-    let stride = if has_cells {
-        if vertex.count > max_points as u64 {
-            return Err(invalid(format!("{} vertices with edges or faces: more than the {max_points} points read whole", vertex.count)));
-        }
-        1
-    } else {
-        vertex.count.div_ceil(max_points.max(1) as u64).max(1)
-    };
+    let stride = vertex.count.div_ceil(max_points.max(1) as u64).max(1);
+    let whole = stride == 1;
     let body = bytes.len().saturating_sub(h.body) as u64;
     let mut rows = Rows::new(&h, bytes);
-    let mut out = PlyCloud { positions: Vec::new(), colors: None, complex: Complex::default(), vertices: vertex.count, bad_faces: 0 };
+    let mut out =
+        PlyCloud { positions: Vec::new(), colors: None, complex: Complex::default(), vertices: vertex.count, bad_faces: 0, cells_left_out: 0 };
     let mut columns: Vec<(On, Vec<f32>, Column)> = Vec::new();
     let (mut segments, mut triangles) = (Vec::new(), Vec::new());
     let mut row = vec![0.0f64; e_max(&h.elements)];
@@ -76,6 +72,9 @@ pub(crate) fn read_ply_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
     for e in &h.elements {
         if e.count > body {
             return Err(invalid(format!("the file is too short for its {} {}", e.count, e.name)));
+        }
+        if !whole && (e.name == "edge" || e.name == "face") {
+            out.cells_left_out = out.cells_left_out.saturating_add(e.count);
         }
         let (on, taken, xyz, rgb, ends, face) = match e.name.as_str() {
             "vertex" => {
@@ -91,13 +90,13 @@ pub(crate) fn read_ply_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
                 taken.extend(rgb.into_iter().flatten());
                 (Some(On::Point), taken, Some([x, y, z]), rgb, None, None)
             }
-            "edge" => {
+            "edge" if whole => {
                 let (Some(a), Some(b)) = (named(e, &["vertex1"]), named(e, &["vertex2"])) else {
                     return Err(invalid("the edges have no `vertex1` and `vertex2`"));
                 };
                 (Some(On::Segment), vec![a, b], None, None, Some([a, b]), None)
             }
-            "face" => {
+            "face" if whole => {
                 let face = e
                     .properties
                     .iter()
@@ -225,7 +224,13 @@ mod tests {
         // Names for the whole-numbered `role` only: `t` is no list and `width` is not whole.
         assert_eq!(r.complex.names.len(), 1);
         assert_eq!(r.complex.names("role").and_then(|n| n.name(-1)), Some("none"));
-        assert!(read_ply_cloud(text.as_bytes(), 3).is_err(), "edges and faces are not thinned");
+        // Too many vertices: thinned, with the edges and faces that thinning would cut left out.
+        let thin = read_ply_cloud(text.as_bytes(), 3).unwrap();
+        assert_eq!((thin.positions.len(), thin.cells_left_out), (2, 3));
+        assert!(thin.complex.segments.0.is_empty() && thin.complex.triangles.0.is_empty());
+        assert_eq!(&*thin.complex.column("t", On::Point).unwrap().values.0, &[0.5, 2.5]);
+        assert!(thin.complex.column("role", On::Segment).is_none());
+        thin.complex.check(2).unwrap();
         let bad = text.replace("1 2 -1 0", "1 9 -1 0");
         assert!(read_ply_cloud(bad.as_bytes(), 10).is_err(), "an edge to a missing vertex");
     }

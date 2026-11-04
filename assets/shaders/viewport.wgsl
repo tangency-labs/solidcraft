@@ -1002,24 +1002,41 @@ fn filtered_out(i: CIn) -> bool {
     return false;
 }
 
+/// The part in front of the near plane of the segment between clip-space `a` and `b`, as
+/// fractions of it from `a`; empty (first above second) when all of it is behind. Clip-space
+/// coordinates are affine along a line, so the crossing is exact.
+fn in_front(a: vec4<f32>, b: vec4<f32>) -> vec2<f32> {
+    let za = near_z(a);
+    let zb = near_z(b);
+    if (za < 0.0 && zb < 0.0) { return vec2<f32>(1.0, 0.0); }
+    let t = za / (za - zb);
+    return vec2<f32>(select(0.0, t, za < 0.0), select(1.0, t, zb < 0.0));
+}
+
 @vertex
 fn vs_cloud_segment(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
     // Corner `vi % 10` of the cross-section at the start (`vi < 10`) or the end; the index
     // buffer joins them into the bead's sides.
-    if (filtered_out(i)) {
+    let pa = u.vp * vec4<f32>(i.a, 1.0);
+    let pb = u.vp * vec4<f32>(i.b, 1.0);
+    let part = in_front(pa, pb);
+    if (filtered_out(i) || part.x > part.y) {
         return cloud_out(i, vec3<f32>(1.0, 0.0, 0.0), i.a, vec4<f32>(0.0, 0.0, 0.0, -1.0), vec3<f32>(0.0));
     }
-    let e = select(0.0, 1.0, vi >= 10u);
+    // Where the near plane cuts it, the bead ends there, square; its numbers are exact at `e`.
+    let at_end = vi >= 10u;
+    let e = select(part.x, part.y, at_end);
+    let cut = e != select(0.0, 1.0, at_end);
     let f = bead_frame(i.b - i.a);
     let c = stadium(vi % 10u, i.size);
     let axis = mix(i.a, i.b, e);
     // Where it meets the next or the previous bead, the cross-section lies in the plane halfway
     // between their directions, stretched across to keep its width: both beads end on the same
     // section. A turn sharper than 120° ends square instead.
-    let other = select(i.a - i.before, i.after - i.b, e > 0.5);
+    let other = select(i.a - i.before, i.after - i.b, at_end);
     var across_dir = f[1];
     var stretch = 1.0;
-    if (length(other) > 1e-9) {
+    if (!cut && length(other) > 1e-9) {
         let g = bead_frame(other);
         let mid = f[1] + g[1];
         if (length(mid) > 1e-6 && dot(normalize(mid), f[1]) > 0.5) {
@@ -1031,17 +1048,22 @@ fn vs_cloud_segment(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
     let ca = u.vp * vec4<f32>(axis, 1.0);
     let cw = u.vp * vec4<f32>(wp, 1.0);
     let half = u.screen.xy * 0.5;
-    let pa = u.vp * vec4<f32>(i.a, 1.0);
-    let pb = u.vp * vec4<f32>(i.b, 1.0);
-    let along = (pb.xy / pb.w - pa.xy / pa.w) * half;
-    var across = vec2<f32>(-along.y, along.x);
-    if (length(across) < 1e-6) { across = vec2<f32>(1.0, 0.0); }
-    across = normalize(across);
-    // At least a pixel and a half across: a bead seen from afar, or a line without size.
-    var px = (cw.xy / cw.w - ca.xy / ca.w) * half;
-    if (length(px) < MIN_HALF_PX * abs(c.z)) { px = across * c.z * MIN_HALF_PX; }
-    var pos = vec4<f32>((ca.xy / ca.w + px / half) * cw.w, cw.z, cw.w);
-    if (behind(ca)) { pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    var pos = cw;
+    // At least a pixel and a half across: a bead seen from afar, or a line without size. A corner
+    // behind the eye has no place on the screen and needs no widening: the rasteriser clips it.
+    if (cw.w > 0.0) {
+        let c0 = mix(pa, pb, part.x);
+        let c1 = mix(pa, pb, part.y);
+        let along = (c1.xy / c1.w - c0.xy / c0.w) * half;
+        var across = vec2<f32>(-along.y, along.x);
+        if (length(across) < 1e-6) { across = vec2<f32>(1.0, 0.0); }
+        across = normalize(across);
+        var px = (cw.xy / cw.w - ca.xy / ca.w) * half;
+        if (length(px) < MIN_HALF_PX * abs(c.z)) {
+            px = across * c.z * MIN_HALF_PX;
+            pos = vec4<f32>((ca.xy / ca.w + px / half) * cw.w, cw.z, cw.w);
+        }
+    }
     let n = select(f[1] * c.z + f[2] * c.w, vec3<f32>(0.0), i.size.y <= 0.0);
     return cloud_out(i, vec3<f32>(1.0 - e, e, 0.0), wp, pos, n);
 }
@@ -1053,9 +1075,8 @@ fn vs_cloud_triangle(@builtin(vertex_index) vi: u32, i: CIn) -> COut {
     let wp = i.a * w.x + i.b * w.y + i.c * w.z;
     var n = cross(i.b - i.a, i.c - i.a);
     if (length(n) > 0.0) { n = normalize(n); }
-    var pos = u.vp * vec4<f32>(wp, 1.0);
-    if (behind(pos)) { pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
-    return cloud_out(i, w, wp, pos, n);
+    // The true clip-space corner, even behind the eye: the rasteriser clips a triangle exactly.
+    return cloud_out(i, w, wp, u.vp * vec4<f32>(wp, 1.0), n);
 }
 
 fn cloud_ramp(t: f32) -> vec3<f32> {

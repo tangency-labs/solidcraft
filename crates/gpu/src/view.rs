@@ -5305,6 +5305,53 @@ mod glass_tests {
         assert!(!has(&hidden, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "hiding the cloud removes it");
     }
 
+    /// A floor and a bead on it, one end far off to the side behind the eye: each is cut exactly at
+    /// the near plane. So what lies ahead shows where the perspective puts it, and nothing is
+    /// drawn straight below the eye, where an end moved to a made-up place would pull a wedge.
+    #[test]
+    fn a_cloud_element_crossing_the_near_plane_is_cut_there() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let mut renderer = Renderer::new(&device, target, None);
+        // Looking along -z from the origin: a point shows at x/d, y/d at distance d = -z.
+        let (near, far) = (0.1f32, 1000.0f32);
+        let (a, b) = (-far / (far - near), -far * near / (far - near));
+        let view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
+        let mut draw = |version: u64, segments: Vec<u8>, triangles: Vec<u8>| {
+            let mut frame = test_frame(GpuScene::default(), 1.0);
+            frame.view_proj = view_proj;
+            let style = CloudStyle { mode: ColorMode::Own, range: [0.0, 1.0], filters: Default::default(), point_size: 1.0 };
+            let dots = Arc::new(Vec::new());
+            frame.clouds.push(GpuCloud { id: 1, version, dots, segments: Arc::new(segments), triangles: Arc::new(triangles), style });
+            render_frame(&mut renderer, &device, &queue, &frame, true)
+        };
+        // Green at pixel `x` of row `y`, counted from the top of the 64 by 64 picture.
+        let green =
+            |img: &[u8], x: usize, y: usize| img.get((y * 64 + x) * 4..(y * 64 + x) * 4 + 3).is_some_and(|p| p[1] > 60 && p[0] < 30 && p[2] < 30);
+        // Pixel 47 of row 43 is (0.48, -0.36). On y = -1 that is 2.78 away, where the path from
+        // (0, -1, -3) to (40, -1, 3) has come to x = 1.47: x/d = 0.53, within the floor (0.18 to
+        // 0.87 there) and the bead. Pixel 32 of row 56 is (0.0, -0.77): by that distance both have
+        // gone far off to the right.
+        let (ahead, below) = ((47, 43), (32, 56));
+
+        let mut triangles = Vec::new();
+        let floor = [[-1.0, -1.0, -3.0], [1.0, -1.0, -3.0], [40.0, -1.0, 3.0]];
+        cloud_cell(&mut triangles, &Cell { corners: floor, rgb: [0, 255, 0], ..Default::default() });
+        let img = draw(1, Vec::new(), triangles);
+        assert!(green(&img, ahead.0, ahead.1), "the floor ahead");
+        assert!(!green(&img, below.0, below.1), "no wedge of floor below the eye");
+
+        let (start, end) = ([40.0, -1.0, 3.0], [0.0, -1.0, -3.0]);
+        let mut segments = Vec::new();
+        let bead = Cell { corners: [start, end, end], neighbours: [start, end], size: [0.5, 0.5], rgb: [0, 255, 0], ..Default::default() };
+        cloud_cell(&mut segments, &bead);
+        let img = draw(2, segments, Vec::new());
+        assert!(green(&img, ahead.0, ahead.1), "the bead ahead");
+        assert!(!green(&img, below.0, below.1), "no wedge of bead below the eye");
+    }
+
     /// A still view shows the picture it drew last: a reused frame (whose filtered picture is
     /// cached once) draws the same pixels as the frame before it, and changing the camera draws
     /// again rather than keeping the cached picture.

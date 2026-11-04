@@ -89,9 +89,9 @@ it shows the property's whole span, with the part the track shows framed.
 ## Size
 
 A cloud keeps at most `max_points` points (5,000,000 unless asked, at most 20,000,000); a larger
-file is thinned evenly, one point in *n*, and the result says how many were kept. A file with
-edges or faces is read whole, since thinning its points would cut them: one with more than
-`max_points` points is refused. It holds at most 20,000,000 segments and as many triangles. Files up to
+file is thinned evenly, one point in *n*, and the result says how many were kept. Thinning would
+cut a file's edges and faces, so a thinned file leaves them out, with a warning; raise `max_points`
+to keep them. A cloud holds at most 20,000,000 segments and as many triangles. Files up to
 1 GiB are read. The points are stored single precision relative to the cloud's first point (kept
 double precision), so a scan far from the origin keeps its detail; they travel inside the design
 file as a binary part (12 bytes a point, 3 more with colours).
