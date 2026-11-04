@@ -1665,6 +1665,12 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "middle"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+        // A middle click on the ×, which lies over the tab and takes its clicks, closes it too
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "tab:close:0"}, "button": "middle"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 1);
     }
 
     /// #3187: a tab moved to another place keeps its design, and the active design stays
