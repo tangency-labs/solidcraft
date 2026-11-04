@@ -111,6 +111,23 @@ part, `?webgl` forces WebGL2 where WebGPU is missing or misbehaves; the browser 
 `?webgpu`, and an app installed from Chrome or Edge starts with it too). Designs are saved in the
 browser's private file storage, which needs HTTPS or localhost.
 
+### Older computers
+
+The web app also runs on older PCs. It was measured with a software graphics driver and a
+processor slowed six times, which stands in for a Pentium with a graphics card from about 2010.
+- **Graphics.** It needs WebGL2 or WebGPU. Cards that predate WebGPU use WebGL2 by themselves.
+  Browsers turn WebGL2 off for some older cards and drivers. SolidCraft then shows what to try
+  instead of starting: turn on graphics acceleration in the browser's settings, and update the
+  browser and the driver. Chrome and Edge can also turn on *Override software rendering list* in
+  `chrome://flags` (`edge://flags`), and Firefox can set `webgl.force-enabled` in `about:config`.
+- **Browser.** Chrome 109 and Firefox 115 ESR, the last versions for Windows 7, are recent
+  enough.
+- **Start.** The app is 95 MB (31 MB where the server compresses it). The first visit downloads
+  it; after that the browser keeps a copy. The browser compiles it at each start, so on a slow
+  processor the start takes a while. Close other tabs if the PC has 4 GB of memory or less.
+- **Smoother view.** In View, turn off the ground shadow and the grid: on a slow graphics card they
+  take about half the time of each frame while you orbit.
+
 The web app at `/app/` is always the latest release. Two more builds are there to try early:
 the [release candidate](../app-rc/) (the newest `-rc` pre-release; a page saying so appears
 until the first one is out) and the [edge build](../app-edge/) (the current `main`, rebuilt on

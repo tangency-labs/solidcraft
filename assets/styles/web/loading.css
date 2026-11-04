@@ -5,3 +5,12 @@
     #solidcraft_loading.done { opacity: 0; pointer-events: none; }
     #solidcraft_loading img { width: min(60vmin, 360px); height: auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    /* When SolidCraft can't start: what happened and what to try (apps/solidcraft-web/src/start_failure.rs). */
+    #solidcraft_loading.failed { justify-content: flex-start; overflow-y: auto; padding: 48px 16px; box-sizing: border-box; color: #2a2f3a; line-height: 1.45; }
+    #solidcraft_loading.failed > * { width: 100%; max-width: 640px; }
+    #solidcraft_loading.failed h1 { font-size: 20px; margin: 0 0 8px; }
+    #solidcraft_loading.failed p { margin: 0 0 12px; }
+    #solidcraft_loading.failed ol { margin: 0 0 16px; padding-left: 22px; }
+    #solidcraft_loading.failed li { margin: 6px 0; }
+    #solidcraft_loading.failed a { color: #1f5fbf; font-weight: 600; margin-bottom: 16px; }
+    #solidcraft_loading.failed pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: #4a5060; }

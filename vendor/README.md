@@ -45,8 +45,9 @@ SolidCraft changes:
 - `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
   the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
   guarantees 1x and 4x).
-- `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
-  instead of exactly 8192.
+- `src/setup.rs`: the default device asks for the adapter's largest 2D texture instead of
+  exactly 8192, and never more than the adapter offers: an older card, or a browser's
+  minimum-capability WebGL2, offers less than 8192 and refused the device.
 - `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
   device and the window's surface up (instance, surface, adapter request, the chosen adapter,
   device, renderer, surface configure, first present), so the app's crash journal can say which
