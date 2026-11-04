@@ -1746,6 +1746,17 @@ impl Sketch {
                 owned.extend(c.kind.point_ids());
             }
         }
+        // An ellipse going while one of its axes stays leaves its centre, which still bisects
+        // them, as a Center Rectangle's centre stays with its edges gone.
+        let centres: Vec<usize> = which
+            .iter()
+            .filter_map(|&e| {
+                let CurveKind::Ellipse { c, .. } = self.curves.get(e)?.kind else { return None };
+                let (major, minor) = self.ellipse_axis_lines(e)?;
+                [major.map(|(l, _)| l), minor.map(|(l, ..)| l)].into_iter().flatten().any(|l| !which.contains(&l)).then_some(c)
+            })
+            .collect();
+        owned.retain(|p| !centres.contains(p));
         let on_ends = self.points_on_ends_of(which);
         self.drop_curves(which);
         for (p, q) in on_ends {

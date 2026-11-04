@@ -2269,12 +2269,16 @@ fn an_ellipse_comes_with_its_axes_as_construction_lines() {
         chain.sort();
         assert_eq!(chain, curves, "double-click on {id}");
     }
-    // Deleting it leaves the two axes, still construction and still perpendicular.
+    // Deleting it leaves the two axes, still construction and still perpendicular, and still
+    // bisected by the centre, which stays as a Center Rectangle's centre does.
     run(&mut s, "sketch.delete", json!({"entities": [&e]}));
     let sk = sketch(&s);
     assert_eq!(sk.curves.len(), 2);
     assert!(sk.curves.iter().all(|c| c.construction && matches!(c.kind, CurveKind::Line { .. })));
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Perpendicular { .. })));
+    let centres: Vec<usize> =
+        sk.constraints.iter().filter_map(|c| if let ConstraintKind::Midpoint { p, .. } = c.kind { Some(p) } else { None }).collect();
+    assert!(centres.len() == 2 && centres[0] == centres[1], "both axes keep their midpoint on the centre: {:?}", sk.constraints);
     // The same as a Center Rectangle whose edges are deleted: its diagonals stay.
     let mut s = new_sketch();
     let edges = ids(&run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 10]}))["curves"]);
