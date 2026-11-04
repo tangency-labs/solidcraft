@@ -597,8 +597,8 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
             .then(|| dimension.id.clone())
         })
         .collect();
-    // Points held at the middle of the trimmed curve (a center rectangle's centre, an ellipse's
-    // centre on its axis): `release_extent` drops that hold, so remember them for the cuts below.
+    // Points held at the middle of the trimmed line (a center rectangle's centre on its first
+    // diagonal): `release_extent` drops that hold, so remember them for the cuts below.
     let midpoints: Vec<usize> = sk
         .constraints
         .iter()
