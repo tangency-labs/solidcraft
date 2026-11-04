@@ -13,7 +13,10 @@ use crate::p21::{Entity, Exchange, Param};
 
 pub type R<T> = Result<T, String>;
 
-/// Geometry nesting we follow (a trimmed curve of a surface curve of …).
+/// Geometry nesting we follow (a trimmed curve of a surface curve of …). Real files nest a few
+/// levels; the cap bounds the stack, and it is what ends a curve or surface whose definition leads
+/// back to itself, so every curve and surface read checks it (`read_curve`,
+/// `read_surface`).
 pub const MAX_GEOM_DEPTH: usize = 12;
 /// Most control points in one B-spline (the whole net for a surface).
 pub const MAX_CTRL: usize = 1_000_000;
@@ -385,9 +388,6 @@ impl<'a> Reader<'a> {
         if let Some(c) = self.curves.get(&id) {
             return Ok(c.clone());
         }
-        if depth > MAX_GEOM_DEPTH {
-            return Err("curve definitions nested too deeply".into());
-        }
         let l = self.units.len;
         let c = Arc::new(self.read_curve(id, [l, l, l], 3, depth)?);
         self.curves.insert(id, c.clone());
@@ -400,9 +400,6 @@ impl<'a> Reader<'a> {
         let key = (id, [s[0].to_bits(), s[1].to_bits()]);
         if let Some(c) = self.curves_2d.get(&key) {
             return Ok(c.clone());
-        }
-        if depth > MAX_GEOM_DEPTH {
-            return Err("curve definitions nested too deeply".into());
         }
         let c = Arc::new(self.read_curve(id, s, 2, depth)?);
         self.curves_2d.insert(key, c.clone());
@@ -425,7 +422,12 @@ impl<'a> Reader<'a> {
         Ok(s[0])
     }
 
+    /// Every curve is read here, the basis of a 2D trimmed curve too, so the depth check here
+    /// ends every chain of curve references, a cycle included.
     fn read_curve(&mut self, id: u64, s: [f64; 3], dim: usize, depth: usize) -> R<Curve> {
+        if depth > MAX_GEOM_DEPTH {
+            return Err(format!("curve #{id}: definitions nested more than {MAX_GEOM_DEPTH} deep, or referring to themselves"));
+        }
         let e = entity(self.ex, id)?;
         if e.is_complex() {
             return self.bspline_curve(e, s, dim);
@@ -633,15 +635,15 @@ impl<'a> Reader<'a> {
         if let Some(s) = self.surfaces.get(&id) {
             return Ok(s.clone());
         }
-        if depth > MAX_GEOM_DEPTH {
-            return Err("surface definitions nested too deeply".into());
-        }
         let s = Arc::new(self.read_surface(id, depth)?);
         self.surfaces.insert(id, s.clone());
         Ok(s)
     }
 
     fn read_surface(&mut self, id: u64, depth: usize) -> R<Surface> {
+        if depth > MAX_GEOM_DEPTH {
+            return Err(format!("surface #{id}: definitions nested more than {MAX_GEOM_DEPTH} deep, or referring to themselves"));
+        }
         let e = entity(self.ex, id)?;
         if e.is_complex() {
             return self.bspline_surface(e);
