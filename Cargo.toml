@@ -77,13 +77,13 @@ gltf = { version = "1.4", default-features = false, features = ["names"] }
 # tree through x11rb).
 gethostname = "1"
 
-# FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
-# Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
-# features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
+# FreeCAD, Rhino, and SolidWorks import (Apache-2.0, pure Rust; native and browser builds).
+# Pinned: its IR and codec APIs change between minor versions. Open and supported formats: no default
+# features, so cadmpeg's codecs for other commercial formats (f3d, inventor, catia, creo, nx)
 # and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
 cadmpeg-core = "=0.6.3"
 cadmpeg-ir = "=0.6.3"
-cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
+cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "sldprt", "step"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }

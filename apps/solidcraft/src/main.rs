@@ -429,6 +429,9 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
         if e.eq_ignore_ascii_case("fcstd") {
             forms.push("FCStd".into());
         }
+        if e.eq_ignore_ascii_case("sldprt") {
+            forms.push("SLDPRT".into());
+        }
         for v in forms {
             if !all.contains(&v) {
                 all.push(v);
