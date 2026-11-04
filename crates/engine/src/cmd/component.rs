@@ -751,7 +751,17 @@ fn after_joints(s: &mut Session, p: &Value, id: u64, moved: Mat, cmd: &str) -> V
         return json!({"occurrence": id, "transform": now, "pending": false});
     }
     let name = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_default();
-    let why = occurrence_path(s, p, id, cmd).and_then(|path| s.drag_group(&path)).err().map(|e| format!("{e}. ")).unwrap_or_default();
+    // The placement the caller named, else the first one: a part in a component placed more
+    // than once has no path of its own, and its joints hold it alike in every placement.
+    let path = if p.get("path").is_some() {
+        occurrence_path(s, p, id, cmd).ok()
+    } else {
+        let parent = s.doc.occurrences.iter().find(|o| o.id == id).map_or(0, |o| o.parent);
+        let mut path = s.doc.first_path(parent);
+        path.push(id);
+        Some(path)
+    };
+    let why = path.and_then(|path| s.drag_group(&path).err()).map(|e| format!("{e}. ")).unwrap_or_default();
     let warning = format!(
         "{why}The joints put {name} back where they hold it. To move it, change the joint (joint.edit for its offset or angle, \
          joint.drive for a hinge or slider value), move what it is held to, or use joint.reach"

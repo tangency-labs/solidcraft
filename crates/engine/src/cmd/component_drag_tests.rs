@@ -330,3 +330,23 @@ fn a_move_its_joints_undo_says_so() {
         assert!(warning.contains(holder) && warning.contains("joint.reach") && warning.contains("joint.edit"), "{case}: {warning}");
     }
 }
+
+/// #11723: a part inside an assembly placed twice has no path of its own. When its joints put it
+/// back, the warning still names the joint that holds it.
+#[test]
+fn a_move_its_joints_undo_names_the_joint_in_a_repeated_assembly() {
+    let mut s = Session::default();
+    let (_, base) = part(&mut s, "Base", [0.0, 0.0, 0.0]);
+    let arm = run(&mut s, "component.create", json!({"name": "Arm"}));
+    let (arm_component, arm_at) = (arm["component"].as_u64().unwrap(), arm["occurrence"].as_u64().unwrap());
+    run(&mut s, "component.activate", json!({"component": arm_component}));
+    let plate = run(&mut s, "component.create", json!({"name": "Plate"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": base, "b": plate, "name": "Mount"}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": arm_at, "translate": [0, 50, 0]}));
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": plate, "translate": [0, 0, 30]}));
+    assert_eq!(r["reverted"], json!(true), "{r}");
+    let warning = r["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("Mount"), "the warning names the joint: {warning}");
+}
