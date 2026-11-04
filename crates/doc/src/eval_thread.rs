@@ -126,6 +126,9 @@ pub(super) struct ThreadOn {
     /// A modelled internal thread in a hole wider than it needs: the radius the bore is narrowed
     /// to (the thread's minor radius) before the groove is cut, with the hole's own radius.
     narrow: Option<f64>,
+    /// A shoulder keeps the square stop because the kernel couldn't check whether it stays beyond
+    /// the face's end.
+    shoulder_unchecked: bool,
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
@@ -169,13 +172,17 @@ impl FaceEnds<'_> {
     /// Does the shoulder at this closed end stay beyond the plane of the face's end? Not where it
     /// rises back along the face (a slanted plate, a boss on a round body), which a groove
     /// running to that plane would cut into: there is material outside the face just inside it.
-    /// A check the kernel can't make counts as no: the groove then keeps its square stop.
-    fn clear_of_end_plane(&self, side: usize) -> bool {
+    /// The caller keeps the square stop, and says so, when the kernel can't make the check.
+    fn clear_of_end_plane(&self, side: usize) -> Result<bool> {
+        #[cfg(test)]
+        if tests::FAIL_CLEARANCE.get() {
+            return Err(kernel::KernelError::Failed("clearance refused for the test".into()).into());
+        }
         let (p, e) = (self.pitch, self.pitch * 1e-3);
         let inside = if side == 0 { (self.cyl.start + e, self.cyl.start + p) } else { (self.cyl.end - p, self.cyl.end - e) };
         // All the radii the groove cuts beyond the face; only touching their rims is not in its
         // way, as in `free`.
-        kernel::material_in_ring(self.body, self.cyl, self.beyond.0 + e, self.beyond.1 - e, inside).is_ok_and(|hit| !hit)
+        kernel::material_in_ring(self.body, self.cyl, self.beyond.0 + e, self.beyond.1 - e, inside).map(|hit| !hit).map_err(DocError::from)
     }
 }
 
@@ -350,13 +357,23 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
     // How each end of the thread meets the face: at a face end, or within half a pitch (and its
     // runout) of one, where the groove would reach past it, that end's free-end test decides.
     let near = |at: f64, side: usize| if side == 0 { at - lo } else { hi - at } < pitch / 2.0 + ease.get(side).copied().unwrap_or(0.0);
+    // A shoulder whose check the kernel couldn't make keeps the square stop, and the feature says so.
+    let mut unchecked = false;
     let mut kind = |at: f64, side: usize| -> Result<End> {
         Ok(if !ask.modeled || !near(at, side) {
             End::Inside
         } else if !ends.free(side)? {
             let at_end = (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3;
             let square = ease.get(side).copied().unwrap_or(0.0) == 0.0;
-            if at_end && square && !cyl.internal && !form.is_taper() && ends.clear_of_end_plane(side) { End::Shoulder } else { End::Closed }
+            let clear = at_end && square && !cyl.internal && !form.is_taper() && {
+                let check = ends.clear_of_end_plane(side);
+                unchecked |= matches!(check, Err(DocError::Kernel(_)));
+                match check {
+                    Err(DocError::Kernel(_)) => false,
+                    other => other?,
+                }
+            };
+            if clear { End::Shoulder } else { End::Closed }
         } else if (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3 {
             End::Free
         } else {
@@ -392,7 +409,7 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         .then(|| form.groove(major, pitch, true))
         .filter(|g| !(g.root_r - cyl.radius >= g.basic_depth / 4.0))
         .map(|g| g.crest_r);
-    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow })
+    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow, shoulder_unchecked: unchecked })
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
@@ -833,7 +850,7 @@ pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRun
 /// (`tip`, with its angle and depth when given). What the user should be told about the result, if
 /// anything, is returned.
 pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<Option<String>> {
-    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow } = on;
+    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow, shoulder_unchecked } = on;
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     let (mut input, radius) = (mb.traced(), cyl.radius);
@@ -897,16 +914,18 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
     };
     // A design that built with the square stop keeps building: where the kernel can't make the
     // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
-    let (mut note, mut made) = (None, cut_grooves(ends));
+    let mut made = cut_grooves(ends);
+    let mut square_stop = shoulder_unchecked;
     if matches!(made, Err(DocError::Kernel(_))) && ends.contains(&End::Shoulder) {
         made = cut_grooves(ends.map(|e| if e == End::Shoulder { End::Closed } else { e }));
-        note = made.is_ok().then(|| {
-            format!(
-                "the {} thread's groove could not be run down to the shoulder here, so it stops clear of it and its last turn is left uncut",
-                t.designation
-            )
-        });
+        square_stop = true;
     }
+    let note = (square_stop && made.is_ok()).then(|| {
+        format!(
+            "the {} thread's groove could not be run down to the shoulder here, so it stops clear of it and its last turn is left uncut",
+            t.designation
+        )
+    });
     let (nb, groove_faces) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
@@ -1017,6 +1036,8 @@ mod tests {
     thread_local! {
         /// Make [`trim_at_shoulders`] find nothing of the groove left.
         pub(super) static EMPTY_TRIM: Cell<bool> = const { Cell::new(false) };
+        /// Make the rising-shoulder check fail as the kernel would.
+        pub(super) static FAIL_CLEARANCE: Cell<bool> = const { Cell::new(false) };
     }
 
     fn ask() -> ThreadAsk<'static> {
@@ -1058,6 +1079,24 @@ mod tests {
         let round = kernel::cylinder(Vec3::new(0.0, -20.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 10.0, 40.0).unwrap();
         let on_round = ends_of(join(&round, &boss), 20.0);
         assert!(on_round.contains(&End::Closed) && !on_round.contains(&End::Shoulder), "{on_round:?}");
+    }
+
+    /// Where the kernel can't check the shoulder, the thread still builds with the square stop, and
+    /// the feature says its last turn is left uncut.
+    #[test]
+    fn a_shoulder_the_kernel_cannot_check_keeps_the_square_stop_and_says_so() {
+        let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 6.0)).unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0), 5.0, 16.0).unwrap();
+        let body = kernel::boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let mut st = ModelState::default();
+        st.bodies.push(ModelBody::new("Part".into(), body, 1));
+        FAIL_CLEARANCE.set(true);
+        let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask());
+        FAIL_CLEARANCE.set(false);
+        let on = on.unwrap();
+        assert!(on.ends.contains(&End::Closed) && !on.ends.contains(&End::Shoulder), "{:?}", on.ends);
+        let note = cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
+        assert!(note.is_some_and(|n| n.contains("M10") && n.contains("left uncut")));
     }
 
     /// Where the trim leaves nothing of the groove, a thread at a shoulder that built with the
