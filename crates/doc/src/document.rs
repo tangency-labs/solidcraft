@@ -1928,7 +1928,7 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
         /// Name new conversions from their exact source mesh and reconstruction tolerance.
-        /// Absent in older records: keep their geometry-derived names and original body owner.
+        /// Absent in older records: keep their geometry-derived names and conversion feature owner.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         source_bound_names: bool,
     },

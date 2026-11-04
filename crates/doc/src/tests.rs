@@ -1171,30 +1171,29 @@ fn legacy_mesh_conversion_preserves_saved_geometry_names() {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::new("legacy conversion");
-    let import = doc
-        .add_feature(
-            FeatureKind::MeshImport {
-                file: "legacy-box.stl".into(),
-                meshes: vec![MeshData {
-                    name: "Mesh".into(),
-                    positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
-                    triangles: mesh.triangles.iter().flatten().copied().collect(),
-                    color: None,
-                }],
-            },
-            None,
-        )
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "legacy-box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        None,
+    )
+    .unwrap();
     // An existing record has no source-bound naming marker.
     let kind = serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.01 mm"})).unwrap();
-    doc.add_feature(kind, None).unwrap();
+    let conversion = doc.add_feature(kind, None).unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
     let state = model.state();
     let converted = state.body("Mesh").unwrap();
     // Reproduce the upstream ModelBody::new path, with the same naming origin and no traced roles.
-    let mut legacy = ModelBody::new(converted.name.clone(), converted.body.clone(), import);
+    let mut legacy = ModelBody::new(converted.name.clone(), converted.body.clone(), conversion);
     legacy.names = crate::naming::NameCell::new(converted.names.origin.clone());
     let faces = crate::naming::face_names(&legacy);
     let edges = crate::naming::edge_names(&legacy);
@@ -1213,7 +1212,7 @@ fn legacy_mesh_conversion_preserves_saved_geometry_names() {
         let body = st.body("Mesh").unwrap();
         assert_eq!(crate::naming::face_names(body), faces, "existing MeshConvert faces keep their stored names");
         assert_eq!(crate::naming::edge_names(body), edges, "existing MeshConvert edges keep their stored names");
-        assert_eq!(body.feature, import, "existing conversion keeps its original body owner");
+        assert_eq!(body.feature, conversion, "existing conversion keeps the conversion feature as its owner");
         let face = crate::name_lookup::locate_face(&st, &faces[0], face_point).unwrap();
         let edge = crate::name_lookup::locate_edge(body, &edges[0], edge_point).unwrap();
         assert!(!face.verified && !edge.verified, "legacy geometry names must not pretend to be exact lineage");

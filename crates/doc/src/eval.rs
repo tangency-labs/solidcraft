@@ -7998,7 +7998,7 @@ fn eval_feature(
                 let converted = crate::lineage::reconstructed_tool(converted, positions, triangles, tolerance);
                 ModelBody::traced_new(source.name.clone(), converted, f.id)
             } else {
-                ModelBody::new(source.name.clone(), converted, source.feature)
+                ModelBody::new(source.name.clone(), converted, f.id)
             };
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
