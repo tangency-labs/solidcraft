@@ -5,6 +5,14 @@
   {"expect": {"prefs": {"dialog": "Design", "length_decimals": 2, "angle_decimals": 1, "parameter_list_rows": 50}}},
   {"click": {"handle": "dialog:Length decimals up"}},
   {"expect": {"prefs": {"length_decimals": 3}}},
+  {"click": {"handle": "dialog:Length decimals up"}},
+  {"click": {"handle": "dialog:Length decimals up"}},
+  {"click": {"handle": "dialog:Length decimals up"}},
+  {"click": {"handle": "dialog:Length decimals up"}},
+  {"expect": {"prefs": {"length_decimals": 6}}},
+  {"click": {"handle": "dialog:Length decimals down"}},
+  {"click": {"handle": "dialog:Length decimals down"}},
+  {"click": {"handle": "dialog:Length decimals down"}},
   {"click": {"handle": "dialog:Length decimals down"}},
   {"click": {"handle": "dialog:Length decimals down"}},
   {"expect": {"prefs": {"length_decimals": 1}}},
@@ -15,5 +23,8 @@
   {"click": {"handle": "dialog:Angle decimals down"}},
   {"expect": {"prefs": {"angle_decimals": 0}}},
   {"click": {"handle": "dialog:Rows down"}},
-  {"expect": {"prefs": {"parameter_list_rows": 49}}}
+  {"expect": {"prefs": {"parameter_list_rows": 49}}},
+  {"click": {"handle": "dialog:Rows up"}},
+  {"click": {"handle": "dialog:Rows up"}},
+  {"expect": {"prefs": {"parameter_list_rows": 51}}}
 ]

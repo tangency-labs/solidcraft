@@ -1525,15 +1525,18 @@ pub(crate) fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &m
         .inner;
     let row = label(ui).to_owned();
     let (now, lo, hi) = (value.to_f64(), range.start().to_f64(), range.end().to_f64());
-    let next = |delta: i64| {
-        let next = (now.round() + delta as f64).clamp(lo, hi);
-        (next != now).then_some(next)
-    };
-    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, next) {
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_whole(now, lo, hi, delta)) {
         *value = T::from_f64(next);
         response.mark_changed();
     }
     response
+}
+
+/// `now` stepped by `delta` whole numbers within `lo..=hi`, or None when that does not move it the
+/// arrow's way: at a limit, or past one (a saved value the arrow must not pull the other way).
+fn step_whole(now: f64, lo: f64, hi: f64, delta: i64) -> Option<f64> {
+    let next = (now.round() + delta as f64).clamp(lo, hi);
+    if delta > 0 { next > now } else { next < now }.then_some(next)
 }
 
 /// Three bounded numeric components sharing the available control-column width.
@@ -1749,4 +1752,27 @@ pub(crate) fn placement_field_content_size(ui: &Ui, value: &str) -> egui::Vec2 {
     // Retain the native hit target: a taller editor would intercept nearby sketch picks.
     let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + ui.spacing().extra_text_line_spacing + t.space_4;
     vec2(grown_width(ui, value, &font, t.control_height * 3.0 - t.space_6), height)
+}
+
+#[cfg(test)]
+mod step_whole_tests {
+    use super::step_whole;
+
+    #[test]
+    fn a_step_moves_one_whole_number_within_the_limits() {
+        assert_eq!(step_whole(2.0, 0.0, 6.0, 1), Some(3.0));
+        assert_eq!(step_whole(2.0, 0.0, 6.0, -1), Some(1.0));
+        assert_eq!(step_whole(6.0, 0.0, 6.0, 1), None);
+        assert_eq!(step_whole(0.0, 0.0, 6.0, -1), None);
+    }
+
+    /// A value past a limit (#11829) only steps back into range: Up never lowers it, Down never
+    /// raises it.
+    #[test]
+    fn a_value_past_a_limit_is_not_pulled_the_other_way() {
+        assert_eq!(step_whole(300.0, 1.0, 200.0, 1), None);
+        assert_eq!(step_whole(300.0, 1.0, 200.0, -1), Some(200.0));
+        assert_eq!(step_whole(-3.0, 0.0, 6.0, -1), None);
+        assert_eq!(step_whole(-3.0, 0.0, 6.0, 1), Some(0.0));
+    }
 }
