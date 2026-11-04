@@ -5366,6 +5366,8 @@
   "ui.repeat_nothing": "还没有可重复的操作：请先启动一个工具或对话框。",
   "ui.replace_with_link_done": "这些副本现在是链接设计的放置。",
   "ui.report_a_bug": "报告缺陷",
+  "ui.report_characters_left_one": "剩余 {count} 个字符",
+  "ui.report_characters_left_other": "剩余 {count} 个字符",
   "ui.reset": "重置",
   "ui.reset_all": "全部重置",
   "ui.reset_the_settings_on_this_page": "重置此页面上的设置",

@@ -5366,6 +5366,8 @@
   "ui.repeat_nothing": "まだ繰り返すものがありません。先にツールかダイアログを開始してください。",
   "ui.replace_with_link_done": "コピーはリンクされたデザインの配置になりました。",
   "ui.report_a_bug": "不具合を報告",
+  "ui.report_characters_left_one": "残り {count} 文字",
+  "ui.report_characters_left_other": "残り {count} 文字",
   "ui.reset": "リセット",
   "ui.reset_all": "すべてリセット",
   "ui.reset_the_settings_on_this_page": "このページの設定をリセット",

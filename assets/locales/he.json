@@ -5366,6 +5366,8 @@
   "ui.repeat_nothing": "אין עדיין מה לחזור עליו: התחל קודם כלי או תיבת דו־שיח.",
   "ui.replace_with_link_done": "העותקים הם עכשיו מיקומים של התכן המקושר.",
   "ui.report_a_bug": "דיווח על באג",
+  "ui.report_characters_left_one": "תווים שנותרו: {count}",
+  "ui.report_characters_left_other": "תווים שנותרו: {count}",
   "ui.reset": "איפוס",
   "ui.reset_all": "איפוס הכול",
   "ui.reset_the_settings_on_this_page": "איפוס ההגדרות בדף זה",

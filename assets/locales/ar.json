@@ -5366,6 +5366,8 @@
   "ui.repeat_nothing": "لا يوجد ما يُكرَّر بعد: ابدأ أداة أو مربع حوار أولًا.",
   "ui.replace_with_link_done": "أصبحت النسخ الآن مواضع للتصميم المرتبط.",
   "ui.report_a_bug": "الإبلاغ عن خطأ",
+  "ui.report_characters_left_one": "الأحرف المتبقية: {count}",
+  "ui.report_characters_left_other": "الأحرف المتبقية: {count}",
   "ui.reset": "إعادة تعيين",
   "ui.reset_all": "إعادة تعيين الكل",
   "ui.reset_the_settings_on_this_page": "إعادة تعيين إعدادات هذه الصفحة",

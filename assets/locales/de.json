@@ -5307,6 +5307,8 @@
   "ui.repeat_nothing": "Noch nichts zu wiederholen: Starten Sie zuerst ein Werkzeug oder einen Dialog.",
   "ui.replace_with_link_done": "Die Kopien sind jetzt Platzierungen des verknüpften Designs.",
   "ui.report_a_bug": "Fehler melden",
+  "ui.report_characters_left_one": "{count} Zeichen übrig",
+  "ui.report_characters_left_other": "{count} Zeichen übrig",
   "ui.reset": "Zurücksetzen",
   "ui.reset_all": "Alle zurücksetzen",
   "ui.reset_the_settings_on_this_page": "Einstellungen auf dieser Seite zurücksetzen",

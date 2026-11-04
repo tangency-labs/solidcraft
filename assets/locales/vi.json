@@ -5366,6 +5366,8 @@
   "ui.repeat_nothing": "Chưa có gì để lặp lại: hãy bắt đầu một công cụ hoặc hộp thoại trước.",
   "ui.replace_with_link_done": "Các bản sao hiện đã trở thành các vị trí đặt của thiết kế liên kết.",
   "ui.report_a_bug": "Báo cáo lỗi",
+  "ui.report_characters_left_one": "Còn {count} ký tự",
+  "ui.report_characters_left_other": "Còn {count} ký tự",
   "ui.reset": "Đặt lại",
   "ui.reset_all": "Đặt lại tất cả",
   "ui.reset_the_settings_on_this_page": "Đặt lại các cài đặt trên trang này",
