@@ -979,6 +979,32 @@ fn hidden_edge_mode_keeps_section_caps_as_occluders() {
 }
 
 #[test]
+fn hidden_edge_mode_keeps_caps_behind_a_nearer_kept_face() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    let (mut h, _) = covered_edge();
+    // This face counts as kept just before the cut. The Cover still crosses the plane.
+    let top = 25.0 + crate::view_pick::SECTION_EPS * 0.5;
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":1,"corner":[-10,-10,top-1.0],"body_name":"NearFace"})).unwrap();
+    h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
+    h.app.ui.perspective = false;
+    h.app.ui.visual_style = 3;
+    h.app.preferences.select_hidden_edges = true;
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    // The ray lies inside the faces, close enough to reach the Target's edge.
+    let pos = proj.to_screen(solidcore_record::Vec3::new(5.0, 0.02, 10.0)).unwrap();
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target), "ordinary faces permit hidden edges");
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, 25.0), solidcore_record::Vec3::Z));
+    for enabled in [false, true] {
+        h.app.preferences.select_hidden_edges = enabled;
+        for hits in [pick(&h.app, &proj, pos), pick_all(&h.app, &proj, pos)] {
+            assert!(hits.iter().any(|hit| matches!(hit, Hit::Face { body, .. } if body == "NearFace")), "the nearer kept face remains selectable");
+            assert!(!hits.iter().any(target), "the cap still hides the Target with hidden edges {enabled}");
+        }
+    }
+}
+
+#[test]
 fn hidden_edge_ties_prefer_visible_edges_without_overriding_distance() {
     use crate::viewport::{Hit, pick, pick_all, projection};
     for front_first in [false, true] {

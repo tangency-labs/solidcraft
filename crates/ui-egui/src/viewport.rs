@@ -2697,21 +2697,23 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     if crate::render_workspace::active(app) {
         return if all { faces.sorted().into_iter().map(|(_, hit)| hit).collect() } else { bestf.into_iter().map(|(_, hit)| hit).collect() };
     }
-    // The cut cap, where the plane crosses a body nearer than any kept face: it hides that face
-    // and everything behind it, and is no face itself.
+    // Find the cap independently: a face within the clipping tolerance may lie just ahead
+    // of it. That face stays selectable, but cannot expose edges behind the cap.
     let cap = section.and_then(|(so, sn)| {
         let den = sn.dot(d);
         let t_cap = (sn.dot(so) - sn.dot(o)) / den;
-        let nearer = den.abs() > 1e-12 && t_cap > 0.0 && bestf.as_ref().is_none_or(|(t, _)| t_cap < *t);
+        let crosses = den.abs() > 1e-12 && t_cap > 0.0;
         let replaced = app.preview.effective_replaced();
         let shown_bodies = &None;
-        (nearer && crate::view_pick::body_cut_at(app, &st, &bounds, o, d, t_cap, true, replaced, shown_bodies).is_some()).then_some(t_cap)
+        (crosses && crate::view_pick::body_cut_at(app, &st, &bounds, o, d, t_cap, true, replaced, shown_bodies).is_some()).then_some(t_cap)
     });
     if let Some(t_cap) = cap {
-        bestf = None;
-        faces.v.retain(|(t, _)| *t < t_cap);
+        if bestf.as_ref().is_some_and(|(t, _)| t_cap < *t) {
+            bestf = None;
+        }
+        faces.v.retain(|(t, _)| *t <= t_cap);
     }
-    let hidden_from = cap.or(bestf.as_ref().map(|(t, _)| *t));
+    let hidden_from = bestf.as_ref().map(|(t, _)| *t).or(cap);
     let slack = scene_pick_slack(app);
     // Wireframe draws no faces, so nothing hides an edge or a vertex. `slack` is the body's own:
     // what counts as lying on the face in front depends on how coarsely that body is meshed.
