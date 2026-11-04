@@ -515,16 +515,21 @@ impl Document {
         }
     }
 
+    /// The units `drawing` (one of this design's drawings) shows its numbers in.
+    pub fn drawing_units<'a>(&'a self, drawing: &'a Drawing) -> &'a str {
+        match &drawing.units {
+            Units::Fixed { unit } => unit.as_str(),
+            Units::FollowModel => self.units.as_str(),
+        }
+    }
+
     /// The dimensions `wanted` of `drawing` (one of this design's drawings) as `model` (this
     /// design's) has them now: what each measures found again by name, measured on its view, and
     /// the text it shows. A body is looked up and its edge names worked out once for the call,
     /// however many dimensions name it; a body none names isn't touched. `Err` only for an id the
     /// drawing doesn't have, or a damaged record.
     pub fn resolve_dimensions(&self, model: &Model, drawing: &Drawing, wanted: &[u64]) -> Result<Vec<Resolved>> {
-        let units = match &drawing.units {
-            Units::Fixed { unit } => unit.as_str(),
-            Units::FollowModel => self.units.as_str(),
-        };
+        let units = self.drawing_units(drawing);
         let mut lookup = Lookup::new(self, model);
         wanted
             .iter()

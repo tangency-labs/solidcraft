@@ -10,9 +10,10 @@ use serde_json::Value;
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
-use crate::drawing_scene::CMD;
+use crate::drawing_scene::{CMD, DimensionState};
 use crate::schema::drawing_scene::{
-    DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, SheetPaperScene, SheetSceneParams, SheetSceneResult, ViewStatusResult,
+    DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, SheetPaperScene, SheetSceneDimension, SheetSceneParams, SheetSceneResult,
+    ViewStatusResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -36,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<SheetSceneResult>)
-    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity}]}]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its visible lines only for now), then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border and each view sit on paper}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why. Read-only; no model is evaluated.")];
+    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity}]}]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its visible lines only for now), then the dimensions of those views by view and id (object: the dimension; lines and arrowheads, in paper millimetres at any scale, with no text yet), then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view and each dimension sit on paper, dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}]}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn. Read-only; no model is evaluated.")];
 
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;
@@ -60,6 +61,21 @@ fn status(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// Each dimension of a scene in the words of a reply.
+pub(super) fn dimension_results(states: Vec<DimensionState>) -> Vec<SheetSceneDimension> {
+    let one = |state: DimensionState| {
+        let (status, why, _) = super::drawing_dimension::status_words(state.status);
+        SheetSceneDimension {
+            dimension: ids::encode(state.dimension),
+            view: ids::encode(state.view),
+            status,
+            drawn: state.drawn,
+            why: why.or(state.why),
+        }
+    };
+    states.into_iter().map(one).collect()
+}
+
 fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let request: SheetSceneParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
@@ -67,6 +83,8 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let built = crate::drawing_scene::build(s, &d, sheet)?;
     let views = built.views.into_iter().map(Into::into).collect();
     let objects = built.objects.into_iter().map(Into::into).collect();
-    let reply = SheetSceneResult { sheet: ids::encode(sheet), scene: SheetPaperScene(built.scene), views, objects, param_warnings: Vec::new() };
+    let dimensions = dimension_results(built.dimensions);
+    let reply =
+        SheetSceneResult { sheet: ids::encode(sheet), scene: SheetPaperScene(built.scene), views, objects, dimensions, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }

@@ -22,8 +22,9 @@ pub struct SheetSceneParams {
 
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
-/// (object and source: the placement), then each view's strokes (object: the view), then the title
-/// block's (object: the sheet).
+/// (object and source: the placement), then each view's strokes (object: the view), then each
+/// dimension's lines and arrowheads (object: the dimension), then the title block's (object: the
+/// sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -33,7 +34,11 @@ impl JsonSchema for SheetPaperScene {
         "SheetPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::TitleBlock], true)
+        paper_scene_schema(
+            generator,
+            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::TitleBlock],
+            true,
+        )
     }
 }
 
@@ -54,6 +59,18 @@ impl From<ViewState> for SheetSceneView {
     fn from(v: ViewState) -> Self {
         SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason(), stats: v.stats.map(Into::into) }
     }
+}
+
+/// One dimension of a view on the sheet: where it stands with the model, in
+/// `drawing.dimension.inspect`'s words, and whether its lines are in the scene, with why not.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneDimension {
+    pub dimension: String,
+    pub view: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }
 
 /// Where one object of the scene sits on paper: the box round what it draws, along its lines' paths
@@ -120,8 +137,10 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, in paint order.
+    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
     pub objects: Vec<SheetObjectResult>,
+    /// Each dimension of a view on the sheet, by view and id.
+    pub dimensions: Vec<SheetSceneDimension>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
