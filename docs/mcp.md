@@ -192,8 +192,9 @@ The files are edited in place: only the `solidcraft` entries change, everything 
 (other servers, comments, order) stays as it was, and the file is copied to `<name>.bak` first. A
 file that does not parse is left alone. Running it again after an update moves the program only
 refreshes the path of an entry it wrote; an entry you changed (extra arguments, another program)
-is left as you have it. `--live` also adds `solidcraft-live`, which bridges to the open app (port
-7878, see below). Restart the client afterwards.
+is left as you have it. `--live` also adds `solidcraft-live`, which bridges to the open app on its
+default port, 27878 (see below); a `solidcraft-live` an older setup pointed at 7878 is moved there.
+Restart the client afterwards.
 
 SolidCraft also does this by itself: when the app starts it adds the `solidcraft` entry to each
 installed client (and refreshes its path after an update), and says once which clients it

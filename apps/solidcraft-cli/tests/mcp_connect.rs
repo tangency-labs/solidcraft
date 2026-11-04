@@ -205,7 +205,7 @@ mod setup {
         assert_eq!(v["theme"], "x");
         assert_eq!(v["mcp"]["other"], old["mcp"]["other"]);
         assert_eq!(v["mcp"]["solidcraft"], json!({"type": "local", "command": [exe(), "mcp"], "enabled": true}));
-        assert_eq!(v["mcp"]["solidcraft-live"]["command"], json!([exe(), "mcp", "--connect", "127.0.0.1:7878"]));
+        assert_eq!(v["mcp"]["solidcraft-live"]["command"], json!([exe(), "mcp", "--connect", "127.0.0.1:27878"]));
         assert_eq!(json_of(&oc.join("opencode.json.bak")), old);
         let c = json_of(&h.join(".cursor/mcp.json"));
         assert_eq!(c["mcpServers"]["other"], json!({"command": "o"}));

@@ -11,8 +11,13 @@
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-/// The address `--live` bridges to, the one docs/mcp.md starts the app on.
-const LIVE_ADDR: &str = "127.0.0.1:7878";
+/// The address `--live` bridges to: the app's default control port,
+/// [`crate::control_auth::DEFAULT_PORT`] (a test keeps the two equal).
+const LIVE_ADDR: &str = "127.0.0.1:27878";
+
+/// The address an older `--live` wrote, which the app listens on only when started with
+/// `--control 7878` (#11807). An entry still holding it is ours, moved to [`LIVE_ADDR`].
+const OLD_LIVE_ADDR: &str = "127.0.0.1:7878";
 
 /// Where the clients keep their configuration, read from the environment so tests can point it at a
 /// temporary folder.
@@ -253,27 +258,40 @@ fn command_and_args(entry: &Value) -> Option<(String, Vec<String>)> {
     }
 }
 
+/// Whether `got` are the arguments an older setup wrote for an entry that now gets `args`.
+fn earlier_args(got: &[String], args: &[&str]) -> bool {
+    args == ["mcp", "--connect", LIVE_ADDR] && got == ["mcp", "--connect", OLD_LIVE_ADDR]
+}
+
 fn judge(existing: Option<&Value>, exe: &str, args: &[&str]) -> Verdict {
     let Some(existing) = existing else { return Verdict::Add };
     let Some((cmd, got)) = command_and_args(existing) else { return Verdict::Custom };
-    if got != args {
+    let earlier = earlier_args(&got, args);
+    if got != args && !earlier {
         return Verdict::Custom;
     }
-    if cmd == exe {
+    if cmd == exe && !earlier {
         Verdict::Same
-    } else if is_solidcraft_cli(&cmd) {
+    } else if cmd == exe || is_solidcraft_cli(&cmd) {
         Verdict::Stale
     } else {
         Verdict::Custom
     }
 }
 
-/// `existing` with its command replaced by `exe`, every other field kept.
-fn with_command(existing: &Value, exe: &str) -> Value {
+/// `existing` with its command replaced by `exe` and its arguments by `args`, every other field kept.
+fn refreshed(existing: &Value, exe: &str, args: &[&str]) -> Value {
     let mut v = existing.clone();
-    match v.get_mut("command") {
-        Some(Value::Array(a)) if !a.is_empty() => a[0] = json!(exe),
-        Some(c) => *c = json!(exe),
+    let Some(entry) = v.as_object_mut() else { return v };
+    match entry.get("command") {
+        Some(Value::Array(_)) => {
+            let all: Vec<&str> = std::iter::once(exe).chain(args.iter().copied()).collect();
+            entry.insert("command".into(), json!(all));
+        }
+        Some(_) => {
+            entry.insert("command".into(), json!(exe));
+            entry.insert("args".into(), json!(args));
+        }
         None => {}
     }
     v
@@ -504,7 +522,7 @@ fn edit_json(text: &mut String, shape: Shape, exe: &str, live: bool, mode: Mode)
                 Change::Added
             }
             (Verdict::Stale, Some(m)) => {
-                let updated = with_command(parsed.as_ref().unwrap_or(&new), exe);
+                let updated = refreshed(parsed.as_ref().unwrap_or(&new), exe, &args);
                 let indent = line_indent(text, m.val.0);
                 text.replace_range(m.val.0..m.val.1, &pretty_at(&updated, &indent));
                 Change::Updated
@@ -572,6 +590,11 @@ fn edit_toml(text: &mut String, exe: &str, live: bool, mode: Mode) -> Result<Vec
             Verdict::Stale => {
                 if let Some(entry) = doc.get_mut("mcp_servers").and_then(|t| t.get_mut(name)) {
                     entry["command"] = value(exe);
+                    let mut a = Array::new();
+                    for x in &args {
+                        a.push(*x);
+                    }
+                    entry["args"] = value(a);
                 }
                 Change::Updated
             }
@@ -840,6 +863,49 @@ mod tests {
             "[mcp_servers.other]\ncommand = \"o\"\n\n[mcp_servers.solidcraft]\ncommand = \"/old/solidcraft-cli\"\nargs = [\"mcp\"]\n".to_owned();
         assert_eq!(edit_toml(&mut toml, EXE, false, Mode::Remove).unwrap(), [("solidcraft", Change::Removed)]);
         assert!(toml.contains("[mcp_servers.other]") && !toml.contains("solidcraft"), "{toml}");
+    }
+
+    /// #11807: `--live` bridges to the port the app listens on by default, and a `solidcraft-live`
+    /// an older setup pointed at 7878 is still ours: set up again, it moves; turned off, it goes.
+    #[test]
+    fn live_bridges_to_the_apps_default_port_and_moves_an_old_entry_there() {
+        let addr = format!("127.0.0.1:{}", crate::control_auth::DEFAULT_PORT);
+        let mut t = String::new();
+        edit_json(&mut t, Shape::ClaudeCode, EXE, true, Mode::Add).unwrap();
+        let v: Value = serde_json::from_str(&t).unwrap();
+        assert_eq!(v["mcpServers"]["solidcraft-live"]["args"], json!(["mcp", "--connect", addr]));
+
+        let old = |cmd: &str| {
+            format!(
+                r#"{{"mcpServers": {{"solidcraft-live": {{"command": "{cmd}", "args": ["mcp", "--connect", "127.0.0.1:7878"], "env": {{"A": "1"}}}}}}}}"#
+            )
+        };
+        for cmd in [EXE, "/old/solidcraft-cli"] {
+            let mut t = old(cmd);
+            let c = edit_json(&mut t, Shape::McpServers, EXE, true, Mode::Add).unwrap();
+            assert_eq!(c, [("solidcraft", Change::Added), ("solidcraft-live", Change::Updated)], "{cmd}");
+            let v: Value = serde_json::from_str(&t).unwrap();
+            assert_eq!(v["mcpServers"]["solidcraft-live"], json!({"command": EXE, "args": ["mcp", "--connect", addr], "env": {"A": "1"}}));
+            let mut t = old(cmd);
+            let c = edit_json(&mut t, Shape::McpServers, EXE, true, Mode::Remove).unwrap();
+            assert_eq!(c, [("solidcraft-live", Change::Removed)], "{cmd}");
+        }
+        // OpenCode's one command array, and Codex's TOML.
+        let mut t = r#"{"mcp": {"solidcraft-live": {"type": "local", "command": ["/old/solidcraft-cli", "mcp", "--connect", "127.0.0.1:7878"], "enabled": true}}}"#.to_owned();
+        edit_json(&mut t, Shape::OpenCode, EXE, true, Mode::Add).unwrap();
+        let v: Value = serde_json::from_str(&t).unwrap();
+        assert_eq!(v["mcp"]["solidcraft-live"]["command"], json!([EXE, "mcp", "--connect", addr]));
+        let mut toml =
+            "[mcp_servers.solidcraft-live]\ncommand = \"/old/solidcraft-cli\"\nargs = [\"mcp\", \"--connect\", \"127.0.0.1:7878\"]\n".to_owned();
+        let c = edit_toml(&mut toml, EXE, true, Mode::Add).unwrap();
+        assert_eq!(c, [("solidcraft", Change::Added), ("solidcraft-live", Change::Updated)]);
+        assert!(toml.contains(&addr) && !toml.contains(":7878\""), "{toml}");
+        // Another port the user picked stays theirs.
+        let mine = r#"{"mcpServers": {"solidcraft-live": {"command": "/x/solidcraft-cli", "args": ["mcp", "--connect", "127.0.0.1:9000"]}}}"#;
+        let mut t = mine.to_owned();
+        let c = edit_json(&mut t, Shape::McpServers, EXE, true, Mode::Add).unwrap();
+        assert_eq!(c, [("solidcraft", Change::Added), ("solidcraft-live", Change::Custom)]);
+        assert!(t.contains("127.0.0.1:9000"), "{t}");
     }
 
     #[test]
