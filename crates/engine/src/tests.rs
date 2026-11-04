@@ -2555,6 +2555,34 @@ fn split_body_by_a_face() {
     assert!(s.execute("solid.split_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
 }
 
+/// Split Body by a face follows the face when a parameter moves it (#11674): the tool face is
+/// named when it is picked, as other face picks are, and found again where it went.
+#[test]
+fn split_body_by_a_face_follows_the_face() {
+    let build = |h: &str, z: f64| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "h", "expression": h}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 200, "center": [0, 0, 100], "body_name": "Post"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 42, "height": 300, "base": [-150, 0, "h"], "axis": "X", "body_name": "Rail"}));
+        run(&mut s, "solid.split_body", json!({"body": "Post", "tool": {"body": "Rail", "point": [0, 0, z]}}));
+        s
+    };
+    let volumes = |s: &Session| {
+        let st = s.world_state().unwrap();
+        let mut v: Vec<f64> =
+            st.bodies.iter().filter(|b| b.name.starts_with("Post")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let mut s = build("100 mm", 79.0);
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "150 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    // As if the rail had been at 150 mm when the face was picked.
+    let (got, want) = (volumes(&s), volumes(&build("150 mm", 129.0)));
+    assert!(got.len() >= 2 && got.len() == want.len() && got.iter().zip(&want).all(|(a, b)| rel(*a, *b) < 1e-9), "{got:?} against {want:?}");
+}
+
 /// Split Body by a sketch line (#1552): the plane through the line along the sketch's normal
 /// splits a box; the split follows the line when the sketch changes, the design saves the line,
 /// and anything but a straight line of a sketch is refused.
