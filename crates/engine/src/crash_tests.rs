@@ -336,6 +336,8 @@ fn a_kernel_panic_is_reported_as_recovered() {
     let _ = fs::remove_dir_all(&d);
 }
 
+/// A panic on a Rayon worker inside the kernel guard, during a command (child case `worker`):
+/// one `kernel_panic_recovered` report with the command, its design and its replay.
 #[test]
 fn a_worker_panic_during_a_command_is_recovered_with_the_command() {
     let d = fresh_dir("worker");
@@ -355,6 +357,8 @@ fn a_worker_panic_during_a_command_is_recovered_with_the_command() {
     let _ = fs::remove_dir_all(&d);
 }
 
+/// The same worker panic resumed outside the guard (child case `worker_raw`): one
+/// `command_panic` with the command and its design, not a recovered kernel panic.
 #[test]
 fn a_worker_panic_outside_the_kernel_guard_is_a_command_panic() {
     let d = fresh_dir("worker-raw");
@@ -370,6 +374,8 @@ fn a_worker_panic_outside_the_kernel_guard_is_a_command_panic() {
     let _ = fs::remove_dir_all(&d);
 }
 
+/// A worker panic while no command is open (child case `worker_idle`): written at once as a
+/// `panic`, with no command and the journal's base.
 #[test]
 fn a_worker_panic_outside_a_command_is_reported_at_once() {
     let d = fresh_dir("worker-idle");
@@ -385,6 +391,8 @@ fn a_worker_panic_outside_a_command_is_reported_at_once() {
     let _ = fs::remove_dir_all(&d);
 }
 
+/// A panic inside `guard` on a kernel pool worker (`map_with_local_pools`, child case
+/// `guarded_worker`): nothing is written until the command ends, then one recovered report.
 #[test]
 fn a_guarded_panic_on_a_pool_worker_is_reported_when_the_command_ends() {
     let d = fresh_dir("guarded-worker");

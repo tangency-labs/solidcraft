@@ -141,6 +141,7 @@ pub enum CrashTestMode {
 }
 
 impl<'de> Deserialize<'de> for CrashTestMode {
+    /// Reads one of the mode names; anything else gets the handler's message, which lists them.
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
             Value::String(s) if s == "panic" => Ok(CrashTestMode::Panic),

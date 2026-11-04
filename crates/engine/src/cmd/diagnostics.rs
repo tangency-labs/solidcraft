@@ -124,8 +124,10 @@ fn crash_test_enabled(_: &Session) -> std::result::Result<(), String> {
     if solidcraft_geom::env::var_os("CRASH_TEST").is_some() { Ok(()) } else { Err("set SOLIDCRAFT_CRASH_TEST to use the crash test".into()) }
 }
 
-// The one deliberate panic: it proves the crash reports work, and runs only when asked for with
-// SOLIDCRAFT_CRASH_TEST.
+/// `diagnostics.crash_test`: the one deliberate panic. It proves the crash reports work, and runs
+/// only when asked for with SOLIDCRAFT_CRASH_TEST. `mode` picks where the internal error happens
+/// ([`CrashTestMode`](crate::schema::diagnostics::CrashTestMode)); every mode but `abort` ends
+/// in a caught error.
 #[allow(clippy::panic)]
 fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "diagnostics.crash_test";

@@ -144,12 +144,17 @@ pub(crate) fn kernel_caught() {
 /// The count and the queue share one lock: a worker's hook either queues the panic or sees that
 /// the command has already ended, and [`command_done`] cannot take the queue in between.
 struct PoolPanics {
+    /// Command scopes ([`Scope`]) open on any thread.
     commands: u32,
+    /// Pool-worker panics held for the command that ends last (at most 8).
     pending: Vec<Panic>,
 }
 
+/// The one [`PoolPanics`] for the process.
 static POOL_PANICS: Mutex<PoolPanics> = Mutex::new(PoolPanics { commands: 0, pending: Vec::new() });
 
+/// Run `f` with [`POOL_PANICS`] locked. A poisoned lock is used as it is: this runs inside the
+/// panic hook, which must not panic again.
 fn with_pool_panics<T>(f: impl FnOnce(&mut PoolPanics) -> T) -> T {
     let mut gate = match POOL_PANICS.lock() {
         Ok(gate) => gate,
@@ -555,8 +560,11 @@ fn hold_pool_panic(p: Panic) -> PoolHold {
     })
 }
 
+/// What [`hold_pool_panic`] did with a pool-worker panic.
 enum PoolHold {
+    /// Queued; [`command_done`] reports it with the command.
     Kept,
+    /// No command was open: the caller writes it at once.
     Now(Panic),
 }
 
@@ -577,6 +585,8 @@ fn write_panic_now(state: &State, p: &Panic) {
 pub(crate) struct Scope(bool);
 
 impl Scope {
+    /// Open a command scope on this thread, and count it in [`POOL_PANICS`] so pool-worker panics
+    /// are held until it ends. Does nothing when crash reporting is off.
     pub(crate) fn enter() -> Scope {
         if !enabled() {
             return Scope(false);
@@ -588,6 +598,7 @@ impl Scope {
 }
 
 impl Drop for Scope {
+    /// Close the scope [`Scope::enter`] opened, on this thread and in [`POOL_PANICS`].
     fn drop(&mut self) {
         if self.0 {
             IN_COMMAND.with(|c| c.set(c.get().saturating_sub(1)));
@@ -926,6 +937,10 @@ fn dead_journals(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Report the app that held `journal` and died without a clean exit (an abort, a native crash,
+/// the process being killed), with what the journal knows. Nothing when the journal says the
+/// crash was reported; a crash already on file only has its count raised. The native crash
+/// record and minidump next to the journal are attached when the crash handler left them.
 fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
     let j = read_journal(journal);
     let (native_file, dump_file) = native_paths_for(journal);
