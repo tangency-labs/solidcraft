@@ -175,14 +175,20 @@ pub fn capture(app: &SolveApp, name: &str) -> Value {
     doc
 }
 
-/// Older profiles leave absent preferences alone, so only their saved keys can be edited.
-/// Keep the full comparison for shortcuts, favourites, toolbar and themes.
+/// Older profiles leave absent preferences and optional navigator state alone.
 fn is_edited(app: &SolveApp, doc: &Value) -> bool {
     let mut current = capture(app, name_of(doc));
-    if let (Some(saved), Some(preferences)) =
-        (doc.get("preferences").and_then(Value::as_object), current.get_mut("preferences").and_then(Value::as_object_mut))
-    {
-        preferences.retain(|key, _| saved.contains_key(key));
+    for key in ["preferences", "view_navigator"] {
+        if let (Some(saved), Some(values)) = (doc.get(key).and_then(Value::as_object), current.get_mut(key).and_then(Value::as_object_mut)) {
+            values.retain(|key, _| saved.contains_key(key));
+        }
+    }
+    if let Some(values) = current.as_object_mut() {
+        for key in ["view_navigator", "view_gizmo"] {
+            if doc.get(key).is_none() {
+                values.remove(key);
+            }
+        }
     }
     *doc != current
 }

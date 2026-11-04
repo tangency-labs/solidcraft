@@ -218,6 +218,7 @@ fn older_profiles_leave_newly_supported_settings_unchanged() {
     };
     assert_edited(&mut h, false);
     h.app.preferences.default_units = "mm".into();
+    h.app.preferences.navigator_arrows = false;
     assert_edited(&mut h, false);
     h.app.preferences.zoom_reverse = false;
     assert_edited(&mut h, true);
@@ -234,6 +235,28 @@ fn older_profiles_leave_newly_supported_settings_unchanged() {
     assert_eq!(h.app.settings_profiles.list[0]["preferences"]["default_units"], "mm", "saving captures newly supported preferences");
     h.app.preferences.default_units = "in".into();
     assert_edited(&mut h, true);
+}
+
+/// Optional navigator entries in older profiles may store only some of today's settings.
+#[test]
+fn older_profiles_compare_only_the_navigator_settings_they_store() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
+    let old = json!({"format":FORMAT, "name":"Older navigator", "preferences":{}, "view_navigator":{"home":false}});
+    run(&mut h, "settings.profile.import", json!({"profile":old}));
+    run(&mut h, "settings.profile.apply", json!({"name":"Older navigator"}));
+    let stored = h.app.settings_profiles.prefs();
+    h.call("ui.prefs", json!({"open":"General"}));
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+    h.app.preferences.navigator_arrows = false;
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none(), "absent navigator settings remain independent");
+    h.app.preferences.navigator_home = true;
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_some(), "the saved navigator setting still detects edits");
+    assert_eq!(h.app.settings_profiles.prefs(), stored, "comparison does not fill absent saved fields");
 }
 
 /// Summary chips follow declared scope, including mixed pages and migration-only fields.
