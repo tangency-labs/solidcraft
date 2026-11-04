@@ -24,45 +24,55 @@ fn tolerances(made: &Value) -> Value {
     cells.iter().find(|cell| cell["name"] == "general_tolerances").unwrap()["text"].clone()
 }
 
-/// A drawing starts from the template named, else ISO A3 with its border only, which
-/// `drawing.template.list` marks; it keeps the template's projection unless given one. An unknown
-/// template is refused with nothing changed, and undo takes the drawing away whole. The built-in
-/// block is added by name, its general tolerances empty for a part and an assembly alike.
+/// A drawing starts from the template named, else its kind's: a part's on ISO A3 with the part
+/// note over its general tolerances, an assembly's on ISO A2 with the assembly note, which
+/// `drawing.template.list` marks for the design. It keeps the template's projection unless given
+/// one. An older name reads as that size's part template; an unknown one is refused with nothing
+/// changed, and undo takes the drawing away whole.
 #[test]
 fn a_drawing_starts_from_a_template() {
     let mut s = design();
-    let listed = run(&mut s, "drawing.template.list", json!({}))["templates"].clone();
+    let default = |s: &mut Session| {
+        let listed = run(s, "drawing.template.list", json!({}))["templates"].clone();
+        let marked: Vec<Value> = listed.as_array().unwrap().iter().filter(|t| t["default"] == json!(true)).cloned().collect();
+        (listed, marked)
+    };
+    let (listed, marked) = default(&mut s);
     let names: Vec<&str> = listed.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(names, template::BUILT_INS);
-    let marked: Vec<&Value> = listed.as_array().unwrap().iter().filter(|t| t["default"] == json!(true)).collect();
-    assert_eq!(marked, [&json!({"name": "iso-a3", "title": "ISO A3", "default": true})]);
-    let made = run(&mut s, "drawing.create", json!({"template": "iso-a4", "projection": "first", "language": "de"}));
+    assert_eq!(marked, [json!({"name": "iso-a3-part", "title": "ISO A3", "assembly": false, "default": true})]);
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
+    assert_eq!(tolerances(&made), json!(template::PART_NOTE));
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"template": "iso-a4-assembly", "projection": "first", "language": "de"}));
     let sheet = &made["sheets"][0];
-    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")));
-    assert_eq!((&made["projection"], &made["language"]), (&json!("first"), &json!("de")));
-    assert_eq!(open_one(&s).sheets[0].title_block, None, "the border only");
+    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")), "the one named wins");
+    assert_eq!((&made["projection"], &made["language"], tolerances(&made)), (&json!("first"), &json!("de"), json!(template::ASSEMBLY_NOTE)));
+    assert_eq!(open_one(&s).sheets[0].title_block, Some(solidcraft_geom::title_block::default_block()), "the built-in block");
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"template": "iso-a1"}));
+    assert_eq!((&made["sheets"][0]["size_mm"], tolerances(&made)), (&json!([841.0, 594.0]), json!(template::PART_NOTE)), "an older name");
     let (undo, before) = (s.undo.len(), s.doc.drawings.clone());
-    for old in ["iso-b2", "iso-a3-part"] {
+    for old in ["iso-b2", "iso-a3-parts", "iso-a5-part"] {
         assert!(refused(&mut s, "drawing.create", json!({"template": old})).contains(&format!("no template `{old}`")), "{old}");
     }
     assert_eq!((s.undo.len(), &s.doc.drawings), (undo, &before), "nothing changed");
     run(&mut s, "drawing.close", json!({}));
     run(&mut s, "edit.undo", json!({}));
-    assert!(s.doc.drawings.is_empty(), "undo takes the drawing away whole");
-    run(&mut s, "drawing.create", json!({}));
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(""));
-    run(&mut s, "drawing.close", json!({}));
-    // A design with components: the same template, and the same empty tolerances.
-    run(&mut s, "component.create", json!({"name": "Bracket"}));
-    run(&mut s, "component.activate", json!({"component": 0}));
-    let marked =
-        run(&mut s, "drawing.template.list", json!({}))["templates"].as_array().unwrap().iter().find(|t| t["default"] == json!(true)).cloned();
-    assert_eq!(marked.map(|t| t["name"].clone()), Some(json!(template::DEFAULT)));
+    assert_eq!(s.doc.drawings.len(), 2, "undo takes the drawing away whole");
+
+    // An assembly of two components: A2, with the assembly note.
+    let mut s = Session::default();
+    for (name, corner) in [("Bracket", [0, 0, 0]), ("Pin", [100, 0, 0])] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "body_name": name}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    assert_eq!(default(&mut s).1.iter().map(|t| t["name"].clone()).collect::<Vec<_>>(), [json!("iso-a2-assembly")]);
     let made = run(&mut s, "drawing.create", json!({}));
-    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(""));
+    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([594.0, 420.0]), &json!("third")));
+    assert_eq!(tolerances(&made), json!(template::ASSEMBLY_NOTE));
 }
 
 /// A template applied to the drawing open: a dry run answers what would change and changes nothing;
@@ -73,24 +83,24 @@ fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
     let (mut s, [front, right, top]) = crate::cmd::drawing_view::tests::three_views();
     let before = open_one(&s);
     let (steps, sheet) = (s.undo.len(), ids::encode(before.sheets[0].id));
-    let dry = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4", "dry_run": true}));
+    let dry = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part", "dry_run": true}));
     assert_eq!(dry["changed"], json!([{"sheet": sheet, "paper": true, "border": false, "title_block": false, "lost": []}]));
     let outside: Vec<&str> = dry["outside"].as_array().unwrap().iter().map(|v| v["view"].as_str().unwrap()).collect();
     assert!(outside.contains(&ids::encode(right).as_str()) && outside.contains(&ids::encode(top).as_str()), "{dry}");
     assert!(!outside.contains(&ids::encode(front).as_str()), "{dry}");
     assert_eq!((open_one(&s), s.undo.len()), (before.clone(), steps), "a dry run changes nothing");
-    let applied = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4"}));
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
     assert_eq!((&applied["changed"], &applied["outside"], &applied["dry_run"]), (&dry["changed"], &dry["outside"], &json!(false)));
     let after = open_one(&s);
-    assert_eq!(after.sheets[0].sheet, template::built_in("iso-a4").unwrap().unwrap().sheets[0].sheet);
+    assert_eq!(after.sheets[0].sheet, template::built_in("iso-a4-part").unwrap().unwrap().sheets[0].sheet);
     assert_eq!(after.views, before.views, "nothing moves");
     assert_eq!(s.undo.len(), steps + 1);
-    let again = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4"}));
+    let again = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
     assert_eq!((again["changed"].clone(), s.undo.len()), (json!([]), steps + 1), "nothing to change, no step");
     for (p, why) in [
         (json!({"template": "iso-b2"}), "no template `iso-b2`"),
         (json!({}), "`template` must be a template's name"),
-        (json!({"template": "iso-a3", "dry_run": "yes"}), "`dry_run` is true or false"),
+        (json!({"template": "iso-a3-part", "dry_run": "yes"}), "`dry_run` is true or false"),
     ] {
         assert!(refused(&mut s, "drawing.template.apply", p.clone()).contains(why), "{p}");
     }
@@ -99,18 +109,21 @@ fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
 }
 
 /// A drawing saved as a template file starts new drawings and restyles others, with nothing of its
-/// model; a later save changes no drawing made from it. Only a .json path is taken, and only inside
+/// model: a copy of the built-in with a company's changes is a template of its own. A later save
+/// changes no drawing made from it. Only a .json path is taken, and only inside
 /// the folders an agent may use while a scope is active.
 #[test]
 fn a_template_file_saves_and_starts_drawings() {
     let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
     let folder = Folder::new("drawing-template");
     let path = folder.path("company-a3.json");
-    run(
-        &mut s,
-        "drawing.sheet.set",
-        json!({"sheet": "Sheet 1", "title_block": "built-in", "title_block_overrides": {"general_tolerances": "ISO 2768-m"}}),
-    );
+    // The company's name written into the built-in block, and its general tolerances typed over it.
+    let mut block = solidcraft_geom::title_block::default_block();
+    let owner = block.cells.iter_mut().find(|cell| cell.name == "legal_owner").unwrap();
+    let solidcraft_geom::title_block::CellKind::Text(owner) = &mut owner.kind else { panic!("the legal owner cell shows text") };
+    owner.content = solidcraft_geom::cell::Content(vec![solidcraft_geom::cell::Part::Text("Acme Ltd".into())]);
+    let changes = json!({"sheet": "Sheet 1", "title_block": block, "title_block_overrides": {"general_tolerances": "ISO 2768-m"}});
+    run(&mut s, "drawing.sheet.set", changes);
     let saved = run(&mut s, "drawing.template.save", json!({"path": path}));
     assert_eq!(saved["bytes"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
     let first = open_one(&s);
@@ -120,8 +133,11 @@ fn a_template_file_saves_and_starts_drawings() {
     assert!(from_file.views.is_empty() && from_file.sheets[0].id != first.sheets[0].id, "{made}");
     assert_eq!((from_file.sheets[0].sheet, &from_file.sheets[0].title_block), (first.sheets[0].sheet, &first.sheets[0].title_block));
     assert_eq!(from_file.sheets[0].title_block_overrides, first.sheets[0].title_block_overrides);
+    let cells = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["title_block_cells"].clone();
+    let shown = |name: &str| cells.as_array().unwrap().iter().find(|cell| cell["name"] == name).unwrap()["text"].clone();
+    assert_eq!((shown("legal_owner"), shown("general_tolerances")), (json!("Acme Ltd"), json!("ISO 2768-m")), "the company's copy");
     // A later save of another format changes no drawing made from the file.
-    run(&mut s, "drawing.template.apply", json!({"template": "iso-a4"}));
+    run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
     run(&mut s, "drawing.template.save", json!({"path": path}));
     let other = s.doc.drawings.iter().find(|d| d.id == first.id).unwrap().clone();
     assert_eq!(other.sheets, first.sheets, "the first drawing kept its own copy");
@@ -164,8 +180,8 @@ fn names(s: &Session) -> Vec<&str> {
     s.doc.drawings.iter().map(|d| d.name.as_str()).collect()
 }
 
-/// A drawing of the design: one A3 sheet with the ISO border and no title block, the design its
-/// one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
+/// A drawing of the design: one A3 sheet with the ISO border and the built-in title block, the design
+/// its one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
 #[test]
 fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let mut s = design();
@@ -182,7 +198,9 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let d = open_one(&s);
     assert_eq!(made["id"], json!(ids::encode(d.id)));
     assert!(d.sheets[0].border.is_some(), "the ISO border");
-    assert_eq!((&d.sheets[0].title_block, &sheet["title_block"]), (&None, &Value::Null), "the border only");
+    let built_in = template::built_in(template::default_for(false)).unwrap().unwrap();
+    assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the built-in block");
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");

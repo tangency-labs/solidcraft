@@ -226,8 +226,8 @@ fn block() -> Value {
 }
 
 /// A sheet's title block by command: given, listed by `drawing.inspect`, taken by a new sheet from
-/// the one it follows, and taken away with `null`. A block or a paper the sheet can't hold is
-/// refused, with the drawing unchanged and no undo step.
+/// the one it follows, taken away with `null`, and the built-in one put back by name. A block or a
+/// paper the sheet can't hold is refused, with the drawing unchanged and no undo step.
 #[test]
 fn a_sheets_title_block_by_command() {
     let mut s = drawing_session();
@@ -257,6 +257,9 @@ fn a_sheets_title_block_by_command() {
     unchanged(&mut s, json!({"sheet": "Sheet 1", "title_block": unknown}), "unknown field `colour`");
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": null}));
     assert_eq!((sheets(&s)[0].title_block.is_some(), sheets(&s)[1].title_block.is_some()), (true, false));
+    // The built-in block comes back by name.
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": "built-in"}));
+    assert_eq!(sheets(&s)[1].title_block, Some(solidcraft_geom::title_block::default_block()));
 }
 
 /// A view a new block covers is listed with the ones the drawing space leaves out, and nothing
@@ -322,16 +325,15 @@ fn a_title_blocks_cells_read_the_model() {
     run(&mut s, "component.metadata.set", properties);
     run(&mut s, "drawing.create", json!({}));
     let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
-    let documents = json!({"source": source, "component": component});
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": documents, "title_block": "built-in"}));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source, "component": component}}));
     let shown = |s: &mut Session, names: &[&str]| {
         let cells = cells(s);
         names.iter().map(|name| cells[*name].0.clone()).collect::<Vec<_>>()
     };
     let read = ["title", "identification_number", "material", "finish", "mass", "sheet", "general_tolerances", "legal_owner"];
-    // The built-in block's general tolerances start empty; with no number of its own, the drawing is
-    // numbered by the component's name.
-    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", "", ""];
+    // The design places components, so its general tolerances are the assembly's note; with no number
+    // of its own, the drawing is numbered by the component's name.
+    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", solidcraft_doc::drawing::template::ASSEMBLY_NOTE, ""];
     assert_eq!(shown(&mut s, &read), expected);
     on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
     on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));

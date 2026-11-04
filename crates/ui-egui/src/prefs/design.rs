@@ -130,16 +130,23 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.preferences.default_projection = *projection;
                     }
                 });
-                let titles: Vec<String> = template::BUILT_INS.iter().filter_map(|name| template::title(name)).collect();
-                let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
-                let chosen = &mut app.preferences.drawing_template;
-                ui_kit::row(ui, crate::i18n::tr("ui.template_for_new_drawings"), |ui| {
-                    let mut selected = template::BUILT_INS.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
-                    ui_kit::dropdown(ui, "pref_drawing_template", &mut selected, &titles);
-                    if let Some(name) = template::BUILT_INS.get(selected) {
-                        *chosen = (*name).to_string();
-                    }
-                });
+                // Each kind's built-ins, by size: the kind is the row's, so each shows its paper's title.
+                let p = &mut app.preferences;
+                for (label, id, chosen, assembly) in [
+                    ("ui.template_for_new_part_drawings", "pref_part_drawing_template", &mut p.part_drawing_template, false),
+                    ("ui.template_for_new_assembly_drawings", "pref_assembly_drawing_template", &mut p.assembly_drawing_template, true),
+                ] {
+                    let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
+                    let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+                    ui_kit::row(ui, crate::i18n::tr(label), |ui| {
+                        let mut selected = names.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
+                        ui_kit::dropdown(ui, id, &mut selected, &titles);
+                        if let Some(name) = names.get(selected) {
+                            *chosen = (*name).to_string();
+                        }
+                    });
+                }
             });
         });
         ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {

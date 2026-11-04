@@ -1038,9 +1038,12 @@ preference_settings! {
     /// First or third angle for new drawings (third when not set, or set to one this version
     /// doesn't know).
     default_projection: Projection = Projection::Third, PAGE_DESIGN;
-    /// The template new drawings start from: a built-in's name (ISO A3 when not set, or set to one
-    /// this version doesn't know).
-    drawing_template: String = template::DEFAULT.into(), PAGE_DESIGN;
+    /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
+    /// or set to one this version doesn't have for a part).
+    part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;
+    /// The template new drawings of an assembly start from: an assembly's built-in, by name (ISO A2
+    /// when not set, or set to one this version doesn't have for an assembly).
+    assembly_drawing_template: String = template::default_for(true).into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -2420,14 +2423,16 @@ pub fn apply_new_design(app: &mut SolveApp) {
 }
 
 /// What `drawing.create` run from the app starts from when it names no template: the preferred
-/// template for a drawing of a part or of an assembly, in the preferred projection and the
-/// interface font when that is a family (drawings name fonts by family, never a file), unless it
-/// names them. A template it names keeps its own projection and font.
+/// template for a drawing of a part or of an assembly, as the design is one
+/// ([`template::is_assembly`]), in the preferred projection and the interface font when that is a
+/// family (drawings name fonts by family, never a file), unless it names them. A template it names
+/// keeps its own projection and font.
 pub fn new_drawing_params(app: &SolveApp, mut params: Value) -> Value {
     let Some(given) = params.as_object_mut() else { return params };
     if !given.contains_key("template") {
         let p = &app.preferences;
-        given.insert("template".into(), json!(p.drawing_template));
+        let chosen = if template::is_assembly(&app.session.doc) { &p.assembly_drawing_template } else { &p.part_drawing_template };
+        given.insert("template".into(), json!(chosen));
         given.entry("projection").or_insert_with(|| json!(p.default_projection));
         let font = p.ui_font.trim();
         if solidcraft_engine::sketch::check_family(font).is_ok() {
@@ -3893,11 +3898,13 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
-    // A template this version doesn't have (a newer one's, or a saved template since removed).
-    if !template::BUILT_INS.contains(&p.drawing_template.as_str()) {
-        let default = Prefs::default().drawing_template;
-        log::warn!("preferences: there is no drawing template `{}`; using `{default}`", p.drawing_template);
-        p.drawing_template = default;
+    // A template this version doesn't have for that kind (a newer one's, or a saved template since removed).
+    for (chosen, assembly) in [(&mut p.part_drawing_template, false), (&mut p.assembly_drawing_template, true)] {
+        if !is_template_for(chosen, assembly) {
+            let default = template::default_for(assembly);
+            log::warn!("preferences: there is no drawing template `{chosen}` for this kind of design; using `{default}`");
+            *chosen = default.into();
+        }
     }
     p.space_mouse_calibrations.retain(|device, calibration| {
         let usable = calibration.is_usable();
@@ -3959,6 +3966,11 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
     let allowed: Vec<&str> = crate::workspace::choosable_tabs().collect();
     p.hidden_toolbar_tabs = known_once(std::mem::take(&mut p.hidden_toolbar_tabs), &allowed);
     p
+}
+
+/// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
+pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
+    template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
 }
 
 /// Saved preferences, keeping every one that still reads. A value this version doesn't
@@ -4057,8 +4069,13 @@ fn prepare_preferences(
         return Err("`wheel_zoom_speed` must be 0.25…4".into());
     }
     // Before `migrate`, which puts a template this version doesn't have back to the default.
-    if !template::BUILT_INS.contains(&new.drawing_template.as_str()) {
-        return Err(format!("`drawing_template` must be one of {}", template::BUILT_INS.join(", ")));
+    for (key, chosen, assembly) in
+        [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
+    {
+        if !is_template_for(chosen, assembly) {
+            let kind: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect();
+            return Err(format!("`{key}` must be one of {}", kind.join(", ")));
+        }
     }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
@@ -10122,29 +10139,46 @@ mod tests {
         assert_eq!(other.preferences.nav, "hfss");
     }
 
-    /// The template of new drawings: ISO A3 unless chosen, refused when not a template, read as the
-    /// default when saved so. A new drawing starts from it, in the preferred projection and the
-    /// interface font; a template named keeps its own.
+    /// The templates of new drawings: ISO A3 for a part and ISO A2 for an assembly unless chosen, each
+    /// refused when not one of its kind's built-ins and read as its default when saved so; the old
+    /// one setting still loads. A new drawing starts from its design's kind's, in the preferred
+    /// projection and the interface font; a template named keeps its own.
     #[test]
     fn new_drawings_start_from_the_preferred_template() {
         use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert_eq!(app.preferences.drawing_template, "iso-a3");
-        for old in ["iso-b2", "iso-a3-part"] {
-            assert!(set(&mut app, &json!({"drawing_template": old})).is_err(), "{old}");
-            assert_eq!(lenient(&json!({"drawing_template": old})).drawing_template, "iso-a3", "{old}");
+        let chosen = |p: &Prefs| (p.part_drawing_template.clone(), p.assembly_drawing_template.clone());
+        assert_eq!(chosen(&app.preferences), ("iso-a3-part".to_string(), "iso-a2-assembly".to_string()));
+        for (key, wrong) in [("part_drawing_template", "iso-a2-assembly"), ("assembly_drawing_template", "iso-a3-part")] {
+            for old in [wrong, "iso-b2", "iso-a3"] {
+                assert!(set(&mut app, &json!({key: old})).is_err(), "{key} {old}");
+                assert_eq!(chosen(&lenient(&json!({key: old}))), chosen(&Prefs::default()), "{key} {old}");
+            }
         }
-        assert_eq!(lenient(&json!({"drawing_template": "iso-a1"})).drawing_template, "iso-a1");
-        set(&mut app, &json!({"drawing_template": "iso-a4", "default_projection": "first"})).unwrap();
+        assert_eq!(chosen(&lenient(&json!({"drawing_template": "iso-a1"}))), chosen(&Prefs::default()), "the old setting still loads");
+        let read = lenient(&json!({"part_drawing_template": "iso-a1-part", "assembly_drawing_template": "iso-a0-assembly"}));
+        assert_eq!(chosen(&read), ("iso-a1-part".to_string(), "iso-a0-assembly".to_string()));
+        set(
+            &mut app,
+            &json!({"part_drawing_template": "iso-a4-part", "assembly_drawing_template": "iso-a1-assembly", "default_projection": "first"}),
+        )
+        .unwrap();
         app.preferences.ui_font = "IBM Plex Mono".into();
         app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
         app.run("drawing.create", json!({})).unwrap();
         let d = app.session.drawing("test").unwrap().clone();
         assert_eq!((d.sheets[0].sheet.size, d.projection, d.font.as_str()), (SheetSize::Standard(PaperSize::A4), Projection::First, "IBM Plex Mono"));
         app.run("drawing.close", json!({})).unwrap();
-        app.run("drawing.create", json!({"template": "iso-a2"})).unwrap();
+        app.run("drawing.create", json!({"template": "iso-a2-part"})).unwrap();
         let d = app.session.drawing("test").unwrap().clone();
         assert_eq!((d.sheets[0].sheet.size, d.projection, d.font.as_str()), (SheetSize::Standard(PaperSize::A2), Projection::Third, ""));
+        app.run("drawing.close", json!({})).unwrap();
+        // The design places a component now: an assembly's template.
+        app.run("component.create", json!({"name": "Bracket"})).unwrap();
+        app.run("component.activate", json!({"component": "root"})).unwrap();
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!(d.sheets[0].sheet.size, SheetSize::Standard(PaperSize::A1));
     }
 
     /// The dialog: changes apply at once, Cancel puts back what was there when it opened, Apply

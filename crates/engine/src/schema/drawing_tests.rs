@@ -46,7 +46,7 @@ fn the_template_apply_reply_matches_its_output_schema() {
     let (mut s, _) = drawing_session(ParamCheck::Warn);
     let schema = output_schema_for::<TemplateApplyResult>();
     let schema = schema.as_value();
-    for p in [json!({"template": "iso-a2", "dry_run": true}), json!({"template": "iso-a2"}), json!({"template": "iso-a2"})] {
+    for p in [json!({"template": "iso-a2-part", "dry_run": true}), json!({"template": "iso-a2-part"}), json!({"template": "iso-a2-part"})] {
         let r = s.execute("drawing.template.apply", &p).unwrap();
         assert!(conforms(schema, schema, &r) && r.get("param_warnings").is_none(), "{p}: {r} doesn't match {schema}");
     }
@@ -61,7 +61,7 @@ fn the_template_list_matches_its_output_schema() {
     let schema = schema.as_value();
     let r = s.execute("drawing.template.list", &json!({})).unwrap();
     assert!(conforms(schema, schema, &r) && r.get("param_warnings").is_none(), "{r} doesn't match {schema}");
-    assert_eq!(r["templates"].as_array().map(Vec::len), Some(5));
+    assert_eq!(r["templates"].as_array().map(Vec::len), Some(10));
     s.param_check = ParamCheck::Strict;
     assert!(s.execute("drawing.template.list", &json!({"kind": "part"})).is_err());
 }

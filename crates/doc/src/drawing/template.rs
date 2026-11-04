@@ -11,11 +11,13 @@
 //! block, and moves nothing on it.
 //!
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, each
-//! one sheet with the ISO border and nothing more. A title block, tables and text are added to a
-//! drawing, and a template saved from it keeps them; the built-in block
-//! ([`default_block`](solidcraft_geom::title_block::default_block)) is one a sheet can take. A
-//! later built-in never changes a drawing made from an earlier one: a drawing keeps copies, never
-//! names.
+//! for a part and for an assembly, one sheet with the ISO border and the built-in title block
+//! ([`default_block`](title_block::default_block)), the kind's general tolerances typed over its
+//! cell ([`PART_NOTE`], [`ASSEMBLY_NOTE`]). A part's drawing starts from ISO A3 and an assembly's from
+//! ISO A2 ([`default_for`]). A drawing saved as a template replaces or changes them: a copy of a
+//! built-in with a company's changes, its own note among them, is a template like any other. A later
+//! built-in never changes a drawing made from an earlier one: a drawing keeps copies, never names.
+//! An older name (`iso-a3`, before the built-ins came in two kinds) reads as that size's part one.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -23,23 +25,49 @@ use std::sync::Arc;
 use solidcraft_geom::cell::Part;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
 use solidcraft_geom::revision::RevisionRecord;
-use solidcraft_geom::title_block::CellKind;
+use solidcraft_geom::title_block::{self, CellKind};
 
 use super::Drawing;
 use crate::format::DRAWING;
 use crate::ids::IdSource;
-use crate::{DocError, Result};
+use crate::{DocError, Document, Result};
 
-/// The built-in templates, by name: each ISO size, with its border only.
-pub const BUILT_INS: &[&str] = &["iso-a4", "iso-a3", "iso-a2", "iso-a1", "iso-a0"];
+/// The built-in templates, by name: each ISO size for a part and for an assembly.
+pub const BUILT_INS: &[&str] = &[
+    "iso-a4-part",
+    "iso-a4-assembly",
+    "iso-a3-part",
+    "iso-a3-assembly",
+    "iso-a2-part",
+    "iso-a2-assembly",
+    "iso-a1-part",
+    "iso-a1-assembly",
+    "iso-a0-part",
+    "iso-a0-assembly",
+];
 /// Where every built-in's ids come from, so one built-in is always the same bytes.
 const BUILT_IN_SEED: u64 = 3875;
 /// The ISO sizes the built-ins come in, as their names and titles write them.
 const SIZES: [(PaperSize, &str); 5] =
     [(PaperSize::A4, "A4"), (PaperSize::A3, "A3"), (PaperSize::A2, "A2"), (PaperSize::A1, "A1"), (PaperSize::A0, "A0")];
 
-/// The built-in a new drawing starts from when nothing else is chosen.
-pub const DEFAULT: &str = "iso-a3";
+/// The general tolerances a part's built-ins carry.
+pub const PART_NOTE: &str = "Unless stated: linear ±0.2 mm, angles ±0.5°. Break sharp edges 0.2 mm.";
+/// The general tolerances an assembly's built-ins carry.
+pub const ASSEMBLY_NOTE: &str = "Unless stated: assembled positions ±0.5 mm, angles ±1°. Part tolerances are on the part drawings.";
+/// The title block cell the notes are typed over.
+const TOLERANCES_CELL: &str = "general_tolerances";
+
+/// The built-in a new drawing starts from when nothing else is chosen: ISO A3 for a part, ISO A2 for
+/// an assembly.
+pub fn default_for(assembly: bool) -> &'static str {
+    if assembly { "iso-a2-assembly" } else { "iso-a3-part" }
+}
+
+/// Whether `doc`'s drawings are an assembly's, for the template they start from: it places components.
+pub fn is_assembly(doc: &Document) -> bool {
+    !doc.occurrences.is_empty()
+}
 
 /// The template rules: a drawing's ([`Drawing::validate`]), and nothing of a model. A template
 /// with anything of one is refused, naming all it has.
@@ -154,30 +182,48 @@ pub fn apply(drawing: &Drawing, template: &Drawing) -> Result<(Drawing, Vec<Rest
     Ok((d, changed))
 }
 
-/// The built-in `name`'s paper size and its title ("ISO A3"); none for another name.
-fn parse(name: &str) -> Option<(PaperSize, String)> {
-    let size = name.strip_prefix("iso-")?;
-    let (size, label) = SIZES.into_iter().find(|(_, label)| label.to_ascii_lowercase() == size)?;
-    Some((size, format!("ISO {label}")))
+/// The built-in `name`'s paper size, its title ("ISO A3") and whether it is an assembly's; none for
+/// another name. An older name without its kind is the part's.
+fn parse(name: &str) -> Option<(PaperSize, String, bool)> {
+    let rest = name.strip_prefix("iso-")?;
+    let (size, assembly) = match rest.split_once('-') {
+        None => (rest, false),
+        Some((size, "part")) => (size, false),
+        Some((size, "assembly")) => (size, true),
+        Some(_) => return None,
+    };
+    let (paper, label) = SIZES.into_iter().find(|(_, label)| label.to_ascii_lowercase() == size)?;
+    Some((paper, format!("ISO {label}"), assembly))
 }
 
 /// The title of the built-in template `name` ("ISO A3"), without making it; none for another name.
 pub fn title(name: &str) -> Option<String> {
-    parse(name).map(|(_, title)| title)
+    parse(name).map(|(_, title, _)| title)
+}
+
+/// Whether the built-in template `name` is an assembly's; none for another name.
+pub fn assembly(name: &str) -> Option<bool> {
+    parse(name).map(|(.., assembly)| assembly)
 }
 
 /// The built-in template `name` ([`BUILT_INS`]), made now; none for another name.
 pub fn built_in(name: &str) -> Option<Result<Drawing>> {
-    let (size, title) = parse(name)?;
+    let (size, title, assembly) = parse(name)?;
     // A4 is used upright (ISO 5457); the larger sizes lie flat.
     let orientation = if size == PaperSize::A4 { Orientation::Portrait } else { Orientation::Landscape };
-    Some(made(&title, drawing_sheet::Sheet::standard(size, orientation)))
+    Some(made(&title, drawing_sheet::Sheet::standard(size, orientation), if assembly { ASSEMBLY_NOTE } else { PART_NOTE }))
 }
 
-/// One sheet of `paper` with the ISO border.
-fn made(title: &str, paper: drawing_sheet::Sheet) -> Result<Drawing> {
+/// One sheet of `paper` with the ISO border and the built-in title block, `note` typed over its
+/// general tolerances.
+fn made(title: &str, paper: drawing_sheet::Sheet, note: &str) -> Result<Drawing> {
     let mut id_source = IdSource::seeded(BUILT_IN_SEED);
-    let d = Drawing::new(title, "en", "Sheet 1", paper, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source)?;
+    let mut d = Drawing::new(title, "en", "Sheet 1", paper, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source)?;
+    if let Some(first) = d.sheets.first_mut() {
+        let first = Arc::make_mut(first);
+        first.title_block = Some(title_block::default_block());
+        first.title_block_overrides.insert(TOLERANCES_CELL.into(), note.into());
+    }
     check(&d)?;
     Ok(d)
 }

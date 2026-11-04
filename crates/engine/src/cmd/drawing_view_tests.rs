@@ -495,7 +495,8 @@ fn a_base_view_fits_what_its_percent_shows() {
     let snapshot = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}))["scale"]["text"].clone();
     let (near, far) = (snapshot(&mut s, 0.0), snapshot(&mut s, 100.0));
     assert_ne!(near, far);
-    run(&mut s, "drawing.create", json!({}));
+    // On the snapshot's A3.
+    run(&mut s, "drawing.create", json!({"template": "iso-a3-assembly"}));
     for (percent, scale) in [(0.0, near), (100.0, far)] {
         let (made, id) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "reference_shown_percent": percent}));
         assert_eq!((&made["scale"]["text"], made["scale"]["fitted"].as_bool()), (&scale, Some(true)), "{made}");
