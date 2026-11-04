@@ -739,6 +739,8 @@ Every `engine.run` from a plugin passes these checks in order:
    runs `read` entries without asking, and treats `edit` entries (every transaction, and actions
    without `effect: read`) like the edits it already asks about.
 
+The later `feature` world adds one check after these, the target rule of 13a.
+
 Plugins never call each other: `plugin.*` is on the deny list (rule 2) and no import reaches another
 plugin. If plugins ever need to cooperate, it will be through host events, where a failing listener
 never fails the caller.
@@ -1317,14 +1319,101 @@ Frozen depth for 0.1 (findings beyond this are out of scope, not defects):
   results that a model reads is a channel for steering that model, which needs its own threat model
   before it is offered. Lookups and plans for agents (the `how`/`plan` kind of plugin) already fit
   as `action` entries with no permissions, listed and called like commands.
+- Extension points on core commands (suggested in #1221), after standalone entries have shipped:
+  data that core dialogs read, such as thread standards, hole types or fastener tables, namespaced
+  by plugin id. A plugin never overrides what a core command does.
 - Events by subscription: the engine has none; the coalesced `design-changed` over `Session.revision`
   covers the pilots.
 - Later interfaces (each as a new interface in `1.x` with `@since`): an exporter world (importers
-  are in 9a), `feature` world (`evaluate` for parametric features per docs/plugins.md),
-  background jobs with progress (CAM, FEA, slicer), viewport overlays beyond pins (toolpaths), plugin
-  workspaces, the browser host (docs/web-runtime.md), signing and an index.
+  are in 9a), a `feature` world for persistent features (13a), background jobs with progress (CAM,
+  FEA, slicer), viewport overlays beyond pins (toolpaths), plugin workspaces, the browser host
+  (docs/web-runtime.md), signing and an index (#1221 suggests that anyone may sideload a plugin,
+  while a listing in a community index asks for open source and a signature).
 
-Open questions for the maintainer:
+### 13a. Persistent features (later work)
+
+Asked for in #1221 and in the review of this PR: generators whose instances (each use of a
+generator in a design) can be edited from the timeline, also after the design is saved and
+reopened. Three examples, which are also the acceptance tests for that stage: a **spur gear** and a
+**custom metric screw** (new components from parameters, the screw with a modeled thread), and a
+**threaded hole** with a modeled thread (cuts an existing body at a sketch point; moving the point
+or changing the body upstream rebuilds the hole and leaves nearby bodies alone). Add-ons bundled
+with the app and installed ones use the same interface. None of this is in 0.1, and 0.1 needs no
+change to leave room for it. It refines phase 2 of docs/plugins.md (`FeatureKind::Plugin`,
+`evaluate`) in these points:
+
+- **One declaration of inputs** (5a). The host draws an entry's form from its `input`, to create an
+  instance (from a toolbar entry, command search or the Plugins page) and for Edit Feature, and
+  checks `plugin.<id>.<entry>` calls against the same declaration; geometry selected before the
+  form opens fills the inputs it suits. The declaration comes from plugin.json, not from a
+  `parameter_schema()` export, so it is known before plugin code runs (G3). `engine.describe` and
+  `plugin.list` return it, and inspecting an instance returns its saved inputs and the references
+  they resolved to, so an app that embeds SolidCraft and draws its own dialogs, or an agent, builds
+  the same form and makes the same call.
+- **Targets the host enforces.** Plugins keep `engine.run` and the command policy of 6.4, and the
+  host adds one rule after it. A command may create geometry (sketches, construction, new bodies
+  and components), may change or remove what this evaluation created, and may change the bodies
+  declared as targets. If it changes anything else that existed before the evaluation (another
+  body, a component's position, a joint, a parameter), it is refused with `denied` and undone (its
+  nested `Session::execute` restores the design), and the evaluation fails. The host checks what
+  each command changed, not its parameters, so the rule holds for every command, also ones added
+  later. A placement reference never makes its body a target (5a). Targets are a list in the
+  declaration and in the saved instance even while the first version allows one, so a feature that
+  spans several bodies or components (a bolted joint through two parts, #1221) needs no new
+  interface.
+- **Rebuilds start from the design before the feature.** To regenerate an instance, the engine
+  takes its recorded features (below) out, runs the generator on the design as it stands at the
+  instance's place in the timeline, and records the new features in their place. So the generator
+  sees its targets as they were before its own earlier result, and the new result replaces the old
+  one instead of cutting an already cut body again. Creating or editing an instance is one undo
+  step, and so is a regeneration together with the command that caused it (the undo stacks move
+  aside as in 6.3); a failed or cancelled edit keeps the committed result; a failed automatic
+  regeneration keeps the last result and marks the instance out of date.
+- **The result is native features in a managed group.** The commands a generator ran are recorded as
+  ordinary features in a timeline folder (`timeline.group`) that belongs to the instance and is
+  read-only while it is linked (the group header step, v2a, of docs/plugins.md). They rebuild in the
+  kernel like any other features, so a design opens, shows and rebuilds without the plugin, as the
+  `recorded_script` policy there describes and as #1221 asks of every persistent feature. A recorded
+  feature that changes a body must name it (the `targets` or `body` field of native features, where
+  empty means every body), and may name only the instance's targets and bodies the same evaluation
+  created, or the command that made it is refused; so a native rebuild after an upstream change
+  cannot reach a body that was not a target either. Unlike the rebuild flow sketched there, plugin
+  code never runs inside the model evaluation, which lives below the engine and cannot reach a
+  plugin host: when an input's value, a referenced geometry or a target's upstream geometry changes,
+  the engine regenerates the instance after the command that changed it. Without the instance's
+  plugin revision, the recorded features stay and the instance is marked out of date. An undoable
+  Detach Generator turns the group into ordinary editable features and drops the inputs; a target
+  body's earlier history stays as it was. Opening a design never downloads or runs a missing
+  package.
+- **Each instance keeps its plugin revision.** The instance records the plugin id, the readable
+  version or tag, an optional source (a URL and a reference such as a Git commit SHA) and a SHA-256
+  of the package (plugin.json, the component and its locales). The hash decides which code runs, so
+  a moved tag, a reinstall or an edited local source never changes an existing design. The host
+  keeps installed revisions by hash instead of overwriting them on update (the Plugins page lists
+  and removes old ones), so instances made with version 1 still regenerate after version 2 is
+  installed or the original download is gone; running instances are keyed by plugin id and hash,
+  so both revisions can run in one design. Updating is explicit, per instance or for all of them,
+  and one undo step. At that stage approval (6.1) is recorded per revision, by plugin id and
+  package hash, rather than per plugin id: a revision runs only once that exact package was
+  approved, and a design that names a hash never approves it. Where nothing approves a revision (a
+  CLI run whose `--plugin` names another one), its instances keep their recorded features and are
+  marked out of date.
+- **No machine-local state in the `feature` world.** A rebuild must not depend on the computer it
+  runs on, so this world imports `engine` (with the target rule) and `log` only: no `store`, `net`
+  or `host`. Every evaluation starts on a fresh instance, so nothing is kept between rebuilds. Its
+  reads see the design only: session state that is not saved with the design (selection, camera,
+  the active sketch or component) starts empty in every evaluation, and `select.*`, `view.*` and
+  `engine.describe` (whose answer depends on what else is installed) are refused. Both
+  clocks stand still (the wall clock at the Unix epoch; there is no `clock` permission in this
+  world), and `wasi:random` is seeded by the host from the instance's id. So the same revision
+  with the same inputs on the same design runs the same commands.
+- **Finding them.** The Plugins page could also open from the ribbon, as an Add-on Manager under
+  Manage (#1221) that lists each plugin's entries, versions and permissions, with enable, disable
+  and remove. Command search already finds entries, since they are listed like commands (section
+  3), and both open the same form. Local folders come first; installing from a URL or a community
+  index comes with signing (section 13).
+
+### 13b. Open questions for the maintainer
 
 - Q1 Is the wasmtime + WASI dependency cost acceptable (measured in S2), or Pulley/no-WASI first?
 - Q2 Default for a newly installed plugin with code: unapproved (proposed) vs today's "on".
@@ -1334,4 +1423,6 @@ Open questions for the maintainer:
   (9.7). Alternatives: a BCF-API server first (needs run-time origins and OAuth in the host), or the
   PDM server (#3711) once it lands. A hosted backend would be one more origin and changes nothing in
   this interface; the free GitHub and self-hosted paths stay.
-- Q4 Examples in this repository (`examples/plugins/`) or a separate tangency-labs repository.
+- Q4 Examples in this repository (`examples/plugins/`) or a separate tangency-labs repository, and
+  whether some add-ons (the gear, screw and threaded hole of 13a) ship with the app, through the
+  same interface.
