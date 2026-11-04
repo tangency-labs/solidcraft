@@ -54,7 +54,7 @@
 use std::f64::consts::TAU;
 
 use crate::blend::fillet_section::interval::{round_up, Ivl};
-use crate::blend::fillet_section::recertify::{gamma, transform_rounding};
+use crate::blend::fillet_section::recertify::transform_rounding;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector3d::{Point3, Vec3};
@@ -63,6 +63,7 @@ use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::math::gamma;
 use crate::surface::procedural_blend::{BlendRef, NetScope};
 
 const OP_CREATE: &str = "surface::procedural_sweep::ProceduralSweep::create";
