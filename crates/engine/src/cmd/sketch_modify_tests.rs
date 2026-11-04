@@ -270,9 +270,13 @@ fn an_ellipse_s_own_axes_do_not_cut_it() {
     let at = Vec2::new(20.0 * 10f64.to_radians().cos(), 8.0 * 10f64.to_radians().sin());
     run(&mut s, "sketch.trim", json!({"curve": e, "at": [at.x, at.y]}));
     let sk = sketch(&s);
-    for (i, c) in sk.curves.iter().enumerate().filter(|(_, c)| !c.construction && !matches!(c.kind, CurveKind::Line { .. })) {
+    let left: Vec<usize> =
+        (0..sk.curves.len()).filter(|i| !sk.curves[*i].construction && !matches!(sk.curves[*i].kind, CurveKind::Line { .. })).collect();
+    // What is left of the ellipse comes back as conic pieces; the trim must leave some.
+    assert!(!left.is_empty(), "part of the ellipse is left: {:?}", sk.curves);
+    for i in left {
         let right = sk.polyline(i).iter().map(|q| q.x).fold(f64::MIN, f64::max);
-        assert!(right < 10.0 + 1e-6, "{}: what is left stays left of the line, reaching x = {right}", c.id);
+        assert!(right < 10.0 + 1e-6, "{}: what is left stays left of the line, reaching x = {right}", sk.curves[i].id);
     }
 }
 
