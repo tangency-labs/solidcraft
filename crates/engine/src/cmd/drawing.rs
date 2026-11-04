@@ -10,8 +10,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_doc::bom::{Mass, Tree};
+use solidcraft_doc::bom::{self, Mass, Tree};
+use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::fields::{Component, Values};
+use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
 use solidcraft_doc::drawing::{self, Drawing, Source, Units, template};
 use solidcraft_doc::drawing_view::ViewDirection;
@@ -401,6 +403,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "tables": d.tables.iter().filter(|t| t.sheet == sheet.id).map(|t| ids::encode(t.id)).collect::<Vec<_>>(),
         }));
     }
+    let parts_lists = parts_lists(d, &mut tree);
     Ok(json!({
         "id": ids::encode(d.id),
         "name": d.name,
@@ -412,6 +415,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "properties": d.properties,
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
         "sheets": sheets,
+        "parts_lists": parts_lists,
         "revisions": {
             "numbering": d.revisions.numbering,
             "rows": super::drawing_revision::rows(&d.revisions),
@@ -420,6 +424,22 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "tags": super::drawing_revision::tags(&d.revisions),
         },
     }))
+}
+
+/// Each parts list with how many balloons point at each of its rows, its editor's ballooned column
+/// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large.
+fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
+    let reading = d.balloons_by_list();
+    let lists = d.tables.iter().filter_map(|t| if let Kind::PartsList(list) = &t.kind { Some((t.id, list)) } else { None });
+    lists
+        .map(|(id, list)| {
+            let ballooned = bom::list_with(tree, &list.request(), true).ok().map(|listed| {
+                let rows = balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree);
+                rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>()
+            });
+            json!({"table": ids::encode(id), "ballooned": ballooned})
+        })
+        .collect()
 }
 
 /// The text cells of sheet `at`'s title block as the sheet shows them (`drawing.inspect`).

@@ -11,7 +11,8 @@
 //!
 //! The number a balloon shows comes from a parts list, worked out and never saved: the one it names,
 //! else its sheet's only one, else the drawing's only one ([`Drawing::parts_list_for`]). It keeps the
-//! balloon whatever becomes of the row.
+//! balloon whatever becomes of the row. A parts list's editor shows how many balloons point at each of
+//! its rows ([`balloons_by_row`]), worked out the same way.
 //!
 //! The rules, beside the record's: a balloon is on one of the drawing's views; its edge reference
 //! keeps a dimension's rules, with an occurrence path of 1 to [`crate::MAX_PLACEMENT_DEPTH`] ids; its place
@@ -20,6 +21,8 @@
 //!
 //! [`Document::resolve_balloons`] finds each balloon's edge again as a dimension's is found
 //! ([`super::dimension::Status`]): by name, strictly, and what it can't decide it says.
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
@@ -30,6 +33,7 @@ use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, Status, check_edge};
 use super::table::{Kind, PartsList, SheetTable};
 use super::{Drawing, require};
+use crate::bom::{Bom, Tree, item_text};
 use crate::{DocError, Document, Model, Result, ids};
 
 /// The most balloons a drawing may have.
@@ -89,6 +93,18 @@ impl Drawing {
         }
     }
 
+    /// The balloons that read each parts list ([`Self::parts_list_for`]), by the list's id: each
+    /// balloon's list worked out once. A balloon with no list to go by reads none.
+    pub fn balloons_by_list(&self) -> HashMap<u64, Vec<&Balloon>> {
+        let mut by_list: HashMap<u64, Vec<&Balloon>> = HashMap::new();
+        for b in &self.balloons {
+            if let Ok((list, _)) = self.parts_list_for(b) {
+                by_list.entry(list).or_default().push(b);
+            }
+        }
+        by_list
+    }
+
     /// The balloons' rules (the module's notes). The views and the tables are checked first, so they
     /// are in id order here.
     pub(super) fn check_balloons(&self) -> Result<()> {
@@ -106,6 +122,27 @@ impl Drawing {
         let [x, y] = b.at;
         require(is_paper_coordinate(x) && is_paper_coordinate(y), || format!("its place is at most {MAX_SIDE_MM} mm on paper"))
     }
+}
+
+/// How many of `balloons`, those that read one parts list ([`Drawing::balloons_by_list`]), point at
+/// each of its rows, by item ("1.2"): every row of `listed` (that list, made from `tree` with its
+/// members) in its order, 0 included. A balloon whose row is lost counts for none.
+pub fn balloons_by_row(balloons: &[&Balloon], listed: &Bom, tree: &Tree) -> Vec<(String, usize)> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for b in balloons {
+        if let Ok(item) = listed.item_of(tree, b.occurrence()) {
+            *counts.entry(item).or_default() += 1;
+        }
+    }
+    listed
+        .rows_deep()
+        .iter()
+        .map(|(item, _)| {
+            let item = item_text(item);
+            let n = counts.get(&item).copied().unwrap_or(0);
+            (item, n)
+        })
+        .collect()
 }
 
 /// A balloon as the model has it now ([`Document::resolve_balloons`]): never saved.

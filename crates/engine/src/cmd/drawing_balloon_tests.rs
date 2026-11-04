@@ -360,6 +360,68 @@ fn a_balloon_follows_its_row_through_the_model() {
     assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "the part back, its number back");
 }
 
+/// How many balloons point at each row of each parts list, as `drawing.inspect` gives them, by the
+/// list's id.
+fn ballooned(s: &mut Session) -> Vec<(String, Vec<(String, u64)>)> {
+    let inspected = s.execute("drawing.inspect", &json!({})).unwrap();
+    let rows = |list: &Value| -> Vec<(String, u64)> {
+        list["ballooned"].as_array().unwrap().iter().map(|r| (r["item"].as_str().unwrap().into(), r["balloons"].as_u64().unwrap())).collect()
+    };
+    let lists = inspected["parts_lists"].as_array().unwrap();
+    let mut by_id: Vec<_> = lists.iter().map(|list| (list["table"].as_str().unwrap().into(), rows(list))).collect();
+    by_id.sort();
+    by_id
+}
+
+/// Each row of a parts list counts the balloons that read it, 0 included, in the list's order: a
+/// balloon reading another list, or none while two are on the sheet, counts for none, as does one
+/// whose part is gone. Worked out on each read and never saved.
+#[test]
+fn a_parts_list_counts_the_balloons_on_each_row() {
+    let (mut s, view, [component, occurrence]) = placed();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
+        s.execute("drawing.close", &json!({})).unwrap();
+        let reply = s.execute(id, &p).unwrap();
+        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+        reply
+    };
+    // A 10 mm pin of its own at x = 100, below the Bracket in the list.
+    let pin = with_drawing_closed(&mut s, "component.create", json!({"name": "Pin"}));
+    with_drawing_closed(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Pin"}));
+    let pin = pin["occurrence"].as_u64().unwrap();
+    let first = list(&mut s, json!({}));
+    let rows = |counts: [u64; 2]| vec![(first.clone(), vec![("1".to_string(), counts[0]), ("2".to_string(), counts[1])])];
+    assert_eq!(ballooned(&mut s), rows([0, 0]), "every row, none ballooned");
+
+    let on_bracket = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    assert_eq!(ballooned(&mut s), rows([1, 0]));
+    add(&mut s, view, occurrence);
+    assert_eq!(ballooned(&mut s), rows([2, 0]), "two on one row");
+    run(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"point": [105, 0, 0], "path": [pin]}, "at": [-60, 40]}));
+    assert_eq!(ballooned(&mut s), rows([2, 1]));
+
+    let second = list(&mut s, json!({}));
+    let two = ballooned(&mut s);
+    assert_eq!(two.iter().map(|(_, r)| r.iter().map(|(_, n)| n).sum::<u64>()).collect::<Vec<_>>(), [0, 0], "none names a list: none counts");
+    run(&mut s, EDIT, json!({"balloon": on_bracket, "set": {"parts_list": second}}));
+    let mut named =
+        vec![(first.clone(), vec![("1".to_string(), 0), ("2".to_string(), 0)]), (second.clone(), vec![("1".to_string(), 1), ("2".to_string(), 0)])];
+    named.sort();
+    assert_eq!(ballooned(&mut s), named, "it counts on the list it names alone");
+    s.execute("drawing.table.delete", &json!({"table": first})).unwrap();
+    assert_eq!(ballooned(&mut s), vec![(second.clone(), vec![("1".to_string(), 2), ("2".to_string(), 1)])], "the only list again");
+
+    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    assert_eq!(
+        ballooned(&mut s),
+        vec![(second.clone(), vec![("2".to_string(), 1)])],
+        "the Bracket's balloons count for no row; the Pin keeps its number"
+    );
+    with_drawing_closed(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 1}));
+    assert_eq!(ballooned(&mut s), vec![(second, vec![("1".to_string(), 1)])], "nor for the row that takes the Bracket's number");
+}
+
 /// A list of the component the balloon's part is in reads it below that component; a list of the
 /// component a balloon's path doesn't run through, or one deleted since, finds nothing.
 #[test]
