@@ -6,6 +6,12 @@
 //! ([`super::record::CornerRecord`]).
 //!
 //! Each kind is defined by its construction:
+//! - [`BallDefinition`]: the Ball's patch (#2357), its sphere (the corner ball's centre and
+//!   radius) bounded by the patch's loop (its three sections), the net a
+//!   [`BallPatch`] (bound 0). Re-certified by `IsOnSphere`'s certificate
+//!   ([`BallPatch::is_on_sphere`], [`BallPatch::is_curve_on_sphere`] at
+//!   [`ON_SPHERE_REL_TOL`]): the net and every curve of the loop on the sphere, decided on
+//!   their control nets, and the net's own sphere the definition's.
 //! - [`SweptDefinition`]: a Swept turn, the end section of two rounds revolved about the
 //!   side edge, an exact torus (bound 0): the common face the rounds meet, the side edge's
 //!   line, the balls' centres at the side vertex and their radius. Re-certified by its label
@@ -56,8 +62,9 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use crate::surface::ball_patch::{BallPatch, ON_SPHERE_REL_TOL};
 use crate::surface::implicit::{lies_on, AnalyticSupport};
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_CREATE: &str = "surface::procedural_blend::corner::CornerDefinition::create";
 const OP_RECERTIFY: &str = "surface::procedural_blend::corner::CornerDefinition::recertify";
@@ -66,6 +73,8 @@ const OP_TRANSFORM: &str = "surface::procedural_blend::corner::CornerDefinition:
 /// The kind of a blend corner's face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CornerKind {
+    /// The Ball's patch on its sphere.
+    Ball,
     /// A Swept turn's torus.
     Swept,
     /// An End's patch on its support face.
@@ -81,12 +90,25 @@ impl CornerKind {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Ball => "ball",
             Self::Swept => "swept",
             Self::End => "end",
             Self::Setback => "setback",
             Self::Mixed => "mixed",
         }
     }
+}
+
+/// The Ball's definition (#2357): the corner ball's sphere (its centre and radius) and the
+/// patch's boundary, its loop's curves (the three sections, the pole left out).
+#[derive(Debug, Clone)]
+pub struct BallDefinition {
+    /// The sphere's centre.
+    pub(crate) centre: Point3,
+    /// The sphere's radius.
+    pub(crate) radius: f64,
+    /// The patch's loop's curves, as NURBS curves.
+    pub(crate) boundary: Vec<BSplineCurve>,
 }
 
 /// A Swept turn's definition: the end section of its two rounds (balls of radius `radius`
@@ -195,6 +217,8 @@ pub struct MixedDefinition {
 /// A blend corner's face's definition.
 #[derive(Debug, Clone)]
 pub enum CornerDefinition {
+    /// The Ball's patch.
+    Ball(BallDefinition),
     /// A Swept turn's torus.
     Swept(SweptDefinition),
     /// An End's patch.
@@ -370,6 +394,45 @@ fn control_distance(
 /// `|a x b| <= sin`, `a` and `b` unit: the two directions are parallel to within `sin`.
 fn parallel(a: Vec3, b: Vec3, sin: f64) -> bool {
     a.cross(b).length() <= sin
+}
+
+impl BallDefinition {
+    /// The sphere's centre.
+    #[must_use]
+    pub const fn centre(&self) -> Point3 {
+        self.centre
+    }
+
+    /// The sphere's radius.
+    #[must_use]
+    pub const fn radius(&self) -> f64 {
+        self.radius
+    }
+
+    /// The patch's loop's curves.
+    #[must_use]
+    pub fn boundary(&self) -> &[BSplineCurve] {
+        &self.boundary
+    }
+
+    fn recertify(&self, k: &Kernel, net: &Surface) -> Result<f64> {
+        let (c, r) = (self.centre, self.radius);
+        // the net's own sphere (what its offset scales about) is the definition's
+        if let SurfaceKind::BallPatch(bp) = net.kind() {
+            if bp.centre() != c || bp.radius().to_bits() != r.to_bits() {
+                return Err(refuse("a ball's patch is not on its definition's sphere"));
+            }
+        }
+        if !BallPatch::is_on_sphere(&form_of(k, net)?, c, r, ON_SPHERE_REL_TOL)? {
+            return Err(refuse("a ball's patch is not on its definition's sphere"));
+        }
+        for curve in &self.boundary {
+            if !BallPatch::is_curve_on_sphere(curve, c, r, ON_SPHERE_REL_TOL)? {
+                return Err(refuse("a ball's loop is not on its sphere"));
+            }
+        }
+        Ok(0.0)
+    }
 }
 
 impl SweptDefinition {
@@ -685,6 +748,28 @@ impl CornerDefinition {
         }))
     }
 
+    /// The Ball's definition: the sphere of centre `centre` and radius `radius`, bounded by
+    /// `boundary`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a centre not finite, a radius not finite and positive, or an
+    /// empty boundary.
+    pub fn ball(centre: Point3, radius: f64, boundary: Vec<BSplineCurve>) -> Result<Self> {
+        let finite = centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite();
+        if !(finite && radius.is_finite() && radius > 0.0) || boundary.is_empty() {
+            return Err(SolidError::invalid_input(
+                OP_CREATE,
+                "a ball's sphere has a finite centre and a positive radius, and its patch is bounded",
+            ));
+        }
+        Ok(Self::Ball(BallDefinition {
+            centre,
+            radius,
+            boundary,
+        }))
+    }
+
     /// A Swept turn's definition on a copy of its common face.
     ///
     /// # Errors
@@ -755,6 +840,7 @@ impl CornerDefinition {
     #[must_use]
     pub const fn kind(&self) -> CornerKind {
         match self {
+            Self::Ball(_) => CornerKind::Ball,
             Self::Swept(_) => CornerKind::Swept,
             Self::End(_) => CornerKind::End,
             Self::Setback(_) => CornerKind::Setback,
@@ -766,7 +852,7 @@ impl CornerDefinition {
     /// Setback's patch is the B-spline its rule makes.
     #[must_use]
     pub const fn is_exact(&self) -> bool {
-        matches!(self, Self::Swept(_) | Self::End(_))
+        matches!(self, Self::Ball(_) | Self::Swept(_) | Self::End(_))
     }
 
     /// The net's certified distance from the definition: 0 for an exact kind (the net is
@@ -776,7 +862,7 @@ impl CornerDefinition {
     #[must_use]
     pub fn bound(&self) -> f64 {
         match self {
-            Self::Swept(_) | Self::End(_) => 0.0,
+            Self::Ball(_) | Self::Swept(_) | Self::End(_) => 0.0,
             Self::Setback(d) => d.fill.tol,
             Self::Mixed(d) => d.tol,
         }
@@ -786,14 +872,14 @@ impl CornerDefinition {
     #[must_use]
     pub fn order(&self) -> u32 {
         match self {
-            Self::Swept(_) | Self::End(_) => 1,
+            Self::Ball(_) | Self::Swept(_) | Self::End(_) => 1,
             Self::Setback(d) => u32::try_from(d.fill.order).unwrap_or(u32::MAX),
             Self::Mixed(d) => u32::from(!d.bilinear),
         }
     }
 
     /// The `i`-th surface the face is built on: a Swept turn's common face, an End's
-    /// support face.
+    /// support face (a Ball's patch keeps none: its sphere is its definition).
     #[must_use]
     pub fn support(&self, i: usize) -> Option<&Surface> {
         match (self, i) {
@@ -811,7 +897,16 @@ impl CornerDefinition {
     pub const fn as_swept(&self) -> Option<&SweptDefinition> {
         match self {
             Self::Swept(d) => Some(d),
-            Self::End(_) | Self::Setback(_) | Self::Mixed(_) => None,
+            Self::Ball(_) | Self::End(_) | Self::Setback(_) | Self::Mixed(_) => None,
+        }
+    }
+
+    /// The Ball's definition.
+    #[must_use]
+    pub const fn as_ball(&self) -> Option<&BallDefinition> {
+        match self {
+            Self::Ball(d) => Some(d),
+            Self::Swept(_) | Self::End(_) | Self::Setback(_) | Self::Mixed(_) => None,
         }
     }
 
@@ -820,7 +915,7 @@ impl CornerDefinition {
     pub const fn as_end(&self) -> Option<&EndDefinition> {
         match self {
             Self::End(d) => Some(d),
-            Self::Swept(_) | Self::Setback(_) | Self::Mixed(_) => None,
+            Self::Ball(_) | Self::Swept(_) | Self::Setback(_) | Self::Mixed(_) => None,
         }
     }
 
@@ -829,7 +924,7 @@ impl CornerDefinition {
     pub const fn as_setback(&self) -> Option<&SetbackDefinition> {
         match self {
             Self::Setback(d) => Some(d),
-            Self::Swept(_) | Self::End(_) | Self::Mixed(_) => None,
+            Self::Ball(_) | Self::Swept(_) | Self::End(_) | Self::Mixed(_) => None,
         }
     }
 
@@ -838,7 +933,7 @@ impl CornerDefinition {
     pub const fn as_mixed(&self) -> Option<&MixedDefinition> {
         match self {
             Self::Mixed(d) => Some(d),
-            Self::Swept(_) | Self::End(_) | Self::Setback(_) => None,
+            Self::Ball(_) | Self::Swept(_) | Self::End(_) | Self::Setback(_) => None,
         }
     }
 
@@ -850,6 +945,7 @@ impl CornerDefinition {
     /// `InvalidInput` naming what fails; those of the checks' evaluations.
     pub fn recertify(&self, k: &Kernel, net: &Surface) -> Result<f64> {
         match self {
+            Self::Ball(d) => d.recertify(k, net),
             Self::Swept(d) => d.recertify(k, net),
             Self::End(d) => d.recertify(k, net),
             Self::Setback(d) => d.recertify(k, net),
@@ -884,6 +980,14 @@ impl CornerDefinition {
         }
         let point = |p: Point3| rotate_n_move.transform_point(p * factor);
         match self {
+            Self::Ball(d) => {
+                // the centre as the patch moves its own (BallPatch::transform), to its bits
+                d.centre = BallPatch::move_centre(d.centre, rotate_n_move, scale)?;
+                d.radius *= factor;
+                for c in &mut d.boundary {
+                    c.transform(rotate_n_move, scale)?;
+                }
+            }
             Self::Swept(d) => {
                 d.common
                     .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;

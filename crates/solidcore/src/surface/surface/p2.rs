@@ -792,8 +792,9 @@ pub(crate) fn check_geometry_nesting(
                                 }
                                 push(Geometry::Surface(&mixed.common));
                             }
-                            // Clone shares the fill instead of cloning its surfaces.
-                            CornerDefinition::Setback(_) => {}
+                            // Clone shares a Setback's fill instead of cloning its surfaces; a
+                            // Ball holds a sphere and B-spline boundary curves, nothing nested.
+                            CornerDefinition::Setback(_) | CornerDefinition::Ball(_) => {}
                         },
                         KeptDefinition::Sweep(_) => {}
                         KeptDefinition::Draft(draft) => push(Geometry::Surface(&draft.source)),

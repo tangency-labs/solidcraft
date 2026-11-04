@@ -642,6 +642,14 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
     let xyz = |p: Point3| [p.x, p.y, p.z];
     let face_net = || support_record(k, net, 1);
     Ok(match corner {
+        // the Ball's patch is recorded as its B-rep face, its sphere the face's `BallPatch`
+        // label over its net, and read back certified by solidcore-convert's `ball_patch`
+        CornerDefinition::Ball(_) => {
+            return Err(SolidError::invalid_input(
+                OP_CORNER_TO,
+                "a ball's patch is recorded as its B-rep face, not as a corner record",
+            ))
+        }
         CornerDefinition::Swept(d) => CornerRecord::Swept(SweptCornerRecord {
             common: support_record(k, &d.common, 1)?,
             axis_point: xyz(d.axis_point),

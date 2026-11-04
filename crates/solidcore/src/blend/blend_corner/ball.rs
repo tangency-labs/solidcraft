@@ -38,13 +38,17 @@
 //! Deviations: the face is, as the fork's f8e6709 makes it, an
 //! [`crate::surface::ball_patch::BallPatch`] (`SmBallPatch`): the rational patch carrying
 //! its sphere as its definition (its own type, exact offset and database IO). The patch
-//! and its loop are kept in [`BallCorner`] from the edge geometry until the patch takes them. The fork's
+//! and its loop are kept in [`BallCorner`] from the edge geometry until the patch takes them.
+//! With `Kernel::fixes.fillet_round_as_definition` the patch also keeps its corner
+//! definition (#2357, not the fork's): its sphere and its loop, certified on it
+//! ([`crate::surface::procedural_blend::corner::BallDefinition`]). The fork's
 //! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument. Opt-in:
 //! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion; the certified root's Newton
 //! loop is bounded at 50 steps, as the fork's.
 
 use crate::blend::blend_corner::BlendCornerEvent;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
+use crate::blend::fillet_corner::p1::nurbs_curve;
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_custom_solver::{offset_local_point_solve, offset_natural_uv_domain};
 use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
@@ -62,6 +66,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::surface::ball_patch::BallPatch;
+use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
@@ -1147,6 +1152,19 @@ pub fn ball_corner_edge_geom(
         let trims =
             surface.create_natural_uv_trim_curves(k, &nurb_domain, SurfParamType::V, true)?;
         let count = trims.curves_3d.len();
+        // each patch keeps its definition (#2357): the ball's sphere and the patch's own loop,
+        // certified on it
+        let mut surface = surface;
+        if k.fixes.fillet_round_as_definition {
+            let boundary = trims
+                .curves_3d
+                .iter()
+                .map(|c| nurbs_curve(c).cloned())
+                .collect::<Result<_>>()?;
+            let definition = CornerDefinition::ball(centre, radius, boundary)?;
+            definition.recertify(k, &surface)?;
+            surface.set_corner_definition(definition);
+        }
         ball.curves_3d.extend(trims.curves_3d);
         ball.uv_curves
             .extend(trims.uv_curves.iter().cloned().map(Curve::from));

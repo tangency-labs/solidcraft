@@ -875,3 +875,194 @@ fn a_box_rounded_all_round_shells_in_and_out_after_a_round_trip() {
     );
     assert!(got.is_err());
 }
+
+// ---- #2357: the Ball's patch keeps its definition, certified on its sphere ----
+// (the record's path, the B-rep record's ball patch face read back certified, is
+// solidcore-convert's `ball_patch`, tested in its tests/round_trip.rs)
+
+use solidcore::surface::procedural_blend::corner::CornerKind;
+use solidcore::surface::procedural_blend::BlendNet;
+
+/// The box corner's Ball face with `fillet_round_as_definition` on or off.
+fn ball_face_with(definition: bool) -> (Kernel, Surface) {
+    let mut k = all_fixes(true);
+    k.fixes.fillet_round_as_definition = definition;
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let at = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
+    let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(&mut k, &edges, &[3.0; 3], &xs, 1, 1.0)
+            .unwrap();
+        s.do_fillet(&mut k).unwrap();
+    }
+    stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    let mut balls: Vec<Surface> = get_faces(&b)
+        .unwrap()
+        .into_iter()
+        .map(|f| face2::surface(&b, f).unwrap().unwrap().copy(&k).unwrap())
+        .filter(|s| matches!(s.kind(), SurfaceKind::BallPatch(_)))
+        .collect();
+    assert_eq!(balls.len(), 1, "one ball patch");
+    (k, balls.remove(0))
+}
+
+/// The Ball's face is its definition: the sphere (centre r in from each face, radius r),
+/// the patch's loop (its three sections) and its net, exact (bound 0), G1, re-certified
+/// at 0; the patch is bit for bit the one built without keeping the definition.
+#[test]
+fn the_ball_s_patch_is_its_definition() {
+    let (k, s) = ball_face_with(true);
+    let d = s
+        .procedural_blend()
+        .expect("the ball's patch keeps its definition");
+    let corner = d.corner().unwrap();
+    assert_eq!(corner.kind(), CornerKind::Ball);
+    assert!(matches!(d.net(), BlendNet::Exact(_)));
+    assert_eq!(d.bound(), 0.0);
+    assert_eq!(d.order(), 1);
+    assert_eq!(d.recertify(&k).unwrap(), 0.0);
+    let ball = corner.as_ball().unwrap();
+    assert_eq!(ball.centre(), CENTRE);
+    assert_eq!(ball.radius(), 3.0);
+    assert_eq!(ball.boundary().len(), 3);
+    // each section a quarter circle of radius 3 on the sphere: its ends and middle 3 off
+    // the centre
+    for c in ball.boundary() {
+        let ivl = c.natural_interval();
+        for t in [0.0, 0.5, 1.0] {
+            let p = c
+                .evaluate_point(ivl.min() + t * (ivl.max() - ivl.min()))
+                .unwrap();
+            assert!(((p - CENTRE).length() - 3.0).abs() <= 1e-13, "{p:?}");
+        }
+    }
+    let (_, bare) = ball_face_with(false);
+    assert!(bare.procedural_blend().is_none());
+    assert!(same_bits(patch(&s), patch(&bare)));
+}
+
+/// A moved patch (rigid, and by a uniform scale) carries its definition with it and is
+/// certified again; its sphere is the patch's own, bit for bit.
+#[test]
+fn a_moved_ball_s_patch_is_certified_again() {
+    let (k, s) = ball_face_with(true);
+    let mut place = Axis2Placement::default();
+    place.rotate_about_axis(0.3, Vec3::new(1.0, 2.0, 3.0).unitize().unwrap());
+    place.translate(Vec3::new(1e2, -2e2, 5e1));
+    for scale in [None, Some(Vec3::new(2.0, 2.0, 2.0))] {
+        let mut m = s.copy(&k).unwrap();
+        m.transform(&k, &place, scale).unwrap();
+        let d = m.procedural_blend().unwrap();
+        assert_eq!(d.recertify(&k).unwrap(), 0.0);
+        let ball = d.corner().unwrap().as_ball().unwrap();
+        let q = patch(&m);
+        assert_eq!(ball.centre(), q.centre());
+        assert_eq!(ball.radius().to_bits(), q.radius().to_bits());
+        let want = if scale.is_some() { 6.0 } else { 3.0 };
+        assert_eq!(q.radius(), want);
+    }
+}
+
+/// Far from the origin the certificate is as tight as at it: its tolerance is the sphere's
+/// own size plus the rounding of computing the coefficients, not `(R + |C|)^2`. The ball
+/// corner moved to (1e5, -7e4, 3e4) still certifies; a loop curve, the net or the radius
+/// 1e-7 off its sphere there is still refused.
+#[test]
+fn a_ball_s_patch_far_from_the_origin_is_certified_as_tightly() {
+    let (k, s) = ball_face_with(true);
+    let far = Point3::new(1e5, -7e4, 3e4);
+    let mut place = Axis2Placement::default();
+    place.translate(far - CENTRE);
+    let mut m = s.copy(&k).unwrap();
+    m.transform(&k, &place, None).unwrap();
+    assert!(patch(&m).centre().distance(far) <= 1e-10);
+    assert_eq!(m.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+    // a loop curve, the net or the radius 1e-7 off the sphere there is still refused
+    let ball = m
+        .procedural_blend()
+        .unwrap()
+        .corner()
+        .unwrap()
+        .as_ball()
+        .unwrap();
+    let (c, r) = (ball.centre(), ball.radius());
+    let shifted = |p: Point3| p + Vec3::new(1e-7, 1e-7, 1e-7);
+    for curve in ball.boundary() {
+        assert!(BallPatch::is_curve_on_sphere(curve, c, r, ON_SPHERE_REL_TOL).unwrap());
+        let mut off = curve.clone();
+        for i in 0..off.number_control_points().unwrap() {
+            let (pt, w) = off
+                .control_point(ControlPointForm::EuclideanRational, i)
+                .unwrap();
+            off.set_control_point(ControlPointForm::EuclideanRational, i, shifted(pt), w)
+                .unwrap();
+        }
+        assert!(!BallPatch::is_curve_on_sphere(&off, c, r, ON_SPHERE_REL_TOL).unwrap());
+    }
+    let net = patch(&m).net();
+    assert!(BallPatch::is_on_sphere(net, c, r, ON_SPHERE_REL_TOL).unwrap());
+    assert!(!BallPatch::is_on_sphere(net, c, r + 1e-7, ON_SPHERE_REL_TOL).unwrap());
+    let mut off = net.copy();
+    let cpn = net.control_point_net().unwrap();
+    for i in 0..cpn.u_count {
+        for j in 0..cpn.v_count {
+            let at = i * cpn.v_count + j;
+            off.set_control_point(
+                ControlPointForm::EuclideanRational,
+                i,
+                j,
+                shifted(cpn.points[at]),
+                cpn.weights[at],
+            )
+            .unwrap();
+        }
+    }
+    assert!(!BallPatch::is_on_sphere(&off, c, r, ON_SPHERE_REL_TOL).unwrap());
+}
+
+/// Hostile numbers never certify: a NaN or infinite control point or weight in the net or
+/// a loop curve, and a point so large that a coefficient overflows, are refused by the
+/// certificates.
+#[test]
+fn non_finite_or_overflowing_nets_and_loops_are_refused() {
+    let (_k, s) = ball_face_with(true);
+    let ball = s
+        .procedural_blend()
+        .unwrap()
+        .corner()
+        .unwrap()
+        .as_ball()
+        .unwrap();
+    let net = patch(&s).net();
+    let (c, r) = (CENTRE, 3.0);
+    let bad_points = [
+        (Point3::new(f64::NAN, 27.0, 20.0), 1.0),
+        (Point3::new(f64::INFINITY, 27.0, 20.0), 1.0),
+        (Point3::new(37.0, 27.0, 20.0), f64::NAN),
+        (Point3::new(37.0, 27.0, 20.0), f64::INFINITY),
+        (Point3::new(1e200, -1e200, 1e200), 1.0),
+    ];
+    for (pt, w) in bad_points {
+        let mut n = net.copy();
+        if n.set_control_point(ControlPointForm::EuclideanRational, 0, 0, pt, w)
+            .is_ok()
+        {
+            assert!(
+                !BallPatch::is_on_sphere(&n, c, r, ON_SPHERE_REL_TOL).unwrap_or(false),
+                "net {pt:?} {w}"
+            );
+        }
+        let mut curve = ball.boundary()[0].clone();
+        if curve
+            .set_control_point(ControlPointForm::EuclideanRational, 0, pt, w)
+            .is_ok()
+        {
+            assert!(
+                !BallPatch::is_curve_on_sphere(&curve, c, r, ON_SPHERE_REL_TOL).unwrap_or(false),
+                "loop {pt:?} {w}"
+            );
+        }
+    }
+}
