@@ -133,6 +133,19 @@ fn a_snapped_edge_middle_tip_is_kept_by_its_edge() {
     assert_eq!(corner.param["corner"], json!([60.0, 2.0, 5.0]), "{}", corner.param);
 }
 
+/// A snapped centre of the tappet's flat end face is kept by that face, so the tip follows the
+/// face as the part changes, as a pick of the face does.
+#[test]
+fn a_snapped_face_centre_tip_is_kept_by_its_face() {
+    let app = valve();
+    let st = app.session.world_state().unwrap();
+    let b = st.bodies.iter().find(|b| b.mesh().bounds().max.x > 59.0).unwrap();
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let end = b.body.faces(tol).unwrap().into_iter().find(|f| f.plane_normal.is_some() && f.centroid.x > 59.0).unwrap();
+    let tip = crate::dialogs_assembly::snap_of(&app.session, &Sel::Vertex { body: b.name.clone(), point: end.centroid }).unwrap();
+    assert!(tip.param.get("face").is_some(), "{}", tip.param);
+}
+
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_cam_dialog_labels_translate() {

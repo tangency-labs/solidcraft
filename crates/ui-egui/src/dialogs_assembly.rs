@@ -695,6 +695,11 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             }
         }
         Sel::Vertex { body, point } => {
+            // A woken centre (a flat face's, a round edge's) is kept by that face or edge, so it
+            // follows the part as a pick of the face or edge does (#11231).
+            if let Some(source) = centre_source(&st, body, *point) {
+                return snap_of(s, &source);
+            }
             // The corner of the edges meeting there, kept by their names, z along the part's +Z
             // as a point's is.
             let z = occurrence_of_body(s, body)
@@ -731,6 +736,19 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         m.insert("occurrence".into(), json!(occ));
     }
     Some(snap)
+}
+
+/// The flat face or round edge of `body` whose centre is at `at`, if one is.
+fn centre_source(st: &solidcraft_engine::doc::ModelState, body: &str, at: Vec3) -> Option<Sel> {
+    let b = st.body(body)?;
+    let near = |p: Vec3| p.dist(at) <= 1e-6 * (1.0 + at.len());
+    let m = b.mesh();
+    if let Some((i, e)) = m.edges.iter().enumerate().find(|(_, e)| circle_of(e).is_some_and(|(c, _)| near(c))) {
+        return Some(Sel::Edge { body: body.into(), index: i, point: *e.first()? });
+    }
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.plane_normal.is_some() && near(f.centroid))?;
+    Some(Sel::Face { body: body.into(), index: f.index, point: f.centroid })
 }
 
 /// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
