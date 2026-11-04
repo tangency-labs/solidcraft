@@ -1373,6 +1373,15 @@ mod tests {
     }
 
     #[test]
+    fn server_request_timeout_grows_with_the_body_and_never_overflows() {
+        assert_eq!(server::request_timeout_ms(0), server::REQUEST_TIMEOUT_BASE_MS);
+        let largest = server::request_timeout_ms(256 * 1024 * 1024);
+        assert_eq!(largest, server::REQUEST_TIMEOUT_BASE_MS + 1_024_000);
+        assert!(largest > server::request_timeout_ms(1024 * 1024));
+        assert_eq!(server::request_timeout_ms(usize::MAX), u32::MAX);
+    }
+
+    #[test]
     fn server_saves_require_the_opened_version_or_an_explicit_overwrite() {
         assert_eq!(server::save_condition(None, false), Some(("If-None-Match", "*")));
         assert_eq!(server::save_condition(Some("\"first\""), false), Some(("If-Match", "\"first\"")));

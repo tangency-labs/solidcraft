@@ -6,6 +6,18 @@ pub const ENDPOINT: &str = "/designs/";
 pub const MAX_LISTING: usize = 10_000;
 pub const MAX_LIST_BYTES: usize = 4 * 1024 * 1024;
 
+/// Fixed part of every request's time limit, in milliseconds.
+pub const REQUEST_TIMEOUT_BASE_MS: u32 = 60_000;
+/// Slowest upload rate the limit allows for, in bytes per second.
+pub const REQUEST_MIN_BYTES_PER_SECOND: u64 = 256 * 1024;
+
+/// How long a request may run before the browser aborts it, so a stalled save fails instead of staying pending.
+/// The base covers a round trip; the body adds the time to send it at the slowest rate.
+pub fn request_timeout_ms(body_len: usize) -> u32 {
+    let upload = (body_len as u64).saturating_mul(1000) / REQUEST_MIN_BYTES_PER_SECOND;
+    u32::try_from(upload).unwrap_or(u32::MAX).saturating_add(REQUEST_TIMEOUT_BASE_MS)
+}
+
 /// Relative names only; reject ambiguous URL encodings and platform path separators.
 pub fn valid(path: &str) -> bool {
     !path.is_empty()

@@ -254,6 +254,10 @@ The folder has no built-in authentication. Restrict the whole site, including `/
 through a reverse proxy with basic authentication, a VPN, or your existing access controls.
 Use HTTPS when accessing it over a network.
 
+The web app requests `/designs/` from the site's origin root, so the proxy must route that
+path at the root of the site's origin. Serving SolidCraft from a sub-path such as `/solidcraft/`
+does not move the endpoint.
+
 ### 3D mouse in the browser
 
 The web app reads a 3Dconnexion SpaceMouse or SpaceNavigator through the browser's Gamepad API,

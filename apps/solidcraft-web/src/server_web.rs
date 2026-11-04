@@ -10,7 +10,7 @@ use solidcraft_ui_egui::{FilePickerFuture, SolveApp, open_elsewhere::DiskAnswer,
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
-use super::{ENDPOINT, MAX_LIST_BYTES, MAX_LISTING, PREFIX, endpoint, parse, save_conflict, valid};
+use super::{ENDPOINT, MAX_LIST_BYTES, MAX_LISTING, PREFIX, endpoint, parse, request_timeout_ms, save_conflict, valid};
 use crate::files::{Files, err};
 
 type Answer = Rc<RefCell<(Option<Option<String>>, Option<Waker>)>>;
@@ -55,6 +55,7 @@ async fn request(method: &str, path: &str, bytes: Option<&[u8]>, condition: Opti
         headers.set(key, value).map_err(err)?;
     }
     options.set_headers(&headers);
+    options.set_signal(Some(&web_sys::AbortSignal::timeout_with_u32(request_timeout_ms(bytes.map_or(0, <[u8]>::len)))));
     let window = web_sys::window().ok_or("No browser window")?;
     JsFuture::from(window.fetch_with_str_and_init(path, &options)).await.map_err(err)?.dyn_into().map_err(|_| "Invalid server response".into())
 }
@@ -358,7 +359,11 @@ pub fn show(files: &Rc<Files>, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui_kit::cell_editor(ui, ui.make_persistent_id("server_save_name"), name, tr("web.server.name"), false);
                 if ui_kit::button(ui, tr("ui.save"), ui_kit::Button::Normal).clicked() && valid(name) && !name.contains('/') {
-                    let name = if solidcraft_engine::io::is_design_path(name) { name.clone() } else { format!("{name}.solidcraft") };
+                    let name = if solidcraft_engine::io::is_design_path(name) {
+                        name.clone()
+                    } else {
+                        format!("{name}.{}", solidcraft_engine::io::DESIGN_EXT)
+                    };
                     selected = if picker.place == 1 { Some(format!("{}{name}", crate::files::OPFS)) } else { super::engine_path(&join(&name)) };
                 }
             });
