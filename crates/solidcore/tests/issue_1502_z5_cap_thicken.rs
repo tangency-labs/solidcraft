@@ -265,6 +265,19 @@ fn z5_cap_half_rims_thicken_with_the_wr463_option() {
     assert_sound((k, shell), 4);
 }
 
+/// The same half rims with `offset_lamina_corner_at_vertex_image` (WR-736, #2611) alone:
+/// each half's offset ends at its vertices' images, one manifold solid of the sector's
+/// volume.
+#[test]
+fn z5_cap_half_rims_thicken_with_the_wr736_option() {
+    let mut k = Kernel::default();
+    k.fixes.offset_lamina_corner_at_vertex_image = true;
+    let sheet = cap_sheet(&mut k, true);
+    assert_half_rims(&k, &sheet);
+    let shell = thicken(&mut k, sheet, 1.0).unwrap();
+    assert_sound((k, shell), 4);
+}
+
 /// Characterize the Rust default on the same half-rim shape: no manifold solid and zero
 /// volume. The enabled-policy test above demonstrates the existing option's correction;
 /// neither test diagnoses the default's internal failure mechanism.

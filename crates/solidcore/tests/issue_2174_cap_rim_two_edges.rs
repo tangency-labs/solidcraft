@@ -58,12 +58,13 @@ use solidcore::topology::{Brep, FaceId};
 use solidcore::SolidError;
 
 /// The issue's flags: every fix on except `geometric_g2_continuity`, with or without
-/// this one.
+/// this one. `offset_lamina_corner_at_vertex_image` (WR-736, #2611), which came later and
+/// ends each rim half at its vertices' images by itself, is off as it was then.
 fn issue_kernel(fixed: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
+        if name != "geometric_g2_continuity" && name != "offset_lamina_corner_at_vertex_image" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -250,6 +251,20 @@ fn flag_off_refuses_the_gap() {
         match thicken(&mut k, &s, distance) {
             Err(SolidError::Upstream { code, .. }) => assert_eq!(code, 1043, "{distance}"),
             other => panic!("{distance}: {other:?}"),
+        }
+    }
+}
+
+/// Without this fix, WR-736's (#2611) alone closes the gap too: each rim half's offset
+/// ends at its vertices' images, never at the first trim point's twin.
+#[test]
+fn wr736_alone_closes_the_gap() {
+    let sheets: [fn(&mut Kernel) -> Brep; 3] = [intersected_cap, turned_cap, solidcraft_cap];
+    for sheet in sheets {
+        for distance in [1.0, -1.0] {
+            let mut k = issue_kernel(false);
+            k.fixes.offset_lamina_corner_at_vertex_image = true;
+            assert_sound(k, sheet, distance);
         }
     }
 }

@@ -37,6 +37,7 @@
 //! | [`make_edges_on_analytics_exact`]                          | the fork's `MakeEdgesOnAnalyticsExact` (tangency-labs/smlib@cd85d34; opt-in) |
 //! | [`OffsetGeometryCreation::default_tangency_tol_radians`]    | the constructor's `m_dTangencyTolRadians` (half a degree in the fork's tangency-labs/smlib@2e1bb8c; opt-in) |
 //! | `first_cut_from_far_end` (private)                          | the fork's cut-first-from-the-far-end choice in `TrimExtendedEdge` (tangency-labs/smlib@2e1bb8c; opt-in) |
+//! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
 //!
 //! Deviations:
 //! - **Four faces at a vertex (WR-666, opt-in).** With `Kernel::fixes.offset_four_face_vertex_split`
@@ -46,6 +47,12 @@
 //!   reached first from the edge's other end. That choice also skips, on an open edge's
 //!   second end, a cut at the first trim point again (the fork's `bFirstAgain`, used there
 //!   only; the main candidate search is upstream's, WR-463's opt-in covers closed curves).
+//! - **A lamina edge's corner at its vertex image (WR-736, #2611, opt-in).** With
+//!   `Kernel::fixes.offset_lamina_corner_at_vertex_image`, `trim_extended_edge` ends a
+//!   lamina edge's offset, at a vertex whose next edge is lamina or a tangent sector, where
+//!   the offset curve passes nearest the vertex's image `V + d n(V)`
+//!   (`offset_vertex_image`), instead of at the crossing of the two edges' UV trim curves
+//!   or the neighbour's offset vertex. Solidcore-native, no fork commit.
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
 //!   handle `O` ([`ClassObject`] + [`SolutionObject`]), as in
 //!   [`proto_topology`](crate::topology::proto_topology) and the topology intersector.
@@ -2544,8 +2551,38 @@ impl OffsetGeometryCreation {
                 }
             } // end 2nd iteration branch
 
+            // `Kernel::fixes.offset_lamina_corner_at_vertex_image` (WR-736, #2611): a lamina
+            // edge's offset (the lifted curve, on its own face's offset) ends, at a vertex
+            // whose next edge is lamina or a tangent sector, at the vertex's own image
+            // `V + d n(V)`, where it passes nearest that image (a well-conditioned solve: the
+            // curve runs through the image to the lift's tolerance). Neither the neighbour's
+            // offset vertex, snapped to within ten tolerances, nor the crossing of the two
+            // edges' UV trim curves is taken: the crossing's parameter is the UV curve's,
+            // which the lifted curve does not keep, and between tangent edges the crossing
+            // is ill-conditioned.
+            let vertex_image = k.fixes.offset_lamina_corner_at_vertex_image
+                && !tan_eus.is_empty()
+                && brep.edge_is_lamina(base_edge)?;
+            if vertex_image {
+                let tol_3d = brep.brep_tolerance(base_edge)?;
+                let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
+                let on_curve = Self::point_solve(
+                    k,
+                    brep,
+                    curve_3d,
+                    SolverOperation::Minimize,
+                    image,
+                    tol_3d,
+                    None,
+                    SolutionRequested::All,
+                )?;
+                solutions.append(&on_curve);
+            }
             // Tangent sector handling - extend parameter space and intersect it for one or two curves.
             for (itry, &tan_eu) in tan_eus.iter().enumerate() {
+                if vertex_image {
+                    break;
+                }
                 let tan_uv = tan_uvs.get(itry).copied().flatten();
                 let mut uv_curve = brep.edgeuse_uv_trim_curve(tan_eu)?;
 
@@ -3073,6 +3110,61 @@ impl OffsetGeometryCreation {
         } else {
             p1
         }))
+    }
+
+    /// Not upstream (WR-736, `Kernel::fixes.offset_lamina_corner_at_vertex_image`): the
+    /// image of `vertex` on the offset of `edgeuse`'s face, `V + sign d n(V)`: the unit
+    /// normal of the face's surface at the vertex, `sign` that of the face use's
+    /// orientation, as [`Self::faceuse_offset`] offsets the surface. The vertex lies on
+    /// the surface, so its parameters are a well-conditioned point solve.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for dangling topology or no solution; those of the
+    /// point solve and the normal evaluation.
+    fn offset_vertex_image<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &impl OffsetBrep<O>,
+        edgeuse: O,
+        vertex: O,
+    ) -> Result<Point3> {
+        let faceuse = brep
+            .edgeuse_faceuse(edgeuse)?
+            .ok_or(dangling("edge use without face use"))?;
+        let sign = if brep.faceuse_orientation(faceuse)? == OrientType::Opposite {
+            -1.0
+        } else {
+            1.0
+        };
+        let face = brep
+            .edgeuse_face(edgeuse)?
+            .ok_or(dangling("edge use without face"))?;
+        let sur = brep
+            .face_surface(face)?
+            .ok_or(dangling("face without surface"))?;
+        let mut surface = surface_of(brep, sur)?.clone_for_evaluation()?;
+        surface.set_owner(None);
+        let point = brep.vertex_point(vertex)?;
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        // (a copy free of its face: the vertex, on the face's boundary, needs no test
+        // against the face's trims)
+        let sols: SolutionArray<O> = surface.global_point_solve(
+            k,
+            None,
+            &domain,
+            SolverOperation::Minimize,
+            point,
+            brep.brep_tolerance(vertex)?,
+            None,
+            SolutionRequested::Single,
+        )?;
+        let sol = sols
+            .get(0)
+            .ok_or(dangling("vertex off its face's surface"))?;
+        let uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
+        let normal = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+        Ok(point + normal * (sign * self.offset_distance))
     }
 
     /// The neighbour classification of `TrimExtendedEdge` (repeated for each end of
