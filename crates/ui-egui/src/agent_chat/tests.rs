@@ -4547,7 +4547,8 @@ fn the_copy_message_button_copies_the_prompt_as_entered() {
 /// the bubble stretching over the empty view below it.
 #[test]
 fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
-    let h = chat_with_copiable_messages();
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
     let button = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
     let prompt = crate::scenario::rect_of("agent_chat:msg:0").expect("the prompt's message area");
     let reply = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
