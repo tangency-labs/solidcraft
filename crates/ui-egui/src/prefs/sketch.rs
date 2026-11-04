@@ -172,6 +172,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.project_options_dialog_note"),
                     &mut app.preferences.project_options_dialog,
                 );
+                check(
+                    ui,
+                    "sketch_move_classic",
+                    "prefs.sketch_move_classic",
+                    Some("prefs.sketch_move_classic_note"),
+                    &mut app.preferences.sketch_move_classic,
+                );
             });
         });
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
