@@ -5,7 +5,7 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
-fn theme_browser_has_equal_end_padding_and_three_card_arrows_without_selecting() {
+fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() {
     let ctx = crate::fonts::test_context();
     let clicked = std::cell::Cell::new(false);
     let draw = |ui: &mut Ui| {
@@ -44,9 +44,11 @@ fn theme_browser_has_equal_end_padding_and_three_card_arrows_without_selecting()
         frame(&ctx, pointer(at, false), draw);
         frame(&ctx, vec![], draw);
     };
+    let stride = scenario::rect_of("test:theme_card:1").unwrap().left() - first.left();
+    let page = ((viewport.width() / stride).floor() as usize).max(1);
     advance();
-    let moved = scenario::rect_of("test:theme_card:3").unwrap();
-    assert!((moved.left() - first.left()).abs() < 0.1, "arrow moves exactly three cards");
+    let moved = scenario::rect_of(&format!("test:theme_card:{page}")).unwrap();
+    assert!((moved.left() - first.left()).abs() < 0.1, "arrow moves a screenful of {page} cards");
     assert!(scenario::handle_at("prefs:theme_previous").is_some());
     assert!(scenario::handle_at("prefs:theme_next").is_some());
     for _ in 0..10 {

@@ -538,7 +538,9 @@ pub(crate) fn theme_browser(ui: &mut Ui, id: &str, count: usize, grid: bool, rev
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
             scenario::publish_target(if left { "prefs:theme_previous" } else { "prefs:theme_next" }, arrow);
             if response.clicked() {
-                offset = (offset + if left { -3.0 * stride } else { 3.0 * stride }).clamp(0.0, max);
+                // A screenful: the cards that fit in view, at least one (#11434).
+                let page = (r.width() / stride).floor().max(1.0) * stride;
+                offset = (offset + if left { -page } else { page }).clamp(0.0, max);
             }
             response.backing_on_hover_text(label).on_hover_cursor(egui::CursorIcon::PointingHand);
         }
