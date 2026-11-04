@@ -2133,8 +2133,10 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
 
     /// Not the fork's (#2401): for a constant ball of `radius` (`None`: its own) whose
     /// offset of a face collapses, the radius of that face where the zone the ball sweeps is
-    /// open at an end of the edge (`blend::fillet_exact::ball_zone_open_at_an_end`); `None`
-    /// otherwise, and for a solver that rolls no constant ball.
+    /// open at an end of the edge, or (solidcore #2652) where the face is as wide as the ball
+    /// along part of the edge only
+    /// ([`ball_zone_open_at_an_end`](crate::blend::fillet_exact::ball_zone_open_at_an_end));
+    /// `None` otherwise, and for a solver that rolls no constant ball.
     ///
     /// # Errors
     /// The judging's own errors; the adapter over [`ExecutiveAccess`] has no solvers.
@@ -2143,7 +2145,7 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         k: &mut Kernel,
         solver: O,
         radius: Option<f64>,
-    ) -> Result<Option<f64>>;
+    ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>>;
 
     /// `SmFilletSolver::BandsMeetAt` (the fork's, a3d6d81) over the executive's pairs of
     /// `solvers` sharing a face, in its loop order (`a`, `b`, then each's face index): the
@@ -2255,7 +2257,7 @@ where
         _k: &mut Kernel,
         _solver: O,
         _radius: Option<f64>,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>> {
         Err(invalid("the ball's zone needs a live fillet session"))
     }
 
@@ -3725,15 +3727,26 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        // the least of the radii named (solidcore #2652: the smallest size that fits)
+        let mut least: Option<(crate::blend::fillet_exact::CollapsedOffset, O)> = None;
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
-            let Some(radius) = access.creation_ball_zone_open(k, solver, None)? else {
-                continue;
-            };
+            if let Some(open) = access.creation_ball_zone_open(k, solver, None)? {
+                if least.is_none_or(|(l, _)| open.radius < l.radius) {
+                    least = Some((open, solver));
+                }
+            }
+        }
+        if let Some((open, solver)) = least {
+            let radius = open.radius;
             let g = |x: f64| c_general(x, 0, 7);
             self.error.code = FilletErrorType::NoRoom as i32;
-            self.error.comment = format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls", g(radius), g(radius));
+            self.error.comment = if open.partial {
+                format!("Fillet Error: the rolling ball is as wide as a face it rolls on along part of the edge only (the face's radius across the edge reaches {}): a radius below {} rolls", g(radius), g(radius))
+            } else {
+                format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls", g(radius), g(radius))
+            };
             self.error.no_room = Some(NoRoomReason::OffsetCollapses);
             self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
             return Err(failure());

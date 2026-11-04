@@ -3925,7 +3925,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         k: &mut Kernel,
         solver: FilletObject,
         radius: Option<f64>,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
