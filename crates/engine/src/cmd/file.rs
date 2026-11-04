@@ -595,7 +595,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn default_design_format(path: &str) -> &'static str {
+pub(super) fn default_design_format(path: &str) -> &'static str {
     if std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("json")) { "json" } else { "container" }
 }
 
