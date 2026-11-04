@@ -295,6 +295,7 @@ fn box_fillet_cut_timeline() {
             fit: Default::default(),
             corner: Default::default(),
             setbacks: Vec::new(),
+            turn: Default::default(),
             tangent_chain: true,
         },
         None,
@@ -370,6 +371,7 @@ fn errors_are_reported_not_fatal() {
             fit: Default::default(),
             corner: Default::default(),
             setbacks: Vec::new(),
+            turn: Default::default(),
             tangent_chain: true,
         },
         None,
@@ -867,10 +869,37 @@ fn fillet_setbacks_default_to_none_and_round_trip() {
         fit: Default::default(),
         corner: Default::default(),
         setbacks: vec![CornerSetback { vertex: Position(Vec3::new(60.0, 40.0, 20.0)), distance: "8 mm".into() }],
+        turn: Default::default(),
         tangent_chain: true,
     };
     let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
     assert_eq!(back, set);
+}
+
+/// A fillet saved before turns reads as mitred and writes no `turn`; a swept one saves
+/// `turn: "swept"` and keeps it through a save and an open; a turn of another name is refused.
+#[test]
+fn fillet_turn_defaults_to_mitre_round_trips_and_refuses_unknown_turns() {
+    let old = serde_json::json!({"type": "fillet", "edges": [[15.0, 0.0, 10.0]], "radius": "2"});
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::Fillet { turn, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*turn, crate::FilletTurn::Mitre);
+    assert!(serde_json::to_value(&kind).unwrap().get("turn").is_none());
+    let mut swept = old.clone();
+    swept["turn"] = serde_json::json!("swept");
+    let kind: FeatureKind = serde_json::from_value(swept).unwrap();
+    assert!(matches!(kind, FeatureKind::Fillet { turn: crate::FilletTurn::Swept, .. }), "{kind:?}");
+    assert_eq!(serde_json::to_value(&kind).unwrap()["turn"], "swept");
+    let mut doc = Document::new("turn");
+    doc.add_feature(kind.clone(), None).unwrap();
+    let saved = doc.to_json();
+    let opened = Document::from_json(&saved).unwrap();
+    assert_eq!(opened.features.last().map(|f| &f.kind), Some(&kind));
+    assert_eq!(opened.to_json(), saved);
+    let mut unknown = old;
+    unknown["turn"] = serde_json::json!("round");
+    let e = serde_json::from_value::<FeatureKind>(unknown).unwrap_err().to_string();
+    assert!(e.contains("unknown variant `round`") && e.contains("mitre") && e.contains("swept"), "{e}");
 }
 
 #[test]

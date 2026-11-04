@@ -409,13 +409,14 @@ fn fillet_fitted(
     edges: &[Vec3],
     r: f64,
     fit: crate::FilletFit,
+    turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
-    match kernel::fillet_removing(body, edges, r) {
+    match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => {
-            Err(with_largest_fit(why, "radius", || kernel::fillet_max(body, edges, r)))
+            Err(with_largest_fit(why, "radius", || kernel::fillet_max(body, edges, r, turn)))
         }
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r)? {
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used), Vec::new())),
             None => Err(kernel::KernelError::TooLarge(why)),
@@ -4014,6 +4015,11 @@ fn blend_body(
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
     let input = mb.traced();
     let (mut used, mut tapered) = (None, Vec::new());
+    if let FeatureKind::Fillet { turn: crate::FilletTurn::Swept, style, fit, corner, setbacks, .. } = &f.kind
+        && (!style.is_constant() || *fit == crate::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty())
+    {
+        return Err(DocError::Invalid(crate::SWEPT_TAKES.into()));
+    }
     // The blended body, and the lineage of what the last blend started from.
     let (nb, from) = match &f.kind {
         // A curvature-continuous fillet's corners are G2 patches, whatever `corner` says: SMLib's
@@ -4061,8 +4067,8 @@ fn blend_body(
             tapered = edges.iter().copied().zip(tapers).filter_map(|(p, t)| Some((p, t?))).collect();
             (b, input)
         }
-        FeatureKind::Fillet { fit, .. } => {
-            let (b, u, gone) = fillet_fitted(&mb.body, edges, r, *fit)?;
+        FeatureKind::Fillet { fit, turn, .. } => {
+            let (b, u, gone) = fillet_fitted(&mb.body, edges, r, *fit, turn.kernel())?;
             if let Some(u) = &u {
                 append_warning(warning, reduced_note(u, r));
             }
@@ -6323,12 +6329,12 @@ fn replay(
                     let nb = match &src.kind {
                         FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
                         // A copy is congruent to the original: the radius it was reduced to first.
-                        FeatureKind::Fillet { fit, .. } => match st.fitted.get(&src.id) {
+                        FeatureKind::Fillet { fit, turn, .. } => match st.fitted.get(&src.id) {
                             Some(used) => {
                                 let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
-                                kernel::fillet_each(&mb.body, &moved, &used)?
+                                kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?
                             }
-                            None => fillet_fitted(&mb.body, &moved, r, *fit)?.0,
+                            None => fillet_fitted(&mb.body, &moved, r, *fit, turn.kernel())?.0,
                         },
                         _ => kernel::fillet(&mb.body, &moved, r)?,
                     };
@@ -8550,6 +8556,7 @@ mod chain_tests {
                 fit: Default::default(),
                 corner: Default::default(),
                 setbacks: Vec::new(),
+                turn: Default::default(),
                 tangent_chain: true,
             },
             None,
@@ -8578,6 +8585,7 @@ mod chain_tests {
             fit: Default::default(),
             corner: Default::default(),
             setbacks: Vec::new(),
+            turn: Default::default(),
             tangent_chain,
         }
     }

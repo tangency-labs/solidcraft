@@ -53,7 +53,7 @@ use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
 use super::{Body, answer};
-use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result};
+use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
 /// (`fixes.fillet_refuse_mixed_corner_crossing_rails`, [`MIXED_CORNER_RAILS_CROSS`]): it builds no
@@ -248,7 +248,9 @@ fn chamfer_radius(k: &Kernel, b: &mut Brep, e: EdgeId, distance: f64) -> solidco
 /// What `round_edges` makes: the capi's kinds less the chamfer, which `chamfer_offsets` makes.
 #[derive(Clone, Copy, PartialEq)]
 enum Section<'a> {
-    Round,
+    /// A circular section of constant radius (or of a variable radius's law), the turns of two
+    /// such rounds at a side edge as the [`Turn`] says (`SetSweptTurns`).
+    Round(Turn),
     /// The curvature-continuous section (`SM_FSG_BLEND_CURVE`): the Gⁿ generator's order 2 at the
     /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261 under
     /// `fillet_gn_section_generator`), which takes off what the ball's circle does.
@@ -336,6 +338,23 @@ fn room_reason(r: NoRoomReason) -> Option<crate::RoomReason> {
         NoRoomReason::RoundIntoMaterial | NoRoomReason::RailRunsPastFaceIntoMaterial => R::RunsIntoMaterial,
         _ => return None,
     })
+}
+
+/// The refusal of a swept turn `CreateFilletCorners` noted at its vertex (`SmBlendCorner::Classify`
+/// with `GetSweptTurns()`): [`Error::TurnRefused`] with solidcore's reason, without its "Fillet
+/// Error: " prefix, and where it is; `None` for a note of another kind.
+fn turn_refusal(info: &ErrorInfo<FilletObject>) -> Option<Error> {
+    let room = match info.code {
+        c if c == FilletErrorType::NoRoom as i32 => true,
+        c if c == FilletErrorType::CornerUnsupported as i32 => false,
+        _ => return None,
+    };
+    let why = info.comment.trim();
+    if why.is_empty() {
+        return None;
+    }
+    let why = why.strip_prefix("Fillet Error:").map_or(why, str::trim_start).to_owned();
+    Some(Error::TurnRefused { room, why, at: info.location.map(|p| [p.x, p.y, p.z]) })
 }
 
 /// [`blend_failure`] where solidcore gives no size.
@@ -433,13 +452,16 @@ fn blend_edges_stopping(
     let mut fit_edge = None;
     let done = {
         let mut s = FilletSession::new(k, b)?;
+        // `SetSweptTurns`: read as the corners are made (`fixes.fillet_blend_corner`).
+        let swept = section == Section::Round(Turn::Swept);
+        s.set_swept_turns(swept);
         // `SetFilletParameters(b, es, sections, solvers, values, laws, -1, -1, -1, -1,
         // continuity 1, thumbweight 1)`: the session sets the executive's global merge first, as
         // `SmApiFilletEdges` does, and `SetFilletParameters` resets it, as in the capi.
         let prepared = match (section, law) {
-            (Section::Round, None) => s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
+            (Section::Round(_), None) => s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
             // The size is the start radius (`smlib_fillet_variable`).
-            (Section::Round, Some(law)) => match sizes.first() {
+            (Section::Round(_), Some(law)) => match sizes.first() {
                 Some(&size) => s.prepare_variable_radius_edges(k, edges, size, law, 1, 1),
                 None => return Ok(Err(Err(Error::Argument))),
             },
@@ -459,7 +481,10 @@ fn blend_edges_stopping(
                 s.add_set_back_vertex(sb.vertex);
             }
         }
+        let prepared_ok = prepared.is_ok();
         let mut step = prepared.and_then(|()| s.create_corners(k, None)).map(|()| Ok(Vec::new()));
+        // A swept turn `CreateFilletCorners` refused, with solidcore's reason ([`turn_refusal`]).
+        let refused_turn = if swept && prepared_ok && step.is_err() { turn_refusal(s.error_info()) } else { None };
         // A vertex `CreateFilletCorners` made no corner for, noted before a later step notes its
         // own failure over it ([`blend_failure`]).
         let corner = step.is_ok() && s.error_info().code == FilletErrorType::CornerUnsupported as i32;
@@ -488,11 +513,14 @@ fn blend_edges_stopping(
                 }
             },
             Ok(Err(refusal)) => Ok(Err(refusal)),
-            Err(e) => {
-                let (why, edge) = blend_failure(&s, e, corner);
-                fit_edge = edge;
-                Ok(Err(Err(why)))
-            }
+            Err(e) => match refused_turn {
+                Some(why) => Ok(Err(Err(why))),
+                None => {
+                    let (why, edge) = blend_failure(&s, e, corner);
+                    fit_edge = edge;
+                    Ok(Err(Err(why)))
+                }
+            },
         }
     };
     let done: solidcore::Result<std::result::Result<(Vec<usize>, Vec<(usize, FaceId)>), std::result::Result<usize, Error>>> = done;
@@ -825,9 +853,9 @@ pub(crate) fn blend(
 
 /// `smlib_blend_dropping`: [`blend`] with one size per point, no corners, and per point whether it
 /// picked an edge that a larger round, overflowing its faces, removed whole.
-pub(crate) fn blend_dropping(body: &Body, kind: Blend, points: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Body, Vec<bool>)> {
+pub(crate) fn blend_dropping(body: &Body, kind: Blend, turn: Turn, points: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Body, Vec<bool>)> {
     let mut dropped = vec![false; points.len()];
-    let (b, _) = blend_call(body, kind, points, sizes, tolerance, &[], &[], Corners::Filled, &mut dropped)?;
+    let (b, _) = blend_call(body, kind, turn, points, sizes, tolerance, &[], &[], Corners::Filled, &mut dropped)?;
     Ok((b, dropped))
 }
 
@@ -846,15 +874,17 @@ pub(crate) fn blend_holes(
     setbacks: &[f64],
     open: Corners,
 ) -> Result<(Body, Vec<Hole>)> {
-    blend_call(body, kind, points, sizes, tolerance, corners, setbacks, open, &mut vec![false; points.len()])
+    blend_call(body, kind, Turn::Mitre, points, sizes, tolerance, corners, setbacks, open, &mut vec![false; points.len()])
 }
 
 /// `blend_call`: [`blend_holes`], with per point in `dropped` whether it picked an edge an
-/// overflowing round removed whole ([`overflow_first`]).
+/// overflowing round removed whole ([`overflow_first`]), and the rounds' turns at side edges as
+/// `turn` says (a swept turn is for [`Blend::Round`] only).
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
 fn blend_call(
     body: &Body,
     kind: Blend,
+    turn: Turn,
     points: &[[f64; 3]],
     sizes: &[f64],
     tolerance: f64,
@@ -869,6 +899,7 @@ fn blend_call(
         || !(one_size || sizes.len() == points.len())
         || !points_ok(corners, true)
         || setbacks.len() != corners.len()
+        || (turn == Turn::Swept && kind != Blend::Round)
     {
         return Err(Error::Argument);
     }
@@ -898,7 +929,7 @@ fn blend_call(
         }
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let section = match kind {
-            Blend::Round => Section::Round,
+            Blend::Round => Section::Round(turn),
             // Every edge of one call takes the equal-area thumbweight of the first's wedge
             // (solidcore#2250's comment 6563419897): edges of other wedges would take off another
             // area than their own, so they are not built together.
@@ -1380,7 +1411,7 @@ pub(crate) fn fillet_variable(
         // (`NoRoomReason::BallsFold`), [`Error::NoRoom`].
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let (r0, r1) = (radii.first().copied().unwrap_or(0.0), radii.last().copied().unwrap_or(0.0));
-        Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round, Some(law), &[], None)? {
+        Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round(Turn::Mitre), Some(law), &[], None)? {
             Ok(()) => finish(w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),

@@ -134,13 +134,17 @@ fn fillet_corner_tip() -> String {
 /// radius and narrow it only where the faces run out.
 const FILLET_FITS: [(&str, &str); 3] = [("ui.fillet_fit_exact", "exact"), ("ui.fillet_fit_reduce", "reduce"), ("ui.fillet_fit_taper", "taper")];
 
+/// How two rounds turn where they meet at a sharp corner edge (`turn`): in a mitre (the
+/// default) or swept round the edge.
+const FILLET_TURNS: [(&str, &str); 2] = [("ui.fillet_turn_mitre", "mitre"), ("ui.fillet_turn_swept", "swept")];
+
 /// Which fillet options apply together, exactly as `solid.fillet` takes them (`fillet` in
 /// crates/engine/src/cmd/features.rs):
 ///
-/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) |
-/// |---------------|-------------------------|-------------------------------------|----------------------|
-/// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  |
-/// | any other     | exact (not sent)        | tangent (not sent)                  | none                 |
+/// | Type          | Face limits (`fit`)     | Corners (`corner`)                  | Setback (`setbacks`) | Turns (`turn`)                  |
+/// |---------------|-------------------------|-------------------------------------|----------------------|---------------------------------|
+/// | Constant      | exact, reduce or taper  | tangent; curvature with exact only  | with curvature only  | mitre; swept without taper, g2  |
+/// | any other     | exact (not sent)        | tangent (not sent)                  | none                 | mitre (not sent)                |
 ///
 /// The dialog shows an option's row only where it applies and sends the option only then, and a
 /// choice that rules another out puts that one back to its default ([`settle_fillet_options`]).
@@ -150,6 +154,8 @@ pub(super) fn fillet_option_applies(extra: &serde_json::Map<String, Value>, key:
     match key {
         "fit" => constant,
         "corner" | "setbacks" => constant && exact,
+        // A swept turn takes an exact or reduced radius and rolling-ball corners.
+        "turn" => constant && extra.get("fit").and_then(Value::as_str) != Some("taper") && extra.get("corner").and_then(Value::as_str) != Some("g2"),
         _ => true,
     }
 }
@@ -159,15 +165,29 @@ pub(super) fn fillet_option_applies(extra: &serde_json::Map<String, Value>, key:
 /// takes the exact radius. A type other than Constant clears both ([`choose_fillet_type`]).
 fn settle_fillet_options(extra: &mut serde_json::Map<String, Value>, changed: &str, setback: &mut Option<String>) {
     let fitted = extra.get("fit").and_then(Value::as_str).is_some_and(|fit| fit != "exact");
+    let tapered = extra.get("fit").and_then(Value::as_str) == Some("taper");
     let patch = extra.get("corner").and_then(Value::as_str) == Some("g2");
+    let swept = extra.get("turn").and_then(Value::as_str) == Some("swept");
     match changed {
         "fit" if fitted => {
             extra.remove("corner");
             extra.remove("setbacks");
             *setback = None;
+            if tapered {
+                extra.remove("turn");
+            }
         }
         "corner" if patch => {
             extra.remove("fit");
+            extra.remove("turn");
+        }
+        "turn" if swept => {
+            extra.remove("corner");
+            extra.remove("setbacks");
+            *setback = None;
+            if tapered {
+                extra.remove("fit");
+            }
         }
         _ => {}
     }
@@ -256,6 +276,17 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
     }
 }
 
+/// A Constant radius fillet's Turns row (`turn`): how two rounds turn where they meet at a sharp
+/// corner edge.
+fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
+    let before = extra.get("turn").cloned();
+    let row = ui.scope(|ui| form_row(ui, "ui.fillet_turn", |ui| extra_choice(ui, extra, "fi_turn", "turn", &FILLET_TURNS)));
+    row.response.on_hover_text(tr("ui.fillet_turn_tip"));
+    if extra.get("turn") != before.as_ref() {
+        settle_fillet_options(extra, "turn", setback);
+    }
+}
+
 /// The most instances a solid pattern makes in one direction (the document's own limit).
 const MAX_PATTERN_INSTANCES: i64 = 1000;
 
@@ -293,6 +324,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
         extra.remove("fit");
         extra.remove("corner");
         extra.remove("setbacks");
+        extra.remove("turn");
     }
     if index == 2 {
         extra.entry("radius2").or_insert_with(|| json!("1 mm"));
@@ -544,6 +576,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 if rtype == 0 {
                     enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, radius, setback);
                     fillet_fit_rows(app, ui, &mut d.extra, setback);
+                    fillet_turn_row(ui, &mut d.extra, setback);
                 }
             }
             if *chamfer && *ctype == 1 {
@@ -1281,13 +1314,46 @@ mod tests {
         assert!(scenario::handle_at("dialog:ui.fillet_fit").is_none(), "a fitted radius is for Constant radius only");
     }
 
+    /// Turns sends `turn: swept` with a Constant radius only, and a choice it rules out (a
+    /// narrowed radius, a curvature corner) puts the other back: Swept and those never go
+    /// together.
+    #[test]
+    fn turns_maps_to_turn_and_rules_out_what_a_swept_corner_does_not_take() {
+        let mut h = fillet_harness();
+        set_edges(&mut h, 3);
+        assert!(scenario::handle_at("dialog:ui.fillet_turn").is_some());
+        assert!(parameters(&h).get("turn").is_none(), "Mitre is the default, not sent");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        assert_eq!(parameters(&h)["turn"], json!("swept"));
+        choose(&mut h, "ui.fillet_fit", "ui.fillet_fit_reduce");
+        assert_eq!((parameters(&h)["turn"].clone(), parameters(&h)["fit"].clone()), (json!("swept"), json!("reduce")));
+        choose(&mut h, "ui.fillet_fit", "ui.fillet_fit_taper");
+        assert!(parameters(&h).get("turn").is_none(), "a narrowed radius puts Turns back to Mitre");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        assert!(parameters(&h).get("fit").is_none(), "Swept puts Face limits back to Exact radius");
+        choose(&mut h, "ui.corners", Continuity::G2.label_id());
+        assert!(parameters(&h).get("turn").is_none(), "a curvature corner puts Turns back to Mitre");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        assert!(parameters(&h).get("corner").is_none(), "Swept puts Corners back to Tangent");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_mitre");
+        assert!(parameters(&h).get("turn").is_none(), "Mitre is not sent");
+        choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
+        choose(&mut h, "Type", "Chord length");
+        assert!(parameters(&h).get("turn").is_none() && scenario::handle_at("dialog:ui.fillet_turn").is_none(), "Turns is for Constant radius only");
+    }
+
     /// The dialog follows the option model (`fillet_option_applies`): through every type, fit and
     /// corner choice, in either order, each option it shows is one the others allow, and the
     /// command it builds is never refused for its options (`solid.fillet` runs it on a copy of
     /// the design). A choice that rules another out resets that one, visibly.
     #[test]
     fn no_reachable_fillet_option_state_is_refused_for_its_options() {
-        let refused_for_options = |e: &str| e.contains("take a constant radius") || e.contains("is built for") || e.contains("are built for");
+        let refused_for_options = |e: &str| {
+            e.contains("take a constant radius")
+                || e.contains("is built for")
+                || e.contains("are built for")
+                || e.contains(solidcraft_engine::doc::SWEPT_TAKES)
+        };
         // Each distinct command is run once.
         let ran = std::cell::RefCell::new(std::collections::BTreeSet::new());
         let check = |h: &Harness, what: &str| {
