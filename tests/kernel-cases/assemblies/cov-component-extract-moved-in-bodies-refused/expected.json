@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "component.extract of a component whose body was moved in from the root",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Arm's body came in by component.move_bodies, a feature outside it: its history can't move to a design of its own, so extract is refused",
+ "outcome": "refused",
+ "refusal": "moves bodies into or out of Arm"
+}

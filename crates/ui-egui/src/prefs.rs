@@ -1,11 +1,15 @@
 //! Grouped preferences composed with the shared UI kit. Changes apply immediately; Cancel
 //! restores the opening snapshot, Apply keeps editing, and Defaults affects the current page.
 
+use crate::ui_kit::BackingTooltipExt as _;
+use solidcraft_engine::geom::prelude::*;
+use std::collections::BTreeMap;
+
 use egui::{Modifiers, Pos2};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use solidcore_record::Vec3;
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
-use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::render::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
@@ -23,9 +27,11 @@ mod design;
 mod general;
 mod graphics;
 mod interface;
+mod mouse3d;
 mod navbar;
 mod navigation;
 mod sketch;
+mod tools;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -86,6 +92,8 @@ pub struct NavPreset {
     pub help: &'static str,
     /// Choosing the preset turns the wheel the other way.
     pub reverse_zoom: bool,
+    /// Dragging down zooms in instead of out (independent of the wheel preference).
+    pub reverse_drag_zoom: bool,
     /// Choosing the preset sets what a middle double-click does (`None` leaves it as it is).
     pub middle_double_click: Option<&'static str>,
     /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
@@ -110,6 +118,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Fusion",
         help: "Middle drag pans, Shift+middle orbits, right drag orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
@@ -119,6 +128,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "SolidWorks",
         help: "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
         reverse_zoom: true,
+        reverse_drag_zoom: false,
         // Picked here, the right button is left to the context menu and mouse gestures (#6492).
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
@@ -129,11 +139,37 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Right, NavKeys::NONE, Orbit),
         ],
     },
+    // Public Creo Parametric dynamic-viewing bindings; no product code or assets are used.
+    // https://support.ptc.com/help/creo/creo_pma/r12/usascii/fundamentals/fundamentals/About_Dynamic_Viewing.html
+    NavPreset {
+        id: "creo",
+        label: "Creo",
+        help: "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
+        reverse_zoom: false,
+        reverse_drag_zoom: true,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
+    },
+    NavPreset {
+        id: "nx",
+        label: "NX",
+        // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
+        // pan; the bindings here hold one button at a time, so the two-button drags are the
+        // middle drag with Ctrl (zoom) and Shift (pan).
+        help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+        reverse_zoom: false,
+        reverse_drag_zoom: false,
+        middle_double_click: Some("fit"),
+        right_drag_orbits: Some(false),
+        bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+    },
     NavPreset {
         id: "inventor",
         label: "Inventor",
         help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -148,6 +184,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Alias",
         help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -164,6 +201,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Maya",
         help: "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -178,6 +216,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Blender",
         help: "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
@@ -187,6 +226,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Tinkercad",
         help: "Right drag orbits, middle or Shift+right drag pans",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
@@ -196,6 +236,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "OpenSCAD",
         help: "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[
@@ -211,6 +252,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "HFSS",
         help: "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
@@ -222,6 +264,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Touchpad",
         help: "Hold Shift and move the pointer to pan; hold Alt/Option and move it to orbit. No mouse button is needed. Vertical scroll zooms.",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
@@ -242,7 +285,15 @@ impl NavPreset {
     }
 
     pub(crate) fn translated_label(&self) -> &str {
-        if self.id == TOUCHPAD_NAV { crate::i18n::tr("nav.touchpad.label") } else { crate::i18n::tr_label(self.label) }
+        match self.id {
+            "creo" => crate::i18n::tr("nav.creo.label"),
+            TOUCHPAD_NAV => crate::i18n::tr("nav.touchpad.label"),
+            _ => crate::i18n::tr_label(self.label),
+        }
+    }
+
+    pub(crate) fn translated_help(&self) -> &str {
+        if self.id == "creo" { crate::i18n::tr("nav.creo.help") } else { crate::i18n::tr_label(self.help) }
     }
 }
 
@@ -271,81 +322,144 @@ pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
     }
 }
 /// Stable control-channel names; presentation labels may be shorter.
-pub const PAGES: &[&str] = &["General", "Interface", "Design", "Navigation", "Keyboard Shortcuts", "Sketch", "Graphics", "AI", "Plugins"];
+pub const PAGES: &[&str] =
+    &["General", "Appearance", "Layout", "Graphics", "Design", "Sketch", "Tools", "Navigation", "3D mouse", "Shortcuts", "Assistant", "Plugins"];
 pub const PAGE_GENERAL: usize = 0;
-pub const PAGE_INTERFACE: usize = 1;
-pub const PAGE_DESIGN: usize = 2;
-pub const PAGE_NAVIGATION: usize = 3;
-pub const PAGE_SHORTCUTS: usize = 4;
+pub const PAGE_APPEARANCE: usize = 1;
+pub const PAGE_LAYOUT: usize = 2;
+pub const PAGE_GRAPHICS: usize = 3;
+pub const PAGE_DESIGN: usize = 4;
 pub const PAGE_SKETCH: usize = 5;
-pub const PAGE_GRAPHICS: usize = 6;
-pub const PAGE_AI: usize = 7;
-pub const PAGE_PLUGINS: usize = 8;
+pub const PAGE_TOOLS: usize = 6;
+pub const PAGE_NAVIGATION: usize = 7;
+pub const PAGE_MOUSE3D: usize = 8;
+pub const PAGE_SHORTCUTS: usize = 9;
+pub const PAGE_ASSISTANT: usize = 10;
+pub const PAGE_PLUGINS: usize = 11;
+/// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
+pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
-    ui_kit::WindowPage { icon: "settings", label: "ui.general", group: None, handle: "prefs:page:General", scroll: true, draw: window_page::<0> },
     ui_kit::WindowPage {
-        icon: "settings_palette",
-        label: "prefs.interface",
+        icon: "prefs_general",
+        label: "ui.general",
         group: None,
-        handle: "prefs:page:Interface",
+        handle: "prefs:page:General",
         scroll: true,
-        draw: window_page::<1>,
+        draw: window_page::<PAGE_GENERAL>,
     },
-    ui_kit::WindowPage { icon: "ws_design", label: "ui.design", group: None, handle: "prefs:page:Design", scroll: true, draw: window_page::<2> },
     ui_kit::WindowPage {
-        icon: "settings_mouse",
+        icon: "prefs_appearance",
+        label: "prefs.structure.appearance",
+        group: Some("prefs.structure.look"),
+        handle: "prefs:page:Appearance",
+        scroll: true,
+        draw: window_page::<PAGE_APPEARANCE>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_layout",
+        label: "prefs.structure.layout",
+        group: None,
+        handle: "prefs:page:Layout",
+        scroll: true,
+        draw: window_page::<PAGE_LAYOUT>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_graphics",
+        label: "ui.graphics",
+        group: None,
+        handle: "prefs:page:Graphics",
+        scroll: true,
+        draw: window_page::<PAGE_GRAPHICS>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_design",
+        label: "ui.design",
+        group: Some("prefs.structure.work"),
+        handle: "prefs:page:Design",
+        scroll: true,
+        draw: window_page::<PAGE_DESIGN>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_sketch",
+        label: "prefs.structure.sketch",
+        group: None,
+        handle: "prefs:page:Sketch",
+        scroll: true,
+        draw: window_page::<PAGE_SKETCH>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_tools",
+        label: "prefs.structure.tools",
+        group: None,
+        handle: "prefs:page:Tools",
+        scroll: true,
+        draw: window_page::<PAGE_TOOLS>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_navigation",
         label: "ui.navigation",
         group: Some("prefs.input"),
         handle: "prefs:page:Navigation",
         scroll: true,
-        draw: window_page::<3>,
+        draw: window_page::<PAGE_NAVIGATION>,
     },
     ui_kit::WindowPage {
-        icon: "settings_keyboard",
+        icon: "prefs_mouse3d",
+        label: "prefs.structure.mouse3d",
+        group: None,
+        handle: "prefs:page:3D mouse",
+        scroll: true,
+        draw: window_page::<PAGE_MOUSE3D>,
+    },
+    ui_kit::WindowPage {
+        icon: "prefs_shortcuts",
         label: "prefs.shortcuts",
         group: None,
-        handle: "prefs:page:Keyboard Shortcuts",
+        handle: "prefs:page:Shortcuts",
         scroll: false,
-        draw: window_page::<4>,
+        draw: window_page::<PAGE_SHORTCUTS>,
     },
     ui_kit::WindowPage {
-        icon: "sketch",
-        label: "prefs.sketch_selection",
-        group: None,
-        handle: "prefs:page:Sketch",
-        scroll: true,
-        draw: window_page::<5>,
-    },
-    ui_kit::WindowPage {
-        icon: "settings_monitor",
-        label: "ui.graphics",
-        group: Some("prefs.display"),
-        handle: "prefs:page:Graphics",
-        scroll: true,
-        draw: window_page::<6>,
-    },
-    ui_kit::WindowPage {
-        icon: "assistant",
+        icon: "prefs_assistant",
         label: "prefs.assistant",
         group: Some("prefs.extend"),
-        handle: "prefs:page:AI",
+        handle: "prefs:page:Assistant",
         scroll: true,
-        draw: window_page::<7>,
+        draw: window_page::<PAGE_ASSISTANT>,
     },
     ui_kit::WindowPage {
-        icon: "settings_plug",
+        icon: "prefs_plugins",
         label: "ui.plugins",
         group: None,
         handle: "prefs:page:Plugins",
         scroll: true,
-        draw: window_page::<8>,
+        draw: window_page::<PAGE_PLUGINS>,
     },
 ];
 
+/// Former page names remain usable through both ui.prefs and scenario handles.
+const PAGE_ALIASES: &[(&str, usize)] = &[
+    ("AI", PAGE_ASSISTANT),
+    ("Interface", PAGE_APPEARANCE),
+    ("Interface/navigation bar", PAGE_LAYOUT),
+    ("Keyboard Shortcuts", PAGE_SHORTCUTS),
+    ("Selection", PAGE_SKETCH),
+    ("Sketch & selection", PAGE_SKETCH),
+    ("Sketch and selection", PAGE_SKETCH),
+];
+
+fn page_path(index: usize) -> String {
+    let Some(page) = WINDOW_PAGES.get(index) else { return String::new() };
+    let group = WINDOW_PAGES.get(..=index).and_then(|pages| pages.iter().rev().find_map(|page| page.group));
+    match group {
+        Some(group) => format!("{} > {}", crate::i18n::tr(group), crate::i18n::tr(page.label)),
+        None => crate::i18n::tr(page.label).to_owned(),
+    }
+}
+
 fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     let typed = drive_search(ui, app);
-    let (field, _) =
-        ui_kit::search_actions_row(ui, egui::Id::new("prefs_search"), &mut app.prefs_window.filter, crate::i18n::tr("prefs.search"), &[]);
+    let field = ui_kit::preferences_search_field(ui, egui::Id::new("prefs_search"), &mut app.prefs_window.filter, crate::i18n::tr("prefs.search"));
     if typed {
         place_search_cursor(ui.ctx(), egui::Id::new("prefs_search"), app.prefs_window.filter.chars().count());
     }
@@ -356,7 +470,6 @@ fn search_header(ui: &mut egui::Ui, app: &mut SolveApp) {
     settle_search(app);
     crate::prefs_search::set_reveal(ui.ctx(), app.prefs_window.reveal.clone());
     crate::prefs_search::set_force_scroll(ui.ctx(), !app.prefs_window.filter.trim().is_empty());
-    ui.add_space(Tokens::get().space_8);
 }
 
 /// Keys for the search field. Shortcut capture keeps the key for itself.
@@ -426,6 +539,12 @@ fn place_search_cursor(ctx: &egui::Context, id: egui::Id, chars: usize) {
 }
 
 fn open_result(app: &mut SolveApp, page: usize, label: &str) {
+    if page == PAGE_SHORTCUTS {
+        crate::keymap::reveal(app);
+    }
+    if page == PAGE_PLUGINS {
+        app.prefs_window.plugin_query.clear();
+    }
     app.prefs_window.filter.clear();
     app.prefs_window.search_from = None;
     app.prefs_window.section = page;
@@ -455,8 +574,12 @@ fn clear_search(app: &mut SolveApp) {
 }
 
 fn window_page<const INDEX: usize>(ui: &mut egui::Ui, app: &mut SolveApp) {
-    if let Some(rect) = crate::scenario::rect_of("prefs:page:Sketch") {
-        crate::scenario::publish_target("prefs:page:Selection", rect);
+    for (alias, index) in PAGE_ALIASES {
+        if let Some(page) = WINDOW_PAGES.get(*index)
+            && let Some(rect) = crate::scenario::rect_of(page.handle)
+        {
+            crate::scenario::publish_target(&format!("prefs:page:{alias}"), rect);
+        }
     }
     if let Some(page) = app.prefs_window.land_on.take() {
         if app.prefs_window.section != page {
@@ -511,6 +634,19 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How a section hatches the faces it cuts (Preferences: "Section hatch").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionHatch {
+    /// Each body in its own hatch (`solidcraft_render::hatch`): 45 or 135 degrees in one of the
+    /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
+    /// know reads as (`lenient`).
+    #[default]
+    ByPart,
+    /// Every cut face in the cap colour at 45 degrees (how it was before by part).
+    One,
+}
+
 /// What the interface calls the origin planes (Preferences › Interface). Only the names shown
 /// change: the planes' ids (`XY`, `XZ`, `YZ`), commands, scripts and saved designs keep theirs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -539,6 +675,21 @@ impl OriginPlaneNames {
         }
     }
 }
+
+/// Where a sketch dimension's value is typed (Preferences › Sketch, "Dimension values", #7246).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DimensionInput {
+    /// In a box on the dimension (also what a value this version doesn't know reads as).
+    #[default]
+    View,
+    /// In a small window at the dimension, with arrows that step the value (`dim_view::window`).
+    Window,
+}
+
+/// The lengths (millimetres) and angles (degrees) the dimension window's arrows may step by.
+pub const DIMENSION_STEP_MM: std::ops::RangeInclusive<f64> = 0.001..=1000.0;
+pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
 
 /// What an orbit turns around (Preferences: "Orbit around").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -850,7 +1001,7 @@ macro_rules! preference_settings {
     (@page $page:expr) => { Some($page) };
     (@control $app:ident, $ui:ident, $field:ident, check($label:literal $(, $help:literal)?)) => {
         ui_kit::checkbox($ui, crate::i18n::tr_label($label), &mut $app.preferences.$field)
-            $(.on_hover_text(crate::i18n::tr_label($help)))?
+            $(.backing_on_hover_text(crate::i18n::tr_label($help)))?
     };
     (@control $app:ident, $ui:ident, $field:ident, check_tr($label:literal)) => {
         ui_kit::checkbox($ui, crate::i18n::tr($label), &mut $app.preferences.$field)
@@ -886,7 +1037,7 @@ preference_settings! {
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
-    free_orbit: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit.label");
+    free_orbit: bool = false, PAGE_NAVIGATION;
     /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
     /// the pole limit) instead of the screen's.
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
@@ -897,7 +1048,7 @@ preference_settings! {
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
-    direct_interaction: bool = false, PAGE_NAVIGATION => check("Direct interaction", "Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size");
+    direct_interaction: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
@@ -909,33 +1060,37 @@ preference_settings! {
     /// read, so an existing choice survives the upgrade; this version only writes `false`.
     orbit_cursor: bool = false, PAGE_NAVIGATION;
     /// Whether a connected 3D mouse moves the view.
-    space_mouse_enabled: bool = true, PAGE_NAVIGATION => check("Navigate with the 3D mouse");
+    space_mouse_enabled: bool = true, PAGE_MOUSE3D => check("Navigate with the 3D mouse");
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
     /// left corner. Off by default.
-    space_mouse_in_view: bool = false, PAGE_NAVIGATION => check_id("ui.3d_mouse_show_in_view");
+    space_mouse_in_view: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_show_in_view");
     /// 3D mouse orbit: traced (on) turns the view around the model in the middle of the view when
     /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
     /// (off, the default) turns it around the view's centre, as it did before.
-    space_mouse_model_pivot: bool = false, PAGE_NAVIGATION;
+    space_mouse_model_pivot: bool = false, PAGE_MOUSE3D;
+    /// Whether the 3D mouse also turns the view while a sketch is edited and still seen square on
+    /// (#2227), as the mouse can. Off (the default): the cap pans and zooms a square-on sketch and
+    /// turns it only after the view is tilted away from it.
+    space_mouse_sketch_orbit: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_sketch_orbit");
     /// Speed multiplier for 3D mouse navigation.
-    space_mouse_speed: f32 = 1.0, PAGE_NAVIGATION;
+    space_mouse_speed: f32 = 1.0, PAGE_MOUSE3D;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
     /// the other way.
-    space_mouse_reverse: [bool; 6] = [false; 6], PAGE_NAVIGATION;
+    space_mouse_reverse: [bool; 6] = [false; 6], PAGE_MOUSE3D;
     /// Per physical axis of the cap, a multiplier on top of `space_mouse_speed`; 0 switches it off.
-    space_mouse_axis_speed: [f32; 6] = [1.0; 6], PAGE_NAVIGATION;
+    space_mouse_axis_speed: [f32; 6] = [1.0; 6], PAGE_MOUSE3D;
     /// Per physical axis of the cap, which of its motions drives it (`space_mouse::reassigned`),
     /// applied after calibration; each motion drives exactly one axis.
-    space_mouse_axis_source: [usize; 6] = crate::space_mouse::SAME_AXES, PAGE_NAVIGATION;
+    space_mouse_axis_source: [usize; 6] = crate::space_mouse::SAME_AXES, PAGE_MOUSE3D;
     /// Which program reads the 3D mouse when spacenavd and the device itself are both there (Linux).
-    space_mouse_driver: SpaceMouseDriver = SpaceMouseDriver::default(), PAGE_NAVIGATION;
+    space_mouse_driver: SpaceMouseDriver = SpaceMouseDriver::default(), PAGE_MOUSE3D;
     /// Where the 3D mouse picture sits in the 3D view, when it is shown there (`space_mouse_in_view`).
-    space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_NAVIGATION;
+    space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_MOUSE3D;
     /// The user turned the calibration offer off for good ("Never show again"). Unlike closing the
     /// card, which only records that device, this stops every offer, for every device: it is one flag,
     /// not kept per device key. Like the settings beside it, the dialog's Restore Defaults puts it back
     /// (the 3D mouse section's own restore leaves it).
-    space_mouse_offer_never: bool = false, PAGE_NAVIGATION;
+    space_mouse_offer_never: bool = false, PAGE_MOUSE3D;
     /// Per 3D mouse (`space_mouse::Input::device`), the calibration that puts its axes on
     /// 3Dconnexion's. A device without one is read as it reports. Page resets keep calibrations.
     #[serde(deserialize_with = "calibrations_that_read")]
@@ -954,13 +1109,13 @@ preference_settings! {
     /// A device's own app on this computer moves the view (the navigation bridge, docs/3d-mouse.md):
     /// the desktop app connects to it on `nav_bridge_port`. Off unless asked for, so the app
     /// doesn't connect to whatever else listens on that port.
-    nav_bridge_enabled: bool = false, PAGE_NAVIGATION;
+    nav_bridge_enabled: bool = false, PAGE_MOUSE3D;
     /// The loopback port the device app listens on (0: none).
-    nav_bridge_port: u16 = 8765, PAGE_NAVIGATION;
+    nav_bridge_port: u16 = 8765, PAGE_MOUSE3D;
     /// Anti-aliasing samples (applies on restart).
     msaa: u32 = 4, PAGE_GRAPHICS;
     /// Share shading and Continuity; false preserves their independent legacy behavior.
-    single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.single_surface_analysis");
+    single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
     /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
     window_system: String = "auto".into(), PAGE_GRAPHICS;
@@ -968,17 +1123,30 @@ preference_settings! {
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
+    /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
+    /// (#7974). Off by default: the viewport shades as it always has.
+    dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
+    /// A section hatches each cut body its own way (the default), or every one alike, in the cap
+    /// colour at 45 degrees, as before.
+    section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
-    grid_follows_view: bool = false => check("Grid follows the view", "Side views show the grid on the upright plane facing them instead of the ground");
+    grid_follows_view: bool = false => check_id("ui.grid_follows_view");
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
-    reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("settings.reference_geometry_through_bodies");
+    reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
-    vertex_markers: bool = false => check("Vertex markers", "Show a small dot at every vertex wherever edges are drawn");
+    vertex_markers: bool = false;
+    /// A preview of a feature that changes a body draws the surface it adds in the preview
+    /// colour, working out face by face which surface that is. Off: the body is drawn as itself
+    /// and nothing is worked out (`preview::Colors::tint_new`).
+    preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
+    /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
+    /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
+    cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
@@ -988,9 +1156,12 @@ preference_settings! {
     /// down (1, 1.5 or 2; 1 is off).
     supersampling: f32 = 1.0, PAGE_GRAPHICS;
     /// Supersample only while the view holds still (full speed while orbiting).
-    supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("ui.supersampling_adaptive");
+    supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("prefs.graphics_page.supersampling_adaptive");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
-    show_frame_rate: bool = false, PAGE_GRAPHICS => check_id("ui.frame_rate");
+    show_frame_rate: bool = false, PAGE_GRAPHICS;
+    /// Record where the time goes (SMLib's calls, kernel operations, features, commands, imports)
+    /// for `diagnostics.profile` (docs/perf.md). Off by default: nothing is recorded.
+    profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
@@ -999,16 +1170,31 @@ preference_settings! {
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
     show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
-    measure_axis_distances: bool = true, PAGE_GRAPHICS => check_id("settings.measure_axis_distances");
+    measure_axis_distances: bool = true, PAGE_TOOLS;
     /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
     /// saved value outside that range as the default ([`perspective_fov`]).
     perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
+    /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
+    /// list light in a large design.
+    parameter_list_rows: u16 = 50, PAGE_DESIGN;
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
+    /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
+    /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
+    validation: solidcraft_engine::kernel::Validation = solidcraft_engine::kernel::Validation::EachFeature, PAGE_DESIGN;
+    /// A command's value (Extrude's Distance, Fillet's Radius…) in a box beside its handle in the
+    /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
+    /// keyboard after a pick instead, and nothing covers the model (#9479).
+    value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
+    /// The Parameters dialog applies an expression as soon as its field is left (#9279). Off: the
+    /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
+    /// step. Its checkbox is in the dialog itself.
+    parameters_apply_live: bool = true;
     /// A design coming back to its tab reads again the linked designs whose files changed since
     /// it last read them. Off: they wait for Update Links, as before.
     update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
@@ -1030,89 +1216,112 @@ preference_settings! {
     /// The largest design file opened or saved, in MB (#4086): from the default (256) up to 16 GB.
     max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
-    assembly_move_handles: bool = true, PAGE_DESIGN => check_id("joint_move.use_handles");
+    assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
-    joint_rotation_coarse: f64 = 10.0, PAGE_DESIGN;
+    joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
     /// Degrees per step after pulling the cursor outside the precision guide.
-    joint_rotation_fine: f64 = 0.1, PAGE_DESIGN;
+    joint_rotation_fine: f64 = 0.1, PAGE_TOOLS;
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
-    theme: String = "dark".into(), PAGE_INTERFACE;
+    theme: String = "dark".into(), PAGE_APPEARANCE;
     /// The 3D view's colours: the theme's own, or the Light or Dark theme's whatever the window
     /// uses (#4146).
-    viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_INTERFACE;
+    viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_APPEARANCE;
     /// The 3D view's background, one colour for the whole application (#7688), or `None` (the
     /// default) for the theme's gradient.
-    viewport_background: Option<[u8; 3]> = None, PAGE_INTERFACE;
+    viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
-    logo_accent: bool = false, PAGE_INTERFACE;
+    logo_accent: bool = false, PAGE_APPEARANCE;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
+    #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
     /// Desktop: a `solidcraft-theme/1` file another tool writes, followed as the theme and
     /// reloaded when it changes (#7573). Empty (the default): no file is followed.
-    theme_follow: String = String::new(), PAGE_INTERFACE;
-    /// Interface language (a registered locale ID).
-    language: String = "en".into(), 0;
+    theme_follow: String = String::new(), PAGE_APPEARANCE;
+    /// Per-theme overrides. Raw JSON retains entries from newer or hand-edited settings.
+    theme_options: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new(), PAGE_APPEARANCE;
+    /// Interface language: a registered locale ID, or `system` to follow the system's language
+    /// on every start (#10138). A saved language keeps winning, so existing users don't change.
+    language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
-    layout: crate::shell::LayoutMode = Default::default(), PAGE_INTERFACE;
+    layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
-    navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_INTERFACE;
+    navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
     /// Show command names beneath ribbon icons, independently of workspace layout.
-    ribbon_labels: bool = true, PAGE_INTERFACE;
+    ribbon_labels: bool = true, PAGE_LAYOUT;
+    /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
+    persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
+    viewport_analysis_status: bool = true, PAGE_GRAPHICS;
+    viewport_section_status: bool = true, PAGE_GRAPHICS;
+    viewport_status_details: bool = true, PAGE_GRAPHICS;
+    viewport_status_summary: bool = true, PAGE_GRAPHICS;
     /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
     /// tools then start a sketch first (#7904).
-    sketch_tab_always: bool = false, PAGE_INTERFACE => check_id("prefs.sketch_tab_always");
+    sketch_tab_always: bool = false, PAGE_LAYOUT;
+    /// Each design tab keeps its open dialog or tool, and its toolbar tab, while another design is
+    /// shown, and has them back when it is shown again (#9360). Off by default: a switch cancels
+    /// them and shows the MODEL tab.
+    keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
     /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
     /// its button or its row in a section's drop-down (#7287). A command started from the search
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
-    ribbon_reveal: bool = false, PAGE_INTERFACE => check_id("prefs.ribbon_reveal");
+    ribbon_reveal: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
-    dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_INTERFACE;
+    dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
     /// centre, as before #7893.
-    toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_INTERFACE;
+    toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_LAYOUT;
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
-    hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_INTERFACE;
+    hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
+    /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
+    /// instead of a list of small icons with names (#4739).
+    ribbon_icon_grid: bool = false, PAGE_LAYOUT;
+    /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
+    /// which then list only the rest (#4739).
+    ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
     /// Interface scale (1 = 100 %).
-    ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
+    ui_scale: f32 = 1.0, PAGE_APPEARANCE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
     /// (#1290). Menus, dialogs and labels use it; glyphs it lacks fall back as before.
-    ui_font: String = String::new(), PAGE_INTERFACE;
+    ui_font: String = String::new(), PAGE_APPEARANCE;
     /// While a dialog or a sketch is open, OK and Cancel in the view's top right corner, with the
     /// axis view moved down below them (#6709). Off by default.
-    view_confirm_corner: bool = false, PAGE_INTERFACE => check_id("prefs.view_confirm_corner");
+    view_confirm_corner: bool = false, PAGE_LAYOUT;
     /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
     /// and the design's units (#7243). Off by default.
-    status_bar: bool = false, PAGE_INTERFACE => check_id("prefs.status_bar");
+    status_bar: bool = false, PAGE_LAYOUT;
+    /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
+    /// default.
+    quick_measure: bool = false, PAGE_GRAPHICS;
     /// Put the feature history to the left of the browser instead of below the viewport.
-    timeline_left: bool = false, PAGE_INTERFACE;
+    timeline_left: bool = false, PAGE_LAYOUT;
     /// Measured outer width; the contents react to this width without a names mode.
-    timeline_left_width: f32 = 130.0, PAGE_INTERFACE;
+    timeline_left_width: f32 = 130.0, PAGE_LAYOUT;
     /// Share the browser column, vertically, instead of a separate left column.
-    timeline_under_browser: bool = false, PAGE_INTERFACE;
+    timeline_under_browser: bool = false, PAGE_LAYOUT;
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
-    history_in_browser: bool = false, PAGE_INTERFACE;
+    history_in_browser: bool = false, PAGE_LAYOUT;
     /// Fold the shared-column history to its header.
-    timeline_collapsed: bool = false, PAGE_INTERFACE;
+    timeline_collapsed: bool = false, PAGE_LAYOUT;
     /// The browser's share of the column's height when History sits under it, which the user
     /// drags at the seam between the two cards (#7371).
-    browser_share: f32 = DEFAULT_BROWSER_SHARE, PAGE_INTERFACE;
+    browser_share: f32 = DEFAULT_BROWSER_SHARE, PAGE_LAYOUT;
     /// Whether the browser beside the vertical history is collapsed to its rail.
-    timeline_left_browser_collapsed: bool = false, PAGE_INTERFACE;
+    timeline_left_browser_collapsed: bool = false, PAGE_LAYOUT;
     /// Whether the History at the left lists a sketch under the feature built from it.
-    history_sketches: HistorySketches = HistorySketches::default(), PAGE_INTERFACE;
+    history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
-    history_play_button: bool = true, PAGE_INTERFACE => check_id("prefs.history_play_button");
+    history_play_button: bool = true, PAGE_LAYOUT;
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
-    timeline_origin_bodies: bool = false, PAGE_INTERFACE;
+    timeline_origin_bodies: bool = false, PAGE_LAYOUT;
     /// Width of the browser sidebar, which
     /// the user drags wider or narrower at its right edge.
-    browser_width: f32 = DEFAULT_BROWSER_WIDTH, PAGE_INTERFACE;
+    browser_width: f32 = DEFAULT_BROWSER_WIDTH, PAGE_LAYOUT;
     /// Render shell preference, independent of the document and Design history.
     render_shots_strip: bool = true;
     render_inspector_side: String = "right".into();
@@ -1124,22 +1333,28 @@ preference_settings! {
     render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
     /// Draw the parts browser on a translucent card over the 3D view instead of a column of its
     /// own, so the workspace keeps the whole window width.
-    browser_float: bool = false, PAGE_INTERFACE;
+    browser_float: bool = false, PAGE_LAYOUT;
     /// The browser card folded to its header with the chevron in that header, kept from one run
     /// to the next like the toolbar's pins (#8692).
-    browser_collapsed: bool = false, PAGE_INTERFACE;
+    browser_collapsed: bool = false, PAGE_LAYOUT;
     /// Whether the browser card is always shown or kept out of sight until the pointer comes to
     /// it, as the navigation bar's "Hide until hovered" does (#8692).
-    browser_show: crate::browser::BrowserShow = Default::default(), PAGE_INTERFACE;
+    browser_show: crate::browser::BrowserShow = Default::default(), PAGE_LAYOUT;
     /// Where command dialogs open: at the view's edge, or in the left column in place of the
     /// browser and the History there (#6707).
-    dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_INTERFACE;
+    dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_LAYOUT;
     /// The names the browser, dialogs and lists show for the origin planes (#6491).
-    origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_INTERFACE;
+    origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
     /// When components' bodies sit in a Bodies folder in the browser (#4217).
-    browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_INTERFACE;
+    browser_bodies_folders: BodiesFolders = BodiesFolders::Several, PAGE_LAYOUT;
+    /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
+    /// column at the rows' right end. Off by default.
+    browser_eye_left: bool = false, PAGE_LAYOUT;
+    /// Every component placement in the browser starts open, as before #9274, instead of closed
+    /// until the user opens it. Off by default.
+    browser_components_open: bool = false, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
-    zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's centre)");
+    zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
     wheel_zoom_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => slider("ui.wheel_zoom_speed", 0.25..=4.0, 0.05, |v| format!("{v:.2}×"), "prefs:wheel_zoom_speed");
     /// Opt-in surface anchoring for the 3D mouse, navigation bridge and drag-zoom. The wheel
@@ -1152,51 +1367,74 @@ preference_settings! {
     /// Hold this modifier alone to zoom with vertical wheel or two-finger scroll.
     trackpad_zoom_modifier: TrackpadZoomModifier = TrackpadZoomModifier::default(), PAGE_NAVIGATION;
     /// Horizontal trackpad and thumb-wheel scrolling pans the view the other way (#2007).
-    pan_reverse_x: bool = false, PAGE_NAVIGATION => check("Reverse horizontal pan direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
+    pan_reverse_x: bool = false, PAGE_NAVIGATION => check("ui.reverse_horizontal_pan_direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
     /// Vertical trackpad scrolling pans the view the other way (#5240).
-    pan_reverse_y: bool = false, PAGE_NAVIGATION => check("Reverse vertical pan direction", "Vertical two-finger scrolling pans the other way");
+    pan_reverse_y: bool = false, PAGE_NAVIGATION => check("ui.reverse_vertical_pan_direction", "Vertical two-finger scrolling pans the other way");
     /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
     /// as natural scrolling turns it (#8410).
-    orbit_reverse: bool = false, PAGE_NAVIGATION => check("Reverse trackpad orbit direction", "Shift with two-finger scrolling orbits the other way");
+    orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
     /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
-    look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "Axis view, Look At, Home and Fit");
+    look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
     look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
     /// Default modelling orientation: `z` (Z up) or `y` (Y up) (#3).
     up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
-    offer_stand_up: bool = true, PAGE_DESIGN => check("Offer to stand up Y-up files", "After a STEP or IGES file opens with Z up, offer a quarter turn about X");
+    offer_stand_up: bool = true, PAGE_DESIGN => check_tr("ui.offer_to_stand_up_y_up_files");
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
-    /// switches the extent to To Object (off: picks only add profiles, as before).
-    extrude_auto_to_object: bool = false, PAGE_DESIGN => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
+    /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
+    /// Profiles box makes the next picks profiles again.
+    extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
+    /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
+    /// Off (the default): the view stays as it is.
+    extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
+    /// With `extrude_view_isometric`: when Extrude closes (OK or Cancel) the view goes back to
+    /// where it was before it turned (#9176). Off (the default): it stays isometric.
+    extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
-    auto_operation: bool = true, PAGE_DESIGN => check_id("prefs.auto_operation");
+    auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
-    hole_snaps: bool = false, PAGE_DESIGN => check("Snap to face and edge centres");
+    hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
     /// A placed Single hole has a handle that drags it, and a pick elsewhere on a face that has a
     /// hole moves the hole there (`hole_place`). Off by default: a second pick on its face takes
     /// the hole out, and a hole is moved by taking it out and picking again.
-    hole_moves: bool = false, PAGE_DESIGN => check("Move holes by clicking or dragging");
+    hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
     /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
     /// by its click only, as before, and its Position input takes faces only.
-    placement_handles: bool = false, PAGE_DESIGN => check("Placement handles", "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its ring");
+    placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the
     /// servers in `network_hosts`, or one the user allows when asked (`network_prompt`).
-    network_locations: bool = false, PAGE_DESIGN => check_tr("prefs.network_locations");
+    network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
-    network_hosts: Vec<String> = Vec::new(), PAGE_DESIGN;
+    network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
+    /// A view chosen on the navigator (a cube face, corner or arrow, an axis tip) also frames the
+    /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
+    /// target and zoom.
+    navigator_fit: bool = false, PAGE_NAVIGATION;
+    /// The view cube's directional arrows orbit the camera the way the arrow points, as in
+    /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
+    /// the cube toward the side it sits on, so the arrow on the left swings the camera left.
+    invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
+    /// The view cube's two curved arrows roll the view the other way: the clockwise arrow rolls
+    /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
+    /// #10483). Off by default: each arrow rolls the view the way it curls.
+    invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
+    /// How much of the view the model fills when Home, Fit, an opened design or a navigator
+    /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
+    /// panels, the compass and the navigation bar, as before.
+    home_fit_size: f32 = 1.0, PAGE_NAVIGATION, accept(0.1..=1.0);
     /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
-    color_vision: crate::theme::ColorVision = crate::theme::ColorVision::Off, PAGE_INTERFACE;
+    color_vision: crate::theme::ColorVision = crate::theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
@@ -1207,6 +1445,9 @@ preference_settings! {
     /// Personal Hole parameter combinations, shared by every design in this profile.
     /// No page reset discards this user-authored library.
     hole_presets: crate::hole_presets::Library = crate::hole_presets::Library::default();
+    /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
+    /// (#9346). No page reset discards this user-authored library.
+    personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -1219,6 +1460,9 @@ preference_settings! {
     send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
     slicer_single_instance: bool = true, 0;
+    /// How strongly a print face stands out in the viewport (#8429): the share of the section
+    /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
+    print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
     /// The line about sending again replacing the slicer's file has been shown.
     slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
@@ -1229,19 +1473,19 @@ preference_settings! {
     custom_slicers: Vec<String> = Vec::new();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
-    ai_features: bool = true, PAGE_AI;
+    ai_features: bool = true, PAGE_ASSISTANT;
     /// The Assistant button in the application bar (the shortcut and View menu entry stay).
-    ai_toolbar_button: bool = true, PAGE_AI;
+    ai_toolbar_button: bool = true, PAGE_ASSISTANT;
     /// An agent's slow commands over the control channel (MCP) compute off the window thread,
     /// so the window stays live while they run (#1989, [`crate::control_job`]). Off: they run on
     /// the window thread, and the window waits for each, as before (the default).
-    agent_off_thread: bool = false, PAGE_AI;
+    agent_off_thread: bool = false, PAGE_ASSISTANT;
     /// Let AI agents connect: the localhost control channel (MCP) opens on the default port at
     /// start-up, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one. Read at start-up.
-    agent_control: bool = true, PAGE_AI;
+    agent_control: bool = true, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.
-    connect_ai_apps: bool = true, PAGE_AI;
+    connect_ai_apps: bool = true, PAGE_ASSISTANT;
     /// Agents the user added (the installed ones are found by themselves). API keys are never
     /// here: they live in the system keychain.
     agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
@@ -1252,26 +1496,26 @@ preference_settings! {
     /// When SolidCraft starts: connect the agent started last (`agent_last`, else the one a new
     /// conversation starts with), and open the panel (#7009). Off by default: an agent starts
     /// only when a message is sent or Connect is pressed, and the panel opens when asked for.
-    agent_connect_at_start: bool = false, PAGE_AI;
-    agent_chat_open_at_start: bool = false, PAGE_AI;
+    agent_connect_at_start: bool = false, PAGE_ASSISTANT;
+    agent_chat_open_at_start: bool = false, PAGE_ASSISTANT;
     /// How much the agent may do without asking (`ask`, `edits`, `all`), and per agent.
-    ai_permissions: crate::agent_chat::agents::Mode = crate::agent_chat::agents::Mode::Edits, PAGE_AI;
-    agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_AI;
+    ai_permissions: crate::agent_chat::agents::Mode = crate::agent_chat::agents::Mode::Edits, PAGE_ASSISTANT;
+    agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_ASSISTANT;
     /// The model last chosen in the chat, per agent: put back when the agent offers it again.
     agent_models: std::collections::BTreeMap<String, String> = Default::default();
     /// "Always allow" answers: per agent, the tools it may use without asking.
     agent_always_allow: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     /// The side the panel docks on (`left` or `right`), its width, and whether it is folded to a strip.
-    agent_chat_side: String = "right".into(), PAGE_AI;
-    agent_chat_width: f32 = 380.0, PAGE_AI;
-    agent_chat_minimized: bool = false, PAGE_AI;
+    agent_chat_side: String = "right".into(), PAGE_ASSISTANT;
+    agent_chat_width: f32 = 380.0, PAGE_ASSISTANT;
+    agent_chat_minimized: bool = false, PAGE_ASSISTANT;
     /// Whether the chat is in its own window instead of the side panel, and that window's place
     /// and size as the system last reported them (`[x, y, width, height]`, points; `x` can be
     /// negative or past the main screen when the window sits on another one).
-    agent_chat_popped: bool = false, PAGE_AI;
-    agent_chat_window: Option<[f32; 4]> = None, PAGE_AI;
+    agent_chat_popped: bool = false, PAGE_ASSISTANT;
+    agent_chat_window: Option<[f32; 4]> = None, PAGE_ASSISTANT;
     /// Changes the agent may make for one message; 0 is no limit.
-    agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_AI;
+    agent_chat_turn_limit: u32 = crate::agent_chat::gate::DEFAULT_TURN_LIMIT, PAGE_ASSISTANT;
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
@@ -1279,6 +1523,12 @@ preference_settings! {
     suppress_sketch_snap: ModifierCombo = ModifierCombo::CTRL_ALT, PAGE_SKETCH;
     /// Temporary horizontal/vertical guides from hovered centres and edge midpoints.
     sketch_tracking_guides: bool = true, PAGE_SKETCH;
+    /// While a drawing tool waits for a point, hovered sketch points (ends, corners, free
+    /// points) start tracking guides too (#9105). Off: only centres and midpoints, as before.
+    sketch_tracking_points: bool = true, PAGE_SKETCH;
+    /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
+    /// Off: the guides stay visual and the cursor does not move (#8694).
+    sketch_recent_snap: bool = false, PAGE_SKETCH;
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
@@ -1289,33 +1539,56 @@ preference_settings! {
     manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
     /// tooltip names the state (#7245). Off: every sketch has the same icon, as before.
-    sketch_state_icons: bool = true, PAGE_SKETCH => check_id("prefs.sketch_state_icons");
+    sketch_state_icons: bool = true, PAGE_SKETCH;
+    /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
+    sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
+    /// A click on the ribbon button of the sketch tool that is running ends the tool, so clicks
+    /// in the view select again (#10151). Off: the click starts the tool again, as before.
+    ribbon_click_ends_tool: bool = true, PAGE_SKETCH;
+    /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
+    /// it is, and Look At faces the sketch when asked.
+    sketch_open_look_at: bool = true, PAGE_SKETCH;
+    /// A sketch started on a face of a body in another component than the active one activates
+    /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
+    /// #10215). Off (the default): the sketch belongs to the active component, as before.
+    sketch_face_activates_part: bool = false, PAGE_SKETCH;
+    /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
+    /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
+    /// runs its command, and one that builds a feature finishes the sketch first (#2815).
+    sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
     /// other size the shape has at its size as drawn (`sketch.draw.dimensioned` with `as_drawn`).
     /// Shapes `solidcraft_engine::dimension_roles` doesn't list are drawn as before.
-    sketch_auto_dimensions: bool = false, PAGE_SKETCH => check(
-        "Dimension new shapes",
-        "Each shape you draw gets all its dimensions, at the sizes you drew (typed values win). A size the sketch already sets is left out."
-    );
+    sketch_auto_dimensions: bool = false, PAGE_SKETCH;
     /// With `sketch_auto_dimensions`: new shapes are also placed from the sketch origin until they
     /// are fully constrained (`sketch.draw.dimensioned` with `locate`). A shape already anchored to
     /// the origin or to placed geometry gets nothing more.
-    sketch_auto_locate: bool = false, PAGE_SKETCH => check(
-        "Also place them from the origin (fully constrained)",
-        "Each new shape is also dimensioned from the sketch origin until nothing of it is left free. A shape already attached to the origin or to placed geometry gets none."
-    );
+    sketch_auto_locate: bool = false, PAGE_SKETCH;
     /// A centre-point arc runs the way the cursor goes round its centre from the start (#6645).
     /// Off: it always runs counter-clockwise from the start, as it did before.
     center_arc_follows_cursor: bool = true, PAGE_SKETCH;
     /// In the Line tool, a press, a drag and the release draw one line from the press to the
     /// release and end there (#7247); clicks still draw a chain. Off (the default): a drag is a
     /// click that moved on the way, placing a point where it is let go (#2448).
-    line_drag_draws_one: bool = false, PAGE_SKETCH => check_id("prefs.line_drag_draws_one");
+    line_drag_draws_one: bool = false, PAGE_SKETCH;
+    /// In the Line tool, leaving the chain's last point and resting back on it switches to a
+    /// tangent arc, and the same again back to lines (#9489). Off (the default): resting there
+    /// does nothing, and tangent arcs are the Arc tool's.
+    line_hover_tangent_arc: bool = false, PAGE_SKETCH;
+    /// Include hidden geometry and a small pointer neighbourhood in Select Other.
+    select_other_hidden: bool = true, PAGE_SKETCH;
+    /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
+    /// window at it whose arrows step the value (#7246, `dim_view::window`).
+    dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
+    /// What the dimension window's arrows, Up/Down and the wheel add to a length (millimetres,
+    /// converted to the unit the value is written in) and to an angle (degrees).
+    dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
+    dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -1324,9 +1597,14 @@ preference_settings! {
     /// While the open sketch's constraints conflict, the curves and points a failing constraint
     /// holds, and its glyph or dimension, are drawn in `sketch_conflict` (#7244). Off: only the
     /// glyphs and dimensions are red, in `error`, as before.
-    sketch_conflict_colour: bool = true, PAGE_SKETCH => check_id("prefs.sketch_conflict_colour");
+    sketch_conflict_colour: bool = true, PAGE_SKETCH;
+    /// Hide constraint glyphs when the sketch is zoomed out so far that a millimetre of the plane
+    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980) and the sketch spans
+    /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
+    /// size at every zoom, as before.
+    hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
-    drive_joints_ghost: bool = true, PAGE_DESIGN;
+    drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
 }
@@ -1371,6 +1649,11 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The Profile operations preference the profiler last followed: applied when it changes,
+    /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
+    applied_profile: Option<bool>,
+    /// The appearance last asked of the native window ([`sync_window_theme`]).
+    window_theme: Option<egui::SystemTheme>,
     /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
     drawn_fov: f64,
     /// The search text of the interface font list.
@@ -1467,6 +1750,14 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
 pub fn open_at(app: &mut SolveApp, page: usize) {
     app.prefs_window.open = true;
     app.prefs_window.section = page.min(PAGES.len() - 1);
+}
+
+/// The sidebar is drawn before the selected page: defer its Profiles action until that page
+/// callback, and leave any search before showing General's existing profile controls.
+pub(crate) fn open_profiles(app: &mut SolveApp) {
+    clear_search(app);
+    open_at(app, PAGE_GENERAL);
+    app.prefs_window.land_on = Some(PAGE_GENERAL);
 }
 
 /// Every setting the dialog changes, for Cancel and Restore Defaults.
@@ -1600,6 +1891,54 @@ fn apply_pending(app: &mut SolveApp) -> bool {
     app.prefs_window.snapshot.as_ref().is_some_and(|s| !s.matches(app))
 }
 
+/// The saved-settings keys whose values the snapshot holds, as [`SolveApp::prefs`] writes them.
+/// While the dialog is open every writer of the settings file saves these instead of the live
+/// values, so a change that was never applied can't reach disk through the periodic save, a
+/// quit or a window close (#9730). Keys the dialog can't change keep their live values.
+pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let s = app.prefs_window.snapshot.as_ref()?;
+    let mut prefs = s.prefs.clone();
+    // Same bookkeeping rule as `restore`: a check that finished while the dialog was open stays.
+    prefs.update.clone_from(&app.preferences.update);
+    let mut shortcut_box = app.sbox.prefs();
+    if let Some(o) = shortcut_box.as_object_mut() {
+        o.insert("pinned".into(), serde_json::json!(s.favourites));
+    }
+    let mut profiles = app.settings_profiles.prefs();
+    if let Some(o) = profiles.as_object_mut() {
+        o.insert("active".into(), serde_json::json!(s.profile));
+    }
+    let mut shortcuts = serde_json::Map::new();
+    for (id, keys) in &s.keys {
+        shortcuts.insert(id.clone(), crate::keymap::keys_value(keys));
+    }
+    // Bound outside the `json!` macro: the ui-containers guard reads `.shadow` inside a macro
+    // as egui's popup shorthand.
+    let shadow = s.shadow;
+    let mut m = serde_json::Map::new();
+    for (key, value) in [
+        ("dark", serde_json::json!(s.dark)),
+        ("grid", serde_json::json!(s.grid)),
+        ("navigation_bar", serde_json::json!(s.navigation_bar)),
+        ("tool_cursor", serde_json::json!(s.tool_cursor)),
+        ("perspective", serde_json::json!(s.perspective)),
+        ("pick_bodies", serde_json::json!(s.pick_bodies)),
+        ("auto_project", serde_json::json!(s.auto_project)),
+        ("visual_style", serde_json::json!(s.style)),
+        ("shortcut_box", shortcut_box),
+        ("shortcuts", serde_json::Value::Object(shortcuts)),
+        ("toolbar", s.toolbar.clone()),
+        ("settings_profiles", profiles),
+        ("autosave_minutes", serde_json::json!(s.autosave)),
+        ("ground_shadow", serde_json::json!(shadow)),
+        ("agent_cursor", serde_json::json!(s.agent)),
+        ("preferences", serde_json::to_value(&prefs).unwrap_or_default()),
+    ] {
+        m.insert(key.to_string(), value);
+    }
+    Some(m)
+}
+
 /// The colour theme (#2255): Dark, Light, System, the built-in theme files and the imported
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
@@ -1618,60 +1957,94 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut chosen: Option<String> = None;
     let mut action: Option<&str> = None;
     let mut import_tile = None;
-    ui_kit::theme_rail(
-        ui,
-        |ui| {
-            for (id, label) in &choices {
-                let palette = match id.as_str() {
-                    "light" | "system" => Tokens::light(),
-                    "dark" => Tokens::dark(),
-                    _ => crate::theme_files::find(id, &app.preferences.custom_themes).map(crate::theme_files::resolve).unwrap_or_else(Tokens::dark),
-                };
-                let custom = app.preferences.custom_themes.iter().any(|t| t.id == *id);
-                let note = app.tr(if id == "system" {
-                    "prefs.follows_os"
-                } else if custom {
-                    "prefs.imported_file"
-                } else {
-                    "prefs.built_in"
-                });
-                let response = ui_kit::option_card(
-                    ui,
+    let t = Tokens::get();
+    let width = t.space_24 * 3.0 + t.space_16;
+    let height = t.space_24 * 4.0;
+    let dark_sample = ui_kit::ThemeSample::from_tokens(&Tokens::dark());
+    let carousel_id = "appearance_themes";
+    // Reveal the active theme after a programmatic selection or import too.
+    let selection_key = ui.make_persistent_id((carousel_id, "selection"));
+    let carousel_key = ui.make_persistent_id(carousel_id);
+    ui.data_mut(|data| {
+        if data.get_temp::<String>(selection_key).as_deref() != Some(app.preferences.theme.as_str()) {
+            let index = choices.iter().position(|(id, _)| id == &app.preferences.theme).unwrap_or(0);
+            data.insert_temp(carousel_key, index.saturating_sub(1));
+            data.insert_temp(selection_key, app.preferences.theme.clone());
+        }
+    });
+    let mut item = |ui: &mut egui::Ui, index: usize| {
+        if let Some((id, label)) = choices.get(index) {
+            let palette = match id.as_str() {
+                "light" | "system" => Tokens::light(),
+                "dark" => Tokens::dark(),
+                _ => crate::theme_files::find(id, &app.preferences.custom_themes)
+                    .map(|f| resolved_theme(&app.preferences, f))
+                    .unwrap_or_else(Tokens::dark),
+            };
+            let custom = app.preferences.custom_themes.iter().any(|t| t.id == *id);
+            let note = app.tr(if id == "system" {
+                "prefs.follows_os"
+            } else if custom {
+                "prefs.imported_file"
+            } else {
+                "prefs.built_in"
+            });
+            let options = crate::theme_files::find(id, &app.preferences.custom_themes)
+                .is_some_and(|file| !crate::theme_options::offered(file, crate::theme_options::PROVIDERS).is_empty());
+            if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label, note]) {
+                return;
+            }
+            let sample = ui_kit::ThemeSample::from_tokens(&palette);
+            let response = ui_kit::picture_card(
+                ui,
+                &ui_kit::Card {
                     label,
-                    Some(note),
-                    !following && app.preferences.theme == *id,
-                    true,
-                    ui_kit::PreferenceFigure::Theme { palette: palette.into(), system: id == "system" },
-                );
-                crate::scenario::publish_target(&format!("prefs:theme_tile:{id}"), response.rect);
-                crate::scenario::publish_target(&format!("prefs:theme:{id}"), response.rect);
-                if !following && app.preferences.theme == *id {
-                    crate::scenario::publish_target("prefs:theme", response.rect);
-                }
-                if response.clicked() {
-                    chosen = Some(id.clone());
-                }
-                ui_kit::Menu::context(&response, |ui| {
-                    ui_kit::Menu::show(ui, Tokens::get().form_card_width, |ui| {
-                        if ui_kit::MenuItem::new("theme_export", app.tr_label("Export…"), "export").show(ui).clicked() {
-                            tile_action = Some(("export", id.clone()));
+                    sub: Some(note),
+                    selected: !following && app.preferences.theme == *id,
+                    enabled: true,
+                    options: options.then(|| app.tr("prefs.theme_options_badge")),
+                    check: false,
+                    aspect: 124.0 / 76.0,
+                    figure: &|p, rect| {
+                        if id == "system" {
+                            ui_kit::paint_theme_system(p, rect, &sample, &dark_sample);
+                        } else {
+                            ui_kit::paint_theme_thumbnail(p, rect, &sample);
+                        }
+                    },
+                },
+                width.min(ui.available_width()),
+            );
+            if options {
+                crate::scenario::publish_rect(&format!("prefs:theme_options_badge:{id}"), response.rect);
+            }
+            crate::scenario::publish_target(&format!("prefs:theme_tile:{id}"), response.rect);
+            crate::scenario::publish_target(&format!("prefs:theme:{id}"), response.rect);
+            if !following && app.preferences.theme == *id {
+                crate::scenario::publish_target("prefs:theme", response.rect);
+            }
+            if response.clicked() {
+                chosen = Some(id.clone());
+            }
+            ui_kit::Menu::context(&response, |ui| {
+                ui_kit::Menu::show(ui, Tokens::get().form_card_width, |ui| {
+                    if ui_kit::MenuItem::new("theme_export", app.tr_label("Export…"), "export").show(ui).clicked() {
+                        tile_action = Some(("export", id.clone()));
+                        ui.close();
+                    }
+                    if custom {
+                        let mut remove = ui_kit::MenuItem::new("theme_remove", app.tr_label("Remove"), "delete");
+                        remove.danger = true;
+                        if remove.show(ui).clicked() {
+                            tile_action = Some(("remove", id.clone()));
                             ui.close();
                         }
-                        if custom {
-                            let mut remove = ui_kit::MenuItem::new("theme_remove", app.tr_label("Remove"), "delete");
-                            remove.danger = true;
-                            if remove.show(ui).clicked() {
-                                tile_action = Some(("remove", id.clone()));
-                                ui.close();
-                            }
-                        }
-                    });
+                    }
                 });
-            }
-        },
-        |ui| {
-            let tile = ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file_or_paste"))
-                .on_hover_text(app.tr("prefs.theme_import_hint"));
+            });
+        } else {
+            let tile = ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file"))
+                .backing_on_hover_text(app.tr("prefs.theme_import_hint"));
             import_tile = Some(tile.rect);
             if tile.clicked() {
                 action = Some("import");
@@ -1686,8 +2059,24 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             });
-        },
-    );
+        }
+    };
+    if crate::prefs_search::suppress_chrome(ui) {
+        for index in 0..=choices.len() {
+            item(ui, index);
+        }
+    } else {
+        ui_kit::carousel(ui, carousel_id, choices.len() + 1, width, height, &mut item);
+        for (label, handle, help) in [
+            ("prefs.carousel_previous", "prefs:theme_previous", "prefs.appearance.previous_themes"),
+            ("prefs.carousel_next", "prefs:theme_next", "prefs.appearance.next_themes"),
+        ] {
+            if let Some(rect) = crate::scenario::rect_of(&format!("prefs:carousel:{}", crate::i18n::tr(label))) {
+                crate::scenario::publish_target(handle, rect);
+                ui.interact(rect, ui.make_persistent_id((handle, "help")), egui::Sense::hover()).backing_on_hover_text(app.tr(help));
+            }
+        }
+    }
     app.prefs_window.import_tile = import_tile;
     if let Some((kind, id)) = tile_action {
         action = Some(kind);
@@ -1697,6 +2086,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Choosing a theme stops following a file (#7573).
         stop_following(app);
         select_theme(app, &id);
+        ui.data_mut(|data| data.insert_temp(selection_key, id));
     }
     match action {
         Some("import") => app.pick_open_for(&["json"], |app, path| {
@@ -1715,7 +2105,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         Some("export") => {
-            let system_dark = ui.ctx().system_theme().map_or(app.ui.dark, |theme| theme == egui::Theme::Dark);
+            let system_dark = system_dark(app, ui.ctx()).unwrap_or(app.ui.dark);
             let file = theme_file(app, action_theme.as_deref().unwrap_or(&app.preferences.theme), system_dark);
             let name = file.get("name").and_then(serde_json::Value::as_str).unwrap_or("Theme").to_string();
             let text = serde_json::to_string_pretty(&file).unwrap_or_default();
@@ -1745,28 +2135,30 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let launch = app.prefs_window.follow.launch.is_some();
     let error = app.prefs_window.follow.error().map(str::to_string);
     let (mut choose, mut stop) = (false, false);
-    // The setting's name is longer than the label column: it leads the row's own line.
-    ui_kit::row(ui, "", |ui| {
-        // On a narrow page the buttons drop to a second line rather than widening the page.
-        let narrow = ui.available_width() < Tokens::get().form_card_width;
-        ui.horizontal_wrapped(|ui| {
-            ui_kit::text(ui, app.tr("prefs.theme_follow"), ui_kit::Text::Inline);
-            if narrow {
-                ui.end_row();
+    ui.horizontal_wrapped(|ui| {
+        ui.add_enabled_ui(FOLLOW_AVAILABLE, |ui| {
+            let mut on = !path.is_empty();
+            let check = ui_kit::checkbox(ui, app.tr("prefs.theme_follow"), &mut on);
+            crate::scenario::publish_target("prefs:theme_follow_toggle", check.rect);
+            if check.changed() {
+                if on {
+                    choose = true;
+                } else {
+                    stop = true;
+                }
             }
-            let choose_button = ui_kit::button(ui, app.tr_label("Choose…"), ui_kit::Button::Small);
-            crate::scenario::publish_target("prefs:theme_follow", choose_button.rect);
-            choose = choose_button.clicked();
-            let stop_button = ui_kit::button(ui, app.tr("prefs.theme_follow_stop"), ui_kit::Button::Enabled(!path.is_empty()));
-            stop = stop_button.clicked();
-            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string());
-            let shown = name.unwrap_or_else(|| app.tr("prefs.theme_follow_off").to_string());
-            ui_kit::text(ui, &shown, ui_kit::Text::Inline).on_hover_text(&path);
+            ui_kit::help_icon(ui, app.tr("prefs.appearance.follow_help"));
+            let button = ui_kit::button(ui, app.tr_label("Choose…"), ui_kit::Button::Small);
+            crate::scenario::publish_target("prefs:theme_follow", button.rect);
+            choose |= button.clicked();
         });
+        ui_kit::settings_state_badge(ui, app.tr("prefs.appearance.desktop_only"), ui_kit::SettingsBadgeTone::Neutral);
+        if !path.is_empty() {
+            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            ui_kit::settings_inline_note(ui, &name);
+            ui_kit::help_icon(ui, app.tr(if launch { "prefs.theme_follow_launch" } else { "prefs.theme_follow_note" })).backing_on_hover_text(&path);
+        }
     });
-    if !path.is_empty() {
-        ui_kit::text(ui, app.tr(if launch { "prefs.theme_follow_launch" } else { "prefs.theme_follow_note" }), ui_kit::Text::Hint("theme_follow"));
-    }
     if let Some(error) = error.filter(|_| !path.is_empty()) {
         ui_kit::text(ui, &crate::i18n::format("prefs.theme_follow_error", &[("error", &error)]), ui_kit::Text::Error("theme_follow"));
     }
@@ -1786,7 +2178,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The interface font (#1290): the built-in font first, then the installed families, with a
 /// search box. The choice applies at once, like the other preferences.
 fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let builtin = app.tr_label("Built-in").to_string();
+    let builtin = crate::i18n::format("sketch_text.builtin_font", &[("family", "IBM Plex Sans")]);
     let current = if app.preferences.ui_font.trim().is_empty() { builtin.clone() } else { app.preferences.ui_font.clone() };
     let families = crate::sketch_text::families(ui.ctx());
     let mut values = vec![(String::new(), builtin.clone(), "prefs:font_builtin".to_string())];
@@ -1794,17 +2186,21 @@ fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         values.extend(families.iter().map(|family| (family.clone(), family.clone(), format!("prefs:font:{family}"))));
     }
     let options: Vec<_> = values.iter().map(|(value, label, handle)| ui_kit::SearchOption { value, label, handle: Some(handle) }).collect();
-    let chosen = ui_kit::searchable_dropdown(
-        ui,
-        "pref_ui_font",
-        &current,
-        &mut app.prefs_window.font_filter,
-        &options,
-        None,
-        families.is_none().then(|| crate::i18n::tr_label("Listing the installed fonts…")),
-    );
-    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:widget:{}", crate::i18n::tr("prefs.font"))) {
-        crate::scenario::publish_handle("prefs:ui_font", rect.center());
+    let chosen = ui_kit::named_control(ui, app.tr_label("Interface font"), |ui| {
+        ui_kit::searchable_dropdown(
+            ui,
+            "pref_ui_font",
+            &current,
+            &mut app.prefs_window.font_filter,
+            &options,
+            None,
+            families.is_none().then(|| crate::i18n::tr_label("Listing the installed fonts…")),
+        )
+    });
+    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:widget:{}", crate::i18n::tr_label("Interface font"))) {
+        crate::scenario::publish_target("prefs:ui_font", rect);
+        crate::scenario::publish_target(&format!("dialog:{}", app.tr("prefs.font")), rect);
+        crate::scenario::publish_rect(&format!("dialog:widget:{}", app.tr("prefs.font")), rect);
     }
     if let Some(name) = chosen {
         if name.is_empty() || crate::fonts::ui_font(&name).is_some() {
@@ -1830,16 +2226,21 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.autosave_minutes = 5.0;
             set_autosave(app);
         }
-        PAGE_INTERFACE => {
+        PAGE_APPEARANCE => {
             app.prefs_window.follow.launch = None;
             app.ui.dark = true;
+        }
+        PAGE_LAYOUT => {
             app.ui.layout = app.preferences.layout;
             app.ui.show_navigation_bar = true;
         }
-        PAGE_AI => app.ui.agent_cursor = Default::default(),
-        PAGE_NAVIGATION => app.ui.tool_cursor = false,
+        PAGE_ASSISTANT => app.ui.agent_cursor = Default::default(),
+        PAGE_TOOLS => app.ui.tool_cursor = false,
         PAGE_DESIGN => {}
-        PAGE_SHORTCUTS => crate::keymap::reset(app, None),
+        PAGE_SHORTCUTS => {
+            crate::keymap::stop_capture(app);
+            crate::keymap::reset(app, None);
+        }
         PAGE_GRAPHICS => {
             app.ui.visual_style = 0;
             app.ui.show_grid = true;
@@ -1857,11 +2258,75 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
 }
 
+/// Whether the desktop asks for dark colours, for Theme: System; `None` when nothing says.
+/// The host's own reading of the desktop (`Services::desktop_dark`, the freedesktop setting on
+/// Linux, #7944) comes first, as the window toolkit does not report it on every desktop
+/// (GNOME on Wayland), nor its changes; then the window toolkit's.
+pub(crate) fn system_dark(app: &SolveApp, ctx: &egui::Context) -> Option<bool> {
+    app.services.desktop_dark.as_ref().and_then(|f| f()).or_else(|| ctx.system_theme().map(|t| t == egui::Theme::Dark))
+}
+
+/// The desktop's dark or light preference from the freedesktop settings a Linux host reads
+/// (#7944): `appearance` is `org.freedesktop.appearance color-scheme` (1 prefer dark, 2 prefer
+/// light, 0 no preference), `gnome` is GNOME's `org.gnome.desktop.interface color-scheme`
+/// (`prefer-dark`, `prefer-light`, `default`) and `gtk_theme` its `gtk-theme` name. An explicit
+/// preference wins; otherwise a dark-named GTK theme ("Adwaita-dark") means dark, and anything
+/// else light, as GTK applications read it (GNOME's Light is `default`). `None` when no setting
+/// was read at all.
+pub fn desktop_prefers_dark(appearance: Option<u32>, gnome: Option<&str>, gtk_theme: Option<&str>) -> Option<bool> {
+    match appearance {
+        Some(1) => return Some(true),
+        Some(2) => return Some(false),
+        _ => {}
+    }
+    match gnome.map(|s| s.trim().trim_matches('\'')) {
+        Some("prefer-dark") => return Some(true),
+        Some("prefer-light") => return Some(false),
+        _ => {}
+    }
+    let theme = gtk_theme.map(|s| s.trim().trim_matches('\'').to_ascii_lowercase()).filter(|s| !s.is_empty());
+    if theme.as_deref().is_some_and(|t| t.ends_with("-dark") || t.ends_with(":dark")) {
+        return Some(true);
+    }
+    (appearance.is_some() || gnome.is_some() || theme.is_some()).then_some(false)
+}
+
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
 /// the interface scale.
+/// Tell the native window which appearance to take (#8983): the operating system's while the
+/// theme follows it, otherwise the theme's own, so the title bar matches. egui's own window sync
+/// (`Options::sync_window_theme`) went by the egui theme, which [`crate::theme::apply`] always
+/// sets to light or dark. A macOS window told to be light stays light and no longer reports the
+/// system appearance changing, so a theme following the system never turned with it.
+fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bool) {
+    let window = if follows_system {
+        egui::SystemTheme::SystemDefault
+    } else if app.ui.dark {
+        egui::SystemTheme::Dark
+    } else {
+        egui::SystemTheme::Light
+    };
+    if app.prefs_window.window_theme != Some(window) {
+        ctx.options_mut(|o| o.sync_window_theme = false);
+        ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(window));
+        app.prefs_window.window_theme = Some(window);
+    }
+}
+
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     apply_network(&app.preferences);
+    // The features computed from now on are checked as the preference says.
+    app.session.set_validation(app.preferences.validation);
+    // The profiler records while the preference is on (switched when it changes; at start-up only
+    // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
+    let profile = app.preferences.profile_operations;
+    if app.prefs_window.applied_profile != Some(profile) {
+        if profile || app.prefs_window.applied_profile.is_some() {
+            solidcraft_engine::profile::set_enabled(profile);
+        }
+        app.prefs_window.applied_profile = Some(profile);
+    }
     apply_file_limits(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
@@ -1873,21 +2338,25 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     follow_view_fov(app);
     if app.preferences.theme == "system"
-        && let Some(t) = ctx.system_theme()
+        && let Some(dark) = system_dark(app, ctx)
     {
-        app.ui.dark = t == egui::Theme::Dark;
+        app.ui.dark = dark;
     }
     // A theme file's palette, in place of its base's (dark or light); the visuals follow. A
     // followed file (#7573) wins while it is followed and has read completely once.
     follow_theme_file(app, ctx);
-    let file = app.prefs_window.follow.theme().or_else(|| crate::theme_files::find(&app.preferences.theme, &app.preferences.custom_themes));
-    if let Some(f) = file {
-        app.ui.dark = f.base.is_dark();
+    let file = active_theme_file(app);
+    let custom = crate::theme::prepare_tabs(ctx, file, file.and_then(|f| app.preferences.theme_options.get(&f.id)), || {
+        file.map(|f| effective_theme_options(&app.preferences, f).0).unwrap_or_default()
+    });
+    if let Some(custom) = &custom {
+        app.ui.dark = custom.dark;
     }
-    let custom = file.map(|f| crate::theme::Custom { dark: f.base.is_dark(), tokens: crate::theme_files::resolve(f) });
+    let follows_system = app.preferences.theme == "system" && custom.is_none();
     if crate::theme::set_custom(custom) {
         app.styled = false;
     }
+    sync_window_theme(app, ctx, follows_system);
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
         app.styled = false;
     }
@@ -2092,27 +2561,41 @@ pub const WAYLAND_DROP_ISSUE: &str = "https://github.com/rust-windowing/winit/is
 /// which one is running now, and when native Wayland is in use or chosen, that some features are
 /// limited there, linking to [`WAYLAND_DROP_ISSUE`].
 #[cfg(target_os = "linux")]
-fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let t = Tokens::get();
     let label = |id: &str| crate::i18n::tr(&format!("ui.window_system_{id}")).to_string();
     let labels: Vec<_> = WINDOW_SYSTEMS.iter().copied().map(label).collect();
     let labels: Vec<_> = labels.iter().map(String::as_str).collect();
-    // The note below says that it applies after a restart, and which one runs now.
-    let response = ui.allocate_ui_with_layout(egui::vec2(t.form_card_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-        let mut selected = WINDOW_SYSTEMS.iter().position(|id| *id == app.preferences.window_system).unwrap_or(0);
-        if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments::default())
-            && let Some(id) = WINDOW_SYSTEMS.get(selected)
-        {
-            app.preferences.window_system = (*id).into();
-        }
-    });
-    crate::scenario::publish_handle("prefs:window_system", response.response.rect.center());
     let now = app.services.window_system.map(label);
     let text = match &now {
         Some(now) => crate::i18n::format("settings.window_system_note_now", &[("now", now)]),
         None => app.tr("settings.msaa_applies_on_restart").to_string(),
     };
-    ui_kit::text(ui, &text, ui_kit::Text::Hint("window_system"));
+    let row_width = (label_width + t.space_14 + t.space_24 * 10.0).min(ui.available_width());
+    ui.horizontal_wrapped(|ui| {
+        ui.allocate_ui_with_layout(egui::vec2(row_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui_kit::settings_form(ui, label_width, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("ui.window_system"), &text, |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2((t.space_24 * 10.0).min(ui.available_width()), t.control_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            let mut selected = WINDOW_SYSTEMS.iter().position(|id| *id == app.preferences.window_system).unwrap_or(0);
+                            let before = selected;
+                            let response = ui_kit::dropdown(ui, "window_system", &mut selected, &labels);
+                            crate::scenario::publish_target("prefs:window_system", response.rect);
+                            if selected != before
+                                && let Some(id) = WINDOW_SYSTEMS.get(selected)
+                            {
+                                app.preferences.window_system = (*id).into();
+                            }
+                        },
+                    );
+                });
+            });
+        });
+        ui_kit::settings_badge(ui, "Linux", false);
+    });
     let choice = app.preferences.window_system.as_str();
     if choice == "wayland" || (choice == "auto" && app.services.window_system == Some("wayland")) {
         ui.horizontal_wrapped(|ui| {
@@ -2195,6 +2678,7 @@ fn unfold(ctx: &egui::Context) {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::settings_profiles::rename_popup(app, ctx);
     // File › Keyboard Shortcuts and Help › Keyboard Shortcuts open this dialog at that page.
     if app.keymap.open {
         app.keymap.open = false;
@@ -2233,25 +2717,35 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = ui_kit::Window::new(egui::Id::new("sc_prefs"), "settings", app.tr("ui.preferences"))
         .cards(10.0 / 3.0)
         .page_rows(24.0)
+        .page_header_in_titlebar()
         .page_padding(egui::Margin {
-            left: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
-            right: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
-            top: Tokens::get().space_6 as i8,
-            bottom: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
+            left: (Tokens::get().space_24 - Tokens::get().space_2) as i8,
+            right: (Tokens::get().space_24 - Tokens::get().space_2) as i8,
+            top: (Tokens::get().space_16 + Tokens::get().space_2) as i8,
+            bottom: Tokens::get().space_10 as i8,
         })
         .fields()
         .actions("OK", "Cancel", Some("Apply"))
         .apply_enabled(pending);
     let window = if capturing { window.keep_open_on_escape() } else { window };
     let mut selected = app.prefs_window.section;
-    let (closed, action) = window.show_pages_with_header(ctx, &mut selected, WINDOW_PAGES, app, search_header, clear_search, |ui| {
-        if ui_kit::button(ui, crate::i18n::tr("ui.restore_defaults"), ui_kit::Button::Normal)
-            .on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
-            .clicked()
-        {
-            button = Some("defaults");
-        }
-    });
+    let (closed, action) = window.show_pages_with_header(
+        ctx,
+        &mut selected,
+        WINDOW_PAGES,
+        app,
+        search_header,
+        clear_search,
+        Some((Tokens::get().space_24 * 2.0, crate::settings_profiles::sidebar)),
+        |ui| {
+            let defaults = ui_kit::button(ui, crate::i18n::tr("prefs.restore_page_defaults"), ui_kit::Button::Ghost)
+                .backing_on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"));
+            crate::scenario::publish_target("prefs:defaults", defaults.rect);
+            if defaults.clicked() {
+                button = Some("defaults");
+            }
+        },
+    );
     if let Some(rect) = crate::scenario::rect_of("dialog:page_body") {
         crate::scenario::publish_rect("prefs:page_body", rect);
     }
@@ -2332,19 +2826,19 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         // Paint only the pages that match. A first pass is invisible, so the 3D mouse rows and the
         // agent list cannot draw on top of the setting that did match.
         let mut keep = vec![false; WINDOW_PAGES.len()];
-        for (index, item) in WINDOW_PAGES.iter().enumerate() {
-            crate::prefs_search::begin_page(ui, index, crate::i18n::tr(item.label));
+        for (index, _) in WINDOW_PAGES.iter().enumerate() {
+            crate::prefs_search::begin_page(ui, index, &page_path(index));
             let before = crate::prefs_search::hits(ui);
             let mut probe = crate::prefs_search::detached_child(ui, ("prefs-search-probe", index), true);
             draw_page(app, &mut probe, index, t);
             keep[index] = crate::prefs_search::hits(ui) > before;
         }
         crate::prefs_search::rewind_search_layout(ui);
-        for (index, item) in WINDOW_PAGES.iter().enumerate() {
+        for (index, _) in WINDOW_PAGES.iter().enumerate() {
             if !keep.get(index).copied().unwrap_or(false) {
                 continue;
             }
-            crate::prefs_search::begin_page(ui, index, crate::i18n::tr(item.label));
+            crate::prefs_search::begin_page(ui, index, &page_path(index));
             let before = crate::prefs_search::hits(ui);
             let mut child = crate::prefs_search::detached_child(ui, ("prefs-search-page", index), false);
             draw_page(app, &mut child, index, t);
@@ -2354,8 +2848,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui.label(egui::RichText::new(crate::i18n::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));
         }
     } else {
-        let label = WINDOW_PAGES.get(app.prefs_window.section).map(|item| crate::i18n::tr(item.label)).unwrap_or("");
-        crate::prefs_search::begin_page(ui, app.prefs_window.section, label);
+        let label = page_path(app.prefs_window.section);
+        crate::prefs_search::begin_page(ui, app.prefs_window.section, &label);
         draw_page(app, ui, app.prefs_window.section, t);
     }
     crate::prefs_search::store_nav(ui);
@@ -2363,11 +2857,32 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 
 fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
     match index {
-        PAGE_SHORTCUTS => crate::keymap::page(app, ui),
-        PAGE_AI => crate::agent_chat::settings::page(app, ui),
+        PAGE_SHORTCUTS => {
+            let read_only = app.keymap.read_only;
+            let mut show = |ui: &mut egui::Ui| {
+                ui_kit::settings_heading_with_tag(
+                    ui,
+                    app.tr("prefs.shortcuts"),
+                    app.tr("prefs.shortcuts_intro"),
+                    Some(crate::settings_profiles::tag),
+                );
+                crate::keymap::page(app, ui);
+            };
+            if read_only {
+                show(ui);
+            } else {
+                ui_kit::settings_page(ui, show);
+            }
+        }
+        PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
         PAGE_PLUGINS => crate::plugins::page(app, ui),
         PAGE_GENERAL => general::show(app, ui),
-        PAGE_INTERFACE => interface::interface(app, ui, t),
+        PAGE_APPEARANCE => interface::appearance(app, ui, t),
+        PAGE_LAYOUT => interface::layout(app, ui),
+        PAGE_TOOLS => tools::show(app, ui),
+        PAGE_MOUSE3D => {
+            space_mouse_section(app, ui);
+        }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
@@ -2377,340 +2892,48 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
 }
 
 fn page_index(name: &str) -> Option<usize> {
-    match name.to_ascii_lowercase().as_str() {
-        "selection" | "sketch & selection" | "sketch and selection" => Some(PAGE_SKETCH),
-        "interface/navigation bar" => Some(PAGE_INTERFACE),
-        "assistant" => Some(PAGE_AI),
-        "shortcuts" => Some(PAGE_SHORTCUTS),
-        _ => PAGES.iter().position(|x| x.eq_ignore_ascii_case(name)),
-    }
+    PAGES
+        .iter()
+        .position(|page| page.eq_ignore_ascii_case(name))
+        .or_else(|| PAGE_ALIASES.iter().find_map(|(alias, page)| alias.eq_ignore_ascii_case(name).then_some(*page)))
 }
 
-/// The 3D mouse's settings under Navigation, drawn with the same settings kit as the sections above
+/// The 3D mouse page's settings, drawn with the same settings kit as the sections above
 /// it: whether it moves the view and shows in it, where the picture goes, its speed, the driver and
 /// calibration, each axis, the picture with its dead zone, and what its buttons do. A section like the
-/// others, so it folds with its header and stays as the user last left it.
+/// others, with independent, searchable sections.
 fn space_mouse_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "space_mouse", crate::i18n::tr("ui.3d_mouse_section"), |ui| space_mouse_rows(app, ui));
+    mouse3d::show(app, ui);
 }
 
-/// The label column the Navigation page's forms share (`prefs/navigation.rs`).
+/// A device's own app on this computer driving the view (the navigation bridge): on or off, its
+/// port, and whether an app is connected. Part of the 3D mouse Advanced section.
+fn nav_bridge(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let (label, tip, port) = (app.tr("ui.nav_bridge").to_owned(), app.tr("ui.nav_bridge_tip").to_owned(), app.tr("ui.nav_bridge_port").to_owned());
+    let status = match (&app.space_mouse.bridge, app.preferences.nav_bridge_enabled) {
+        (_, false) => None,
+        (Some(name), true) => Some((format!("{} · {name}", app.tr("ui.nav_bridge_connected")), false)),
+        (None, true) => Some((app.tr("ui.nav_bridge_waiting").to_owned(), true)),
+    };
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
+        ui_kit::checkbox(ui, &label, &mut app.preferences.nav_bridge_enabled).backing_on_hover_text(&tip);
+        if let Some((status, waiting)) = &status {
+            ui_kit::settings_state_badge(ui, status, if *waiting { ui_kit::SettingsBadgeTone::Warning } else { ui_kit::SettingsBadgeTone::Success });
+        }
+    });
+    ui_kit::settings_form(ui, ui_kit::ContentWidth::label(ui, &port), |ui| {
+        ui_kit::row(ui, &port, |ui| {
+            ui.add_enabled_ui(app.preferences.nav_bridge_enabled, |ui| {
+                ui_kit::settings_control_width(ui, Tokens::get().space_24 * 3.0 + Tokens::get().space_8, |ui| {
+                    ui_kit::number_field(ui, &mut app.preferences.nav_bridge_port, 1..=u16::MAX, 1.0, "");
+                });
+            });
+        });
+    });
+}
+
+/// Legacy label alignment for the 3D mouse's supplemental controls.
 const FORM_LABEL_WIDTH: f32 = 150.0;
-
-fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = Tokens::get();
-    // The two checkboxes sit in the two-column grid Wheel and trackpad uses (`navigation.rs`).
-    let width = (ui.available_width() - (t.space_16 + t.space_4)) * 0.5;
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = t.space_16 + t.space_4;
-        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.horizontal_wrapped(|ui| {
-                setting::space_mouse_enabled(app, ui);
-                let device = app.space_mouse.device.as_ref();
-                let saved = device.is_some_and(|device| app.preferences.space_mouse_calibrations.contains_key(device));
-                if let Some(device) = device {
-                    let state = app.tr(if saved { "ui.3d_mouse_calibrated" } else { "ui.3d_mouse_not_calibrated" });
-                    ui_kit::settings_badge(ui, &format!("{state} · {device}"), !saved);
-                }
-            });
-        });
-        ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            setting::space_mouse_in_view(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
-        });
-    });
-    // Where the picture goes, a choice that waits on the checkbox above.
-    let names: Vec<(SpaceMouseGhost, String)> = [
-        (SpaceMouseGhost::LeftViewport, "ui.3d_mouse_ghost_left_viewport"),
-        (SpaceMouseGhost::RightViewport, "ui.3d_mouse_ghost_right_viewport"),
-        (SpaceMouseGhost::LeftWindow, "ui.3d_mouse_ghost_left_window"),
-    ]
-    .map(|(position, key)| (position, app.tr(key).to_owned()))
-    .into();
-    let orbits = [app.tr("ui.3d_mouse_orbit_traced").to_owned(), app.tr("ui.3d_mouse_orbit_classic").to_owned()];
-    ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-        // Traced or classic orbit: a choice between two named ways rather than a checkbox.
-        ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_orbit"), |ui| {
-            let mut selected = usize::from(!app.preferences.space_mouse_model_pivot);
-            let response = ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &orbits.each_ref().map(String::as_str), ui_kit::Segments::default()));
-            if response.inner {
-                app.preferences.space_mouse_model_pivot = selected == 0;
-            }
-            let rect = response.response.rect;
-            crate::scenario::publish_handle("prefs:3d_mouse_orbit_traced", egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y));
-            crate::scenario::publish_handle("prefs:3d_mouse_orbit_classic", egui::pos2(rect.left() + rect.width() * 0.75, rect.center().y));
-            response.response.on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
-        });
-        ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_ghost_position"), |ui| {
-            let (in_view, position) = (app.preferences.space_mouse_in_view, &mut app.preferences.space_mouse_ghost_position);
-            ui.add_enabled_ui(in_view, |ui| {
-                ui_kit::settings_control_width(ui, AXIS_DRIVEN_WIDTH, |ui| {
-                    let current = names.iter().find(|(choice, _)| choice == position).map_or("", |(_, name)| name.as_str());
-                    ui_kit::dropdown_menu(ui, "sc_space_mouse_ghost", current, |ui| {
-                        for (choice, name) in &names {
-                            if ui_kit::list_picker(ui, name, name, choice == position).clicked() {
-                                *position = *choice;
-                            }
-                        }
-                    });
-                });
-            });
-        });
-        ui_kit::row(ui, app.tr("prefs.overall_speed"), |ui| {
-            ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-                ui_kit::slider(
-                    ui,
-                    &mut app.preferences.space_mouse_speed,
-                    0.25..=5.0,
-                    ui_kit::Slider { step: Some(0.05), format: |value| format!("{value:.2}×"), ..Default::default() },
-                );
-            });
-        });
-        ui_kit::row(ui, app.tr("ui.3d_mouse_calibration"), |ui| {
-            let device = app.space_mouse.device.clone();
-            let saved = device.as_ref().is_some_and(|device| app.preferences.space_mouse_calibrations.contains_key(device));
-            ui.add_enabled_ui(app.preferences.space_mouse_enabled && device.is_some(), |ui| {
-                if ui_kit::button(ui, app.tr("ui.3d_mouse_calibrate"), ui_kit::Button::Normal)
-                    .on_hover_text(app.tr("ui.3d_mouse_calibrate_tip"))
-                    .on_disabled_hover_text(app.tr(if app.space_mouse.device.is_none() {
-                        "ui.3d_mouse_calibrate_wait"
-                    } else {
-                        "ui.3d_mouse_calibrate_tip"
-                    }))
-                    .clicked()
-                {
-                    crate::space_mouse_calibration::start(app);
-                }
-                if saved
-                    && ui_kit::button(ui, app.tr("ui.3d_mouse_forget"), ui_kit::Button::Normal).clicked()
-                    && let Some(device) = &device
-                {
-                    app.preferences.space_mouse_calibrations.remove(device);
-                }
-            });
-            let not_allowed = found_but_not_allowed(app.space_mouse.drivers);
-            // With a device, the badge beside the toggle above says this.
-            if device.is_some() {
-                return;
-            }
-            let status = if not_allowed {
-                app.tr("ui.3d_mouse_denied_short")
-            } else if waiting_for_a_record(app.space_mouse.drivers) {
-                app.tr("ui.3d_mouse_calibrate_wait")
-            } else {
-                app.tr("ui.3d_mouse_none")
-            };
-            let status_line = ui_kit::text(ui, status, ui_kit::Text::Report("calibration_status", false));
-            // Nothing confirmed yet (none found, or waiting for the first record): a hint to try, as a
-            // tooltip here and, while a reader is waiting for the first record, as a line below.
-            if device.is_none() && !not_allowed {
-                status_line.on_hover_text(app.tr("ui.3d_mouse_wiggle"));
-            }
-        });
-        if app.space_mouse.device.is_none() {
-            if found_but_not_allowed(app.space_mouse.drivers) {
-                // Wiggling will not help: the device is there and SolidCraft may not read it.
-                hint_under_controls(ui, app.tr("ui.3d_mouse_denied"), "space_mouse_denied");
-            } else {
-                hint_under_controls(ui, app.tr("ui.3d_mouse_wiggle"), "space_mouse_wiggle");
-            }
-        }
-    });
-    // A device whose own app drives the view instead (the navigation bridge).
-    ui_kit::divider(ui, "nav_bridge");
-    navigation::nav_bridge(app, ui);
-    // The rarely needed settings sit behind one disclosure, closed until the reader opens it.
-    ui_kit::section(ui, "space_mouse_advanced", crate::i18n::tr_label("Advanced"), false, |ui| {
-        ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-            // Only where the reader has seen the choice: Linux, with spacenavd and the device both there.
-            if let Some(present) = app.space_mouse.drivers.filter(|present| present.spacenavd || (present.direct && !present.denied)) {
-                let [label, auto, direct, only_spacenavd, only_direct] =
-                    ["driver", "driver_auto", "driver_direct", "driver_only_spacenavd", "driver_only_direct"]
-                        .map(|key| app.tr(&format!("ui.3d_mouse_{key}")).to_owned());
-                let driver = &mut app.preferences.space_mouse_driver;
-                ui_kit::row(ui, &label, |ui| match (present.spacenavd, present.direct) {
-                    (true, true) => {
-                        let name = |driver| match driver {
-                            SpaceMouseDriver::Automatic => auto.as_str(),
-                            SpaceMouseDriver::Spacenavd => "spacenavd",
-                            SpaceMouseDriver::Direct => direct.as_str(),
-                        };
-                        ui_kit::settings_control_width(ui, AXIS_DRIVEN_WIDTH, |ui| {
-                            ui_kit::dropdown_menu(ui, "sc_space_mouse_driver", name(*driver), |ui| {
-                                for choice in SpaceMouseDriver::ALL {
-                                    if ui_kit::list_picker(ui, name(choice), name(choice), *driver == choice).clicked() {
-                                        *driver = choice;
-                                    }
-                                }
-                            });
-                        });
-                    }
-                    (true, false) => {
-                        ui_kit::text(ui, &only_spacenavd, ui_kit::Text::Hint("space_mouse_driver"));
-                    }
-                    (false, _) => {
-                        ui_kit::text(ui, &only_direct, ui_kit::Text::Hint("space_mouse_driver"));
-                    }
-                });
-            }
-            // The setting says what was asked for; this says what is read when that is not it: Direct or
-            // Automatic with the daemon read because the device itself could not be opened.
-            if let Some(present) = app.space_mouse.drivers
-                && present.spacenavd
-                && present.direct
-                && app.preferences.space_mouse_driver != SpaceMouseDriver::Spacenavd
-                && app.space_mouse.device.as_deref() == Some("spacenavd")
-            {
-                hint_under_controls(ui, app.tr("ui.3d_mouse_driver_fallback"), "space_mouse_driver_fallback");
-            }
-            let enabled = app.preferences.space_mouse_enabled;
-            let (label, tip) = (app.tr("ui.3d_mouse_dead_zone").to_owned(), app.tr("ui.3d_mouse_dead_zone_tip").to_owned());
-            let device = app.space_mouse.device.clone();
-            if let Some(calibration) = device.and_then(|device| app.preferences.space_mouse_calibrations.get_mut(&device)) {
-                ui_kit::row(ui, &label, |ui| {
-                    ui.add_enabled_ui(enabled, |ui| {
-                        ui_kit::slider(
-                            ui,
-                            &mut calibration.dead_zone_share,
-                            0.0..=solidcraft_space_mouse::MAX_DEAD_ZONE_SHARE,
-                            ui_kit::Slider { step: Some(0.01), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
-                        )
-                        .on_hover_text(tip);
-                    });
-                });
-            }
-        });
-        ui_kit::divider(ui, "space_mouse_axes");
-        // Rows say what they do to the view, through the mapping navigation uses; the choices
-        // are the device's calibrated motions. Neither names a kind of device.
-        let mapping = app.space_mouse.mapping;
-        let rows: Vec<(String, bool)> = (0..6)
-            .map(|row| {
-                let label = crate::space_mouse::row_label(mapping, row);
-                let text = crate::i18n::Locale::for_language(&app.preferences.language).format(label, &[("n", &(row + 1).to_string())]);
-                (text, label == "ui.3d_mouse_view_off")
-            })
-            .collect();
-        let driven_by = app.tr("ui.3d_mouse_driven_by").to_owned();
-        let off_tip = app.tr("ui.3d_mouse_view_off_tip").to_owned();
-        let motions: Vec<String> = crate::space_mouse::MOTIONS.iter().map(|motion| app.tr(motion).to_owned()).collect();
-        // The axes are a table of their own: each row is a live meter of the motion that drives that
-        // view axis, then its Invert, Speed and the motion choice.
-        let enabled = app.preferences.space_mouse_enabled;
-        let raw: [i16; 6] = app.space_mouse.raw.into();
-        // Frames come on input, so a reading that moved since the last one gets a frame to show it.
-        let seen = ui.id().with("space_mouse_meter_raw");
-        let before = ui.data_mut(|data| data.get_temp::<[i16; 6]>(seen));
-        ui.data_mut(|data| data.insert_temp(seen, raw));
-        if before.is_some_and(|before| before != raw) {
-            ui.ctx().request_repaint();
-        }
-        let calibration = app.space_mouse.device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get(device));
-        let meters: [_; 6] = std::array::from_fn(|axis| axis_meter(calibration, raw, app.preferences.space_mouse_axis_source, axis));
-        ui_kit::settings_axis_header(ui);
-        for (axis, (name, off)) in rows.iter().enumerate() {
-            ui.push_id(("space_mouse_axis", axis), |ui| {
-                let (value, zone) = meters[axis];
-                let prefs = &mut app.preferences;
-                let (reverse, speed, source) =
-                    (prefs.space_mouse_reverse.get_mut(axis), prefs.space_mouse_axis_speed.get_mut(axis), &mut prefs.space_mouse_axis_source);
-                ui_kit::settings_axis_row(
-                    ui,
-                    name,
-                    value,
-                    zone,
-                    // Invert and speed do nothing on a row the driver turns off. The motion choice
-                    // stays live, so a motion can still be swapped out of it.
-                    |ui| {
-                        ui.add_enabled_ui(enabled && !off, |ui| {
-                            if let Some(reverse) = reverse {
-                                ui_kit::checkbox(ui, crate::i18n::tr_label("Invert"), reverse);
-                            }
-                        });
-                    },
-                    |ui| {
-                        ui.add_enabled_ui(enabled && !off, |ui| {
-                            if let Some(speed) = speed {
-                                ui_kit::settings_axis_gain(ui, speed);
-                            }
-                        });
-                    },
-                    |ui| {
-                        ui.add_enabled_ui(enabled, |ui| {
-                            let current = source.get(axis).copied().unwrap_or(axis);
-                            let mut chosen = current;
-                            ui_kit::dropdown_menu(ui, ("sc_space_mouse_source", axis), motions.get(current).map_or("", String::as_str), |ui| {
-                                for (from, name) in motions.iter().enumerate() {
-                                    if ui_kit::list_picker(ui, name, name, chosen == from).clicked() {
-                                        chosen = from;
-                                    }
-                                }
-                            })
-                            .on_hover_text(if *off { &off_tip } else { &driven_by });
-                            if chosen != current {
-                                crate::space_mouse::reassign(source, axis, chosen);
-                            }
-                        });
-                    },
-                );
-            });
-        }
-        ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-            ui_kit::row(ui, "", |ui| {
-                let reassigned = app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES;
-                ui.add_enabled_ui(app.preferences.space_mouse_enabled && reassigned, |ui| {
-                    if ui_kit::button(ui, app.tr("ui.3d_mouse_reset_axes"), ui_kit::Button::Normal).clicked() {
-                        app.preferences.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
-                    }
-                });
-            });
-            // Restore this section's settings (after asking); the calibration, the button mapping and the
-            // test model are not touched.
-            if app.space_mouse.restore_pending {
-                // A short question on its own, not in a row (a row has one line's height and cut it off), so
-                // that it wraps to its whole height at any width; the buttons are under it.
-                hint_under_controls(ui, app.tr("ui.3d_mouse_restore_ask"), "space_mouse_restore_ask");
-                ui_kit::row(ui, "", |ui| {
-                    if ui_kit::button(ui, app.tr("ui.3d_mouse_restore"), ui_kit::Button::Normal).clicked() {
-                        restore_space_mouse_defaults(app);
-                        app.space_mouse.restore_pending = false;
-                    }
-                    if ui_kit::button(ui, app.tr("ui.cancel"), ui_kit::Button::Normal).clicked() {
-                        app.space_mouse.restore_pending = false;
-                    }
-                });
-            } else {
-                ui_kit::row(ui, "", |ui| {
-                    if ui_kit::button(ui, app.tr("ui.3d_mouse_restore"), ui_kit::Button::Normal).clicked() {
-                        app.space_mouse.restore_pending = true;
-                    }
-                });
-            }
-        });
-        // The calibrated device moving as it does, with the test model beside it, then its dead zones.
-        let (device, raw) = (app.space_mouse.device.clone(), app.space_mouse.raw.into());
-        let (boat, motion, reverse) = (&mut app.space_mouse.boat, app.space_mouse.motion, (app.preferences.zoom_reverse, app.preferences.free_orbit));
-        if let Some(calibration) = device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get_mut(device)) {
-            ui_kit::divider(ui, "space_mouse_picture");
-            // Under each circle's axes, what the view does with them: the rows' own labels.
-            let stories = crate::space_mouse::stories(&app.preferences.language, mapping, app.preferences.space_mouse_axis_source);
-            let help = crate::i18n::tr("ui.3d_mouse_circles_help").to_string();
-            let pads = |ui: &mut egui::Ui| {
-                crate::space_mouse_calibration::dead_zone_pads(ui, calibration, raw, false, &stories);
-                ui_kit::text(ui, &help, ui_kit::Text::Hint("space_mouse_circles_help"));
-            };
-            picture_and_boat(ui, boat, motion, reverse, true, |ui| crate::space_mouse_model::live(ui, calibration, raw), pads);
-        } else if device.is_some() {
-            // Not calibrated: the test model alone.
-            ui_kit::divider(ui, "space_mouse_picture");
-            picture_and_boat(ui, boat, motion, reverse, false, |_| {}, |_| {});
-        }
-        ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-            hint_under_controls(ui, crate::i18n::tr_label("Move and rotate the view together; sketches use pan and zoom only."), "space_mouse");
-        });
-        ui_kit::divider(ui, "space_mouse_buttons");
-        space_mouse_buttons(app, ui);
-    });
-}
 
 /// A hint in the control column of the forms above and below it, as the form rows' controls are,
 /// not at the section's left edge.
@@ -2722,9 +2945,6 @@ fn hint_under_controls(ui: &mut egui::Ui, text: &str, key: &str) {
         ui_kit::text(ui, text, ui_kit::Text::Hint(key));
     });
 }
-
-/// The width of the "driven by" choice.
-const AXIS_DRIVEN_WIDTH: f32 = 140.0;
 
 /// Where the motion that drives view axis `axis` sits, as a share of its full travel (calibrated
 /// when the device has a calibration, else the raw reading over full scale), and the share of that
@@ -2767,6 +2987,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_ghost_position = d.space_mouse_ghost_position;
     p.space_mouse_in_view = d.space_mouse_in_view;
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
+    p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
 }
 
 /// The device's picture with the coordinate circles under it, and a box with a small model that
@@ -2776,7 +2997,7 @@ fn picture_and_boat(
     ui: &mut egui::Ui,
     boat: &mut Option<crate::test_boat::Boat>,
     motion: Option<crate::space_mouse::DeviceMotion>,
-    (reverse_zoom, free_orbit): (bool, bool),
+    free_orbit: bool,
     has_picture: bool,
     picture: impl FnOnce(&mut egui::Ui),
     pads: impl FnOnce(&mut egui::Ui),
@@ -2791,7 +3012,7 @@ fn picture_and_boat(
     let width = if beside { (room - PICTURE_WIDTH - gap).min(BOAT_MAX) } else { room.min(BOAT_MAX) };
     let mut boat_and_reset = |ui: &mut egui::Ui| {
         ui.vertical(|ui| {
-            crate::test_boat::show(ui, boat, motion, reverse_zoom, free_orbit, egui::vec2(width.max(0.0), BOAT_HEIGHT));
+            crate::test_boat::show(ui, boat, motion, free_orbit, egui::vec2(width.max(0.0), BOAT_HEIGHT));
             if ui_kit::button(ui, crate::i18n::tr("ui.3d_mouse_reset_view"), ui_kit::Button::Normal).clicked() {
                 crate::test_boat::reset(boat);
             }
@@ -2800,7 +3021,7 @@ fn picture_and_boat(
     // The coordinate circles stay under the device's picture, from its left edge; the test model is
     // beside the picture where there is room, else under the circles.
     if beside {
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             picture(ui);
             boat_and_reset(ui);
         });
@@ -2928,37 +3149,88 @@ fn button_job_picker(
 /// Returns them all, the open page, the offer (and whether it is the note), the theme ids and the
 /// followed file (`theme_followed`, `theme_follow_error`).
 pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let mut rest = p.as_object().cloned().unwrap_or_default();
-    if let Some(page) = rest.remove("open") {
-        let name = page.as_str().unwrap_or("General");
-        let i = page_index(name).ok_or_else(|| format!("no page `{name}` ({})", PAGES.join(", ")))?;
+    // Stage every fallible preference operation before dialogs, document actions or writes.
+    let mut rest = p.as_object().cloned().ok_or("preferences must be an object")?;
+    let page = rest
+        .remove("open")
+        .map(|page| {
+            let name = page.as_str().unwrap_or("General");
+            page_index(name)
+                .map(|i| (i, name.eq_ignore_ascii_case("Interface/Navigation bar")))
+                .ok_or_else(|| format!("no page `{name}` ({})", PAGES.join(", ")))
+        })
+        .transpose()?;
+    let button = rest.remove("button");
+    if let Some(b) = button.as_ref().and_then(|v| v.as_str())
+        && !["ok", "cancel", "apply", "defaults"].contains(&b)
+    {
+        return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)"));
+    }
+    let stand_up = rest.remove("stand_up").and_then(|v| v.as_bool());
+    let mut staged = app.preferences.clone();
+    let mut follow = app.prefs_window.follow.clone();
+    let imported = rest
+        .remove("theme_import")
+        .map(|value| {
+            let theme = match value {
+                serde_json::Value::String(text) => crate::theme_files::parse(&text)?,
+                other => crate::theme_files::from_value(&other)?,
+            };
+            let id = crate::theme_files::add(&mut staged.custom_themes, theme)?;
+            staged.theme = id.clone();
+            Ok::<_, String>(id)
+        })
+        .transpose()?;
+    if let Some(id) = rest.remove("theme_remove") {
+        let id = id.as_str().unwrap_or_default();
+        let i = staged.custom_themes.iter().position(|t| t.id == id).ok_or_else(|| format!("no imported theme `{id}`"))?;
+        let gone = staged.custom_themes.remove(i);
+        staged.theme_options.remove(id);
+        if staged.theme == id {
+            staged.theme = if gone.base.is_dark() { "dark" } else { "light" }.into();
+        }
+    }
+    match rest.remove("theme_follow") {
+        Some(value) => {
+            if !FOLLOW_AVAILABLE {
+                return Err(FOLLOW_UNAVAILABLE.into());
+            }
+            let path = value.as_str().ok_or("`theme_follow` must be a theme file's path, or an empty string to stop following")?;
+            staged.theme_follow = crate::theme_files::follow_path(path)?;
+            follow.launch = None;
+            let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
+        }
+        None if rest.contains_key("theme") => {
+            staged.theme_follow.clear();
+            follow.launch = None;
+            let _ = follow.poll("", f64::NEG_INFINITY, true);
+        }
+        None => {}
+    }
+    let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
+    let new = prepare_preferences(app, &staged, followed_theme(&staged, &follow), &serde_json::Value::Object(rest.clone()))?;
+    let stopped_following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty() && follow.path(&new.theme_follow).is_empty();
+    if stand_up == Some(true) && app.stand_up.is_none() {
+        return Err("no file is waiting to be stood up".into());
+    }
+    if let Some((i, navbar)) = page {
         open_at(app, i);
-        app.prefs_window.navbar_scroll = name.eq_ignore_ascii_case("Interface/Navigation bar");
+        app.prefs_window.navbar_scroll = navbar;
         if app.prefs_window.snapshot.is_none() {
             app.prefs_window.snapshot = Some(Snapshot::take(app));
         }
     }
-    match rest.remove("stand_up").and_then(|v| v.as_bool()) {
+    match stand_up {
         Some(true) => crate::stand_up::stand_up(app)?,
         Some(false) => crate::stand_up::leave(app),
         None => {}
     }
-    let imported = match rest.remove("theme_import") {
-        Some(v) => Some(import_theme(app, &v)?),
-        None => None,
-    };
-    if let Some(id) = rest.remove("theme_remove") {
-        remove_theme(app, id.as_str().unwrap_or_default())?;
+    if stopped_following {
+        // Restore the selected theme's dark/light mode even when its saved id did not change.
+        stop_following(app);
     }
-    match rest.remove("theme_follow") {
-        Some(v) => set_theme_follow(app, &v, FOLLOW_AVAILABLE)?,
-        // Choosing a theme stops following a file, as clicking a theme tile does.
-        None if rest.contains_key("theme") => stop_following(app),
-        None => {}
-    }
-    let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
-    let button = rest.remove("button");
-    let mut out = set(app, &serde_json::Value::Object(rest))?;
+    app.prefs_window.follow = follow;
+    let mut out = apply_preferences(app, new, &serde_json::Value::Object(rest))?;
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
@@ -2973,6 +3245,9 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         out = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
     }
     if let Some(o) = out.as_object_mut() {
+        if let serde_json::Value::Object(options) = serde_json::to_value(theme_options_reply(app)).map_err(|e| e.to_string())? {
+            o.extend(options);
+        }
         o.insert("dialog".into(), json!(app.prefs_window.open.then(|| PAGES.get(app.prefs_window.section).copied().unwrap_or_default())));
         o.insert("apply_enabled".into(), json!(apply_pending(app)));
         o.insert("stand_up_offer".into(), json!(app.stand_up));
@@ -2992,6 +3267,35 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         }
     }
     Ok(out)
+}
+
+/// Read stored theme identity/base tables with the existing serde contract, then normalize only
+/// option tables using the file-import parser. A stale declaration must not lose the base palette.
+fn theme_from_preferences(value: &serde_json::Value, strict: bool) -> Result<crate::theme_files::ThemeFile, String> {
+    let mut base = value.clone();
+    if let Some(object) = base.as_object_mut() {
+        object.remove("options");
+        object.remove("overlays");
+        object.remove("tabs");
+    }
+    let mut theme: crate::theme_files::ThemeFile = serde_json::from_value(base).map_err(|e| e.to_string())?;
+    if let Err(error) = theme.set_tabs(value) {
+        if strict {
+            return Err(error);
+        }
+        log::warn!("preferences: theme `{}` has invalid tab surfaces ({error}); keeping its base palette", theme.id);
+    }
+    if let Err(error) = theme.set_option_tables(value) {
+        if strict {
+            return Err(error);
+        }
+        log::warn!("preferences: theme `{}` has invalid option tables ({error}); keeping its base palette", theme.id);
+    }
+    Ok(theme)
+}
+
+fn themes_that_read<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<Vec<crate::theme_files::ThemeFile>, D::Error> {
+    Vec::<serde_json::Value>::deserialize(saved)?.iter().map(|value| theme_from_preferences(value, false).map_err(serde::de::Error::custom)).collect()
 }
 
 /// The saved 3D mouse calibrations that still read. One this version can't read (a hand edit, a
@@ -3086,11 +3390,11 @@ fn looks_like_theme(text: &str) -> bool {
     text.trim_start().starts_with('{') && text.contains(crate::theme_files::FORMAT)
 }
 
-/// Ctrl/Cmd+V on the Interface page with a theme file's text on the clipboard imports it, like
+/// Ctrl/Cmd+V on the Appearance page with a theme file's text on the clipboard imports it, like
 /// Import… with a file (#8226). Called before the global Copy and Paste shortcuts, which would
 /// otherwise paste copied components; the paste is taken out of the input once it is a theme's.
 pub fn take_theme_paste(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.prefs_window.open || app.prefs_window.section != PAGE_INTERFACE {
+    if !app.prefs_window.open || app.prefs_window.section != PAGE_APPEARANCE {
         return;
     }
     let Some(text) = ctx.input(|i| i.events.iter().find_map(|e| if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None })) else {
@@ -3162,6 +3466,7 @@ fn remove_theme(app: &mut SolveApp, id: &str) -> Result<(), String> {
         return Err(format!("no imported theme `{id}`"));
     };
     let gone = app.preferences.custom_themes.remove(i);
+    app.preferences.theme_options.remove(id);
     if app.preferences.theme == id {
         select_theme(app, if gone.base.is_dark() { "dark" } else { "light" });
     }
@@ -3170,14 +3475,355 @@ fn remove_theme(app: &mut SolveApp, id: &str) -> Result<(), String> {
 
 /// The theme on now as a complete theme file, a starting point for a new one.
 fn current_theme_file(app: &SolveApp) -> serde_json::Value {
-    theme_file(app, &app.preferences.theme, app.ui.dark)
+    match active_theme_file(app) {
+        Some(f) => export_theme_file(f),
+        None => theme_file(app, &app.preferences.theme, app.ui.dark),
+    }
+}
+
+fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
+    followed_theme(&app.preferences, &app.prefs_window.follow)
+        .or_else(|| crate::theme_files::find(&app.preferences.theme, &app.preferences.custom_themes))
+}
+
+/// The single runtime decision used by controls, ui.prefs and renderer activation. It never
+/// changes saved intent or caches accessibility/hardware state in palette tokens.
+pub(crate) fn blur_availability(app: &SolveApp) -> crate::theme_options::Availability {
+    blur_availability_for(app, active_theme_file(app).is_some_and(crate::theme_options::declares_blur))
+}
+
+fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options::Availability {
+    use crate::theme_options::Availability::{Available, Unavailable};
+    let reduced = app.services.reduce_transparency.as_ref().and_then(|read| read(offered));
+    if !offered && app.blur_session.harness_radius.is_none() {
+        return Available;
+    }
+    if let Some(reason) = app.blur_session.harness_unavailable {
+        return Unavailable(reason);
+    }
+    // State owns CPU policy, including the explicit cfg(test) rendering fixture. The
+    // adapter identity stays real; production CPU capability can never be Available.
+    let capability = app.blur.capability();
+    if app.blur.software_adapter() && capability != crate::blur::Capability::Available {
+        return Unavailable("prefs.blur_software");
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Unavailable("prefs.blur_web");
+    }
+    if reduced == Some(true) {
+        return Unavailable("prefs.blur_reduce_transparency");
+    }
+    if app.home.open || crate::render_workspace::result_active(app) {
+        return Unavailable("prefs.blur_source");
+    }
+    match capability {
+        crate::blur::Capability::Available => Available,
+        crate::blur::Capability::Unavailable(_) => Unavailable("prefs.blur_device"),
+    }
+}
+
+pub(crate) fn prepare_blur(app: &mut SolveApp, ctx: &egui::Context) {
+    if ctx.viewport_id() != egui::ViewportId::ROOT {
+        return;
+    }
+    let intent = crate::theme::blur_intent(ctx);
+    let radius = app.blur_session.harness_radius.unwrap_or(intent.radius);
+    // Disabled frames need only cached intent and atomic OS observation. Explicit UI/API
+    // queries still report capabilities at radius zero; painting need not probe the GPU.
+    let availability = if radius > 0.0 {
+        blur_availability_for(app, intent.offered)
+    } else {
+        if let Some(read) = &app.services.reduce_transparency {
+            read(intent.offered);
+        }
+        crate::theme_options::Availability::Available
+    };
+    // Resolve raw/default intent separately so temporary unavailability never drives the
+    // renderer through radius=0 and clears a latched device/allocation failure.
+    let available = availability == crate::theme_options::Availability::Available;
+    app.blur_session.sample(ctx, intent.revision, radius, available, app.blur.painted_frame());
+    app.blur.set_available(available);
+    app.blur.set_tier_cap(app.blur_session.guard.cap);
+    if let Err(error) = app.blur.set_radius(radius) {
+        log::warn!("theme blur: {error}");
+    }
+}
+
+fn followed_theme<'a>(prefs: &Prefs, follow: &'a crate::theme_files::Follow) -> Option<&'a crate::theme_files::ThemeFile> {
+    (!follow.path(&prefs.theme_follow).is_empty()).then(|| follow.theme()).flatten()
+}
+
+/// Preserve authored definitions; themes predating options retain their complete snapshot export.
+fn export_theme_file(file: &crate::theme_files::ThemeFile) -> serde_json::Value {
+    if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() {
+        crate::theme_files::export_file(file)
+    } else {
+        crate::theme_files::export(&file.name, file.base, &crate::theme_files::resolve(file))
+    }
+}
+
+fn effective_theme_options(
+    prefs: &Prefs,
+    file: &crate::theme_files::ThemeFile,
+) -> (BTreeMap<String, crate::theme_files::OptionValue>, Vec<solidcraft_engine::schema::ui_prefs::ThemeOptionNotice>) {
+    use crate::theme_files::{OptionKind, OptionNoticeKind, OptionValue};
+    use solidcraft_engine::schema::ui_prefs::{ThemeOptionNotice, ThemeOptionNoticeKind as Kind};
+    let mut saved = BTreeMap::new();
+    let mut notices = Vec::new();
+    let definitions = crate::theme_files::ordered_options(file);
+    for (id, value) in prefs.theme_options.get(&file.id).into_iter().flatten() {
+        let definition = definitions.iter().find(|o| &o.id == id);
+        if let Some(definition) = definition
+            && let OptionKind::Range { min, max, .. } = &definition.kind
+            && value.as_f64().is_some_and(|n| n < f64::from(*min) || n > f64::from(*max))
+        {
+            notices.push(ThemeOptionNotice { id: id.clone(), kind: Kind::OutOfRange });
+            continue;
+        }
+        match serde_json::from_value::<OptionValue>(value.clone()) {
+            Ok(value) => {
+                saved.insert(id.clone(), value);
+            }
+            Err(_) => {
+                notices.push(ThemeOptionNotice { id: id.clone(), kind: if definition.is_some() { Kind::WrongType } else { Kind::UnknownOption } })
+            }
+        }
+    }
+    let (values, problems) = crate::theme_files::effective_values(file, &saved);
+    notices.extend(problems.into_iter().map(|notice| ThemeOptionNotice {
+        id: notice.id,
+        kind: match notice.kind {
+            OptionNoticeKind::UnknownOption => Kind::UnknownOption,
+            OptionNoticeKind::WrongType => Kind::WrongType,
+            OptionNoticeKind::UnknownChoice => Kind::UnknownChoice,
+            OptionNoticeKind::NonFinite => Kind::NonFinite,
+            OptionNoticeKind::Clamped => Kind::OutOfRange,
+        },
+    }));
+    notices.sort_by(|a, b| a.id.cmp(&b.id));
+    (values, notices)
+}
+
+fn resolved_theme(prefs: &Prefs, file: &crate::theme_files::ThemeFile) -> Tokens {
+    crate::theme_files::resolve_with(file, &effective_theme_options(prefs, file).0)
+}
+
+fn theme_option_text(text: &crate::theme_files::OptionText, language: &str, fallback: &str) -> String {
+    text.get(language).or_else(|| text.get("en")).map(String::as_str).unwrap_or(fallback).to_owned()
+}
+
+fn theme_option_rows<'a>(
+    file: &'a crate::theme_files::ThemeFile,
+    language: &str,
+    providers: &[crate::theme_options::Provider],
+    blur: crate::theme_options::Availability,
+) -> Vec<ui_kit::ThemeOptionRow<'a>> {
+    use crate::theme_options::{Availability, offered, provider};
+    let locale = crate::i18n::Locale::for_language(language);
+    offered(file, providers)
+        .into_iter()
+        .map(|definition| {
+            let provider = provider(&definition.id, providers);
+            ui_kit::ThemeOptionRow {
+                definition,
+                blur: definition.id == "blur",
+                label: provider
+                    .map(|p| locale.text(p.label).to_owned())
+                    .unwrap_or_else(|| theme_option_text(&definition.label, language, &definition.id)),
+                help: provider.map(|p| locale.text(p.help).to_owned()).unwrap_or_else(|| theme_option_text(&definition.help, language, "")),
+                choices: match &definition.kind {
+                    crate::theme_files::OptionKind::Choice { values, .. } => {
+                        values.iter().map(|v| theme_option_text(&v.label, language, &v.id)).collect()
+                    }
+                    _ => Vec::new(),
+                },
+                reason: match crate::theme_options::availability(file, &definition.id, providers, blur) {
+                    Availability::Available => None,
+                    Availability::Unavailable(reason) => Some(locale.text(reason).to_owned()),
+                },
+            }
+        })
+        .collect()
+}
+
+fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let availability = blur_availability(app);
+    let Some(file) = active_theme_file(app).cloned() else { return };
+    let (mut values, notices) = effective_theme_options(&app.preferences, &file);
+    // Notices precede the empty-control return: newer requirements intentionally have no rows.
+    let mut problems: Vec<_> = notices
+        .iter()
+        .map(|notice| {
+            let raw = app.preferences.theme_options.get(&file.id).and_then(|v| v.get(&notice.id));
+            (notice.id.clone(), format!("{:?}:{raw:?}", notice.kind), crate::i18n::format("prefs.theme_option_invalid", &[("option", &notice.id)]))
+        })
+        .collect();
+    if file.needs_newer() {
+        problems.push(("newer".into(), file.requires.to_string(), app.tr("prefs.theme_options_newer").to_owned()));
+    }
+    for (id, identity, text) in problems {
+        let key = theme_notice_key(&file.id, &id, &identity);
+        if !app.blur_session.dismissed(key) && ui_kit::theme_option_notice(ui, &id, &text, false).1 {
+            app.blur_session.dismiss(key);
+        }
+    }
+    if app.blur_session.guard.notice {
+        let (undo, dismiss) = ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), true);
+        if undo {
+            app.blur_session.guard.undo();
+            ui.ctx().request_repaint();
+        }
+        if dismiss {
+            app.blur_session.guard.notice = false;
+        }
+    }
+    let rows = theme_option_rows(&file, crate::i18n::effective_language(&app.preferences.language), crate::theme_options::PROVIDERS, availability);
+    if rows.is_empty() {
+        return;
+    }
+    let before = values.clone();
+    let reset = ui_kit::settings_card(ui, |ui| ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values)).inner;
+    let changes: BTreeMap<_, _> = values.into_iter().filter(|(id, value)| before.get(id) != Some(value)).collect();
+    if reset || !changes.is_empty() {
+        let update = if reset { json!({}) } else { json!(changes) };
+        let params = json!({"theme_options": {(file.id.clone()): update}});
+        // Same atomic validation/merge and followed-file semantics as the control channel.
+        // No button, page selection or dialog is added by this live preference update.
+        if let Err(error) = control(app, &params) {
+            app.set_status(error, true);
+        }
+    }
+}
+
+fn theme_notice_key(theme: &str, problem: &str, raw: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    (theme, problem, raw).hash(&mut hash);
+    hash.finish()
+}
+
+/// Only explicitly supplied entries are checked. Stale saved entries survive unrelated changes.
+fn merge_theme_options(prefs: &mut Prefs, followed: Option<&crate::theme_files::ThemeFile>, update: &serde_json::Value) -> Result<(), String> {
+    use crate::theme_files::{OptionKind, OptionValue};
+    let themes = update.as_object().ok_or("`theme_options` must be a map of theme ids to option maps")?;
+    // Apply legacy keys first so a canonical entry in the same request always wins.
+    let aliases = themes.iter().filter(|(id, _)| crate::theme_files::legacy_gruvbox(id).is_some());
+    let canonical = themes.iter().filter(|(id, _)| crate::theme_files::legacy_gruvbox(id).is_none());
+    for (requested_id, update) in aliases.chain(canonical) {
+        let theme_id = crate::theme_files::legacy_gruvbox(requested_id).map_or(requested_id.as_str(), |(family, _)| family);
+        let key = format!("theme_options.{theme_id}");
+        let file = followed.filter(|f| f.id == theme_id).or_else(|| crate::theme_files::find(theme_id, &prefs.custom_themes));
+        let mode = THEMES.iter().any(|(id, _)| *id == theme_id);
+        if file.is_none() && !mode {
+            return Err(format!("`{key}`: unknown theme"));
+        }
+        let options = update.as_object().ok_or_else(|| format!("`{key}` must be an option map"))?;
+        if options.is_empty() {
+            prefs.theme_options.remove(theme_id);
+            continue;
+        }
+        for (id, value) in options {
+            let key = format!("{key}.{id}");
+            let definition = file
+                .and_then(|file| crate::theme_files::ordered_options(file).into_iter().find(|o| &o.id == id))
+                .ok_or_else(|| format!("`{key}`: unknown option"))?;
+            if value.is_null() {
+                if let Some(saved) = prefs.theme_options.get_mut(theme_id) {
+                    saved.remove(id);
+                }
+                continue;
+            }
+            let parsed: OptionValue = serde_json::from_value(value.clone()).map_err(|_| format!("`{key}`: wrong type"))?;
+            let valid = match (&definition.kind, &parsed) {
+                (OptionKind::Bool { .. }, OptionValue::Bool(_)) => true,
+                (OptionKind::Choice { values, .. }, OptionValue::Choice(id)) => values.iter().any(|v| &v.id == id),
+                (OptionKind::Range { min, max, .. }, OptionValue::Num(n)) => {
+                    // Check the original JSON number too, before f32 conversion rounds at a bound.
+                    n.is_finite() && value.as_f64().is_some_and(|n| n.is_finite() && n >= f64::from(*min) && n <= f64::from(*max))
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(format!("`{key}`: wrong type, unknown choice or out of range"));
+            }
+            prefs.theme_options.entry(theme_id.to_owned()).or_default().insert(id.clone(), value.clone());
+        }
+        if prefs.theme_options.get(theme_id).is_some_and(BTreeMap::is_empty) {
+            prefs.theme_options.remove(theme_id);
+        }
+    }
+    Ok(())
+}
+
+fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::ThemeOptionsReply {
+    use crate::theme_files::{OptionKind, OptionValue};
+    use solidcraft_engine::schema::ui_prefs::{ThemeChoice, ThemeOptionDef, ThemeOptionKind, ThemeOptionValue, ThemeOptionsReply};
+    let Some(file) = active_theme_file(app) else { return ThemeOptionsReply::default() };
+    let text = |texts: &crate::theme_files::OptionText, fallback: &str| {
+        texts
+            .get(crate::i18n::effective_language(&app.preferences.language))
+            .or_else(|| texts.get("en"))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+            .to_string()
+    };
+    let (values, notices) = effective_theme_options(&app.preferences, file);
+    let blur = blur_availability(app);
+    ThemeOptionsReply {
+        theme_option_defs: crate::theme_files::ordered_options(file)
+            .into_iter()
+            .map(|o| {
+                let standard = crate::theme_options::standard(&o.id);
+                let provider = crate::theme_options::provider(&o.id, crate::theme_options::PROVIDERS);
+                let availability = crate::theme_options::availability(file, &o.id, crate::theme_options::PROVIDERS, blur);
+                ThemeOptionDef {
+                    id: o.id.clone(),
+                    kind: match &o.kind {
+                        OptionKind::Bool { default } => ThemeOptionKind::Bool { default: *default },
+                        OptionKind::Choice { default, values } => ThemeOptionKind::Choice {
+                            default: default.clone(),
+                            values: values.iter().map(|v| ThemeChoice { id: v.id.clone(), label: text(&v.label, &v.id) }).collect(),
+                        },
+                        OptionKind::Range { default, min, max, step, unit } => {
+                            ThemeOptionKind::Range { default: *default, min: *min, max: *max, step: *step, unit: unit.clone() }
+                        }
+                    },
+                    label: provider.map(|p| app.tr(p.label).to_owned()).unwrap_or_else(|| text(&o.label, &o.id)),
+                    help: provider.map(|p| app.tr(p.help).to_owned()).unwrap_or_else(|| text(&o.help, "")),
+                    parent: o.parent.clone(),
+                    advanced: o.advanced,
+                    section: o.section.clone(),
+                    standard,
+                    available: availability == crate::theme_options::Availability::Available,
+                    reason: match availability {
+                        crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason).to_owned()),
+                        crate::theme_options::Availability::Available => None,
+                    },
+                }
+            })
+            .collect(),
+        theme_option_values: values
+            .into_iter()
+            .map(|(id, value)| {
+                (
+                    id,
+                    match value {
+                        OptionValue::Bool(v) => ThemeOptionValue::Bool(v),
+                        OptionValue::Choice(v) => ThemeOptionValue::Choice(v),
+                        OptionValue::Num(v) => ThemeOptionValue::Num(v),
+                    },
+                )
+            })
+            .collect(),
+        theme_option_notices: notices,
+    }
 }
 
 /// Export the tile the user chose, without applying it or changing the dialog snapshot.
 fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value {
-    use crate::theme_files::{Base, export, find, resolve};
+    use crate::theme_files::{Base, export, find};
     match find(id, &app.preferences.custom_themes) {
-        Some(f) => export(&f.name, f.base, &resolve(f)),
+        Some(f) => export_theme_file(f),
         None if id == "dark" || (id == "system" && system_dark) => export("Dark", Base::Dark, &crate::theme::Tokens::dark()),
         None => export("Light", Base::Light, &crate::theme::Tokens::light()),
     }
@@ -3188,6 +3834,7 @@ fn theme_file(app: &SolveApp, id: &str, system_dark: bool) -> serde_json::Value 
 /// calibration that can't be used as it is (a hand edit) is dropped, so the device is read as it
 /// reports rather than spinning the view.
 pub fn migrate(mut p: Prefs) -> Prefs {
+    migrate_gruvbox(&mut p);
     // Every saved file carries the old default limit; it reads as no limit.
     if p.agent_chat_turn_limit == crate::agent_chat::gate::OLD_DEFAULT_TURN_LIMIT {
         p.agent_chat_turn_limit = 0;
@@ -3203,6 +3850,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     }
     if !accepted::wheel_zoom_speed(&p) {
         p.wheel_zoom_speed = Prefs::default().wheel_zoom_speed;
+    }
+    if !accepted::home_fit_size(&p) {
+        p.home_fit_size = Prefs::default().home_fit_size;
     }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
@@ -3220,6 +3870,25 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         usable
     });
     p
+}
+
+/// Fold old contrast cards into their family without replacing unrelated saved options.
+/// An active old card still names the selected appearance; explicit control updates run after
+/// this migration, so their contrast choice (including a reset) takes precedence.
+pub(crate) fn migrate_gruvbox(p: &mut Prefs) {
+    let selected = crate::theme_files::legacy_gruvbox(&p.theme);
+    for (old, family, _) in crate::theme_files::GRUVBOX_ALIASES {
+        if let Some(options) = p.theme_options.remove(old) {
+            let canonical = p.theme_options.entry(family.into()).or_default();
+            for (id, value) in options {
+                canonical.entry(id).or_insert(value);
+            }
+        }
+    }
+    if let Some((family, contrast)) = selected {
+        p.theme = family.into();
+        p.theme_options.entry(family.into()).or_default().insert("contrast".into(), json!(contrast));
+    }
 }
 
 /// Drop plugin ids this page would not show, and keep at most [`crate::plugins::MAX_DISABLED`],
@@ -3277,8 +3946,13 @@ pub fn lenient(saved: &serde_json::Value) -> Prefs {
     serde_json::from_value(cur).map(migrate).map(limit_disabled_plugins).map(limit_toolbar_tabs).unwrap_or_default()
 }
 
-/// Set preferences from JSON (control channel); returns them all.
-pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Value, String> {
+/// Validate a proposed preference state without applying it or performing writes.
+fn prepare_preferences(
+    app: &SolveApp,
+    base: &Prefs,
+    followed: Option<&crate::theme_files::ThemeFile>,
+    p: &serde_json::Value,
+) -> Result<Prefs, String> {
     for key in ["joint_rotation_coarse", "joint_rotation_fine"] {
         if let Some(value) = p.get(key)
             && value.as_f64().is_none_or(|v| !v.is_finite() || !(0.001..=180.0).contains(&v))
@@ -3286,13 +3960,26 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
             return Err(format!("`{key}` must be 0.001…180 degrees"));
         }
     }
-    let mut cur = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
+    let mut cur = serde_json::to_value(base).map_err(|e| e.to_string())?;
     if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
         for (k, v) in src {
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
             }
-            o.insert(k.clone(), v.clone());
+            if k == "custom_themes" {
+                let values = v
+                    .as_array()
+                    .filter(|values| values.len() <= crate::theme_files::MAX_CUSTOM)
+                    .ok_or_else(|| format!("`custom_themes` must be an array of at most {} themes", crate::theme_files::MAX_CUSTOM))?;
+                let themes: Vec<_> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value)| theme_from_preferences(value, true).map_err(|error| format!("`custom_themes[{i}]`: {error}")))
+                    .collect::<Result<_, _>>()?;
+                o.insert(k.clone(), serde_json::to_value(themes).map_err(|e| e.to_string())?);
+            } else if k != "theme_options" {
+                o.insert(k.clone(), v.clone());
+            }
         }
     }
     // Saved preferences read an unknown mode as the default; asked for here, it is an error.
@@ -3306,6 +3993,11 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     {
         return Err("`viewport_theme` must be theme, light or dark".into());
     }
+    if let Some(v) = p.get("validation")
+        && v.as_str().and_then(solidcraft_engine::kernel::Validation::parse).is_none()
+    {
+        return Err("`validation` must be each_step, each_feature or off".into());
+    }
     if let Some(value) = p.get("navigation_bar") {
         crate::navigation_bar::validate(value)?;
     }
@@ -3314,9 +4006,21 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     {
         return Err("`stand_up_unknown` must be ask, note or off".into());
     }
-    let new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    if let Some(v) = p.get("dimension_input")
+        && !matches!(v.as_str(), Some("view" | "window"))
+    {
+        return Err("`dimension_input` must be view or window".into());
+    }
+    let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    migrate_gruvbox(&mut new);
+    if let Some(update) = p.get("theme_options") {
+        merge_theme_options(&mut new, followed, update)?;
+    }
     if !accepted::wheel_zoom_speed(&new) {
         return Err("`wheel_zoom_speed` must be 0.25…4".into());
+    }
+    if !accepted::home_fit_size(&new) {
+        return Err("`home_fit_size` must be 0.1…1".into());
     }
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -3352,8 +4056,12 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
         }
         crate::theme_files::follow_path(&new.theme_follow)?;
     }
-    if !crate::i18n::is_supported(&new.language) {
-        return Err(format!("`language` must be one of: {}", crate::i18n::LOCALES.iter().map(|locale| locale.id).collect::<Vec<_>>().join(", ")));
+    if new.language != crate::i18n::SYSTEM && !crate::i18n::is_supported(&new.language) {
+        return Err(format!(
+            "`language` must be `{}` or one of: {}",
+            crate::i18n::SYSTEM,
+            crate::i18n::LOCALES.iter().map(|locale| locale.id).collect::<Vec<_>>().join(", ")
+        ));
     }
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
@@ -3387,8 +4095,17 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
     }
+    if !accepted::print_face_highlight(&new) {
+        return Err("`print_face_highlight` must be 0…1".into());
+    }
+    if !accepted::home_fit_size(&new) {
+        return Err("`home_fit_size` must be 0.1…1".into());
+    }
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
+    if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
+        return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
@@ -3399,7 +4116,19 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
     }
-    if new.theme != app.preferences.theme && new.theme != "system" {
+    Ok(new)
+}
+
+/// Set preferences from JSON (control channel); returns them all.
+pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let new = prepare_preferences(app, &app.preferences, followed_theme(&app.preferences, &app.prefs_window.follow), p)?;
+    apply_preferences(app, new, p)
+}
+
+/// All fallible preference checks finish before any application or file write.
+fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let file = crate::theme_files::find(&new.theme, &new.custom_themes);
+    if (new.theme != app.preferences.theme || new.custom_themes != app.preferences.custom_themes) && new.theme != "system" {
         app.ui.dark = file.map_or(new.theme == "dark", |f| f.base.is_dark());
     }
     let units_changed = new.default_units != app.preferences.default_units;
@@ -3409,6 +4138,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
         || new.graphics_adapter != app.preferences.graphics_adapter;
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
+    }
+    if new.select_other_hidden != app.preferences.select_other_hidden {
+        crate::select_other::close(app);
     }
     app.preferences = new;
     sync_surface_analysis(app);
@@ -3428,8 +4160,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
 
 #[cfg(test)]
 pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) {
-    // Interface includes the toolbar-tab choices as well as the existing font controls.
-    // Keep small scroll steps so a target cannot be skipped, with a bounded longer page.
+    // Keep small scroll steps so a target cannot be skipped on a long Preferences page.
     for _ in 0..32 {
         let page = crate::scenario::rect_of("dialog:page_body").expect("preference body");
         let visible = crate::scenario::rect_of(handle)
@@ -3441,11 +4172,91 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
         h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
         h.frames(20);
     }
-    panic!("preference {handle} was not revealed");
+    panic!(
+        "preference {handle} was not revealed: theme={} language={} section={} filter={:?} screen={:?} window={:?} body={:?} target_rect={:?} target_point={:?}",
+        h.app.preferences.theme,
+        h.app.preferences.language,
+        h.app.prefs_window.section,
+        h.app.prefs_window.filter,
+        h.ctx.content_rect(),
+        crate::scenario::rect_of("prefs:window"),
+        crate::scenario::rect_of("dialog:page_body"),
+        crate::scenario::rect_of(handle),
+        crate::scenario::handle_at(handle)
+    );
 }
 
 #[cfg(test)]
 mod tests {
+    /// Profile operations switches the profiler when it changes, and only then: an agent's
+    /// diagnostics.profile in between is not undone next frame.
+    #[test]
+    fn the_profile_preference_switches_the_profiler_when_it_changes() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        h.call("ui.prefs", json!({"profile_operations": true}));
+        h.frames(2);
+        assert!(solidcraft_engine::profile::enabled());
+        h.app.session.execute("diagnostics.profile", &json!({"enabled": false})).unwrap();
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled(), "the command's choice stands");
+        h.call("ui.prefs", json!({"profile_operations": false}));
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled());
+    }
+
+    /// Preferences saved with a setting this version no longer has still load, every other
+    /// setting kept: the removed key is ignored like any unknown one.
+    #[test]
+    fn saved_preferences_with_a_removed_setting_still_load() {
+        use serde_json::json;
+        for (removed, value) in [
+            ("geometry_kernel", json!("smlib")),
+            ("geometry_kernel", json!("solidcore")),
+            ("metric_tap_drill_major_less_pitch", json!(true)),
+            ("surface_extrude_symmetric_per_side", json!(true)),
+        ] {
+            let saved = json!({"length_decimals": 4, removed: value});
+            let p = serde_json::from_value::<super::Prefs>(saved.clone()).unwrap();
+            assert_eq!(p.length_decimals, 4, "{removed}");
+            assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
+            assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
+        }
+    }
+
+    /// #10254: the invert toggle is off by default, persists, and the Navigation page's
+    /// Defaults resets it.
+    #[test]
+    fn invert_navigator_arrows_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().invert_navigator_arrows);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.invert_navigator_arrows);
+        app.preferences.invert_navigator_arrows = true;
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["invert_navigator_arrows"], true);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.invert_navigator_arrows);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(!app.preferences.invert_navigator_arrows);
+    }
+
+    /// #10483: the curved-roll invert toggle is off by default, persists, and the Navigation
+    /// page's Defaults resets it.
+    #[test]
+    fn invert_curved_roll_arrows_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().invert_curved_roll_arrows);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.invert_curved_roll_arrows);
+        app.preferences.invert_curved_roll_arrows = true;
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["invert_curved_roll_arrows"], true);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.invert_curved_roll_arrows);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(!app.preferences.invert_curved_roll_arrows);
+    }
+
     #[test]
     fn trackpad_zoom_modifier_roundtrips_and_validates_control_values() {
         assert_eq!(Prefs::default().trackpad_zoom_modifier, TrackpadZoomModifier::Off);
@@ -3529,7 +4340,7 @@ mod tests {
         let initial = h.call("ui.prefs", json!({}));
         assert_eq!(initial["result"]["navigation_bar"], serde_json::to_value(NavigationBar::default()).unwrap());
         let edit = json!({"navigation_bar":{"slots":["zoom", "future", "zoom", "display"], "position":"bottom_right", "size":"regular", "labels":"labels", "idle":"always"}});
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.call("ui.prefs", json!({"open":"Layout"}));
         let reply = h.call("ui.prefs", edit);
         assert_eq!(reply["ok"], true, "{reply}");
         assert_eq!(reply["result"]["navigation_bar"]["slots"], json!(["zoom", "future", "display"]));
@@ -3549,10 +4360,10 @@ mod tests {
         }
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert_eq!(restored.preferences.navigation_bar, before.navigation_bar);
+        assert_eq!(restored.preferences.navigation_bar, NavigationBar::default(), "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.navigation_bar, NavigationBar::default());
-        h.call("ui.prefs", json!({"open":"Interface","navigation_bar":{"slots":[]}}));
+        h.call("ui.prefs", json!({"open":"Layout","navigation_bar":{"slots":[]}}));
         assert!(h.app.preferences.navigation_bar.slots.is_empty());
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert_eq!(h.app.preferences.navigation_bar, NavigationBar::default());
@@ -3581,10 +4392,12 @@ mod tests {
         navbar_click(&mut h, "prefs:navbar:slot:visual_style");
         navbar_click(&mut h, "prefs:navbar:shows:0");
         assert_eq!(h.app.preferences.navigation_bar.menu_display("visual_style"), MenuDisplay::IconAndValue);
-        navbar_click(&mut h, "prefs:navbar:position:0");
+        navbar_click(&mut h, "prefs:navbar:anchor:0");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Left);
-        navbar_click(&mut h, "prefs:navbar:position:2");
+        assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Top);
+        navbar_click(&mut h, "prefs:navbar:anchor:5");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Right);
+        assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Bottom);
         navbar_click(&mut h, "prefs:navbar:size:0");
         assert_eq!(h.app.preferences.navigation_bar.size, Size::Compact);
         navbar_click(&mut h, "prefs:navbar:size:1");
@@ -3598,6 +4411,11 @@ mod tests {
         let before = h.app.preferences.navigation_bar.clone();
         navbar_click(&mut h, "prefs:navbar:preview_as:1");
         assert_eq!(h.app.preferences.navigation_bar, before, "canvas preview is transient");
+        navbar_click(&mut h, "prefs:navbar:add:zoom");
+        assert_eq!(h.app.preferences.navigation_bar.slots.last().map(String::as_str), Some("zoom"));
+        let shared = h.app.preferences.navigation_bar.clone();
+        navbar_click(&mut h, "prefs:navbar:preview_as:0");
+        assert_eq!(h.app.preferences.navigation_bar, shared, "Render edits persist in the shared Design preview");
         navbar_click(&mut h, "prefs:navbar:show");
         assert!(!h.app.ui.show_navigation_bar);
         navbar_click(&mut h, "prefs:navbar:show");
@@ -3608,15 +4426,25 @@ mod tests {
     fn navigation_bar_appearance_segments_stay_inside_the_page_at_narrow_widths() {
         for width in [1600, 880, 640, 600, 480] {
             let mut h = crate::scenario::Harness::new();
+            h.app.preferences.language = "en".into();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":width,"height":1100}));
             h.call("ui.prefs", json!({"open":"Interface/Navigation bar", "navigation_bar":{"slots":["fit","visual_style","display","spin"]}}));
             h.frames(20);
+            let header = crate::scenario::rect_of("dialog:header").unwrap();
+            let search = crate::scenario::rect_of("prefs:search:frame").unwrap();
+            assert!(header.contains_rect(search), "titlebar search stays inside the window at {width}");
+            assert!(search.width() <= 230.0 && search.width() >= 100.0, "usable bounded search at {width}");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            for index in 0..6 {
+                let cell = crate::scenario::rect_of(&format!("prefs:navbar:anchor:{index}")).unwrap();
+                assert!(cell.left() >= body.left() && cell.right() <= body.right() + 0.5, "anchor {index} at {width}: {cell:?} outside {body:?}");
+                assert!(cell.width() > 20.0 && cell.height() > 20.0, "anchor {index} stays a usable target at {width}");
+            }
             for (key, label, labels) in [
-                ("position", "Position", &["Left", "Centre", "Right"][..]),
                 ("size", "Size", &["Compact", "Regular"][..]),
-                ("buttons", "Buttons", &["Icons", "Icons and labels"][..]),
-                ("idle", "When idle", &["Always visible", "Fade", "Hide until hovered"][..]),
+                ("buttons", "Buttons", &["Icons", "Icons + labels"][..]),
+                ("idle", "When idle", &["Always", "Fade", "Hover"][..]),
             ] {
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                 let row = crate::scenario::rect_of(&format!("prefs:navbar:{key}")).unwrap();
@@ -3624,20 +4452,8 @@ mod tests {
                 assert_eq!(row.height(), crate::ui_kit::row_height(), "standard control height");
                 let dropdown = crate::scenario::rect_of(&format!("dialog:segments:{label}")).is_none();
                 if !dropdown {
-                    let t = crate::theme::Tokens::get();
-                    let natural: f32 = labels
-                        .iter()
-                        .map(|option| {
-                            h.ctx
-                                .fonts_mut(|fonts| fonts.layout_no_wrap((*option).to_owned(), crate::fonts::semibold(t.font_label), t.form_ink))
-                                .size()
-                                .x
-                                .ceil()
-                                + t.space_16
-                        })
-                        .sum();
                     let control = crate::scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
-                    assert!((row.width() - natural.min(control.width())).abs() < 0.5, "{key} hugs its content at {width}");
+                    assert!((row.width() - control.width()).abs() < 0.5, "{key} fills its property column at {width}");
                 }
                 if dropdown {
                     // Standard Segments fall back to the kit dropdown when their labels cannot fit.
@@ -3724,15 +4540,27 @@ mod tests {
                     h.frames(3);
                 }
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                let card = crate::scenario::rect_of("prefs:navbar:inspector").unwrap();
-                assert!(
-                    (card.left() - body.left()).abs() < 0.5 && (card.right() - body.right()).abs() < 0.5,
-                    "{slot:?} at {width}: {card:?} vs {body:?}"
-                );
+                if slot.is_some() {
+                    let card = crate::scenario::rect_of("prefs:navbar:inspector").unwrap();
+                    assert!(
+                        (card.left() - body.left()).abs() < 0.5 && (card.right() - body.right()).abs() < 0.5,
+                        "{slot:?} at {width}: {card:?} vs {body:?}"
+                    );
+                } else {
+                    assert!(crate::scenario::rect_of("prefs:navbar:inspector").is_none(), "inspector belongs to a selected slot");
+                }
                 let status = crate::scenario::rect_of("prefs:navbar:status").unwrap();
                 let reset = crate::scenario::rect_of("prefs:navbar:reset").unwrap();
                 let show = crate::scenario::rect_of("prefs:navbar:show").unwrap();
-                assert_eq!(status.right(), body.right());
+                assert!(status.left() >= body.left() && status.right() <= body.right() + 0.5, "header actions stay inside the page");
+                let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
+                let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
+                assert!(status.bottom() <= stage.top(), "Show and Reset belong above the shared stage");
+                let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
+                assert!(stage.contains_rect(count), "the real slot count sits in the stage");
+                assert!(!count.intersects(bar), "the count never covers the bar");
+                let properties = crate::scenario::rect_of("dialog:row:Position").unwrap();
+                assert!(stage.bottom() <= properties.top(), "the stage stays before properties");
                 assert!(status.contains_rect(reset) && status.contains_rect(show));
                 assert!(show.right() <= reset.left());
                 assert_eq!(reset.center().y, show.center().y);
@@ -3763,50 +4591,73 @@ mod tests {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":width,"height":1100}));
-            h.call("ui.prefs", json!({"open":"Interface"}));
-            h.frames(20);
-            for _ in 0..2 {
-                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                let window = crate::scenario::rect_of("prefs:window").unwrap();
-                let t = crate::theme::Tokens::get();
-                let inset = t.space_16 + t.space_4 + crate::ui_kit::navigation_popup_frame().stroke.width;
-                assert!((body.right() - (window.right() - inset)).abs() < 0.5, "{width}: page {body:?} leaves unused window content {window:?}");
-                for key in ["theme", "layout", "navigation_bar", "scale", "colour_vision"] {
-                    let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
-                    assert!(
-                        (section.left() - body.left()).abs() < 0.5 && (section.right() - body.right()).abs() < 0.5,
-                        "{key} at {width}: {section:?} vs {body:?}"
-                    );
-                }
-                for key in ["prefs:navbar:stage", "dialog:divider:scale_font", "dialog:row:Font"] {
-                    let row = crate::scenario::rect_of(key).unwrap();
-                    assert!((row.right() - body.right()).abs() < 0.5, "{key} at {width}: {row:?} vs {body:?}");
-                }
-                h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":-600}));
+            for (page, sections, rows) in [
+                ("Appearance", &["theme", "scale", "colour_vision"][..], &["dialog:divider:scale_font", "dialog:row:Font"][..]),
+                ("Layout", &["layout", "navigation_bar"][..], &["prefs:navbar:stage"][..]),
+            ] {
+                h.call("ui.prefs", json!({"open":page}));
                 h.frames(20);
+                for _ in 0..2 {
+                    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                    let window = crate::scenario::rect_of("prefs:window").unwrap();
+                    let t = crate::theme::Tokens::get();
+                    let inset = t.space_24 - t.space_2 + crate::ui_kit::navigation_popup_frame().stroke.width;
+                    assert!((body.right() - (window.right() - inset)).abs() < 0.5, "{width}: {page}");
+                    for key in sections {
+                        let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
+                        assert!(
+                            (section.left() - body.left()).abs() < 0.5 && (section.right() - body.right()).abs() < 0.5,
+                            "{key} at {width}: {section:?} vs {body:?}"
+                        );
+                    }
+                    for key in rows {
+                        let row = crate::scenario::rect_of(key).unwrap();
+                        assert!((row.right() - body.right()).abs() < 0.5, "{key} at {width}: {row:?} vs {body:?}");
+                    }
+                    h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":-600}));
+                    h.frames(20);
+                }
             }
         }
     }
 
     #[test]
-    fn navigation_bar_preview_stage_follows_position_live() {
-        use crate::navigation_bar::Position;
+    fn navigation_bar_preview_stage_follows_anchor_live() {
+        use crate::navigation_bar::{Edge, Position};
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1600,"height":1100}));
         h.call("ui.prefs", json!({"open":"Interface/Navigation bar","navigation_bar":{"slots":["pan","fit","display"]}}));
-        for (index, position) in [(0, Position::Left), (1, Position::Centre), (2, Position::Right)] {
-            navbar_click(&mut h, &format!("prefs:navbar:position:{index}"));
+        for (index, edge, position) in [
+            (0, Edge::Top, Position::Left),
+            (1, Edge::Top, Position::Centre),
+            (2, Edge::Top, Position::Right),
+            (3, Edge::Bottom, Position::Left),
+            (4, Edge::Bottom, Position::Centre),
+            (5, Edge::Bottom, Position::Right),
+        ] {
+            navbar_click(&mut h, &format!("prefs:navbar:anchor:{index}"));
             h.frames(3);
             let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
             let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
-            assert_eq!(h.app.preferences.navigation_bar.position, position);
+            let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
+            assert_eq!((h.app.preferences.navigation_bar.edge, h.app.preferences.navigation_bar.position), (edge, position));
             assert_eq!(stage.height(), crate::ui_kit::NAV_STAGE_HEIGHT);
-            assert_eq!(bar.center().y, stage.center().y);
+            let inset = crate::ui_kit::NAV_BORDER + crate::ui_kit::NAV_STAGE_INSET;
+            match edge {
+                Edge::Top => {
+                    assert_eq!(bar.top(), stage.top() + inset);
+                    assert!(count.top() >= bar.bottom(), "the count sits below a top bar");
+                }
+                Edge::Bottom => {
+                    assert_eq!(bar.bottom(), stage.bottom() - inset);
+                    assert!(count.bottom() <= bar.top(), "the count sits above a bottom bar");
+                }
+            }
             match position {
-                Position::Left => assert_eq!(bar.left(), stage.left() + crate::ui_kit::NAV_BORDER + crate::ui_kit::NAV_STAGE_INSET),
+                Position::Left => assert_eq!(bar.left(), stage.left() + inset),
                 Position::Centre => assert_eq!(bar.center().x, stage.center().x),
-                Position::Right => assert_eq!(bar.right(), stage.right() - crate::ui_kit::NAV_BORDER - crate::ui_kit::NAV_STAGE_INSET),
+                Position::Right => assert_eq!(bar.right(), stage.right() - inset),
             }
         }
     }
@@ -4025,7 +4876,7 @@ mod tests {
         h.app.home.open = false;
         h.app.space_mouse.device = Some("spacenavd".into());
         h.app.space_mouse.drivers = Some(DriversPresent { spacenavd: true, direct: false, denied: false });
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(3);
         assert!(h.app.prefs_window.open);
     }
@@ -4038,7 +4889,7 @@ mod tests {
         h.app.home.open = false;
         // After a driver change and before any reading: no device, so nothing starts.
         h.app.space_mouse.device = None;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(5);
         assert!(crate::i18n::tr("ui.3d_mouse_calibrate_wait").starts_with("Move the 3D mouse"));
         crate::space_mouse_calibration::start(&mut h.app);
@@ -4085,40 +4936,26 @@ mod tests {
         panic!("{handle} never came into view");
     }
 
-    /// The page's rows share one label column, widened by the longest label in the form. The 3D
-    /// mouse section brought longer labels, which moved every control (Orbit around's among them) to
-    /// the right and turned its three buttons into a dropdown. Measured: each row's control left edge and
-    /// width with the section open and folded, at the window sizes the app is used at.
     #[test]
-    fn folding_the_3d_mouse_section_does_not_move_the_controls_of_the_rows_above_it() {
-        let mut report = Vec::new();
+    fn folding_a_3d_mouse_section_does_not_move_navigation_controls() {
         for width in [900, 1100, 1318, 1600, 1920] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
-            h.app.space_mouse.device = Some("hid 046d:c62b".into());
-            h.call("ui.resize", serde_json::json!({"width": width, "height": 900}));
-            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+            h.call("ui.resize", json!({"width":width,"height":900}));
+            open_at(&mut h.app, PAGE_NAVIGATION);
             h.frames(6);
-            let rows = ["Orbit around", "Middle double-click", "View navigator"];
-            let control = |name: &str| crate::scenario::rect_of(&format!("dialog:control:{name}")).map(|r| (r.left(), r.width()));
-            let buttons = || crate::scenario::rect_of("dialog:segments:Orbit around").is_some();
-            let (open, open_form) = (rows.map(control), buttons());
-            scroll_to_and_click(&mut h, "dialog:section:3D mouse");
-            // Back to the top, where the rows above are on screen again.
-            h.app.synthetic.push(egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: egui::vec2(0.0, 5000.0),
-                modifiers: egui::Modifiers::NONE,
-                phase: egui::TouchPhase::Move,
-            });
+            let rows = ["Middle double-click", "View navigator"];
+            let controls = || rows.map(|name| crate::scenario::rect_of(&format!("dialog:control:{name}")));
+            let before = controls();
+            assert!(before.iter().all(Option::is_some));
+            open_at(&mut h.app, PAGE_MOUSE3D);
             h.frames(6);
-            let (folded, folded_form) = (rows.map(control), buttons());
-            eprintln!("window {width}: open {open:?} buttons {open_form}; folded {folded:?} buttons {folded_form}");
-            if folded != open || folded_form != open_form {
-                report.push(format!("window {width}: open {open:?} buttons {open_form}, folded {folded:?} buttons {folded_form}"));
-            }
+            assert!(h.widget("Middle double-click").is_none());
+            scroll_to_and_click(&mut h, "dialog:section:Device");
+            open_at(&mut h.app, PAGE_NAVIGATION);
+            h.frames(6);
+            assert_eq!(controls(), before);
         }
-        assert!(report.is_empty(), "{}", report.join("\n"));
     }
 
     /// The meter in a view axis row shows the motion chosen in its "driven by" menu, calibrated or not.
@@ -4159,6 +4996,7 @@ mod tests {
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
         p.space_mouse_model_pivot = true;
+        p.space_mouse_sketch_orbit = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -4170,7 +5008,7 @@ mod tests {
         );
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
-        assert_eq!(p.space_mouse_model_pivot, d.space_mouse_model_pivot);
+        assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
@@ -4192,6 +5030,8 @@ mod tests {
         assert!(h.app.preferences.space_mouse_model_pivot, "traced is opt-in");
         scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_classic");
         assert!(!h.app.preferences.space_mouse_model_pivot, "classic again");
+        open_at(&mut h.app, PAGE_NAVIGATION);
+        h.frames(4);
         assert!(!h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is off by default");
         scroll_to_and_click(&mut h, "prefs:zoom_stop_at_model");
         assert!(h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is opt-in");
@@ -4220,13 +5060,16 @@ mod tests {
         assert!(other.preferences.zoom_stop_at_model && other.preferences.space_mouse_model_pivot);
         assert!(other.preferences.zoom_to_cursor, "enabling model navigation leaves wheel zoom alone");
         control(&mut app, &json!({"button": "defaults"})).unwrap();
-        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        assert!(!app.preferences.zoom_stop_at_model);
+        assert!(app.preferences.space_mouse_model_pivot, "Navigation defaults leave 3D mouse settings alone");
+        control(&mut app, &json!({"open":"3D mouse", "button":"defaults"})).unwrap();
+        assert!(!app.preferences.space_mouse_model_pivot);
         assert!(app.preferences.zoom_to_cursor, "Navigation defaults still anchor the wheel");
         control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert!(app.preferences.zoom_stop_at_model && app.preferences.space_mouse_model_pivot, "Cancel restores the last Apply");
     }
 
-    /// Opens Preferences on the Navigation page with the 3D mouse section open and these settings
+    /// Opens Preferences on the 3D mouse page with its section open and these settings
     /// changed from their defaults, as a person who changed them would find it.
     fn changed_3d_mouse_settings(device: Option<&str>) -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();
@@ -4245,41 +5088,117 @@ mod tests {
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
         h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(36);
-        open_advanced(&mut h);
         h
     }
 
-    /// Opens the section's "Advanced" disclosure, which starts closed. Once per harness: it toggles.
-    fn open_advanced(h: &mut crate::scenario::Harness) {
-        scroll_to_and_click(h, "dialog:section:Advanced");
-        h.frames(10);
-    }
-
-    /// The driver, dead zone, axis table and buttons are rarely needed, so they start folded away and
-    /// are not drawn until the reader opens "Advanced"; the everyday controls are there either way.
+    /// Axes and buttons have independent search homes and stay available when Advanced folds.
     #[test]
-    fn the_advanced_3d_mouse_settings_start_folded_away() {
+    fn the_3d_mouse_sections_keep_axes_and_buttons_outside_advanced() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.device = Some("hid 046d:c62b".into());
+        h.app.space_mouse.seen = 1;
         h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
-        h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        h.call("ui.resize", json!({"width":1600,"height":4000}));
+        open_at(&mut h.app, PAGE_MOUSE3D);
         h.frames(36);
-        let drawn = |name: &str| crate::scenario::rect_of(&format!("dialog:row:{name}")).is_some();
-        let (driver, axes) = (crate::i18n::tr("ui.3d_mouse_driver"), crate::i18n::tr("ui.3d_mouse_button").replace("{number}", "1"));
-        assert!(drawn("Calibration") && drawn("Overall speed"), "everyday controls are always there");
-        assert!(!drawn(driver) && !drawn(&axes), "closed: no driver row, no buttons");
-        assert!(crate::scenario::rect_of("dialog:section:Advanced").is_some());
-        open_advanced(&mut h);
-        assert!(drawn(driver), "open: the driver row");
-        assert!(crate::scenario::rect_of("dialog:button::Restore defaults").is_some(), "open: the restore button");
-        open_advanced(&mut h);
-        assert!(!drawn(driver), "closed again");
+        let sections = ["space_mouse_device", "space_mouse_orbit", "space_mouse_axes", "space_mouse_buttons", "space_mouse_advanced"];
+        let bodies = sections.map(|key| crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap());
+        assert!(bodies.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
+        assert!(crate::scenario::rect_of("dialog:row:Button 1").is_some());
+        assert!(crate::scenario::rect_of("dialog:row:Driver").is_some());
+        scroll_to_and_click(&mut h, "dialog:section:Advanced");
+        assert!(crate::scenario::rect_of("dialog:row:Driver").is_none());
+        assert!(crate::scenario::rect_of("dialog:row:Button 1").is_some());
+        assert!(crate::scenario::rect_of("prefs:space_mouse_reset_axes").is_some());
     }
 
+    #[test]
+    fn mouse3d_device_card_uses_content_height_and_paints_status_and_actions_at_its_top() {
+        let previous = crate::theme::is_dark();
+        for dark in [false, true] {
+            crate::theme::set_dark(dark);
+            let t = Tokens::get();
+            for width in [280.0, 646.0] {
+                for (drivers, status_id) in [
+                    (None, "ui.3d_mouse_none"),
+                    (Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false }), "ui.3d_mouse_calibrate_wait"),
+                    (Some(crate::space_mouse::DriversPresent { spacenavd: false, direct: true, denied: true }), "ui.3d_mouse_denied_short"),
+                ] {
+                    let mut heights = Vec::new();
+                    for viewport_height in [900.0, 1800.0] {
+                        let ctx = crate::fonts::test_context();
+                        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+                        app.preferences.language = "en".into();
+                        app.space_mouse.drivers = drivers;
+                        let before = app.preferences.clone();
+                        crate::scenario::clear_handles();
+                        let output = crate::test_support::frame(
+                            &ctx,
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, viewport_height))),
+                                ..Default::default()
+                            },
+                            |ui| {
+                                ui_kit::scope(ui, |ui| {
+                                    ui.set_width(width);
+                                    super::space_mouse_section(&mut app, ui);
+                                });
+                            },
+                        );
+                        let card = crate::scenario::rect_of("prefs:space_mouse_device_card").unwrap();
+                        let status = crate::scenario::rect_of("prefs:space_mouse_status").unwrap();
+                        let calibrate = crate::scenario::rect_of("prefs:space_mouse_calibrate").unwrap();
+                        assert!(card.height() < t.control_height * 4.0 + t.space_24 * 2.0, "{width}/{viewport_height}: compact card {card:?}");
+                        assert!(card.contains_rect(status) && card.contains_rect(calibrate));
+                        assert!(status.top() - card.top() < t.control_height, "the status belongs at the card's top");
+                        assert!(calibrate.top() - status.bottom() <= t.space_24, "actions follow the status without viewport-sized space");
+                        for label in [app.tr(status_id), app.tr("ui.3d_mouse_calibrate")] {
+                            let mut painted = 0;
+                            for clipped in &output.shapes {
+                                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                                    if let egui::Shape::Text(text) = shape
+                                        && text.galley.text() == label
+                                    {
+                                        painted += 1;
+                                        let rect = text.galley.rect.translate(text.pos.to_vec2());
+                                        assert!(!text.galley.elided && card.expand(1.0).contains_rect(rect));
+                                        assert!(clipped.clip_rect.expand(1.0).contains_rect(rect), "{label} must be fully painted");
+                                    }
+                                });
+                            }
+                            assert_eq!(painted, 1, "one actual {label} is visible");
+                        }
+                        assert_eq!(app.preferences, before);
+                        assert!(app.space_mouse.device.is_none() && app.space_mouse.calibrating.is_none());
+                        heights.push(card.height());
+                    }
+                    assert!((heights[0] - heights[1]).abs() < 0.5, "viewport height must not stretch the device card");
+                }
+            }
+        }
+        crate::theme::set_dark(previous);
+    }
+
+    #[test]
+    fn reset_axis_assignment_preserves_gains_inversion_and_every_other_setting() {
+        for theme in ["light", "dark"] {
+            let mut h = changed_3d_mouse_settings(Some("hid 046d:c62b"));
+            h.call("ui.prefs", json!({"theme":theme}));
+            let mut expected = h.app.preferences.clone();
+            expected.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
+            scroll_to_and_click(&mut h, "prefs:space_mouse_reset_axes");
+            assert_eq!(h.app.preferences, expected);
+            h.app.preferences.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
+            h.app.preferences.space_mouse_enabled = false;
+            h.frames(3);
+            let before = h.app.preferences.clone();
+            scroll_to_and_click(&mut h, "prefs:space_mouse_reset_axes");
+            assert_eq!(h.app.preferences, before, "disabled navigation cannot reset assignments");
+        }
+    }
     /// The question is short, says what stays, and exists in every language.
     #[test]
     fn the_restore_question_is_short_and_says_what_stays() {
@@ -4347,7 +5266,7 @@ mod tests {
         h.step(&serde_json::json!({"click": {"handle": "dialog:cancel"}})).unwrap();
         h.frames(6);
         assert!(!h.app.prefs_window.open, "the dialog closed");
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(6);
         assert!(!h.app.space_mouse.restore_pending, "the question is not asked again on its own");
         assert_eq!(h.app.preferences, before);
@@ -4363,6 +5282,7 @@ mod tests {
         scroll_to_and_click(&mut h, "dialog:button::Restore defaults");
         scroll_to_and_click(&mut h, "dialog:button::Restore defaults");
         assert!(!h.app.space_mouse.restore_pending && section_is_at_defaults(&h.app));
+        h.call("ui.prefs", json!({"button":"apply"}));
         let saved = h.app.prefs();
         let mut next = crate::scenario::Harness::new();
         next.app.preferences.space_mouse_speed = 2.5;
@@ -4395,7 +5315,7 @@ mod tests {
         card.frames(5);
         // Preferences'.
         let mut prefs = harness();
-        crate::prefs::open_at(&mut prefs.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut prefs.app, crate::prefs::PAGE_MOUSE3D);
         prefs.frames(6);
         prefs.frames(30);
         assert!(prefs.app.space_mouse.calibrating.is_none());
@@ -4433,10 +5353,9 @@ mod tests {
             h.app.space_mouse.device = Some(device.into());
             h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct, denied: false });
             h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
-            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             h.frames(6);
             h.frames(30);
-            open_advanced(&mut h);
             let up = h.widget(&note).is_some();
             assert_eq!(up, shown, "{driver:?} reading {device}, device present {direct}");
             // Whatever it says, no calibration moves between keys.
@@ -4471,10 +5390,9 @@ mod tests {
             // The axis assignment is changed, so its reset button is enabled and drawn.
             h.app.preferences.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
             h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
-            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             h.frames(6);
-            scroll_to_and_click(&mut h, &format!("dialog:section:{}", crate::i18n::Locale::for_language(catalog.id).text("Advanced")));
-            h.frames(10);
+            // The redesigned Advanced section starts expanded.
             // The restore question is up, so its whole text can be checked too.
             h.app.space_mouse.restore_pending = true;
             // The frame's language is only set while it runs, so the texts come from the catalog itself.
@@ -4612,11 +5530,11 @@ mod tests {
         h.app.space_mouse.device = None;
         h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
         h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(5);
-        assert!(crate::scenario::rect_of("dialog:section:3D mouse").is_some(), "the section is drawn with the kit's header");
-        assert!(crate::scenario::rect_of("dialog:section:3D mouse:count").is_none());
-        assert!(crate::scenario::rect_of("dialog:hint:space_mouse_wiggle").is_some());
+        assert!(crate::scenario::rect_of("dialog:section:Device").is_some(), "the section is drawn with the kit's header");
+        assert!(crate::scenario::rect_of("dialog:section:Device:count").is_none());
+        assert!(h.widget(crate::i18n::tr("ui.3d_mouse_calibrate_wait")).is_some());
     }
 
     /// The boat's Reset view puts the boat back and nothing else: calibration, sensitivity, axis
@@ -4653,10 +5571,10 @@ mod tests {
         let mut h = changed_3d_mouse_settings(None);
         h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
         h.frames(10);
-        assert!(crate::scenario::rect_of("dialog:hint:space_mouse_wiggle").is_some(), "no device yet: the hint is a line");
+        assert!(h.widget(crate::i18n::tr("ui.3d_mouse_calibrate_wait")).is_some(), "the reader waits for a real record");
         h.app.space_mouse.device = Some("spacenavd".into());
         h.frames(10);
-        assert!(crate::scenario::rect_of("dialog:hint:space_mouse_wiggle").is_none(), "confirmed: no hint");
+        assert!(crate::scenario::rect_of("prefs:space_mouse_status").is_none(), "confirmed: the real device replaces the waiting status");
     }
 
     /// A 3D mouse that is there but may not be read, with no spacenavd to ask instead: Preferences says so
@@ -4681,9 +5599,15 @@ mod tests {
             let mut h = changed_3d_mouse_settings(None);
             h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd, direct, denied });
             h.frames(10);
-            let said = crate::scenario::rect_of("dialog:hint:space_mouse_denied").is_some();
+            let said = h.widget(crate::i18n::tr("ui.3d_mouse_denied_short")).is_some();
             assert_eq!(said, shown, "spacenavd {spacenavd}, found {direct}, denied {denied}");
-            let wiggle = crate::scenario::rect_of("dialog:hint:space_mouse_wiggle").is_some();
+            let wiggle = h
+                .widget(crate::i18n::tr(if super::waiting_for_a_record(h.app.space_mouse.drivers) {
+                    "ui.3d_mouse_calibrate_wait"
+                } else {
+                    "ui.3d_mouse_none"
+                }))
+                .is_some();
             assert_eq!(wiggle, !shown, "the hint to wiggle shows only where waiting can help");
             assert_eq!(super::waiting_for_a_record(h.app.space_mouse.drivers), spacenavd || (direct && !denied));
         }
@@ -4892,7 +5816,7 @@ mod tests {
             out.textures_delta.clear();
         }
         let mut previous = 0;
-        for label in ["Coarse", "Normal", "Fine", "Ultra"] {
+        for (label, segments) in [("Coarse", 8), ("Normal", 16), ("Fine", 32), ("Ultra", 64)] {
             let card = crate::scenario::rect_of(&format!("prefs:option:{label}")).expect("quality card");
             let facets = shapes
                 .iter()
@@ -4906,8 +5830,168 @@ mod tests {
                 .max()
                 .unwrap_or(0);
             assert!(facets > previous, "{label} must visibly add detail to the preceding quality: {facets} <= {previous}");
+            assert_eq!(facets, segments + 1, "{label} uses the canonical faceting caption, with the closing vertex");
             previous = facets;
         }
+    }
+
+    #[test]
+    fn design_precision_controls_use_preferred_units_and_keep_document_and_transactions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en", "theme":theme}));
+            // A nonblank document keeps its units while the new-design defaults are edited.
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            let doc = h.app.session.doc.to_json();
+            let original = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"General"}));
+            h.step(&json!({"click":{"handle":"prefs:page:Design"}})).unwrap();
+            h.app.prefs_window.filter = "Units and precision".into();
+            h.frames(5);
+            for unit in UNITS {
+                h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
+                h.frames(2);
+                let sample = format_length(12.5 * unit_scale(unit).0, unit, 2);
+                assert!(h.widget(&sample).is_some(), "{theme}: {unit} uses the real unit-aware sample {sample}");
+                assert_eq!(h.app.session.doc.to_json(), doc);
+            }
+            for (key, text) in [("length_decimals", "4"), ("angle_decimals", "3"), ("parameter_list_rows", "75")] {
+                let handle = format!("prefs:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle},"double":true})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                h.frames(2);
+            }
+            assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
+            assert!(h.widget(&format_length(12.5 * unit_scale("ft").0, "ft", 4)).is_some());
+            assert!(h.widget("45.000°").is_some());
+            assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = h.app.preferences.clone();
+            let mut restarted = SolveApp::new(Default::default(), Default::default());
+            restarted.load_prefs(&h.app.prefs());
+            assert_eq!(
+                (
+                    restarted.preferences.default_units.as_str(),
+                    restarted.preferences.length_decimals,
+                    restarted.preferences.angle_decimals,
+                    restarted.preferences.parameter_list_rows
+                ),
+                ("ft", 4, 3, 75)
+            );
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (2, 1, 50));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, applied);
+            assert_eq!(h.app.session.doc.to_json(), doc);
+        }
+    }
+
+    #[test]
+    fn design_unknown_program_dropdown_keeps_note_default_and_stand_up_dependency() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+        h.app.prefs_window.filter = "Files from unknown programs".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:stand_up_unknown");
+        h.step(&json!({"click":{"handle":"prefs:stand_up_unknown"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:list:prefs.stand_up_unknown.ask"}})).unwrap();
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Ask);
+        h.app.prefs_window.filter = "Offer to stand up Y-up files".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:offer_stand_up");
+        h.step(&json!({"click":{"handle":"prefs:offer_stand_up"}})).unwrap();
+        assert!(!h.app.preferences.offer_stand_up);
+        h.app.prefs_window.filter = "Files from unknown programs".into();
+        h.frames(5);
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let dropdown =
+            tree.nodes.iter().find(|(_, node)| node.role() == egui::accesskit::Role::ComboBox && node.label() == Some("Files from unknown programs"));
+        assert!(dropdown.expect("unknown-program dropdown").1.is_disabled());
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Ask, "disabling the offer keeps the stored choice");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.offer_stand_up);
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+    }
+
+    #[test]
+    fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
+            let original = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"General"}));
+            h.step(&json!({"click":{"handle":"prefs:page:Tools"}})).unwrap();
+            let mut expected = serde_json::to_value(&original).unwrap();
+            for (query, field) in [
+                ("Show moved parts' old place as a ghost", "drive_joints_ghost"),
+                ("Axis distances in Measure", "measure_axis_distances"),
+                ("Direct interaction", "direct_interaction"),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let handle = format!("prefs:{field}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected[field] = json!(!expected[field].as_bool().unwrap());
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field} edits only its own preference");
+            }
+            h.app.prefs_window.filter = "Tool at the cursor".into();
+            h.frames(5);
+            super::reveal_preference(&mut h, "view:tool_cursor");
+            h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+            assert!(h.app.ui.tool_cursor);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "cursor stays app UI state");
+            assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original).unwrap());
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = h.app.preferences.clone();
+            let mut restarted = SolveApp::new(Default::default(), Default::default());
+            restarted.load_prefs(&h.app.prefs());
+            assert_eq!(restarted.preferences, applied);
+            assert!(restarted.ui.tool_cursor);
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert!(h.app.preferences.drive_joints_ghost && h.app.preferences.measure_axis_distances);
+            assert!(!h.app.preferences.direct_interaction && !h.app.ui.tool_cursor);
+            assert!(h.app.preferences.quick_measure, "Tools defaults leave Graphics quick measurement alone");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, applied);
+            assert!(h.app.ui.tool_cursor);
+        }
+    }
+
+    #[test]
+    fn tools_extrude_view_controls_keep_their_dependency_without_clearing_the_saved_choice() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Tools"}));
+        h.app.prefs_window.filter = "Extrude".into();
+        h.frames(5);
+        for (key, isometric, returns) in [
+            ("extrude_view_return", false, false),
+            ("extrude_view_isometric", true, false),
+            ("extrude_view_return", true, true),
+            ("extrude_view_isometric", false, true),
+            ("extrude_view_return", false, true),
+        ] {
+            let handle = format!("prefs:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!((h.app.preferences.extrude_view_isometric, h.app.preferences.extrude_view_return), (isometric, returns));
+            assert!(h.app.preferences.auto_operation);
+            assert!(h.app.preferences.extrude_auto_to_object);
+        }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);
     }
 
     #[test]
@@ -4917,36 +6001,82 @@ mod tests {
             ("default_units", json!("ft"), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),
             ("angle_decimals", json!(4), PAGE_DESIGN),
-            ("theme", json!("light"), PAGE_INTERFACE),
-            ("ui_scale", json!(1.25), PAGE_INTERFACE),
-            ("ui_font", json!("test font"), PAGE_INTERFACE),
-            ("layout", json!("compact"), PAGE_INTERFACE),
-            ("ribbon_labels", json!(false), PAGE_INTERFACE),
-            ("sketch_tab_always", json!(true), PAGE_INTERFACE),
-            ("ribbon_reveal", json!(true), PAGE_INTERFACE),
-            ("dialog_buttons", json!("top"), PAGE_INTERFACE),
-            ("toast_place", json!("centre"), PAGE_INTERFACE),
-            ("timeline_left", json!(true), PAGE_INTERFACE),
-            ("timeline_under_browser", json!(true), PAGE_INTERFACE),
-            ("history_sketches", json!("under_feature"), PAGE_INTERFACE),
-            ("history_play_button", json!(false), PAGE_INTERFACE),
-            ("browser_float", json!(true), PAGE_INTERFACE),
-            ("browser_collapsed", json!(true), PAGE_INTERFACE),
-            ("browser_show", json!("hover"), PAGE_INTERFACE),
-            ("dialog_place", json!("left_column"), PAGE_INTERFACE),
-            ("color_vision", json!("protan"), PAGE_INTERFACE),
-            ("viewport_theme", json!("light"), PAGE_INTERFACE),
-            ("viewport_background", json!([255, 255, 255]), PAGE_INTERFACE),
-            ("view_confirm_corner", json!(true), PAGE_INTERFACE),
-            ("status_bar", json!(true), PAGE_INTERFACE),
+            ("parameter_list_rows", json!(75), PAGE_DESIGN),
+            ("step_values", json!(true), PAGE_DESIGN),
+            ("value_boxes_in_view", json!(false), PAGE_DESIGN),
+            ("up_axis", json!("y"), PAGE_DESIGN),
+            ("offer_stand_up", json!(false), PAGE_DESIGN),
+            ("stand_up_unknown", json!("ask"), PAGE_DESIGN),
+            ("hide_origin", json!(true), PAGE_DESIGN),
+            ("update_changed_links", json!(false), PAGE_DESIGN),
+            ("double_click_components", json!(false), PAGE_DESIGN),
+            ("insert_lists_open_designs", json!(false), PAGE_DESIGN),
+            ("theme", json!("light"), PAGE_APPEARANCE),
+            ("ui_scale", json!(1.25), PAGE_APPEARANCE),
+            ("ui_font", json!("test font"), PAGE_APPEARANCE),
+            ("layout", json!("compact"), PAGE_LAYOUT),
+            ("ribbon_labels", json!(false), PAGE_LAYOUT),
+            ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
+            ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),
+            ("viewport_section_status", json!(false), PAGE_GRAPHICS),
+            ("viewport_status_details", json!(false), PAGE_GRAPHICS),
+            ("viewport_status_summary", json!(false), PAGE_GRAPHICS),
+            ("sketch_tab_always", json!(true), PAGE_LAYOUT),
+            ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
+            ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("dialog_buttons", json!("top"), PAGE_LAYOUT),
+            ("toast_place", json!("centre"), PAGE_LAYOUT),
+            ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
+            ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
+            ("timeline_left", json!(true), PAGE_LAYOUT),
+            ("timeline_under_browser", json!(true), PAGE_LAYOUT),
+            ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
+            ("history_play_button", json!(false), PAGE_LAYOUT),
+            ("browser_float", json!(true), PAGE_LAYOUT),
+            ("browser_collapsed", json!(true), PAGE_LAYOUT),
+            ("browser_show", json!("hover"), PAGE_LAYOUT),
+            ("dialog_place", json!("left_column"), PAGE_LAYOUT),
+            ("color_vision", json!("protan"), PAGE_APPEARANCE),
+            ("viewport_theme", json!("light"), PAGE_APPEARANCE),
+            ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
+            ("view_confirm_corner", json!(true), PAGE_LAYOUT),
+            ("status_bar", json!(true), PAGE_LAYOUT),
+            ("browser_eye_left", json!(true), PAGE_LAYOUT),
+            ("browser_components_open", json!(true), PAGE_LAYOUT),
+            ("quick_measure", json!(true), PAGE_GRAPHICS),
+            ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
+            ("direct_interaction", json!(true), PAGE_TOOLS),
+            ("hole_snaps", json!(true), PAGE_TOOLS),
+            ("hole_moves", json!(true), PAGE_TOOLS),
+            ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
+            ("extrude_view_isometric", json!(true), PAGE_TOOLS),
+            ("extrude_view_return", json!(true), PAGE_TOOLS),
+            ("auto_operation", json!(false), PAGE_TOOLS),
+            ("placement_handles", json!(true), PAGE_TOOLS),
+            ("assembly_move_handles", json!(false), PAGE_TOOLS),
+            ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
+            ("joint_rotation_fine", json!(0.2), PAGE_TOOLS),
+            ("drive_joints_ghost", json!(false), PAGE_TOOLS),
+            ("measure_axis_distances", json!(false), PAGE_TOOLS),
+            ("network_locations", json!(true), PAGE_GENERAL),
+            ("network_hosts", json!(["files.studio"]), PAGE_GENERAL),
+            ("nav_bridge_enabled", json!(true), PAGE_MOUSE3D),
+            ("nav_bridge_port", json!(9876), PAGE_MOUSE3D),
+            ("space_mouse_speed", json!(2.0), PAGE_MOUSE3D),
             ("nav", json!("blender"), PAGE_NAVIGATION),
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
+            ("select_other_hidden", json!(false), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
+            ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
+            ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
+            ("sketch_recent_snap", json!(true), PAGE_SKETCH),
+            ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
+            ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];
@@ -4969,7 +6099,7 @@ mod tests {
         for name in ["Sketch", "Selection", "Sketch & selection"] {
             assert_eq!(page_index(name), Some(PAGE_SKETCH));
         }
-        assert_eq!(page_index("Assistant"), Some(PAGE_AI));
+        assert_eq!(page_index("Assistant"), Some(PAGE_ASSISTANT));
         assert_eq!(page_index("Shortcuts"), Some(PAGE_SHORTCUTS));
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.ui.agent_cursor.show = false;
@@ -4979,12 +6109,150 @@ mod tests {
         assert!(!app.ui.agent_cursor.show);
         assert!(app.ui.pick_bodies);
         assert!(!app.session.auto_project);
-        defaults(&mut app, PAGE_AI);
+        defaults(&mut app, PAGE_ASSISTANT);
         let expected = SolveApp::new(Default::default(), Default::default()).ui.agent_cursor.show;
         assert_eq!(app.ui.agent_cursor.show, expected);
         defaults(&mut app, PAGE_SKETCH);
         assert!(!app.ui.pick_bodies);
         assert!(app.session.auto_project);
+    }
+
+    #[test]
+    fn preferences_structure_order_groups_and_unique_field_homes() {
+        assert_eq!(
+            PAGES,
+            [
+                "General",
+                "Appearance",
+                "Layout",
+                "Graphics",
+                "Design",
+                "Sketch",
+                "Tools",
+                "Navigation",
+                "3D mouse",
+                "Shortcuts",
+                "Assistant",
+                "Plugins"
+            ]
+        );
+        assert_eq!(WINDOW_PAGES.len(), PAGES.len());
+        let groups: Vec<_> = WINDOW_PAGES.iter().enumerate().filter_map(|(i, p)| p.group.map(|g| (i, crate::i18n::tr(g)))).collect();
+        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
+        let mut fields = std::collections::BTreeSet::new();
+        for (field, page) in FIELD_PAGES {
+            assert!(fields.insert(field), "duplicate home for {field}");
+            assert!(page.is_none_or(|p| p < PAGES.len()), "invalid page for {field}");
+        }
+        let saved = serde_json::to_value(Prefs::default()).unwrap();
+        assert_eq!(fields.len(), saved.as_object().unwrap().len(), "every stored field has exactly one metadata entry");
+        for (i, name) in PAGES.iter().enumerate() {
+            assert_eq!(crate::i18n::tr(WINDOW_PAGES[i].label), *name);
+            assert_eq!(WINDOW_PAGES[i].handle, format!("prefs:page:{name}"));
+        }
+    }
+
+    #[test]
+    fn preferences_all_canonical_and_legacy_pages_open_and_publish_real_alias_handles() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        for (name, index) in PAGES.iter().enumerate().map(|(i, n)| (*n, i)).chain(PAGE_ALIASES.iter().copied()) {
+            assert_eq!(page_index(name), Some(index));
+            let reply = h.call("ui.prefs", json!({"open":name}));
+            assert!(reply["error"].is_null(), "{name}: {reply}");
+            assert_eq!(reply["result"]["dialog"], PAGES[index]);
+            open_at(&mut h.app, index);
+            h.frames(4);
+            assert_eq!(h.app.prefs_window.section, index);
+            assert_eq!(crate::scenario::rect_of(&format!("prefs:page:{name}")), crate::scenario::rect_of(WINDOW_PAGES[index].handle));
+            assert!(crate::scenario::rect_of(&format!("prefs:page:{name}")).is_some());
+        }
+        for (alias, index) in PAGE_ALIASES {
+            open_at(&mut h.app, *index);
+            h.frames(4);
+            h.step(&json!({"click":{"handle":format!("prefs:page:{alias}")}})).unwrap();
+            assert_eq!(h.app.prefs_window.section, *index, "{alias} is clickable");
+        }
+    }
+
+    #[test]
+    fn preferences_moved_controls_have_one_drawn_home() {
+        let cases = [
+            ("Tool at the cursor", PAGE_TOOLS),
+            ("Direct interaction", PAGE_TOOLS),
+            ("Axis distances in Measure", PAGE_TOOLS),
+            ("Move by click or drag", PAGE_TOOLS),
+            ("Snap to centers", PAGE_TOOLS),
+            ("Show moved parts' old place as a ghost", PAGE_TOOLS),
+            ("Extrude to a picked target", PAGE_TOOLS),
+            ("Turn the view to isometric when Extrude opens", PAGE_TOOLS),
+            ("Go back to the earlier view when Extrude closes", PAGE_TOOLS),
+            ("Placement handles", PAGE_TOOLS),
+            ("Navigate with the 3D mouse", PAGE_MOUSE3D),
+            ("Origin plane names", PAGE_DESIGN),
+            ("Status bar", PAGE_LAYOUT),
+            ("Color vision", PAGE_APPEARANCE),
+            ("Quick measurement", PAGE_GRAPHICS),
+            ("Analysis", PAGE_GRAPHICS),
+            ("Section", PAGE_GRAPHICS),
+            ("Live details", PAGE_GRAPHICS),
+            ("Fold items", PAGE_GRAPHICS),
+            ("Allow network locations in designs", PAGE_GENERAL),
+            ("Print face highlight", PAGE_GENERAL),
+        ];
+        let mut found = vec![Vec::new(); cases.len()];
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        for page in 0..PAGES.len() {
+            open_at(&mut h.app, page);
+            h.frames(4);
+            for (i, (label, _)) in cases.iter().enumerate() {
+                if h.widget(label).is_some() {
+                    found[i].push(page);
+                }
+            }
+        }
+        for ((label, page), actual) in cases.iter().zip(found) {
+            assert_eq!(actual, [*page], "{label} must have exactly one Preferences home");
+        }
+    }
+
+    #[test]
+    fn preferences_session_resets_follow_their_new_pages_only() {
+        for page in 0..PAGES.len() {
+            let mut app = SolveApp::new(Default::default(), Default::default());
+            app.autosave_minutes = 9.0;
+            app.ui.dark = false;
+            app.prefs_window.follow.launch = Some("theme.json".into());
+            app.ui.layout = crate::shell::LayoutMode::Docked;
+            app.ui.show_navigation_bar = false;
+            app.ui.tool_cursor = true;
+            app.ui.visual_style = 2;
+            app.ui.show_grid = false;
+            app.ui.ground_shadow = false;
+            app.ui.perspective = true;
+            app.session.auto_project = false;
+            app.ui.pick_bodies = true;
+            app.ui.agent_cursor.show = true;
+            app.keymap.custom.insert("solid.extrude".into(), vec!["X".into()]);
+            defaults(&mut app, page);
+            assert_eq!(app.autosave_minutes, if page == PAGE_GENERAL { 5.0 } else { 9.0 });
+            assert_eq!(app.ui.dark, page == PAGE_APPEARANCE);
+            assert_eq!(app.prefs_window.follow.launch.is_none(), page == PAGE_APPEARANCE);
+            assert_eq!(app.ui.layout == crate::shell::LayoutMode::Floating, page == PAGE_LAYOUT);
+            assert_eq!(app.ui.show_navigation_bar, page == PAGE_LAYOUT);
+            assert_eq!(app.ui.tool_cursor, page != PAGE_TOOLS);
+            assert_eq!(app.ui.visual_style, if page == PAGE_GRAPHICS { 0 } else { 2 });
+            assert_eq!(app.ui.show_grid, page == PAGE_GRAPHICS);
+            assert_eq!(app.ui.ground_shadow, page == PAGE_GRAPHICS);
+            assert_eq!(app.ui.perspective, page != PAGE_GRAPHICS);
+            assert_eq!(app.session.auto_project, page == PAGE_SKETCH);
+            assert_eq!(app.ui.pick_bodies, page != PAGE_SKETCH);
+            assert_eq!(app.ui.agent_cursor.show, page != PAGE_ASSISTANT);
+            assert_eq!(app.keymap.custom.is_empty(), page == PAGE_SHORTCUTS);
+        }
     }
 
     fn hole_preset_row(name: &str) -> serde_json::Value {
@@ -5024,10 +6292,10 @@ mod tests {
         use serde_json::json;
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let mut row = hole_preset_row("Fixture");
-        row["thread_options"] = json!({"handedness":"left","full_length":false,"depth":"4 mm"});
+        row["thread_options"] = json!({"full_length":false,"depth":"4 mm"});
         super::set(&mut app, &json!({"hole_presets":[row]})).unwrap();
         let expected = serde_json::to_value(&app.preferences.hole_presets).unwrap();
-        assert_eq!(expected[0]["thread_options"]["handedness"], "left");
+        assert_eq!(expected[0]["thread_options"]["depth"], "4 mm");
         for page in 0..super::PAGES.len() {
             super::reset_preferences(&mut app.preferences, page);
         }
@@ -5049,6 +6317,51 @@ mod tests {
         assert_eq!(saved[0]["thread_options"]["starts"], 2, "unknown thread semantics must not silently become the defaults");
     }
 
+    fn personal_sheet_rule_row(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name, "thickness": "1.6 mm", "k_factor": "0.42", "bend_radius": "Thickness",
+            "relief_width": "Thickness", "relief_depth": "Thickness * 0.5", "corner_relief": "Thickness * 4.0",
+            "corner_relief_shape": "round", "hem_gap": "0.01 mm", "gap": "Thickness", "angle_display": "included"
+        })
+    }
+
+    #[test]
+    fn personal_sheet_rules_corrupt_rows_and_limits_do_not_discard_other_preferences() {
+        use serde_json::json;
+        let good = personal_sheet_rule_row("CRS 1.6");
+        let mut oversized = personal_sheet_rule_row("Too long");
+        oversized["thickness"] = json!("x".repeat(513));
+        let mut duplicate = good.clone();
+        duplicate["name"] = json!("crs 1.6");
+        let p = super::lenient(&json!({"length_decimals":4,"personal_sheet_rules":[null,good,oversized,duplicate,{"name":"incomplete"}]}));
+        assert_eq!(p.length_decimals, 4);
+        assert_eq!(serde_json::to_value(&p.personal_sheet_rules).unwrap(), json!([personal_sheet_rule_row("CRS 1.6")]));
+        let corrupt = super::lenient(&json!({"length_decimals":3,"personal_sheet_rules":{"unexpected":true}}));
+        assert_eq!(corrupt.length_decimals, 3);
+        assert_eq!(serde_json::to_value(corrupt.personal_sheet_rules).unwrap(), json!([]));
+        let many: Vec<_> = (0..100).map(|i| personal_sheet_rule_row(&format!("Rule {i}"))).collect();
+        let capped = super::lenient(&json!({"personal_sheet_rules":many}));
+        assert_eq!(serde_json::to_value(capped.personal_sheet_rules).unwrap().as_array().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn personal_sheet_rules_survive_application_preferences_roundtrip_and_page_resets() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        super::set(&mut app, &json!({"personal_sheet_rules":[personal_sheet_rule_row("CRS 1.6")]})).unwrap();
+        let expected = serde_json::to_value(&app.preferences.personal_sheet_rules).unwrap();
+        assert_eq!(expected[0]["angle_display"], "included");
+        for page in 0..super::PAGES.len() {
+            super::reset_preferences(&mut app.preferences, page);
+        }
+        assert_eq!(serde_json::to_value(&app.preferences.personal_sheet_rules).unwrap(), expected);
+        let saved = app.prefs();
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&saved);
+        assert_eq!(serde_json::to_value(&other.preferences.personal_sheet_rules).unwrap(), expected);
+        assert!(other.session.doc.sheet.rules.is_empty(), "a personal rule is not a rule of the design");
+    }
+
     /// The interface font (#1290): a font that can be read, or empty for the built-in one; saved
     /// with the others and reset by Restore Defaults.
     #[test]
@@ -5065,7 +6378,7 @@ mod tests {
         let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         other.load_prefs(&app.prefs());
         assert_eq!(other.preferences.ui_font, family);
-        super::defaults(&mut app, super::PAGE_INTERFACE);
+        super::defaults(&mut app, super::PAGE_APPEARANCE);
         assert_eq!(app.preferences.ui_font, "");
     }
 
@@ -5116,14 +6429,67 @@ mod tests {
             let saved = lenient(&json!({"browser_bodies_folders": bad, "theme": "light"}));
             assert_eq!((saved.browser_bodies_folders, saved.theme.as_str()), (BodiesFolders::Several, "light"), "{bad}");
         }
-        h.call("ui.prefs", json!({"open": "Interface"}));
+        h.call("ui.prefs", json!({"open": "Layout"}));
         reveal_preference(&mut h, "dialog:Bodies folders:Always");
         h.step(&json!({"click": {"handle": "dialog:Bodies folders:Always"}})).unwrap();
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Always);
         h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Never, "Cancel puts it back");
-        defaults(&mut h.app, PAGE_INTERFACE);
+        defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
+    }
+
+    /// Theme: System on a Linux desktop (#7944): the freedesktop preference wins, GNOME's
+    /// settings decide when it has none (its Light is `default`, so a plain theme name is
+    /// light), and nothing read leaves the window toolkit to say.
+    #[test]
+    fn the_desktops_colour_scheme_setting_decides_dark_or_light() {
+        use super::desktop_prefers_dark as d;
+        assert_eq!(d(Some(1), Some("prefer-light"), Some("Adwaita")), Some(true), "freedesktop: prefer dark");
+        assert_eq!(d(Some(2), Some("prefer-dark"), Some("Adwaita-dark")), Some(false), "freedesktop: prefer light");
+        assert_eq!(d(Some(0), Some("prefer-dark"), None), Some(true), "no preference: GNOME's");
+        assert_eq!(d(Some(0), Some("'prefer-light'"), Some("Adwaita-dark")), Some(false), "gsettings quotes its answer");
+        assert_eq!(d(Some(0), Some("default"), Some("Adwaita-dark")), Some(true), "a dark GTK theme");
+        assert_eq!(d(None, None, Some("Yaru:dark")), Some(true));
+        assert_eq!(d(Some(0), Some("default"), Some("Adwaita")), Some(false), "GNOME's Light");
+        assert_eq!(d(Some(0), None, None), Some(false), "no preference at all: light, as GTK applications");
+        assert_eq!(d(Some(u32::MAX), None, None), Some(false), "an unknown value is no preference");
+        assert_eq!(d(None, None, Some("  ")), None, "nothing read");
+        assert_eq!(d(None, None, None), None);
+    }
+
+    /// The host's reading of the desktop comes before the window toolkit's theme, which egui
+    /// reports as None in tests, and Theme: System follows it every frame (#7944).
+    #[test]
+    fn theme_system_follows_the_hosts_desktop_setting() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU8, Ordering};
+        let desktop = Arc::new(AtomicU8::new(0));
+        let reading = desktop.clone();
+        let services = crate::Services {
+            desktop_dark: Some(Box::new(move || match reading.load(Ordering::Relaxed) {
+                1 => Some(true),
+                2 => Some(false),
+                _ => None,
+            })),
+            ..Default::default()
+        };
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), services);
+        app.preferences.theme = "system".into();
+        app.ui.dark = true;
+        let ctx = egui::Context::default();
+        super::apply(&mut app, &ctx);
+        assert!(app.ui.dark, "nothing known: the colours stay");
+        desktop.store(2, Ordering::Relaxed);
+        super::apply(&mut app, &ctx);
+        assert!(!app.ui.dark, "the desktop turned light");
+        desktop.store(1, Ordering::Relaxed);
+        super::apply(&mut app, &ctx);
+        assert!(app.ui.dark, "and dark again");
+        app.preferences.theme = "light".into();
+        app.ui.dark = false;
+        super::apply(&mut app, &ctx);
+        assert!(!app.ui.dark, "an explicit theme does not follow the desktop");
     }
 
     /// Theme files (#2255): a built-in one and an imported one turn on through `ui.prefs`, the
@@ -5139,6 +6505,48 @@ mod tests {
         assert_eq!(theme_file(&app, "system", false)["base"], "light");
         assert_eq!(app.preferences.theme, "light");
         assert!(!app.ui.dark);
+    }
+
+    /// The System theme leaves the native window to follow the operating system (#8983). A macOS
+    /// window told to be light or dark keeps that appearance and no longer reports the system
+    /// appearance changing, so the app stayed light after the system turned dark. Dark and Light
+    /// still give the window their own appearance, for its title bar.
+    #[test]
+    fn the_system_theme_leaves_the_window_to_follow_the_system() {
+        let mut h = crate::scenario::Harness::new();
+        // A frame with the system appearance `system`: the window themes the frame asked for.
+        let frame = |h: &mut crate::scenario::Harness, system: egui::Theme| {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                system_theme: Some(system),
+                ..Default::default()
+            };
+            let app = &mut h.app;
+            let out = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            let commands = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
+            commands.into_iter().filter_map(|c| if let egui::ViewportCommand::SetTheme(t) = c { Some(t) } else { None }).collect::<Vec<_>>()
+        };
+        let frames = |h: &mut crate::scenario::Harness, system: egui::Theme| (0..3).flat_map(|_| frame(h, system)).collect::<Vec<_>>();
+        let out = h.call("ui.prefs", json!({"theme": "system"}));
+        assert_eq!(out["result"]["theme"], "system", "{out}");
+        frames(&mut h, egui::Theme::Light);
+        assert_eq!(h.app.prefs_window.window_theme, Some(egui::SystemTheme::SystemDefault));
+        assert!(!h.ctx.options(|o| o.sync_window_theme), "egui would tell the window light or dark");
+        assert!(!h.app.ui.dark);
+        // The system turns dark: the app follows, and nothing is asked of the window.
+        assert_eq!(frames(&mut h, egui::Theme::Dark), vec![]);
+        assert!(h.app.ui.dark);
+        assert_eq!(frames(&mut h, egui::Theme::Light), vec![]);
+        assert!(!h.app.ui.dark);
+        // An explicit theme gives the window its appearance, whatever the system's.
+        let out = h.call("ui.prefs", json!({"theme": "light"}));
+        assert_eq!(out["result"]["theme"], "light", "{out}");
+        assert_eq!(frames(&mut h, egui::Theme::Dark), vec![]);
+        assert_eq!(h.app.prefs_window.window_theme, Some(egui::SystemTheme::Light));
+        assert!(!h.app.ui.dark);
     }
 
     /// The 3D view in the other theme's colours (#4146): `ui.prefs` sets it, the window keeps its
@@ -5167,7 +6575,7 @@ mod tests {
         let out = h.call("ui.prefs", json!({"theme": "gruvbox-dark-hard", "viewport_theme": "light"}));
         assert_eq!((out["result"]["dark"].as_bool(), out["result"]["viewport_dark"].as_bool()), (Some(true), Some(false)), "{out}");
         h.frames(2);
-        let hard = crate::theme_files::find("gruvbox-dark-hard", &[]).map(crate::theme_files::resolve).unwrap();
+        let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert_eq!((Tokens::get().panel, Tokens::get().viewport_top), (hard.panel, Tokens::light().viewport_top));
 
         // Asked for, an unknown value is refused; read from saved preferences, it is the default.
@@ -5194,7 +6602,7 @@ mod tests {
             let (t, white) = (Tokens::get(), egui::Color32::WHITE);
             assert_eq!((t.viewport_top, t.viewport_bottom, Tokens::view().viewport_top), (white, white, white), "{theme}");
             assert_eq!(t.panel, Tokens::themed(view_dark, ColorVision::Off).panel, "{theme}: the window");
-            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default());
+            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap();
             let white = solidcraft_engine::render::Rgb(255, 255, 255);
             assert_eq!(scene.background, Some((white, white)), "{theme}: a picture of the view");
         }
@@ -5282,7 +6690,15 @@ mod tests {
         h.app.home.open = false;
         h.call("ui.prefs", json!({"theme": "dark", "open": "Interface"}));
         h.frames(2);
-        super::reveal_preference(&mut h, "dialog:Import…");
+        // The Import card is the last one in the theme carousel: page it into view.
+        for _ in 0..40 {
+            if h.app.prefs_window.import_tile.is_some() {
+                break;
+            }
+            h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.prefs_window.import_tile.is_some(), "the Import card is reachable in the theme carousel");
         let (root, out) = (h.dir.join("root"), h.dir.join("out"));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&out).unwrap();
@@ -5381,15 +6797,1231 @@ mod tests {
     }
 
     #[test]
+    fn appearance_sections_and_carousel_use_real_data_and_stay_in_the_page() {
+        for base in ["light", "dark"] {
+            for screen in [740, 1600] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.call("ui.resize", json!({"width":screen,"height":1100}));
+                h.call("ui.prefs", json!({"theme":base,"language":"en","open":"Appearance"}));
+                h.frames(4);
+                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let mut previous: Option<f32> = None;
+                for key in ["theme", "viewport_logo", "scale", "colour_vision"] {
+                    let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
+                    assert!(section.left() >= page.left() - 1.0 && section.right() <= page.right() + 1.0);
+                    if let Some(bottom) = previous {
+                        assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{base} width={screen}: {key}");
+                    }
+                    previous = Some(crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap().bottom());
+                }
+                let choices = theme_choices(&h.app);
+                let count = format!("{} themes", choices.len());
+                let mut painted_count = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            painted_count |= text.galley.job.text == count;
+                        }
+                    });
+                }
+                assert!(painted_count, "count comes from actual themes");
+                for _ in 0..choices.len() + 1 {
+                    h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
+                    h.frames(2);
+                }
+                let mut found = std::collections::BTreeSet::new();
+                for _ in 0..choices.len() + 1 {
+                    for (id, _) in &choices {
+                        if let Some(rect) = crate::scenario::rect_of(&format!("prefs:theme:{id}")) {
+                            assert!(page.expand(1.0).contains_rect(rect), "{base} width={screen}: {id} {rect:?}");
+                            assert!((rect.width() - 88.0).abs() <= 1.0);
+                            found.insert(id.clone());
+                        }
+                    }
+                    if let Some(import) = h.app.prefs_window.import_tile {
+                        assert!(page.expand(1.0).contains_rect(import));
+                        break;
+                    }
+                    h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+                    h.frames(2);
+                }
+                assert_eq!(found, choices.into_iter().map(|(id, _)| id).collect());
+                assert!(h.app.prefs_window.import_tile.is_some(), "Import is the last carousel card");
+                assert_eq!(h.app.preferences.theme, base, "scrolling does not select a theme");
+                assert_eq!(h.app.preferences.ui_scale, 1.0);
+                assert_eq!(h.app.preferences.viewport_background, None);
+                assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Theme);
+                assert!(!h.app.preferences.logo_accent);
+                assert!(h.app.preferences.theme_follow.is_empty() && h.app.preferences.ui_font.is_empty());
+                assert_eq!(h.app.preferences.color_vision, crate::theme::ColorVision::Off);
+                h.call("ui.prefs", json!({"button":"cancel"}));
+            }
+        }
+    }
+
+    #[test]
+    fn appearance_controls_edit_real_fields_and_cancel_restores_them() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"language":"en"}));
+        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.frames(3);
+        assert_eq!(h.app.prefs_window.section, PAGE_APPEARANCE, "legacy alias remains supported");
+        let before = h.app.preferences.clone();
+        for (handle, expected) in
+            [("prefs:viewport_theme:light", crate::theme::ViewportTheme::Light), ("prefs:viewport_theme:dark", crate::theme::ViewportTheme::Dark)]
+        {
+            super::reveal_preference(&mut h, handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.viewport_theme, expected);
+        }
+        super::reveal_preference(&mut h, "dialog:Background:Color");
+        h.step(&json!({"click":{"handle":"dialog:Background:Color"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background, Some([255, 255, 255]));
+        super::reveal_preference(&mut h, "prefs:viewport_background_hex");
+        h.step(&json!({"click":{"handle":"prefs:viewport_background_hex"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"#123456"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background, Some([0x12, 0x34, 0x56]));
+        super::reveal_preference(&mut h, "prefs:viewport_background_picker");
+        h.step(&json!({"click":{"handle":"prefs:viewport_background_picker"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("color:popover").is_some(), "the standard picker opens beside the hex editor");
+        h.step(&json!({"click":{"handle":"color:spin:R:up"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.viewport_background, Some([0x13, 0x34, 0x56]), "picker edits the same RGB as hex");
+        h.step(&json!({"click":{"handle":"prefs:viewport_background_hex"}})).unwrap();
+        h.frames(2);
+        assert!(h.widget("#133456").is_some(), "a picker edit refreshes the inline hex field");
+        super::reveal_preference(&mut h, "dialog:Logo:Accent");
+        h.step(&json!({"click":{"handle":"dialog:Logo:Accent"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.preferences.logo_accent);
+        for (percent, scale) in [(75, 0.75), (100, 1.0), (110, 1.1), (125, 1.25), (150, 1.5), (200, 2.0)] {
+            let handle = format!("prefs:scale_preset:{percent}");
+            // Rescaling may leave the presets above the current vertical scroll position.
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":5000}));
+            h.frames(20);
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(4);
+            assert!((h.app.preferences.ui_scale - scale).abs() < 0.001);
+        }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences, before);
+    }
+
+    fn theme_options_fixture(base: &str, count: usize) -> serde_json::Value {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-options.json")).unwrap();
+        fixtures[format!("{base}-{count}")].clone()
+    }
+
+    #[test]
+    fn theme_options_ui_counts_badges_more_and_reset_in_light_and_dark() {
+        for base in ["light", "dark"] {
+            for count in [0, 1, 3, 6, 12] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.call("ui.resize", json!({"width":1600,"height":1100}));
+                let fixture = theme_options_fixture(base, count);
+                // The 12-cell fixture also declares a composite child, counted in the header.
+                let option_count = fixture["options"].as_array().expect("fixture option definitions").len();
+                let out = h.call("ui.prefs", json!({"theme_import":fixture,"open":"Interface"}));
+                assert!(out["error"].is_null(), "{out}");
+                h.frames(3);
+                assert_eq!(crate::scenario::rect_of("prefs:theme_options_header").is_some(), count > 0, "{base} {count}");
+                let caption = if option_count == 1 { "1 option".to_owned() } else { format!("{option_count} options") };
+                let mut painted_count = 0;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            painted_count += usize::from(text.galley.job.text == caption);
+                        }
+                    });
+                }
+                assert_eq!(painted_count, usize::from(count > 0), "{base}: the real option count paints the exact singular/plural caption once");
+                let id = format!("options-{base}-{count}");
+                assert_eq!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_some(), count > 0);
+                assert_eq!(crate::scenario::handle_at("prefs:theme_options_more").is_some(), count == 12);
+                let cells: std::collections::BTreeSet<_> = crate::scenario::rects("prefs:theme_option_cell:").into_iter().map(|(id, _)| id).collect();
+                assert_eq!(cells.len(), count.min(10), "only ten top-level cells before More");
+                assert_eq!(
+                    crate::scenario::rect_of("dialog:hint:theme_option_section").is_some(),
+                    count > 6,
+                    "dim section labels only above six entries"
+                );
+                assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_none());
+                if count == 0 {
+                    let viewport = crate::scenario::rect_of("prefs:section:viewport_logo").unwrap();
+                    let mut unknown = theme_options_fixture(base, count);
+                    unknown["options"] = json!([]);
+                    h.call("ui.prefs", json!({"theme_import":unknown}));
+                    h.frames(2);
+                    assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
+                    assert!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_none());
+                    assert_eq!(crate::scenario::rect_of("prefs:section:viewport_logo").unwrap(), viewport, "empty declarations add no gap or notice");
+                }
+                if count == 12 {
+                    assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_none());
+                    assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_none(), "advanced is always under More");
+                    super::reveal_preference(&mut h, "prefs:theme_options_more");
+                    h.step(&json!({"click":{"handle":"prefs:theme_options_more"}})).unwrap();
+                    h.frames(2);
+                    assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_some());
+                    assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_some());
+                }
+                if count >= 3 {
+                    super::reveal_preference(&mut h, "prefs:theme_option_switch:Warm accent");
+                    h.step(&json!({"click":{"handle":"prefs:theme_option_switch:Warm accent"}})).unwrap();
+                    h.frames(2);
+                    assert_eq!(h.app.preferences.theme_options[&id]["warm"], true, "UI edits go through preference merging");
+                    assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_some());
+                    super::reveal_preference(&mut h, "prefs:theme_options_reset");
+                    h.step(&json!({"click":{"handle":"prefs:theme_options_reset"}})).unwrap();
+                    h.frames(2);
+                    assert!(!h.app.preferences.theme_options.contains_key(&id));
+                    assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn theme_options_ui_short_composite_shares_row_with_narrow_control() {
+        for base in ["light", "dark"] {
+            for language in ["en", "de"] {
+                for width in [1600, 520] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.app.home.open = false;
+                    h.call("ui.resize", json!({"width":width,"height":1100}));
+                    let file = json!({"format":"solidcraft-theme/1","name":"Compact options","base":base,"options":[
+                        {"id":"shadow","type":"bool","default":true,"label":{"en":"Shadow","de":"Schatten"}},
+                        {"id":"softness","type":"range","default":5.5,"min":0,"max":10,"step":0.5,"unit":"px","parent":"shadow",
+                            "label":{"en":"Softness","de":"Weichheit"}},
+                        {"id":"edges","type":"range","default":5.5,"min":0,"max":10,"step":0.5,"unit":"px",
+                            "label":{"en":"Edges","de":"Kanten"}}
+                    ]});
+                    let out = h.call("ui.prefs", json!({"theme_import":file,"open":"Interface","language":language}));
+                    assert!(out["error"].is_null(), "{out}");
+                    h.frames(3);
+                    let rect = |name: &str| crate::scenario::rect_of(name).unwrap();
+                    let parent = rect("prefs:theme_option:shadow");
+                    let child = rect("prefs:theme_option:softness");
+                    let composite = rect("prefs:theme_option_cell:shadow");
+                    let neighbour = rect("prefs:theme_option_cell:edges");
+                    let body = rect("prefs:page_body").expand(1.0);
+                    assert!(body.contains_rect(composite) && body.contains_rect(neighbour), "{base} {language} width={width}");
+                    assert!(composite.contains_rect(parent) && composite.contains_rect(child));
+                    assert!(!composite.intersects(neighbour));
+                    if width == 1600 {
+                        assert!(
+                            (composite.top() - neighbour.top()).abs() < 1.0,
+                            "short composite must share a normal Preferences row: {composite:?} {neighbour:?}"
+                        );
+                        assert!(composite.right() < neighbour.left(), "declared left-to-right order");
+                        assert!((parent.top() - child.top()).abs() < 1.0);
+                        assert!(parent.right() < child.left(), "parent and child share one compact cell");
+                    } else {
+                        assert!(neighbour.top() > composite.bottom(), "a genuinely narrow page falls back to a full composite row");
+                    }
+                    let labels = if language == "de" { ["Schatten", "Weichheit", "Kanten"] } else { ["Shadow", "Softness", "Edges"] };
+                    let parts = [
+                        rect(&format!("dialog:label:{}", labels[0])),
+                        rect(&format!("prefs:theme_option_switch:{}", labels[0])),
+                        rect(&format!("dialog:label:{}", labels[1])),
+                        rect(&format!("dialog:slider:{}", labels[1])),
+                        rect("prefs:theme_option_readout:softness"),
+                        rect(&format!("dialog:label:{}", labels[2])),
+                        rect(&format!("dialog:slider:{}", labels[2])),
+                        rect("prefs:theme_option_readout:edges"),
+                    ];
+                    for (i, part) in parts.iter().enumerate() {
+                        assert!(body.contains_rect(*part), "{base} {language} width={width}: {part:?} outside {body:?}");
+                        for other in parts.iter().skip(i + 1) {
+                            assert!(!part.intersects(*other), "{base} {language} width={width}: {part:?} overlaps {other:?}");
+                        }
+                    }
+                    assert!(rect(&format!("dialog:slider:{}", labels[1])).width() >= Tokens::get().space_24 * 2.0, "retain a usable slider track");
+                    let control = rect(&format!("dialog:control:{}", labels[2]));
+                    let track = rect(&format!("dialog:slider_track:{}", labels[2]));
+                    let readout = rect("prefs:theme_option_readout:edges");
+                    let t = Tokens::get();
+                    let natural_width = |text: &str| {
+                        h.ctx.fonts_mut(|fonts| {
+                            fonts.layout_no_wrap(text.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink).size().x.ceil()
+                        })
+                    };
+                    assert!((rect(&format!("dialog:label:{}", labels[2])).width() - natural_width(labels[2]) - t.space_4).abs() <= 1.0);
+                    assert!((readout.width() - natural_width("5.5px")).abs() <= 1.0, "readout must retain its natural width");
+                    let reserved_readout = ["0px", "10px", "5.5px", "0.5px", "9.5px"].into_iter().map(natural_width).fold(0.0, f32::max);
+                    assert!(neighbour.expand(1.0).contains_rect(control));
+                    assert!(control.contains_rect(track) && control.contains_rect(readout));
+                    assert!(
+                        (track.width() - (control.width() - reserved_readout - t.space_8 - t.space_4)).abs() <= 1.0,
+                        "standalone slider must fill the width left by its natural label and readout: {base} {language} width={width}: {control:?} {track:?} {readout:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn theme_options_ui_wide_composite_dropdown_and_advanced_keep_order() {
+        for base in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"theme_import":theme_options_fixture(base, 12),"open":"Interface"}));
+            h.frames(3);
+            let rect = |id: &str| crate::scenario::rect_of(&format!("prefs:theme_option:{id}")).unwrap();
+            assert!(rect("opacity").center().x < rect("warm").center().x);
+            assert!((rect("opacity").top() - rect("warm").top()).abs() < 1.0);
+            assert!(rect("palette").top() > rect("warm").top());
+            assert!(rect("radius").top() > rect("palette").top(), "four choices occupy a full row");
+            let composite = crate::scenario::rect_of("prefs:theme_option_cell:shadow").unwrap();
+            assert!(composite.contains_rect(rect("shadow")) && composite.contains_rect(rect("softness")));
+            assert!(crate::scenario::rect_of("prefs:theme_option_cell:softness").is_none(), "child is not an eleventh cell");
+            super::reveal_preference(&mut h, "dialog:Palette:Warm");
+            h.step(&json!({"click":{"handle":"dialog:Palette:Warm"}})).unwrap();
+            h.frames(2);
+            let id = format!("options-{base}-12");
+            assert_eq!(h.app.preferences.theme_options[&id]["palette"], "v2");
+            super::reveal_preference(&mut h, "prefs:theme_option_switch:Shadow");
+            h.step(&json!({"click":{"handle":"prefs:theme_option_switch:Shadow"}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.theme_options[&id]["shadow"], false);
+            let saved = h.app.preferences.theme_options[&id].clone();
+            let track = crate::scenario::rect_of("dialog:slider_track:Softness").unwrap();
+            h.step(&json!({"click":[track.center().x,track.center().y]})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.theme_options[&id], saved, "inactive child is inert and retains its value");
+            super::reveal_preference(&mut h, "prefs:theme_option:pattern");
+            h.step(&json!({"click":{"handle":"dialog:Pattern"}})).unwrap();
+            h.frames(2);
+            assert!(crate::scenario::handle_at("dialog:Pattern:Plain").is_some(), "six choices use a dropdown");
+            h.step(&json!({"click":{"handle":"dialog:Pattern:Plain"}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.theme_options[&id]["pattern"], "v6");
+            assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_none());
+            super::reveal_preference(&mut h, "prefs:theme_options_more");
+            h.step(&json!({"click":{"handle":"prefs:theme_options_more"}})).unwrap();
+            h.frames(2);
+            assert!(rect("extra").top() > rect("compact").top());
+            assert!((rect("extra").top() - rect("outline").top()).abs() < 1.0);
+        }
+    }
+
+    #[test]
+    fn theme_options_ui_opacity_live_reset_and_cancel_use_the_existing_path() {
+        for base in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            control(&mut h.app, &json!({"theme_import":theme_options_fixture(base, 1)})).unwrap();
+            h.call("ui.prefs", json!({"open":"Interface"}));
+            h.frames(3);
+            let full = Tokens::get();
+            let file = active_theme_file(&h.app).unwrap();
+            let mut invalid_saved = h.app.preferences.clone();
+            invalid_saved.theme_options.entry(file.id.clone()).or_default().insert("opacity".into(), json!(20));
+            assert_eq!(resolved_theme(&invalid_saved, file), full, "saved preference fallback stays at the theme default");
+            assert_eq!(invalid_saved.theme_options[&file.id]["opacity"], 20, "fallback must retain the raw saved value");
+            super::reveal_preference(&mut h, "dialog:slider:Opacity");
+            let slider = crate::scenario::rect_of("dialog:slider_track:Opacity").unwrap();
+            h.step(&json!({"click":[slider.center().x,slider.center().y]})).unwrap();
+            h.frames(2);
+            let id = format!("options-{base}-1");
+            let value = h.app.preferences.theme_options[&id]["opacity"].as_f64().unwrap();
+            assert!((40.0..100.0).contains(&value));
+            assert!(Tokens::get().panel.a() < full.panel.a());
+            assert_eq!(Tokens::get().text, full.text);
+            assert!(h.app.prefs_window.open, "editing must keep the same Preferences window");
+            h.step(&json!({"click":{"handle":"prefs:theme_options_reset"}})).unwrap();
+            h.frames(2);
+            assert_eq!(Tokens::get(), full);
+            h.call("ui.prefs", json!({"theme_options":{(id.clone()):{"opacity":60}}}));
+            h.frames(2);
+            assert!(Tokens::get().panel.a() < full.panel.a());
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            h.frames(2);
+            assert_eq!(Tokens::get(), full);
+            assert!(!h.app.preferences.theme_options.contains_key(&id));
+        }
+    }
+
+    #[test]
+    fn theme_options_provider_registry_filters_unknown_and_retains_unavailable() {
+        use crate::theme_options::{Availability, Provider};
+        let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1","name":"Providers","base":"dark","options":[
+            {"id":"blur","type":"range","default":0},
+            {"id":"tab_colours","type":"bool","default":true},
+            {"id":"tab_fade_ms","type":"range","default":100},
+            {"id":"dependent","type":"bool","default":true,"parent":"tab_colours"},
+            {"id":"custom","type":"bool","default":false,"label":{"en":"Custom","de":"Eigene"}},
+            {"id":"opacity","type":"range","default":100}
+        ]}))
+        .unwrap_err();
+        assert!(file.contains("more than one child"));
+        let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1","name":"Providers","base":"dark","options":[
+            {"id":"blur","type":"range","default":0}, {"id":"tab_colours","type":"bool","default":true},
+            {"id":"tab_fade_ms","type":"range","default":100},
+            {"id":"custom","type":"bool","default":false,"label":{"en":"Custom","de":"Eigene"}},
+            {"id":"opacity","type":"range","default":100}
+        ]}))
+        .unwrap();
+        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS, Availability::Available);
+        assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["opacity", "blur", "tab_colours", "tab_fade_ms", "custom"]);
+        assert_eq!(rows[0].label, "Deckkraft");
+        assert_eq!(rows[4].label, "Eigene");
+        assert_eq!(theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS, Availability::Available)[4].label, "Custom", "English fallback");
+        let providers = [Provider {
+            id: "blur",
+            label: "prefs.theme_option_opacity",
+            help: "prefs.theme_option_opacity_help",
+            availability: || Availability::Unavailable("prefs.theme_options_unavailable"),
+            apply: |_, _| {},
+        }];
+        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["blur", "custom"]);
+        assert_eq!(rows[0].reason.as_deref(), Some("Unavailable on this device"));
+        // The internal fixture goes through the real kit. No fake provider is shipped.
+        for dark in [false, true] {
+            crate::theme::set_custom(None);
+            crate::theme::set_dark(dark);
+            let mut values = crate::theme_files::effective_values(&file, &BTreeMap::new()).0;
+            let before = values.clone();
+            let ctx = crate::fonts::test_context();
+            let mut draw = |events| {
+                crate::scenario::clear_handles();
+                crate::test_support::frame(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                        events,
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui_kit::scope(ui, |ui| {
+                            ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                        });
+                    },
+                );
+            };
+            draw(vec![]);
+            assert!(crate::scenario::rect_of("prefs:theme_option_reason:blur").is_some());
+            let at = crate::scenario::handle_at("dialog:slider:Opacity").unwrap();
+            draw(crate::test_support::pointer(at, true));
+            draw(crate::test_support::pointer(at, false));
+            assert_eq!(values, before, "unavailable controls stay visible and inert");
+        }
+    }
+
+    #[test]
+    fn blur_slider_reserves_readout_meter_and_disabled_reason() {
+        use crate::theme_files::OptionValue;
+        use crate::theme_options::Availability;
+        let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        let file = crate::theme_files::from_value(&source).unwrap();
+        for dark in [false, true] {
+            crate::theme::set_custom(None);
+            crate::theme::set_dark(dark);
+            for available in [Availability::Available, Availability::Unavailable("prefs.theme_options_unavailable")] {
+                let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, available);
+                for radius in [0.0, 1.0, 8.0, 9.0, 18.0, 33.0, 40.0, 18.25] {
+                    let ctx = crate::fonts::test_context();
+                    let mut values = crate::theme_files::effective_values(&file, &BTreeMap::new()).0;
+                    values.insert("blur".into(), OptionValue::Num(radius));
+                    let before = values.clone();
+                    let mut output = egui::FullOutput::default();
+                    for _ in 0..2 {
+                        crate::scenario::clear_handles();
+                        output = crate::test_support::frame(
+                            &ctx,
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+                                ..Default::default()
+                            },
+                            |ui| {
+                                ui_kit::scope(ui, |ui| {
+                                    ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                                })
+                            },
+                        );
+                    }
+                    assert_eq!(values, before, "drawing must preserve fractional intent");
+                    let meter = crate::scenario::rect_of("prefs:blur_cost").unwrap();
+                    let readout = crate::scenario::rect_of("prefs:theme_option_readout:blur").unwrap();
+                    let slider = crate::scenario::rect_of("dialog:slider_track:Blur behind panels").unwrap();
+                    assert!(slider.width() > 300.0, "standalone blur fills remaining row width");
+                    assert!(slider.right() <= readout.left() && readout.right() <= meter.left());
+                    assert_eq!(crate::scenario::rect_of("prefs:theme_option_reason:blur").is_some(), available != Availability::Available);
+                    let mut heights = Vec::new();
+                    for clipped in &output.shapes {
+                        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                            if let egui::Shape::Rect(rect) = shape
+                                && meter.contains_rect(rect.rect)
+                            {
+                                heights.push(rect.rect.height());
+                            }
+                        });
+                    }
+                    assert_eq!(heights, if radius == 0.0 { vec![2.0] } else { vec![4.0, 6.0, 8.0, 11.0, 14.0] });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blur_availability_preserves_saved_intent_and_parent_state() {
+        use crate::theme_options::{Availability, Provider};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let source = json!({"format":"solidcraft-theme/1","name":"Blur parent","base":"dark","options":[
+            {"id":"enabled","type":"bool","default":true}, {"id":"blur","type":"range","default":0,"parent":"enabled"},
+            {"id":"amount","type":"range","default":5,"min":0,"max":10,"step":1,"parent":"enabled"}
+        ]});
+        control(&mut h.app, &json!({"theme_import":source,"theme_options":{"blur-parent":{"blur":18.25,"amount":7.5}}})).unwrap();
+        let file = active_theme_file(&h.app).unwrap().clone();
+        assert_eq!(file.options.iter().find(|o| o.id == "blur").unwrap().parent, None, "reserved blur ignores authored parenting");
+        assert_eq!(file.options.iter().find(|o| o.id == "amount").unwrap().parent.as_deref(), Some("enabled"));
+        let saved = h.app.preferences.theme_options.clone();
+        let values = effective_theme_options(&h.app.preferences, &file).0;
+        for reason in ["prefs.blur_software", "prefs.blur_web", "prefs.blur_reduce_transparency"] {
+            assert_eq!(crate::theme_options::blur_radius(&file, &values, Availability::Unavailable(reason)), 0.0);
+            assert_eq!(crate::theme_options::blur_radius(&file, &values, Availability::Available), 18.25);
+        }
+        assert_eq!(h.app.preferences.theme_options, saved);
+        let providers = [
+            Provider { id: "enabled", label: "", help: "", availability: || Availability::Unavailable("prefs.blur_software"), apply: |_, _| {} },
+            Provider {
+                id: "blur",
+                label: "prefs.theme_option_blur",
+                help: "prefs.theme_option_blur_help",
+                availability: || Availability::Available,
+                apply: |_, _| {},
+            },
+        ];
+        assert_eq!(
+            crate::theme_options::availability(&file, "amount", &providers, Availability::Available),
+            Availability::Unavailable("prefs.blur_software")
+        );
+        assert_eq!(
+            crate::theme_options::availability(&file, "blur", &providers, Availability::Available),
+            Availability::Available,
+            "standard blur remains independent of the unavailable custom parent"
+        );
+        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        let parent = rows.iter().find(|r| r.definition.id == "enabled").unwrap();
+        let child = rows.iter().find(|r| r.definition.id == "amount").unwrap();
+        let blur = rows.iter().find(|r| r.definition.id == "blur").unwrap();
+        assert!(parent.reason.is_some());
+        assert_eq!(child.reason, parent.reason, "the genuine custom child inherits its parent's unavailable reason");
+        assert!(blur.reason.is_none(), "the reserved blur control is unaffected by custom-parent availability");
+        let reduced = std::rc::Rc::new(std::cell::Cell::new(true));
+        let reading = reduced.clone();
+        h.app.services.reduce_transparency = Some(Box::new(move |_| Some(reading.get())));
+        assert_eq!(blur_availability(&h.app), Availability::Unavailable("prefs.blur_reduce_transparency"));
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_values"]["blur"], 18.25);
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "OS unavailability preserves requested intent");
+        assert_eq!(h.app.preferences.theme_options, saved);
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        assert_eq!(h.app.blur.counters().markers_emitted, 0);
+        reduced.set(false);
+        assert_ne!(blur_availability(&h.app), Availability::Unavailable("prefs.blur_reduce_transparency"));
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "renderer retains raw intent even without a GPU");
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        control(&mut h.app, &json!({"theme_options":{"blur-parent":{"enabled":false}}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "an inactive custom parent cannot turn independent standard blur off");
+        assert_eq!(crate::theme::blur_intent(&h.ctx).radius, 18.25);
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_values"]["enabled"], false);
+        assert_eq!(reply["theme_option_values"]["amount"], 7.5, "an inactive custom child retains its saved value");
+        assert_eq!(h.app.preferences.theme_options["blur-parent"]["blur"], 18.25);
+        control(&mut h.app, &json!({"theme_options":{"blur-parent":{"enabled":true}}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25);
+        assert_eq!(h.app.preferences.theme_options["blur-parent"]["amount"], 7.5);
+        let counts = h.app.blur.counters();
+        assert_eq!((counts.textures_created, counts.markers_emitted, counts.markers_drawn, counts.live_bytes), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn blur_notices_dismiss_by_problem_identity_and_preserve_raw_json() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"theme_import":option_theme_file("Notice blur"),"open":"Interface"}));
+        h.app.preferences.theme_options.insert("notice-blur".into(), BTreeMap::from([("blur".into(), json!({"future":18}))]));
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_some());
+        h.step(&json!({"click":{"handle":"prefs:theme_notice_dismiss:blur"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_none());
+        assert_eq!(h.app.preferences.theme_options["notice-blur"]["blur"], json!({"future":18}));
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_notices"], json!([{"id":"blur","kind":"wrong_type"}]));
+        h.app.preferences.theme_options.get_mut("notice-blur").unwrap().insert("blur".into(), json!({"future":19}));
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_some(), "changed raw value must reappear");
+        h.call(
+            "ui.prefs",
+            json!({"theme_import":{"format":"solidcraft-theme/1","name":"Future blur","base":"dark","requires":2,
+            "options":[{"id":"blur","type":"range","default":18}]}}),
+        );
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_some());
+        assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
+        h.step(&json!({"click":{"handle":"prefs:theme_notice_dismiss:newer"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_none());
+        assert!(active_theme_file(&h.app).unwrap().options.is_empty(), "unsupported tables were discarded, never auto-restored");
+        h.app.preferences.custom_themes.iter_mut().find(|f| f.id == "future-blur").unwrap().requires = 3;
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_some());
+        for identity in 0..80 {
+            h.app.blur_session.dismiss(identity);
+        }
+        assert!(!h.app.blur_session.dismissed(0), "dismissal storage is bounded");
+        assert!(h.app.blur_session.dismissed(79));
+    }
+
+    fn option_theme_file(name: &str) -> serde_json::Value {
+        json!({
+            "format": "solidcraft-theme/1", "name": name, "base": "dark", "colors": {"panel": "#112233"},
+            "options": [
+                {"id":"enabled", "type":"bool", "default":false, "label":{"en":"Enabled", "de":"Aktiv"}, "help":{"en":"Use the overlay", "de":"Farben verwenden"}},
+                {"id":"amount", "type":"range", "default":5, "min":0, "max":10, "step":1, "unit":"px", "advanced":true, "section":"Details"},
+                {"id":"style", "type":"choice", "default":"warm", "parent":"enabled", "values":[{"id":"warm", "label":{"en":"Warm", "de":"Warmton"}}, {"id":"cool", "label":{"en":"Cool"}}]},
+                {"id":"blur", "type":"range", "default":0}
+            ],
+            "overlays": [{"when":{"opt":"enabled", "eq":true}, "colors":{"panel":"#abcdef"}}]
+        })
+    }
+
+    #[test]
+    fn sketch_checkbox_bindings_edit_only_their_own_fields() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme}));
+            h.call("ui.prefs", json!({"open":"Sketch"}));
+            let original = h.app.preferences.clone();
+            let session = (h.app.session.auto_project, h.app.ui.pick_bodies);
+            let mut expected = serde_json::to_value(&original).unwrap();
+            for (field, label) in [
+                ("sketch_tracking_points", "prefs.sketch.tracking_points"),
+                ("sketch_tracking_guides", "prefs.sketch.tracking_guides"),
+                ("sketch_recent_snap", "prefs.sketch.recent_snap"),
+                ("sketch_align_points", "prefs.sketch.align_points"),
+                ("line_drag_draws_one", "prefs.line_drag_draws_one"),
+                ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
+                ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
+                ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+                ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
+                ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+                ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
+                ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
+                ("project_options_dialog", "prefs.sketch.project_options"),
+                ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
+                ("sketch_open_look_at", "prefs.sketch_open_look_at"),
+                ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
+                ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
+                ("select_other_hidden", "prefs.sketch.select_other_hidden"),
+                ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
+            ] {
+                h.app.prefs_window.filter = h.app.tr(label).into();
+                h.frames(5);
+                let handle = format!("prefs:{field}");
+                super::reveal_preference(&mut h, &handle);
+                let legacy = match field {
+                    "sketch_auto_dimensions" => Some("Dimension new shapes"),
+                    "sketch_auto_locate" => Some("Also place them from the origin (fully constrained)"),
+                    "select_other_hidden" => Some("Select hidden geometry with Select Other"),
+                    _ => None,
+                };
+                if let Some(legacy) = legacy {
+                    assert_eq!(crate::scenario::rect_of(&format!("dialog:{legacy}")), crate::scenario::rect_of(&handle));
+                }
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected[field] = json!(!expected[field].as_bool().unwrap());
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field}");
+                assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), session, "{field} leaves session values alone");
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, original);
+        }
+    }
+
+    #[test]
+    fn sketch_cards_tiles_and_session_controls_preserve_apply_defaults_and_cancel() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
+            // Opening the page must retain a non-default session, too.
+            h.app.session.auto_project = false;
+            h.app.ui.pick_bodies = true;
+            let original = Snapshot::take(&h.app);
+            h.call("ui.prefs", json!({"open":"Sketch"}));
+            assert!(original.matches(&h.app));
+            let mut expected = serde_json::to_value(&h.app.preferences).unwrap();
+            for (key, choice) in
+                [("previous", SketchExitView::Previous), ("keep", SketchExitView::Keep), ("unless_rotated", SketchExitView::UnlessRotated)]
+            {
+                h.app.prefs_window.filter = h.app.tr("prefs.sketch_exit_view").into();
+                h.frames(5);
+                let handle = format!("prefs:sketch_exit_view:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected["sketch_exit_view"] = serde_json::to_value(choice).unwrap();
+                assert_eq!(h.app.preferences.sketch_exit_view, choice);
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "only the exit enum changes");
+            }
+            for (key, label) in [
+                ("sketch_state_icons", "prefs.sketch.state_icons"),
+                ("sketch_conflict_colour", "prefs.sketch.conflict_colour"),
+                ("hide_constraint_glyphs_zoomed_out", "prefs.sketch.hide_glyphs"),
+            ] {
+                h.app.prefs_window.filter = h.app.tr(label).into();
+                h.frames(5);
+                let handle = format!("prefs:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected[key] = json!(false);
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{key} changes only its field");
+            }
+            for (key, bodies) in [("faces_edges", false), ("bodies", true), ("faces_edges", false)] {
+                h.app.prefs_window.filter = h.app.tr("prefs.sketch.click_selects").into();
+                h.frames(5);
+                let handle = format!("prefs:pick_bodies:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                assert_eq!(h.app.ui.pick_bodies, bodies);
+                assert!(!h.app.session.auto_project);
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
+            }
+            h.app.prefs_window.filter = h.app.tr("ui.project_face_edges_sketch").into();
+            h.frames(5);
+            super::reveal_preference(&mut h, "prefs:auto_project");
+            h.step(&json!({"click":{"handle":"prefs:auto_project"}})).unwrap();
+            assert!(h.app.session.auto_project);
+            assert!(!h.app.ui.pick_bodies);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
+            assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original.prefs).unwrap(), "unapplied tile choices are held back");
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = Snapshot::take(&h.app);
+            let mut reloaded = SolveApp::new(Default::default(), Default::default());
+            reloaded.load_prefs(&h.app.prefs());
+            assert_eq!(reloaded.preferences, h.app.preferences, "card and tile values survive the existing saved representation");
+
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            let reset = serde_json::to_value(&h.app.preferences).unwrap();
+            let defaults = serde_json::to_value(Prefs::default()).unwrap();
+            for (field, owner) in FIELD_PAGES {
+                assert_eq!(
+                    &reset[*field],
+                    if *owner == Some(PAGE_SKETCH) { &defaults[*field] } else { &expected[*field] },
+                    "{field}: only Sketch resets"
+                );
+            }
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
+
+            // The session fields also roll back when the page was opened with the opposite values.
+            original.clone().restore(&mut h.app);
+            h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert!(original.matches(&h.app));
+        }
+    }
+
+    #[test]
+    fn sketch_disabled_dependencies_keep_their_stored_choices() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Sketch","sketch_auto_locate":true}));
+        for (query, parent, child) in [
+            ("prefs.sketch.drawing", "sketch_auto_dimensions", "sketch_auto_locate"),
+            ("prefs.sketch.snapping_guides", "sketch_tracking_guides", "sketch_tracking_points"),
+        ] {
+            h.app.prefs_window.filter = h.app.tr(query).into();
+            h.frames(5);
+            for enabled in [false, true, false] {
+                set(&mut h.app, &json!({(parent):enabled, (child):true})).unwrap();
+                h.frames(5);
+                let handle = format!("prefs:{child}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                let prefs = serde_json::to_value(&h.app.preferences).unwrap();
+                assert_eq!(prefs[parent], enabled);
+                assert_eq!(prefs[child], !enabled, "a disabled {child} retains true; an enabled one toggles");
+            }
+        }
+    }
+
+    #[test]
+    fn sketch_shift_legend_updates_in_the_checkbox_release_frame() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Sketch"}));
+            h.app.prefs_window.filter = h.app.tr("prefs.selecting").into();
+            h.frames(5);
+            super::reveal_preference(&mut h, "prefs:selection_shift_add_only");
+            for enabled in [true, false] {
+                let at = crate::scenario::rect_of("prefs:selection_shift_add_only").unwrap().center();
+                h.frame_with(crate::test_support::pointer(at, true));
+                h.frame_with(crate::test_support::pointer(at, false));
+                assert_eq!(h.app.preferences.selection_shift_add_only, enabled);
+                let mut actions = Vec::new();
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            actions.push(text.galley.job.text.clone());
+                        }
+                    });
+                }
+                assert_eq!(actions.iter().filter(|text| text.as_str() == h.app.tr("prefs.add_item")).count(), usize::from(enabled));
+                assert_eq!(actions.iter().filter(|text| text.as_str() == h.app.tr("prefs.toggle_item")).count(), if enabled { 1 } else { 2 });
+                let primary = crate::tool_modifiers::ctrl_name_for(crate::tool_modifiers::Platform::of(&h.ctx));
+                assert!(actions.iter().any(|text| text == primary), "the live platform keycap remains visible");
+            }
+        }
+    }
+
+    #[test]
+    fn theme_options_raw_values_default_while_theme_api_clamps() {
+        use crate::theme_files::{OptionNotice, OptionNoticeKind, OptionValue};
+        use solidcraft_engine::schema::ui_prefs::ThemeOptionNoticeKind;
+        let file = crate::theme_files::from_value(&option_theme_file("Options A")).unwrap();
+        for (raw, clamped) in [(-1.0, 0.0), (20.0, 10.0)] {
+            let (values, notices) = crate::theme_files::effective_values(&file, &BTreeMap::from([("amount".into(), OptionValue::Num(raw))]));
+            assert_eq!(values["amount"], OptionValue::Num(clamped));
+            assert_eq!(notices, [OptionNotice { id: "amount".into(), kind: OptionNoticeKind::Clamped }]);
+
+            let mut prefs = Prefs::default();
+            prefs.theme_options.insert(file.id.clone(), BTreeMap::from([("amount".into(), json!(raw))]));
+            let saved = prefs.theme_options.clone();
+            let (values, notices) = effective_theme_options(&prefs, &file);
+            assert_eq!(values["amount"], OptionValue::Num(5.0));
+            assert_eq!(notices.len(), 1);
+            assert_eq!((notices[0].id.as_str(), notices[0].kind), ("amount", ThemeOptionNoticeKind::OutOfRange));
+            assert_eq!(prefs.theme_options, saved);
+        }
+    }
+
+    #[test]
+    fn tabs_preferences_validate_atomically_restore_safely_and_preserve_export_defaults() {
+        for base in ["dark", "light"] {
+            let file = crate::theme_files::tab_fixture(base);
+            let source = serde_json::to_value(&file).unwrap();
+            let mut h = crate::scenario::Harness::new();
+            for invalid in [json!(false), json!({"sketch":{}}), json!({"SKETCH":{"error":"#ffffff"}}), json!({"SKETCH":{"panel":"bad"}})] {
+                let mut damaged = source.clone();
+                damaged["tabs"] = invalid;
+                let before = h.app.preferences.clone();
+                let error = control(&mut h.app, &json!({"custom_themes":[damaged],"theme":file.id,"ui_scale":1.5,"open":"Interface"})).unwrap_err();
+                assert!(error.contains("tabs"), "{error}");
+                assert_eq!(h.app.preferences, before);
+                assert!(!h.app.prefs_window.open);
+                h.app.load_prefs(&json!({"preferences":{"custom_themes":[damaged,source],"theme":file.id,"zoom_reverse":true}}).to_string());
+                assert_eq!(h.app.preferences.custom_themes.len(), 2);
+                assert!(h.app.preferences.custom_themes[0].tabs.is_empty());
+                assert_eq!(h.app.preferences.custom_themes[1].tabs, file.tabs);
+                assert!(h.app.preferences.zoom_reverse);
+            }
+            let out = control(&mut h.app, &json!({"custom_themes":[source],"theme":file.id,"theme_options":{&file.id:{"tab_colours":false,"tab_fade_ms":123}},"theme_export":true})).unwrap();
+            assert_eq!(out["theme_file"]["tabs"], serde_json::to_value(&file.tabs).unwrap());
+            assert_eq!(out["theme_file"]["options"][0]["default"], true);
+            assert_eq!(out["theme_file"]["options"][1]["default"], 240.0);
+            assert_eq!(out["theme_option_values"]["tab_fade_ms"], 123.0, "step is a control increment, never rounding");
+            assert_eq!(out["theme_option_defs"].as_array().unwrap().iter().find(|o| o["id"] == "tab_fade_ms").unwrap()["step"], 20.0);
+            let mut restored = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(restored.preferences.custom_themes, h.app.preferences.custom_themes);
+            assert_eq!(restored.preferences.theme_options, h.app.preferences.theme_options);
+        }
+    }
+
+    #[test]
+    fn tabs_followed_reload_updates_surfaces_without_losing_saved_options() {
+        let mut h = crate::scenario::Harness::new();
+        let mut source = crate::theme_files::export_file(&crate::theme_files::tab_fixture("dark"));
+        let path = h.dir.join("tabs.json");
+        std::fs::write(&path, source.to_string()).unwrap();
+        control(&mut h.app, &json!({"theme_follow":path,"theme_options":{"file-tabs-dark":{"tab_fade_ms":0}}})).unwrap();
+        assert!(h.call("engine.execute", json!({"command":"sketch.create","params":{"plane":"XY"}}))["ok"].as_bool().unwrap());
+        h.frames(2);
+        assert_eq!(Tokens::get().viewport_top, egui::Color32::from_rgb(0x10, 0x31, 0x28));
+        source["tabs"]["SKETCH"]["viewport_top"] = json!("#1a4232");
+        std::fs::write(&path, source.to_string()).unwrap();
+        control(&mut h.app, &json!({"theme_follow":path})).unwrap();
+        h.frames(2);
+        assert_eq!(Tokens::get().viewport_top, egui::Color32::from_rgb(0x1a, 0x42, 0x32));
+        assert_eq!(h.app.preferences.theme_options["file-tabs-dark"]["tab_fade_ms"], 0);
+        source["tabs"]["SKETCH"]["warning"] = json!("#ffffff");
+        std::fs::write(&path, source.to_string()).unwrap();
+        assert!(control(&mut h.app, &json!({"theme_follow":path})).unwrap()["theme_follow_error"].as_str().unwrap().contains("warning"));
+        h.frames(2);
+        assert_eq!(Tokens::get().viewport_top, egui::Color32::from_rgb(0x1a, 0x42, 0x32));
+        control(&mut h.app, &json!({"theme_follow":""})).unwrap();
+        h.frames(2);
+        assert_eq!(Tokens::get(), Tokens::dark());
+    }
+
+    #[test]
+    fn theme_options_direct_definitions_validate_and_restore_safely() {
+        let mut source = option_theme_file("Options A");
+        source["id"] = json!("options-a");
+        let mut other = source.clone();
+        other["id"] = json!("options-b");
+        other["name"] = json!("Options B");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let invalid_tables = [
+            ("options", json!((0..17).map(|i| json!({"id":format!("option_{i}"),"type":"bool","default":true})).collect::<Vec<_>>())),
+            ("options", json!([{ "id":"amount","type":"range","default":5,"min":10,"max":0,"step":1 }])),
+            ("options", json!([{ "id":"amount","type":"range","default":11,"min":0,"max":10,"step":1 }])),
+            ("options", json!([{ "id":"amount","type":"range","default":5,"min":0,"max":10,"step":0 }])),
+            ("options", json!([{ "id":"amount","type":"range","default":"bad","min":0,"max":10,"step":1 }])),
+            ("options", json!([{ "id":"enabled","type":"unknown","default":true }])),
+            ("options", json!([{ "id":"enabled","type":"bool","default":true,"parent":"missing" }])),
+            ("options", json!([{ "id":"a","type":"bool","default":true,"parent":"b" },{ "id":"b","type":"bool","default":true,"parent":"a" }])),
+            ("options", json!([{ "id":"style","type":"choice","default":"missing","values":[{"id":"a","label":{}}] }])),
+            ("overlays", json!((0..33).map(|_| json!({"when":{"opt":"enabled","eq":true},"colors":{"panel":"#abcdef"}})).collect::<Vec<_>>())),
+            ("overlays", json!([{ "when":{"opt":"enabled","eq":1},"colors":{"panel":"#abcdef"} }])),
+            ("overlays", json!([{ "when":{"opt":"unknown","eq":true},"colors":{"panel":"#abcdef"} }])),
+            ("overlays", json!([{ "when":{"opt":"enabled","eq":true},"radii":{"radius_sm":-1} }])),
+        ];
+        for (table, invalid) in invalid_tables {
+            let mut malformed = source.clone();
+            malformed[table] = invalid;
+            assert!(crate::theme_files::from_value(&malformed).is_err(), "{malformed}");
+            let before = app.preferences.clone();
+            let error = control(&mut app, &json!({"custom_themes":[malformed],"ui_scale":1.5,"open":"Interface"})).unwrap_err();
+            assert!(error.contains("custom_themes[0]"), "{error}");
+            assert_eq!(app.preferences, before);
+            assert!(!app.prefs_window.open);
+
+            let mut restored = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            restored.load_prefs(
+                &json!({"preferences":{
+                    "custom_themes":[malformed,other],"theme":"options-a","zoom_reverse":true,
+                    "theme_options":{"options-a":{"amount":99}}
+                }})
+                .to_string(),
+            );
+            assert_eq!(restored.preferences.custom_themes.len(), 2);
+            assert!(restored.preferences.custom_themes[0].options.is_empty());
+            assert!(restored.preferences.custom_themes[0].overlays.is_empty());
+            assert_eq!(restored.preferences.custom_themes[0].colors, restored.preferences.custom_themes[1].colors);
+            assert!(!restored.preferences.custom_themes[1].options.is_empty());
+            assert!(restored.preferences.zoom_reverse);
+            apply(&mut restored, &egui::Context::default());
+            assert_eq!(
+                resolved_theme(&restored.preferences, &restored.preferences.custom_themes[0]).panel,
+                egui::Color32::from_rgb(0x11, 0x22, 0x33)
+            );
+            let out = control(&mut restored, &json!({"ui_scale":1.25})).unwrap();
+            assert_eq!(out["theme_option_defs"], json!([]));
+            assert_eq!(out["theme_option_values"], json!({}));
+            assert_eq!(out["theme_options"]["options-a"]["amount"], 99);
+            assert!(restored.preferences.zoom_reverse);
+        }
+
+        // Reserved fields ignored by import must also be ignored before serde sees an update.
+        source["options"][3] = json!({"id":"blur","type":"range","default":999,"step":null,"unit":false,"label":null,"advanced":"ignored"});
+        let expected = crate::theme_files::from_value(&source).unwrap();
+        control(&mut app, &json!({"custom_themes":[source],"theme":"options-a"})).unwrap();
+        assert_eq!(app.preferences.custom_themes, [expected]);
+        app.preferences.custom_themes[0].options[1].kind =
+            crate::theme_files::OptionKind::Range { default: 5.0, min: 10.0, max: 0.0, step: 1.0, unit: None };
+        let out = control(&mut app, &json!({"ui_scale":1.25})).unwrap();
+        assert_eq!(out["theme_option_defs"], json!([]));
+        assert_eq!(app.preferences.custom_themes[0].colors["panel"], "#112233");
+    }
+
+    #[test]
+    fn theme_options_persist_isolate_reset_remove_and_export_definitions() {
+        let mut h = crate::scenario::Harness::new();
+        let out =
+            control(&mut h.app, &json!({"theme_import":option_theme_file("Options A"), "theme_options":{"options-a":{"enabled":true,"amount":7.5}}}))
+                .unwrap();
+        assert_eq!(out["theme_option_values"]["enabled"], true);
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+        control(&mut h.app, &json!({"theme_import":option_theme_file("Options B"), "theme_options":{"options-b":{"amount":3}}})).unwrap();
+        assert_eq!(control(&mut h.app, &json!({})).unwrap()["theme_option_values"]["enabled"], false);
+        let out = control(&mut h.app, &json!({"theme":"options-a", "theme_export":true})).unwrap();
+        assert_eq!(out["theme_option_values"]["amount"], 7.5);
+        assert_eq!(out["theme_file"]["options"][0]["default"], false);
+        assert_eq!(out["theme_file"]["colors"]["panel"], "#112233");
+        assert_eq!(out["theme_file"]["overlays"][0]["colors"]["panel"], "#abcdef");
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert_eq!(other.preferences.theme_options, h.app.preferences.theme_options);
+        control(&mut other, &json!({"theme_options":{"options-a":{"amount":null}}})).unwrap();
+        assert_eq!(control(&mut other, &json!({})).unwrap()["theme_option_values"]["amount"], 5.0);
+        assert!(other.preferences.theme_options["options-a"].contains_key("enabled"));
+        control(&mut other, &json!({"theme_options":{"options-a":{}}})).unwrap();
+        assert!(!other.preferences.theme_options.contains_key("options-a"));
+        assert!(other.preferences.theme_options.contains_key("options-b"));
+        control(&mut h.app, &json!({"theme_remove":"options-a"})).unwrap();
+        assert!(!h.app.preferences.theme_options.contains_key("options-a"));
+        assert!(h.app.preferences.theme_options.contains_key("options-b"));
+        control(&mut other, &json!({"open":"Interface", "button":"defaults"})).unwrap();
+        assert!(other.preferences.theme_options.is_empty());
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, Tokens::dark().panel);
+        control(
+            &mut h.app,
+            &json!({"theme_import":option_theme_file("Options A"),"theme_options":{"options-a":{"enabled":true}},"open":"Interface"}),
+        )
+        .unwrap();
+        control(&mut h.app, &json!({"button":"apply"})).unwrap();
+        control(&mut h.app, &json!({"button":"defaults"})).unwrap();
+        h.frames(2);
+        assert!(h.app.preferences.theme_options.is_empty());
+        assert_eq!(Tokens::get().panel, Tokens::dark().panel);
+        control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    }
+
+    #[test]
+    fn theme_options_saved_invalid_values_survive_with_defaults_and_notices() {
+        let mut h = crate::scenario::Harness::new();
+        control(&mut h.app, &json!({"theme_import":option_theme_file("Options A")})).unwrap();
+        let mut saved = serde_json::to_value(&h.app.preferences).unwrap();
+        saved["theme_options"] =
+            json!({"options-a":{"enabled":[], "amount":99, "style":"dropped", "removed":{"future":true}}, "unknown-theme":{"anything":null}});
+        saved["zoom_reverse"] = json!(true);
+        saved["ui_scale"] = json!("bad saved field");
+        h.app.preferences = lenient(&saved);
+        assert!(h.app.preferences.zoom_reverse);
+        let out = control(&mut h.app, &json!({"look_at_anim":false})).unwrap();
+        assert_eq!(out["theme_options"], saved["theme_options"]);
+        assert_eq!(out["theme_option_values"], json!({"enabled":false,"amount":5.0,"style":"warm","blur":0.0}));
+        assert_eq!(
+            out["theme_option_notices"],
+            json!([
+                {"id":"amount","kind":"out_of_range"}, {"id":"enabled","kind":"wrong_type"},
+                {"id":"removed","kind":"unknown_option"}, {"id":"style","kind":"unknown_choice"}
+            ])
+        );
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert_eq!(other.preferences.theme_options, h.app.preferences.theme_options);
+        assert!(other.preferences.zoom_reverse);
+    }
+
+    #[test]
+    fn theme_options_control_refuses_entire_mixed_call_before_side_effects() {
+        let mut h = crate::scenario::Harness::new();
+        control(&mut h.app, &json!({"theme_import":option_theme_file("Options A")})).unwrap();
+        h.app.stand_up = Some(vec!["Offered".into()]);
+        h.app.stand_up_note = true;
+        let before = h.app.prefs();
+        for (options, key) in [
+            (json!({"unknown":{"enabled":true}}), "theme_options.unknown"),
+            (json!({"options-a":{"unknown":true}}), "theme_options.options-a.unknown"),
+            (json!({"options-a":{"enabled":1}}), "theme_options.options-a.enabled"),
+            (json!({"options-a":{"amount":10.0000001}}), "theme_options.options-a.amount"),
+            (json!({"options-a":{"amount":-1}}), "theme_options.options-a.amount"),
+            (json!({"options-a":{"style":"missing"}}), "theme_options.options-a.style"),
+            (json!({"options-a":{"amount":8,"enabled":{}},"options-b":{"enabled":true}}), "theme_options.options-a.enabled"),
+        ] {
+            let err = control(
+                &mut h.app,
+                &json!({
+                    "theme_import":option_theme_file("Options B"), "theme_options":options,
+                    "theme":"options-b", "theme_follow":"", "open":"Interface", "button":"defaults", "stand_up":false,
+                    "msaa":4, "default_units":"inch", "up_axis":"y", "ui_scale":1.5
+                }),
+            )
+            .unwrap_err();
+            assert!(err.contains(key), "{err}");
+            assert_eq!(h.app.prefs(), before, "{key}");
+            assert!(!h.app.prefs_window.open && h.app.prefs_window.snapshot.is_none());
+            assert_eq!(h.app.stand_up.as_deref(), Some(["Offered".to_string()].as_slice()));
+            assert!(h.app.stand_up_note);
+        }
+        let err = control(&mut h.app, &json!({"theme_remove":"options-a", "theme_options":{"options-a":{}}})).unwrap_err();
+        assert!(err.contains("theme_options.options-a"));
+        assert_eq!(h.app.prefs(), before);
+        assert!(control(&mut h.app, &json!({"theme_options":{"options-a":{"enabled":true}},"ui_scale":9})).is_err());
+        assert_eq!(h.app.prefs(), before);
+        assert!(control(&mut h.app, &json!({"theme_import":option_theme_file("Options B"),"button":"invalid"})).is_err());
+        assert_eq!(h.app.prefs(), before);
+        assert!(control(&mut h.app, &json!({"theme_options":null})).is_err());
+    }
+
+    #[test]
+    fn theme_options_active_reply_is_localized_ordered_and_matches_schema_types() {
+        use solidcraft_engine::schema::ui_prefs::{PrefsReply, ThemeOptionKind};
+        let mut h = crate::scenario::Harness::new();
+        let out = control(&mut h.app, &json!({"theme_import":option_theme_file("Options A"), "language":"de"})).unwrap();
+        let reply: PrefsReply = serde_json::from_value(out.clone()).unwrap();
+        assert_eq!(reply.options.theme_option_defs.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["blur", "enabled", "amount", "style"]);
+        let defs = &reply.options.theme_option_defs;
+        assert!(defs[0].standard && !defs[0].available);
+        let crate::theme_options::Availability::Unavailable(reason) = blur_availability(&h.app) else { panic!("headless fixture has no GPU") };
+        assert_eq!(defs[0].reason.as_deref(), Some(crate::i18n::Locale::for_language("de").text(reason)));
+        assert_eq!((&defs[1].label, &defs[1].help), (&"Aktiv".to_string(), &"Farben verwenden".to_string()));
+        assert!(defs[1].available && defs[1].reason.is_none());
+        assert!(defs[2].advanced && defs[2].section.as_deref() == Some("Details"));
+        let ThemeOptionKind::Choice { values, .. } = &defs[3].kind else { panic!("choice definition") };
+        assert_eq!(values.iter().map(|v| v.label.as_str()).collect::<Vec<_>>(), ["Warmton", "Cool"]);
+        assert_eq!(serde_json::to_value(reply).unwrap(), out);
+        let out = control(&mut h.app, &json!({"theme":"dark"})).unwrap();
+        assert_eq!(out["theme_option_defs"], json!([]));
+        assert_eq!(out["theme_option_values"], json!({}));
+        assert_eq!(out["theme_option_notices"], json!([]));
+    }
+
+    #[test]
+    fn theme_options_followed_file_uses_its_id_and_reload_keeps_saved_entries() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("follow-options.json");
+        let mut file = option_theme_file("Follow Options");
+        file["base"] = json!("light");
+        std::fs::write(&path, file.to_string()).unwrap();
+        let out = control(&mut h.app, &json!({"theme_follow":path, "theme_options":{"file-follow-options":{"enabled":true,"amount":8}}})).unwrap();
+        assert_eq!(out["theme"], "dark");
+        assert_eq!(out["theme_option_values"]["enabled"], true);
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+        assert!(!h.app.ui.dark);
+        let saved = h.app.prefs();
+        let err = control(&mut h.app, &json!({"theme":"light", "theme_options":{"missing":{}}, "stand_up":false})).unwrap_err();
+        assert!(err.contains("theme_options.missing"));
+        assert_eq!(h.app.prefs(), saved);
+        assert_eq!(active_theme_file(&h.app).unwrap().id, "file-follow-options");
+        let other_path = h.dir.join("other-options.json");
+        std::fs::write(&other_path, option_theme_file("Other Options").to_string()).unwrap();
+        let err = control(&mut h.app, &json!({"theme_follow":other_path,"theme_options":{"file-other-options":{"enabled":42}}})).unwrap_err();
+        assert!(err.contains("theme_options.file-other-options.enabled"), "{err}");
+        assert_eq!(h.app.prefs(), saved);
+        assert_eq!(active_theme_file(&h.app).unwrap().id, "file-follow-options");
+        file["options"][1]["max"] = json!(6);
+        file["options"][1]["default"] = json!(2);
+        std::fs::write(&path, file.to_string()).unwrap();
+        let out = control(&mut h.app, &json!({"theme_follow":path, "theme_export":true})).unwrap();
+        assert_eq!(out["theme_option_values"]["amount"], 2.0);
+        assert_eq!(out["theme_options"]["file-follow-options"]["amount"], 8);
+        assert_eq!(out["theme_option_notices"], json!([{"id":"amount","kind":"out_of_range"}]));
+        assert_eq!(out["theme_file"]["name"], "Follow Options");
+        assert_eq!(out["theme_file"]["options"][1]["default"], 2.0);
+        std::fs::write(&path, "incomplete").unwrap();
+        let out = control(&mut h.app, &json!({"theme_follow":path})).unwrap();
+        assert!(out["theme_follow_error"].is_string());
+        assert_eq!(out["theme_option_values"]["enabled"], true);
+        let out = control(&mut h.app, &json!({"theme_follow":""})).unwrap();
+        assert_eq!(out["dark"], true);
+        assert!(active_theme_file(&h.app).is_none());
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, Tokens::dark().panel);
+        let out = control(&mut h.app, &json!({"theme_follow":path})).unwrap();
+        assert_eq!(out["theme_option_values"], json!({}), "stopping clears the last good file");
+        control(&mut h.app, &json!({"theme_follow":""})).unwrap();
+        std::fs::write(&path, file.to_string()).unwrap();
+        follow_theme_file_for_run(&mut h.app, path.to_str().unwrap()).unwrap();
+        h.frames(2);
+        let out = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(out["theme_follow"], "");
+        assert_eq!(out["theme_option_values"]["enabled"], true);
+        assert_eq!(Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+        assert!(!h.app.ui.dark);
+        let saved = h.app.prefs();
+        let launch = h.app.prefs_window.follow.launch.clone();
+        assert!(control(&mut h.app, &json!({"theme":"dark","theme_options":{"missing":{}}})).is_err());
+        assert_eq!(h.app.prefs(), saved);
+        assert_eq!(h.app.prefs_window.follow.launch, launch);
+        assert_eq!(active_theme_file(&h.app).unwrap().id, "file-follow-options");
+        let out = control(&mut h.app, &json!({"theme":"dark"})).unwrap();
+        assert_eq!(out["dark"], true);
+        assert!(out["theme_followed"].is_null());
+        assert!(h.app.prefs_window.follow.theme().is_none());
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, Tokens::dark().panel);
+    }
+
+    #[test]
+    fn gruvbox_legacy_selection_migrates_on_load_and_preserves_saved_values() {
+        for (old, family, contrast) in crate::theme_files::GRUVBOX_ALIASES {
+            let saved = json!({"theme":old,"theme_options":{
+                family:{"contrast":"standard","unrelated":{"keep":true}},
+                old:{"contrast":"standard","future":42}
+            }});
+            let migrated = lenient(&saved);
+            assert_eq!(migrated.theme, family);
+            assert_eq!(migrated.theme_options[family]["contrast"], contrast);
+            assert_eq!(migrated.theme_options[family]["unrelated"], json!({"keep":true}));
+            assert_eq!(migrated.theme_options[family]["future"], 42);
+            assert!(!migrated.theme_options.contains_key(old));
+            assert_eq!(serde_json::to_value(migrate(migrated.clone())).unwrap(), serde_json::to_value(&migrated).unwrap());
+            let mut h = crate::scenario::Harness::new();
+            h.app.load_prefs(&json!({"preferences":saved}).to_string());
+            assert_eq!(h.app.preferences.theme, family);
+            assert_eq!(h.app.preferences.theme_options[family]["contrast"], contrast);
+            let output: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+            assert_eq!(output["preferences"]["theme"], family);
+            assert_eq!(output["preferences"]["theme_options"][family]["contrast"], contrast);
+        }
+        // An unselected legacy map must not replace an existing canonical contrast.
+        let migrated = lenient(&json!({"theme":"dark","theme_options":{
+            "gruvbox-dark":{"contrast":"soft"},"gruvbox-dark-hard":{"contrast":"hard"}
+        }}));
+        assert_eq!(migrated.theme_options["gruvbox-dark"]["contrast"], "soft");
+    }
+
+    #[test]
+    fn gruvbox_control_legacy_ids_allow_explicit_choices_resets_and_atomic_errors() {
+        let mut h = crate::scenario::Harness::new();
+        for (old, family, contrast) in crate::theme_files::GRUVBOX_ALIASES {
+            let out = control(&mut h.app, &json!({"theme":old})).unwrap();
+            assert_eq!(out["theme"], family);
+            assert_eq!(out["theme_option_values"]["contrast"], contrast);
+            let ids = out["theme_ids"].as_array().unwrap();
+            assert_eq!(ids.iter().filter(|id| id.as_str().is_some_and(|id| id.starts_with("gruvbox-"))).count(), 2);
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{family:{"contrast":"standard"}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "standard");
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{family:{"contrast":null}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "standard");
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{family:{}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "standard");
+            let out = control(&mut h.app, &json!({"theme":old,"theme_options":{old:{"contrast":"hard"},family:{"contrast":"soft"}}})).unwrap();
+            assert_eq!(out["theme_option_values"]["contrast"], "soft", "canonical explicit values win over alias entries");
+            let before = h.app.prefs();
+            assert!(control(&mut h.app, &json!({"theme":old,"open":"Interface","theme_options":{family:{"contrast":"invalid"}}})).is_err());
+            assert_eq!(h.app.prefs(), before, "failed changes do not migrate or open the dialog");
+            assert!(!h.app.prefs_window.open);
+        }
+    }
+
+    #[test]
     fn theme_files_import_apply_export_save_and_remove() {
         use crate::theme::{ColorVision, Tokens};
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         let out = h.call("ui.prefs", json!({"theme": "gruvbox-dark-hard"}));
-        assert_eq!(out["result"]["theme"], "gruvbox-dark-hard", "{out}");
+        assert_eq!(out["result"]["theme"], "gruvbox-dark", "{out}");
+        assert_eq!(out["result"]["theme_option_values"]["contrast"], "hard");
         assert!(out["result"]["theme_ids"].as_array().is_some_and(|ids| ids.len() == 3 + crate::theme_files::builtin().len()), "{out}");
         h.frames(2);
-        let hard = crate::theme_files::find("gruvbox-dark-hard", &[]).map(crate::theme_files::resolve).unwrap();
+        let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert!(h.app.ui.dark);
         assert_eq!(Tokens::get().panel, hard.panel);
         assert_eq!(
@@ -5516,6 +8148,61 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:ok").is_some());
     }
 
+    #[test]
+    fn appearance_popups_own_escape_restore_focus_and_leave_cancel_to_the_next_escape() {
+        for font in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"language":"en","theme":"dark"}));
+            let before = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"Appearance"}));
+            h.frames(3);
+            reveal_preference(&mut h, "prefs:viewport_theme:light");
+            h.step(&json!({"click":{"handle":"prefs:viewport_theme:light"}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Light);
+            let (target, popup) = if font {
+                ("prefs:ui_font", "dialog:Interface font search")
+            } else {
+                reveal_preference(&mut h, "dialog:Background:Color");
+                h.step(&json!({"click":{"handle":"dialog:Background:Color"}})).unwrap();
+                h.frames(2);
+                ("prefs:viewport_background_picker", "color:popover")
+            };
+            reveal_preference(&mut h, target);
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let rect = crate::scenario::rect_of(target).unwrap();
+            assert!(body.contains_rect(rect), "{target} is visible before clicking");
+            let edited = h.app.preferences.clone();
+            assert_ne!(edited, before);
+            h.step(&json!({"click":{"handle":target}})).unwrap();
+            h.frames(2);
+            assert!(crate::scenario::handle_at(popup).is_some() || crate::scenario::rect_of(popup).is_some(), "{target} opens its real popup");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.section == PAGE_APPEARANCE);
+            assert!(h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited, "dismissing {target} retains live changes");
+            assert!(crate::scenario::handle_at(popup).is_none() && crate::scenario::rect_of(popup).is_none());
+            // No pointer input: the actual combo/swatch must have regained keyboard focus.
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(
+                crate::scenario::handle_at(popup).is_some() || crate::scenario::rect_of(popup).is_some(),
+                "{target} reopens from its restored focus"
+            );
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.prefs_window.open && h.app.prefs_window.snapshot.is_none());
+            assert_eq!(h.app.preferences, before, "Escape with no popup cancels and restores the original snapshot");
+        }
+    }
+
     /// Letters typed in the font list's own Search box narrow the list. Preferences' search takes
     /// typing only when no text field has the keyboard, so it must not take these.
     #[test]
@@ -5527,9 +8214,12 @@ mod tests {
         h.step(&json!({"text": "font"})).expect("search");
         h.frames(3);
         let combo = crate::scenario::handle_at("prefs:ui_font").expect("the search finds the font row");
+        let body = crate::scenario::rect_of("prefs:page_body").expect("the Preferences page body");
+        let picker = crate::scenario::rect_of("prefs:ui_font").expect("the font picker bounds");
+        assert!(body.contains_rect(picker) && picker.contains(combo), "the font picker is inside the visible page before clicking");
         h.call("ui.click", json!({"x":combo.x,"y":combo.y}));
         h.frames(2);
-        let search = format!("dialog:{} search", crate::i18n::tr("prefs.font"));
+        let search = format!("dialog:{} search", crate::i18n::tr_label("Interface font"));
         let field = crate::scenario::handle_at(&search).expect("the font list is open");
         h.call("ui.click", json!({"x":field.x,"y":field.y}));
         h.frames(2);
@@ -5582,6 +8272,30 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    /// The validation mode is once per feature by default; set by name or by the command, the
+    /// two stay one setting, the session computes under it, and Restore Defaults on Design brings
+    /// each_feature back. A saved unknown mode reads as the default.
+    #[test]
+    fn validation_defaults_to_each_feature_and_follows_the_command() {
+        use serde_json::json;
+        use solidcraft_engine::kernel::Validation;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
+        assert_eq!(super::lenient(&json!({"validation": "sometimes"})).validation, Validation::EachFeature);
+        assert!(super::set(&mut app, &json!({"validation": "never"})).unwrap_err().contains("each_step, each_feature or off"));
+        let out = super::set(&mut app, &json!({"validation": "each_step"})).unwrap();
+        assert_eq!(out["validation"], "each_step");
+        assert_eq!(super::lenient(&out).validation, Validation::EachStep);
+        // A command runs under the preference.
+        app.run("diagnostics.validation", json!({})).unwrap();
+        assert_eq!(app.session.validation(), Validation::EachStep);
+        // The command sets the preference too.
+        app.run("diagnostics.validation", json!({"mode": "off"})).unwrap();
+        assert_eq!((app.preferences.validation, app.session.validation()), (Validation::Off, Validation::Off));
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
     }
 
     #[test]
@@ -5714,6 +8428,216 @@ mod tests {
     }
 
     #[test]
+    fn general_files_controls_edit_real_limits_and_hosts_in_both_themes() {
+        for theme in ["light", "dark"] {
+            for width in [1468, 480] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.call("ui.resize", json!({"width":width, "height":1100}));
+                let configured = h.call(
+                    "ui.prefs",
+                    json!({"language":"en", "theme":theme, "network_locations":true, "network_hosts":["files.example", "nas.example"]}),
+                );
+                assert!(configured["error"].is_null(), "{theme} {width}: setting up Preferences failed: {configured}");
+                let opened = h.call("ui.prefs", json!({"open":"General"}));
+                assert!(opened["error"].is_null(), "{theme} {width}: opening General failed: {opened}");
+                let initial_body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                for target in [
+                    "dialog:widget:Profile name",
+                    "prefs:profile:save",
+                    "prefs:profile:import",
+                    "prefs:profiles:held:row",
+                    "prefs:profiles:computer:row",
+                ] {
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    assert!(initial_body.contains_rect(rect), "{theme} {width}: {target} {rect:?} leaves {initial_body:?}");
+                }
+                if width == 480 {
+                    let name = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
+                    let save = crate::scenario::rect_of("prefs:profile:save").unwrap();
+                    let import = crate::scenario::rect_of("prefs:profile:import").unwrap();
+                    assert!(save.top() >= name.bottom(), "narrow Save wraps after the independent name entry");
+                    assert!((save.top() - import.top()).abs() < 0.5);
+                }
+                let painted = |h: &crate::scenario::Harness, label: &str| {
+                    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                    h.shapes
+                        .iter()
+                        .find_map(|shape| {
+                            if let egui::Shape::Text(text) = &shape.shape
+                                && text.galley.job.text == label
+                            {
+                                let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                                if body.contains_rect(rect) && shape.clip_rect.contains_rect(rect) {
+                                    return Some(rect);
+                                }
+                            }
+                            None
+                        })
+                        .unwrap_or_else(|| panic!("{theme} {width}: {label} is not fully painted in the page"))
+                };
+                // Reveal the live dropdown, not the full-width layout row's allocation rectangle.
+                super::reveal_preference(&mut h, "dialog:widget:Interface language");
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                let language = painted(&h, "Interface language");
+                assert!((language.left() - body.left()).abs() < 0.75);
+                assert!((crate::scenario::rect_of("dialog:control:Interface language").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+                super::reveal_preference(&mut h, "prefs:autosave_minutes");
+                let autosave = painted(&h, "Autosave every");
+                let autosave_help = crate::scenario::rect_of("dialog:row_help:Autosave every").unwrap();
+                assert!((autosave.left() - body.left()).abs() < 0.75, "the painted autosave label shares the language label's left edge");
+                assert!((autosave_help.left() - autosave.right() - 4.0).abs() < 1.0, "help follows the actual text, not the whole label column");
+                assert!((crate::scenario::rect_of("prefs:autosave_minutes").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+                super::reveal_preference(&mut h, "prefs:autosave_timeline");
+                let timeline = crate::scenario::rect_of("prefs:autosave_timeline").unwrap();
+                let autosave_control = crate::scenario::rect_of("prefs:autosave_minutes").unwrap();
+                assert!((timeline.left() - autosave_control.left()).abs() < 0.5);
+                assert!((timeline.width() - 260.0_f32.min(body.right() - autosave_control.left())).abs() < 0.5);
+                assert!(body.contains_rect(timeline));
+                super::reveal_preference(&mut h, "prefs:max_step_file_mb");
+                super::reveal_preference(&mut h, "dialog:row:Largest file to open");
+                let field = crate::scenario::rect_of("prefs:max_step_file_mb").unwrap();
+                let design = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
+                assert!(
+                    (field.width() - 72.0).abs() < 0.5 && (design.width() - 72.0).abs() < 0.5,
+                    "{theme}: both compound file editors retain their width"
+                );
+                let step_group = crate::scenario::rect_of("dialog:row:Largest file to open: STEP and import").unwrap();
+                let design_group = crate::scenario::rect_of("dialog:row:Largest file to open: Design").unwrap();
+                let step_caption = painted(&h, "STEP and import");
+                let design_caption = painted(&h, "Design");
+                let largest = painted(&h, "Largest file to open");
+                assert!((step_caption.left() - field.left()).abs() < 0.75 && (design_caption.left() - design.left()).abs() < 0.75);
+                assert!((largest.left() - body.left()).abs() < 0.75);
+                assert!((largest.top() - step_caption.top() - 6.0).abs() <= 1.0, "the left label stays in its top-aligned 28 px cell");
+                assert!(step_group.width() >= 90.0 && step_group.width() < 130.0, "{theme}: the subgroup follows its field, unit and caption");
+                if width == 1468 {
+                    assert!((step_caption.top() - design_caption.top()).abs() < 0.5, "{theme}: the actual painted captions share a top baseline");
+                    assert!(
+                        (field.top() - design.top()).abs() < 0.5 && field.right() < design.left(),
+                        "{theme}: independent editors share one visual row"
+                    );
+                    assert!((design_group.left() - step_group.right() - 20.0).abs() < 0.5, "{theme}: compact pair gap");
+                } else {
+                    assert!(design_group.top() > step_group.bottom(), "{theme}: the pair wraps at narrow widths");
+                    assert!((design_group.left() - step_group.left()).abs() < 0.5);
+                }
+                let group = crate::scenario::rect_of("dialog:row:Largest file to open").unwrap();
+                assert!(group.contains_rect(field) && group.contains_rect(design));
+                assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(group));
+                h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
+                h.step(&json!({"key":"A", "cmd":true})).unwrap();
+                h.step(&json!({"text":"4096"})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!(h.app.preferences.max_step_file_mb, 4096);
+                super::reveal_preference(&mut h, "prefs:max_design_file_mb");
+                let field = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
+                h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
+                h.step(&json!({"key":"A", "cmd":true})).unwrap();
+                h.step(&json!({"text":"2048"})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!(h.app.preferences.max_design_file_mb, 2048);
+                assert_eq!(super::file_limits(&h.app.preferences).step, 4096 * solidcraft_engine::io::limits::MB);
+                let before = h.app.preferences.clone();
+                for bad in [json!({"max_step_file_mb":16385}), json!({"max_design_file_mb":255})] {
+                    assert!(h.call("ui.prefs", bad)["error"].is_string());
+                    assert_eq!(h.app.preferences, before, "invalid file limits fail atomically");
+                }
+                super::reveal_preference(&mut h, "prefs:network_host:files.example:remove");
+                h.step(&json!({"click":{"handle":"prefs:network_host:files.example:remove"}})).unwrap();
+                assert_eq!(h.app.preferences.network_hosts, ["nas.example"]);
+                h.step(&json!({"widget":"Allow network locations in designs"})).unwrap();
+                h.frames(3);
+                assert!(!h.app.preferences.network_locations);
+                assert_eq!(h.app.preferences.network_hosts, ["nas.example"], "hiding the chips retains the hosts");
+                assert!(crate::scenario::rect_of("prefs:network_host:nas.example:remove").is_none());
+                super::reveal_preference(&mut h, "prefs:print_face_highlight");
+                let highlight = painted(&h, "Print face highlight");
+                let highlight_help = crate::scenario::rect_of("dialog:row_help:Print face highlight").unwrap();
+                assert!((highlight.left() - body.left()).abs() < 0.75, "the painted highlight label shares the language/autosave left edge");
+                assert!((highlight_help.left() - highlight.right() - 4.0).abs() < 1.0);
+                assert!((crate::scenario::rect_of("prefs:print_face_highlight").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+                let track = crate::scenario::rect_of("dialog:slider_track:Print face highlight").unwrap();
+                // The published rectangle includes the circular handle's endpoint insets.
+                let input_range = track.x_range().shrink(track.height() / 2.5);
+                h.step(&json!({"click":[egui::lerp(input_range, 0.75), track.center().y]})).unwrap();
+                assert!(
+                    (h.app.preferences.print_face_highlight - 0.75).abs() < 0.06,
+                    "{theme} {width}: highlight={} track={track:?} input_range={input_range:?}",
+                    h.app.preferences.print_face_highlight
+                );
+                super::reveal_preference(&mut h, "prefs:check_now");
+                assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_now").unwrap()));
+                assert!(h.app.prefs_window.open);
+                h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+                assert_eq!((h.app.preferences.max_step_file_mb, h.app.preferences.max_design_file_mb), (DEFAULT_STEP_MB, DEFAULT_DESIGN_MB));
+                assert_eq!(h.app.preferences.network_hosts, ["files.example", "nas.example"]);
+                assert!(h.app.preferences.network_locations);
+                assert_eq!(h.app.preferences.print_face_highlight, 0.2);
+            }
+        }
+    }
+
+    #[test]
+    fn general_autosave_rows_apply_cancel_and_defaults_keep_the_effective_interval() {
+        use std::time::Duration;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.step(&json!({"autosave":true})).unwrap();
+        h.app.autosave_minutes = 7.0;
+        super::set_autosave(&mut h.app);
+        h.app.preferences.language = "en".into();
+        h.app.preferences.nav = "tinkercad".into();
+        h.app.preferences.reopen_designs = false;
+        h.app.run("settings.profile.save", json!({"name":"Working"})).unwrap();
+        let profiles = h.app.settings_profiles.list.clone();
+        h.call("ui.prefs", json!({"open":"General"}));
+        super::reveal_preference(&mut h, "prefs:autosave_minutes");
+        super::reveal_preference(&mut h, "prefs:autosave_timeline");
+        let number = crate::scenario::rect_of("prefs:autosave_minutes").unwrap();
+        let timeline = crate::scenario::rect_of("prefs:autosave_timeline").unwrap();
+        assert!((timeline.width() - 260.0).abs() < 0.5, "the timeline stays bounded in the control column");
+        assert!((timeline.left() - number.left()).abs() < 0.5);
+        assert!(timeline.top() >= number.bottom());
+        assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(timeline));
+        h.step(&json!({"click":{"handle":"prefs:autosave_minutes"}, "double":true})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"2.5"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 2.5);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
+        assert_eq!(saved_prefs(&h.app)["autosave_minutes"], 7.0, "an unapplied value is not persisted");
+        h.step(&json!({"click":{"handle":"prefs:apply"}})).unwrap();
+        assert_eq!(saved_prefs(&h.app)["autosave_minutes"], 2.5);
+        super::reveal_preference(&mut h, "prefs:autosave_minutes");
+        h.step(&json!({"click":{"handle":"prefs:autosave_minutes"}, "double":true})).unwrap();
+        h.step(&json!({"key":"A", "cmd":true})).unwrap();
+        h.step(&json!({"text":"0"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 0.0);
+        assert!(h.app.autosave.as_ref().unwrap().interval > Duration::from_secs(365 * 24 * 60 * 60));
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 2.5);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
+        h.call("ui.prefs", json!({"open":"General"}));
+        assert!(h.widget(h.app.tr("prefs.restore_page_defaults")).is_some(), "the translated Preferences caption is visible");
+        assert!(h.widget(h.app.tr("ui.restore_defaults")).is_none(), "the generic caption is absent from Preferences");
+        h.step(&json!({"widget":"Restore page defaults"})).unwrap();
+        assert_eq!(h.app.autosave_minutes, 5.0);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(300));
+        assert_eq!(h.app.preferences.language, crate::i18n::SYSTEM);
+        assert!(h.app.preferences.reopen_designs);
+        assert_eq!(h.app.preferences.nav, "tinkercad", "General's reset leaves other pages alone");
+        assert_eq!(h.app.settings_profiles.list, profiles);
+        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Working"));
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(h.app.preferences.language, "en");
+        assert!(!h.app.preferences.reopen_designs);
+        assert_eq!(h.app.autosave_minutes, 2.5);
+        assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
+    }
+
+    #[test]
     fn graphics_card_picker_selects_named_cards_and_restores_automatic() {
         let dir = std::env::temp_dir().join(format!("solidcraft-graphics-picker-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -5756,6 +8680,79 @@ mod tests {
         assert!(set(&mut app, &json!({"graphics_adapter":"x".repeat(1025)})).is_err());
         assert!(set(&mut app, &json!({"graphics_adapter":"card\nname"})).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The settings `SolveApp::prefs` would write right now, parsed.
+    fn saved_prefs(app: &SolveApp) -> serde_json::Value {
+        serde_json::from_str(&app.prefs()).unwrap()
+    }
+
+    #[test]
+    fn unapplied_changes_are_not_saved_while_the_dialog_is_open() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert_eq!(saved_prefs(&app)["preferences"]["theme"], "dark");
+        assert_eq!(saved_prefs(&app)["preferences"]["sketch_tab_always"], false);
+        // Open the dialog: the snapshot is taken as `show` and the control channel take it.
+        app.prefs_window.open = true;
+        app.prefs_window.snapshot = Some(Snapshot::take(&app));
+        // The Light tile and the Sketch tab box, clicked without Apply.
+        set(&mut app, &json!({"theme": "light", "sketch_tab_always": true})).unwrap();
+        assert_eq!(app.preferences.theme, "light", "the live app has the change");
+        assert!(!app.ui.dark);
+        let held = saved_prefs(&app);
+        assert_eq!(held["preferences"]["theme"], "dark", "a change that was not applied must not be saved");
+        assert_eq!(held["preferences"]["sketch_tab_always"], false);
+        assert_eq!(held["dark"], true, "the Light tile's dark flag is not saved either");
+        // Apply makes the change the baseline: from now on it is saved.
+        app.prefs_window.snapshot = Some(Snapshot::take(&app));
+        let applied = saved_prefs(&app);
+        assert_eq!(applied["preferences"]["theme"], "light");
+        assert_eq!(applied["dark"], false);
+        // A second unapplied change is held back too, and Cancel puts it back.
+        set(&mut app, &json!({"theme": "dark"})).unwrap();
+        assert_eq!(saved_prefs(&app)["preferences"]["theme"], "light", "the second change waits for Apply too");
+        close(&mut app, true);
+        let after = saved_prefs(&app);
+        assert_eq!(after["preferences"]["theme"], "light", "Cancel restores the applied state");
+        assert_eq!(after["dark"], false);
+        assert_eq!(after["preferences"]["sketch_tab_always"], true, "Apply's change stays");
+    }
+
+    #[test]
+    fn settings_the_dialog_cannot_change_keep_saving_while_it_is_open() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.prefs_window.open = true;
+        app.prefs_window.snapshot = Some(Snapshot::take(&app));
+        // A recent file joins while the dialog is open: not a dialog setting, so it is saved.
+        app.home.recent.insert(0, "bracket.solid".to_string());
+        assert_eq!(saved_prefs(&app)["recent"][0], "bracket.solid");
+    }
+
+    #[test]
+    fn shortcut_changes_are_not_saved_while_the_dialog_is_open() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.keymap.custom.insert("file.new".into(), vec!["Ctrl+N".into()]);
+        app.prefs_window.open = true;
+        app.prefs_window.snapshot = Some(Snapshot::take(&app));
+        app.keymap.custom.insert("file.save".into(), vec!["Ctrl+S".into()]);
+        let saved = saved_prefs(&app);
+        assert_eq!(saved["shortcuts"]["file.new"], "Ctrl+N", "the shortcut from before the dialog is saved");
+        assert!(saved["shortcuts"].get("file.save").is_none(), "a shortcut rebound without Apply is not saved");
+    }
+
+    #[test]
+    fn control_channel_holds_unapplied_changes_out_of_the_saved_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.call("ui.prefs", json!({"sketch_tab_always": true}));
+        let saved = saved_prefs(&h.app);
+        assert!(h.app.preferences.sketch_tab_always);
+        assert_eq!(saved["preferences"]["sketch_tab_always"], false, "the control channel's change waits for Apply");
+        h.call("ui.prefs", json!({"button": "apply"}));
+        assert_eq!(saved_prefs(&h.app)["preferences"]["sketch_tab_always"], true, "Apply makes it the saved state");
+        h.call("ui.prefs", json!({"sketch_tab_always": false}));
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(saved_prefs(&h.app)["preferences"]["sketch_tab_always"], true, "Cancel puts back what Apply left");
     }
 
     #[test]
@@ -5875,8 +8872,6 @@ mod tests {
         let nav = h.app.preferences.nav.clone();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         super::reveal_preference(&mut h, "prefs:navigator");
-        let picker = crate::scenario::rect_of("prefs:navigator").unwrap().center();
-        h.call("ui.click", json!({"x":picker.x,"y":picker.y}));
         let cube = crate::scenario::rect_of("prefs:navigator:Cube").unwrap().center();
         assert!(crate::scenario::rect_of("prefs:navigator:Signed axes").is_some());
         h.call("ui.click", json!({"x":cube.x,"y":cube.y}));
@@ -5887,7 +8882,7 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), design);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert_eq!(restored.preferences.navigator_style, NavigatorStyle::Cube);
+        assert_eq!(restored.preferences.navigator_style, NavigatorStyle::Axes, "a change that was not applied is not saved (#9730)");
         let before = h.app.preferences.clone();
         assert!(control(&mut h.app, &json!({"navigator_style":"unknown", "nav":"solidworks"})).is_err());
         assert_eq!(h.app.preferences, before, "invalid settings must fail atomically");
@@ -5924,35 +8919,36 @@ mod tests {
             .collect()
     }
 
-    /// The Interface page's tab colour strip names each tab as the ribbon does, in every language.
+    /// The shipped ribbon uses the same localized tab names as workspace metadata.
     #[test]
-    fn tab_accent_strip_names_the_tabs_as_the_ribbon_does() {
-        use crate::workspace::tab_name;
-        fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
-            match shape {
-                egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
-                _ => {}
-            }
-        }
-        let h = crate::scenario::Harness::new();
+    fn ribbon_names_the_tabs_as_workspace_metadata_does() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":2400,"height":1000}));
         for (lang, want) in [
             ("en", ["Model", "Surface", "Mesh", "Form", "Sheet Metal", "Render"]),
             ("de", ["Modell", "Fläche", "Mesh", "Form", "Blech", "Rendern"]),
             ("fr", ["Modèle", "Surface", "Maillage", "Forme", "Tôlerie", "Rendu"]),
         ] {
+            h.app.preferences.language = lang.into();
+            h.frames(3);
             let _scope = crate::i18n::scope(lang);
-            let got = ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"].map(tab_name);
-            assert_eq!(got, want, "{lang}");
-            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 200.0));
-            let mut out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
-                crate::ui_kit::scope(ui, crate::ui_kit::tab_accent_strip);
-            });
-            out.textures_delta.clear();
+            for (id, name) in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"].into_iter().zip(want) {
+                assert_eq!(crate::workspace::tab_name(id), name, "{lang}");
+                assert_eq!(crate::toolbar::ribbon_label(&h.app, id), name, "{lang}");
+            }
             let mut painted = Vec::new();
-            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
-            for name in want {
-                assert!(painted.iter().any(|p| p == name), "{lang}: the strip paints {painted:?}, not {name}");
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        painted.push(text.galley.job.text.clone());
+                    }
+                });
+            }
+            for id in crate::workspace::visible_tabs(&h.app) {
+                let name = crate::toolbar::ribbon_label(&h.app, id);
+                assert!(crate::scenario::handle_at(&format!("tab:{id}")).is_some(), "{lang}: real ribbon tab {id}");
+                assert!(painted.contains(&name), "{lang}: the ribbon paints {painted:?}, not {name}");
             }
         }
     }
@@ -5979,7 +8975,7 @@ mod tests {
         let rows = || crate::browser::drawn_rows().into_iter().map(|(label, ..)| label).collect::<Vec<_>>();
         assert!(OriginPlaneNames::PLANES.iter().all(|p| rows().iter().any(|r| r == p)), "{:?}", rows());
         let design = h.app.session.doc.to_json();
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.call("ui.prefs", json!({"open":"Design"}));
         super::reveal_preference(&mut h, "prefs:origin_plane_names:top_front_right");
         h.step(&json!({"click":{"handle":"prefs:origin_plane_names:top_front_right"}})).unwrap();
         assert_eq!(h.app.preferences.origin_plane_names, TopFrontRight);
@@ -6014,10 +9010,10 @@ mod tests {
         let before = h.app.preferences.clone();
         assert!(control(&mut h.app, &json!({"origin_plane_names":"top", "nav":"solidworks"})).is_err());
         assert_eq!(h.app.preferences, before, "an unknown naming fails atomically");
-        h.call("ui.prefs", json!({"open":"Interface","origin_plane_names":"xyz"}));
+        h.call("ui.prefs", json!({"open":"Design","origin_plane_names":"xyz"}));
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.origin_plane_names, TopFrontRight, "Cancel takes it back");
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.call("ui.prefs", json!({"open":"Design"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert_eq!(h.app.preferences.origin_plane_names, Xyz, "Restore Defaults: XY, XZ and YZ");
         h.frames(2);
@@ -6043,6 +9039,89 @@ mod tests {
     }
 
     #[test]
+    fn layout_cards_and_toolbar_chips_preserve_transactions_in_both_themes() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1200,"height":1100}));
+            h.call("ui.prefs", json!({"theme":theme,"quick_measure":true,"invert_curved_roll_arrows":true}));
+            h.call("ui.prefs", json!({"open":"Layout"}));
+            let before = h.app.preferences.clone();
+            let doc = h.app.session.doc.to_json();
+            for (key, left, under, browser) in
+                [("left", true, false, false), ("under_browser", true, true, false), ("browser", false, false, true), ("bottom", false, false, false)]
+            {
+                scroll_to_and_click(&mut h, &format!("prefs:history:{key}"));
+                assert_eq!(
+                    (h.app.preferences.timeline_left, h.app.preferences.timeline_under_browser, h.app.preferences.history_in_browser),
+                    (left, under, browser)
+                );
+            }
+            for (key, floating) in [("card", true), ("column", false), ("card", true)] {
+                scroll_to_and_click(&mut h, &format!("prefs:browser:{key}"));
+                assert_eq!(h.app.preferences.browser_float, floating);
+            }
+            for tab in crate::workspace::choosable_tabs() {
+                scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
+                assert!(!crate::workspace::tab_turned_on(&h.app, tab));
+                scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
+                assert!(crate::workspace::tab_turned_on(&h.app, tab));
+            }
+            assert_eq!(h.app.session.doc.to_json(), doc);
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, before, "Cancel restores every Layout edit");
+            h.call("ui.prefs", json!({"open":"Layout"}));
+            scroll_to_and_click(&mut h, "prefs:browser:card");
+            h.call("ui.prefs", json!({"button":"apply"}));
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert!(!h.app.preferences.browser_float);
+            assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert!(h.app.preferences.browser_float, "Cancel after Apply returns to the applied state");
+        }
+    }
+
+    #[test]
+    fn history_preferences_widget_click_reveals_scrolled_content_and_keeps_folds_closed() {
+        let steps: serde_json::Value = serde_json::from_str(include_str!("../tests/scenarios/history_sketches_under_feature.json")).unwrap();
+        let steps = steps.as_array().unwrap();
+        let transition = steps.iter().position(|step| step["params"]["history_sketches"] == "under_feature").unwrap();
+        let mut h = crate::scenario::Harness::new();
+        for step in steps.iter().take(transition) {
+            h.step(step).unwrap();
+        }
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+        h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-10000}));
+        h.frames(60);
+        let at = h.widget("Under their feature").unwrap();
+        let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+        assert!(!page.contains(egui::pos2(at[0] as f32, at[1] as f32)), "the real control begins scrolled out of view");
+        assert!((at[1] as f32) < page.top(), "scrolling to the bottom puts the target above the viewport");
+        assert_eq!(h.app.preferences.history_sketches, HistorySketches::InOrder);
+        h.step(&json!({"widget":"Under their feature", "near":"Sketches in History"})).unwrap();
+        assert_eq!(h.app.preferences.history_sketches, HistorySketches::UnderFeature);
+        let at = h.widget("Under their feature").unwrap();
+        assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains(egui::pos2(at[0] as f32, at[1] as f32)));
+        assert!(h.app.tree.expanded.is_empty(), "revealing a preference does not open history folds");
+        let page_before = crate::scenario::rect_of("prefs:page_body");
+        h.step(&json!({"widget":"Apply"})).unwrap();
+        assert!(h.app.prefs_window.open);
+        assert_eq!(crate::scenario::rect_of("prefs:page_body"), page_before);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        h.step(&steps[transition + 1]).unwrap();
+        assert!(!h.app.prefs_window.open);
+        for step in steps.iter().skip(transition + 2) {
+            h.step(step).unwrap();
+        }
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        h.step(&json!({"widget":"Navigation"})).unwrap();
+        assert_eq!(h.app.prefs_window.section, PAGE_NAVIGATION, "sidebar navigation remains a real click");
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        assert!(!h.app.prefs_window.open);
+    }
+
+    #[test]
     fn history_sketches_defaults_in_order_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"timeline_left": true})).unwrap();
         assert_eq!(old.history_sketches, HistorySketches::InOrder, "designs and settings from before keep the creation order");
@@ -6050,7 +9129,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"timeline_left": true, "timeline_under_browser": true}));
         let design = h.app.session.doc.to_json();
-        h.call("ui.prefs", json!({"open": "Interface"}));
+        h.call("ui.prefs", json!({"open": "Layout"}));
         let row = h.app.tr("prefs.history_sketches").to_string();
         let under = h.app.tr("prefs.history_sketches_under_feature").to_string();
         let handle = format!("dialog:{row}:{under}");
@@ -6070,7 +9149,7 @@ mod tests {
         let before = h.app.preferences.clone();
         assert!(control(&mut h.app, &json!({"history_sketches": "sideways"})).is_err());
         assert_eq!(h.app.preferences, before, "an unknown value changes nothing");
-        h.call("ui.prefs", json!({"open": "Interface"}));
+        h.call("ui.prefs", json!({"open": "Layout"}));
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::InOrder);
         h.call("ui.prefs", json!({"button": "cancel"}));
@@ -6084,7 +9163,7 @@ mod tests {
         assert_eq!(old.dialog_buttons, DialogButtons::Bottom, "settings from before keep the footer");
         assert_eq!(lenient(&json!({"dialog_buttons": "sideways"})).dialog_buttons, DialogButtons::Bottom);
         let mut h = crate::scenario::Harness::new();
-        h.call("ui.prefs", json!({"open": "Interface"}));
+        h.call("ui.prefs", json!({"open": "Layout"}));
         super::reveal_preference(&mut h, "prefs:dialog_buttons:top");
         h.step(&json!({"click": {"handle": "prefs:dialog_buttons:top"}})).unwrap();
         assert_eq!(h.app.preferences.dialog_buttons, DialogButtons::Top);
@@ -6099,11 +9178,102 @@ mod tests {
         let before = h.app.preferences.clone();
         assert!(control(&mut h.app, &json!({"dialog_buttons": "sideways"})).is_err());
         assert_eq!(h.app.preferences, before, "an unknown value changes nothing");
-        h.call("ui.prefs", json!({"open": "Interface"}));
+        h.call("ui.prefs", json!({"open": "Layout"}));
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(h.app.preferences.dialog_buttons, DialogButtons::Bottom);
         h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(h.app.preferences.dialog_buttons, DialogButtons::Top);
+    }
+
+    #[test]
+    fn navigation_legend_follows_all_presets_and_runtime_options_without_mutating_them() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for preset in NAV_PRESETS {
+            choose_nav_preset(&mut app.preferences, preset);
+            let before = app.preferences.clone();
+            let rows = navigation::mapping_rows(&app);
+            assert!(!rows.is_empty());
+            assert!(rows.iter().all(|(keys, action)| !keys.is_empty() && !action.is_empty()));
+            assert_eq!(app.preferences, before);
+            if preset.id == "creo" {
+                assert!(preset.reverse_drag_zoom);
+                assert_eq!(preset.mode(NavButton::Middle, Modifiers::NONE), Some(NavMode::Orbit));
+                assert!(
+                    rows.iter().any(|(keys, action)| keys.iter().any(|key| key == "Ctrl/Cmd") && action == crate::i18n::tr("prefs.gesture_zoom"))
+                );
+            }
+            if preset.id == TOUCHPAD_NAV {
+                assert!(
+                    rows.iter()
+                        .any(|(keys, action)| keys == &[crate::i18n::tr("prefs.shift").to_owned()] && action == crate::i18n::tr("prefs.gesture_pan"))
+                );
+                assert!(rows.iter().any(|(keys, action)| keys == &["Alt/Option".to_owned()] && action == crate::i18n::tr("prefs.gesture_orbit")));
+                assert!(!app.preferences.trackpad_pans());
+            }
+        }
+        choose_nav_preset(&mut app.preferences, nav_preset(crate::mouse_gesture::MOUSE_MODE));
+        app.preferences.mouse_gestures.enabled = true;
+        let rows = navigation::mapping_rows(&app);
+        assert!(rows.iter().any(|(_, action)| action == crate::i18n::tr("prefs.context_menu_ring")));
+        assert!(!rows.iter().any(
+            |(keys, action)| keys.contains(&crate::i18n::tr("prefs.button_right").to_owned()) && action == crate::i18n::tr("prefs.gesture_orbit")
+        ));
+    }
+
+    #[test]
+    fn navigation_dropdown_escape_retains_live_edits_then_cancels_the_snapshot() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"language":"en","theme":theme}));
+            let before = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"Navigation","zoom_reverse":true}));
+            let edited = h.app.preferences.clone();
+            scroll_to_and_click(&mut h, "prefs:nav");
+            let popup = "dialog:list:creo";
+            assert!(crate::scenario::handle_at(popup).is_some());
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited);
+            assert!(crate::scenario::handle_at(popup).is_none());
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(crate::scenario::handle_at(popup).is_some(), "Escape restored focus to the mapping trigger");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.prefs_window.open);
+            assert_eq!(h.app.preferences, before);
+        }
+    }
+
+    #[test]
+    fn orbit_picture_cards_keep_legacy_migration_and_preferences_transactions() {
+        let legacy = migrate(serde_json::from_value::<Prefs>(json!({"orbit_cursor":true})).unwrap());
+        assert_eq!(legacy.orbit_around, OrbitAround::Cursor);
+        assert!(!legacy.orbit_cursor);
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Navigation"}));
+            let camera = h.app.cam;
+            for (key, value) in [("Origin", OrbitAround::Origin), ("View center", OrbitAround::ViewCentre), ("Under the cursor", OrbitAround::Cursor)]
+            {
+                scroll_to_and_click(&mut h, &format!("prefs:orbit_around:{key}"));
+                assert_eq!(h.app.preferences.orbit_around, value);
+                assert_eq!(h.app.cam, camera, "choosing the pivot does not turn the camera");
+                assert!(!h.app.preferences.orbit_cursor);
+            }
+            h.call("ui.prefs", json!({"button":"apply"}));
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!(h.app.preferences.orbit_around, OrbitAround::ViewCentre);
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
+        }
     }
 
     #[test]
@@ -6112,11 +9282,16 @@ mod tests {
         assert!(!old.free_orbit);
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
-        h.step(&json!({"click":{"handle":"prefs:free_orbit"}})).unwrap();
+        h.app.preferences.free_orbit_upright = true;
+        h.frames(2);
+        scroll_to_and_click(&mut h, "prefs:free_orbit_upright");
+        assert!(h.app.preferences.free_orbit_upright, "the disabled upright control preserves its saved value");
+        assert!(!h.app.preferences.free_orbit);
+        scroll_to_and_click(&mut h, "prefs:free_orbit");
         assert!(h.app.preferences.free_orbit);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.free_orbit);
+        assert!(!restored.preferences.free_orbit, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.free_orbit);
         h.call("ui.prefs", json!({"open":"Navigation","free_orbit":true,"button":"apply"}));
@@ -6145,7 +9320,7 @@ mod tests {
         assert!(h.app.preferences.radial_context_menu, "the actual checkbox enables radial menus");
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.radial_context_menu, "enabled preference survives save/load");
+        assert!(!restored.preferences.radial_context_menu, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.radial_context_menu, "Cancel restores the default-off setting");
         h.call("ui.prefs", json!({"open":"Navigation","radial_context_menu":true}));
@@ -6191,6 +9366,210 @@ mod tests {
     }
 
     #[test]
+    fn persistent_ribbon_pressed_preference_checkbox_control_persists_cancels_and_resets() {
+        assert!(Prefs::default().persistent_ribbon_pressed);
+        assert!(lenient(&json!({"theme":"light"})).persistent_ribbon_pressed);
+        assert!(lenient(&json!({"persistent_ribbon_pressed":"no"})).persistent_ribbon_pressed);
+        let mut h = crate::scenario::Harness::new();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        super::reveal_preference(&mut h, "prefs:persistent_ribbon_pressed");
+        let checkbox = crate::scenario::handle_at("prefs:persistent_ribbon_pressed").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.preferences.persistent_ribbon_pressed);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["persistent_ribbon_pressed"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.persistent_ribbon_pressed, "a change that was not applied is not saved (#9730)");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.persistent_ribbon_pressed);
+        h.call("ui.prefs", json!({"open":"Layout","persistent_ribbon_pressed":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.persistent_ribbon_pressed);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.persistent_ribbon_pressed);
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut h.app, &json!({"persistent_ribbon_pressed":malformed})).is_err());
+            assert!(!h.app.preferences.persistent_ribbon_pressed);
+        }
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn viewport_analysis_status_preference_checkbox_control_persists_cancels_and_resets() {
+        assert!(Prefs::default().viewport_analysis_status);
+        assert!(lenient(&json!({"theme":"light"})).viewport_analysis_status);
+        assert!(lenient(&json!({"viewport_analysis_status":"no"})).viewport_analysis_status);
+        let mut h = crate::scenario::Harness::new();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:viewport_analysis_status");
+        let checkbox = crate::scenario::handle_at("prefs:viewport_analysis_status").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.preferences.viewport_analysis_status);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["viewport_analysis_status"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.viewport_analysis_status, "a change that was not applied is not saved (#9730)");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.viewport_analysis_status);
+        h.call("ui.prefs", json!({"open":"Graphics","viewport_analysis_status":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.viewport_analysis_status);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.viewport_analysis_status);
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut h.app, &json!({"viewport_analysis_status":malformed})).is_err());
+            assert!(!h.app.preferences.viewport_analysis_status);
+        }
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn viewport_analysis_status_is_independent_of_session_policy_in_background_documents() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::set(&mut app, &json!({"single_surface_analysis":false,"persistent_ribbon_pressed":false})).unwrap();
+        app.run("inspect.zebra", json!({})).unwrap();
+        let mut other = solidcraft_engine::Session::default();
+        other.execute("inspect.draft", &json!({})).unwrap();
+        crate::documents::open_tab(&mut app, other).unwrap();
+        let before: Vec<_> =
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+        super::control(&mut app, &json!({"open":"Graphics","viewport_analysis_status":false})).unwrap();
+        assert!(!app.preferences.viewport_analysis_status);
+        assert!(!app.preferences.persistent_ribbon_pressed);
+        assert!(std::iter::once(&app.session).chain(app.docs.background()).all(|s| !s.single_surface_analysis()));
+        super::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(app.preferences.viewport_analysis_status);
+        let after: Vec<_> =
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+        assert_eq!(before, after, "a presentation preference never changes effects in any document");
+    }
+
+    #[test]
+    fn viewport_section_status_preference_checkbox_control_persists_cancels_and_resets() {
+        assert!(Prefs::default().viewport_section_status);
+        assert!(lenient(&json!({"theme":"light"})).viewport_section_status);
+        assert!(lenient(&json!({"viewport_section_status":"no"})).viewport_section_status);
+        let mut h = crate::scenario::Harness::new();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:viewport_section_status");
+        let checkbox = crate::scenario::handle_at("prefs:viewport_section_status").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.preferences.viewport_section_status);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["viewport_section_status"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.viewport_section_status, "a change that was not applied is not saved (#9730)");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.viewport_section_status);
+        h.call("ui.prefs", json!({"open":"Graphics","viewport_section_status":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.viewport_section_status);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.viewport_section_status);
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut h.app, &json!({"viewport_section_status":malformed})).is_err());
+            assert!(!h.app.preferences.viewport_section_status);
+        }
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn viewport_status_details_preference_checkbox_control_persists_cancels_and_resets() {
+        assert!(Prefs::default().viewport_status_details);
+        assert!(lenient(&json!({"theme":"light"})).viewport_status_details);
+        assert!(lenient(&json!({"viewport_status_details":"no"})).viewport_status_details);
+        let mut h = crate::scenario::Harness::new();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:viewport_status_details");
+        let checkbox = crate::scenario::handle_at("prefs:viewport_status_details").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.preferences.viewport_status_details);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["viewport_status_details"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.viewport_status_details, "a change that was not applied is not saved (#9730)");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.viewport_status_details);
+        h.call("ui.prefs", json!({"open":"Graphics","viewport_status_details":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.viewport_status_details);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.viewport_status_details);
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut h.app, &json!({"viewport_status_details":malformed})).is_err());
+            assert!(!h.app.preferences.viewport_status_details);
+        }
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn viewport_status_summary_preference_checkbox_control_persists_cancels_and_resets() {
+        assert!(Prefs::default().viewport_status_summary);
+        assert!(lenient(&json!({"theme":"light"})).viewport_status_summary);
+        assert!(lenient(&json!({"viewport_status_summary":"no"})).viewport_status_summary);
+        let mut h = crate::scenario::Harness::new();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:viewport_status_summary");
+        let checkbox = crate::scenario::handle_at("prefs:viewport_status_summary").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.preferences.viewport_status_summary);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["viewport_status_summary"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.viewport_status_summary, "a change that was not applied is not saved (#9730)");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.viewport_status_summary);
+        h.call("ui.prefs", json!({"open":"Graphics","viewport_status_summary":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.viewport_status_summary);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.viewport_status_summary);
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut h.app, &json!({"viewport_status_summary":malformed})).is_err());
+            assert!(!h.app.preferences.viewport_status_summary);
+        }
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn viewport_section_status_is_independent_of_session_policy_in_background_documents() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::set(&mut app, &json!({"single_surface_analysis":false,"persistent_ribbon_pressed":false})).unwrap();
+        app.run("inspect.zebra", json!({})).unwrap();
+        app.run("inspect.section", json!({"plane":"XY","at":4})).unwrap();
+        let mut other = solidcraft_engine::Session::default();
+        other.execute("inspect.draft", &json!({})).unwrap();
+        other.execute("inspect.section", &json!({"plane":"XZ","at":-3})).unwrap();
+        crate::documents::open_tab(&mut app, other).unwrap();
+        let before: Vec<_> =
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+        super::control(&mut app, &json!({"open":"Graphics","viewport_section_status":false})).unwrap();
+        assert!(!app.preferences.viewport_section_status);
+        assert!(!app.preferences.persistent_ribbon_pressed);
+        assert!(std::iter::once(&app.session).chain(app.docs.background()).all(|s| !s.single_surface_analysis()));
+        super::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(app.preferences.viewport_section_status);
+        let after: Vec<_> =
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+        assert_eq!(before, after, "a presentation preference never changes effects in any document");
+    }
+
+    #[test]
     fn single_surface_analysis_preference_checkbox_persists_cancels_and_resets() {
         assert!(Prefs::default().single_surface_analysis);
         let old: Prefs = serde_json::from_value(json!({"theme":"light"})).unwrap();
@@ -6207,8 +9586,8 @@ mod tests {
         assert!(!h.app.session.single_surface_analysis());
         let mut restored = SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(!restored.preferences.single_surface_analysis);
-        assert!(!restored.session.single_surface_analysis(), "loaded settings apply before any command");
+        assert!(restored.preferences.single_surface_analysis, "a change that was not applied is not saved (#9730)");
+        assert!(restored.session.single_surface_analysis(), "loaded settings apply before any command");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(h.app.preferences.single_surface_analysis && h.app.session.single_surface_analysis());
         h.call("ui.prefs", json!({"open":"Graphics","single_surface_analysis":false,"button":"apply"}));
@@ -6301,7 +9680,7 @@ mod tests {
         assert!(h.app.preferences.cosmetic_threads, "the actual checkbox enables the optional markings");
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.cosmetic_threads, "the preference survives saved application settings");
+        assert!(!restored.preferences.cosmetic_threads, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.cosmetic_threads);
         h.call("ui.prefs", json!({"open":"Graphics","cosmetic_threads":true,"button":"apply"}));
@@ -6415,6 +9794,79 @@ mod tests {
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Pan), "only an orbiting right drag is affected");
         set(&mut app, &json!({"right_drag_orbits": true, "nav": "solidworks"})).unwrap();
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit), "turned back on, the right drag orbits again");
+    }
+
+    #[test]
+    fn creo_preset_maps_navigation_and_persists() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert_eq!(app.preferences.nav, "fusion");
+        choose_nav_preset(&mut app.preferences, nav_preset("creo"));
+        assert_eq!(app.preferences.nav, "creo");
+        assert!(!app.preferences.zoom_reverse);
+        for (mods, mode) in [
+            (Modifiers::NONE, NavMode::Orbit),
+            (Modifiers::SHIFT, NavMode::Pan),
+            (Modifiers::CTRL, NavMode::Zoom),
+            (Modifiers::COMMAND, NavMode::Zoom),
+        ] {
+            assert_eq!(nav_mode(&app, NavButton::Middle, mods), Some(mode));
+        }
+        for button in [NavButton::Left, NavButton::Right] {
+            assert_eq!(nav_mode(&app, button, Modifiers::NONE), None);
+        }
+        assert!(nav_preset("creo").reverse_drag_zoom);
+        for preset in NAV_PRESETS.iter().filter(|p| p.id != "creo") {
+            assert!(!preset.reverse_drag_zoom, "{} keeps its drag zoom direction", preset.id);
+        }
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert_eq!(other.preferences.nav, "creo");
+        assert_eq!(nav_mode(&other, NavButton::Middle, Modifiers::NONE), Some(NavMode::Orbit));
+    }
+
+    #[test]
+    fn creo_navigation_settings_show_localised_bindings() {
+        let _language = crate::i18n::scope("de");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        control(&mut app, &json!({"open":"Navigation", "nav":"creo", "language":"de"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+        let mut textures = std::collections::HashMap::new();
+        let mut draw = || {
+            let raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(raw, |ui| show(&mut app, ui.ctx()));
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            output
+        };
+        for _ in 0..3 {
+            draw();
+        }
+        let output = draw();
+        for label in ["Creo", crate::i18n::tr("prefs.gesture_orbit"), crate::i18n::tr("prefs.gesture_pan"), crate::i18n::tr("prefs.gesture_zoom")] {
+            assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text().contains(label)), "missing binding label: {label}");
+        }
+        assert_ne!(nav_preset("creo").translated_help(), nav_preset("creo").help);
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_CREO_EVIDENCE") {
+            std::fs::create_dir_all(&dir).unwrap();
+            crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, screen, &textures)
+                .save(std::path::Path::new(&dir).join("creo-navigation-de.png"))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn creo_preset_obeys_preference_transactions() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        control(&mut app, &json!({"open":"Navigation", "nav":"creo"})).unwrap();
+        assert_eq!(app.preferences.nav, "creo");
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.nav, "fusion");
+        control(&mut app, &json!({"open":"Navigation", "nav":"creo", "button":"apply"})).unwrap();
+        control(&mut app, &json!({"button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.nav, "fusion");
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.nav, "creo");
     }
 
     #[test]
@@ -6685,7 +10137,8 @@ mod tests {
     #[test]
     fn language_preference_switches_and_persists() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert_eq!(app.preferences.language, "en");
+        // A first start follows the system (#10138), which is English in a test.
+        assert_eq!(app.preferences.language, crate::i18n::SYSTEM);
         assert_eq!(app.tr("ui.preferences"), "Preferences");
         assert_eq!(app.tr("ui.extrude"), "Extrude");
 
@@ -6727,7 +10180,7 @@ mod tests {
         app.open_path(&path);
         let offered = app.stand_up.clone().unwrap_or_default();
         assert_eq!(offered.len(), 1, "the file's body is offered");
-        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session);
+        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session).unwrap();
         assert!((size(&app).max.y - size(&app).min.y - 40.0).abs() < 1e-6);
         control(&mut app, &json!({"stand_up": true})).unwrap();
         let b = size(&app);
@@ -6816,7 +10269,7 @@ mod tests {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let proj = crate::viewport::projection(&app, rect);
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let m = st.bodies[0].mesh();
         // A spot a fifth of the way along a visible edge, well away from its middle on screen.
         let found = m.edges.iter().filter(|e| e.len() >= 2).find_map(|e| {
@@ -6875,9 +10328,9 @@ mod tests {
 
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.preferences.orbit_around = OrbitAround::Cursor;
-        app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, -3.0, 2.0);
+        app.cam.target = solidcore_record::Vec3::new(5.0, -3.0, 2.0);
         orbit(&mut app, rect, 40.0, 25.0, Some(corner));
-        assert_eq!(app.viewport.orbit_pivot, Some(solidcraft_engine::geom::Vec3::new(5.0, -3.0, 2.0)));
+        assert_eq!(app.viewport.orbit_pivot, Some(solidcore_record::Vec3::new(5.0, -3.0, 2.0)));
     }
 
     /// The Y up preference turns the view: the camera's up axis follows it, startup included.
@@ -6954,16 +10407,6 @@ mod ui_scale_regression_tests {
     }
 }
 
-/// View ▸ View angles and Preferences ▸ Graphics run the same command (#6032).
-pub(crate) fn view_angles_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let mut enabled = app.preferences.show_view_angles;
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("ui.view_angles"), &mut enabled).on_hover_text(crate::i18n::tr("ui.view_angles_help"));
-    crate::scenario::publish_handle("view:view_angles", response.rect.center());
-    if response.changed() {
-        let _ = app.run("view.angle_readout", json!({"enabled": enabled}));
-    }
-}
-
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
@@ -6982,7 +10425,7 @@ mod ambient_occlusion_tests {
         assert!(h.app.preferences.ambient_occlusion);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.ambient_occlusion);
+        assert!(!restored.preferences.ambient_occlusion, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.ambient_occlusion);
         h.call("ui.prefs", json!({"open":"Graphics", "ambient_occlusion":true}));
@@ -7001,6 +10444,31 @@ mod ambient_occlusion_tests {
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
     }
+
+    /// #7974: shading dark parts in linear light with a sky fill is off for older and new
+    /// preferences, turned on from the Graphics page, kept, and sent to the shader with the world's
+    /// up direction; Restore Defaults turns it off again.
+    #[test]
+    fn dark_parts_shading_is_optional_persistent_and_follows_the_up_axis() {
+        use solidcraft_engine::render::UpAxis;
+        let old: Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
+        assert!(!old.dark_parts_shading && !Prefs::default().dark_parts_shading);
+        assert_eq!(crate::viewport::sky_uniform(false, UpAxis::Z), [0.0; 4], "off: shaded as before");
+        assert_eq!(crate::viewport::sky_uniform(true, UpAxis::Z), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(crate::viewport::sky_uniform(true, UpAxis::Y), [0.0, 1.0, 0.0, 1.0]);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:dark_parts_shading");
+        let checkbox = crate::scenario::handle_at("prefs:dark_parts_shading").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(h.app.preferences.dark_parts_shading);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.dark_parts_shading);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.dark_parts_shading);
+    }
 }
 
 /// Manual edits are preserved and shown as Custom rather than claiming to match a preset.
@@ -7015,6 +10483,288 @@ pub(crate) fn graphics_preset(prefs: &Prefs) -> &'static str {
 #[cfg(test)]
 mod graphics_preset_tests {
     use super::*;
+
+    fn click_graphics(h: &mut crate::scenario::Harness, query: &str, handle: &str) {
+        h.app.prefs_window.filter = query.into();
+        h.frames(5);
+        reveal_preference(h, handle);
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn graphics_cards_follow_manual_changes_and_preserve_non_preset_settings_in_both_themes() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","msaa":2,"dark_parts_shading":true,"frame_rate_details":true}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            let camera = h.app.cam;
+            let design = h.app.session.doc.to_json();
+            click_graphics(&mut h, "Quality", "view:graphics_preset:quality");
+            assert_eq!(graphics_preset(&h.app.preferences), "quality");
+            assert_eq!(
+                (h.app.preferences.display_quality.as_str(), h.app.preferences.supersampling, h.app.preferences.supersampling_adaptive),
+                ("fine", 2.0, true)
+            );
+            assert!(h.app.preferences.ambient_occlusion);
+            assert_eq!(h.app.preferences.msaa, 2);
+            assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
+            let quality = h.app.preferences.clone();
+            click_graphics(&mut h, "Custom", "view:graphics_preset:custom");
+            assert_eq!(h.app.preferences, quality, "Custom represents the mixture and sets nothing");
+            click_graphics(&mut h, "Ultra", "prefs:display_quality:ultra");
+            assert_eq!(h.app.preferences.display_quality, "ultra");
+            assert_eq!(graphics_preset(&h.app.preferences), "custom");
+            click_graphics(&mut h, "Performance", "view:graphics_preset:performance");
+            assert_eq!(graphics_preset(&h.app.preferences), "performance");
+            assert_eq!(
+                (h.app.preferences.ambient_occlusion, h.app.preferences.supersampling, h.app.preferences.display_quality.as_str()),
+                (false, 1.0, "normal")
+            );
+            h.call("ui.prefs", json!({"supersampling_adaptive":false}));
+            assert_eq!(graphics_preset(&h.app.preferences), "performance", "Performance ignores the stored adaptive flag");
+            assert_eq!(h.app.preferences.msaa, 2);
+            assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(h.app.session.doc.to_json(), design);
+            assert!(h.app.session.undo.is_empty());
+        }
+    }
+
+    #[test]
+    fn graphics_tiles_and_status_chips_edit_real_values_and_cancel_in_both_themes() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            let original = h.app.preferences.clone();
+            let session = (h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective);
+            for (query, handle) in [("Grid", "prefs:grid"), ("Ground shadow", "prefs:ground_shadow"), ("Perspective", "prefs:perspective")] {
+                click_graphics(&mut h, query, handle);
+            }
+            assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), (!session.0, !session.1, !session.2));
+            for (query, field) in [
+                ("Ambient occlusion", "ambient_occlusion"),
+                ("View angles", "show_view_angles"),
+                ("Vertex markers", "vertex_markers"),
+                ("Quick measurement", "quick_measure"),
+                ("Frame rate", "show_frame_rate"),
+                ("Analysis", "viewport_analysis_status"),
+                ("Section", "viewport_section_status"),
+                ("Live details", "viewport_status_details"),
+                ("Fold items", "viewport_status_summary"),
+            ] {
+                let before = serde_json::to_value(&h.app.preferences).unwrap();
+                click_graphics(&mut h, query, &format!("prefs:{field}"));
+                let after = serde_json::to_value(&h.app.preferences).unwrap();
+                let mut expected = before.clone();
+                expected[field] = json!(!before[field].as_bool().unwrap());
+                assert_eq!(after, expected, "{theme}: {field} changes precisely its own setting");
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, original);
+            assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), session);
+        }
+    }
+
+    #[test]
+    fn graphics_overlay_cards_apply_persist_and_reset_without_adding_unpaged_fields() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"language":"en"}));
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        for (query, handle) in [
+            ("View angles", "prefs:show_view_angles"),
+            ("Vertex markers", "prefs:vertex_markers"),
+            ("Quick measurement", "prefs:quick_measure"),
+            ("Frame rate", "prefs:show_frame_rate"),
+            ("Frame rate details", "prefs:frame_rate_details"),
+            ("Analysis", "prefs:viewport_analysis_status"),
+            ("Section", "prefs:viewport_section_status"),
+            ("Live details", "prefs:viewport_status_details"),
+            ("Fold items", "prefs:viewport_status_summary"),
+        ] {
+            click_graphics(&mut h, query, handle);
+        }
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let applied = h.app.preferences.clone();
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.show_view_angles && restored.preferences.vertex_markers && restored.preferences.quick_measure);
+        assert!(restored.preferences.show_frame_rate && restored.preferences.frame_rate_details);
+        assert!(!restored.preferences.viewport_analysis_status && !restored.preferences.viewport_section_status);
+        assert!(!restored.preferences.viewport_status_details && !restored.preferences.viewport_status_summary);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.show_view_angles && !h.app.preferences.quick_measure);
+        assert!(!h.app.preferences.show_frame_rate && !h.app.preferences.frame_rate_details);
+        assert!(h.app.preferences.viewport_analysis_status && h.app.preferences.viewport_section_status);
+        assert!(h.app.preferences.viewport_status_details && h.app.preferences.viewport_status_summary);
+        assert!(h.app.preferences.vertex_markers, "the visible unpaged control remains excluded from page defaults");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, applied, "Cancel after Apply restores the applied overlay state");
+    }
+
+    #[test]
+    fn graphics_redesign_keeps_newer_main_controls_and_their_transactions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","open":"Graphics"}));
+            let original = h.app.preferences.clone();
+            for (query, handle) in [
+                ("Tint new surface in a preview", "prefs:preview_tint_new_faces"),
+                ("Show removed material in red", "prefs:cut_preview_tint"),
+                ("Profile operations", "prefs:profile_operations"),
+            ] {
+                click_graphics(&mut h, query, handle);
+            }
+            h.app.prefs_window.filter = "Section hatch".into();
+            h.frames(5);
+            reveal_preference(&mut h, "dialog:Section hatch:One style");
+            h.step(&json!({"click":{"handle":"dialog:Section hatch:One style"}})).unwrap();
+            h.frames(2);
+            assert!(!h.app.preferences.preview_tint_new_faces && !h.app.preferences.cut_preview_tint);
+            assert!(h.app.preferences.profile_operations);
+            assert_eq!(h.app.preferences.section_hatch, SectionHatch::One);
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert!(h.app.preferences.preview_tint_new_faces && h.app.preferences.cut_preview_tint);
+            assert!(!h.app.preferences.profile_operations);
+            assert_eq!(h.app.preferences.section_hatch, SectionHatch::ByPart);
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, applied);
+            h.call("ui.prefs", json!({"profile_operations":false}));
+            assert_eq!(h.app.preferences.persistent_ribbon_pressed, original.persistent_ribbon_pressed);
+        }
+    }
+
+    #[test]
+    fn graphics_style_dropdown_uses_the_real_indices_and_icon_masters() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+                click_graphics(&mut h, "Visual style", "prefs:visual_style");
+                h.step(&json!({"click":{"handle":format!("dialog:Visual style:{label}")}})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.ui.visual_style, index as u8);
+                let icon = crate::navigation_bar::visual_style_icon(index as u8);
+                let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                assert!(crate::scenario::rect_of("prefs:visual_style").unwrap().contains_rect(painted));
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.ui.visual_style, 0);
+        }
+    }
+
+    #[test]
+    fn graphics_style_popup_owns_escape_and_leaves_snapshot_cancel_to_the_next_escape() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"language":"en","theme":theme}));
+            let before = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"Graphics","dark_parts_shading":true}));
+            let edited = h.app.preferences.clone();
+            assert_ne!(before, edited);
+            reveal_preference(&mut h, "prefs:visual_style");
+            h.step(&json!({"click":{"handle":"prefs:visual_style"}})).unwrap();
+            h.frames(2);
+            let popup = "dialog:Visual style:Wireframe";
+            assert!(crate::scenario::handle_at(popup).is_some());
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.section == PAGE_GRAPHICS);
+            assert!(h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited, "first Escape retains unapplied Graphics edits");
+            assert!(crate::scenario::handle_at(popup).is_none());
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && crate::scenario::handle_at(popup).is_some(), "Enter reopens the focused style trigger");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.snapshot.is_some());
+            assert!(crate::scenario::handle_at(popup).is_none());
+            assert_eq!(h.app.preferences, edited);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.prefs_window.open && h.app.prefs_window.snapshot.is_none());
+            assert_eq!(h.app.preferences, before, "Escape without a popup performs normal Preferences Cancel");
+        }
+    }
+
+    #[test]
+    fn graphics_disabled_controls_keep_stored_values_and_msaa_waits_for_restart() {
+        use egui::accesskit::Role;
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            let dir = std::env::temp_dir().join(format!("solidcraft-graphics-cards-{}-{theme}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("graphics.json");
+            std::fs::write(&path, r#"{"backend":"vulkan","msaa":4}"#).unwrap();
+            h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+            h.app.msaa_supported = vec![1, 2, 4];
+            let active_samples = h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples);
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","frame_rate_details":true}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:8");
+            assert_eq!(h.app.preferences.msaa, 4, "an unavailable card cannot coerce MSAA");
+            assert!(h.widget("Restart needed").is_some());
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            assert!(tree.nodes.iter().any(|(_, node)| node.role() == Role::RadioButton && node.label() == Some("8×") && node.is_disabled()));
+            click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:2");
+            assert_eq!(h.app.preferences.msaa, 2);
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["msaa"], 2);
+            assert_eq!(saved["backend"], "vulkan");
+            assert_eq!(
+                h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples),
+                active_samples,
+                "changing the saved level leaves the running renderer alone"
+            );
+            click_graphics(&mut h, "Only when the view is still", "prefs:supersampling_adaptive");
+            assert!(h.app.preferences.supersampling_adaptive, "disabled adaptive control retains its saved value");
+            click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
+            assert!(h.app.preferences.frame_rate_details, "visible disabled details control retains its saved value");
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::CheckBox && node.label() == Some("Frame rate details") && node.is_disabled())
+            );
+            click_graphics(&mut h, "Frame rate", "prefs:show_frame_rate");
+            click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
+            assert!(!h.app.preferences.frame_rate_details, "enabling Frame rate enables its details checkbox");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences.msaa, 4);
+            assert!(h.app.preferences.frame_rate_details);
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["msaa"], 4, "Cancel restores startup persistence too");
+            assert_eq!(saved["backend"], "vulkan");
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn graphics_page_keeps_the_untouched_radian_default_and_unpaged_reset_exclusions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","vertex_markers":true,"grid_follows_view":true}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            for (perspective, auto_ortho) in [(false, false), (true, false), (false, true)] {
+                h.app.ui.perspective = perspective;
+                h.app.ui.auto_ortho_faces = auto_ortho;
+                h.app.prefs_window.filter = "Field of view".into();
+                h.frames(5);
+                assert_eq!(h.app.preferences.perspective_fov, 0.6, "drawing a whole-degree readout never rounds the default");
+            }
+            for page in 0..PAGES.len() {
+                defaults(&mut h.app, page);
+                assert!(h.app.preferences.vertex_markers && h.app.preferences.grid_follows_view, "{page}: neither unpaged field joins resets");
+            }
+            assert_eq!(h.app.preferences.perspective_fov, 0.6);
+        }
+    }
 
     #[test]
     fn viewport_preset_popup_accepts_quality_and_performance() {
@@ -7046,7 +10796,7 @@ mod graphics_preset_tests {
         assert!(h.app.preferences.ambient_occlusion);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.ambient_occlusion);
+        assert!(!restored.preferences.ambient_occlusion, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(graphics_preset(&h.app.preferences), "performance");
         assert!(!h.app.preferences.ambient_occlusion);
@@ -7064,6 +10814,9 @@ mod graphics_preset_tests {
         assert_eq!(h.app.preferences.display_quality, "fine");
         assert_eq!(h.app.preferences.supersampling, 2.0);
         assert!(h.app.preferences.supersampling_adaptive);
+        // The dialog is closed now: what is saved is the live state, quality included (#9730).
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
         for edit in [
             json!({"display_quality":"ultra"}),
             json!({"supersampling":1.5}),

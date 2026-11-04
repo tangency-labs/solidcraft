@@ -1,0 +1,18 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.offset_face",
+   "params": {
+    "faces": [
+     [
+      30,
+      20,
+      20
+     ]
+    ],
+    "distance": 5
+   }
+  }
+ ]
+}

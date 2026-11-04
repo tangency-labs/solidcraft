@@ -71,20 +71,23 @@ pub struct Build {
     pub built: &'static str,
 }
 
-/// One report, as listed.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+/// One report, as listed (and as `diagnostics.crash_reports` describes it, #10909).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
 pub struct Summary {
+    /// The report's id, which `diagnostics.crash_report` reads.
     pub id: String,
     /// `command_panic`, `panic`, `kernel_panic_recovered` or `unclean_exit`.
     pub kind: String,
     /// When the report was first recorded (UTC). Unclean exits are recorded at a later launch,
     /// which may be days after the session ended, rather than at the exact exit time.
     pub time: String,
+    /// The internal error's message.
     pub message: String,
     /// The command running when it happened, if one was.
     pub command: Option<String>,
     /// Times it happened.
     pub count: u64,
+    /// The version of SolidCraft it happened in.
     pub version: String,
     /// The report's folder.
     pub path: String,
@@ -365,7 +368,20 @@ pub fn phase(step: &str) {
         j.write(&line);
         j.phase = Some(line);
         j.phase_step = Some(step.to_string());
+        j.running |= step == RUNNING;
     }
+}
+
+/// A step of getting a window's graphics up (egui-wgpu's `window surface`, `surface configure`,
+/// …): the [`phase`] until the app is [`RUNNING`], ignored after. A window opened later (the
+/// agent chat on its own, say) goes through the same steps, and must not make a crash an hour
+/// later read as a crash during startup (#8776).
+pub fn startup_step(step: &str) {
+    let Some(s) = STATE.get() else { return };
+    if s.journal.lock().is_ok_and(|j| j.running) {
+        return;
+    }
+    phase(step);
 }
 
 /// Where a native crash handler writes what it caught for this run: a small JSON file
@@ -622,6 +638,8 @@ struct Journal {
     /// The latest startup step's line and name, and the renderer's line (kept across rebases).
     phase: Option<String>,
     phase_step: Option<String>,
+    /// The app reached [`RUNNING`] once: later startup steps are not startup ([`startup_step`]).
+    running: bool,
     environment: Option<String>,
 }
 
@@ -642,6 +660,7 @@ impl Journal {
             running_at: None,
             phase: None,
             phase_step: None,
+            running: false,
             environment: None,
         };
         j.rebase(&json!("new"), 0);
@@ -889,6 +908,7 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
             running_at: None,
             phase: None,
             phase_step: None,
+            running: false,
             environment: None,
         }),
         known: Mutex::new(list(dir).into_iter().filter_map(|s| sig_of(&s.id).map(|sig| (sig, (0, s.id)))).collect()),
@@ -1011,6 +1031,9 @@ fn write_report(state: &State, kind: &str, p: Option<&Panic>, extra: Extra) -> O
         fs::create_dir_all(&folder).ok()?;
         let mut files = serde_json::Map::new();
         let mut notes = extra.notes;
+        if let Some(call) = solidcraft_kernel::native_call_in_flight() {
+            notes.push(format!("native kernel call in flight: {call}"));
+        }
         if let Some(d) = &extra.design {
             if d.len() <= MAX_DESIGN_BYTES {
                 let name = format!("design.{}", solidcraft_io::DESIGN_EXT);

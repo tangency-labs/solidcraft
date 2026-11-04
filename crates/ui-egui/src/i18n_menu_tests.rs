@@ -42,6 +42,8 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
         Target::Workspace,
         Target::NamedViews,
         Target::InsertDesign,
+        Target::VisualStyle,
+        Target::ViewTool,
     ] {
         take_items(out, &context_menu::items(app, &target));
     }

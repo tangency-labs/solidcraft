@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a quarter arc r 10 extruded 20 as a surface: a quarter cylinder",
+ "source": "analytic",
+ "method": "A = (pi/2) 10 20 = 314.16; one cylinder face; its 4 edges free",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 314.1592653589793,
+ "surface_types": [
+  "cylinder"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   20
+  ]
+ }
+}

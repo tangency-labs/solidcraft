@@ -101,6 +101,19 @@ pub(crate) fn navigation_fill(t: &Tokens, fill: NavigationFill) -> Option<egui::
     }
 }
 
+/// The label and icon colour of a slot. An active slot keeps the accent ink on its selected fill
+/// where that reads; a theme whose selected fill is as dark as its accent (SolidCraft 95's navy)
+/// gets the theme's selected-text ink instead, so an active toggle never turns into a blank block.
+pub(crate) fn navigation_ink(t: &Tokens, fill: NavigationFill) -> egui::Color32 {
+    if fill != NavigationFill::Active {
+        return t.form_ink;
+    }
+    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= NAV_ACTIVE_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+}
+
+/// WCAG small-text contrast for an active slot's label on its selected fill.
+pub(crate) const NAV_ACTIVE_MIN_CONTRAST: f64 = 4.5;
+
 pub(crate) fn navigation_opacity(idle: Idle, active: bool) -> f32 {
     match idle {
         _ if active => 1.0,
@@ -135,7 +148,7 @@ pub(crate) fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: Naviga
             egui::StrokeKind::Inside,
         );
     }
-    let ink = if fill == NavigationFill::Active { t.form_primary } else { t.form_ink };
+    let ink = navigation_ink(&t, fill);
     let text = button.labels.then(|| ui.painter().layout_no_wrap(button.label.to_owned(), crate::fonts::medium(NAV_TEXT), ink));
     let mut x = if button.menu {
         rect.left() + NAV_MENU_LEFT + if editing { NAV_BORDER } else { 0.0 }
@@ -212,4 +225,25 @@ pub(crate) fn navigation_surface(ui: &Ui, rect: Rect, size: Size, editing: bool)
         .stroke(egui::Stroke::new(NAV_BORDER, t.dialog_border))
         .corner_radius(NavigationMetrics::for_size(size).radius);
     super::Container::paint_frame(ui.painter(), frame, rect.shrink(NAV_BORDER));
+}
+
+#[cfg(test)]
+mod active_ink_tests {
+    use super::{NavigationFill, navigation_fill, navigation_ink};
+
+    #[test]
+    fn active_navigation_slots_stay_readable_in_every_built_in_theme() {
+        let mut themes = vec![("Dark", crate::theme::Tokens::dark()), ("Light", crate::theme::Tokens::light())];
+        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
+        let mut failures = Vec::new();
+        for (name, tokens) in themes {
+            let Some(fill) = navigation_fill(&tokens, NavigationFill::Active) else { continue };
+            let ink = navigation_ink(&tokens, NavigationFill::Active);
+            let ratio = crate::theme::contrast_ratio(ink, fill);
+            if ratio < 3.0 {
+                failures.push(format!("{name}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
+            }
+        }
+        assert!(failures.is_empty(), "active navigation slot unreadable:\n{}", failures.join("\n"));
+    }
 }

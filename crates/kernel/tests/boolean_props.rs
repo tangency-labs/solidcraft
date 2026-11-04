@@ -13,7 +13,7 @@
 //! copy the shrunk case into a `#[test]` below (ignored, with its issue, until the kernel is fixed).
 
 use proptest::prelude::*;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_kernel::{Body, BoolOp, boolean, box_solid, cylinder, measure, sphere, transform};
 
 /// Relative volume tolerance. The same 0.2 % that `fuzz::boolean_case` uses.

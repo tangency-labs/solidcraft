@@ -555,3 +555,47 @@ fn escape_ends_navigation_before_sketch_tools_and_does_not_count_as_a_finish_pre
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.session.active_sketch.is_none(), "two ordinary quick Escapes still finish the sketch");
 }
+
+/// Home and Fit put the model in the middle of the view. The floating controls take room out of
+/// it, so the model is drawn smaller and kept clear of them, but the room they leave over moves it
+/// towards the middle of the view rather than the middle of the gap between them; a panel moves
+/// the middle itself (#9195).
+#[test]
+fn a_fit_centres_the_model_in_the_view_and_is_moved_only_by_panels() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 1000.0));
+    let bounds = Aabb3 { min: Vec3::new(-50.0, -50.0, -50.0), max: Vec3::new(50.0, 50.0, 50.0) };
+    let centre = bounds.center();
+    let on_screen = |cam: Camera, p: Vec3| {
+        let radius = (bounds.diagonal() * 0.5 + centre.dist(cam.target)).max(cam.half_height() * 2.0).max(10.0);
+        let (x, y, _) = cam.to_screen(p, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
+        pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+    };
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+        // The compass and the navigation bar, and nothing else.
+        let bare = layout(viewport, &[], 1.0, style, true);
+        let cam = fit_bounds(Camera::default(), &bounds, &bare, 0.0).expect("framed");
+        for x in [bounds.min.x, bounds.max.x] {
+            for y in [bounds.min.y, bounds.max.y] {
+                for z in [bounds.min.z, bounds.max.z] {
+                    let p = on_screen(cam, Vec3::new(x, y, z));
+                    assert!(bare.drawable.contains(p), "{style:?}: the model is clear of the controls: {p:?} {bare:?}");
+                }
+            }
+        }
+        let middle = bare.middle.center();
+        let gap = bare.drawable.center().distance(middle);
+        let off = on_screen(cam, centre).distance(middle);
+        assert!(off + 1.0 < gap, "{style:?}: nearer the middle of the view than the middle of the gap: {off} vs {gap}");
+        // A panel down the left takes that part of the view away, so the middle moves right: the
+        // camera's target moves the other way, against its right vector.
+        let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 1000.0));
+        let docked = layout(viewport, &[panel], 1.0, style, true);
+        let moved = fit_bounds(Camera::default(), &bounds, &docked, 0.0).expect("framed");
+        let right = moved.basis().0;
+        assert!((moved.target - centre).dot(right) < -1.0, "{style:?}: a panel must move the model clear of it: {:?}", moved.target);
+        // It is drawn smaller with the controls shown than with the whole view to itself.
+        let empty = Layout::with_content(viewport, viewport, &[], 1.0, style, egui::Vec2::ZERO, Rect::NOTHING);
+        let roomy = fit_bounds(Camera::default(), &bounds, &empty, 0.0).expect("framed");
+        assert!(roomy.distance <= cam.distance + 1e-9, "{style:?}: controls must not make the model larger");
+    }
+}

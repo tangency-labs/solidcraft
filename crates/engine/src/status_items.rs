@@ -90,6 +90,14 @@ pub struct StatusItems {
     pub items: Vec<StatusItem>,
 }
 
+impl StatusItem {
+    /// Capability independent of a window's presentation preferences. `has_key` retains
+    /// the existing read-only legend contract; live details also include settings/findings.
+    pub fn has_details(&self) -> bool {
+        !matches!(self.setting, StatusSetting::Environment)
+    }
+}
+
 impl Session {
     /// Whether shading and Continuity share one slot (the default). This is session
     /// configuration, never design data; SDK clients may choose the legacy independent policy.
@@ -113,6 +121,14 @@ impl Session {
             }
         }
         self.single_surface_analysis = single;
+        let shading = self.analysis.is_some();
+        let continuity = !self.continuity.is_empty();
+        let section = self.section.is_some();
+        self.status_activation.retain(|source| match source {
+            StatusId::SurfaceAnalysis => shading,
+            StatusId::Continuity => continuity,
+            StatusId::Section => section,
+        });
         self.status_order.clear();
         for item in &before {
             let id = match item.id {
@@ -128,7 +144,7 @@ impl Session {
             self.status_slot(id, active);
         }
         if self.status_items() != before {
-            self.revision += 1;
+            self.refresh_display();
         }
     }
 
@@ -160,6 +176,10 @@ impl Session {
         } else {
             None
         };
+        self.status_activation.retain(|id| *id == StatusId::Section || active(id));
+        if let Some(id) = activated.filter(active) {
+            self.status_activated(id);
+        }
         self.latest_analysis = activated.filter(active).or(self.latest_analysis.filter(active)).or(remaining);
         self.status_slot(StatusId::SurfaceAnalysis, self.analysis.is_some() || (self.single_surface_analysis && !self.continuity.is_empty()));
         self.status_slot(StatusId::Continuity, !self.single_surface_analysis && !self.continuity.is_empty());
@@ -212,9 +232,39 @@ impl Session {
         items
     }
 
+    /// Most recently activated effect among the caller's currently presented slots.
+    /// Row position is deliberately independent: replacing an analysis retains its slot.
+    /// Effects assigned directly by embedders have no activation record; their declared
+    /// order provides a deterministic fallback without inventing session timestamps.
+    pub fn newest_status_item(&self, eligible: &[StatusId]) -> Option<StatusItem> {
+        let items = self.status_items();
+        let find = |source: StatusId| {
+            items
+                .iter()
+                .find(|item| {
+                    eligible.contains(&item.id)
+                        && match source {
+                            StatusId::SurfaceAnalysis => item.id == StatusId::SurfaceAnalysis && item.command != "inspect.continuity",
+                            StatusId::Continuity => item.command == "inspect.continuity",
+                            StatusId::Section => item.id == StatusId::Section,
+                        }
+                })
+                .cloned()
+        };
+        self.status_activation.iter().rev().find_map(|id| find(*id)).or_else(|| items.into_iter().rev().find(|item| eligible.contains(&item.id)))
+    }
+
+    pub(crate) fn status_activated(&mut self, id: StatusId) {
+        self.status_activation.retain(|source| *source != id);
+        self.status_activation.push(id);
+    }
+
     pub(crate) fn status_slot(&mut self, id: StatusId, active: bool) {
         if !active {
             self.status_order.retain(|slot| *slot != id);
+            if id == StatusId::Section {
+                self.status_activation.retain(|source| *source != id);
+            }
         } else if !self.status_order.contains(&id) {
             self.status_order.push(id);
         }

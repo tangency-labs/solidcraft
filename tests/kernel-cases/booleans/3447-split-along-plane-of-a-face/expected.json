@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3447",
+    "tangency-labs/solidcraft#2979"
+  ],
+  "what": "split body where the splitting plane contains an end face (with a boss on it and an R1 fillet on the face's edge)",
+  "source": "analytic",
+  "method": "block x -10..-3.5 is 6.5x50x52.7 = 17128.75 minus the R1 fillet along its 52.7 long edge ((1-pi/4)*1^2*52.7 = 11.31); boss 8.5x20x20.2 = 3434.0 stands on x=-3.5 face. The plane x=-3.5 splits them into two bodies: 17117.44 and 3434.0. (The PR measured 17116.17 for the first, within the 1e-3 tolerance.)",
+  "body_count": 2,
+  "volume_mm3": 20550.19
+}

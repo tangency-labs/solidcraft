@@ -232,7 +232,7 @@ fn edge_flange(on: bool) -> Harness {
     for (id, p) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&id, p).unwrap();
     }
-    let edge = crate::dialogs::edge_sel(&h.app.session, solidcraft_engine::geom::Vec3::new(50.0, 0.0, 2.5)).unwrap();
+    let edge = crate::dialogs::edge_sel(&h.app.session, solidcore_record::Vec3::new(50.0, 0.0, 2.5)).unwrap();
     h.app.session.selection = vec![edge];
     h.step(&json!({"start": "sheet.flange"})).unwrap();
     h.frames(6);

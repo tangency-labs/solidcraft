@@ -229,7 +229,9 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let reopened = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
             assert_eq!(reopened.metadata, document.metadata);
-            assert_eq!(reopened.name, document.name);
+            // #4907: `run --save` maps to Save As, and a borrowed design name
+            // follows the destination file's stem instead of keeping the old name.
+            assert_eq!(reopened.name, format!("resaved-{index}"));
             assert_eq!(reopened.features, document.features);
             assert_eq!(std::fs::read(&source).unwrap(), bytes);
         }
@@ -463,7 +465,11 @@ fn snapshot_runs_its_script_on_the_in_design() {
 fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`?"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open` or `panel.open`?"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds

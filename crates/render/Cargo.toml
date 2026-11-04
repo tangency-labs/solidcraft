@@ -13,12 +13,14 @@ default = []
 raytrace-cpu = []
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 moxcms = { workspace = true }
 png = { workspace = true }
 sha2 = { workspace = true }
+web-time = { workspace = true }
 weezl = { workspace = true }
 
 [dev-dependencies]

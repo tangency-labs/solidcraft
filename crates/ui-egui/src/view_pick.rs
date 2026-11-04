@@ -12,13 +12,15 @@
 //! `pixels_per_point`, offset by the viewport rect); `model` pixels are pixels of a
 //! `ui.render` of the same size, so an agent can render, look, and pick without a window.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{apply_point, is_identity};
-use solidcraft_engine::geom::{Mesh, Vec3};
+use solidcraft_engine::geom::Mesh;
 
 use crate::SolveApp;
 
@@ -150,9 +152,22 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             .and_then(|(so, sn)| section_cap(app, &st, &bounds, input, so, sn, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies));
         let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|(t, _, _)| *t));
         let (edge, vertex) = match (edges_on, input.pixel) {
-            (true, Some(pos)) => {
-                near_edges(app, &st, &bounds, &proj, input, pos, face_t, edge_px, &active_bodies, replaced, include_ghosted, wireframe, slack)
-            }
+            (true, Some(pos)) => near_edges(
+                app,
+                &st,
+                &bounds,
+                &proj,
+                input,
+                pos,
+                face_t,
+                edge_px,
+                &active_bodies,
+                replaced,
+                include_ghosted,
+                wireframe,
+                slack,
+                section,
+            ),
             _ => (None, None),
         };
         hits.push(match (all, cap, kept) {
@@ -206,7 +221,7 @@ fn face_candidates(
 ) -> Vec<Cand> {
     let mut out = Vec::new();
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
@@ -329,7 +344,7 @@ pub(crate) fn body_cut_at(
 ) -> Option<String> {
     let walk_eps = 1e-6 * (1.0 + crate::viewport::scene_radius(app));
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
@@ -382,15 +397,20 @@ fn near_edges(
     include_ghosted: bool,
     wireframe: bool,
     slack: f64,
+    section: Option<(Vec3, Vec3)>,
 ) -> (Option<EdgeHit>, Option<VertexHit>) {
     let reach = crate::pick_index::reach(proj, pos, edge_px.max(6.0));
+    // The section removes a half-space and nothing there is drawn, so the mouse picker skips
+    // edges and vertices in it; a pick must not answer with what the user cannot see (#10704,
+    // the same `kept` test `viewport::pick` applies).
+    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + SECTION_EPS);
     // `slack` is the body's own: what counts as lying on the face in front depends on how
     // coarsely that body is meshed, never on where the camera stands.
-    let visible = |p: Vec3, slack: f64| wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack);
+    let visible = |p: Vec3, slack: f64| kept(p) && (wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack));
     let mut best_e: Option<EdgeHit> = None;
     let mut best_v: Option<VertexHit> = None;
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {

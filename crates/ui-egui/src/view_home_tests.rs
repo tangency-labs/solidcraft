@@ -1,7 +1,9 @@
 // Home and Fit frame what is shown now, and a middle-button double-click goes Home.
 use crate::scenario::Harness;
 use serde_json::json;
-use solidcraft_engine::geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
@@ -11,7 +13,7 @@ fn moved_block(h: &mut Harness) {
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("solid.extrude", json!({"distance": 5})).unwrap();
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("solid.move", json!({"bodies": [body], "translate": [500, 0, 0]})).unwrap();
     h.app.preferences.look_at_anim = false;
     h.settle();
@@ -124,7 +126,7 @@ fn middle_double_click_preference_fit_or_off() {
     assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (yaw, pitch), "Fit keeps the orientation");
     assert!(h.app.cam.target.dist(Vec3::new(505.0, 5.0, 2.5)) < 5.0, "{:?}", h.app.cam.target);
     // Fit frames everything shown, not the selection.
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
     let fitted = h.app.cam;
     h.app.cam.pan(60.0, 0.0, 500.0);
@@ -276,6 +278,36 @@ fn fit_and_home_json_commands_preserve_design_framing() {
     }
     assert_eq!(h.app.session.doc.to_json(), design);
     assert_eq!(h.app.session.undo.len(), undo);
+}
+
+/// #10091: Preferences › Navigation "Home and Fit size" is how much of the view the model fills
+/// when Home and Fit (and an opened design or a navigator view change) frame it; 100 %, the
+/// default, fills the room between the panels and the controls as before.
+#[test]
+fn home_fit_size_scales_the_framed_model() {
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    moved_block(&mut h);
+    assert_eq!(h.app.preferences.home_fit_size, 1.0, "fills the room by default");
+    h.call("engine.execute", json!({"command":"view.home","params":{}}));
+    h.frames(2);
+    let tight = h.app.cam;
+    h.call("ui.prefs", json!({"home_fit_size":0.8}));
+    for command in ["view.home", "view.fit"] {
+        h.call("engine.execute", json!({"command":command,"params":{}}));
+        h.frames(2);
+        assert!((h.app.cam.distance / tight.distance - 1.25).abs() < 0.02, "{command}: {} vs {}", h.app.cam.distance, tight.distance);
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (tight.yaw, tight.pitch), "{command}: the size only zooms");
+    }
+    for bad in [1.5, 0.05, 0.0, -1.0] {
+        let r = h.call("ui.prefs", json!({"home_fit_size":bad}));
+        assert_eq!(r["ok"], false, "{bad} is outside 10 %…100 %: {r}");
+    }
+    assert!((h.app.preferences.home_fit_size - 0.8).abs() < 1e-6);
+    h.call("ui.prefs", json!({"open":"Navigation"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert_eq!(h.app.preferences.home_fit_size, 1.0, "Navigation defaults restore 100 %");
+    h.call("ui.prefs", json!({"button":"cancel"}));
 }
 
 #[test]

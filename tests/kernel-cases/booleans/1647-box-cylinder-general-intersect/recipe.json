@@ -1,0 +1,43 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     11.483767761089219,
+     4.801612107504224,
+     3.6313476467611787
+    ],
+    "length": 4.789088988834864,
+    "width": 3.0,
+    "height": 10.419335961063835,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     29.2480632732879,
+     8.3683289461485,
+     6.947922225984966
+    ],
+    "axis": "Z",
+    "radius": 13.502884497756853,
+    "height": 19.719218725477496,
+    "operation": "new",
+    "body_name": "Cyl"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Box",
+    "tools": [
+     "Cyl"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

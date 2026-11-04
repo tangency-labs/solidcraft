@@ -6,6 +6,16 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+Sketches drawn on a part's face while the design was active belong to the design, so they
+collect in its Sketches folder. **Move Sketches to Their Parts**
+(`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
+the folder's sketches (or the selected ones) to the part whose face each is drawn on, as dragging
+it onto the part would. Each stays where it is on its face, and the whole move is one undo step.
+A sketch with no single part to go to stays where it is: one on an origin, construction or fixed
+plane, on a body of the design itself, on a face without an exact attachment, or already in its
+part. The status bar says how many moved and why the others stayed; the command's reply lists
+each sketch. With no `sketches` it looks at every sketch in the design.
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
@@ -259,7 +269,9 @@ it where it is), and it moves.
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
 by default: B's z axis is turned against A's, as two faces meet. `flip: true` lines them up
-instead, so two origins given at one point with the same z stay as they are. Without an
+instead, so two origins given at one point with the same z and x stay as they are. A point origin
+without `x` takes its x from z alone, so a part turned about z turns back when it is joined: give
+`x` on both origins, or use `joint.as_built`, to keep it where it is. Without an
 `angle`, a new joint (other than a relation, which starts where its parts are) takes no turn or a half turn about its axis, whichever turns B less: two
 faces that already meet, a plate under a panel, stay as they are instead of B spinning about
 their shared normal. For scripts that drive many steps, `quiet: true` leaves the per-part
@@ -345,9 +357,12 @@ accelerations are finite differences between samples, central inside and one-sid
 so they are as smooth as the samples are dense (up to 1000, one per step by default). Angles are
 unwrapped, so a joint that turns on past half a turn keeps counting.
 `motion.interference {study, occurrences?, against?, contact_sets?, samples?, budget_s?}` answers each
-colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, how
-far into each other (`depth_mm`, the most at `deepest_step`) and their shared `volume_mm3`
-there (null when it is not cheap to work out). It plays the study as `motion.play` does, but
+colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, the
+most volume they share at a sample (`volume_mm3`, worked out exactly from the bodies), the first
+sample sharing that much (`deepest_step`) and how far into each other they reach (`depth_mm`, an
+estimate from points of the bodies' contact meshes). When the volume could not be worked out at
+every sample they overlap (more than 16 colliding pairs, or past the check's 256 body
+intersections), `volume_mm3` and `deepest_step` are null and `not_measured` says why. It plays the study as `motion.play` does, but
 contact sets don't stop it, and parts are tested at the samples only: a part that passes right
 through another between two samples is missed. Parts are told apart by occurrence, as contact
 sets tell them apart: an occurrence inside a sub-assembly placed twice is one part, so its two
@@ -371,6 +386,25 @@ listed in `touching_at_start` and stop the sweep only once they pass into each o
 they start. The sweep runs on a copy (closed loops follow, contact sets don't stop it) and
 leaves the design as it was unless `apply` is true.
 
+**Find Limits.** In **Edit Joint**, the **Limits** section's **Find Limits** button fills in each
+value's Minimum and Maximum from where the parts the joint moves first touch another part,
+turning or sliding each way from where the joint is now, and ticks its limits. It searches the
+joint as the dialog has it (a type, flip or offset changed but not yet applied included), on a
+copy: nothing changes until **OK**, so the values can still be rounded or edited. They are
+rounded toward the joint's value (a tenth of a degree, a hundredth of the length unit) so they
+stay clear, and a line under each value says what stopped each side. An angle is searched a turn
+each way: a side that meets nothing is set a turn from the other side, or half a turn each way
+when nothing is met at all. A distance is searched as far as the parts reach; a side that meets
+nothing there keeps what it had, and the limits stay off until both sides are found. Parts
+already in each other where the joint is now are named, and stop the search only once they go
+deeper. The search runs while the window goes on (Cancel drops it). `joint.find_limits {joint,
+index?, refine?, step?, occurrences?, against?, contact_sets?}` answers the same: for each value
+its `min` and `max` (`null` where a distance meets nothing), what stopped each side (`min_by`,
+`max_by`: the two parts and where they touch, or `"loop"`, `"limit"` (the limit of
+another of its values, or of another joint through a motion link), `"turn"` or `"range"`), the `range` searched, and the parts `touching_at_start`
+and `overlapping_at_start` (with `depth_mm`). The joint's own limits are left out of the search,
+closed loops follow, and each side is bisected to `refine` as `joint.sweep` does.
+
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in
 its own document. When other designs are open in tabs, the button first lists them under
@@ -382,16 +416,23 @@ off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
+For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
+parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
+With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;
+it does not inherit another occurrence's position or rotation. For example, inserts at
+`[20,0,0]` and `[40,0,0]` place the two origins at 20 and 40 mm, even when the second reuses the link.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
-An assembly whose tab comes back to the front does that by itself for the parts whose files
+An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
-a checkout. A part that cannot be read is tried again the next time, and holds up no other.
+a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part
+that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
-`component.links` lists the links and whether their files are found. A linked component holds
+`component.links` lists the links, whether their files are found, and whether they changed since
+the assembly last read them (`changed`). A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
@@ -465,6 +506,8 @@ description; **Change Part Size** renumbers them, keeping a field you changed yo
   under it as `children` (items 1.1, 1.2…, with `each` per bolt and `count` in all) instead of
   rows of their own. Bolts with different contents (one with a nut, one without) are different
   rows. `total_occurrences` counts the children too, so it is the same either way.
+  For an inseparable part, only its purchased descendants become children; a purchased part
+  still has no children listed. Parts without a part number are not grouped this way.
 - `component` lists one subassembly's parts instead of the design's.
 
 A component's **bill of materials type** (`bom_type`, a part property set with

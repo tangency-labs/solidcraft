@@ -3,7 +3,7 @@
 use crate::ui_kit;
 use egui::Key;
 
-use crate::params_dialog::{exact_token, suggestions_for, unit_token, word_before};
+use crate::params_dialog::{every_parameter, exact_token, suggestions_for, unit_token, word_before};
 use crate::theme::Tokens;
 
 #[derive(Clone)]
@@ -31,6 +31,15 @@ struct Popup {
     /// every frame: the names it depends on are gathered only once a box has the focus, and
     /// the text before the word can change under it (`20 mm` replaced by `pi mm`).
     keyed: bool,
+    /// The box was empty when last drawn: Down arrow there opens the list.
+    empty: bool,
+    /// Down arrow in the empty box opened it: every named parameter, however many (#9246).
+    every: bool,
+    /// The box was typed in since it took the focus. Until then an unarmed list only shows
+    /// what longer names there are, for a value the window filled in (`T` in Edit Extrude
+    /// lists `tan(`): Escape passes it by and closes the window as it would without the list,
+    /// as Enter and Tab do (#9084).
+    typed: bool,
 }
 
 fn popup_id() -> egui::Id {
@@ -52,6 +61,22 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
         popup.dismissed = false;
         (popup.armed, popup.keyed) = (true, true);
         ctx.data_mut(|d| d.insert_temp(popup_id(), popup.clone()));
+    }
+    // Down arrow in an empty box opens every named parameter (#9246): one need not remember
+    // a letter of the name. Once the list is open, Down moves through it as below.
+    if popup.empty
+        && (popup.count == 0 || popup.dismissed)
+        && ctx.memory(|m| m.has_focus(popup.editor))
+        && popup.frame.saturating_add(1) >= ctx.cumulative_frame_nr()
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown))
+    {
+        ctx.input_mut(|i| {
+            i.raw.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::ArrowDown, modifiers, .. } if modifiers.is_none()));
+        });
+        (popup.explicit, popup.every, popup.dismissed) = (true, true, false);
+        (popup.armed, popup.keyed, popup.selected) = (true, true, 0);
+        ctx.data_mut(|d| d.insert_temp(popup_id(), popup.clone()));
+        return;
     }
     let escape_blurred = ctx.input(|i| i.key_pressed(Key::Escape)) && ctx.memory(|m| m.focused().is_none() && m.had_focus_last_frame(popup.editor));
     let focused = ctx.memory(|m| m.has_focus(popup.editor)) || escape_blurred;
@@ -85,6 +110,7 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
                     // Unarmed, the typed word is complete: Enter submits it and Tab moves on.
                     Key::Enter | Key::Tab if !popup.armed => continue,
                     Key::Enter | Key::Tab => popup.accept = true,
+                    Key::Escape if !popup.armed && !popup.typed => continue,
                     Key::Escape => {
                         popup.dismissed = true;
                         popup.accept = false;
@@ -149,6 +175,7 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     // Dismissed suggestions stay closed until this box is typed in: another control rewriting
     // its text (a slider dragged while the box keeps the focus) or a moved caret is no reason.
     let dismissed = previous.as_ref().is_some_and(|p| p.dismissed) && !resp.changed();
+    let typed = resp.changed() || previous.as_ref().is_some_and(|p| p.typed);
     // What the word follows, blanks aside.
     let before = text.chars().take(start).filter(|c| !c.is_whitespace()).last();
     // A word that is already a complete name opens unarmed: Enter submits it as typed. A unit is
@@ -169,7 +196,12 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         rows: Vec::new(),
         armed,
         keyed: false,
+        empty: false,
+        every: false,
+        typed,
     });
+    popup.typed = typed;
+    popup.empty = text.is_empty();
     popup.armed = popup.keyed || armed;
     // Never over a control being dragged: the drag dismisses them.
     if ctx.dragged_id().is_some_and(|id| id != resp.id) {
@@ -178,7 +210,9 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     // A unit right after a number (`2 in`, `10 mm`, the form every dialog starts its sizes in)
     // is a unit, not the start of a name: no popup there, so nothing sits over the OK button.
     let number_before = before.is_some_and(|c| c.is_ascii_digit() || c == '.' || c == ')');
-    let list = if !popup.explicit && number_before && unit_token(&ctx, &popup.word) {
+    let list = if popup.every {
+        every_parameter(&ctx)
+    } else if !popup.explicit && number_before && unit_token(&ctx, &popup.word) {
         Vec::new()
     } else {
         suggestions_for(&ctx, &popup.word, popup.explicit)
@@ -226,10 +260,13 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         popup.armed.then_some(popup.selected),
         &options,
         // Unarmed, the typed word is complete and Enter submits it; an arrow key arms the list.
+        // Escape is the window's until the box is typed in.
         crate::i18n::tr_label(if popup.armed {
             "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
-        } else {
+        } else if popup.typed {
             "↑ ↓ choose · Enter applies what you typed · Esc dismiss"
+        } else {
+            "↑ ↓ choose · Enter applies this value"
         }),
     ) && pick.is_none()
         && !released_after_press
@@ -324,6 +361,12 @@ mod tests {
             );
             // Nothing paints these frames: drop their texture updates on purpose.
             output.textures_delta.clear();
+        }
+
+        fn frames(&mut self, n: usize) {
+            for _ in 0..n {
+                self.frame(Vec::new());
+            }
         }
 
         fn key(&mut self, key: Key) {
@@ -511,6 +554,26 @@ mod tests {
         }
     }
 
+    /// A list that opened by itself on a value the window filled in leaves Escape to the window
+    /// (#9084); once the box is typed in, Escape dismisses the list first.
+    #[test]
+    fn escape_passes_an_unarmed_list_until_the_box_is_typed_in() {
+        let mut e = Editor::new("width");
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(false));
+        e.key(Key::Escape);
+        assert!(e.leaked.contains(&Key::Escape));
+        assert!(!e.ctx.memory(|m| m.has_focus(e.id)));
+
+        let mut e = Editor::new("widt");
+        e.frame(vec![egui::Event::Text("h".into())]);
+        assert_eq!(e.text, "width");
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(false));
+        e.key(Key::Escape);
+        assert!(e.leaked.is_empty());
+        assert!(!showing(&e.ctx, e.id));
+        assert!(e.ctx.memory(|m| m.has_focus(e.id)));
+    }
+
     /// From the unarmed popup an arrow key picks a row (Down the first, Up the last); Enter or
     /// Tab then complete it as usual.
     #[test]
@@ -646,6 +709,54 @@ mod tests {
             e.key(Key::Tab);
             assert!(e.accepted);
             assert!(!e.text.is_empty());
+        }
+    }
+
+    /// #9246: Down arrow in an empty box lists every named parameter, past the eight rows a
+    /// typed word shows; the list scrolls to the chosen row and Enter inserts it. In a box that
+    /// already holds text, Down stays the editor's.
+    #[test]
+    fn down_arrow_in_an_empty_box_lists_every_parameter_and_scrolls() {
+        let mut e = Editor::new("");
+        for i in 1..=15 {
+            e.app.run("parameters.add", json!({"name":format!("p{i:02}"),"expression":"1 mm"})).unwrap();
+        }
+        e.frame(Vec::new());
+        assert_eq!(e.popup(), None, "an empty box shows nothing until asked");
+        e.key(Key::ArrowDown);
+        e.frame(Vec::new());
+        assert!(!e.leaked.contains(&Key::ArrowDown));
+        assert_eq!(e.popup(), Some((20, true)), "every parameter, armed on the first");
+        assert_eq!(e.selected(), 0);
+        assert!(e.text.is_empty());
+
+        e.key(Key::ArrowUp);
+        e.frames(2);
+        assert_eq!(e.selected(), 19);
+        let rows = e.ctx.data(|d| d.get_temp::<Popup>(popup_id())).unwrap().rows;
+        assert!(rows.last().is_some_and(|r| r.area() > 0.0), "the chosen last row is scrolled into view");
+        assert!(rows.first().is_some_and(|r| r.area() <= 0.0), "the first row has scrolled out: {:?}", rows.first());
+        let last = params_dialog::every_parameter(&e.ctx).last().map(|s| s.text.clone()).unwrap();
+        e.key(Key::Enter);
+        assert!(e.accepted);
+        assert_eq!(e.text, last);
+
+        let mut typed = Editor::new("width + ");
+        typed.key(Key::ArrowDown);
+        assert!(typed.leaked.contains(&Key::ArrowDown), "a box with text keeps Down for itself");
+        assert_eq!(typed.popup(), None);
+
+        // Preferences caps the list, so a large design does not list thousands; a hand-edited
+        // cap below the accepted range still lists a few.
+        for (cap, listed) in [(12, 12), (0, 5)] {
+            let mut capped = Editor::new("");
+            for i in 1..=15 {
+                capped.app.run("parameters.add", json!({"name":format!("p{i:02}"),"expression":"1 mm"})).unwrap();
+            }
+            capped.app.preferences.parameter_list_rows = cap;
+            capped.key(Key::ArrowDown);
+            capped.frame(Vec::new());
+            assert_eq!(capped.popup(), Some((listed, true)), "cap {cap}");
         }
     }
 

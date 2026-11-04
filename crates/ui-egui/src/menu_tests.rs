@@ -3,8 +3,9 @@
 use crate::test_support::sample_app;
 use egui::pos2;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::context_menu::{self, Item, Target};
 use crate::viewport::Hit;
@@ -143,7 +144,7 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
     app.run("sketch.finish", json!({})).unwrap();
     let (sketch, curve) = {
-        let st = app.session.world_state();
+        let st = app.session.world_state().unwrap();
         let ss = st.sketches.first().expect("the design has one sketch");
         (ss.feature, ss.sketch.curves.first().expect("the rectangle drew curves").id.clone())
     };
@@ -171,7 +172,7 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
 fn a_selected_face_keeps_the_body_menu_beside_a_sketch_curve() {
     let mut app = sample_app();
     let b = body(&app);
-    let sketch = app.session.world_state().sketches.first().expect("the sample design has sketches").feature;
+    let sketch = app.session.world_state().unwrap().sketches.first().expect("the sample design has sketches").feature;
     let items = json!([
         {"type": "face", "body": b, "index": 0, "point": [0, 0, 0]},
         {"type": "external_sketch_curve", "sketch": sketch, "id": "l1"},
@@ -587,9 +588,9 @@ fn folder_and_group_menus_make_rename_and_drop_groups() {
     act(&mut app, &t, "Show/Hide");
     assert!(app.session.visibility.hidden_bodies.is_empty());
     assert!(app.session.folder_hidden(&format!("c0/g{}", g.id)));
-    assert!(g.items.iter().all(|b| !app.session.body_visible(b)));
+    assert!(g.item_keys().all(|b| !app.session.body_visible(b)));
     act(&mut app, &t, "Show/Hide");
-    assert!(g.items.iter().all(|b| app.session.body_visible(b)));
+    assert!(g.item_keys().all(|b| app.session.body_visible(b)));
     act(&mut app, &t, "Ungroup");
     assert!(app.session.doc.browser_groups.is_empty());
     act(&mut app, &folder, "New Group");
@@ -673,6 +674,26 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     assert_eq!(app.session.doc.features.len(), n);
 }
 
+/// #9079: Modify ▸ Delete with nothing selected says what to pick, not the command's parameter
+/// error, and changes nothing; with something selected it deletes it, as the Delete key does.
+#[test]
+fn modify_delete_with_nothing_selected_asks_for_a_pick() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 10})).unwrap();
+    let n = app.session.doc.features.len();
+    app.run("select.clear", json!({})).unwrap();
+    app.start("timeline.delete");
+    let (message, _, error) = app.status.clone().expect("a hint");
+    assert!(!error && message == app.tr("ui.delete_select_first"), "{message:?} error: {error}");
+    assert!(!message.contains('`'), "no parameter names: {message}");
+    assert_eq!(app.session.doc.features.len(), n, "nothing deleted");
+    app.run("select.set", json!({"items": [{"type": "plane", "name": "Plane1"}]})).unwrap();
+    app.start("timeline.delete");
+    assert!(app.session.doc.find_feature("Plane1").is_none(), "the selection goes");
+    assert_eq!(app.session.doc.features.len(), n - 1);
+}
+
 #[test]
 fn browser_feature_menu_deletes_its_target_and_supports_undo() {
     let mut app = SolveApp::new(Session::default(), Services::default());
@@ -753,7 +774,7 @@ fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
 fn menu_delete_items_use_the_same_path() {
     let mut app = sample_app();
     let b = body(&app);
-    let original_volume = solidcraft_engine::kernel::measure(&app.session.world_state().body(&b).unwrap().body).unwrap().volume;
+    let original_volume = solidcraft_engine::kernel::measure(&app.session.world_state().unwrap().body(&b).unwrap().body).unwrap().volume;
     let created = app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = app.session.doc.components[0].id;
     let transfer = created["components"][0]["feature"].as_u64().unwrap();
@@ -768,15 +789,15 @@ fn menu_delete_items_use_the_same_path() {
     assert!(crate::delete::confirm(&mut app, true));
     assert!(app.session.doc.components.is_empty());
     assert!(app.session.doc.feature(transfer).is_none());
-    let restored = app.session.world_state();
+    let restored = app.session.world_state().unwrap();
     assert_eq!(restored.bodies.len(), 1, "the original joined plate stays intact");
     let plate = restored.body(&b).unwrap();
     assert_eq!(plate.component, 0);
     assert!((solidcraft_engine::kernel::measure(&plate.body).unwrap().volume - original_volume).abs() < 1e-6);
-    assert!(plate.mesh().contains(solidcraft_engine::geom::Vec3::new(40.0, 35.0, 12.0)));
+    assert!(plate.mesh().contains(solidcore_record::Vec3::new(40.0, 35.0, 12.0)));
     let mut reopened = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
     reopened.refresh();
-    let reopened_state = reopened.world_state();
+    let reopened_state = reopened.world_state().unwrap();
     assert_eq!(reopened_state.bodies.len(), 1);
     assert_eq!(reopened_state.body(&b).unwrap().component, 0);
     assert!((solidcraft_engine::kernel::measure(&reopened_state.body(&b).unwrap().body).unwrap().volume - original_volume).abs() < 1e-6);
@@ -1037,6 +1058,88 @@ fn f2_renames_the_selected_item() {
     assert!(!context_menu::rename_selection(&mut app, pos2(0.0, 0.0)), "nothing selected");
 }
 
+/// Rename shows F2 wherever F2 renames (bodies, sketches and features, construction geometry,
+/// components and placements, groups, canvases), as Cut, Copy, Delete and Show/Hide show their
+/// keys; joints and saved views, which F2 does not rename, show none. F2 pressed with such a
+/// menu open renames what the menu is for, as its row says: a group or canvas is not selected by
+/// the right-click that opens its menu, so F2 would rename the selection instead.
+#[test]
+fn rename_shows_f2_and_f2_with_a_menu_open_renames_what_the_menu_is_for() {
+    use crate::context_menu::RenameWhat;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    let b = body(&h.app);
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 5})).unwrap();
+    let plane = h.app.session.doc.features.last().unwrap().id;
+    let part = h.app.run("component.create", json!({"name": "Menu part"})).unwrap()["component"].as_u64().unwrap();
+    let occurrence = h.app.session.doc.occurrence_of(part).unwrap().id;
+    let group = h.app.run("browser.group", json!({"component": 0, "folder": "bodies", "items": [b]})).unwrap()["group"].as_u64().unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let rename_key = |app: &SolveApp, target: &Target| {
+        context_menu::items(app, target)
+            .into_iter()
+            .find(|i| i.id == "ui.rename")
+            .map(|i| i.shortcut)
+            .unwrap_or_else(|| panic!("no Rename row: {target:?}"))
+    };
+    for target in [
+        Target::Body { name: b.clone() },
+        Target::Sketch { id: feature },
+        Target::Feature { id: feature },
+        Target::Plane { id: plane },
+        Target::Component { id: part },
+        Target::Occurrence { path: vec![occurrence] },
+        Target::Group { id: group, scope: "c0".into() },
+        Target::Canvas { id: canvas },
+    ] {
+        assert_eq!(rename_key(&h.app, &target), "F2", "Rename shows F2: {target:?}");
+    }
+    assert_eq!(rename_key(&h.app, &Target::NamedView { name: "Top".into() }), "", "F2 does not rename a saved view");
+    let sample = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Hinge Assembly").unwrap();
+    let mut assembly = SolveApp::new(Session::default(), Services::default());
+    assembly.session.run_script(&(sample.script)()).unwrap();
+    let joint = assembly.session.doc.assembly.joints[0].id;
+    assert_eq!(rename_key(&assembly, &Target::Joint { id: joint }), "", "F2 does not rename a joint");
+
+    let press_f2 = |h: &mut crate::scenario::Harness| {
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key { key: egui::Key::F2, physical_key: None, pressed, repeat: false, modifiers: Default::default() });
+        }
+        while !h.app.synthetic.is_empty() {
+            h.frame();
+        }
+    };
+    // A body selected elsewhere is not what the group's or the canvas's menu is for.
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+    for (target, what) in
+        [(Target::Group { id: group, scope: "c0".into() }, RenameWhat::Group(group)), (Target::Canvas { id: canvas }, RenameWhat::Canvas(canvas))]
+    {
+        context_menu::open_for(&mut h.app, pos2(300.0, 200.0), target.clone());
+        h.frames(2);
+        press_f2(&mut h);
+        let renaming = h.app.menu.rename.as_ref().map(|r| r.what.clone());
+        assert_eq!(renaming, Some(what), "F2 on the menu of {target:?}");
+        assert!(h.app.viewport.context_menu.is_none(), "the menu closes as after a click");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.menu.rename.is_none());
+    }
+    // With no menu open, F2 still renames the selection.
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+    h.frames(2);
+    press_f2(&mut h);
+    assert_eq!(h.app.menu.rename.as_ref().map(|r| r.what.clone()), Some(RenameWhat::Body(b)), "F2 without a menu renames the selection");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+}
+
 /// A double-click on a body's browser row edits its name in the row, like F2 (no floating box);
 /// Escape cancels, and a second double-click then commits a new name.
 #[test]
@@ -1074,14 +1177,14 @@ fn occurrence_moves_turn_about_their_origin_then_move() {
     let occ = app.session.doc.occurrences[0].id;
     app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
     let mut m = crate::browser::OccMove::new(occ);
-    m.pivot = Some(solidcraft_engine::geom::Vec3::new(5.0, 0.0, 0.0));
+    m.pivot = Some(solidcore_record::Vec3::new(5.0, 0.0, 0.0));
     m.translate = [10.0, 0.0, 0.0];
     m.angles = [0.0, 0.0, 90.0];
     crate::browser::apply_occurrence_move(&mut app, &m);
     let t = *app.session.pending_moves.get(&occ).unwrap();
     // The pivot lands 10 mm along X; X turns into Y.
-    let p = solidcraft_engine::doc::apply_point(&t, solidcraft_engine::geom::Vec3::new(5.0, 0.0, 0.0));
-    let x = solidcraft_engine::doc::apply_vector(&t, solidcraft_engine::geom::Vec3::X);
+    let p = solidcraft_engine::doc::apply_point(&t, solidcore_record::Vec3::new(5.0, 0.0, 0.0));
+    let x = solidcraft_engine::doc::apply_vector(&t, solidcore_record::Vec3::X);
     assert!((p.x - 15.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
     assert!((x.y - 1.0).abs() < 1e-9, "{x:?}");
     // Changing the values again starts from where it was, not from the last move.
@@ -1186,8 +1289,8 @@ fn construction_plane_row_opens_its_menu() {
 /// starts the sketch on that plane.
 #[test]
 fn right_click_on_a_plane_offers_a_sketch_on_it() {
-    use solidcraft_engine::geom::Vec3;
-    let normal = |h: &crate::scenario::Harness| h.app.session.world_state().sketches.first().map(|s| s.plane.normal()).unwrap_or_default();
+    use solidcore_record::Vec3;
+    let normal = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().sketches.first().map(|s| s.plane.normal()).unwrap_or_default();
     for (plane, axis) in [("XY", Vec3::Z), ("XZ", Vec3::Y), ("YZ", Vec3::X)] {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -1234,7 +1337,7 @@ fn right_click_on_a_plane_offers_a_sketch_on_it() {
     let id = h.app.session.doc.find_feature("Cut").map(|f| f.id).unwrap();
     act(&mut h.app, &Target::Plane { id }, "Create Sketch");
     h.frames(3);
-    let sketch = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.origin.z));
+    let sketch = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().unwrap().sketch(s).map(|s| s.plane.origin.z));
     assert_eq!(sketch, Some(25.0), "the sketch is on the construction plane");
 }
 
@@ -1288,7 +1391,7 @@ fn empty_space_leads_with_create_sketch() {
 /// Create Sketch from a right-click on empty space sketches on the next plane clicked (#3032).
 #[test]
 fn create_sketch_from_empty_space_sketches_on_the_plane_clicked_next() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.settle();
@@ -1303,7 +1406,7 @@ fn create_sketch_from_empty_space_sketches_on_the_plane_clicked_next() {
     let p = h.at(&json!({"plane": "XY"})).unwrap();
     h.call("ui.click", json!({"x": p[0], "y": p[1]}));
     h.frames(3);
-    let normal = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.normal()));
+    let normal = h.app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&h.app.session).sketch(s).map(|s| s.plane.normal()));
     assert!(normal.is_some_and(|n| n.dot(Vec3::Z).abs() > 0.999), "sketching on XY: {normal:?}");
 }
 
@@ -1380,14 +1483,15 @@ fn typing_a_new_body_name_and_enter_renames_it() {
 
 #[test]
 fn contribution_picked_faces_open_their_own_feature_after_later_modifiers() {
-    use solidcraft_engine::{Sel, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
     for expected in [1, 2, 3] {
         let mut app = SolveApp::new(Session::default(), Services::default());
         app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
         app.run("solid.hole", json!({"position":[20,15,20],"diameter":8})).unwrap();
         app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2})).unwrap();
         app.run("solid.hole", json!({"position":[32,20,20],"diameter":4})).unwrap();
-        let state = app.session.world_state();
+        let state = app.session.world_state().unwrap();
         let b = state.body("Plate").unwrap();
         let names = solidcraft_engine::doc::naming::face_names(b);
         let index = names.iter().position(|n| n.starts_with(&format!("F{expected}:"))).unwrap();
@@ -1424,8 +1528,7 @@ fn contribution_picked_faces_open_their_own_feature_after_later_modifiers() {
 fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
-    app.session.selection =
-        vec![solidcraft_engine::Sel::Face { body: "Plate".into(), index: usize::MAX, point: solidcraft_engine::geom::Vec3::ZERO }];
+    app.session.selection = vec![solidcraft_engine::Sel::Face { body: "Plate".into(), index: usize::MAX, point: solidcore_record::Vec3::ZERO }];
     let items = context_menu::items(&app, &Target::Viewport);
     assert!(!find(&items, "Edit Feature").enabled);
     assert!(!find(&items, "Find in Timeline").enabled);
@@ -1466,6 +1569,8 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Group { id: group_id, scope: "c0".into() },
         Target::Origin,
         Target::Units,
+        Target::VisualStyle,
+        Target::ViewTool,
         Target::ToolbarCommand { id: "solid.extrude".into() },
         Target::Toolbar,
         Target::HistoryControls,

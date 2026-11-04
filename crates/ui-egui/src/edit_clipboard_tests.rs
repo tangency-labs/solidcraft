@@ -1,8 +1,9 @@
 //! Copy and Paste from the keyboard and the context menu (#1480).
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -207,6 +208,82 @@ fn ctrl_c_ctrl_v_outside_a_sketch_copies_and_pastes_timeline_features() {
 }
 
 #[test]
+fn completed_sketch_copies_and_pastes_into_a_new_design() {
+    let (mut h, _) = rectangle();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let id = h.app.session.doc.features[0].id;
+    select(&mut h.app, json!({"type": "feature", "id": id}));
+    clipboard_event(&mut h, egui::Event::Copy, None);
+    crate::documents::new_tab(&mut h.app);
+    clipboard_event(&mut h, egui::Event::Paste("SolidCraft features".into()), None);
+    assert_eq!(h.app.session.doc.features.len(), 1, "{:?}", h.app.status);
+    let copied = &h.app.session.doc.features[0];
+    let sketch = h.app.session.doc.sketch(copied.id).unwrap();
+    assert_eq!(sketch.curves.len(), 4);
+    assert!(h.app.session.model.result(copied.id).unwrap().error.is_none());
+}
+
+/// Sketch geometry copied in a sketch pastes into a sketch of another design (tab) with Ctrl+V,
+/// at the cursor, with its constraints and dimensions, in one undo step; the context menu offers
+/// it there too. A copy made since in that design is what pastes back in the first (#9258).
+#[test]
+fn sketch_geometry_copies_into_a_sketch_of_another_design() {
+    let (mut h, _) = rectangle();
+    clipboard_event(&mut h, egui::Event::Copy, Some([10.0, 5.0]));
+    crate::documents::new_tab(&mut h.app);
+    assert!(!super::can_paste(&h.app), "outside a sketch, sketch geometry has nowhere to go");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [20, 10, 0], "distance": 150}));
+    h.frames(4);
+    assert!(super::can_paste(&h.app));
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(menu.iter().any(|i| i.id == "ui.paste" && i.enabled), "the sketch menu's Paste is on");
+    let undo = h.app.session.undo.len();
+    clipboard_event(&mut h, egui::Event::Paste("SolidCraft sketch geometry".into()), Some([60.0, 40.0]));
+    let pasted = curves(&h);
+    assert_eq!(pasted.len(), 4, "{:?}", h.app.status);
+    let corner = start(&h, &pasted[0]);
+    assert!(corner.dist(Vec2::new(50.0, 35.0)) < 1.0, "{corner:?}");
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sk.constraints.iter().filter(|c| c.param.is_some()).count(), 2, "both dimensions came along");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    // A copy in this design is now the last: the first design pastes it.
+    let items: Vec<Value> = pasted.iter().take(1).map(|id| json!({"type": "sketch_curve", "id": id})).collect();
+    h.app.run("select.set", json!({ "items": items })).unwrap();
+    assert!(super::copy(&mut h.app));
+    crate::documents::switch(&mut h.app, 0);
+    let before = curves(&h).len();
+    assert!(super::paste(&mut h.app, None), "{:?}", h.app.status);
+    assert_eq!(curves(&h).len(), before + 1, "the one line copied last, not the rectangle copied here before");
+}
+
+#[test]
+fn copied_sketch_survives_source_close_and_pastes_from_a_sketch_group_menu() {
+    use crate::context_menu::{Target, items, run_item};
+    let (mut h, _) = rectangle();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    select(&mut h.app, json!({"type":"feature","id":1}));
+    assert!(super::copy(&mut h.app));
+    crate::documents::new_tab(&mut h.app);
+    crate::documents::close(&mut h.app, 0, true);
+    assert!(super::can_paste(&h.app) && super::pasting_features(&h.app));
+    assert!(!super::pasting_bodies(&h.app) && !super::pasting_components(&h.app));
+    let group = h.app.run("browser.group", json!({"folder":"sketches","name":"Copied"})).unwrap()["group"].as_u64().unwrap();
+    let item = items(&h.app, &Target::Group { id: group, scope: "c0".into() }).into_iter().find(|i| i.id == "ui.paste").unwrap();
+    assert!(item.enabled);
+    run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    let id = h.app.session.doc.find_feature("Sketch1").unwrap().id;
+    assert_eq!(h.app.session.doc.sketch(id).unwrap().curves.len(), 4);
+    assert!(h.app.session.doc.browser_groups.iter().any(|g| g.id == group && g.has_item(&id.to_string())));
+    // A later copy in this design replaces the cross-design snapshot everywhere.
+    select(&mut h.app, json!({"type":"feature","id":id}));
+    assert!(super::copy(&mut h.app));
+    assert!(super::paste(&mut h.app, None));
+    assert!(h.app.session.doc.find_feature("Sketch1 (2)").is_some());
+}
+
+#[test]
 fn ctrl_x_cuts_the_sketch_selection_and_ctrl_v_brings_it_back() {
     let (mut h, rect) = rectangle();
     let before = curves(&h);
@@ -292,7 +369,7 @@ fn contribution_occurrence_move_panel_belongs_to_its_document() {
 
 #[test]
 fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
     h.app = contribution_saved_part(&file);
@@ -335,7 +412,8 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
 
 #[test]
 fn contribution_paste_pointer_uses_parent_coordinates_and_safe_fallbacks() {
-    use solidcraft_engine::{doc, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc;
     let mut h = crate::scenario::Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Parent","grounded":false})).unwrap();
     h.app
@@ -614,13 +692,13 @@ fn design_with_cube(name: &str) -> solidcraft_engine::Session {
 #[test]
 fn copied_bodies_paste_into_another_design_as_imported_bodies() {
     let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
-    let was = app.session.world_state().body("Cube").unwrap().mesh().bounds();
+    let was = crate::open_meshing::session_world(&app.session).body("Cube").unwrap().mesh().bounds();
     select(&mut app, json!({"type": "body", "name": "Cube"}));
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, design_with_cube("Frame")).unwrap();
     assert!(super::can_paste(&app) && super::pasting_bodies(&app));
     assert!(super::paste(&mut app, None));
-    let is = app.session.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    let is = crate::open_meshing::session_world(&app.session).body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let feature = app.session.doc.find_feature("Import1").expect("one Import feature");
     assert!(matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Import { .. }));
@@ -754,9 +832,7 @@ fn pasting_on_a_group_puts_the_copy_in_it() {
         assert!(item.enabled);
         run_item(app, &item, egui::Pos2::ZERO);
     };
-    let holds = |app: &crate::SolveApp, group: u64, key: &str| {
-        app.session.doc.browser_groups.iter().any(|g| g.id == group && g.items.iter().any(|k| k == key))
-    };
+    let holds = |app: &crate::SolveApp, group: u64, key: &str| app.session.doc.browser_groups.iter().any(|g| g.id == group && g.has_item(key));
     select(&mut app, json!({"type": "body", "name": "Cube"}));
     assert!(super::copy(&mut app));
     paste_on(&mut app, bodies);
@@ -806,7 +882,7 @@ fn a_second_placements_body_copies_but_is_not_cut() {
     select(&mut app, json!({"type": "body", "name": seen}));
     assert!(super::copy(&mut app));
     assert!(super::paste(&mut app, None), "{:?}", app.status);
-    let world = app.session.world_state();
+    let world = app.session.world_state().unwrap();
     let (there, copy) = (world.body(&seen).unwrap().mesh().bounds(), world.body("Cube (2)").expect("the copy").mesh().bounds());
     assert!(there.min.dist(copy.min) < 1e-6 && there.max.dist(copy.max) < 1e-6, "{there:?} vs {copy:?}");
 }

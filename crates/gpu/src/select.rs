@@ -139,7 +139,7 @@ pub fn native_backends() -> wgpu::Backends {
     }
 }
 
-pub(crate) fn tier_of(t: wgpu::DeviceType) -> Tier {
+pub fn tier_of(t: wgpu::DeviceType) -> Tier {
     match t {
         wgpu::DeviceType::Cpu => Tier::Software,
         wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => Tier::Hardware,
@@ -232,7 +232,15 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    adapters(&instance())
+    pick_among(adapters(&instance()), policy)
+}
+
+/// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best
+/// first, the first whose tier the policy admits), with its report; `None` when none qualifies.
+/// For a caller with an instance of its own, such as the UI's offscreen tests.
+pub fn pick_among(mut found: Vec<wgpu::Adapter>, policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
+    found.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    found
         .into_iter()
         .map(|a| {
             let r = report(&a.get_info());

@@ -17,9 +17,12 @@ versions. Two preferences opt into holding the model:
   but picks the point each frame because device apps do not report rest.
 
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
-adjust the view with the navigation cube, the cap can rotate it too. The Navigation
+adjust the view with the navigation cube, the cap can rotate it too. Turn on **Turn sketches with
+the 3D mouse** (`space_mouse_sketch_orbit: true`) to let the cap rotate a sketch seen square on as
+well, as the mouse can. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
-invert switch and a speed for the 3D mouse. The web app reads
+invert switch and a speed for the 3D mouse. The cap's zoom direction comes from its own invert
+switch; **Reverse zoom direction** under Wheel and trackpad reverses the wheel only (#8993). The web app reads
 it too, through the browser; Firefox needs a 3DxWare setting first (see
 [Getting started › 3D mouse in the browser](book/src/guide/getting-started.md#3d-mouse-in-the-browser)).
 
@@ -83,7 +86,7 @@ know, is ignored:
 | Message | Meaning |
 |---|---|
 | `{"t":"hello","server":"MAKMOUSE","device":"MAKMOUSE"}` | The program's name (shown in Preferences) and, optionally, a name in the device's USB manufacturer or product string. A 3D mouse with that name is then left to the program, so its motion doesn't reach the view twice. |
-| `{"t":"axis","x":4.0,"y":-2.5}` | Motion since the last message, in points: it orbits as a drag of that many points would (the model follows), or pans or zooms in the current mode. Where the view can't turn (a sketch being edited, a flat page) an orbit pans. |
+| `{"t":"axis","x":4.0,"y":-2.5}` | Motion since the last message, in points: it orbits as a drag of that many points would (the model follows), or pans or zooms in the current mode. Where the view can't turn (a sketch being edited and seen square on, unless **Turn sketches with the 3D mouse** is on; a flat page) an orbit pans. |
 | `{"t":"zoom","d":1.0}` | Zoom steps (8 % of the distance each); positive zooms in, as a wheel turned forward. Reverse zoom direction applies. Stops at the model only when **Stop zoom at the model** is on. |
 | `{"t":"mode","mode":"pan","on":true}` | What `axis` drives: `orbit` (the default), `pan` or `zoom` (up zooms in, 8 points a step). `"on":false` goes back to orbit. |
 | `{"t":"view","name":"iso"}` | A standard view: `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, or `fit` to frame everything. |
