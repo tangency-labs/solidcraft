@@ -2241,6 +2241,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
             pv_key: 0,
             pv_slot: slot,
             pv_hide: false,
+            preview_bounds: None,
             view_proj: product_projection(camera, radius, rect, image).to_f32(),
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
