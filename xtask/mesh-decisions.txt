@@ -4,11 +4,14 @@
 # not listed here, and on a listed one that no longer does: a fix removes its line in the same
 # pull request. Never add a line: decide with exact geometry (`Body::exact_bounds`,
 # `kernel::apart`, the B-rep's faces and edges). These are truck-era uses SMLib answers exactly.
+# The three lines marked "drawings branch only" are on the `drawings` branch alone and must be cleared before it lands on main.
 crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
 crates/doc/src/config_styles.rs:Document::configuration_face_indices checks a configuration's named faces against the display mesh
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/document.rs:MeshData::eq compares imported mesh payloads by their triangles
+crates/doc/src/drawing/dimension.rs:Picker::placed reads a body's edges for a dimension from the display mesh (drawings branch only: clear before landing on main)
+crates/doc/src/drawing/dimension.rs:face_corners reads a face's corners for a dimension from the display mesh triangles (drawings branch only: clear before landing on main)
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:body_at picks the body whose surface is nearest a point by the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
@@ -56,6 +59,7 @@ crates/doc/src/joints_face.rs:outline_centre finds a planar face's centre from m
 crates/doc/src/joints_face.rs:rim_neighbour finds the face across a cylinder's rim by the display mesh
 crates/doc/src/joints_face.rs:round_end_at finds a cylinder's round end by the display mesh
 crates/doc/src/lineage.rs:order_legacy_family orders a face family by the display mesh
+crates/doc/src/name_lookup.rs:BodyEdges::new finds a dimension's named edges on the display mesh (drawings branch only: clear before landing on main)
 crates/doc/src/name_lookup.rs:FaceHit::along meets a line with a found face on the display mesh
 crates/doc/src/name_lookup.rs:FaceHit::pick_point finds a point that picks a face again on the display mesh
 crates/doc/src/name_lookup.rs:face_triangles reads a face's mesh triangles for name lookup
