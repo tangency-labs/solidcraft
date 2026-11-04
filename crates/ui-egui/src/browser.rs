@@ -800,8 +800,7 @@ fn click_select_sels(app: &mut SolveApp, ui: &egui::Ui, key: String, sels: &[Sel
             let rows = app.tree.content.current_mut();
             (rows.anchor.clone(), rows.previous.clone(), rows.current_order().to_vec())
         };
-        let items =
-            anchor.as_deref().and_then(|a| shift_range(app, &previous, a, &key).or_else(|| shift_range(app, &order, a, &key)));
+        let items = anchor.as_deref().and_then(|a| shift_range(app, &previous, a, &key).or_else(|| shift_range(app, &order, a, &key)));
         if let Some(items) = items {
             // Move/Copy (and any open command whose active input takes bodies) gets every body
             // in the range. Otherwise the range is an ordinary selection.
@@ -3257,7 +3256,7 @@ fn sketch_contents_rows(
                 let targets = contents_row_targets(app, row, sketch, editable, true);
                 let picked = !targets.is_empty() && targets.iter().all(|sel| app.session.selection.contains(sel));
                 if !picked {
-                    app.tree.anchor = Some(row_key);
+                    app.tree.content.current_mut().anchor = Some(row_key);
                     app.tree.picked_components.clear();
                     app.tree.picked_joints.clear();
                     if targets.is_empty() {
@@ -3286,7 +3285,7 @@ fn sketch_contents_rows(
             }
             if rr.clicked {
                 toggle(app, &all_key, false);
-                app.tree.anchor = Some(handle);
+                app.tree.content.current_mut().anchor = Some(handle);
             }
         }
     }

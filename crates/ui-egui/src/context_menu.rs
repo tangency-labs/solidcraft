@@ -1229,7 +1229,7 @@ fn alignment_items(selection: &[Sel], editable: bool) -> Vec<Item> {
 /// can take. `selection` is the sketch's own entities (a contents row builds it from its ids),
 /// `editable` is false for a sketch that is not being edited, and `at` is where a viewport menu
 /// opened (sketch coordinates), for the spline point under the cursor.
-fn sketch_entity_items(app: &SolveApp, sketch: u64, selection: &[Sel], editable: bool, at: Option<solidcraft_engine::geom::Vec2>) -> Vec<Item> {
+fn sketch_entity_items(app: &SolveApp, sketch: u64, selection: &[Sel], editable: bool, at: Option<solidcore_record::Vec2>) -> Vec<Item> {
     use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
@@ -1525,7 +1525,7 @@ fn contents_selection(app: &SolveApp, sketch: u64, rows: &[String]) -> Vec<Sel> 
 }
 
 /// Where on `sketch`'s plane the viewport menu was opened (sketch coordinates).
-fn menu_sketch_point(app: &SolveApp, sketch: u64) -> Option<solidcraft_engine::geom::Vec2> {
+fn menu_sketch_point(app: &SolveApp, sketch: u64) -> Option<solidcore_record::Vec2> {
     let (at, _) = app.menu.opened?;
     let plane = crate::open_meshing::session_world(&app.session).sketch(sketch)?.plane;
     let proj = crate::viewport::projection(app, app.viewport.rect?);

@@ -662,6 +662,8 @@ pub(crate) fn open_for(app: &mut SolveApp, sketch: u64, constraint: &str) -> boo
             draft: None,
             live: None,
             selection: None,
+            owned: false,
+            shown: None,
             picked: None,
             sketch: Some(sketch),
             driven: None,
