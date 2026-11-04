@@ -57,16 +57,27 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let t = Tokens::get();
     let reserve = (t.control_height * 0.75).round();
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
-    // Focused wheel steps the count by one, like the arrows (#5685).
-    if response.has_focus() {
-        let dy = ui.input(|i| i.smooth_scroll_delta.y);
-        if dy != 0.0 && dy.is_finite() {
-            let delta = if dy > 0.0 { 1 } else { -1 };
-            if let Some(next) = step_count(value, delta, limits) {
-                *value = next;
-                ui.ctx().input_mut(|i| i.smooth_scroll_delta.y = 0.0);
+    // Focused wheel over the field steps the count, like the arrows (#5685).
+    let wheel_key = response.id.with("count_wheel");
+    if response.has_focus() && ui.rect_contains_pointer(response.rect) {
+        let tenths = crate::value_step::wheel_tenths(ui, wheel_key);
+        if tenths != 0 {
+            // Claim even at a limit so the surrounding dialog does not move.
+            crate::navigation::claim_wheel(ui.ctx());
+            let mut notches = tenths / 10;
+            while notches != 0 {
+                let delta = notches.signum();
+                match step_count(value, delta, limits) {
+                    Some(next) => {
+                        *value = next;
+                        notches -= delta;
+                    }
+                    None => break,
+                }
             }
         }
+    } else {
+        ui.data_mut(|d| d.remove::<f32>(wheel_key));
     }
     let rect = response.rect;
     let column = egui::Rect::from_min_max(egui::pos2((rect.right() - reserve).max(rect.left()), rect.top()), rect.max);
@@ -1576,18 +1587,26 @@ pub(crate) fn mixed_slider(ui: &mut Ui, value: &mut f64, range: std::ops::RangeI
     .inner
 }
 
-/// Wheel over a focused number field nudges it by one `step` and consumes the scroll so a
-/// surrounding dialog does not move (#5685). Hovered-only fields keep egui's own drag-scroll.
+/// Wheel over a focused number field nudges it by `step` per notch and consumes the scroll so a
+/// surrounding dialog does not move (#5685). Requires the pointer over the field; hovered-only
+/// (unfocused) fields keep egui's own drag-scroll. Discrete wheel events, not smooth-scroll
+/// frames, so one notch is one step.
 fn scroll_nudge(ui: &Ui, response: &Response, value: &mut f64, step: f64, range: Option<std::ops::RangeInclusive<f64>>) -> bool {
     if !ui.is_enabled() || !response.has_focus() || !step.is_finite() || step == 0.0 {
         return false;
     }
-    let dy = ui.input(|i| i.smooth_scroll_delta.y);
-    if dy == 0.0 || !dy.is_finite() {
+    let wheel_key = response.id.with("scroll_nudge_wheel");
+    if !ui.rect_contains_pointer(response.rect) {
+        ui.data_mut(|d| d.remove::<f32>(wheel_key));
         return false;
     }
-    ui.ctx().input_mut(|i| i.smooth_scroll_delta.y = 0.0);
-    let next = *value + if dy > 0.0 { step } else { -step };
+    let tenths = crate::value_step::wheel_tenths(ui, wheel_key);
+    if tenths == 0 {
+        return false;
+    }
+    // Claim even when the value is already at a range limit.
+    crate::navigation::claim_wheel(ui.ctx());
+    let next = *value + step * (tenths as f64 / 10.0);
     let next = match &range {
         Some(r) => next.clamp(*r.start(), *r.end()),
         None => next,
