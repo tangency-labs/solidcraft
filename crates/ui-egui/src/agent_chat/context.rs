@@ -61,6 +61,9 @@ pub struct Entry {
     /// The pill in the message it was picked for (`«n: …»`), 0 for what is not placed in the text
     /// (Attach selection).
     pub group: u32,
+    /// Also attached with Attach selection while it was a pill: listed once, under the pill, and
+    /// kept as not placed if the pill is taken out of a queued message.
+    pub attached: bool,
 }
 
 impl Entry {
@@ -70,7 +73,7 @@ impl Entry {
     }
 
     fn new(kind: Kind, label: String, detail: String) -> Entry {
-        Entry { kind, label, detail, sels: Vec::new(), names: Vec::new(), group: 0 }
+        Entry { kind, label, detail, sels: Vec::new(), names: Vec::new(), group: 0, attached: false }
     }
 }
 
@@ -137,9 +140,9 @@ impl Context {
     /// The same with the groups renumbered: `order` lists the old number of each group that is
     /// still in the text, in reading order (it becomes 1, 2, ...). The items of any other group
     /// are dropped, as taking a mark out of the message box drops its pick; those that were never
-    /// placed (Attach selection) stay.
+    /// placed, or were also attached with Attach selection, stay (not placed).
     pub fn regrouped(mut self, order: &[u32]) -> Context {
-        self.items.retain(|item| item.group == 0 || order.contains(&item.group));
+        self.items.retain(|item| item.group == 0 || item.attached || order.contains(&item.group));
         let number = |old: u32| order.iter().position(|o| *o == old).map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)).unwrap_or(0);
         let labels: Vec<(u32, String)> = order
             .iter()
