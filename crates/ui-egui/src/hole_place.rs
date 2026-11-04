@@ -240,10 +240,14 @@ pub(crate) fn move_place(d: &mut Dialog, s: &Session, i: usize, to: Sel) -> bool
     true
 }
 
+/// Why a pick did not move a hole one reference edge holds: its line leaves the face first.
+pub(crate) const HELD_OFF_ITS_LINE: &str = "The reference edge holds this hole on a line that leaves the face before the picked point. Pick nearer the line, or take the edge out to move the hole freely.";
+
 /// A Single hole's face place picked on a face that already has a hole moves that hole there
 /// (true), when holes move by clicking. A pick on the hole itself (within its radius) is left to
 /// take it out, as before. A hole held along one reference edge goes along it only, and the pick
-/// is spent either way (it never takes the hole out instead).
+/// is spent either way (it never takes the hole out instead): when the line leaves the face before
+/// the pick, the dialog says so.
 pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
     let Kind::Hole { opts, diameter, .. } = &d.kind else { return false };
     let Sel::Face { point, .. } = sel else { return false };
@@ -261,7 +265,9 @@ pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
     match crate::hole_refs::freedom(s, d, i) {
         crate::place_gizmo::Freedom::Plane => move_place(d, s, i, sel.clone()),
         crate::place_gizmo::Freedom::Line(_) => {
-            crate::hole_refs::drag_to(s, d, i, *point);
+            if !crate::hole_refs::drag_to(s, d, i, *point) {
+                d.error = Some(HELD_OFF_ITS_LINE.to_string());
+            }
             true
         }
     }
