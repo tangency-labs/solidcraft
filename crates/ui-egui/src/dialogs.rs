@@ -521,8 +521,8 @@ pub struct Dialog {
     pub preview_enabled: bool,
     /// Preserve Apply intent across asynchronous evaluation; never a command parameter.
     repeat_after_apply: bool,
-    /// Finish Sketch waits for this corner operation's OK to succeed before leaving.
-    finish_sketch_after_apply: bool,
+    /// Finish Sketch or a tool that ends the sketch waits for this corner operation to succeed.
+    start_after_apply: Option<String>,
     /// Parameters the dialog doesn't show but the command needs (kept when editing).
     pub extra: serde_json::Map<String, Value>,
     /// What the inputs were when OK was refused: `error` stays only while they still are.
@@ -780,20 +780,20 @@ impl Dialog {
 
     /// A pending sketch corner is part of Finish Sketch, through the same OK path as its
     /// button. An unused corner dialog has nothing to keep and closes with the sketch.
-    pub(crate) fn request_sketch_finish(&mut self) -> bool {
+    pub(crate) fn request_sketch_finish(&mut self, command: &str) -> bool {
         if !matches!(self.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }))
             || self.inputs.iter().all(|input| input.items.is_empty())
         {
             return false;
         }
-        self.finish_sketch_after_apply = true;
+        self.start_after_apply = Some(command.into());
         self.repeat_after_apply = false;
         true
     }
 
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
     fn refuse(&mut self, app: &SolveApp, error: String) {
-        self.finish_sketch_after_apply = false;
+        self.start_after_apply = None;
         self.refused = Some(Refused::now(app, self));
         self.error = Some(error);
     }
@@ -815,7 +815,7 @@ impl Dialog {
             reset_scroll: true,
             preview_enabled: true,
             repeat_after_apply: false,
-            finish_sketch_after_apply: false,
+            start_after_apply: None,
             extra: serde_json::Map::new(),
             refused: None,
             then_start: None,
@@ -3758,7 +3758,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         (drag_key, moved, docked, drag_bounds, crate::frame::offset_anchor(docked, moved, drag_bounds, side))
     };
     let mut keep = true;
-    let mut ok = d.finish_sketch_after_apply;
+    let mut ok = d.start_after_apply.is_some();
     let mut applied = false;
     let mut apply_again = app.applying.is_some() && d.repeat_after_apply;
     let mut adopted = false;
@@ -3985,7 +3985,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Ok(_) => {
                 app.look_at_opened_sketch(before);
                 cancel = true;
-                then_start = d.then_start;
+                then_start = d.then_start.map(str::to_owned);
             }
             Err(error) => d.refuse(app, error),
         }
@@ -3998,14 +3998,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         match start_sketch(app, &sel) {
             Ok(()) => {
                 cancel = true;
-                then_start = d.then_start;
+                then_start = d.then_start.map(str::to_owned);
             }
             Err(error) => d.refuse(app, error),
         }
     }
     cancel |= !keep;
     // A window still choosing its operation applies once its check is in (#6901).
-    if d.finish_sketch_after_apply {
+    if d.start_after_apply.is_some() {
         apply_again = false;
     }
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
@@ -4106,8 +4106,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if applied && matches!(d.kind, Kind::Text(_) | Kind::TextMove(_)) {
         let _ = app.session.execute("select.clear", &json!({}));
     }
-    if applied && d.finish_sketch_after_apply {
-        then_start = Some("sketch.finish");
+    if applied && d.start_after_apply.is_some() {
+        then_start = d.start_after_apply.take();
     }
     if keep && !cancel {
         // The canvas follows Edit Text's fields.
@@ -4129,7 +4129,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // The shortcut that asked for this sketch starts its tool in it.
     if let Some(id) = then_start {
-        app.start(id);
+        app.start(&id);
     }
 }
 

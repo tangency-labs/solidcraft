@@ -211,49 +211,59 @@ fn finish_sketch_closes_an_unused_corner_dialog() {
 /// and neither Cancel nor a failed computation may leave an automatic finish queued.
 #[test]
 fn finish_sketch_waits_for_corner_apply_and_respects_cancel_or_failure() {
-    for outcome in ["success", "cancel", "failure"] {
-        let mut h = fixture();
-        let sketch = h.app.session.active_sketch.unwrap();
-        h.app.dialog = Some(picked(&h, "sketch.fillet"));
-        h.frames(4);
-        let before = h.app.session.doc.to_json();
-        let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let prepared = h.app.session.scratch().compute_commands(&cmds, None).map_err(|e| e.to_string());
-        assert!(prepared.is_ok());
-        let (send, done) = std::sync::mpsc::channel();
-        h.app.applying = Some(Applying {
-            done,
-            ready: None,
-            seen: true,
-            started: crate::now_ms(),
-            cmds,
-            progress: Default::default(),
-            quality: Default::default(),
-        });
-        h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
-        h.frames(4);
-        assert_eq!(h.app.session.active_sketch, Some(sketch));
-        assert_eq!(h.app.session.doc.to_json(), before, "Finish must wait for the computation");
-        match outcome {
-            "cancel" => {
-                h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
-                assert!(send.send(prepared).is_err(), "a cancelled result must be discarded");
-            }
-            "failure" => send.send(Err("corner computation failed".into())).unwrap(),
-            _ => send.send(prepared).unwrap(),
-        }
-        h.frames(6);
-        assert!(h.app.applying.is_none());
-        if outcome == "success" {
-            assert!(h.app.session.active_sketch.is_none() && h.app.dialog.is_none());
-            assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 5);
-        } else {
+    for request in ["sketch.finish", "solid.extrude"] {
+        for outcome in ["success", "cancel", "failure"] {
+            let mut h = fixture();
+            let sketch = h.app.session.active_sketch.unwrap();
+            h.app.dialog = Some(picked(&h, "sketch.fillet"));
+            h.frames(4);
+            let before = h.app.session.doc.to_json();
+            let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+            let prepared = h.app.session.scratch().compute_commands(&cmds, None).map_err(|e| e.to_string());
+            assert!(prepared.is_ok());
+            let (send, done) = std::sync::mpsc::channel();
+            h.app.applying = Some(Applying {
+                done,
+                ready: None,
+                seen: true,
+                started: crate::now_ms(),
+                cmds,
+                progress: Default::default(),
+                quality: Default::default(),
+            });
+            h.app.start(request);
+            h.frames(4);
+            assert!(h.app.applying.is_some(), "{request}: keep the corner computation running");
             assert_eq!(h.app.session.active_sketch, Some(sketch));
-            assert_eq!(h.app.session.doc.to_json(), before);
-            if outcome == "failure" {
-                assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some("corner computation failed"));
+            assert_eq!(h.app.session.doc.to_json(), before, "Finish must wait for the computation");
+            match outcome {
+                "cancel" => {
+                    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+                    assert!(send.send(prepared).is_err(), "a cancelled result must be discarded");
+                }
+                "failure" => send.send(Err("corner computation failed".into())).unwrap(),
+                _ => send.send(prepared).unwrap(),
+            }
+            h.frames(6);
+            assert!(h.app.applying.is_none());
+            if outcome == "success" {
+                assert!(h.app.session.active_sketch.is_none());
+                if request == "solid.extrude" {
+                    let d = h.app.dialog.as_ref().expect("the requested Extrude dialog");
+                    assert!(matches!(d.kind, Kind::Extrude { .. }));
+                    assert!(d.inputs[0].items.contains(&Sel::Profile { sketch, index: 0 }));
+                } else {
+                    assert!(h.app.dialog.is_none());
+                }
+                assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 5);
             } else {
-                assert!(h.app.dialog.is_none());
+                assert_eq!(h.app.session.active_sketch, Some(sketch));
+                assert_eq!(h.app.session.doc.to_json(), before);
+                if outcome == "failure" {
+                    assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some("corner computation failed"));
+                } else {
+                    assert!(h.app.dialog.is_none());
+                }
             }
         }
     }
@@ -869,22 +879,68 @@ fn transform_scales_about_a_picked_center() {
     assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
 }
 
-/// Starting Extrude while a corner dialog is pending must not replace that dialog with the Extrude
-/// one over a still-open sketch: the corner dialog takes the request, applies its corners and
-/// finishes the sketch, and Extrude does not start.
+/// Starting Extrude must apply the pending corners, finish the sketch, then open Extrude
+/// with the finished sketch's profile selected.
 #[test]
-fn starting_another_command_leaves_a_pending_corner_to_finish_the_sketch() {
+fn starting_another_command_applies_pending_corners_then_starts_the_command() {
+    for command in ["sketch.fillet", "sketch.chamfer.equal_distance"] {
+        for edited in [false, true] {
+            let mut h = fixture();
+            let sketch = h.app.session.active_sketch.unwrap();
+            if edited {
+                h.app.run("sketch.finish", json!({})).unwrap();
+                h.app.run("solid.extrude", json!({"distance": 10})).unwrap();
+                h.app.edit_sketch(sketch);
+            }
+            let mut d = picked(&h, command);
+            d.inputs[0].items = h
+                .app
+                .session
+                .doc
+                .sketch(sketch)
+                .unwrap()
+                .points
+                .iter()
+                .filter(|p| p.id != "origin")
+                .map(|p| Sel::SketchPoint { id: p.id.clone() })
+                .collect();
+            h.app.dialog = Some(d);
+            h.frames(4);
+            h.app.start("solid.extrude");
+            assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::SketchModify(Mod::Corner { .. }))), "the corner dialog is kept");
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none());
+            assert_eq!(h.app.session.doc.marker, None, "the history marker is restored before Extrude opens");
+            let d = h.app.dialog.as_ref().expect("the requested Extrude dialog");
+            assert!(matches!(d.kind, Kind::Extrude { .. }));
+            assert!(d.inputs[0].items.contains(&Sel::Profile { sketch, index: 0 }));
+            assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 8, "all four corners are kept");
+        }
+    }
+}
+
+#[test]
+fn a_refused_corner_discards_the_requested_command() {
     let mut h = fixture();
     let sketch = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.to_json();
     let mut d = picked(&h, "sketch.fillet");
-    d.inputs[0].items =
-        h.app.session.doc.sketch(sketch).unwrap().points.iter().filter(|p| p.id != "origin").map(|p| Sel::SketchPoint { id: p.id.clone() }).collect();
+    let Kind::SketchModify(Mod::Corner { size, .. }) = &mut d.kind else { panic!("no corner dialog") };
+    *size = "-2 mm".into();
     h.app.dialog = Some(d);
     h.frames(4);
     h.app.start("solid.extrude");
-    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::SketchModify(Mod::Corner { .. }))), "the corner dialog is kept");
     h.settle();
-    assert!(h.app.session.active_sketch.is_none());
-    assert!(h.app.dialog.is_none(), "no Extrude dialog over the finished sketch");
-    assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 8, "all four corners are kept");
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.app.dialog.as_ref().unwrap().error.is_some());
+    let Kind::SketchModify(Mod::Corner { size, .. }) = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("no corner dialog") };
+    *size = "2 mm".into();
+    h.frames(4);
+    assert_eq!(h.app.session.doc.to_json(), before, "correcting the value does not retry the command");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.active_sketch, Some(sketch), "OK applies the corrected corner without the discarded Extrude request");
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 5);
 }

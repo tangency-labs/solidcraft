@@ -677,7 +677,7 @@ fn a_sketch_opened_inside_a_component_gives_the_active_component_back() {
     let path = app.session.doc.first_path(comp);
     let sketch = app.session.doc.features.iter().find(|f| f.component == comp && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).unwrap();
     let marker = app.session.doc.marker;
-    for leave in [(|a: &mut SolveApp| _ = a.finish_sketch()) as fn(&mut SolveApp), SolveApp::cancel_sketch] {
+    for leave in [SolveApp::finish_sketch as fn(&mut SolveApp), SolveApp::cancel_sketch] {
         app.edit_sketch_in(sketch, Some((comp, &path)));
         assert_eq!(
             (app.session.active_sketch, app.session.active_component),

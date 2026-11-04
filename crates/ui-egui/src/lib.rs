@@ -1992,6 +1992,13 @@ impl SolveApp {
             pending.then_start(id);
             return;
         }
+        // Keep the requested tool with the corner dialog until its apply succeeds, including
+        // an already-running computation. Resuming through start also restores the history marker
+        // and selects the finished sketch's profile before opening the tool.
+        if interactive && ends_sketch(id) && self.session.active_sketch.is_some() && self.dialog.as_mut().is_some_and(|d| d.request_sketch_finish(id))
+        {
+            return;
+        }
         // Cancel before finishing a sketch or waiting for its history marker.
         if interactive && (self.editing_state.is_some() || self.applying.is_some()) {
             dialogs::cancel(self);
@@ -2010,11 +2017,7 @@ impl SolveApp {
                     }
                 }
             }
-            if !self.finish_sketch() {
-                // The corner dialog's OK finishes the sketch; the user picks the tool again.
-                self.pre_command_cam = None;
-                return;
-            }
+            self.finish_sketch();
             // A feature committed before the marker is back would go in where the sketch was.
             if self.deferred.is_some() {
                 self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
@@ -2365,13 +2368,11 @@ impl SolveApp {
     /// Finish the active sketch: stop editing and restore the history marker Edit Sketch moved.
     /// The camera goes where the "When a sketch ends" preference says (#7038); by default it
     /// stays where it is, however the sketch is left.
-    /// Returns false when a pending corner dialog took the request: its OK finishes the sketch.
-    pub fn finish_sketch(&mut self) -> bool {
-        if self.session.active_sketch.is_some() && self.dialog.as_mut().is_some_and(dialogs::Dialog::request_sketch_finish) {
-            return false;
+    pub fn finish_sketch(&mut self) {
+        if self.session.active_sketch.is_some() && self.dialog.as_mut().is_some_and(|d| d.request_sketch_finish("sketch.finish")) {
+            return;
         }
         self.leave_sketch("sketch.finish");
-        true
     }
 
     /// Cancel Sketch (#3838): leave the sketch without its changes. When the command refuses (the
