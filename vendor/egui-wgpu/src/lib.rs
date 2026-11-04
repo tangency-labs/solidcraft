@@ -202,6 +202,24 @@ impl DeviceLost {
         queue.submit([encoder.finish()]);
         self.is_lost()
     }
+
+    /// Run `draw`, GPU work on this device, and survive a panic it meets once the device is lost:
+    /// `None` then. The driver resets a device at any moment, so a reset can land after the
+    /// probe and a queue write (or the present) still be the first call to meet it, which panics
+    /// inside wgpu (`PendingWrites::activate` unwraps `Lost`, #10240). After such a panic the
+    /// probe meets the loss and marks it. Any other panic carries on unwinding.
+    pub fn survive<R>(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        draw: impl FnOnce() -> R,
+    ) -> Option<R> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(draw)) {
+            Ok(drawn) => Some(drawn),
+            Err(_) if self.probe(device, queue) => None,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
 }
 
 /// SolidCraft: a frame acquired from a window's surface, which gives its swapchain image back
