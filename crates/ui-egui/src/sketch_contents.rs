@@ -6,9 +6,10 @@
 //! so it costs no more than a walk over the sketch. It is pure data: no egui, no selection and no
 //! command is involved; the browser decides what a row does.
 
+use solidcore_record::Seg2;
 use solidcraft_engine::{
     doc::{Document, ModelState},
-    geom::Seg2,
+    geom::Vec2Geom,
     sketch::{Constraint, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch, SketchPatternKind},
 };
 
@@ -374,9 +375,9 @@ fn excerpt(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::{Vec2, Vec3};
     use solidcraft_engine::{
         doc::{FeatureKind, Model, PlaneRef},
-        geom::{Vec2, Vec3},
         sketch::{EquationCurve, FreeformOffset, Link, OffsetChain, PatternAlignment, SketchPattern, TextExprs, TextStyle, Wire, WireSpace},
     };
 
