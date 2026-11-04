@@ -11,7 +11,7 @@ use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
@@ -412,7 +412,8 @@ const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
 
 /// How far apart two kernels' procedural blend serials start. A body keeps the serials of the
 /// kernel that made it and may be used on any other, whose memo of solved stations is keyed by
-/// serial alone: the ranges keep one definition's stations from answering for another's.
+/// serial alone: the ranges keep one definition's stations from answering for another's. A serial
+/// only names a definition, so which range one comes from changes no answer.
 pub(crate) const BLEND_SERIALS_PER_KERNEL: u64 = 1 << 40;
 
 /// A new kernel. Each takes the next range of blend serials, the first starting at 0.
@@ -424,30 +425,85 @@ fn fresh() -> Kernel {
     k
 }
 
-/// Most kernels kept for later calls; those over it are dropped when their call ends.
-const MOST_IDLE: usize = 8;
-
-/// The kernels no call is using, the last used on top. The lock is only held to take or put back
-/// a kernel, never during a call: a call that runs long (or never returns) holds up nothing but
-/// its own body, so one design's long operation never delays another's. Calls one after another
-/// all get the same kernel, as a single kernel would serve them; one that starts while another
-/// runs gets one of its own (solidcore keeps no global state, and a body's identities are valid
-/// only in the kernel that issued them, so any kernel takes any body).
-static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
-
-fn take_kernel() -> Kernel {
-    IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop().unwrap_or_else(fresh)
+/// The kernels calls run on. The lock is only held to take or put back a kernel, never during a
+/// call: a call that runs long (or never returns) holds up nothing but its own body, so one
+/// design's long operation never delays another's. Calls one after another all get the same
+/// kernel; one that starts while another runs gets one of its own (solidcore keeps no global
+/// state, and a body's identities are valid only in the kernel that issued them, so any kernel
+/// takes any body).
+///
+/// A call stuck for good keeps its kernel and the thread it runs on, and costs nothing more: at
+/// most `most_idle` kernels wait between calls, however many calls once ran side by side. A job
+/// that starts again and sticks again holds one more each time, so at `most_running` calls a new
+/// call fails, saying so, rather than grow without end or wait for calls that may never return.
+pub(crate) struct Pool<K> {
+    pub(crate) idle: Vec<K>,
+    pub(crate) running: usize,
+    pub(crate) most_idle: usize,
+    pub(crate) most_running: usize,
 }
 
-fn put_kernel(k: Kernel) {
-    let mut idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner);
-    if idle.len() < MOST_IDLE {
-        idle.push(k);
+impl<K> Pool<K> {
+    /// A kernel for a call, the last used first; `None` when too many are running.
+    pub(crate) fn take(&mut self, make: impl FnOnce() -> K) -> Option<K> {
+        if self.running >= self.most_running {
+            return None;
+        }
+        self.running += 1;
+        Some(self.idle.pop().unwrap_or_else(make))
+    }
+
+    /// A call ended, handing back its kernel if it is fit to use again.
+    pub(crate) fn put(&mut self, kernel: Option<K>) {
+        self.running = self.running.saturating_sub(1);
+        if let Some(kernel) = kernel
+            && self.idle.len() < self.most_idle
+        {
+            self.idle.push(kernel);
+        }
     }
 }
 
+/// Most calls at once. Far above what any work needs: an operation runs on at most 16 threads.
+const MOST_RUNNING: usize = 256;
+
+static POOL: Mutex<Pool<Kernel>> = Mutex::new(Pool { idle: Vec::new(), running: 0, most_idle: 8, most_running: MOST_RUNNING });
+
+fn take_kernel() -> Option<Kernel> {
+    POOL.lock().unwrap_or_else(PoisonError::into_inner).take(fresh)
+}
+
+fn put_kernel(k: Option<Kernel>) {
+    POOL.lock().unwrap_or_else(PoisonError::into_inner).put(k);
+}
+
+/// What a call must not find from the calls before it: the same operation on the same bodies
+/// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
+/// the stations it remembers; marks, identities and what is only kept to reuse memory change no
+/// answer. Tolerances and fixes are the same on every kernel.)
+fn start_clean(k: &mut Kernel) {
+    k.rng = Rng::new(KernelOptions::default().seed);
+    *k.blend_station_memo.borrow_mut() = Default::default();
+    k.fillet_point_step.set(None);
+    k.upstream_ub_passed.clear();
+}
+
+/// A kernel kept out of use until dropped ([`crate::hold_a_kernel`]).
+pub struct HeldKernel(Option<Kernel>);
+
+impl Drop for HeldKernel {
+    fn drop(&mut self) {
+        put_kernel(self.0.take());
+    }
+}
+
+pub(crate) fn hold_a_kernel() -> HeldKernel {
+    HeldKernel(take_kernel())
+}
+
 /// Runs `f` on a kernel of its own. A panic in solidcore is caught: the kernel, which it may have
-/// left half-updated, is replaced by a fresh one and the call fails with [`Error::Internal`].
+/// left half-updated, is dropped and the call fails with [`Error::Internal`]. A token over this
+/// thread's work ([`crate::stop`]) stops it.
 pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>) -> Result<T> {
     run_on(call, &[], f)
 }
@@ -470,7 +526,26 @@ pub(crate) fn run_on<T: dump::Answer>(
     inputs: dump::Inputs<'_>,
     f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
-    let mut k = take_kernel();
+    let stop = crate::stop::token();
+    if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
+        return Err(Error::Solidcore(format!("{call}: cancelled")));
+    }
+    call_on(call, inputs, stop, f)
+}
+
+/// [`run_on`], stopped by `stop`.
+fn call_on<T: dump::Answer>(
+    call: &'static str,
+    inputs: dump::Inputs<'_>,
+    stop: Option<CancelToken>,
+    f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>,
+) -> Result<T> {
+    let Some(mut k) = take_kernel() else {
+        log::warn!(target: "smlib", "{call}: refused, {MOST_RUNNING} kernel calls are still running");
+        return Err(Error::Solidcore(format!("{call}: {MOST_RUNNING} kernel calls are still running")));
+    };
+    start_clean(&mut k);
+    k.cancel = stop.clone();
     // A profiler span per call: where the kernel's time goes.
     let _span = solidcraft_profile::span("solidcore", call);
     let in_flight = dump::in_flight(call);
@@ -495,6 +570,11 @@ pub(crate) fn run_on<T: dump::Answer>(
         }
     };
     drop(in_flight);
+    // Stopped, it is no failure to look into, and solidcore may have left the kernel part way.
+    if stop.is_some_and(|s| s.is_cancelled()) {
+        put_kernel(None);
+        return r;
+    }
     let why = match &r {
         Ok(v) => v.refusal(),
         Err(e) => Some(e.to_string()),
@@ -503,7 +583,8 @@ pub(crate) fn run_on<T: dump::Answer>(
         // The kernel the call ran on, or the fresh one that replaced it after a panic.
         dump::failed(&k, call, &why, inputs);
     }
-    put_kernel(k);
+    k.cancel = None;
+    put_kernel(Some(k));
     r
 }
 
@@ -530,7 +611,8 @@ pub(crate) fn with_body<T: dump::Answer>(
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
-    run_on(call, &[("brep", body)], |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
+    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:

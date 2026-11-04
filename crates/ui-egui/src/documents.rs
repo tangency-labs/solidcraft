@@ -583,10 +583,11 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let next = if i + 1 < n { i + 1 } else { i - 1 };
         switch(app, next);
     }
-    if let Some(slot) = app.docs.slots.remove(i)
-        && let Some(a) = slot.autosave
-    {
-        a.discard();
+    if let Some(slot) = app.docs.slots.remove(i) {
+        slot.session.stop_computing();
+        if let Some(a) = slot.autosave {
+            a.discard();
+        }
     }
     if app.docs.active > i {
         app.docs.active -= 1;
