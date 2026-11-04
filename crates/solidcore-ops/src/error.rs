@@ -59,6 +59,8 @@ pub enum Error {
     NoEffect,
     /// The answer is not exact in the input's geometry.
     NotExact,
+    /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
+    Profile(solidcore::prism::profile::ProfileRefusal),
     /// The geometry has no value where one is needed (the kernel's `Degenerate`): a normal
     /// at a pole or an apex, a zero-length vector, a collapsed edge.
     Degenerate,
@@ -172,6 +174,18 @@ impl std::fmt::Display for Error {
             Error::CornerRefused { corner } => write!(f, "corner {corner} is not set back"),
             Error::NoEffect => write!(f, "the operation did nothing"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
+            Error::Profile(r) => write!(
+                f,
+                "planar profile refused: {}",
+                match r {
+                    solidcore::prism::profile::ProfileRefusal::Budget =>
+                        "a loop not closed, empty, or past the segment budget",
+                    solidcore::prism::profile::ProfileRefusal::LineOrArc =>
+                        "lines and circular arcs must be finite and of some length",
+                    solidcore::prism::profile::ProfileRefusal::FreeForm =>
+                        "free-form segments must be finite and of some length",
+                }
+            ),
             Error::Degenerate => write!(f, "degenerate geometry where a value is needed"),
             Error::UnsureRegion { region } => {
                 write!(f, "unsure whether region {region} is material")

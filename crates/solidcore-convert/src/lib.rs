@@ -24,6 +24,10 @@
 //! | [`Curve`] | [`k::Curve`] | [`curve`] | [`record_curve`] |
 //! | [`Surface`] | [`k::Surface`] | [`surface`] | [`record_surface`] |
 //! | [`Curve2`] | [`k::Curve2`] | [`curve2`] | [`record_curve2`] |
+//! | [`Vec2`] | [`solidcore::math::Vec2`] | [`vec2`] | [`record_vec2`] |
+//! | [`Seg2`] | [`kp::Seg2`] | [`seg2`] | [`record_seg2`] |
+//! | [`Loop2`] | [`kp::Loop2`] | [`loop2`] | [`record_loop2`] |
+//! | [`Region2`] (a planar profile) | [`kp::Region2`] | [`region2`] | [`record_region2`] |
 //!
 //! [`brep`] converts the record's B-rep to the kernel's body and back.
 
@@ -33,8 +37,9 @@
 pub mod brep;
 
 use solidcore::eval as k;
+use solidcore::prism::profile as kp;
 use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
-use solidcore_record::{Plane, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 /// The record's vector as the kernel's.
 #[must_use]
@@ -383,5 +388,124 @@ pub fn record_curve2(c: k::Curve2) -> Curve2 {
         k::Curve2::RationalSpline { knots, homogeneous } => {
             Curve2::RationalSpline { knots, homogeneous }
         }
+    }
+}
+
+/// The record's planar vector as the kernel's.
+#[must_use]
+pub fn vec2(v: Vec2) -> solidcore::math::Vec2 {
+    solidcore::math::Vec2::new(v.x, v.y)
+}
+
+/// A kernel planar vector as the record's.
+#[must_use]
+pub fn record_vec2(v: solidcore::math::Vec2) -> Vec2 {
+    Vec2::new(v.x, v.y)
+}
+
+/// A record profile segment as the kernel's, field for field.
+#[must_use]
+pub fn seg2(s: &Seg2) -> kp::Seg2 {
+    match *s {
+        Seg2::Line { a, b } => kp::Seg2::Line {
+            a: vec2(a),
+            b: vec2(b),
+        },
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => kp::Seg2::Arc {
+            center: vec2(center),
+            radius,
+            start,
+            sweep,
+        },
+        Seg2::Cubic { p0, p1, p2, p3 } => kp::Seg2::Cubic {
+            p0: vec2(p0),
+            p1: vec2(p1),
+            p2: vec2(p2),
+            p3: vec2(p3),
+        },
+        Seg2::Conic { a, apex, b, w } => kp::Seg2::Conic {
+            a: vec2(a),
+            apex: vec2(apex),
+            b: vec2(b),
+            w,
+        },
+        Seg2::Bezier { n, p } => kp::Seg2::Bezier { n, p: p.map(vec2) },
+    }
+}
+
+/// A kernel profile segment as the record's, field for field.
+#[must_use]
+pub fn record_seg2(s: &kp::Seg2) -> Seg2 {
+    match *s {
+        kp::Seg2::Line { a, b } => Seg2::Line {
+            a: record_vec2(a),
+            b: record_vec2(b),
+        },
+        kp::Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => Seg2::Arc {
+            center: record_vec2(center),
+            radius,
+            start,
+            sweep,
+        },
+        kp::Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
+            p0: record_vec2(p0),
+            p1: record_vec2(p1),
+            p2: record_vec2(p2),
+            p3: record_vec2(p3),
+        },
+        kp::Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+            a: record_vec2(a),
+            apex: record_vec2(apex),
+            b: record_vec2(b),
+            w,
+        },
+        kp::Seg2::Bezier { n, p } => Seg2::Bezier {
+            n,
+            p: p.map(record_vec2),
+        },
+    }
+}
+
+/// A record profile loop as the kernel's.
+#[must_use]
+pub fn loop2(l: &Loop2) -> kp::Loop2 {
+    kp::Loop2 {
+        segs: l.segs.iter().map(seg2).collect(),
+    }
+}
+
+/// A kernel profile loop as the record's.
+#[must_use]
+pub fn record_loop2(l: &kp::Loop2) -> Loop2 {
+    Loop2 {
+        segs: l.segs.iter().map(record_seg2).collect(),
+    }
+}
+
+/// A record planar region (outer loop less its holes) as the kernel's.
+#[must_use]
+pub fn region2(r: &Region2) -> kp::Region2 {
+    kp::Region2 {
+        outer: loop2(&r.outer),
+        holes: r.holes.iter().map(loop2).collect(),
+    }
+}
+
+/// A kernel planar region as the record's.
+#[must_use]
+pub fn record_region2(r: &kp::Region2) -> Region2 {
+    Region2 {
+        outer: record_loop2(&r.outer),
+        holes: r.holes.iter().map(record_loop2).collect(),
     }
 }

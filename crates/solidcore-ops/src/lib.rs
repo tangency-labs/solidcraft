@@ -19,7 +19,8 @@
 //! - [`provenance`]: the hook an application's construction history rides on.
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
-//! distances and normals), [`boolean`], [`stitch`].
+//! distances and normals), [`boolean`], [`stitch`], [`prism`] (planar region booleans and
+//! extrusion, prism sections).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -34,6 +35,7 @@ pub mod file;
 pub mod measure;
 pub mod offset;
 pub mod order;
+pub mod prism;
 pub mod provenance;
 pub mod session;
 pub mod stitch;
