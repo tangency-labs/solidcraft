@@ -803,8 +803,17 @@ fn b_spline_surface_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) 
 
         // (bClosedRow is passed as the grid's bClosedCol and bClosedCol as its
         // bClosedRow, as upstream)
-        let non_monotonic =
-            grid_has_non_monotonic_points(&net.points, net.v_count, closed_row, closed_col)?;
+        // a step within the rounding of the two control points it is between is no step;
+        // upstream's monotonicity pass skips a step only below an absolute SM_EFF_ZERO,
+        // which one ulp of a coordinate is above past about 8192 mm from the origin, so
+        // it reads a collapsed pole row carrying one ulp of noise as a zigzag that
+        // reverses at every point (WR-737, #2560)
+        let non_monotonic = grid_has_non_monotonic_points_to_rounding(
+            &net.points,
+            net.v_count,
+            closed_row,
+            closed_col,
+        )?;
         rtn &= r.report(B_SPLINE_SURFACE_TYPE, 5, 0, !non_monotonic, UNDEF, UNDEF)?;
     }
 
@@ -1085,6 +1094,12 @@ pub fn has_degenerate_control_point_row(b: &BSplineSurface, tol: f64) -> Result<
 /// neighbouring differences (coincident pairs skipped). As upstream, a failing column
 /// clears the row flag.
 ///
+/// A pair counts as coincident below an absolute `SM_EFF_ZERO`, as upstream. Test #5 of
+/// `AssertValid` takes [`grid_has_non_monotonic_points_to_rounding`] instead, which counts
+/// a step within the rounding of the two points it is between; this entry point is left
+/// for the curved Setback fill's net certificate (#2366), whose own criterion is #2243's
+/// question.
+///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a zero row size (upstream divides by zero) or
@@ -1094,6 +1109,113 @@ pub fn grid_has_non_monotonic_points(
     row_size: usize,
     closed_col: bool,
     closed_row: bool,
+) -> Result<bool> {
+    grid_non_monotonic(points, row_size, closed_col, closed_row, Zero::Absolute)
+}
+
+/// [`grid_has_non_monotonic_points`] taking a step for no step when it is within the
+/// rounding of the two control points it is between ([`step_within_rounding`]), instead
+/// of upstream's absolute `SM_EFF_ZERO`, and keeping the last step that had a direction
+/// as the one the next is compared against. This is what `AssertValid` test #5 asks, so
+/// it is solidcore's result for a B-spline surface; the difference from
+/// `SmPointGrid::SetUpMonotonic` is recorded in `plan/upstream-issues/WR-737`.
+///
+/// A direction is what the pass reads off a step, and a step shorter than the rounding of
+/// its own endpoints has none: the two points are one point as far as the numbers can
+/// say. Upstream tests an absolute `SM_EFF_ZERO` instead, and one ulp of a coordinate is
+/// above 1e-12 past about 8192 mm from the origin, so a collapsed or repeated row that
+/// carries one-ulp noise there reads as a zigzag reversing at every point, where the whole
+/// row is one point to rounding (WR-737, #2560). A width fixed in millimetres is not the
+/// criterion either: a net whose steps really are that short would hide a reversal behind
+/// it. The bound grows with the coordinates instead, and stays exact at any distance from
+/// the origin.
+///
+/// Upstream replaces the last difference with the skipped one, which costs nothing at an
+/// absolute `SM_EFF_ZERO` but here would make the step after a passed-over one be passed
+/// over too, so a reversal across a step of rounding would go unseen. A step within
+/// rounding carries no direction, so it is passed over instead and the last one that had a
+/// direction is kept (#2560).
+///
+/// # Errors
+///
+/// Those of [`grid_has_non_monotonic_points`].
+pub fn grid_has_non_monotonic_points_to_rounding(
+    points: &[Point3],
+    row_size: usize,
+    closed_col: bool,
+    closed_row: bool,
+) -> Result<bool> {
+    grid_non_monotonic(points, row_size, closed_col, closed_row, Zero::Rounding)
+}
+
+/// `u`, the unit roundoff of `f64`.
+const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
+
+/// `gamma_k = k u / (1 - k u)`: the relative error bound of `k` rounded operations in a
+/// chain (Higham, the standard model).
+fn gamma(k: usize) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    let ku = k as f64 * UNIT_ROUNDOFF;
+    ku / (1.0 - ku)
+}
+
+/// A bound on the rounding of the step from `p0` to `p1`, both Euclidean control points of
+/// a net: within it the step is no step.
+///
+/// The bound is the one the pole classifier of the layer split certifies, `eval::collapse`
+/// of tangency-labs/solidcore#2629 (`crates/solidcore/src/eval/collapse.rs`, not on main
+/// yet): `Hom::euclid` returns each Euclidean point `P = x / w` with a bound
+/// `e = (sqrt(3) ex + |P| ew) / (|w| - ew) + 2 u |P|` on its rounding, from the error
+/// `(ex, ew)` of the homogeneous point it comes from, and a step is zero when
+/// `|P1 - P0| <= e0 + e1 + gamma_3 (|P0| + |P1|)`, the last term covering the subtraction.
+/// A net read off a surface (`GetControlPointNet`) divides the stored homogeneous points,
+/// which are exact as stored, so `ex = ew = 0` and `e = 2 u |P|` per point. The weight is
+/// in the bound through `|P| = |x| / |w|`, which a bound on the coordinates alone misses
+/// (a sphere's pole rows carry `w = sqrt(2) / 2`).
+///
+/// Once #2629 is in, this is `collapse::gamma` and `Hom` (#2560).
+fn step_within_rounding(p0: Point3, p1: Point3) -> f64 {
+    let (l0, l1) = (p0.length(), p1.length());
+    2.0 * UNIT_ROUNDOFF * (l0 + l1) + gamma(3) * (l0 + l1)
+}
+
+/// How the monotonicity pass recognises a step too short to carry a direction, and what
+/// becomes of it.
+#[derive(Clone, Copy)]
+enum Zero {
+    /// Upstream: shorter than an absolute `SM_EFF_ZERO`, and carried forward as the
+    /// difference the next step is compared against.
+    Absolute,
+    /// Within the rounding of the two points it is between
+    /// ([`step_within_rounding`]), and passed over, so that the last step that had a
+    /// direction stays the one the next is compared against.
+    Rounding,
+}
+
+impl Zero {
+    /// Whether the `step` from `p0` to `p1` is too short to carry a direction.
+    fn is_zero(self, step: Vec3, p0: Point3, p1: Point3) -> bool {
+        match self {
+            Zero::Absolute => step.length_squared() < EFF_ZERO_SQ,
+            Zero::Rounding => step.length() <= step_within_rounding(p0, p1),
+        }
+    }
+
+    /// Whether such a step becomes the difference the next step is compared against.
+    fn carries_forward(self) -> bool {
+        matches!(self, Zero::Absolute)
+    }
+}
+
+/// [`grid_has_non_monotonic_points`] over a way of recognising a step that carries no
+/// direction (`zero`), passing over such a step instead of making it the last difference
+/// where `zero` says so.
+fn grid_non_monotonic(
+    points: &[Point3],
+    row_size: usize,
+    closed_col: bool,
+    closed_row: bool,
+    zero: Zero,
 ) -> Result<bool> {
     if row_size == 0 {
         return Err(invalid("point grid row size is zero"));
@@ -1129,7 +1251,7 @@ pub fn grid_has_non_monotonic_points(
 
         // get first point pair difference
         let mut vec0 = at(j1)? - at(j0)?;
-        let mut len_sq0 = vec0.length_squared();
+        let mut zero0 = zero.is_zero(vec0, at(j0)?, at(j1)?);
 
         // next row start
         idx += row_size;
@@ -1139,12 +1261,18 @@ pub fn grid_has_non_monotonic_points(
         j0 = j1 - 1;
         while j1 < idx {
             let vec1 = at(j1)? - at(j0)?;
-            let len_sq1 = vec1.length_squared();
+            let zero1 = zero.is_zero(vec1, at(j0)?, at(j1)?);
 
             // skip coincident control points
-            if len_sq0 < EFF_ZERO_SQ || len_sq1 < EFF_ZERO_SQ {
-                vec0 = vec1;
-                len_sq0 = len_sq1;
+            if zero0 || zero1 {
+                // a step that carries no direction does not become the difference the
+                // next step is compared against unless `zero` carries it forward
+                // (upstream does, and a reversal across it goes unseen); until a step
+                // with a direction has been seen there is nothing to keep
+                if zero.carries_forward() || zero0 {
+                    vec0 = vec1;
+                    zero0 = zero1;
+                }
                 j1 += 1;
                 j0 = j1 - 1;
                 continue;
@@ -1157,6 +1285,7 @@ pub fn grid_has_non_monotonic_points(
             }
 
             vec0 = vec1;
+            zero0 = zero1;
             j1 += 1;
             j0 = j1 - 1;
         }
@@ -1176,7 +1305,7 @@ pub fn grid_has_non_monotonic_points(
 
         // get first point pair difference
         let mut vec0 = at(i1)? - at(i0)?;
-        let mut len_sq0 = vec0.length_squared();
+        let mut zero0 = zero.is_zero(vec0, at(i0)?, at(i1)?);
 
         // next col start
         idx += 1;
@@ -1186,12 +1315,14 @@ pub fn grid_has_non_monotonic_points(
         i0 = i1 - row_size;
         while i1 < size {
             let vec1 = at(i1)? - at(i0)?;
-            let len_sq1 = vec1.length_squared();
+            let zero1 = zero.is_zero(vec1, at(i0)?, at(i1)?);
 
-            // skip coincident control points
-            if len_sq0 < EFF_ZERO_SQ || len_sq1 < EFF_ZERO_SQ {
-                vec0 = vec1;
-                len_sq0 = len_sq1;
+            // skip coincident control points (as in the row pass above)
+            if zero0 || zero1 {
+                if zero.carries_forward() || zero0 {
+                    vec0 = vec1;
+                    zero0 = zero1;
+                }
                 i1 += row_size;
                 i0 = i1 - row_size;
                 continue;
@@ -1205,6 +1336,7 @@ pub fn grid_has_non_monotonic_points(
             }
 
             vec0 = vec1;
+            zero0 = zero1;
             i1 += row_size;
             i0 = i1 - row_size;
         }
@@ -2405,6 +2537,7 @@ mod tests {
     use crate::curve::curve::Curve;
     use crate::geom::extent2d::Extent2d;
     use crate::geom::vector2d::Vec2;
+    use crate::nurbs::b_spline_curve::p2::ControlPointForm;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::surface::sphere::SphereOptions;
     use crate::surface::torus::TorusOptions;
@@ -2744,6 +2877,199 @@ mod tests {
                 "Bad NonMonotonic CPts",
                 "SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface",
             )],
+        );
+    }
+
+    /// The sphere of tangency-labs/solidcore#2560: radius 2.5 centred `(0, 0, 5) + t`,
+    /// its net the net of the sphere at `(0, 0, 5)` moved through its homogeneous control
+    /// points (`[x w + w t, w]`, as a rigid move of a record does). Dividing by `w` again
+    /// rounds differently for `w = 1` and `w = sqrt(2) / 2`, so the Euclidean points of
+    /// each collapsed pole row alternate by one ulp of the coordinate.
+    fn sphere_moved_homogeneously(k: &Kernel, t: [f64; 3]) -> Surface {
+        let build = |origin: Point3| {
+            let d = Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0);
+            let opts = SphereOptions {
+                swap_uv: false,
+                inside_out: false,
+                circle_nurb: None,
+            };
+            let s = Surface::from(Sphere::new(k, origin, X, Y, d, 2.5, opts).unwrap());
+            s.kind_with_nurb(k).unwrap();
+            s
+        };
+        let at_origin = build(Point3::new(0.0, 0.0, 5.0));
+        let (nu, nv, cps) = b_spline_part(&at_origin).unwrap().control_points().unwrap();
+        // the analytic sphere is built at the moved centre, so only the net carries the noise
+        let mut moved = build(Point3::new(t[0], t[1], 5.0 + t[2]));
+        let SurfaceKind::Sphere(sp) = moved.kind_mut() else {
+            unreachable!("built as a sphere")
+        };
+        let b = sp.base_mut().base_mut();
+        for i in 0..nu {
+            for j in 0..nv {
+                let p = cps[i * nv + j];
+                let w = if p.w == NOW { 1.0 } else { p.w };
+                let q = Point3::new(p.x + w * t[0], p.y + w * t[1], p.z + w * t[2]);
+                b.set_control_point(ControlPointForm::HomogeneousRational, i, j, q, w)
+                    .unwrap();
+            }
+        }
+        moved
+    }
+
+    /// tangency-labs/solidcore#2560: a sphere's net has a collapsed row of control points
+    /// at each pole, and consecutive points of a collapsed row are exactly equal, so test
+    /// #5 passes over their zero-length steps. One ulp of noise along such a row is a
+    /// zigzag whose steps reverse at every point. Past about 8192 mm from the origin one
+    /// ulp is above `EFF_ZERO`, which is where upstream's absolute zero stops recognising
+    /// such a step and the check reads a 180-degree turn at every point of the pole
+    /// column. The step is noise: the row is collapsed to within one ulp, 1/2,750,000 of
+    /// `SM_ZONE_TOL_3D`.
+    #[test]
+    fn issue_2560_one_ulp_noise_along_a_pole_row_is_not_a_reversal() {
+        const T: [f64; 3] = [1.0e5, -7.0e4, 3.0e4];
+        let k = Kernel::default();
+
+        let moved = sphere_moved_homogeneously(&k, T);
+        assert_eq!(
+            failed_tests(&k, &moved),
+            (true, vec![]),
+            "the moved sphere's net is the sphere to rounding"
+        );
+
+        // at the origin the pole rows stay bit-identical, so the row has no steps at all
+        let near = sphere_moved_homogeneously(&k, [0.0, 0.0, 0.0]);
+        assert_eq!(failed_tests(&k, &near), (true, vec![]));
+    }
+
+    /// A net that really doubles back is still refused: its steps are far longer than the
+    /// rounding of their own endpoints, so none of them is passed over
+    /// (#2560; the planar G2 Setback patches of
+    /// `plan/findings/blend.blend_corner--planar-g2-setback-patch-net-doubles-back.md`
+    /// turn back between steps of 3.3e-2 and 5.3e-1).
+    #[test]
+    fn issue_2560_a_real_reversal_is_still_refused() {
+        let mut pts = bicubic_points();
+        pts[2 * 4 + 1] = [0.2, 1.0, 0.0];
+        pts[2 * 4 + 2] = [0.2, 2.0, 0.0];
+        let s = bspline(3, 3, &BEZ3, &BEZ3, &pts);
+        let k = Kernel::default();
+        let (ok, failed) = failed_tests(&k, &s);
+        assert!(!ok);
+        assert_eq!(failed, vec![(B_SPLINE_SURFACE_TYPE, 5)], "{failed:?}");
+    }
+
+    /// A grid whose one line walks `back` along x while its neighbour walks `straight`,
+    /// laid out twice: down a column (row size 2, so no row holds two steps to compare)
+    /// and along a row (two rows of four, so no column holds two). Only the pass along
+    /// `back` can report a turn.
+    fn one_line_grids(
+        back: [f64; 4],
+        straight: [f64; 4],
+    ) -> [(&'static str, Vec<Point3>, usize); 2] {
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let col: Vec<Point3> = back
+            .iter()
+            .zip(straight.iter())
+            .flat_map(|(&b, &s)| [p(b, 0.0), p(s, 1.0)])
+            .collect();
+        let row: Vec<Point3> = back
+            .iter()
+            .map(|&x| p(x, 0.0))
+            .chain(straight.iter().map(|&x| p(x, 1.0)))
+            .collect();
+        [("column", col, 2), ("row", row, 4)]
+    }
+
+    /// A step within rounding carries no direction, so it may not become the step the
+    /// next one is compared against: upstream replaces the last difference with the
+    /// skipped one, which lets the step after it be skipped too and hides a reversal
+    /// across the short step. Along `0, 1, 1 + one ulp, 0` the 180-degree turn is real
+    /// and has to be refused, although upstream passes over it; a separator of 5e-7, far
+    /// above the rounding of a coordinate of 1, is not passed over by either (#2560).
+    #[test]
+    fn issue_2560_a_reversal_after_a_step_of_rounding_is_refused() {
+        // a plain monotonic neighbour, so only the doubling-back pass can fail
+        const STRAIGHT: [f64; 4] = [0.0, 1.0, 2.0, 3.0];
+        // a real reversal whose two long steps are separated by a short one
+        let ulp: [f64; 4] = [0.0, 1.0, 1.0 + f64::EPSILON, 0.0];
+        let micron: [f64; 4] = [0.0, 1.0, 1.0 + 5.0e-7, 0.0];
+
+        for (separator, back, upstream_sees_it) in [("one ulp", ulp, false), ("5e-7", micron, true)]
+        {
+            for (what, points, row_size) in one_line_grids(back, STRAIGHT) {
+                assert_eq!(
+                    grid_has_non_monotonic_points(&points, row_size, false, false).unwrap(),
+                    upstream_sees_it,
+                    "{what}, separator {separator}: upstream carries a skipped step forward"
+                );
+                assert!(
+                    grid_has_non_monotonic_points_to_rounding(&points, row_size, false, false)
+                        .unwrap(),
+                    "{what}, separator {separator}: a step of rounding may not replace the \
+                     last step that had a direction"
+                );
+            }
+        }
+    }
+
+    /// The bound is the rounding of the two points a step is between, so a reversal of
+    /// real length is reported however short it is: 1e-7 mm, a tenth of the distance the
+    /// check's own tests #2 and #3 take two points for coincident at, is refused both at
+    /// the origin and at 1e5 mm from it, where one ulp of a coordinate is 1.5e-11 and the
+    /// bound is 1.1e-10 (#2560; a bound fixed at `SM_ZONE_TOL_3D / 10` would accept it).
+    #[test]
+    fn issue_2560_a_reversal_of_a_tenth_of_a_micron_is_refused() {
+        const STEP: f64 = 1.0e-7;
+
+        for base in [0.0, 1.0e5] {
+            let back = [base, base + STEP, base, base + STEP];
+            let straight = [base, base + 1.0, base + 2.0, base + 3.0];
+            for (what, points, row_size) in one_line_grids(back, straight) {
+                assert!(
+                    grid_has_non_monotonic_points_to_rounding(&points, row_size, false, false)
+                        .unwrap(),
+                    "{what} at {base}: a 1e-7 mm reversal is a reversal"
+                );
+            }
+        }
+    }
+
+    /// A closed row's closing step — its last point back to its first — is the difference
+    /// the walk starts with. Far from the origin that step can be pure rounding and still
+    /// be longer than an absolute `SM_EFF_ZERO`, and then the seam of a plain triangle is
+    /// reported: its three real steps turn by 90 and 45 degrees, and only the 1e-11
+    /// closing step looks like a reversal against the first. The bound at these
+    /// coordinates is 1.1e-10, so that step carries no direction and the seam is clean
+    /// (#2560; the same fix as at a pole, in a closed row).
+    #[test]
+    fn issue_2560_a_closed_seam_step_of_rounding_is_not_a_reversal() {
+        const B: f64 = 1.0e5;
+        // above EFF_ZERO (1e-12), inside the bound at these coordinates (1.1e-10)
+        const NOISE: f64 = 1.0e-11;
+
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        // row 0 is the triangle, its closing step NOISE long; row 1 is a clean square, so
+        // only the first row's seam can be reported (the columns hold one step each)
+        let points = vec![
+            p(B, 0.0),
+            p(B - 1.0, 0.0),
+            p(B - 1.0, 1.0),
+            p(B - NOISE, 1.0e-13),
+            p(B, 10.0),
+            p(B + 1.0, 10.0),
+            p(B + 1.0, 11.0),
+            p(B, 11.0),
+        ];
+
+        // the grid's closed row is upstream's bClosedCol, the fourth argument
+        assert!(
+            grid_has_non_monotonic_points(&points, 4, false, true).unwrap(),
+            "upstream reads a direction off the rounding-sized closing step"
+        );
+        assert!(
+            !grid_has_non_monotonic_points_to_rounding(&points, 4, false, true).unwrap(),
+            "the closing step is within the rounding of its own two points"
         );
     }
 
