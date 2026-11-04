@@ -483,7 +483,7 @@ fn compiled_out_raytrace_is_rejected_before_scene_capture() {
 #[test]
 fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
     let (mut s, host) = session();
-    for _ in 0..8 {
+    for _ in 0..24 {
         s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"corner":[-10,-10,-10]})).unwrap();
     }
     let mut camera = solidcraft_render::Camera { distance: 1.0, fov: 0.0, ..Default::default() };
