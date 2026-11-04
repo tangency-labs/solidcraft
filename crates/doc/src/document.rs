@@ -5613,6 +5613,7 @@ impl Document {
         if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
             return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
+        self.refuse_driven(name)?;
         let mut next = self.clone();
         let inferred = match unit {
             Some(u) => u.trim().to_string(),
@@ -5841,7 +5842,8 @@ impl Document {
         self.apply_point_values(vals, sk)?;
         self.apply_equation_values(vals, sk)?;
         self.apply_pattern_values(vals, sk)?;
-        for c in &mut sk.constraints {
+        // A driven dimension measures: its parameter is read from it, never written to it.
+        for c in sk.constraints.iter_mut().filter(|c| !c.driven) {
             if let Some(p) = &c.param {
                 let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
                 let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
@@ -6075,12 +6077,27 @@ impl Document {
     ) -> Result<solidcraft_sketch::SolveReport> {
         // The solve stops with the evaluation it runs for: the app's Cancel, a design that closed.
         match solidcraft_kernel::stop_token() {
-            Some(token) => solidcraft_sketch::cancel::within(&token, || self.solve_sketch_now(vals, sk, stored, moved_from, analysis)),
-            None => self.solve_sketch_now(vals, sk, stored, moved_from, analysis),
+            Some(token) => solidcraft_sketch::cancel::within(&token, || self.solve_sketch_settled(vals, sk, stored, moved_from, analysis)),
+            None => self.solve_sketch_settled(vals, sk, stored, moved_from, analysis),
         }
     }
 
-    fn solve_sketch_now(
+    /// The solve, then the dimensions that use the sketch's own driven dimensions take what
+    /// they measure (#5582).
+    fn solve_sketch_settled(
+        &self,
+        vals: &std::collections::BTreeMap<String, expr::Value>,
+        sk: &mut Sketch,
+        stored: &solidcraft_sketch::DrivingValues,
+        moved_from: Option<&Sketch>,
+        analysis: solidcraft_sketch::Analysis,
+    ) -> Result<solidcraft_sketch::SolveReport> {
+        let report = self.solve_sketch_once(vals, sk, stored, moved_from, analysis)?;
+        self.settle_own_driven(vals, sk, report, analysis)
+    }
+
+    /// One solve of [`Self::solve_sketch_with_analysis`], with the driven values in `vals`.
+    pub(crate) fn solve_sketch_once(
         &self,
         vals: &std::collections::BTreeMap<String, expr::Value>,
         sk: &mut Sketch,

@@ -37,7 +37,9 @@ pub(crate) mod window;
 #[derive(Clone, Debug)]
 struct Drawn {
     id: String,
+    /// The dimension's parameter; a driven dimension's is read-only (#5582).
     param: Option<String>,
+    driven: bool,
     text: Rect,
     segs: Vec<[Pos2; 2]>,
     /// Text centre in sketch coordinates.
@@ -145,7 +147,7 @@ struct DimensionDraft {
     solve: u64,
     error: Option<String>,
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
-    /// it has no parameter and no value to edit (#320).
+    /// it has no value to edit (#320), only a read-only name (#5582).
     driven: bool,
     /// Draw ellipses with their axes, when the draft was made (see [`ellipse_as_before`]).
     half_axes: bool,
@@ -429,8 +431,8 @@ fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> R
     draft_of(app, sketch, &entities, at, false).or_else(|error| draft_of(app, sketch, &entities, at, true).map_err(|_| error))
 }
 
-/// The draft of one dimension: its parameter (for a driven one, its constraint id, since it
-/// has no parameter), the parameter's expression, and the scratch session it was added in.
+/// The draft of one dimension: its parameter (for a driven one, its constraint id, since its
+/// parameter is read-only), the parameter's expression, and the scratch session it was added in.
 fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, driven: bool) -> Result<(String, String, DimensionDraft), String> {
     let mut scratch = app.session.scratch();
     let mut params = json!({"entities": entities_value(entities), "driven": driven});
@@ -549,7 +551,9 @@ pub(crate) fn draft_text() -> Option<Rect> {
 pub(crate) struct ModelDim {
     pub sketch: u64,
     pub id: String,
+    /// The dimension's parameter; a driven dimension's is read-only (#5582).
     pub param: Option<String>,
+    pub driven: bool,
     pub text: Rect,
 }
 
@@ -582,8 +586,8 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
 
 /// Open a finished sketch's shown dimension in the inline editor (true: always).
 fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
-    let Some(param) = d.param else {
-        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+    let Some(param) = d.param.clone().filter(|_| !d.driven) else {
+        app.set_status(driven_status(d.param.as_deref()), false);
         return true;
     };
     let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
@@ -679,7 +683,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
-    let (param, expr, driven) = match d.param {
+    let (param, expr, driven) = match d.param.clone().filter(|_| !d.driven) {
         Some(param) => {
             let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
             (param, expr, None)
@@ -687,7 +691,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
         None => match freed(app, &d.id) {
             Some((param, expr)) => (param, expr, Some(d.id.clone())),
             None => {
-                app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+                app.set_status(driven_status(d.param.as_deref()), false);
                 return true;
             }
         },
@@ -795,6 +799,14 @@ fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Resu
         SheetText::Note(id) => {
             app.run("drawing.note.edit", json!({"note": encode(id), "set": {"content": typed}})).map_err(|err| shown_error("drawing.note.edit", &err))
         }
+    }
+}
+
+/// What a double-click on a driven dimension says: its name, which expressions can use (#5582).
+fn driven_status(param: Option<&str>) -> String {
+    match param {
+        Some(name) => solidcraft_ui_text::format("sketch.driven_dimension_named", &[("name", name)]),
+        None => "A driven dimension measures the sketch; it has no value to edit".into(),
     }
 }
 
@@ -1205,7 +1217,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 }
             });
         } else if !is_draft {
-            drawn.push(Drawn { id: c.id.clone(), param: c.param.clone(), text: r, segs, at: lay.text });
+            drawn.push(Drawn { id: c.id.clone(), param: c.param.clone(), driven: c.driven, text: r, segs, at: lay.text });
         }
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
@@ -1346,11 +1358,11 @@ fn hit_while_editing(pos: Pos2) -> Option<Hit> {
 }
 
 /// Consume dimension clicks while editing (true: the click was on a dimension). A single click
-/// on another driving dimension inserts its name at the caret (replacing selected text) once
-/// egui's double-click window has passed without a second click ([`flush_pending`]); the second
-/// click of a double-click instead applies the current value, as Enter does, and opens the
-/// clicked dimension for editing with its value selected. A value that does not apply keeps its
-/// box open with its error, and nothing switches.
+/// on another dimension, driving or driven (its read-only name, #5582), inserts its name at the
+/// caret (replacing selected text) once egui's double-click window has passed without a second
+/// click ([`flush_pending`]); the second click of a double-click instead applies the current
+/// value, as Enter does, and opens the clicked dimension for editing with its value selected. A
+/// value that does not apply keeps its box open with its error, and nothing switches.
 pub fn pick_reference(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     let Some(target) = hit_while_editing(pos) else { return false };
     let Hit::Other { param, model, id } = target else {
@@ -1377,7 +1389,7 @@ pub fn pick_reference(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2, double
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return };
-        // Driven dimensions have no parameter to name.
+        // A dimension cannot refer to itself; a driven one supplies its read-only name (#5582).
         if let Some(name) = param {
             let selection = edit
                 .caret
@@ -2085,7 +2097,7 @@ mod tests {
     }
 
     /// Placing a dimension the sketch can't take previews it as driven: in the draft it is a
-    /// driven constraint with no parameter, labelled in parentheses (#320).
+    /// driven constraint with a read-only parameter (#5582), labelled in parentheses (#320).
     #[test]
     fn an_over_constraining_placement_previews_a_driven_dimension() {
         cancel();
@@ -2103,7 +2115,7 @@ mod tests {
         assert!(draft.driven);
         let sk = &draft.preview.sketch(draft.sketch).unwrap().sketch;
         let c = sk.constraints.iter().find(|c| c.id == id).unwrap();
-        assert!(c.driven && c.param.is_none(), "{c:?}");
+        assert!(c.driven && c.param.is_some(), "{c:?}");
         assert!(matches!(c.kind, ConstraintKind::Length {value,..} if (value-20.).abs()<1e-6));
         assert_eq!(label(&c.kind, None, c.driven, "mm", 2, 1), "(20.00 mm)");
         assert!(!editing());

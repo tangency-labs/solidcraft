@@ -2657,6 +2657,9 @@ impl Session {
         // Whose 3D constraints held before the edit: only those can it break (#10608).
         let wires_held: std::collections::BTreeSet<u64> =
             self.model.results.iter().filter(|r| r.state.sketch(r.id).is_some_and(|k| k.report.wires_ok())).map(|r| r.id).collect();
+        // Features a driven dimension failed already (#5582): only a new such failure refuses.
+        let driven_failing: std::collections::BTreeSet<u64> =
+            self.model.results.iter().filter(|r| r.error.as_deref().is_some_and(solidcraft_doc::is_driven_problem)).map(|r| r.id).collect();
         // Quantity changes alter topology, so store the regenerated instances in the same
         // transaction as the parameter edit. Later picks and undo must see those same ids.
         let mut updated: Vec<_> = self
@@ -2683,6 +2686,13 @@ impl Session {
             *self.doc_mut().sketch_mut(id)? = sketch;
         }
         self.refresh();
+        // A value that makes a feature use a driven dimension of a later sketch, or a dimension
+        // depend on itself through one, is refused (#5582).
+        if let Some(r) =
+            self.model.results.iter().find(|r| !driven_failing.contains(&r.id) && r.error.as_deref().is_some_and(solidcraft_doc::is_driven_problem))
+        {
+            return Err(EngineError::Other(format!("{}: {}; the values were not changed", r.name, r.error.as_deref().unwrap_or_default())));
+        }
         for r in &self.model.results {
             // A value a 3D dimension or point of this sketch cannot take (#10608) is refused like
             // one that conflicts; an error from upstream is not the edit's to refuse.

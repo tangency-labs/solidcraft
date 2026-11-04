@@ -1,0 +1,38 @@
+{
+  "en": {
+    "parameters.driven_read_only": "Driven dimension: its value is what it measures in the sketch, so it can't be edited. Other expressions can use it.",
+    "sketch.driven_dimension_named": "{name} is a driven dimension: it measures the sketch and has no value to edit, but other expressions can use {name}"
+  },
+  "ar": {
+    "parameters.driven_read_only": "بُعد مُشتق: قيمته هي ما يقيسه في الرسم، لذا لا يمكن تعديله. يمكن للتعبيرات الأخرى استخدامه.",
+    "sketch.driven_dimension_named": "البُعد المُشتق {name} يقيس الرسم: ليست له قيمة للتعديل، لكن يمكن للتعبيرات الأخرى استخدام {name}"
+  },
+  "de": {
+    "parameters.driven_read_only": "Abhängiges Maß: Sein Wert ist das, was es in der Skizze misst, daher kann er nicht bearbeitet werden. Andere Ausdrücke können ihn verwenden.",
+    "sketch.driven_dimension_named": "Das abhängige Maß {name} misst die Skizze: Es hat keinen Wert zum Bearbeiten, aber andere Ausdrücke können {name} verwenden"
+  },
+  "fr": {
+    "parameters.driven_read_only": "Cote pilotée : sa valeur est ce qu'elle mesure dans l'esquisse, elle ne peut donc pas être modifiée. D'autres expressions peuvent l'utiliser.",
+    "sketch.driven_dimension_named": "La cote pilotée {name} mesure l'esquisse : elle n'a pas de valeur à modifier, mais d'autres expressions peuvent utiliser {name}"
+  },
+  "he": {
+    "parameters.driven_read_only": "מידה מונעת: הערך שלה הוא מה שהיא מודדת בסקיצה, ולכן אי אפשר לערוך אותו. ביטויים אחרים יכולים להשתמש בה.",
+    "sketch.driven_dimension_named": "המידה המונעת {name} מודדת את הסקיצה: אין לה ערך לעריכה, אבל ביטויים אחרים יכולים להשתמש ב-{name}"
+  },
+  "ja": {
+    "parameters.driven_read_only": "従動寸法: 値はスケッチで測った値なので編集できません。ほかの式で使うことはできます。",
+    "sketch.driven_dimension_named": "従動寸法 {name} はスケッチを測定します。編集する値はありませんが、ほかの式で {name} を使えます"
+  },
+  "ko": {
+    "parameters.driven_read_only": "종속 치수: 값은 스케치에서 측정한 값이므로 편집할 수 없습니다. 다른 식에서 사용할 수 있습니다.",
+    "sketch.driven_dimension_named": "종속 치수 {name}은(는) 스케치를 측정합니다. 편집할 값은 없지만 다른 식에서 {name}을(를) 사용할 수 있습니다"
+  },
+  "vi": {
+    "parameters.driven_read_only": "Kích thước tham chiếu: giá trị của nó là số đo trong bản phác thảo nên không thể chỉnh sửa. Các biểu thức khác có thể dùng nó.",
+    "sketch.driven_dimension_named": "Kích thước tham chiếu {name} đo bản phác thảo: không có giá trị để chỉnh sửa, nhưng các biểu thức khác có thể dùng {name}"
+  },
+  "zh": {
+    "parameters.driven_read_only": "被驱动尺寸：其值为它在草图中的测量值，因此无法编辑。其他表达式可以使用它。",
+    "sketch.driven_dimension_named": "被驱动尺寸 {name} 测量草图：它没有可编辑的值，但其他表达式可以使用 {name}"
+  }
+}
