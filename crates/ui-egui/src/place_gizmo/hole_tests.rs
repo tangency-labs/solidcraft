@@ -251,6 +251,33 @@ fn a_pick_elsewhere_on_the_face_keeps_a_held_hole_on_its_line() {
     assert!(matches!(p.as_slice(), [p] if (p.x - 10.0).abs() < 1e-6 && (p.y - 25.0).abs() < 0.3), "moved along the edge only: {p:?}");
 }
 
+/// On an L-shaped face the held hole's line can leave the face before the pick: the hole stays,
+/// and the dialog says why instead of taking the pick without a word.
+#[test]
+fn a_pick_the_held_line_cannot_reach_says_why_and_leaves_the_hole() {
+    let mut h = blocks();
+    // A notch out of the first block's back left corner: its top is an L.
+    h.app.run("solid.box", json!({"length": 21, "width": 16, "height": 22, "corner": [-1, 15, -1], "operation": "cut"})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(10.0, 5.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 7.0, 20.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.settle();
+    let before = places(&h);
+    assert!(matches!(before.as_slice(), [p] if p.dist(Vec3::new(10.0, 5.0, 20.0)) < 0.3), "{before:?}");
+    h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
+    // Along the edge from here is the notch: the line at x = 10 has no face at y = 25.
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.settle();
+    assert_eq!(places(&h), before, "the hole stays on its line");
+    let error = h.app.dialog.as_ref().and_then(|d| d.error.clone());
+    assert_eq!(error.as_deref(), Some(crate::hole_place::HELD_OFF_ITS_LINE), "the dialog says why");
+}
+
 #[test]
 fn two_reference_edges_free_the_hole_again_and_a_drag_sets_both_distances() {
     let mut h = held_by_the_left_edge();
