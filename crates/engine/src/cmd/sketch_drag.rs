@@ -37,7 +37,8 @@ const MAX_STEPS: usize = 64;
 /// After a step fails, the way to it from the last solved state is halved until what is left is
 /// shorter than a step over this; at most `MAX_STEPS` such solves per drag.
 const HALVINGS: usize = 16;
-/// Steps of a drag that isn't live solved at once past a failed step (see [`drag_entity`]).
+/// Steps of a drag that isn't live solved at once past a failed step, at most (see
+/// [`drag_entity`] and [`ahead_batch`]).
 const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
@@ -206,15 +207,9 @@ pub(super) fn drag_entity(
         });
         kept || counted_solve(sk, &hold, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
     };
-    let mut step = |sk: &mut Sketch, last: &Geometry, t: f64, solves: &mut Solves| {
-        let mut own = Budget::full();
-        let budget = frame.as_mut().unwrap_or(&mut own);
-        let spent = budget.spent();
-        let ok = held(sk, last, t, budget);
-        solves.count += 1;
-        solves.work += budget.spent() - spent;
-        solves.cut |= budget.exhausted();
-        solves.numeric |= budget.numeric_exhausted();
+    // How a held solve went (`ok`), judged on the sketch it left, which is put back to `last`
+    // unless the step solved.
+    let judge = |sk: &mut Sketch, last: &Geometry, ok: bool| {
         // A step that shrank a line to a point only met its constraints without that line.
         let outcome = if !ok || last.shrank(sk) {
             Step::Failed
@@ -227,6 +222,17 @@ pub(super) fn drag_entity(
         };
         last.restore(sk);
         outcome
+    };
+    let mut step = |sk: &mut Sketch, last: &Geometry, t: f64, solves: &mut Solves| {
+        let mut own = Budget::full();
+        let budget = frame.as_mut().unwrap_or(&mut own);
+        let spent = budget.spent();
+        let ok = held(sk, last, t, budget);
+        solves.count += 1;
+        solves.work += budget.spent() - spent;
+        solves.cut |= budget.exhausted();
+        solves.numeric |= budget.numeric_exhausted();
+        judge(sk, last, ok)
     };
     let mut last = Geometry::default();
     last.take(sk);
@@ -260,32 +266,59 @@ pub(super) fn drag_entity(
         }
         // Past a failed step, every next one starts from the last solved state again and a failed
         // one leaves nothing for the one after. Unless the drag is live (its steps share the
-        // frame's budget), the next few are solved at once, on all cores, and those that fail
-        // in a row are taken as tried: the walk goes on where it would have, one by one, at the
-        // first of them that doesn't fail, without the seconds of failing solves before it.
+        // frame's budget), the next few are solved at once, one per core, and taken in order as
+        // the walk would have solved them one by one: those that fail in a row count as tried,
+        // and the first that solves becomes the sketch, so no step is solved twice (#7648). The
+        // walk goes on from there, without the seconds of failing solves before it. With one core
+        // (and in the browser build) the batch would run one step after another, so the walk
+        // solves the steps itself.
         #[cfg(test)]
         let ahead = last_drag::ahead();
         #[cfg(not(test))]
         let ahead = true;
-        if ahead && !live && failed.is_some() && line_grab.is_none() {
-            let ahead: Vec<f64> =
-                (1..=AHEAD).map(|j| at(base, dt, k + j)).scan(false, |done, t| (!std::mem::replace(done, t >= 1.0)).then_some(t)).collect();
-            let tried = solidcraft_kernel::map_on_threads(&ahead, AHEAD, |&t| {
+        let batch = ahead_batch();
+        if ahead && batch > 1 && !live && failed.is_some() && line_grab.is_none() {
+            let next: Vec<f64> =
+                (1..=batch).map(|j| at(base, dt, k + j)).scan(false, |done, t| (!std::mem::replace(done, t >= 1.0)).then_some(t)).collect();
+            let tried = solidcraft_kernel::map_on_threads(&next, batch, |&t| {
                 let mut sk = sk.clone();
                 let mut budget = Budget::full();
                 let ok = held(&mut sk, &last, t, &mut budget);
-                (ok, budget.spent(), budget.exhausted())
+                let outcome = judge(&mut sk, &last, ok);
+                (outcome, sk, budget.spent(), budget.exhausted() || budget.numeric_exhausted())
             });
-            let failing = tried.iter().take_while(|r| matches!(r, Some((false, _, false)))).flatten().collect::<Vec<_>>();
-            if !failing.is_empty() {
-                for (_, work, _) in &failing {
-                    solves.count += 1;
-                    solves.work += work;
+            #[cfg(test)]
+            last_drag::add_ahead(tried.len());
+            let mut used = 0;
+            let mut solved = None;
+            // A step whose solve ran out of budget, or wrapped, is left to the walk, which knows
+            // what to do with it.
+            for (outcome, copy, work, _) in tried.into_iter().map_while(|r| r.filter(|r| !r.3)) {
+                if matches!(outcome, Step::Wrapped) {
+                    break;
                 }
-                k += failing.len();
+                solves.count += 1;
+                solves.work += work;
+                used += 1;
+                if matches!(outcome, Step::Solved) {
+                    solved = Some(copy);
+                    break;
+                }
+            }
+            if used > 0 {
+                k += used;
                 t = at(base, dt, k);
                 #[cfg(test)]
-                last_drag::add_skipped(failing.len());
+                last_drag::add_skipped(used - usize::from(solved.is_some()));
+                if let Some(copy) = solved {
+                    *sk = copy;
+                    #[cfg(test)]
+                    last_drag::add_taken(1);
+                    (good, failed) = (t, None);
+                    if t < 1.0 {
+                        last.take(sk);
+                    }
+                }
                 continue 'walk;
             }
         }
@@ -408,6 +441,16 @@ pub(super) struct Solves {
     pub numeric: bool,
 }
 
+/// How many steps past a failed one a drag that isn't live solves at once: one per core, at most
+/// [`AHEAD`]. The browser build has one thread: there a batch would solve its steps one after
+/// another, also those the walk never needs.
+fn ahead_batch() -> usize {
+    #[cfg(target_arch = "wasm32")]
+    return 1;
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::available_parallelism().map(usize::from).unwrap_or(1).min(AHEAD)
+}
+
 /// One live frame's decomposition budget (smaller in tests that set one).
 fn frame_budget() -> Budget {
     #[cfg(test)]
@@ -434,6 +477,8 @@ pub(super) mod last_drag {
         static NUMERIC: Cell<Option<usize>> = const { Cell::new(None) };
         static AHEAD: Cell<bool> = const { Cell::new(true) };
         static SKIPPED: Cell<usize> = const { Cell::new(0) };
+        static AHEAD_SOLVED: Cell<usize> = const { Cell::new(0) };
+        static TAKEN: Cell<usize> = const { Cell::new(0) };
     }
 
     pub fn set(s: Solves) {
@@ -494,6 +539,20 @@ pub(super) mod last_drag {
 
     pub fn add_skipped(n: usize) {
         SKIPPED.with(|c| c.set(c.get() + n));
+    }
+
+    /// Steps solved at once past a failed one, and those of them that solved and became the
+    /// sketch, since the last call.
+    pub fn ahead_counts() -> (usize, usize) {
+        (AHEAD_SOLVED.with(|c| c.replace(0)), TAKEN.with(|c| c.replace(0)))
+    }
+
+    pub fn add_ahead(n: usize) {
+        AHEAD_SOLVED.with(|c| c.set(c.get() + n));
+    }
+
+    pub fn add_taken(n: usize) {
+        TAKEN.with(|c| c.set(c.get() + n));
     }
 
     /// Restores solving steps ahead when dropped, also when the test panics.

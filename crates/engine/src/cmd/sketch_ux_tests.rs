@@ -1912,6 +1912,44 @@ fn a_scripted_drag_solves_the_steps_past_a_failure_at_once_and_ends_where_one_by
     assert_eq!((solves2.count, solves2.work), (solves1.count, solves1.work));
 }
 
+/// #7648: past a failed step, the first step solved ahead that solves becomes the sketch, so the
+/// walk doesn't solve it again, and a batch holds one step per core. The drag still ends where
+/// one by one ends it, with the same held solves counted. Out past the arm's reach, and swung
+/// round through the shoulder's hole and out of it again (a step fails, a later one solves).
+#[test]
+fn a_step_solved_ahead_that_solves_is_taken_not_solved_again() {
+    use super::drag::last_drag;
+    let start = hung_arm();
+    let h = pt(&start, "eh.end");
+    let points = |s: &Session| s.doc.sketch(s.active_sketch.unwrap()).unwrap().points.iter().map(|p| (p.id.clone(), p.pos)).collect::<Vec<_>>();
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    let mut taken_all = 0;
+    for (angle, scale) in [(2.0, 1.5), (3.1, 1.0)] {
+        let far = hung_hand_target(&start, angle, scale);
+        let drag = |s: &mut Session| run(s, "sketch.drag", json!({"entity": "eh.end", "from": [h.x, h.y], "to": [far.x, far.y]}));
+        let mut one = hung_arm();
+        let r1 = last_drag::one_by_one(|| drag(&mut one));
+        let solves1 = last_drag::get();
+        assert_eq!(last_drag::ahead_counts(), (0, 0), "one by one solves nothing ahead");
+        last_drag::skipped();
+        let mut ahead = hung_arm();
+        let r2 = drag(&mut ahead);
+        let solves2 = last_drag::get();
+        let (solved_ahead, taken) = last_drag::ahead_counts();
+        let skipped = last_drag::skipped();
+        assert_eq!(r2, r1, "{angle}");
+        assert_eq!(points(&ahead), points(&one), "{angle}");
+        assert_eq!((solves2.count, solves2.work), (solves1.count, solves1.work), "{angle}");
+        // What a batch solved is tried steps, the step taken, and the steps past it, which ran
+        // beside them on other cores.
+        assert!(skipped + taken <= solved_ahead, "{angle}: {solved_ahead} solved ahead, {skipped} tried, {taken} taken");
+        taken_all += taken;
+    }
+    if cores > 1 {
+        assert!(taken_all > 0, "the walk went on from a step solved ahead");
+    }
+}
+
 /// All the held solves of one live frame, halvings included, share one decomposition budget:
 /// together they do at most a frame's work, and one solve's more.
 #[test]
