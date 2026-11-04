@@ -40,7 +40,7 @@ const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
         "solid.box" | "solid.sphere" | "solid.torus" => {
-            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false)]
+            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false).tip("dialog.primitive_point_tip")]
         }
         _ => Vec::new(),
     }
