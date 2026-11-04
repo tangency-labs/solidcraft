@@ -446,7 +446,8 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     if id == "solid.move" && split_move(s, params)?.is_some() {
         return Ok(None);
     }
-    let world = s.world_state()?;
+    // Nothing placed: the model is its own world, and only the saved axis is restored.
+    let world = if placed(s) { s.world_state()? } else { s.model.state() };
     Ok(map_local(s, &world, id, params))
 }
 
@@ -533,7 +534,8 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         }
         // Nothing to map (a surface revolve has no picks; a design with no placed component needs
         // none): an untouched explicit axis is still restored below.
-        let mut inner = match map_local(&context, world, cmd, params.get("params")?) {
+        let mapped = if placed(s) { map_local(&context, world, cmd, params.get("params")?) } else { None };
+        let mut inner = match mapped {
             Some(inner) => inner,
             None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
             None => return None,

@@ -327,6 +327,7 @@ fn untouched_edit_keeps_an_explicit_axis_origin_expression_for_solid_and_surface
         assert_eq!(original["origin"][0], json!("W / 2"));
         open(&mut h);
         h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK did not apply the edit (surface: {surface}, moved: {moved})");
         assert_eq!(saved_axis(&h), original, "surface: {surface}, moved: {moved}");
     }
 }
