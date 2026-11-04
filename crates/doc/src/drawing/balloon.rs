@@ -19,7 +19,7 @@
 //! ([`super::dimension::Status`]): by name, strictly, and what it can't decide it says.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
 

@@ -3,11 +3,13 @@
 //! the move's transform. The preview from a scratch design evaluated the move and meshed the
 //! bodies again for every change, so while the triad was dragged the part trailed the arrow by
 //! one evaluation, longer for a larger part.
+use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{Document, Mat, apply_point, apply_vector, expr::Kind, rigid};
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::{
     SolveApp,
@@ -23,11 +25,12 @@ pub(crate) struct MovePreview {
     cached: Option<Cached>,
 }
 
-/// The listed bodies' world meshes, for the design and revision they were taken from.
+/// The world meshes of the bodies drawn (the listed bodies, and the bodies of the components
+/// copied), for the design and revision they were taken from.
 struct Cached {
     document: Arc<Document>,
     revision: u64,
-    bodies: Vec<String>,
+    names: Vec<String>,
     meshes: Vec<Arc<Mesh>>,
 }
 
@@ -71,31 +74,44 @@ impl MovePreview {
             return None;
         }
         let bodies: Vec<String> = params.get("bodies")?.as_array()?.iter().map(|b| b.as_str().map(str::to_string)).collect::<Option<_>>()?;
-        if bodies.is_empty() {
+        // The components copied (`occurrences`): their bodies are drawn moved, as copies of them.
+        let components: Vec<Vec<u64>> = match params.get("occurrences") {
+            None => Vec::new(),
+            Some(Value::Array(list)) => {
+                list.iter().map(|path| path.as_array()?.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).collect::<Option<_>>()?
+            }
+            Some(_) => return None,
+        };
+        if bodies.is_empty() && components.is_empty() {
             return None;
         }
-        if self
-            .cached
-            .as_ref()
-            .is_none_or(|c| c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.bodies != bodies)
+        let copy = params.get("copy").and_then(Value::as_bool) == Some(true);
+        // Only a copy takes components (the engine refuses them otherwise).
+        if !components.is_empty() && !copy {
+            return None;
+        }
+        let mut names = bodies.clone();
+        for path in &components {
+            names.extend(app.session.occurrence_bodies(path, true).ok()?);
+        }
+        if self.cached.as_ref().is_none_or(|c| c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.names != names)
         {
-            let state = app.session.world_state();
-            let meshes: Vec<Arc<Mesh>> = bodies.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
+            let state = crate::open_meshing::session_world(&app.session);
+            let meshes: Vec<Arc<Mesh>> = names.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
             if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
             }
-            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, bodies: bodies.clone(), meshes });
+            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, names: names.clone(), meshes });
         }
         let cache = self.cached.as_ref()?;
         // About the world origin, as the Move feature turns bodies (`kernel::transform`).
         let m = rigid(translate, Vec3::ZERO, axis, angle);
-        let copy = params.get("copy").and_then(Value::as_bool) == Some(true);
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
         for mesh in &cache.meshes {
             draw(&mut scene, mesh, &m, colors, &mut bounds);
-            if !copy {
+            if !copy && colors.cut_tint {
                 // Where the body was, as the scratch-design preview shows a body moved away.
                 for t in &mesh.triangles {
                     for k in t {
@@ -119,9 +135,11 @@ impl MovePreview {
     }
 }
 
-/// `mesh` moved by `m`, in the colour of geometry the feature adds, with its shaded edges.
+/// `mesh` moved by `m`, in the colour of geometry the feature adds, or the body's own where
+/// the preference leaves new surface untinted (a move makes none either way), with its shaded
+/// edges.
 fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
-    let added = scene.color(colors.added);
+    let added = scene.color(if colors.tint_new { colors.added } else { colors.body });
     for t in &mesh.triangles {
         for k in t {
             let i = *k as usize;
@@ -180,7 +198,7 @@ mod tests {
         // The Move feature on the same body: the preview's extent is the moved body's.
         let mut s = app.session.scratch();
         s.execute("solid.move", &cmds[0].1).unwrap();
-        let moved = s.world_state().body("Plate").unwrap().mesh().bounds();
+        let moved = crate::open_meshing::session_world(&s).body("Plate").unwrap().mesh().bounds();
         assert!(near(built.bounds.min, moved.min) && near(built.bounds.max, moved.max), "{:?} vs {moved:?}", built.bounds);
         // A copy keeps the original shown.
         let copy = [("solid.move".to_string(), json!({"bodies": ["Plate"], "translate": [0, 0, 10], "copy": true}))];
@@ -202,5 +220,32 @@ mod tests {
             assert!(pv.compute(&app, &[("solid.move".to_string(), p.clone())], c).is_none(), "{p}");
         }
         assert!(pv.compute(&app, &[("solid.extrude".to_string(), json!({}))], c).is_none());
+    }
+
+    /// A copy of a component is drawn where the copy lands: the component's bodies moved, the
+    /// component itself left where it was, so the preview is not the scratch design's.
+    #[test]
+    fn a_component_copy_is_previewed_where_the_copy_lands() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Plate"})).unwrap();
+        let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 15, "body_name": "Peg"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let c = colors(&app);
+        let mut pv = MovePreview::default();
+        // The component's box is 0..20 along X; the copy lands 50 mm along.
+        let copy = [("solid.move".to_string(), json!({"bodies": [], "occurrences": [[occurrence]], "copy": true, "translate": [50, 0, 0]}))];
+        let built = pv.compute(&app, &copy, c).expect("taken here").expect("built");
+        assert!(built.replaced.is_empty(), "a copy keeps the original shown");
+        assert!(near(Vec3::new(built.bounds.min.x, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0)), "{:?}", built.bounds);
+        assert!(near(Vec3::new(built.bounds.max.x, 0.0, 0.0), Vec3::new(70.0, 0.0, 0.0)), "{:?}", built.bounds);
+        // With bodies listed too, the component's copy is drawn alongside the body's: the
+        // component's box is 15 mm tall, the Plate 5 mm, so the height shows it is there.
+        let mixed = [("solid.move".to_string(), json!({"bodies": ["Plate"], "occurrences": [[occurrence]], "copy": true, "translate": [50, 0, 0]}))];
+        let built = pv.compute(&app, &mixed, c).expect("taken here").expect("built");
+        assert!(near(Vec3::new(built.bounds.min.x, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0)), "{:?}", built.bounds);
+        assert!(near(Vec3::new(0.0, 0.0, built.bounds.max.z), Vec3::new(0.0, 0.0, 15.0)), "{:?}", built.bounds);
     }
 }

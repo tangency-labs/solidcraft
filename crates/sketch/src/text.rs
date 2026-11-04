@@ -13,7 +13,9 @@
 use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Ring, Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::Ring;
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::{FontData, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
@@ -77,7 +79,9 @@ fn link_geom(seg: Seg2) -> Option<LinkGeom> {
     match seg {
         Seg2::Line { a, b } => Some(LinkGeom::Line(a, b)),
         Seg2::Conic { a, apex, b, .. } => Some(LinkGeom::Conic { a, apex, b, rho: 0.5 }),
-        Seg2::Cubic { p0, p1, p2, p3 } => Some(LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false }),
+        Seg2::Cubic { p0, p1, p2, p3 } => {
+            Some(LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None })
+        }
         Seg2::Arc { .. } | Seg2::Bezier { .. } => None,
     }
 }

@@ -56,10 +56,11 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::drawing_measure::{self, AngleFrom, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::{Drawing, Units, add_by_id, in_id_order, require};
 use crate::config::MAX_REFERENCE_NAME_BYTES;
@@ -826,9 +827,17 @@ impl<'a> Lookup<'a> {
         let through = Plane { origin: *line.first().ok_or_else(face_on)?, ..*basis };
         let local = mat_inverse(&found.frame).and_then(|back| map_plane(&back, &through)).ok_or_else(face_on)?;
         let body = self.state.bodies.get(found.body).ok_or_else(|| Status::Lost("its body no longer exists".into()))?;
-        let segs = body.body.planar_edges(&local, &[*index]).pop().flatten().ok_or_else(face_on)?;
+        let pieces = body.body.planar_edges(&local, &[*index]).pop().flatten().ok_or_else(face_on)?;
         let not_round = || Status::Unmeasurable(format!("edge `{}` isn't a circle or an arc", edge.name));
-        let (radius, points) = one_arc(&segs).ok_or_else(not_round)?;
+        // A spline piece is no arc: only the pieces the kernel gives as segments can be one.
+        let segs: Option<Vec<Seg2>> = pieces
+            .into_iter()
+            .map(|piece| match piece {
+                crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
+                crate::kernel::PlanarPiece::Spline(_) => None,
+            })
+            .collect();
+        let (radius, points) = segs.as_deref().and_then(one_arc).ok_or_else(not_round)?;
         Ok((radius, points.map(|p| apply_point(&found.frame, local.to_world(p)))))
     }
 

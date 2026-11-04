@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
@@ -224,15 +224,14 @@ fn a_point_on_a_curved_edge_finds_it_between_its_chords() {
         let (sin, cos) = degrees.to_radians().sin_cos();
         json!([40.0 + radius * cos, 0.0, 15.0 + radius * sin])
     };
-    // The hole's rim is two half circles, and each point names one of them. Whole steps never land on
-    // where they meet, which names both and is refused.
+    // The hole's rim is one closed edge, and every point on it names that edge.
     let mut named = BTreeSet::new();
     for step in 0..55 {
         let at = add(&mut s, view, json!({"radial": {"edge": rim(6.0, 3.3 + 6.5 * f64::from(step))}}));
         reads(&at, 12.0, "Ø12.00");
         named.insert(at["record"]["kind"]["radial"]["edge"]["name"].as_str().unwrap().to_string());
     }
-    assert_eq!(named.len(), 2, "{named:?}");
+    assert_eq!(named.len(), 1, "{named:?}");
     assert!(refused(&mut s, json!({"view": ids::encode(view), "kind": {"radial": {"edge": rim(7.0, 20.0)}}})).contains("no edge"));
     let (sin, cos) = 45f64.to_radians().sin_cos();
     reads(&add(&mut s, view, json!({"radial": {"edge": [75.0 + 5.0 * cos, 0.0, 25.0 + 5.0 * sin]}})), 5.0, "R5.00");

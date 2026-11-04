@@ -1,0 +1,41 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 30,
+    "width": 30,
+    "height": 20,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     15,
+     20
+    ],
+    "diameter": 8.5
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     19.25,
+     15,
+     10
+    ],
+    "modeled": true,
+    "designation": "M10"
+   }
+  }
+ ]
+}

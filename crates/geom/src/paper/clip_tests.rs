@@ -2,7 +2,8 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
 
 use super::super::{Clip, Dashes, Group, Invalid, Item, ObjectKind, Scene};
 use crate::bspline::tests::Lcg;
-use crate::{Seg2, Vec2};
+use crate::prelude::*;
+use solidcore_record::{Seg2, Vec2};
 
 fn p(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
@@ -204,8 +205,8 @@ fn what_cant_be_clipped_is_refused() {
 /// clip, isn't cut yet.
 #[test]
 fn a_fill_is_kept_or_dropped_whole() {
-    let square = |x0: f64, y0: f64, x1: f64, y1: f64| crate::Loop2::polygon(&[p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)]);
-    let fill = |outer, holes| Item::Fill { region: crate::Region2 { outer, holes } };
+    let square = |x0: f64, y0: f64, x1: f64, y1: f64| solidcore_record::Loop2::polygon(&[p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)]);
+    let fill = |outer, holes| Item::Fill { region: solidcore_record::Region2 { outer, holes } };
     let crossing = "not supported yet: a fill crossing a clip's edge (#4890 A8)";
     for clip in [rect(0.0, 0.0, 10.0, 10.0), Clip::Circle { center: p(5.0, 5.0), radius: 7.5 }] {
         for (item, kept) in [
@@ -213,7 +214,7 @@ fn a_fill_is_kept_or_dropped_whole() {
             (fill(square(20.0, 20.0, 30.0, 30.0), vec![]), Some(false)),
             // Round the clip, its hole round it too: wholly outside.
             (fill(square(-20.0, -20.0, 30.0, 30.0), vec![square(-15.0, -15.0, 25.0, 25.0)]), Some(false)),
-            (fill(crate::Loop2::polygon(&[p(8.0, 5.0), p(30.0, 0.0), p(30.0, 10.0)]), vec![]), None),
+            (fill(solidcore_record::Loop2::polygon(&[p(8.0, 5.0), p(30.0, 0.0), p(30.0, 10.0)]), vec![]), None),
             (fill(square(-20.0, -20.0, 30.0, 30.0), vec![]), None),
         ] {
             let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![item.clone()] }]);
@@ -466,7 +467,8 @@ fn shapes_at_the_clips_edge_keep_exactly_what_lies_inside() {
     // outside, where it crosses and is refused by name; one below it, touching, is dropped whole,
     // unless its top edge is two EPS inside. A fill that is the clip's own rectangle is kept.
     let scene = |item: &Item| Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![item.clone()] }]);
-    let fill = |corners: &[Vec2]| Item::Fill { region: crate::Region2 { outer: crate::Loop2::polygon(corners), holes: vec![] } };
+    let fill =
+        |corners: &[Vec2]| Item::Fill { region: solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(corners), holes: vec![] } };
     let own = fill(&[p(10.0, 10.0), p(60.0, 10.0), p(60.0, 40.0), p(10.0, 40.0)]);
     assert_eq!(groups_cut(&scene(&own), &[(1, rect_clip)]).ok().map(|groups| groups[0].items.clone()), Some(vec![own.clone()]));
     for s in offsets {

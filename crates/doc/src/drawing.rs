@@ -52,11 +52,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
 use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::TitleBlock;
-use solidcraft_geom::{Aabb2, Vec2};
 
 use crate::format::DRAWING;
 use crate::ids::{self, IdSource};

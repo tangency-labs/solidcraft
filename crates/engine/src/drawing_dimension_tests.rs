@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::ModelBody;
 use solidcraft_doc::appearance::face_index_at;
 use solidcraft_doc::drawing::dimension::{
@@ -15,10 +16,10 @@ use solidcraft_doc::drawing::{Drawing, Source, Units};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_doc::ids::IdSource;
 use solidcraft_doc::naming::{edge_names, face_names};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, Sheet};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -504,7 +505,7 @@ fn flat_faces_are_measured_when_their_corners_are_gone() {
     assert!(spans(&r.points[..2], 0.0) && spans(&r.points[2..], 80.0), "{r:?}");
     let along = f.add(f.front, kind(LinearDirection::Horizontal), None);
     assert_reads(&f.resolve(along), 80.0, false);
-    let diagonal = f.add(f.front, kind(LinearDirection::Along(solidcraft_geom::Vec2::new(1.0, 1.0))), None);
+    let diagonal = f.add(f.front, kind(LinearDirection::Along(solidcore_record::Vec2::new(1.0, 1.0))), None);
     assert!((f.resolve(diagonal).measured.unwrap().value - 80.0 * 2f64.sqrt()).abs() < 1e-9);
     let seen = f.add(f.right, kind(LinearDirection::Aligned), None);
     assert!(matches!(&f.resolve(seen).status, Status::Unmeasurable(why) if why.contains("edge-on")), "{:?}", f.resolve(seen));
@@ -546,14 +547,9 @@ fn a_flat_face_that_isnt_one_face_or_isnt_parallel_says_so() {
     assert_eq!(f.resolve(id).status, Status::Suppressed);
 }
 
-fn radial(edge: &ModelEdge, diameter: bool) -> DimensionKind {
-    DimensionKind::Radial { edge: edge.clone(), diameter }
-}
-
 /// A boss of radius 5 along X on the box's right face reads Ø10 between its silhouettes in the front
 /// view, exactly, with its silhouettes 10 apart from one end of it to the other. A notch across its
-/// top cuts its face into pieces, all on the one cylinder, so it still reads Ø10 (found through
-/// pieces, so not exactly). The right view looks along its axis, so it can't be measured there;
+/// top leaves it the one cylindrical face, so it still reads Ø10, exactly. The right view looks along its axis, so it can't be measured there;
 /// with the boss suppressed it is lost.
 #[test]
 fn a_cylinders_diameter_is_found_through_all_its_faces() {
@@ -575,7 +571,7 @@ fn a_cylinders_diameter_is_found_through_all_its_faces() {
     run(&mut f.s, "solid.box", json!({"length": 2, "width": 50, "height": 3, "corner": [89, -1, 18], "operation": "cut", "targets": ["Box"]}));
     let r = f.resolve(front);
     assert_reads(&r, 10.0, false);
-    assert!(!r.exact, "found through pieces: {r:?}");
+    assert!(r.exact, "the notch leaves one cylindrical face: {r:?}");
     run(&mut f.s, "timeline.suppress", json!({"feature": boss, "suppressed": true}));
     let r = f.resolve(front);
     // The boss that made its face is suppressed, so the dimension says so: it isn't lost.

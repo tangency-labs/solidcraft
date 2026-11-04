@@ -112,7 +112,7 @@ fn point_expressions_in_a_moved_component() {
     run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 50, 0]}));
     run(&mut s, "component.activate", json!({"component": cid}));
     run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "base": ["x0", 60, 0], "body_name": "Pin"}));
-    let wlo = |s: &Session| s.world_state().body("Pin").unwrap().mesh().bounds().min;
+    let wlo = |s: &Session| s.world_state().unwrap().body("Pin").unwrap().mesh().bounds().min;
     let lo = wlo(&s);
     assert!((lo.x - 9.0).abs() < 1e-3 && (lo.y - 59.0).abs() < 1e-3, "{lo:?}");
     run(&mut s, "parameters.change", json!({"name": "x0", "expression": "20 mm"}));

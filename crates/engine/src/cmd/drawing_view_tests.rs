@@ -502,7 +502,7 @@ fn a_base_view_fits_what_its_percent_shows() {
         // In the drawing space; it may still lie over the title block, and is listed if it does.
         let space = s.drawing("test").unwrap().sheets[0].drawing_space().unwrap().inflated(1e-9);
         let corner =
-            |at: &str| solidcraft_geom::Vec2::new(made["boundary_mm"][at][0].as_f64().unwrap(), made["boundary_mm"][at][1].as_f64().unwrap());
+            |at: &str| solidcore_record::Vec2::new(made["boundary_mm"][at][0].as_f64().unwrap(), made["boundary_mm"][at][1].as_f64().unwrap());
         assert!(space.contains(corner("min")) && space.contains(corner("max")), "{made}");
         assert_eq!(saved(&s, id).reference_shown_percent, percent);
     }
@@ -914,16 +914,16 @@ fn two_touching_blocks_draw_their_shared_side_once() {
 }
 
 /// Every segment of `v`'s pieces at `visibility`, lines and arcs alike, on the sheet.
-fn drawn(v: &Value, visibility: &str) -> Vec<solidcraft_geom::Seg2> {
+fn drawn(v: &Value, visibility: &str) -> Vec<solidcore_record::Seg2> {
     let pieces = v["lines"].as_array().into_iter().flatten().flat_map(|l| l["pieces"].as_array().into_iter().flatten());
     let segs = pieces.filter(|p| p["visibility"] == visibility).flat_map(|p| p["path"].as_array().into_iter().flatten());
     segs.map(|seg| serde_json::from_value(seg.clone()).unwrap()).collect()
 }
 
 /// The points of `seg` furthest out: its ends, and for an arc each quarter-turn point it passes.
-fn reach(seg: &solidcraft_geom::Seg2) -> Vec<Vec2> {
+fn reach(seg: &solidcore_record::Seg2) -> Vec<Vec2> {
     let mut out = vec![seg.start(), seg.end()];
-    if let solidcraft_geom::Seg2::Arc { center, radius, start, sweep } = *seg {
+    if let solidcore_record::Seg2::Arc { center, radius, start, sweep } = *seg {
         let (lo, span) = if sweep >= 0.0 { (start, sweep) } else { (start + sweep, -sweep) };
         for k in 0..8 {
             let angle = f64::from(k) * std::f64::consts::FRAC_PI_2;
@@ -937,8 +937,8 @@ fn reach(seg: &solidcraft_geom::Seg2) -> Vec<Vec2> {
 
 /// Whether `a` and `b` share a stretch longer than 1e-6 mm: collinear lines that overlap, or arcs
 /// of one circle whose turns overlap.
-fn share_a_stretch(a: &solidcraft_geom::Seg2, b: &solidcraft_geom::Seg2) -> bool {
-    use solidcraft_geom::Seg2::{Arc, Line};
+fn share_a_stretch(a: &solidcore_record::Seg2, b: &solidcore_record::Seg2) -> bool {
+    use solidcore_record::Seg2::{Arc, Line};
     use std::f64::consts::TAU;
     match (*a, *b) {
         (Line { a: p, b: q }, Line { a: c, b: d }) => {
@@ -1116,7 +1116,7 @@ fn each_placements_hole_is_its_own_exact_circle() {
 }
 
 /// Every stroke of `v`'s paper scene: its path, whether it is closed, and its width.
-fn strokes(v: &Value) -> Vec<(Vec<solidcraft_geom::Seg2>, bool, f64)> {
+fn strokes(v: &Value) -> Vec<(Vec<solidcore_record::Seg2>, bool, f64)> {
     use solidcraft_geom::paper::{Item, Scene};
     let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
     let items = scene.groups.into_iter().flat_map(|g| g.items);
@@ -1161,7 +1161,7 @@ fn a_holes_rim_is_arcs_in_the_scene() {
     let mut round = 0.0;
     for (path, closed, _) in strokes(&v) {
         for seg in &path {
-            if let solidcraft_geom::Seg2::Arc { center, radius, sweep, .. } = *seg {
+            if let solidcore_record::Seg2::Arc { center, radius, sweep, .. } = *seg {
                 assert!(center.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{v}");
                 round += radius * sweep.abs();
                 let whole = path.len() == 1 && (sweep.abs() - std::f64::consts::TAU).abs() < 1e-9;
@@ -1321,7 +1321,10 @@ fn a_reference_part_much_bigger_than_the_model_is_held_or_refused() {
     let fitted = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}));
     let (near, far) = (fitted(&mut s, 0.0), fitted(&mut s, 100.0));
     assert_ne!(near["scale"], far["scale"], "{far}");
-    assert!(role_length(&far, true, "visible") > role_length(&near, true, "visible"), "{far}");
+    // At 0% the view shows the two sides of the big part that cross the model, cut off at the view's
+    // edges; at 100% all four.
+    let reference_lines = |v: &Value| v["lines"].as_array().unwrap().iter().filter(|l| l["reference"] == true).count();
+    assert_eq!((reference_lines(&near), reference_lines(&far)), (2, 4), "{far}");
     // Fitted round the model's middle, the side it grows on still stays on the sheet.
     let position = (point(&near["boundary_mm"]["min"]) + point(&near["boundary_mm"]["max"])) * 0.5;
     let (low, high) = (point(&far["boundary_mm"]["min"]), point(&far["boundary_mm"]["max"]));

@@ -1057,7 +1057,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         status: Status::Drawn,
         stats: None,
         boundary: None,
-        frame: Some(ViewFrame::new(solidcraft_geom::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
+        frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
     };
     let mut assembly = assemble(record, Projection::Third, &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };

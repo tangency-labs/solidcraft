@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::{Dashes, Group, Item, NoPictures, ObjectKind, Scene};
-use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use super::*;
 

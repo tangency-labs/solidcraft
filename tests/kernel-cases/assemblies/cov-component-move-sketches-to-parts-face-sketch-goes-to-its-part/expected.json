@@ -1,0 +1,17 @@
+{
+ "sources": [],
+ "what": "component.move_sketches.to_parts moves a sketch drawn on a part's top face into that part, and the pin built from it stays",
+ "source": "analytic",
+ "method": "Bracket: plate 40x30x10 placed 100 mm along x, top face z = 10; a circle r 5 sketched on that face from the design, extruded 8 mm up as a new body: pi*25*8 = 628.3185. The sketch is on an exactly attached face of Bracket's body, so it moves to Bracket (moved 1, stayed 0) and stays where it is on the face: the plate and the pin keep their volumes, 12000 + 628.3185",
+ "body_count": 2,
+ "volume_mm3": 12628.318531,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "moved": 1,
+    "stayed": 0
+   }
+  }
+ ]
+}

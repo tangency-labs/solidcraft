@@ -924,7 +924,7 @@ fn native_spatial_aa_preflight_and_host_forwarding_change_actual_edge_png() {
     let center = scene.bounds.center();
     let mut camera = solidcraft_render::Camera { distance: 2.0, fov: 0.0, ..Default::default() };
     camera.set_view(solidcraft_render::StandardView::Top);
-    camera.target = solidcraft_geom::Vec3::new(scene.bounds.min.x, center.y, center.z);
+    camera.target = solidcore_record::Vec3::new(scene.bounds.min.x, center.y, center.z);
     let doc = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
     let mut legacy: Option<Vec<u8>> = None;
@@ -1052,6 +1052,14 @@ fn completed_png_content_identity_matches_status_and_exact_retained_export() {
     finish(&host);
     let newer = s.execute("render.status", &json!({"job":replacement})).unwrap();
     assert_ne!(newer["frame"]["png_sha256"], metadata["png_sha256"]);
+    let still_retained = dir.join("still-retained.png");
+    s.execute("render.export", &json!({"job":id,"path":still_retained})).unwrap();
+    assert_eq!(std::fs::read(still_retained).unwrap(), bytes);
+    for _ in 0..7 {
+        let next = start(&mut s);
+        finish(&host);
+        s.execute("render.status", &json!({"job":next})).unwrap();
+    }
     let evicted = dir.join("evicted.png");
     assert!(s.execute("render.export", &json!({"job":id,"path":evicted})).is_err());
     assert!(!evicted.exists());
@@ -1183,9 +1191,26 @@ fn registered_product_camera_fit_changes_only_view_and_keeps_orientation() {
     assert_eq!(fitted["document_changed"], false);
     let after = s.camera.unwrap();
     assert_eq!((after.yaw, after.pitch, after.roll), (camera.yaw, camera.pitch, camera.roll));
+    // A picture taller than wide moves the camera back by the ratio, keeping the orientation
+    // and the target; a wide one is the plain fit.
+    let tall = s.execute("render.camera.fit", &json!({"aspect":0.5})).unwrap();
+    assert_eq!(tall["document_changed"], false);
+    let back = s.camera.unwrap();
+    assert!((back.distance - 2.0 * after.distance).abs() < 1e-9, "{} vs {}", back.distance, after.distance);
+    assert_eq!((back.yaw, back.pitch, back.roll, back.target), (after.yaw, after.pitch, after.roll, after.target));
+    s.execute("render.camera.fit", &json!({"aspect":2.0})).unwrap();
+    assert_eq!(s.camera.unwrap(), after);
     assert_eq!(s.doc.to_json(), doc);
     assert_eq!(s.undo.len(), undo);
+    // Hostile aspects are refused and leave the finite camera, the document and undo alone:
+    // a subnormal one would otherwise divide the fitted distance into infinity.
+    for aspect in [json!(0), json!(-1), json!(1e-320), json!(1e-7), json!(1e7), json!("tall")] {
+        assert!(s.execute("render.camera.fit", &json!({"aspect":aspect})).is_err(), "aspect {aspect}");
+        assert_eq!(s.camera.unwrap(), after);
+    }
     assert!(s.execute("render.camera.fit", &json!({"scale":0})).is_err());
+    assert_eq!(s.doc.to_json(), doc);
+    assert_eq!(s.undo.len(), undo);
 }
 
 #[test]
@@ -1264,7 +1289,12 @@ fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads
     assert_eq!(copied["frame"]["job"], json!(job));
     assert_eq!(copied["frame"]["width"], 16);
     assert!(copied.get("png").is_none());
-    for params in [json!({}), json!(null), json!({"job":job,"extra":true}), json!({"job":{"session":0,"serial":0,"generation":0}})] {
+    for params in [json!({}), json!(null)] {
+        assert_eq!(s.execute("render.result.copy", &params).unwrap(), copied, "an omitted job uses the selected result");
+    }
+    for params in
+        [json!({"job":1e300}), json!({"job":"selected"}), json!({"job":job,"extra":true}), json!({"job":{"session":0,"serial":0,"generation":0}})]
+    {
         assert!(s.execute("render.result.copy", &params).is_err());
     }
     assert!(Arc::ptr_eq(&document, &s.doc));

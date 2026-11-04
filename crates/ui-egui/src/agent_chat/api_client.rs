@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+use super::MODEL_LIST_CAP;
 use super::acp::ModelInfo;
 use super::agents::Protocol;
 use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
@@ -22,6 +23,8 @@ use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
+/// Longest name kept for a listed model.
+const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
 /// Pictures of the view kept in the conversation. The whole history goes with every request
@@ -30,6 +33,7 @@ const MAX_HISTORY: usize = 240;
 const MAX_HISTORY_IMAGES: usize = 2;
 /// What an older view becomes in the history.
 const DROPPED_VIEW_NOTE: &str = "[an earlier picture of the view, removed to keep the request small]";
+const DROPPED_THINKING_NOTE: &str = "[earlier reasoning, removed with older history]";
 /// How long one tool call may take (it may wait for the user's Allow, declined after four
 /// minutes). It does not depend on the endpoint's request timeout: a tool call is SolidCraft's own
 /// work and the user's answer, never a wait for the model, so a longer request timeout does not
@@ -503,7 +507,7 @@ fn go_reply_from_parts(text: Vec<(bool, String)>, calls: Vec<Call>, kept_calls: 
     if !kept_calls.is_empty() {
         assistant["tool_calls"] = Value::Array(kept_calls);
     }
-    Reply { text, calls, assistant }
+    Reply { text, calls, assistant, stop: "" }
 }
 
 /// Shared text + capped tool-call accumulator for the three Go reply parsers.
@@ -642,6 +646,10 @@ pub struct ApiConfig {
     pub http: HttpFn,
     /// How long one model request may take, in seconds (the endpoint's setting).
     pub request_timeout_s: u64,
+    /// The reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies. A set value wins over the `none` retry (#3817): that
+    /// retry only runs when no effort was chosen.
+    pub reasoning_effort: String,
 }
 
 enum Cmd {
@@ -649,6 +657,7 @@ enum Cmd {
     NewChat,
     SetModel(String),
     SetRequestTimeout(u64),
+    SetReasoningEffort(String),
 }
 
 pub struct ApiBackend {
@@ -723,6 +732,11 @@ impl ChatBackend for ApiBackend {
             let _ = c.send(Cmd::SetRequestTimeout(secs));
         }
     }
+    fn set_reasoning_effort(&mut self, effort: &str) {
+        if let Some(c) = &self.cmds {
+            let _ = c.send(Cmd::SetReasoningEffort(effort.to_string()));
+        }
+    }
     fn new_session(&mut self) {
         // A running turn is cancelled; the worker resets the history once it has ended.
         self.cancel.store(true, Ordering::Relaxed);
@@ -784,21 +798,36 @@ impl Worker {
         }
         self.emit(Event::ToolsAvailable(!self.tools.is_empty()));
         self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
-        // The endpoint's models for the picker; an endpoint that does not list them shows none.
-        if let Ok(list) = self.model_list() {
-            let mut available = list;
-            if !self.cfg.model.is_empty() && !available.iter().any(|m| m.id == self.cfg.model) {
-                available.insert(0, ModelInfo { id: self.cfg.model.clone(), name: self.cfg.model.clone(), description: String::new() });
+        // The endpoint's models for the picker. An endpoint that does not list them still shows the
+        // configured model, and says why there are no others.
+        let configured = ModelInfo { id: self.cfg.model.clone(), name: self.cfg.model.clone(), description: String::new() };
+        let available = match self.model_list() {
+            Ok(mut list) => {
+                self.emit(Event::ModelsNote(None));
+                if !self.cfg.model.is_empty() && !list.iter().any(|m| m.id == self.cfg.model) {
+                    list.insert(0, configured);
+                }
+                list
             }
-            if !available.is_empty() {
-                self.emit(Event::Models { current: self.cfg.model.clone(), available });
+            Err(e) => {
+                self.emit(Event::ModelsNote(Some(e)));
+                if self.cfg.model.is_empty() { Vec::new() } else { vec![configured] }
             }
+        };
+        if !available.is_empty() {
+            self.emit(Event::Models { current: self.cfg.model.clone(), available });
         }
         for cmd in cmds {
             match cmd {
                 Cmd::Prompt(parts) => self.turn(parts),
                 Cmd::SetModel(m) => self.cfg.model = m,
                 Cmd::SetRequestTimeout(secs) => self.cfg.request_timeout_s = secs,
+                Cmd::SetReasoningEffort(effort) => {
+                    self.cfg.reasoning_effort = super::agents::reasoning_effort(&effort);
+                    // A new choice starts the refusal dance again: an earlier `none` answer was
+                    // the endpoint's, not the user's, and must not silently override the choice.
+                    self.no_reasoning.set(false);
+                }
                 Cmd::NewChat => {
                     self.history.clear();
                     // A new conversation gets a fresh Go session ID for routing and caching.
@@ -876,8 +905,11 @@ impl Worker {
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
         self.history.push(user_message(self.cfg.protocol, &parts));
-        drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
-        self.trim_history();
+        let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
+        let trimmed = self.trim_history();
+        if (dropped || trimmed) && self.cfg.protocol == Protocol::Anthropic {
+            drop_thinking(&mut self.history);
+        }
         // No cap on requests: Stop sets `cancel`, checked at the top of every round.
         loop {
             // The history as of here is complete (every tool call answered): a cancelled request
@@ -910,7 +942,7 @@ impl Worker {
             }
             self.history.push(reply.assistant);
             if reply.calls.is_empty() {
-                self.emit(Event::TurnEnded { reason: String::new() });
+                self.emit(Event::TurnEnded { reason: reply.stop.into() });
                 return;
             }
             // Anthropic takes every result of a round in one user message; OpenAI takes one
@@ -964,14 +996,22 @@ impl Worker {
     }
 
     /// Keep the conversation bounded and starting at a user message, so neither protocol sees a
-    /// reply or a tool result without the message it answers.
-    fn trim_history(&mut self) {
+    /// reply or a tool result without the message it answers. True when a message was removed.
+    fn trim_history(&mut self) -> bool {
+        let before = self.history.len();
         while self.history.len() > MAX_HISTORY {
             self.history.remove(0);
         }
         while self.history.first().is_some_and(|m| !starts_a_turn(m)) {
             self.history.remove(0);
         }
+        self.history.len() != before
+    }
+
+    /// The reasoning effort the user chose for this endpoint, or `None` to send nothing and let
+    /// the provider apply its own default.
+    fn reasoning_effort(&self) -> Option<&str> {
+        (!self.cfg.reasoning_effort.trim().is_empty()).then(|| self.cfg.reasoning_effort.trim())
     }
 
     fn request(&self) -> Result<Reply, String> {
@@ -983,11 +1023,13 @@ impl Worker {
         let (status, v) = self.post(&body)?;
         // Some OpenAI models refuse function tools on this endpoint unless the reasoning effort is
         // "none" (HTTP 400 naming `reasoning_effort`): ask again once with it, and keep it for the
-        // next requests. Anthropic has no such parameter.
+        // next requests. Anthropic has no such parameter. A reasoning effort the user chose wins:
+        // the refusal is shown instead of being replaced silently (#10241).
         let refused = self.cfg.protocol == Protocol::OpenAi
             && status == 400
             && !self.tools.is_empty()
             && !self.no_reasoning.get()
+            && self.reasoning_effort().is_none()
             && http_error(status, &v).contains("reasoning_effort");
         if refused {
             self.no_reasoning.set(true);
@@ -1015,15 +1057,19 @@ impl Worker {
         let mut first_err: Option<String> = None;
         for protocol in order {
             let mut body = self.go_body(protocol);
-            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() {
+            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() && self.reasoning_effort().is_none() {
                 body["reasoning_effort"] = json!("none");
             }
             let (status, v) = self.go_post(protocol, &body)?;
             if protocol == GoProtocol::Chat {
                 // As on plain OpenAI endpoints: ask again once with reasoning effort
-                // "none" when the refusal names it.
-                let refused =
-                    status == 400 && !self.tools.is_empty() && !self.no_reasoning.get() && http_error(status, &v).contains("reasoning_effort");
+                // "none" when the refusal names it — unless the user chose an effort, whose
+                // refusal is shown instead (#10241).
+                let refused = status == 400
+                    && !self.tools.is_empty()
+                    && !self.no_reasoning.get()
+                    && self.reasoning_effort().is_none()
+                    && http_error(status, &v).contains("reasoning_effort");
                 if refused {
                     self.no_reasoning.set(true);
                     body["reasoning_effort"] = json!("none");
@@ -1137,9 +1183,14 @@ impl Worker {
                 messages.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
                 messages.extend(self.history.iter().cloned());
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
+                if let Some(effort) = self.reasoning_effort() {
+                    // The user's choice goes out on every request, ahead of any `none` the
+                    // endpoint once asked for (#10241).
+                    body["reasoning_effort"] = json!(effort);
+                }
                 if !self.tools.is_empty() {
                     body["tools"] = Value::Array(self.tools.clone());
-                    if self.no_reasoning.get() {
+                    if self.no_reasoning.get() && self.reasoning_effort().is_none() {
                         body["reasoning_effort"] = json!("none");
                     }
                 }
@@ -1326,6 +1377,19 @@ struct Reply {
     /// The assistant message to keep in the history, in the endpoint's own shape. Tool calls are
     /// capped to the ones the loop answers, so every call kept here gets a result.
     assistant: Value,
+    /// Why the answer stopped, as the turn-end reason the chat knows: empty for a normal end,
+    /// `max_tokens` for an answer cut off at its length limit, `refusal` when the model declined.
+    stop: &'static str,
+}
+
+/// The turn-end reason for an Anthropic `stop_reason` or an OpenAI `finish_reason`. Anything
+/// else, including a value a server made up, is a normal end.
+fn stop_reason(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("max_tokens" | "length") => "max_tokens",
+        Some("refusal" | "content_filter") => "refusal",
+        _ => "",
+    }
 }
 
 /// The answer in the endpoint's shape.
@@ -1357,8 +1421,16 @@ fn sanitize_reasoning_details(details: Option<&Value>) -> Option<Value> {
 fn openai_reply(body: &Value) -> Reply {
     let message = body.pointer("/choices/0/message").cloned().unwrap_or(Value::Null);
     let text = message.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()).map(|t| vec![(false, t.to_string())]).unwrap_or_default();
-    // No more than the loop answers: every call kept here must get a `tool` message.
-    let raw: Vec<Value> = message.get("tool_calls").and_then(Value::as_array).map(|a| a.iter().take(32).cloned().collect()).unwrap_or_default();
+    let refused = message.get("refusal").and_then(Value::as_str).is_some_and(|r| !r.trim().is_empty());
+    let stop = if refused { "refusal" } else { stop_reason(body.pointer("/choices/0/finish_reason").and_then(Value::as_str)) };
+    // No more than the loop answers: every call kept here must get a `tool` message. A call cut
+    // off at the length limit is incomplete, so none is run or kept.
+    let raw: Vec<Value> = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .filter(|_| stop != "max_tokens")
+        .map(|a| a.iter().take(32).cloned().collect())
+        .unwrap_or_default();
     let calls = raw
         .iter()
         .enumerate()
@@ -1384,11 +1456,12 @@ fn openai_reply(body: &Value) -> Reply {
     if !raw.is_empty() {
         assistant["tool_calls"] = Value::Array(raw);
     }
-    Reply { text, calls, assistant }
+    Reply { text, calls, assistant, stop }
 }
 
 fn anthropic_reply(body: &Value) -> Reply {
     let content = body.get("content").cloned().unwrap_or(Value::Null);
+    let stop = stop_reason(body.get("stop_reason").and_then(Value::as_str));
     let mut text = Vec::new();
     let mut calls = Vec::new();
     let assistant = match &content {
@@ -1411,6 +1484,8 @@ fn anthropic_reply(body: &Value) -> Reply {
                         }
                         kept.push(block.clone());
                     }
+                    // A call cut off at the length limit has incomplete input: not run, not kept.
+                    Some("tool_use") if stop == "max_tokens" => {}
                     Some("tool_use") if calls.len() < 32 => {
                         calls.push(Call {
                             id: block.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{i}"), str::to_string),
@@ -1438,14 +1513,16 @@ fn anthropic_reply(body: &Value) -> Reply {
         }
         _ => json!({"role": "assistant", "content": content.clone()}),
     };
-    Reply { text, calls, assistant }
+    Reply { text, calls, assistant, stop }
 }
 
 /// Keeps the newest `keep` pictures of the view in the history and swaps every older one for a
 /// short note, so the model still knows a view was shown. Text is never touched. Pictures come
-/// as OpenAI `image_url` parts or Anthropic `image` blocks, depending on the endpoint.
-fn drop_old_views(history: &mut [Value], keep: usize) {
+/// as OpenAI `image_url` parts or Anthropic `image` blocks, depending on the endpoint. True when
+/// a picture was swapped.
+fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
     let mut seen = 0;
+    let mut dropped = false;
     for msg in history.iter_mut().rev() {
         let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
         for part in content.iter_mut().rev() {
@@ -1455,7 +1532,24 @@ fn drop_old_views(history: &mut [Value], keep: usize) {
             seen += 1;
             if seen > keep {
                 *part = json!({"type": "text", "text": DROPPED_VIEW_NOTE});
+                dropped = true;
             }
+        }
+    }
+    dropped
+}
+
+/// Takes Anthropic thinking blocks out of every earlier reply. Each one is signed against all
+/// the conversation before it, so once a dropped view or trimmed message changes that, the API
+/// refuses the whole request (#9417); leaving earlier thinking out is allowed. A reply that was
+/// only thinking keeps a note, as the API takes no assistant message without content.
+fn drop_thinking(history: &mut [Value]) {
+    for msg in history.iter_mut().filter(|m| m["role"] == "assistant") {
+        let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
+        let before = content.len();
+        content.retain(|b| !matches!(b.get("type").and_then(Value::as_str), Some("thinking" | "redacted_thinking")));
+        if content.is_empty() && before > 0 {
+            content.push(json!({"type": "text", "text": DROPPED_THINKING_NOTE}));
         }
     }
 }
@@ -1546,7 +1640,7 @@ fn anthropic_headers(base_url: &str, key: Option<&str>) -> Result<Vec<(String, S
 }
 
 /// The endpoint's models for the picker. The Messages API has no models endpoint at every
-/// compatible provider (Qwen's has none), so a failure here simply leaves the picker empty.
+/// compatible provider (Qwen's has none), so a failure here leaves only the configured model.
 pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Vec<ModelInfo>, String> {
     let req = HttpRequest { method: "GET", url: endpoint(base_url, "models"), headers: anthropic_headers(base_url, key)?, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
@@ -1554,19 +1648,10 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(v.get("data")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .take(500)
-                .filter_map(|m| {
-                    let id = m.get("id").and_then(Value::as_str)?.to_string();
-                    let name = m.get("display_name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| id.clone());
-                    Some(ModelInfo { id, name, description: String::new() })
-                })
-                .collect()
-        })
-        .unwrap_or_default())
+    Ok(listed_models(&v, "display_name")?
+        .into_iter()
+        .map(|(id, name)| ModelInfo { name: name.unwrap_or_else(|| id.clone()), id, description: String::new() })
+        .collect())
 }
 
 /// Test an Anthropic-compatible endpoint: send the smallest message there is, so the check covers
@@ -1639,18 +1724,35 @@ fn tool_title(name: &str, args: &Value) -> String {
     }
 }
 
-/// `GET {base_url}/models`: the model ids, in the order the endpoint lists them.
-fn model_ids(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<String>, String> {
+/// The ids of a `/models` body and the names the endpoint gives them (when not just the id), in
+/// its order. The body is the endpoint's to write: an id that could not be sent back is left out,
+/// and a name is cut. A body without a `data` array is no model list (a web page where the
+/// endpoint should be, say): an error, so the picker says so and asks again later.
+fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
+    let Some(entries) = body.get("data").and_then(Value::as_array) else {
+        return Err(crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string());
+    };
+    Ok(entries
+        .iter()
+        .filter_map(|m| {
+            let id = m.get("id").and_then(Value::as_str).filter(|id| super::model_id_valid(id))?;
+            let name = m.get(name_key).and_then(Value::as_str).filter(|name| *name != id).map(|name| name.chars().take(MODEL_NAME_CAP).collect());
+            Some((id.to_string(), name))
+        })
+        .take(MODEL_LIST_CAP)
+        .collect())
+}
+
+/// `GET {base_url}/models`: the models, in the order the endpoint lists them. The picker shows the
+/// ids, so an endpoint's own name for a model is its description.
+fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<ModelInfo>, String> {
     let req = HttpRequest { method: "GET", url: format!("{base_url}/models"), headers, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
     let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(v.get("data")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().take(500).filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect())
-        .unwrap_or_default())
+    Ok(listed_models(&v, "name")?.into_iter().map(|(id, name)| ModelInfo { name: id.clone(), id, description: name.unwrap_or_default() }).collect())
 }
 
 /// The endpoint's models for the picker.
@@ -1662,7 +1764,7 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Ve
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
-    Ok(model_ids(http, base_url, headers)?.into_iter().map(|id| ModelInfo { name: id.clone(), id, description: String::new() }).collect())
+    model_entries(http, base_url, headers)
 }
 
 /// Ask an endpoint for its models (Test connection): how many, and whether `model` is one.
@@ -1674,10 +1776,9 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
-    let ids = model_ids(http, base_url, headers)?;
-    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let found = model.is_empty() || ids.contains(&model);
-    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &ids.len().to_string()), ("model", model)]))
+    let models = model_entries(http, base_url, headers)?;
+    let found = model.is_empty() || models.iter().any(|m| m.id == model);
+    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &models.len().to_string()), ("model", model)]))
 }
 
 #[cfg(test)]
@@ -1731,12 +1832,12 @@ mod tests {
     #[test]
     fn only_the_newest_views_stay_in_the_history_and_older_ones_become_a_note() {
         let mut h = vec![json!({"role": "system", "content": "note"}), view(1), json!({"role": "assistant", "content": "ok"}), view(2)];
-        drop_old_views(&mut h, 2);
+        assert!(!drop_old_views(&mut h, 2));
         assert_eq!(pictures(&h).len(), 2, "two views fit, nothing is dropped");
 
         h.push(json!({"role": "user", "content": "plain text"}));
         h.push(view(3));
-        drop_old_views(&mut h, 2);
+        assert!(drop_old_views(&mut h, 2));
         assert_eq!(pictures(&h), vec!["data:image/png;base64,V2", "data:image/png;base64,V3"]);
         // The oldest view is a note now; the words sent with it, and every other message, stay.
         assert_eq!(h[1]["content"][0]["text"], "look 1");
@@ -1812,6 +1913,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1862,6 +1964,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1915,6 +2018,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1961,6 +2065,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1973,6 +2078,7 @@ mod tests {
         let Some(Event::Models { current, available }) = events.iter().find(|e| matches!(e, Event::Models { .. })) else { panic!("{events:?}") };
         assert_eq!(current, "local");
         assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local", "big", "small"]);
+        assert!(events.iter().any(|e| matches!(e, Event::ModelsNote(None))), "{events:?}");
         b.set_model("big");
         b.prompt(&[PromptPart::Text("hi".into())]);
         wait_for_seen(&seen);
@@ -2044,6 +2150,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         }
     }
 
@@ -2117,6 +2224,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2435,6 +2543,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2472,6 +2581,87 @@ mod tests {
         assert!(tools[0].pointer("/parameters/additionalProperties").is_none(), "{tools:?}");
     }
 
+    /// An endpoint that refuses the listing still shows the configured model, and says why first.
+    #[test]
+    fn a_refused_listing_keeps_the_configured_model_and_says_why() {
+        let http: HttpFn = Arc::new(|r: &HttpRequest| {
+            assert_eq!(r.method, "GET");
+            Ok((401, json!({"error": {"message": "No auth credentials"}}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "local".into(),
+            key: None,
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::Models { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let listing: Vec<&Event> = events.iter().filter(|e| matches!(e, Event::Models { .. } | Event::ModelsNote(_))).collect();
+        let [Event::ModelsNote(Some(note)), Event::Models { current, available }] = listing[..] else { panic!("{events:?}") };
+        assert!(note.contains("No auth credentials"), "{note}");
+        assert_eq!(current, "local");
+        assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local"]);
+        b.shutdown(true);
+    }
+
+    /// OpenRouter's shape: the name is the description, whatever else an entry holds is ignored, an
+    /// id that could not be sent back is left out, and the list stays within its caps.
+    #[test]
+    fn a_listing_keeps_the_names_and_stays_within_its_caps() {
+        let mut data = vec![
+            json!({"id": "openai/gpt-x", "name": "OpenAI: GPT X", "description": "Long text", "supported_parameters": ["tools"]}),
+            json!({"id": "same", "name": "same", "display_name": "Same One"}),
+            json!({"id": "long", "name": "n".repeat(MODEL_NAME_CAP + 10), "display_name": "d".repeat(MODEL_NAME_CAP + 10)}),
+            json!({"id": "x".repeat(super::super::MODEL_ID_CAP + 1)}),
+            json!({"id": "bell\u{7}"}),
+            json!({"id": ""}),
+            json!({"id": 7}),
+            json!({"name": "no id"}),
+        ];
+        data.extend((0..MODEL_LIST_CAP + 500).map(|i| json!({"id": format!("m{i}")})));
+        let body = json!({"data": data}).to_string().into_bytes();
+        let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
+        let list = model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        assert_eq!(list.len(), MODEL_LIST_CAP);
+        let [first, same, long, next] = &list[..4] else { panic!("{}", list.len()) };
+        assert_eq!((first.id.as_str(), first.name.as_str(), first.description.as_str()), ("openai/gpt-x", "openai/gpt-x", "OpenAI: GPT X"));
+        assert_eq!((same.id.as_str(), same.description.as_str()), ("same", ""));
+        assert_eq!(long.description.chars().count(), MODEL_NAME_CAP);
+        assert_eq!(next.id, "m0");
+        let list = anthropic_model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        assert_eq!(list.len(), MODEL_LIST_CAP);
+        let [first, same, long] = &list[..3] else { panic!("{}", list.len()) };
+        assert_eq!(first.name, "openai/gpt-x");
+        assert_eq!(same.name, "Same One");
+        assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
+        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x").unwrap().contains(&MODEL_LIST_CAP.to_string()));
+    }
+
+    /// A 200 that is no model list (a web page where the endpoint should be) is an error, so the
+    /// picker says why and asks again later; a list with nothing in it is a list.
+    #[test]
+    fn an_answer_that_is_no_model_list_is_an_error() {
+        let expected = crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string();
+        let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
+        assert_eq!(model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "").unwrap_err(), expected);
+        let object: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"object": "list"}).to_string().into_bytes())));
+        assert_eq!(model_list(&object, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        let empty: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"data": []}).to_string().into_bytes())));
+        assert!(model_list(&empty, "http://localhost:18789/v1", None).unwrap().is_empty());
+    }
+
     #[test]
     fn tool_arguments_are_an_object_or_an_error() {
         assert_eq!(tool_arguments(None), Ok(json!({})));
@@ -2507,6 +2697,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2536,6 +2727,7 @@ mod tests {
             key: Some("k".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(cfg, ctx).is_err());
@@ -2544,6 +2736,11 @@ mod tests {
     /// A worker with one function tool whose endpoint answers each POST with the next scripted
     /// (status, body); the requests it received are returned too.
     fn scripted_worker(answers: Vec<(u16, Value)>) -> (Worker, Arc<std::sync::Mutex<Vec<Value>>>) {
+        scripted_worker_effort(answers, "")
+    }
+
+    /// [`scripted_worker`] with the endpoint's reasoning effort set (empty: send nothing).
+    fn scripted_worker_effort(answers: Vec<(u16, Value)>, effort: &str) -> (Worker, Arc<std::sync::Mutex<Vec<Value>>>) {
         let answers = std::sync::Mutex::new(answers.into_iter().rev().collect::<Vec<_>>());
         let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
         let log = seen.clone();
@@ -2560,6 +2757,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: effort.to_string(),
         };
         let (events, _rx) = channel();
         let w = Worker {
@@ -2611,6 +2809,37 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
+    /// A reasoning effort the user chose goes out as `reasoning_effort` on every request; empty
+    /// sends nothing, so existing agents are untouched (#10241).
+    #[test]
+    fn a_chosen_reasoning_effort_goes_out_on_every_request() {
+        let ok = json!({"choices": [{"message": {"role": "assistant", "content": "Done."}}]});
+        let (w, seen) = scripted_worker_effort(vec![(200, ok.clone()), (200, ok.clone())], "high");
+        assert_eq!(w.request().unwrap().assistant, ok["choices"][0]["message"]);
+        assert_eq!(w.request().unwrap().assistant, ok["choices"][0]["message"]);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0]["reasoning_effort"], "high");
+        assert_eq!(sent[1]["reasoning_effort"], "high");
+        drop(sent);
+        // Empty effort: nothing is sent at all.
+        let (w, seen) = scripted_worker(vec![(200, ok)]);
+        assert!(w.request().is_ok());
+        assert!(seen.lock().unwrap()[0].get("reasoning_effort").is_none());
+    }
+
+    /// A chosen effort wins over the #3817 `none` retry: the endpoint's refusal of the effort is
+    /// shown to the user after exactly one request, never silently replaced by `none` (#10241).
+    #[test]
+    fn a_chosen_reasoning_effort_wins_over_the_none_retry() {
+        let (w, seen) = scripted_worker_effort(vec![refusal()], "max");
+        let e = w.request().unwrap_err();
+        assert!(e.starts_with("HTTP 400") && e.contains("reasoning_effort"), "{e}");
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 1, "the refusal is shown, not replayed with none");
+        assert_eq!(sent[0]["reasoning_effort"], "max");
+    }
+
     #[test]
     fn mcp_tools_become_anthropic_tools_without_crash_reports() {
         let list = json!({"tools": [
@@ -2647,6 +2876,60 @@ mod tests {
         let capped = anthropic_reply(&json!({"content": many}));
         assert_eq!(capped.calls.len(), 32);
         assert_eq!(capped.assistant["content"].as_array().unwrap().len(), 32);
+    }
+
+    /// Why an answer stopped reaches the turn's end: cut off at the length limit, or declined,
+    /// in either protocol (#9495). A call cut off mid-way is neither run nor kept in the history.
+    #[test]
+    fn answers_say_why_they_stopped() {
+        let thinking = json!({"type": "thinking", "thinking": "", "signature": "s"});
+        let call = json!({"type": "tool_use", "id": "t1", "name": "measure", "input": {}});
+        for (reason, stop) in [("end_turn", ""), ("tool_use", ""), ("max_tokens", "max_tokens"), ("refusal", "refusal"), ("made_up", "")] {
+            assert_eq!(anthropic_reply(&json!({"content": [thinking], "stop_reason": reason})).stop, stop, "{reason}");
+        }
+        assert_eq!(anthropic_reply(&json!({"content": [thinking]})).stop, "");
+        let cut = anthropic_reply(&json!({"content": [thinking, call], "stop_reason": "max_tokens"}));
+        assert!(cut.calls.is_empty());
+        assert_eq!(cut.assistant["content"], json!([thinking]));
+
+        let openai = |finish: &str, message: Value| openai_reply(&json!({"choices": [{"message": message, "finish_reason": finish}]}));
+        let calls = json!([{"id": "c1", "type": "function", "function": {"name": "measure", "arguments": "{\"a\""}}]);
+        assert_eq!(openai("stop", json!({"content": "Hi"})).stop, "");
+        assert_eq!(openai("content_filter", json!({"content": null})).stop, "refusal");
+        assert_eq!(openai("stop", json!({"content": null, "refusal": "I can't help with that."})).stop, "refusal");
+        let cut = openai("length", json!({"content": null, "tool_calls": calls}));
+        assert_eq!(cut.stop, "max_tokens");
+        assert!(cut.calls.is_empty());
+        assert!(cut.assistant.get("tool_calls").is_none());
+    }
+
+    /// The loop ends the turn with the reason: an answer that is only thinking, cut off at the
+    /// length limit, ends as `max_tokens`, not as a normal end with nothing said.
+    #[test]
+    fn a_cut_off_answer_ends_the_turn_as_max_tokens() {
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            let body = json!({"content": [{"type": "thinking", "thinking": "", "signature": "s"}], "stop_reason": "max_tokens"});
+            Ok((200, body.to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::Anthropic,
+            base_url: "http://localhost:1".into(),
+            model: "m".into(),
+            key: Some("sk-secret".into()),
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        b.prompt(&[PromptPart::Text("look closer".into())]);
+        let events = wait_for_turn(&mut b);
+        b.shutdown(true);
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "max_tokens"), "{events:?}");
     }
 
     #[test]
@@ -2689,6 +2972,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2706,6 +2990,67 @@ mod tests {
         assert_eq!(sent[1]["messages"].as_array().unwrap().last().unwrap()["content"][0]["type"], "tool_result");
         assert_eq!(sent[1]["messages"].as_array().unwrap().last().unwrap()["content"][0]["tool_use_id"], "t1");
         b.shutdown(true);
+    }
+
+    /// Thinking blocks are signed against the conversation before them: once an older view is
+    /// dropped, the earlier ones go too, or Claude refuses the request (#9417). Until then, and
+    /// for replies after the drop, they are sent back as they came.
+    #[test]
+    fn a_dropped_view_takes_earlier_thinking_with_it() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            let n = {
+                let mut l = log.lock().unwrap();
+                l.push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+                l.len()
+            };
+            let content = if n == 2 {
+                json!([{"type": "redacted_thinking", "data": "r2"}])
+            } else {
+                json!([{"type": "thinking", "thinking": "", "signature": format!("s{n}")}, {"type": "text", "text": format!("Seen {n}.")}])
+            };
+            Ok((200, json!({"content": content, "stop_reason": "end_turn"}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::Anthropic,
+            base_url: "http://localhost:1".into(),
+            model: "m".into(),
+            key: Some("sk-secret".into()),
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        for n in 1..=3 {
+            b.prompt(&[PromptPart::Text(format!("look {n}")), PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") }]);
+            wait_for_turn(&mut b);
+        }
+        b.prompt(&[PromptPart::Text("and now?".into())]);
+        wait_for_turn(&mut b);
+        b.shutdown(true);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 4);
+        let replies = |i: usize| -> Vec<Value> {
+            sent[i]["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "assistant").map(|m| m["content"].clone()).collect()
+        };
+        // Two views fit: the reply goes back untouched, signature and all.
+        assert_eq!(replies(1)[0][0]["signature"], "s1");
+        // The third view drops the first: no earlier thinking is left, a thinking-only reply
+        // keeps a note, and the words stay.
+        let third = replies(2);
+        assert_eq!(sent[2]["messages"][0]["content"][1]["text"], DROPPED_VIEW_NOTE);
+        assert_eq!(third[0], json!([{"type": "text", "text": "Seen 1."}]));
+        assert_eq!(third[1], json!([{"type": "text", "text": DROPPED_THINKING_NOTE}]));
+        // Nothing is dropped for the next message, so the reply after the drop keeps its thinking.
+        let fourth = replies(3);
+        assert_eq!(fourth[..2], third[..]);
+        assert_eq!(fourth[2][0]["signature"], "s3");
     }
 
     #[test]

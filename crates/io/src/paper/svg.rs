@@ -25,8 +25,9 @@
 
 use std::fmt::Write;
 
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::{Clip, FillRule, Grid, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
-use solidcraft_geom::{Aabb2, Vec2};
 
 use super::png::{PICTURE_DPI, picture_png};
 use crate::{IoError, MAX_DRAWING_BYTES, Result};

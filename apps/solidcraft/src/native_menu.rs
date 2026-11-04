@@ -101,6 +101,7 @@ impl NativeMenu {
         ])?;
         for (action, label) in [
             ("docs", "Documentation"),
+            ("updates", app.tr("update.check_for_updates")),
             ("shortcuts", "Keyboard Shortcuts"),
             ("messages", "Messages\u{2026}"),
             ("report", "Report an Issue\u{2026}"),

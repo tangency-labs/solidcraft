@@ -55,7 +55,7 @@ fn both_modes_keep_their_geometry_and_fit_clear_of_covered_rects() {
             assert!(!layout.drawable.intersect(covered).is_positive(), "{layout:?} {covered:?}");
         }
         let projection = crate::viewport::projection(&h.app, viewport);
-        for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(40.0, 30.0, 20.0)] {
+        for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(40.0, 30.0, 20.0)] {
             assert!(layout.drawable.contains(projection.to_screen(point).unwrap()));
         }
         h.app.start("solid.extrude");
@@ -108,7 +108,7 @@ fn floating_sketch_palette_and_compass_share_measured_clearance() {
             assert!(layout.viewport.expand(1.0).contains_rect(palette), "{palette:?} {layout:?}");
             assert!(palette.contains(crate::scenario::handle_at("sketch_palette:look_at").unwrap()));
             let proj = crate::viewport::projection(&h.app, layout.viewport);
-            for point in [solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::new(20.0, 0.0, 0.0)] {
+            for point in [solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(20.0, 0.0, 0.0)] {
                 assert!(layout.drawable.contains(proj.to_screen(point).unwrap()), "{layout:?}");
             }
             if width > 1000.0 {
@@ -576,7 +576,9 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let overlap = sheet.intersect(preferences);
         assert!(overlap.is_positive(), "Preferences overlaps the feature dialog");
         assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences receives input above the sheet");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
+        let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
+        assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences owns its Cancel target");
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(h.app.dialog.is_none());
@@ -592,7 +594,7 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     let design = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     let camera = h.app.cam;
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Workspace:Compact");
     h.step(&json!({"click":{"handle":"dialog:Workspace:Compact"}})).unwrap();
     h.call("ui.prefs", json!({"button":"ok"}));
@@ -609,15 +611,15 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.ui.layout, LayoutMode::Docked);
     assert_eq!(restored.preferences.layout, LayoutMode::Docked);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"floating"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"floating"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Docked);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"floating"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"floating"}));
     h.call("ui.prefs", json!({"button":"apply"}));
     h.call("ui.prefs", json!({"layout":"compact"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Floating);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"compact"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"compact"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Floating);
     assert_eq!(h.app.preferences.layout, LayoutMode::Floating);
@@ -929,7 +931,7 @@ fn the_view_corner_answers_a_dialog_in_the_left_column() {
     }
 }
 
-/// Dialogs is an Interface preference: set from the page or the control channel, saved,
+/// Dialogs is a Layout preference: set from the page or the control channel, saved,
 /// refused when unknown, and Cancel and Restore Defaults put it back. A dialog already open
 /// moves with it.
 #[test]
@@ -941,7 +943,7 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     h.settle();
     let right = h.app.viewport.dialog_rect.unwrap();
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::Edge);
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Dialogs:In the left column");
     h.step(&json!({"click":{"handle":"dialog:Dialogs:In the left column"}})).unwrap();
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::LeftColumn);
@@ -952,10 +954,10 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     let mut restored = crate::SolveApp::new(Default::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.preferences.dialog_place, DialogPlace::LeftColumn);
-    h.call("ui.prefs", json!({"open":"Interface","dialog_place":"edge"}));
+    h.call("ui.prefs", json!({"open":"Layout","dialog_place":"edge"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::LeftColumn);
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::Edge);
     h.call("ui.prefs", json!({"button":"ok"}));
@@ -1228,4 +1230,21 @@ fn a_larger_interface_scale_in_a_narrow_window_keeps_drawing() {
     }
     h.frames(3);
     assert!(h.app.viewport.rect.unwrap().is_positive());
+}
+
+#[test]
+fn docked_assistant_beside_an_inverted_view_area_does_not_panic() {
+    // A surface reconfigure can leave the view area inside out, its left past its right (#9492).
+    for side in ["right", "left"] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.set", json!({"layout":"floating"}));
+        h.call("ui.agent_chat", json!({"open":true,"side":side,"width":380,"picker":false}));
+        h.frames(5);
+        assert!(h.app.agent_chat.panel_rect.is_some(), "{side}: docked Assistant");
+        h.app.viewport.rect = Some(Rect::from_min_max(pos2(264.1875, 30.0), pos2(159.0, 20.0)));
+        let ctx = h.ctx.clone();
+        crate::viewport::refresh_layout(&mut h.app, &ctx);
+        assert!(h.app.viewport.layout.is_some(), "{side}: a layout for the next frame");
+    }
 }

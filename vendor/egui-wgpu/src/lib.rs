@@ -140,8 +140,8 @@ impl SurfaceConfig {
 /// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
 /// fails: from then on every call on the device fails quietly, and the device's lost callback
 /// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
-/// (`PendingWrites::activate`), so the painter first submits nothing ([`DeviceLost::probe`]):
-/// that submission meets the loss instead, and the frame's uploads are skipped.
+/// (`PendingWrites::activate`), so the painter first probes the device ([`DeviceLost::probe`]):
+/// the probe meets the loss instead, and the frame's uploads are skipped.
 #[derive(Clone, Debug, Default)]
 pub struct DeviceLost {
     lost: Arc<std::sync::atomic::AtomicBool>,
@@ -183,13 +183,23 @@ impl DeviceLost {
         self.lost.clone()
     }
 
-    /// Whether the device is lost, asking the driver first: an empty submission reaches the
-    /// driver, so a loss it reports is marked here rather than met by the next upload.
-    pub fn probe(&self, queue: &wgpu::Queue) -> bool {
+    /// Whether the device is lost, asking the driver first, so a loss it reports is marked here
+    /// rather than met by the next upload.
+    ///
+    /// The probe opens a command list, as the upload would: a queue write's first call into the
+    /// driver is `begin_encoding`, and on D3D12 that is where a reset device says so. An empty
+    /// submission only signals a fence: #6528 met a reset D3D12 device in the upload right after
+    /// one. wgpu handles a failed `begin_encoding` in a command encoder's `finish` (it loses the
+    /// device, and the lost callback marks it); only its queue writes unwrap it.
+    pub fn probe(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         if self.is_lost() {
             return true;
         }
-        queue.submit([]);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("device lost probe"),
+        });
+        encoder.insert_debug_marker("device lost probe");
+        queue.submit([encoder.finish()]);
         self.is_lost()
     }
 }
@@ -1056,6 +1066,34 @@ pub enum Attempt<E> {
     Took(u32),
     /// The configure was refused with this error; the plan says what follows.
     Refused(RetryPlan, E),
+}
+
+/// SolidCraft: the present mode a viewport's surface is configured with. The main window keeps
+/// `configured`. Another window (the agent chat popped out into its own window) is an immediate
+/// viewport: eframe draws and presents it inside the main window's frame, one surface after the
+/// other. With vsync on both, every frame waited for the display twice, and on a compositor that
+/// sends no frame callbacks to a window it isn't showing (Wayland: on another workspace, scrolled
+/// away, covered) the main window stalled behind the other one's present. So another window
+/// presents without waiting where its surface can (Mailbox, which doesn't tear, before
+/// Immediate); the main window's vsync still paces both. A `configured` mode without vsync is
+/// kept everywhere.
+pub fn viewport_present_mode(
+    root: bool,
+    configured: wgpu::PresentMode,
+    supported: &[wgpu::PresentMode],
+) -> wgpu::PresentMode {
+    use wgpu::PresentMode;
+    let waits = matches!(
+        configured,
+        PresentMode::AutoVsync | PresentMode::Fifo | PresentMode::FifoRelaxed
+    );
+    if root || !waits {
+        return configured;
+    }
+    [PresentMode::Mailbox, PresentMode::Immediate]
+        .into_iter()
+        .find(|mode| supported.contains(mode))
+        .unwrap_or(configured)
 }
 
 /// SolidCraft: the surface size for a window of `width` x `height` pixels on a device whose

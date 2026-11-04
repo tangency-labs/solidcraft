@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::Vec2;
+use solidcore_record::Vec2;
 
 /// A fresh id, as the design's random ids are: never one handed out before in this run.
 fn fresh() -> u64 {

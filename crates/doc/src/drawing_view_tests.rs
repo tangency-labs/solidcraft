@@ -1,5 +1,5 @@
 use serde_json::json;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::*;
 

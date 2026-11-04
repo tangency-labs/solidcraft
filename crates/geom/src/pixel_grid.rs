@@ -16,7 +16,8 @@
 //!   image of the sheet is drawn, and a picture on the sheet is drawn into its window of that grid
 //!   ([`PixelGrid::window`]), so placing it is a copy of whole pixels.
 
-use crate::{Aabb2, Vec2};
+use crate::Aabb2;
+use solidcore_record::Vec2;
 
 /// The longest side a grid may have, in pixels.
 pub const MAX_SIDE_PX: u32 = 65_536;

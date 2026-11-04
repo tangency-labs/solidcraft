@@ -4,7 +4,9 @@
 //! round item measures from its centre or axis, with the closest and farthest distances too.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::UnitVec3;
+use solidcraft_geom::prelude::*;
 
 use std::f64::consts::{PI, TAU};
 
@@ -66,6 +68,27 @@ pub(crate) fn add_round(v: &mut Value, shape: &Shape) {
     } else {
         "arc"
     });
+}
+
+/// The radius of a toroidal or spherical face, added to its description: a fillet round a
+/// circular edge is a torus whose tube radius is the fillet's (`major_radius` is the ring
+/// through the middle of the rolling ball), a ball or a spherical corner patch a sphere. These
+/// faces have no axis to measure from, so they stay out of [`Shape`].
+pub(crate) fn add_curved(v: &mut Value, surface: Option<solidcraft_kernel::FaceSurface>) {
+    use solidcraft_kernel::FaceSurface;
+    let (radius, kind) = match surface {
+        Some(FaceSurface::Torus { minor, major, .. }) if minor.is_finite() && minor > 0.0 => {
+            if major.is_finite() {
+                v["major_radius"] = json!(major.abs());
+            }
+            (minor, "torus")
+        }
+        Some(FaceSurface::Sphere { radius, .. }) if radius.is_finite() && radius > 0.0 => (radius, "sphere"),
+        _ => return,
+    };
+    v["diameter"] = json!(2.0 * radius);
+    v["radius"] = json!(radius);
+    v["surface"] = json!(kind);
 }
 
 /// Cylinder `axis` through `origin` of radius `radius` over the points of its face: the
@@ -267,9 +290,9 @@ impl Slot {
 /// sides. `arcs` are (centre, radius, swept angle) with pieces of one end already merged,
 /// `lines` the straight pieces (2D, in the sketch plane).
 pub(crate) fn slot_outline(
-    arcs: &[(solidcraft_geom::Vec2, f64, f64)],
-    lines: &[(solidcraft_geom::Vec2, solidcraft_geom::Vec2)],
-) -> Option<(solidcraft_geom::Vec2, solidcraft_geom::Vec2, f64)> {
+    arcs: &[(solidcore_record::Vec2, f64, f64)],
+    lines: &[(solidcore_record::Vec2, solidcore_record::Vec2)],
+) -> Option<(solidcore_record::Vec2, solidcore_record::Vec2, f64)> {
     let [(c1, r1, s1), (c2, r2, s2)] = arcs else { return None };
     let tol = 1e-6 * (1.0 + r1.abs() + c1.dist(*c2));
     if (r1 - r2).abs() > tol || (s1.abs() - PI).abs() > 1e-4 || (s2.abs() - PI).abs() > 1e-4 || c1.dist(*c2) <= tol || lines.is_empty() {
@@ -277,7 +300,7 @@ pub(crate) fn slot_outline(
     }
     let along = (*c2 - *c1).normalized()?;
     // Every straight piece runs along the slot, `r` to one side of the centre line.
-    let side = |p: solidcraft_geom::Vec2| (p - *c1).cross(along);
+    let side = |p: solidcore_record::Vec2| (p - *c1).cross(along);
     let ok = lines.iter().all(|(a, b)| {
         let d = *b - *a;
         d.cross(along).abs() <= tol * (1.0 + d.len()) && (side(*a).abs() - r1).abs() <= tol && (side(*b).abs() - r1).abs() <= tol
@@ -338,7 +361,7 @@ pub(crate) fn slot_from_faces(picked: &Shape, picked_pts: &[Vec3], faces: &[(sol
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     fn circle(c: Vec3, r: f64) -> Shape {
         Shape::Round { center: c, axis: UnitVec3::Z, radius: r, angle: TAU, planar: true, lo: 0.0, hi: 0.0 }

@@ -11,8 +11,8 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use solidcore_record::Seg2;
 use solidcraft_doc::drawing_view::{TangentEdges, ViewDirection, ViewSettings};
-use solidcraft_geom::Seg2;
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
 use solidcraft_geom::paper::ObjectKind;
@@ -619,7 +619,7 @@ pub struct ExtentsResult {
     /// `approximate`: measured on the display mesh; `placeholder`: nothing to measure, so the box is
     /// the placeholder's.
     pub status: &'static str,
-    /// `display_mesh`; with a placeholder, why: `past_walk_limit` or `no_bodies`.
+    /// `display_mesh`; with a placeholder, why: `past_walk_limit`, `no_bodies` or `not_placed`.
     pub provenance: &'static str,
 }
 

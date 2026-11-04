@@ -26,7 +26,9 @@
 use std::f64::consts::TAU;
 
 use super::{Clip, Dashes, Group, Invalid, Item, Result, meet};
-use crate::{Aabb2, EPS, Region2, Seg2, Vec2};
+use crate::prelude::*;
+use crate::{Aabb2, EPS};
+use solidcore_record::{Region2, Seg2, Vec2};
 
 /// How closely a curve's crossing of a clip's edge is found: the span of its last part's control
 /// points, in millimetres.

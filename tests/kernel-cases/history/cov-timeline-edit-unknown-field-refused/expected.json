@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.edit with a misspelt field",
+ "source": "invariants",
+ "method": "a field the round does not have would change nothing: refused, naming it",
+ "outcome": "refused",
+ "refusal": "unknown field `radus`"
+}

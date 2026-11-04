@@ -19,7 +19,8 @@
 //! to [`MAX_CUBICS`] pieces: past that the curve is refused, never drawn coarser.
 
 use super::{Invalid, Result, require};
-use crate::{Seg2, Vec2};
+use crate::prelude::*;
+use solidcore_record::{Seg2, Vec2};
 
 /// The most cubics one curve may become.
 pub const MAX_CUBICS: usize = 4096;

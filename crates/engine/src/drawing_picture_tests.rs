@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_render::VisualStyle::{Shaded, Visible, VisibleHidden};
 
 use super::*;
@@ -54,7 +55,7 @@ fn bodies_placed_through_a_reference_component_are_reference_parts() {
     run(&mut s, "component.activate", json!({"component": 0}));
     run(&mut s, "occurrence.copy", json!({"component": "Hinge", "translate": [0, 50, 0]}));
     let pin = s.doc.find_component("Pin").unwrap();
-    let pins = |s: &Session| s.world_state().bodies.iter().map(|b| b.component == pin).collect::<Vec<bool>>();
+    let pins = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.component == pin).collect::<Vec<bool>>();
     assert_eq!(pins(&s).iter().filter(|p| **p).count(), 2, "{:?}", pins(&s));
     assert_eq!(reference_flags(&s), vec![false; pins(&s).len()]);
     for reference in ["Hinge", "Pin"] {

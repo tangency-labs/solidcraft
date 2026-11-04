@@ -2,7 +2,8 @@
 //! inference for interactive tools.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};

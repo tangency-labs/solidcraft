@@ -25,9 +25,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::Aabb2;
 use crate::cell::{self, Content, HAlign, PADDING_MM, Part, Source, Warning, check_text, is_snake_case};
 use crate::paper::{Group, Item, MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM, ObjectKind};
-use crate::{Aabb2, Loop2, Seg2, Vec2};
+use solidcore_record::{Loop2, Seg2, Vec2};
 
 /// The most rows a table may list, and the most overrides it may keep.
 pub const MAX_ROWS: usize = 10_000;

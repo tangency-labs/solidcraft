@@ -129,12 +129,41 @@ fn an_appimage_is_replaced_only_when_it_verifies() {
     let bare = release_with(&[(name, new.len())]);
     assert!(run(&bare, &kind, &m, "x86_64", &n, &dir, &Progress::default()).unwrap_err().contains(SUMS));
 
-    // Cancelled: nothing changes.
+    // Cancelled before any network work: nothing changes.
     let good = format!("{}  {name}\n", hex(&new));
     let n = net(vec![(name.into(), new.clone()), (SUMS.into(), good.clone().into_bytes())]);
     let p = Progress::default();
     p.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-    assert!(run(&r, &kind, &m, "x86_64", &n, &dir, &p).is_err());
+    let err = run(&r, &kind, &m, "x86_64", &n, &dir, &p).unwrap_err();
+    assert!(err.contains("cancelled"), "{err}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"old version");
+
+    // Cancel during the checksum GET: package download never starts (#8908).
+    let progress = Arc::new(Progress::default());
+    let flag = progress.clone();
+    let downloaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hit = downloaded.clone();
+    let files = Arc::new(vec![(name.into(), new.clone()), (SUMS.into(), good.clone().into_bytes())]);
+    let f2 = files.clone();
+    let find = |files: &[(String, Vec<u8>)], url: &str| files.iter().find(|(n, _)| url == format!("{BASE}{n}")).map(|(_, b)| b.clone());
+    let n = Net {
+        feed: None,
+        get: Arc::new(move |url: &str| {
+            let body = find(&files, url).ok_or_else(|| FetchError::Failed(format!("404 {url}")))?;
+            if url.ends_with(SUMS) {
+                flag.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            Ok(body)
+        }),
+        download: Arc::new(move |url: &str, to: &Path, _| {
+            hit.store(true, std::sync::atomic::Ordering::Relaxed);
+            let body = find(&f2, url).ok_or_else(|| FetchError::Failed(format!("404 {url}")))?;
+            std::fs::write(to, body).map_err(|e| FetchError::Failed(e.to_string()))
+        }),
+    };
+    let err = run(&r, &kind, &m, "x86_64", &n, &dir, &progress).unwrap_err();
+    assert!(err.contains("cancelled"), "{err}");
+    assert!(!downloaded.load(std::sync::atomic::Ordering::Relaxed), "package must not start after Cancel");
     assert_eq!(std::fs::read(&target).unwrap(), b"old version");
 
     // Verified: renamed over the old one, executable, restart offered.

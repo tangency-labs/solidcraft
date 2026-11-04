@@ -8,12 +8,13 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
+use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, Resolved, TextPlace};
 use solidcraft_geom::drawing_measure::LinearDirection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{ArrowShape, Terminator};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{DimFrame, DimSizes, dim_layout_sized};
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).

@@ -1,7 +1,8 @@
 //! Original periodic preview fields in an explicit world-space millimetre frame.
 //! Only roughness and shading normals change; geometry and visibility do not.
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use crate::job::{ErrorCode, JobError, Result};

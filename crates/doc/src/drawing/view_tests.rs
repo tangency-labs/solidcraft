@@ -1,8 +1,9 @@
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 use solidcraft_geom::drawing_view::NamedView;

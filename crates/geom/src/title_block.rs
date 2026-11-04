@@ -20,10 +20,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::Aabb2;
 use crate::cell::{self, Content, Fit, Format, HAlign, Part, Projection, Source, is_snake_case};
 use crate::drawing_sheet::SheetLayout;
 use crate::paper::{Group, Item, MAX_LINE_MM, ObjectKind};
-use crate::{Aabb2, Loop2, Seg2, Vec2};
+use solidcore_record::{Loop2, Seg2, Vec2};
 
 /// The most cells a block may have.
 pub const MAX_CELLS: usize = 64;
@@ -159,7 +160,12 @@ pub fn projection_symbol(projection: Projection, h: f64, centre: Vec2) -> [Item;
     let cone = Loop2::polygon(&cone.map(|(x, y)| Vec2::new(x, y)));
     let circles = Vec2::new(circles_at, y);
     let stroke = |path: Loop2| Item::Stroke { path: path.segs, closed: true, width_mm: h / 10.0, pattern: None };
-    [stroke(cone), stroke(Loop2::circle(circles, h)), stroke(Loop2::circle(circles, h / 2.0))]
+    // Two half circles, as the symbol has always been drawn: `Loop2::circle` is one whole arc now.
+    let circle = |radius: f64| {
+        let half = |start: f64| Seg2::Arc { center: circles, radius, start, sweep: std::f64::consts::PI };
+        Loop2 { segs: vec![half(0.0), half(std::f64::consts::PI)] }
+    };
+    [stroke(cone), stroke(circle(h)), stroke(circle(h / 2.0))]
 }
 
 /// The built-in block, 180 x 49 mm: the twelve cells of the layout approved on #3875, each under a

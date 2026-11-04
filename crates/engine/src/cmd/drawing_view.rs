@@ -24,6 +24,8 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
+use solidcore_record::Plane;
+use solidcore_record::Vec2;
 use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
@@ -31,14 +33,14 @@ use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, rea
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Looking, TangentEdges, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids;
-use solidcraft_geom::Plane;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
 use solidcraft_geom::hlr::{Source, Visibility};
 use solidcraft_geom::paper::{MAX_COORDINATE_MM, Picture};
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
-use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 

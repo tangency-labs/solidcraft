@@ -2,7 +2,7 @@
 //! sketch says); the ring's grip points the catch, in the four directions the Catch Direction
 //! combo offers for the face, so the ring and the combo always agree.
 
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::{Spec, Turn, angle_of, len, rect};
 use crate::SolveApp;

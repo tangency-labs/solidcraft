@@ -10,6 +10,7 @@
 
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::{Kind, apply_commands};
 use crate::scenario::Harness;
@@ -232,12 +233,12 @@ fn a_half_filled_window_is_an_error_instead_of_a_command() {
     origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
     origin_axis[1].items = vec![Sel::Axis { name: "Z".into() }];
     assert!(commands(&h.app, &Mod::Mirror, &origin_axis, &serde_json::Map::new()).is_err());
-    // The line itself must not be in the entities: the old click flow could not express that
-    // either, and the engine silently dropped it.
+    // The mirror line may itself be among the entities (a chain or profile picked in one action):
+    // the command leaves the line in place and mirrors the rest.
     let mut line_in_both = mirror_inputs();
     line_in_both[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     line_in_both[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
-    assert!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).is_err());
+    assert_eq!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).unwrap()[0].1, json!({"entities": [ids[0]], "line": ids[0]}));
 }
 
 #[test]
@@ -436,7 +437,7 @@ fn the_x_distance_gets_a_drag_arrow_along_the_sketch_x_axis() {
         d.inputs[0].items = picks;
     }
     let sid = h.app.session.active_sketch.unwrap();
-    let x = h.app.session.world_state().sketch(sid).unwrap().plane.x;
+    let x = h.app.session.world_state().unwrap().sketch(sid).unwrap().plane.x;
     let d = h.app.dialog.as_ref().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, d).expect("a picked sketch curve anchors the manipulator");
     let dir = dir.expect("a sketch move's X Distance has a direction to drag along");
@@ -528,7 +529,7 @@ fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_wh
     h.settle();
     assert!(h.app.dialog.is_none());
     let sid = h.app.session.active_sketch.unwrap();
-    let pattern = h.app.session.world_state().sketch(sid).unwrap().sketch.patterns[0].id.clone();
+    let pattern = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.patterns[0].id.clone();
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, &pattern));
     assert!(matches!(
         h.app.dialog.as_ref().unwrap().kind,
@@ -662,11 +663,11 @@ fn the_spacing_gets_a_canvas_arrow_along_the_pattern_direction() {
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
-    assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::X));
+    assert_eq!(dir, Some(solidcore_record::Vec3::X));
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
-    assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::Y));
+    assert_eq!(dir, Some(solidcore_record::Vec3::Y));
 }
 
 /// Dragging a spacing arrow past its start flips the direction, as typing a negative spacing does
@@ -828,7 +829,7 @@ fn circular_flip_and_center_buttons_apply_and_reopen_the_saved_placement() {
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     let sid = h.app.session.active_sketch.unwrap();
     let id = {
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let pattern = &state.sketch(sid).unwrap().sketch.patterns[0];
         assert!(matches!(pattern.kind, SketchPatternKind::Circular { alignment: PatternAlignment::Center, reversed: true, .. }));
         pattern.id.clone()
@@ -896,7 +897,7 @@ fn circular_quantity_keeps_its_expression_when_reopened_and_follows_parameter_ch
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternCirc { count, .. }) if count=="HoleAmount"));
     let sid = h.app.session.active_sketch.unwrap();
-    assert_eq!(h.app.session.world_state().sketch(sid).unwrap().sketch.curves.len(), 7);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.curves.len(), 7);
 }
 
 #[test]

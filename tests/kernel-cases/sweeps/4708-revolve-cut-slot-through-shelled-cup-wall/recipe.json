@@ -1,0 +1,78 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 22.5,
+    "height": 10,
+    "body_name": "Cup"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      10
+     ]
+    ],
+    "thickness": 2
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Slot",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     19,
+     5
+    ],
+    "p1": [
+     24,
+     8
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Slot",
+    "axis": "y",
+    "angle": "30 deg",
+    "operation": "cut",
+    "targets": [
+     "Cup"
+    ]
+   }
+  }
+ ]
+}

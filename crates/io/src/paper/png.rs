@@ -25,7 +25,7 @@
 use std::io::Write;
 use std::ops::RangeInclusive;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_geom::paper::{self, Clip, Grid, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
 use solidcraft_geom::pixel_grid::{GridWindow, MAX_SIDE_PX, PixelGrid, PixelGridError};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8, Stroke, StrokeDash, Transform};

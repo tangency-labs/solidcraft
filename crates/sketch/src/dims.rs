@@ -9,7 +9,8 @@
 //!
 //! [`Constraint::text`]: crate::Constraint::text
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 use crate::union_find::{find, union};
@@ -122,7 +123,7 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             }
         }
         ArcSweep { c, .. } => match sk.segs(c).first()? {
-            solidcraft_geom::Seg2::Arc { center, start, sweep, .. } => {
+            solidcore_record::Seg2::Arc { center, start, sweep, .. } => {
                 DimFrame::Angular { vertex: *center, d0: Vec2::from_angle(*start), sweep: *sweep }
             }
             _ => return None,
@@ -175,7 +176,7 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             let (radius, arc) = match sk.curves.get(c)?.kind {
                 CurveKind::Ellipse { r, .. } => (r, None),
                 CurveKind::Arc { .. } => match sk.segs(c).first()? {
-                    solidcraft_geom::Seg2::Arc { radius, start, sweep, .. } => (*radius, Some((*start, *sweep))),
+                    solidcore_record::Seg2::Arc { radius, start, sweep, .. } => (*radius, Some((*start, *sweep))),
                     _ => return None,
                 },
                 _ => (sk.radius(c)?, None),
@@ -183,7 +184,7 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             DimFrame::Radial { center: sk.center(c)?, radius, diameter: matches!(k, Diameter { .. }), arc }
         }
         ArcLength { c, .. } => match sk.segs(c).first()? {
-            solidcraft_geom::Seg2::Arc { center, radius, start, sweep } => {
+            solidcore_record::Seg2::Arc { center, radius, start, sweep } => {
                 DimFrame::ArcLength { center: *center, radius: *radius, start: *start, sweep: *sweep }
             }
             _ => return None,

@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use image::{DynamicImage, ImageFormat, RgbaImage};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use super::*;
 

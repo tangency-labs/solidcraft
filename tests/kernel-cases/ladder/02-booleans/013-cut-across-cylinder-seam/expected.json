@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 10x4 notch through a cylinder r10 across its +X side (where the seam lies)",
+ "source": "analytic",
+ "method": "removed section = int_-2^2 (sqrt(100 - y^2) - 5) dy = 19.731710021 (Gauss), times 20; faces: cylinder, 2 disks, 3 notch planes",
+ "body_count": 1,
+ "volume_mm3": 5888.551106754,
+ "faces": 6
+}
