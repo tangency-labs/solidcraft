@@ -266,7 +266,7 @@ fn a_cylinder_is_dimensioned_across_its_silhouettes() {
 #[test]
 fn a_dimension_with_no_points_has_no_lines() {
     let mut lost = read(&[], "");
-    lost.status = Status::Lost("gone".into());
+    lost.status = Status::Lost("gone".into(), Vec::new());
     for kind in [length(LinearDirection::Aligned), DimensionKind::Radial { edge: edge(), diameter: false }, DimensionKind::Cylinder { face: face() }]
     {
         assert!(paper_group(&dimension(kind, 10.0, TextPlace::Centred), &lost, &view_at("1:1")).is_none());

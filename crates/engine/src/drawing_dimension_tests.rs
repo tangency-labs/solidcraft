@@ -9,7 +9,7 @@ use solidcore_record::Vec3;
 use solidcraft_doc::ModelBody;
 use solidcraft_doc::appearance::face_index_at;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Resolved, Silhouette, Status, TextPlace,
+    Candidate, Dimension, DimensionKind, MAX_CANDIDATES, ModelEdge, ModelFace, ModelPoint, Resolved, Silhouette, Status, TextPlace,
 };
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing::{Drawing, Source, Units};
@@ -316,7 +316,7 @@ fn a_circle_and_an_arc_read_their_radius_and_diameter() {
     assert_reads(&f.resolve(across), 12.0, false);
     run(&mut f.s, "timeline.delete", json!({"feature": "Hole"}));
     let r = f.resolve(across);
-    assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
+    assert!(matches!(&r.status, Status::Lost(why, _) if why.contains("no longer exists")), "{r:?}");
     run(&mut f.s, "edit.undo", json!({}));
     assert_reads(&f.resolve(across), 12.0, false);
     // A slot across the rim leaves two arcs of one circle: it is still that circle, not exactly, with
@@ -370,7 +370,7 @@ fn lost_and_suppressed_say_so_and_never_move_to_other_geometry() {
     let length = f.add(f.front, DimensionKind::Length { edge: top.clone(), direction: LinearDirection::Aligned, reading: Reading::True }, None);
     run(&mut f.s, "solid.fillet", json!({"edges": [[40, 0, 30]], "radius": 5, "body": "Box"}));
     let r = f.resolve(length);
-    assert!(matches!(&r.status, Status::Lost(why) if why.contains("no longer exists")), "{r:?}");
+    assert!(matches!(&r.status, Status::Lost(why, _) if why.contains("no longer exists")), "{r:?}");
     assert_eq!((r.measured, r.text.as_deref(), r.points.is_empty()), (None, None, true));
     run(&mut f.s, "edit.undo", json!({}));
     assert_reads(&f.resolve(length), 80.0, false);
@@ -383,12 +383,66 @@ fn lost_and_suppressed_say_so_and_never_move_to_other_geometry() {
     // Through an occurrence that isn't there.
     let placed = ModelEdge { path: vec![999], ..top };
     let through = f.add(f.front, DimensionKind::Length { edge: placed, direction: LinearDirection::Aligned, reading: Reading::True }, None);
-    assert!(matches!(f.resolve(through).status, Status::Lost(_)));
+    assert!(matches!(f.resolve(through).status, Status::Lost(..)));
     // Deleted, and a new box made with the same body's name.
     run(&mut f.s, "timeline.delete", json!({"feature": name}));
     run(&mut f.s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
     let r = f.resolve(length);
-    assert!(matches!(&r.status, Status::Lost(why) if why.contains("another feature")), "{r:?}");
+    assert!(matches!(&r.status, Status::Lost(why, _) if why.contains("another feature")), "{r:?}");
+}
+
+/// A fillet on the top front edge takes the edge a length measures: it is lost, never measured,
+/// with leads to what took its place. First the fillet's face (its middle 45° round from the box's
+/// faces), then that face's four edges (where it meets the front and the top, and its arcs at each
+/// end), then the box's six faces: offered, never taken. The record is as it was. A corner that
+/// edge met is lost with the same face first. With the fillet suppressed it reads 80 again.
+#[test]
+fn a_filleted_edge_is_lost_with_its_blend_and_never_measured() {
+    let mut f = boxed();
+    let top = f.edge([0.0, 0.0, 30.0], [80.0, 0.0, 30.0]);
+    let length = f.add(f.front, DimensionKind::Length { edge: top, direction: LinearDirection::Aligned, reading: Reading::True }, None);
+    let corner = f.linear(f.front, [0.0, 0.0, 30.0], [0.0, 0.0, 0.0], LinearDirection::Vertical, Reading::Projected);
+    let saved = f.d.to_json().unwrap();
+    run(&mut f.s, "solid.fillet", json!({"edges": [[40, 0, 30]], "radius": 5, "body": "Box"}));
+    let r = f.resolve(length);
+    let Status::Lost(why, leads) = &r.status else { panic!("{r:?}") };
+    assert!(why.contains("no longer exists"), "{r:?}");
+    assert_eq!((r.measured, r.text.as_deref(), r.points.is_empty()), (None, None, true));
+    let b = f.body();
+    let diagonal = 5.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let blend = face_index_at(&b, Vec3::new(40.0, 5.0 - diagonal, 25.0 + diagonal)).unwrap();
+    assert_eq!(leads.first(), Some(&Candidate::Face { body: "Box".into(), index: blend }), "{leads:?}");
+    // By where each lead is, never by how many edges the kernel cuts them into.
+    let mesh = b.mesh();
+    let edge = |c: &Candidate| match c {
+        Candidate::Edge { body, index } if body == "Box" => mesh.edges.get(*index),
+        _ => None,
+    };
+    let lines: Vec<&Vec<Vec3>> = leads.iter().skip(1).map_while(edge).collect();
+    let along = |y: f64, z: f64| lines.iter().any(|l| l.iter().all(|p| (p.y - y).abs() < 1e-6 && (p.z - z).abs() < 1e-6));
+    let on_arc = |p: &Vec3| ((p.y - 5.0).hypot(p.z - 25.0) - 5.0).abs() < 1e-6;
+    let round = |x: f64| lines.iter().any(|l| l.iter().all(|p| (p.x - x).abs() < 1e-6 && on_arc(p)));
+    assert!(along(0.0, 25.0) && along(5.0, 30.0) && round(0.0) && round(80.0), "the blend's edges next: {leads:?}");
+    let faces: Vec<usize> = leads[1 + lines.len()..]
+        .iter()
+        .map(|c| match c {
+            Candidate::Face { body, index } if body == "Box" => *index,
+            _ => panic!("then the box's faces: {leads:?}"),
+        })
+        .collect();
+    let sides = [[40.0, 0.0, 15.0], [40.0, 40.0, 15.0], [40.0, 20.0, 0.0], [40.0, 20.0, 30.0], [0.0, 20.0, 15.0], [80.0, 20.0, 15.0]];
+    for p in sides {
+        let side = face_index_at(&b, Vec3::from(p)).unwrap();
+        assert!(faces.contains(&side), "the box's face at {p:?}: {leads:?}");
+    }
+    assert!(leads.len() <= MAX_CANDIDATES, "{leads:?}");
+    assert_eq!(f.d.to_json().unwrap(), saved, "the record is what it was");
+    let r = f.resolve(corner);
+    assert!(matches!(&r.status, Status::Lost(_, c) if c.first() == leads.first()), "{r:?}");
+    let fillet = f.s.doc.features.last().unwrap().name.clone();
+    run(&mut f.s, "timeline.suppress", json!({"feature": fillet, "suppressed": true}));
+    assert_reads(&f.resolve(length), 80.0, false);
+    assert_reads(&f.resolve(corner), 30.0, false);
 }
 
 /// A notch across the top front edge splits it in two: its length is no longer one number, so the
@@ -481,7 +535,7 @@ fn a_suppressed_or_failed_feature_is_not_lost() {
     assert_reads(&f.resolve(arc), 5.0, false);
 
     run(&mut f.s, "timeline.delete", json!({"feature": hole}));
-    assert!(matches!(&f.resolve(across).status, Status::Lost(why) if why.contains("no longer exists")), "{:?}", f.resolve(across));
+    assert!(matches!(&f.resolve(across).status, Status::Lost(why, _) if why.contains("no longer exists")), "{:?}", f.resolve(across));
 }
 
 fn radial(edge: &ModelEdge, diameter: bool) -> DimensionKind {
@@ -614,7 +668,7 @@ fn two_cylinders_silhouettes_are_found_on_their_faces() {
     assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("far silhouette in this view isn't on it")), "{r:?}");
     run(&mut f.s, "timeline.suppress", json!({"feature": small, "suppressed": true}));
     let r = f.resolve(front);
-    assert!(matches!(&r.status, Status::Lost(_) | Status::Suppressed), "{r:?}");
+    assert!(matches!(&r.status, Status::Lost(..) | Status::Suppressed), "{r:?}");
 }
 
 /// A slot through the front face splits it, and the top front edge with it; an angle is put on the

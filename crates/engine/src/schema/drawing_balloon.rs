@@ -10,7 +10,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-use super::drawing_dimension::{CandidateResult, EdgeParam};
+use super::drawing_dimension::{CandidateResult, EdgeParam, PickParam};
 use super::drawing_table::TableIdParam;
 use super::drawing_view::ViewIdParam;
 
@@ -85,6 +85,16 @@ pub struct BalloonSet {
     pub parts_list: Option<Option<TableIdParam>>,
 }
 
+/// What `drawing.balloon.repair` takes: the balloon, and the edge it points at now (`{edge: …}`), on
+/// the part it numbers.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct RepairParams {
+    pub balloon: BalloonIdParam,
+    pub pick: PickParam,
+}
+
 /// What `drawing.balloon.edit` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
@@ -104,9 +114,9 @@ pub struct BalloonResult {
     pub record: Value,
     /// The part it numbers: the ids of the occurrences its edge's body is placed through.
     pub occurrence: Vec<u64>,
-    /// `ok`, `ambiguous`, `suppressed` or `lost`.
+    /// `ok`, `ambiguous`, `suppressed`, `failed` or `lost`.
     pub status: String,
-    /// Why it is lost.
+    /// Why it failed or is lost.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
     /// Where its arrow ends, the middle of its edge, in the design's frame.
@@ -114,6 +124,7 @@ pub struct BalloonResult {
     pub point: Option<[f64; 3]>,
     /// Its edge was found by exact history.
     pub exact: bool,
+    /// What its edge's name finds when ambiguous, or the leads when lost: never taken but by a repair.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
     /// The parts list it reads.

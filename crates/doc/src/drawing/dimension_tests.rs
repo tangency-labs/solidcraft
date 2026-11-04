@@ -514,6 +514,35 @@ fn keep_last_good_never_writes_a_record_a_file_refuses() {
     }
 }
 
+/// A lost edge's leads, from its body's face names: the blend face that rounds it and a piece of that
+/// face (a later cut's), then the edges they bound, then the faces of the feature that made it, at most
+/// 16, no face twice. Another fillet's face rounds another edge, so it leads nowhere. A `~k` on the
+/// name finds the same blend; a name no blend rounds leads to its makers' faces only, as a face's
+/// does, and a name that doesn't read, or whose feature made nothing here, leads nowhere.
+#[test]
+fn lost_leads_list_the_blend_then_its_edges_then_the_makers_faces() {
+    let blends = ["F5:blend:F1:+z|F1:-y", "F5:blend:F1:+z|F1:-y#[F1:+x,F7:+z]", "F6:blend:F1:+x|F1:+z"];
+    let mut faces: Vec<String> = ["F1:+z", "F1:-y", "F1:+x"].into_iter().chain(blends).map(String::from).collect();
+    faces.extend((0..40).map(|k| format!("F1:face:{k}")));
+    let leads = Leads::new(BODY, &faces);
+    // Edges 0, 1, 3 and 5 bound the blend or its piece; 2 and 4 don't.
+    let edge_faces = [vec![0, 3], vec![1, 3], vec![0, 2], vec![3, 4], vec![2, 5], vec![4, 1]];
+    let lead_face = |index: usize| Candidate::Face { body: BODY.into(), index };
+    let lead_edge = |index: usize| Candidate::Edge { body: BODY.into(), index };
+    let box_faces = |n: usize| [0, 1, 2].into_iter().chain(6..).take(n).map(lead_face);
+    let mut expected = vec![lead_face(3), lead_face(4), lead_edge(0), lead_edge(1), lead_edge(3), lead_edge(5)];
+    expected.extend(box_faces(10));
+    let found = leads.for_edge("F1:+z|F1:-y", &edge_faces);
+    assert_eq!(found, expected);
+    assert_eq!(found.len(), MAX_CANDIDATES);
+    assert_eq!(leads.for_edge("F1:+z|F1:-y~2", &edge_faces), expected, "a numbered edge's blend");
+    let makers: Vec<Candidate> = box_faces(MAX_CANDIDATES).collect();
+    assert_eq!(leads.for_edge("F1:-y|F1:+x", &edge_faces), makers, "no blend rounds it");
+    assert_eq!(leads.for_face("F1:+z"), makers, "a face's");
+    assert!(leads.for_edge("F1:+z|", &edge_faces).is_empty(), "a name that doesn't read");
+    assert!(leads.for_edge("F9:+z|F9:-y", &edge_faces).is_empty(), "a feature that made nothing here");
+}
+
 /// Quarter arcs of radius `r` round `c` in the plane z = 0, from `from` degrees, as a tessellated edge.
 fn arc_at(c: [f64; 2], r: f64, from: f64) -> (usize, Vec<Vec3>) {
     let at = |d: f64| Vec3::new(c[0] + r * (from + d).to_radians().cos(), c[1] + r * (from + d).to_radians().sin(), 0.0);
