@@ -1986,6 +1986,7 @@
   "material.selection.mixed": "Unterschiedliche Materialien",
   "measure.at": "Bei",
   "measure.item": "Element {number}",
+  "measure.line_to_centre": "Linie zum Mittelpunkt",
   "measure.quick_copied": "Messwert kopiert",
   "measure.quick_copy": "Klicken, um den Messwert zu kopieren",
   "measure.quick_edges": "{count} Kanten",

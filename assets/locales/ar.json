@@ -2004,6 +2004,7 @@
   "material.selection.mixed": "مواد مختلفة",
   "measure.at": "عند",
   "measure.item": "العنصر {number}",
+  "measure.line_to_centre": "من الخط إلى المركز",
   "measure.quick_copied": "تم نسخ القياس",
   "measure.quick_copy": "انقر لنسخ القياس",
   "measure.quick_edges": "{count} حواف",

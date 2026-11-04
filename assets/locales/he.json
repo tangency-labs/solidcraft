@@ -2004,6 +2004,7 @@
   "material.selection.mixed": "חומרים שונים",
   "measure.at": "מיקום",
   "measure.item": "פריט {number}",
+  "measure.line_to_centre": "מהקו למרכז",
   "measure.quick_copied": "המדידה הועתקה",
   "measure.quick_copy": "לחיצה מעתיקה את המדידה",
   "measure.quick_edges": "{count} מקצועות",

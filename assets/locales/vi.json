@@ -2004,6 +2004,7 @@
   "material.selection.mixed": "Các vật liệu khác nhau",
   "measure.at": "Tại",
   "measure.item": "Mục {number}",
+  "measure.line_to_centre": "Từ đường đến tâm",
   "measure.quick_copied": "Đã sao chép số đo",
   "measure.quick_copy": "Nhấp để sao chép số đo",
   "measure.quick_edges": "{count} cạnh",

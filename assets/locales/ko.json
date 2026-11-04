@@ -1434,6 +1434,7 @@
   "material.selection.mixed": "서로 다른 재질",
   "measure.at": "위치",
   "measure.item": "항목 {number}",
+  "measure.line_to_centre": "선에서 중심까지",
   "messages.ago_h": "{n}시간 전",
   "messages.ago_min": "{n}분 전",
   "messages.ago_s": "{n}초 전",

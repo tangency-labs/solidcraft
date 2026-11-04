@@ -2004,6 +2004,7 @@
   "material.selection.mixed": "Different materials",
   "measure.at": "At",
   "measure.item": "Item {number}",
+  "measure.line_to_centre": "Line to center",
   "measure.quick_copied": "Measurement copied",
   "measure.quick_copy": "Click to copy the measurement",
   "measure.quick_edges": "{count} edges",

@@ -2004,6 +2004,7 @@
   "material.selection.mixed": "不同材料",
   "measure.at": "位置",
   "measure.item": "项目 {number}",
+  "measure.line_to_centre": "线到圆心",
   "measure.quick_copied": "已复制测量值",
   "measure.quick_copy": "点击复制测量值",
   "measure.quick_edges": "{count} 条边",
