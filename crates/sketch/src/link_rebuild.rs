@@ -4,7 +4,9 @@
 //! circle, the same side or the piece of it that is left); only then do the old ones go.
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::{Aabb2, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 
 use super::{LCurve, Layout, curve_points, point_roles, same_shape};
 use crate::model::{ConstraintKind, Result, Sketch};
