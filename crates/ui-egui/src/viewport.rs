@@ -1457,7 +1457,7 @@ impl Instances {
     ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
         let (mesh, m, lod_eligible) = self.candidates.get(&b.name)?.clone();
         // A smaller single reference mesh formerly used the sorted CPU glass stream.
-        if !lod_eligible && look == crate::gpu::InstanceLook::Glass && !oit {
+        if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
             return None;
         }
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
@@ -8875,6 +8875,16 @@ mod tests {
         let instanced = build_scene(&app);
         assert_eq!(instanced.instanced.len(), 1);
         assert_eq!(instanced.instanced[0].look, crate::gpu::InstanceLook::Glass);
+        app.run("appearance.assign", json!({"bodies":["Grid"],"color":"#3366cc","opacity":1.0})).unwrap();
+        app.run("component.create", json!({"name":"Editing"})).unwrap();
+        app.viewport.gpu.as_mut().unwrap().oit = false;
+        let faded = build_scene(&app);
+        assert!(faded.instanced.is_empty(), "faded reference meshes retain the old non-OIT block ordering");
+        assert!(!faded.merged().trans.is_empty());
+        app.viewport.gpu.as_mut().unwrap().oit = true;
+        let instanced = build_scene(&app);
+        assert_eq!(instanced.instanced.len(), 1);
+        assert_eq!(instanced.instanced[0].look, crate::gpu::InstanceLook::Faded);
     }
 
     /// A large mesh's shared vertices made ahead (by the background mesher after a file is
