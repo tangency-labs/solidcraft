@@ -412,6 +412,12 @@ fn cancelling_theme_preview_restores_viewport_palette_keys() {
     assert_ne!(keys(&h.app), first);
 }
 
+/// The on/off state a screen reader hears for the widget labelled `label`.
+fn announced_state(h: &crate::scenario::Harness, label: &str) -> Option<egui::accesskit::Toggled> {
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.toggled())
+}
+
 #[test]
 fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() {
     let mut h = crate::scenario::Harness::new();
@@ -427,6 +433,7 @@ fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() 
     h.frames(2);
     assert!(h.widget("Component Colors").is_some());
     assert!(!crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
+    assert_eq!(announced_state(&h, "Component Colors"), Some(egui::accesskit::Toggled::False));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_some());
     assert!(h.app.dialog.is_none());
@@ -437,6 +444,7 @@ fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() 
     h.frames(2);
     assert!(h.widget("Component Colors").is_some());
     assert!(crate::toolbar::persistent_pressed(&h.app, "inspect.colored_components"));
+    assert_eq!(announced_state(&h, "Component Colors"), Some(egui::accesskit::Toggled::True));
     h.step(&json!({"click": {"handle": "dropdown:inspect.colored_components"}})).unwrap();
     assert!(h.app.session.colored_components.is_none());
     let info = command.info(&h.app.session);

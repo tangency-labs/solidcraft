@@ -2618,18 +2618,24 @@ fn dropdown_row(
     let pin = ui.interact(pr, ui.id().with(("dropdown_pin", c.id)), Sense::click());
     let pointer_on = (resp.hovered() || pin.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
     let label = app.tr_label(info.label).to_string();
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label));
+    let mut checked = None;
+    if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
+        checked = Some(persistent_pressed(app, c.id));
+    }
+    if c.id == "view.shots_strip" {
+        checked = Some(app.preferences.render_shots_strip);
+    }
+    // A checkable row announces its on/off state, since its label no longer says it.
+    resp.widget_info(|| match checked {
+        Some(on) => egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled() && info.enabled, on, &label),
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label),
+    });
     crate::scenario::publish_handle(&format!("toolbar:{}", c.id), rect.center());
     crate::scenario::publish_handle(&format!("dropdown:{}", c.id), rect.center());
     let hot = info.enabled && (pointer_on || resp.has_focus());
     let mut row = crate::ui_kit::MenuItem::new(c.id, &label, info.icon);
     row.enabled = info.enabled;
-    if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
-        row.checked = Some(persistent_pressed(app, c.id));
-    }
-    if c.id == "view.shots_strip" {
-        row.checked = Some(app.preferences.render_shots_strip);
-    }
+    row.checked = checked;
     row.highlighted = hot || revealed.is_some();
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
     row.shortcut = &shortcut;
