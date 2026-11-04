@@ -103,6 +103,8 @@ struct DimensionDraft {
     checked_expr: String,
     preview_doc: Arc<solidcraft_engine::doc::Document>,
     preview: Arc<solidcraft_engine::doc::ModelState>,
+    /// Which solve `preview` is (see [`next_solve`]).
+    solve: u64,
     error: Option<String>,
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
     /// it has no parameter and no value to edit (#320).
@@ -329,6 +331,7 @@ fn reevaluate(app: &SolveApp, draft: &mut DimensionDraft, expr: &str) {
     match draft.evaluate(app, expr) {
         Ok(scratch) => {
             draft.preview = crate::open_meshing::session_world(&scratch);
+            draft.solve = next_solve();
             draft.preview_doc = scratch.doc.clone();
             draft.error = None;
         }
@@ -391,6 +394,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         at,
         checked_expr: expr.clone(),
         preview: crate::open_meshing::session_world(&scratch),
+        solve: next_solve(),
         preview_doc: scratch.doc.clone(),
         error: None,
         driven,
@@ -451,6 +455,8 @@ thread_local! {
     /// A text being dragged: dimension id, undo depth at the start, grab offset (sketch).
     static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
+    /// Solves made for drafts so far: each preview's number, which the sketch scene is keyed on.
+    static SOLVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PLACEMENT: RefCell<Option<Placement>> = const { RefCell::new(None) };
     /// The half-axis of an ellipse the last placed draft for these picks in this sketch
     /// measured (see `previous_axis`).
@@ -1239,6 +1245,20 @@ pub fn preview_world(app: &SolveApp) -> Option<Arc<solidcraft_engine::doc::Model
     EDIT.with(|e| e.try_borrow().ok()?.as_ref()?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.preview.clone()))
 }
 
+/// A number for a new solve, never one an earlier solve had: a preview's address can be an earlier
+/// one's once that is freed, so the sketch scene is keyed on this instead.
+fn next_solve() -> u64 {
+    SOLVES.with(|n| {
+        n.set(n.get() + 1);
+        n.get()
+    })
+}
+
+/// Which solve [`preview_world`] is, while there is one.
+pub fn preview_solve(app: &SolveApp) -> Option<u64> {
+    EDIT.with(|e| e.try_borrow().ok()?.as_ref()?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.solve))
+}
+
 /// Is the inline editor open (it has the keyboard)?
 pub fn editing() -> bool {
     EDIT.with(|e| e.borrow().is_some())
@@ -1252,6 +1272,16 @@ pub fn solved_for() -> Option<(String, String)> {
         let e = edit.as_ref()?;
         Some((e.expr.clone(), e.draft.as_ref()?.checked_expr.clone()))
     })
+}
+
+/// Solve the open draft again for `expr`, as a typed value or a moved text does (tests).
+#[cfg(test)]
+pub fn resolve(app: &SolveApp, expr: &str) {
+    EDIT.with(|edit| {
+        if let Some(draft) = edit.borrow_mut().as_mut().and_then(|e| e.draft.as_mut()) {
+            reevaluate(app, draft, expr);
+        }
+    });
 }
 
 /// The open draft: its expression, the dimension it adds and the sketch it previews (tests).

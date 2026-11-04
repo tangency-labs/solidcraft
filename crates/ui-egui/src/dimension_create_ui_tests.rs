@@ -1130,6 +1130,32 @@ fn typing_a_value_draws_the_sketch_at_that_value_and_escape_restores_it() {
     }
 }
 
+/// Each solve of a typed value redraws the sketch, also two between frames (a moved text and a
+/// typed value in one frame), and a solve back to an earlier value: the scene is keyed on the
+/// solve, not on where its result happens to be in memory.
+#[test]
+fn every_solve_of_a_typed_value_redraws_the_sketch() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.app.cam.distance = 300.0;
+    h.settle();
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sixty = drawn_extent(&mut h);
+    let mut solves = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        crate::dim_view::resolve(&h.app, "70");
+        crate::dim_view::resolve(&h.app, "80");
+        assert!(solves.insert(crate::dim_view::preview_solve(&h.app).expect("a preview")), "a new solve has a new number");
+        let (_, _, preview) = crate::dim_view::draft_preview().expect("the draft is open");
+        let drawn = drawn_extent(&mut h);
+        assert!(!near(drawn, sixty) && near(drawn, bounds(&preview)), "drawn {drawn:?}, solved {:?}", bounds(&preview));
+        crate::dim_view::resolve(&h.app, "60");
+        assert!(near(drawn_extent(&mut h), sixty));
+    }
+    crate::dim_view::cancel();
+}
+
 /// Is a sketch point drawn at `world` this frame (its filled square)?
 fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
     let [x, y] = h.at(&json!({"world":[world[0], world[1], 0]})).unwrap();
