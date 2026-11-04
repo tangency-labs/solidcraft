@@ -2356,6 +2356,8 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.dialog.is_none().hash(&mut h);
     measuring_mesh_edges(app).hash(&mut h);
     app.preferences.prefer_free_sketch_points.hash(&mut h);
+    app.preferences.select_hidden_edges.hash(&mut h);
+    app.ui.visual_style.hash(&mut h);
     app.viewport.woken_centre.hash(&mut h);
     crate::sketch3d::drawing(app).hash(&mut h);
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
@@ -2407,7 +2409,7 @@ pub fn pick_all(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
 }
 
 /// See-through candidates in a small screen-space disk. The nine rays are fixed and bounded;
-/// ordinary picking and repeat-click cycling retain their visible-only path.
+/// ordinary picking and repeat-click cycling follow the visual style and edge preference.
 pub(crate) fn pick_through(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
     if !pos.x.is_finite() || !pos.y.is_finite() || !proj.rect.contains(pos) {
         return Vec::new();
@@ -2714,6 +2716,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Wireframe draws no faces, so nothing hides an edge or a vertex. `slack` is the body's own:
     // what counts as lying on the face in front depends on how coarsely that body is meshed.
     let wireframe = app.ui.visual_style == 2;
+    let hidden_edges = app.ui.visual_style == 3 && app.preferences.select_hidden_edges;
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
@@ -2762,7 +2765,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             // Visible where the cursor is: the edge's point under the cursor, not an end or
             // the middle, which can lie deeper than the face the cursor is on.
             let point = ray_segment_closest(o, d, p0, p1);
-            if dd < 6.0 && beste.wants(dd) && visible(point, body_slack) {
+            // Hidden-edge mode changes only edges of shown bodies. Section clipping,
+            // vertex picks and modelling edge identities keep their ordinary rules.
+            if dd < 6.0 && beste.wants(dd) && (visible(point, body_slack) || (hidden_edges && kept(point))) {
                 beste.offer(dd, Hit::Edge { body: b.name.clone(), index: ei, mid: at(polyline_mid(e)), point });
             }
         }

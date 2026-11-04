@@ -921,3 +921,135 @@ fn changing_hidden_selection_or_opening_an_empty_point_clears_the_old_list() {
     assert_eq!(h.call("ui.selectOther", json!({"x":rect.left()+20.0,"y":rect.top()+20.0}))["result"]["open"], false);
     assert!(!super::is_open(&h.app), "an empty point cannot keep the preceding list");
 }
+
+/// A separate cover blocks the target edge at every point along it.
+fn covered_edge() -> (Harness, egui::Pos2) {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"})).unwrap();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":10,"corner":[-10,-10,20],"body_name":"Cover"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    let at = h.at(&json!({"world":[5,0,10]})).unwrap();
+    (h, egui::pos2(at[0] as f32, at[1] as f32))
+}
+
+#[test]
+fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
+    use crate::viewport::{Hit, pick_all, pick_cached, projection};
+    let (mut h, pos) = covered_edge();
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    h.app.ui.visual_style = 3;
+    assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+    assert_eq!(h.call("ui.prefs", json!({"select_hidden_edges":true}))["ok"], true);
+    assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target));
+    assert!(pick_all(&h.app, &proj, pos).iter().any(target));
+    for style in [0, 1, 2, 3] {
+        h.app.ui.visual_style = style;
+        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style >= 2, "style {style}");
+    }
+    h.app.session.visibility.hidden_bodies.push("Target".into());
+    assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+    h.app.session.visibility.hidden_bodies.clear();
+    // The section removes the target entirely: even hidden-edge mode must exclude it.
+    h.app.session.section = Some((solidcore_record::Vec3::new(0.0, 0.0, -5.0), solidcore_record::Vec3::Z));
+    assert!(!pick_all(&h.app, &proj, pos).iter().any(target));
+    h.app.session.section = None;
+    h.call("ui.prefs", json!({"select_hidden_edges":false}));
+    assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+}
+
+#[test]
+fn hidden_edge_mode_reaches_the_far_side_of_the_same_body() {
+    use crate::viewport::{Hit, pick_all, projection};
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.cam.yaw = 0.6;
+    h.app.cam.pitch = 0.5;
+    h.app.fit_view();
+    h.settle();
+    h.app.ui.visual_style = 3;
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let mesh = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh();
+    let mut hidden = 0;
+    for (index, points) in mesh.edges.iter().enumerate() {
+        let mid = (points[0] + points[points.len() - 1]) * 0.5;
+        let Some(pos) = proj.to_screen(mid) else { continue };
+        let wanted = |hit: &Hit| matches!(hit, Hit::Edge { index: i, .. } if *i == index);
+        h.app.preferences.select_hidden_edges = false;
+        if pick_all(&h.app, &proj, pos).iter().any(wanted) {
+            continue;
+        }
+        h.app.preferences.select_hidden_edges = true;
+        assert!(pick_all(&h.app, &proj, pos).iter().any(wanted), "far-side edge {index}");
+        hidden += 1;
+    }
+    assert!(hidden >= 3, "the three edges meeting at the far corner: {hidden}");
+}
+
+#[test]
+fn hidden_edge_clicks_feed_fillet_before_and_after_opening_the_dialog() {
+    for preselect in [true, false] {
+        let (mut h, pos) = covered_edge();
+        h.call("ui.prefs", json!({"select_hidden_edges":true}));
+        h.app.ui.visual_style = 3;
+        if !preselect {
+            h.app.start("solid.fillet");
+        }
+        h.step(&json!({"click":[pos.x,pos.y]})).unwrap();
+        if preselect {
+            #[cfg(not(target_arch = "wasm32"))]
+            save_hidden_edge_evidence(&h, "hidden-edge-selected");
+            assert!(matches!(h.app.session.selection.first(), Some(Sel::Edge {body,..}) if body == "Target"));
+            h.app.start("solid.fillet");
+        }
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(matches!(d.inputs[0].items.first(), Some(Sel::Edge {body,..}) if body == "Target"));
+        if let crate::dialogs::Kind::Fillet { radius, .. } = &mut d.kind {
+            *radius = "1".into();
+        }
+        let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let before = h.app.session.doc.features.len();
+        h.app.dialog = None;
+        for (command, params) in cmds {
+            h.app.run(&command, params).unwrap();
+        }
+        assert_eq!(h.app.session.doc.features.len(), before + 1);
+        assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+        let state = h.app.session.world_state().unwrap();
+        let volume = |name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+        let expected = 1000.0 - 10.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+        assert!((volume("Target") - expected).abs() < 0.02, "radius-1 fillet on a length-10 edge: {}", volume("Target"));
+        assert!((volume("Cover") - 9000.0).abs() < 1e-6, "the cover must stay intact");
+        #[cfg(not(target_arch = "wasm32"))]
+        if preselect {
+            h.app.session.selection.clear();
+            save_hidden_edge_evidence(&h, "hidden-edge-fillet");
+        }
+    }
+}
+
+/// Optional real viewport captures for local review, using the same GPU pipeline as the app.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_hidden_edge_evidence(h: &Harness, name: &str) {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_HIDDEN_EDGE_EVIDENCE") else { return };
+    let size = 768;
+    let proj = crate::viewport::projection(&h.app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size as f32, size as f32)));
+    let eye = proj.cam.eye().to_f32();
+    let rgba = crate::gpu::render_offscreen(
+        crate::viewport::build_scene(&h.app),
+        Some(crate::viewport::build_highlight(&h.app)),
+        proj.vp.to_f32(),
+        proj.cam.back().to_f32(),
+        [eye[0], eye[1], eye[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
+        size,
+        None,
+        [0.0; 8],
+        crate::gpu::analysis_colors(&crate::theme::Tokens::get().analysis),
+    )
+    .expect("a GPU is required when evidence capture is requested");
+    std::fs::create_dir_all(&dir).unwrap();
+    image::save_buffer(std::path::Path::new(&dir).join(format!("{name}.png")), &rgba, size, size, image::ColorType::Rgba8).unwrap();
+}

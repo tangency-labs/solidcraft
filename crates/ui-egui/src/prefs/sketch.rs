@@ -391,6 +391,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,
+            "select_hidden_edges",
+            "prefs.select_hidden_edges",
+            Some("prefs.select_hidden_edges_help"),
+            &mut app.preferences.select_hidden_edges,
+        );
+        check(
+            ui,
             "select_other_hidden",
             "prefs.sketch.select_other_hidden",
             Some("prefs.select_other_hidden_help"),
