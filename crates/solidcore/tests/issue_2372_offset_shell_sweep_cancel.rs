@@ -238,22 +238,30 @@ fn every_fix_but_g2() -> solidcore::kernel::UpstreamFixes {
 /// `Err(Cancelled)`: the time from the cancel to the return, and the check point's
 /// operation; `None` when the shell returned before the cancel (a faster build: in a
 /// debug build the 60 s cancel lands in the bend walls' knot removals, 97 s each). The
-/// knot removal's and the sampling's own checks are also tested directly in
-/// `nurbs::crv_offset`.
+/// canceller waits for the delay or the shell's return, whichever comes first, so a shell
+/// that returns first ends the wait with it. The knot removal's and the sampling's own
+/// checks are also tested directly in `nurbs::crv_offset`.
 #[cfg(not(target_arch = "wasm32"))]
 fn cancel_shell_after(
     every_fix: bool,
     delay: std::time::Duration,
 ) -> Option<(std::time::Duration, &'static str)> {
+    use std::sync::mpsc::{channel, RecvTimeoutError};
     use std::time::Instant;
     let token = CancelToken::new();
     let canceller_token = token.clone();
-    let (start_tx, start_rx) = std::sync::mpsc::channel::<()>();
+    let (start_tx, start_rx) = channel::<()>();
+    let (returned_tx, returned_rx) = channel::<()>();
     let canceller = std::thread::spawn(move || {
         start_rx.recv().unwrap();
-        std::thread::sleep(delay);
-        canceller_token.cancel();
-        Instant::now()
+        match returned_rx.recv_timeout(delay) {
+            Err(RecvTimeoutError::Timeout) => {
+                canceller_token.cancel();
+                Some(Instant::now())
+            }
+            // the shell returned before the delay: nothing to cancel
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => None,
+        }
     });
     let mut k = Kernel::default();
     if every_fix {
@@ -278,11 +286,14 @@ fn cancel_shell_after(
         &start,
     );
     let returned = Instant::now();
+    // (the canceller may have timed out just before this: it then cancelled)
+    let _ = returned_tx.send(());
     let cancelled_at = canceller.join().unwrap();
-    if made.is_ok() && cancelled_at > returned {
+    let Some(cancelled_at) = cancelled_at.filter(|&at| at <= returned || made.is_err()) else {
         // a faster build finished the shell before the cancel: nothing to cancel
+        assert!(made.is_ok(), "the uncancelled shell returned {made:?}");
         return None;
-    }
+    };
     let Err(SolidError::Cancelled { operation }) = made else {
         panic!("the cancelled shell returned {made:?} (after {delay:?})");
     };

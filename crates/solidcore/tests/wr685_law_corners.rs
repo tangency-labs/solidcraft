@@ -18,7 +18,7 @@
     clippy::indexing_slicing
 )]
 
-use solidcore::blend::definition_check::{bare_blend_faces, BlendFaceLog};
+use solidcore::blend::definition_check::{bare_blend_faces, BlendFaceLog, MadeBlendFace};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSolverType;
 use solidcore::blend::fillet_standard_solver::p1::{CircularCrossSectionFsg, FilletLaw};
@@ -44,10 +44,11 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::surface_closest_point;
 use solidcore::query::face::p2::{point_classify, PointClassifyOptions};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::topology::brep::p3::brep_copy_mapped;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
 use solidcore::topology::{edge, EdgeId, FaceId};
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, EntityRef, Kernel};
 
 // ---- the corner ball's zone at a dip ------------------------------------------------------
 
@@ -479,22 +480,6 @@ fn spline_law(degree: usize, knots: &[f64], radii: &[f64], reverse: bool) -> Fil
     FilletLaw::bspline(curve, &Extent1d::from_min_max(0.0, 1.0))
 }
 
-/// The box `size` after the law rounds its edge from `from` to `to` (the law's start at
-/// `from`): the volume removed and the face count, as `smlib_fillet_variable` runs it,
-/// every fix on (the fork's own behaviour).
-fn law_round(
-    size: [f64; 3],
-    from: Point3,
-    to: Point3,
-    degree: usize,
-    knots: &[f64],
-    radii: &[f64],
-) -> (f64, usize) {
-    let (k, mut b, _) = law_body(size, from, to, degree, knots, radii);
-    let faces = b.faces().ids().count();
-    (size[0] * size[1] * size[2] - volume(&k, &mut b), faces)
-}
-
 /// The tolerances a law-cornered round is checked to: the largest distance any of its
 /// session's solvers approximates to (`approx_tol_3d`), and the kernel's angle between
 /// parallel vectors (`SM_ANG_TOL_DEG`, the solvers' own angle being 20 degrees).
@@ -504,43 +489,103 @@ struct SolverTols {
     angle: f64,
 }
 
-/// The box `size` with its edge from `from` to `to` rounded by the law, as
-/// [`law_round`] makes it, with the blend face log on, and the tolerances it is checked to.
-fn law_body(
-    size: [f64; 3],
-    from: Point3,
-    to: Point3,
-    degree: usize,
-    knots: &[f64],
-    radii: &[f64],
-) -> (Kernel, Brep, SolverTols) {
-    use solidcore::blend::fillet_geom::p1::FilletSolverId;
+/// The kernel every law round is built on: every fix on (the fork's own behaviour), with
+/// the blend face log on (the log changes no result: `issue_2489_blend_faces_are_definitions`).
+fn law_kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.clone_from(&UpstreamFixes::all());
-    // (the log changes no result: issue_2489_blend_faces_are_definitions)
     k.blend_face_log = Some(BlendFaceLog::default());
-    let mut b = create_box(&mut k, Vec3::ZERO, size[0], size[1], size[2]).unwrap();
-    let (e, reversed) = edge_between(&k, &b, from, to);
-    let law = spline_law(degree, knots, radii, reversed);
-    let base = radii[0].max(radii[radii.len() - 1]);
-    let mut tols = SolverTols {
-        distance: 0.0,
-        angle: k.tolerances.ang_tol_deg.to_radians(),
-    };
-    {
-        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
-        session
-            .prepare_variable_radius_edges(&mut k, &[e], base, law, 1, 1)
-            .unwrap();
-        session.do_fillet(&mut k).unwrap();
-        for id in 0.. {
-            let Ok(s) = session.solver(FilletSolverId(id)) else {
-                break;
-            };
-            tols.distance = tols.distance.max(s.base().approx_tol_3d);
+    k
+}
+
+/// A box with one edge rounded by a radius law, as built: the body, the tolerances it is
+/// checked to, the faces its session made (its blend face log) and its solvers' kept
+/// law-corner pieces. Each test builds its round once and checks copies of it.
+struct LawRound {
+    body: Brep,
+    tols: SolverTols,
+    made: Vec<MadeBlendFace>,
+    pieces: Vec<Surface>,
+}
+
+impl LawRound {
+    /// The box `size` with its edge from `from` to `to` rounded by the law (its start at
+    /// `from`), as `smlib_fillet_variable` runs it on [`law_kernel`].
+    fn build(
+        size: [f64; 3],
+        from: Point3,
+        to: Point3,
+        degree: usize,
+        knots: &[f64],
+        radii: &[f64],
+    ) -> Self {
+        use solidcore::blend::fillet_geom::p1::FilletSolverId;
+        let mut k = law_kernel();
+        let mut b = create_box(&mut k, Vec3::ZERO, size[0], size[1], size[2]).unwrap();
+        let (e, reversed) = edge_between(&k, &b, from, to);
+        let law = spline_law(degree, knots, radii, reversed);
+        let base = radii[0].max(radii[radii.len() - 1]);
+        let mut tols = SolverTols {
+            distance: 0.0,
+            angle: k.tolerances.ang_tol_deg.to_radians(),
+        };
+        let mut pieces = Vec::new();
+        {
+            let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+            session
+                .prepare_variable_radius_edges(&mut k, &[e], base, law, 1, 1)
+                .unwrap();
+            session.do_fillet(&mut k).unwrap();
+            for id in 0.. {
+                let Ok(s) = session.solver(FilletSolverId(id)) else {
+                    break;
+                };
+                tols.distance = tols.distance.max(s.base().approx_tol_3d);
+                for kept in &s.base().law_corner_pieces {
+                    pieces.extend(kept.pieces.iter().cloned());
+                }
+            }
+        }
+        let made = k.blend_face_log.as_ref().unwrap().last().to_vec();
+        Self {
+            body: b,
+            tols,
+            made,
+            pieces,
         }
     }
-    (k, b, tols)
+
+    /// A copy of the round (`SmBrep`'s copy, its geometry owned by its own faces) on a
+    /// kernel of its own, whose blend face log holds the round's session as the copy's
+    /// faces, and the tolerances it is checked to: a check of its own, as on a fresh build.
+    fn copy(&self) -> (Kernel, Brep, SolverTols) {
+        let mut k = law_kernel();
+        let (body, map) = brep_copy_mapped(&mut k, &self.body).unwrap();
+        // (the map takes each of the build's entities to its copy)
+        let copy_of = |face: FaceId| match map.get_at(Some(EntityRef::Face(face))).unwrap() {
+            Some(EntityRef::Face(f)) => f,
+            other => panic!("face {face:?} copied as {other:?}"),
+        };
+        let made = self
+            .made
+            .iter()
+            .map(|m| MadeBlendFace {
+                face: copy_of(m.face),
+                ..*m
+            })
+            .collect();
+        k.blend_face_log = Some(BlendFaceLog {
+            sessions: vec![made],
+        });
+        (k, body, self.tols)
+    }
+
+    /// The volume the round removes from the box `size`, and the body's face count.
+    fn removed(&self, size: [f64; 3]) -> (f64, usize) {
+        let (k, mut b, _) = self.copy();
+        let faces = b.faces().ids().count();
+        (size[0] * size[1] * size[2] - volume(&k, &mut b), faces)
+    }
 }
 
 /// How far `p` is from the envelope of the balls `ball(t)` (centre, radius) for `t` over
@@ -583,43 +628,6 @@ fn nearest_ball(p: Point3, t0: f64, t1: f64, ball: impl Fn(f64) -> (Point3, f64)
     } else {
         (best, at)
     }
-}
-
-/// The round's kept pieces (the solvers' `law_corner_pieces`) with the solvers'
-/// tolerance, from the box `size` with its edge from `from` to `to` rounded by the law, as
-/// [`law_body`] makes it.
-fn law_pieces(
-    size: [f64; 3],
-    from: Point3,
-    to: Point3,
-    knots: &[f64],
-    radii: &[f64],
-) -> (Kernel, Vec<Surface>, f64) {
-    use solidcore::blend::fillet_geom::p1::FilletSolverId;
-    let mut k = Kernel::default();
-    k.fixes.clone_from(&UpstreamFixes::all());
-    let mut b = create_box(&mut k, Vec3::ZERO, size[0], size[1], size[2]).unwrap();
-    let (e, reversed) = edge_between(&k, &b, from, to);
-    let law = spline_law(1, knots, radii, reversed);
-    let base = radii[0].max(radii[radii.len() - 1]);
-    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
-    session
-        .prepare_variable_radius_edges(&mut k, &[e], base, law, 1, 1)
-        .unwrap();
-    session.do_fillet(&mut k).unwrap();
-    let mut pieces = Vec::new();
-    let mut tol = 0.0_f64;
-    for id in 0.. {
-        let Ok(s) = session.solver(FilletSolverId(id)) else {
-            break;
-        };
-        tol = tol.max(s.base().approx_tol_3d);
-        for kept in &s.base().law_corner_pieces {
-            pieces.extend(kept.pieces.iter().cloned());
-        }
-    }
-    drop(session);
-    (k, pieces, tol)
 }
 
 /// The worst of [`off_the_balls`] over a 21 x 11 grid of each of `pieces`' natural
@@ -674,54 +682,20 @@ fn worst_piece_off_the_balls(
 /// where `BuildLawCorners` ends them). The joined surface is not the envelope: at a dip the sides
 /// end on two different touch circles and the join takes one boundary row between them,
 /// which `BuildLawCorners` mends by putting the pieces back on the split faces.
-#[test]
-fn a_law_cornered_rounds_pieces_are_its_balls_envelope() {
-    let lin = |a: f64, m: f64, z: f64, t: f64| {
-        if t <= 10.0 {
-            a + (m - a) * t / 10.0
-        } else {
-            m + (z - m) * (t - 10.0) / 10.0
-        }
-    };
-    let (a, b) = (Point3::new(0.0, 20.0, 20.0), Point3::new(20.0, 20.0, 20.0));
-    for (from, to) in [(a, b), (b, a)] {
-        let (k, pieces, tol) = law_pieces(
-            [20.0; 3],
-            from,
-            to,
-            &[0.0, 0.0, 0.5, 1.0, 1.0],
-            &[4.0, 2.0, 4.0],
-        );
-        let ball = |x: f64| {
-            let r = lin(4.0, 2.0, 4.0, x);
-            (Point3::new(x, 20.0 - r, 20.0 - r), r)
-        };
-        let (worst, points) =
-            worst_piece_off_the_balls(&k, &pieces, 0.0, 10.0, 20.0, |p| p.x, ball);
-        eprintln!("dip from {from:?}: {} pieces, {points} points, worst {worst:.3e} off the balls, tol {tol:e}", pieces.len());
-        assert_eq!(pieces.len(), 2);
-        assert!(points > 100, "{points}");
-        assert!(worst <= tol, "{worst}");
-    }
-    let (k, pieces, tol) = law_pieces(
-        [10.0, 20.0, 30.0],
-        Point3::new(10.0, 0.0, 30.0),
-        Point3::new(10.0, 20.0, 30.0),
-        &[0.0, 0.0, 0.5, 1.0, 1.0],
-        &[2.0, 3.0, 2.0],
-    );
-    let ball = |y: f64| {
-        let r = lin(2.0, 3.0, 2.0, y);
-        (Point3::new(10.0 - r, y, 30.0 - r), r)
-    };
-    let (worst, points) = worst_piece_off_the_balls(&k, &pieces, 0.0, 10.0, 20.0, |p| p.y, ball);
+fn assert_pieces_on_envelope(case: &LawCase, round: &LawRound) {
+    let k = law_kernel();
+    let (pieces, tol) = (&round.pieces, round.tols.distance);
+    let ball = |t: f64| case.edge.ball(t, piecewise_linear(case.law, t));
+    let (worst, points) =
+        worst_piece_off_the_balls(&k, pieces, 0.0, 10.0, 20.0, |p| case.edge.along(p), ball);
     eprintln!(
-        "peak: {} pieces, {points} points, worst {worst:.3e} off the balls, tol {tol:e}",
+        "{}: {} pieces, {points} points, worst {worst:.3e} off the balls, tol {tol:e}",
+        case.name,
         pieces.len()
     );
-    assert_eq!(pieces.len(), 2);
-    assert!(points > 100, "{points}");
-    assert!(worst <= tol, "{worst}");
+    assert_eq!(pieces.len(), 2, "{}", case.name);
+    assert!(points > 100, "{}: {points}", case.name);
+    assert!(worst <= tol, "{}: {worst}", case.name);
 }
 
 /// The split of the fork's 6eecf04 (`NoteRadiusCornerSurfaces`,
@@ -730,47 +704,43 @@ fn a_law_cornered_rounds_pieces_are_its_balls_envelope() {
 /// refuses inside a face; the corner is then built (7babe17), with a dip's zone between the
 /// sides. On the dip from either end and on a peak: no turn inside any face, the box's six
 /// faces, one per side and the dip's zone, and the body clean at check level 2.
-#[test]
-fn a_law_cornered_round_is_split_at_its_corner() {
-    let (a, b) = (Point3::new(0.0, 20.0, 20.0), Point3::new(20.0, 20.0, 20.0));
-    let cases = [
-        ([20.0; 3], a, b, [4.0, 2.0, 4.0], 1usize),
-        ([20.0; 3], b, a, [4.0, 2.0, 4.0], 1),
-        (
-            [10.0, 20.0, 30.0],
-            Point3::new(10.0, 0.0, 30.0),
-            Point3::new(10.0, 20.0, 30.0),
-            [2.0, 3.0, 2.0],
-            0,
-        ),
-    ];
-    for (size, from, to, radii, zones) in cases {
-        let (mut k, mut body, _) = law_body(size, from, to, 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &radii);
-        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
-            .unwrap()
-            .lines();
-        let mut rounds = Vec::new();
-        for f in body.faces().ids() {
-            let s = body.face(f).unwrap().surface.clone().unwrap();
-            if !matches!(s.kind(), SurfaceKind::Plane(_)) {
-                rounds.push(s);
-            }
+fn assert_split(case: &LawCase, round: &LawRound) {
+    let zones = case
+        .corners
+        .iter()
+        .filter(|&&c| c == LawCornerKind::Dip)
+        .count();
+    let (mut k, mut body, _) = round.copy();
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let mut rounds = Vec::new();
+    for f in body.faces().ids() {
+        let s = body.face(f).unwrap().surface.clone().unwrap();
+        if !matches!(s.kind(), SurfaceKind::Plane(_)) {
+            rounds.push(s);
         }
-        let mut turns = 0;
-        for s in &rounds {
-            let (u, v) = s
-                .find_knots_by_max_continuity(&k, ContinuityType::C0, false)
-                .unwrap();
-            turns += u.len() + v.len();
-        }
-        let faces = body.faces().ids().count();
-        eprintln!(
-            "split {radii:?} from {from:?}: {faces} faces, {} round faces, {turns} turns inside; {lines:?}",
-            rounds.len(),
-        );
-        assert!(lines.is_empty(), "{lines:?}");
-        assert_eq!((faces, rounds.len(), turns), (8 + zones, 2 + zones, 0));
     }
+    let mut turns = 0;
+    for s in &rounds {
+        let (u, v) = s
+            .find_knots_by_max_continuity(&k, ContinuityType::C0, false)
+            .unwrap();
+        turns += u.len() + v.len();
+    }
+    let faces = body.faces().ids().count();
+    eprintln!(
+        "{}: split: {faces} faces, {} round faces, {turns} turns inside; {lines:?}",
+        case.name,
+        rounds.len(),
+    );
+    assert!(lines.is_empty(), "{}: {lines:?}", case.name);
+    assert_eq!(
+        (faces, rounds.len(), turns),
+        (8 + zones, 2 + zones, 0),
+        "{}",
+        case.name
+    );
 }
 
 /// The edge a law rounds: the 20 cube's edge y = z = 20 along x (its faces y = 20 and
@@ -882,9 +852,12 @@ fn assert_definitions_or_listed(name: &str, k: &Kernel, b: &Brep) {
     }
 }
 
-/// One law-cornered round of [`a_law_cornered_round_is_its_balls_union`]: its name, the
-/// box, the edge's ends (the law's start at the first), the law's degree, knots and control
-/// radii, the edge, the law as radii at points along the edge, and its corners' kinds.
+/// One law-cornered round and what is checked on it: its name, the box, the edge's ends (the
+/// law's start at the first), the law's degree, knots and control radii, the edge, the law
+/// as radii at points along the edge, its corners' kinds, whether its split
+/// ([`assert_split`]) and its pieces ([`assert_pieces_on_envelope`]) are checked, and the
+/// volume it removes with the body's face count (the fork's capi case, within 1e-4).
+#[derive(Clone, Copy)]
 struct LawCase {
     name: &'static str,
     size: [f64; 3],
@@ -896,13 +869,15 @@ struct LawCase {
     edge: LawEdge,
     law: &'static [(f64, f64)],
     corners: &'static [LawCornerKind],
+    split: bool,
+    envelope: bool,
+    removed: (f64, usize),
 }
 
 /// The round built at its law's corners (`BuildLawCorners`, the fork's 7babe17 with
 /// 62fcc82 and 58d03ef): the union of its balls. The balls are closed form from the law:
 /// at `t` along the edge, the centre is the edge's two faces moved in by r(t) and the
-/// radius r(t) ([`LawEdge::ball`]). On the dip 4 -> 2 -> 4 from either end and as a
-/// quadratic, the peak 2 -> 3 -> 2, and the dip then peak 4, 2, 4, 2:
+/// radius r(t) ([`LawEdge::ball`]). On every case:
 /// - every point inside every round face is on the boundary of the union of all the balls
 ///   (`min_t |p - c(t)| - r(t)` zero to the solvers' tolerance, the law's end spans carried
 ///   on past the edge's ends as the round is): on its side's envelope and never inside a
@@ -919,225 +894,291 @@ struct LawCase {
 ///   its round by its definition, the law trimmed to the side, over the stations where the
 ///   law stays positive (the dip then peak's last side, whose law the trace's stations past
 ///   the edge's end take through zero, ends at the edge's end, where the end face cuts it).
-#[test]
-fn a_law_cornered_round_is_its_balls_union() {
-    const A: Point3 = Point3::new(0.0, 20.0, 20.0);
-    const B: Point3 = Point3::new(20.0, 20.0, 20.0);
-    const DIP: &[(f64, f64)] = &[(0.0, 4.0), (10.0, 2.0), (20.0, 4.0)];
-    const LINEAR: &[f64] = &[0.0, 0.0, 0.5, 1.0, 1.0];
-    let dip = |name, from, to| LawCase {
-        name,
-        size: [20.0; 3],
-        from,
-        to,
-        degree: 1,
-        knots: LINEAR,
-        radii: &[4.0, 2.0, 4.0],
-        edge: LawEdge::Cube,
-        law: DIP,
-        corners: &[LawCornerKind::Dip],
+fn assert_balls_union(case: &LawCase, round: &LawRound) {
+    let LawCase { name, law, .. } = *case;
+    let (mut k, mut body, tols) = round.copy();
+    let ball = |t: f64| case.edge.ball(t, piecewise_linear(law, t));
+    // the balls the round's points touch: past the edge's ends too, where the round runs
+    // on with its law's end spans (cut by the end faces); a touching ball's centre is
+    // within its radius of the point, so its t within the largest radius of the point's
+    let reach = law.iter().map(|&(_, r)| r).fold(0.0, f64::max);
+    let (lo, hi) = (law[0].0 - reach, law[law.len() - 1].0 + reach);
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{name}: {lines:?}");
+
+    // the round's faces, each with its points, and the zones among them
+    let mut rounds: Vec<(FaceId, Vec<Point3>, f64)> = Vec::new();
+    let mut zones: Vec<FaceId> = Vec::new();
+    for f in body.faces().ids().collect::<Vec<_>>() {
+        let s = body.face(f).unwrap().surface.clone().unwrap();
+        match s.kind() {
+            SurfaceKind::Plane(_) => continue,
+            SurfaceKind::BallPatch(_) => zones.push(f),
+            _ => {}
+        }
+        let points = face_points(&k, &mut body, f);
+        assert!(
+            points.len() > 20,
+            "{name}: face {} has {} points",
+            f.index(),
+            points.len()
+        );
+        let mid = points.iter().map(|&p| case.edge.along(p)).sum::<f64>() / points.len() as f64;
+        rounds.push((f, points, mid));
+    }
+    let corner_at = |kind| -> Vec<f64> {
+        law.windows(3)
+            .zip(case.corners)
+            .filter(|(_, &k)| k == kind)
+            .map(|(w, _)| w[1].0)
+            .collect()
     };
-    let cases = [
-        dip("dip", A, B),
-        dip("dip, reversed", B, A),
-        LawCase {
-            name: "dip, quadratic",
-            degree: 2,
-            knots: &[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
-            radii: &[4.0, 3.0, 2.0, 3.0, 4.0],
-            ..dip("", A, B)
-        },
-        LawCase {
-            name: "peak",
-            size: [10.0, 20.0, 30.0],
-            from: Point3::new(10.0, 0.0, 30.0),
-            to: Point3::new(10.0, 20.0, 30.0),
-            degree: 1,
-            knots: LINEAR,
-            radii: &[2.0, 3.0, 2.0],
-            edge: LawEdge::Block,
-            law: &[(0.0, 2.0), (10.0, 3.0), (20.0, 2.0)],
-            corners: &[LawCornerKind::Peak],
-        },
-        LawCase {
-            name: "dip then peak",
-            knots: &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0],
-            radii: &[4.0, 2.0, 4.0, 2.0],
-            law: &[(0.0, 4.0), (5.0, 2.0), (15.0, 4.0), (20.0, 2.0)],
-            corners: &[LawCornerKind::Dip, LawCornerKind::Peak],
-            // (its last side's law, 4 -> 2 over the last quarter, carried on past the edge's
-            // end as the trace's stations run, 10 past it, falls through zero at 25)
-            ..dip("", A, B)
-        },
-    ];
-    for case in cases {
-        let LawCase { name, law, .. } = case;
-        let (mut k, mut body, tols) = law_body(
-            case.size,
-            case.from,
-            case.to,
-            case.degree,
-            case.knots,
-            case.radii,
-        );
-        let ball = |t: f64| case.edge.ball(t, piecewise_linear(law, t));
-        // the balls the round's points touch: past the edge's ends too, where the round runs
-        // on with its law's end spans (cut by the end faces); a touching ball's centre is
-        // within its radius of the point, so its t within the largest radius of the point's
-        let reach = law.iter().map(|&(_, r)| r).fold(0.0, f64::max);
-        let (lo, hi) = (law[0].0 - reach, law[law.len() - 1].0 + reach);
-        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
-            .unwrap()
-            .lines();
-        assert!(lines.is_empty(), "{name}: {lines:?}");
+    let (dips, peaks) = (
+        corner_at(LawCornerKind::Dip),
+        corner_at(LawCornerKind::Peak),
+    );
+    eprintln!(
+        "{name}: {} faces, {} round faces, {} zones; {tols:?}",
+        body.faces().ids().count(),
+        rounds.len(),
+        zones.len()
+    );
+    assert_eq!(rounds.len(), law.len() - 1 + dips.len(), "{name}");
+    assert_eq!(zones.len(), dips.len(), "{name}");
 
-        // the round's faces, each with its points, and the zones among them
-        let mut rounds: Vec<(FaceId, Vec<Point3>, f64)> = Vec::new();
-        let mut zones: Vec<FaceId> = Vec::new();
-        for f in body.faces().ids().collect::<Vec<_>>() {
-            let s = body.face(f).unwrap().surface.clone().unwrap();
-            match s.kind() {
-                SurfaceKind::Plane(_) => continue,
-                SurfaceKind::BallPatch(_) => zones.push(f),
-                _ => {}
-            }
-            let points = face_points(&k, &mut body, f);
-            assert!(
-                points.len() > 20,
-                "{name}: face {} has {} points",
-                f.index(),
-                points.len()
-            );
-            let mid = points.iter().map(|&p| case.edge.along(p)).sum::<f64>() / points.len() as f64;
-            rounds.push((f, points, mid));
+    // every round face on the boundary of the balls' union
+    let mut worst = 0.0_f64;
+    for (_, points, _) in &rounds {
+        for &p in points {
+            worst = worst.max(off_the_balls(p, lo, hi, ball).abs());
         }
-        let corner_at = |kind| -> Vec<f64> {
-            law.windows(3)
-                .zip(case.corners)
-                .filter(|(_, &k)| k == kind)
-                .map(|(w, _)| w[1].0)
-                .collect()
-        };
-        let (dips, peaks) = (
-            corner_at(LawCornerKind::Dip),
-            corner_at(LawCornerKind::Peak),
-        );
-        eprintln!(
-            "{name}: {} faces, {} round faces, {} zones; {tols:?}",
-            body.faces().ids().count(),
-            rounds.len(),
-            zones.len()
-        );
-        assert_eq!(rounds.len(), law.len() - 1 + dips.len(), "{name}");
-        assert_eq!(zones.len(), dips.len(), "{name}");
+    }
+    eprintln!("{name}: worst {worst:.3e} off the balls' union");
+    assert!(worst <= tols.distance, "{name}: {worst}");
 
-        // every round face on the boundary of the balls' union
-        let mut worst = 0.0_f64;
-        for (_, points, _) in &rounds {
-            for &p in points {
-                worst = worst.max(off_the_balls(p, lo, hi, ball).abs());
-            }
-        }
-        eprintln!("{name}: worst {worst:.3e} off the balls' union");
-        assert!(worst <= tols.distance, "{name}: {worst}");
-
-        // each dip's zone on its corner ball, met G1 along its two circles
-        for &t in &dips {
-            let (centre, r) = ball(t);
-            let &(zone, ref points, _) = rounds
-                .iter()
-                .find(|(f, _, mid)| zones.contains(f) && (mid - t).abs() < 1.0)
-                .expect("the dip's zone");
-            let off = points
-                .iter()
-                .map(|p| (p.distance(centre) - r).abs())
-                .fold(0.0, f64::max);
-            let (mut kink, mut circles) = (0.0_f64, 0);
-            for e in solidcore::topology::face::p4::edges(&body, zone, None, false, None).unwrap() {
-                let faces = edge::faces(&body, e, None).unwrap();
-                let Some(&side) = faces.iter().find(|&&f| f != zone) else {
-                    continue;
-                };
-                circles += 1;
-                let c = edge::curve(&body, e).unwrap().unwrap();
-                let ivl = edge::interval(&body, e).unwrap();
-                for i in 1..16 {
-                    let p = c
-                        .evaluate_point(&k, ivl.evaluate(f64::from(i) / 16.0))
-                        .unwrap();
-                    for f in [side, zone] {
-                        kink = kink.max(line_angle(surface_normal_at(&k, &body, f, p), p - centre));
-                    }
-                }
-            }
-            eprintln!(
-                "{name}: the dip at {t}: the zone {off:.3e} off its ball, {circles} circles, kinked {kink:.3e} rad"
-            );
-            assert!(off <= tols.distance, "{name}: {off}");
-            assert_eq!(circles, 2, "{name}");
-            assert!(kink <= tols.angle, "{name}: {kink}");
-        }
-
-        // each peak's sides crossing at the balls' crease
-        for &t in &peaks {
-            // the faces either side of the peak, the one before first
-            let side = |before: bool| {
-                rounds
-                    .iter()
-                    .filter(|(f, _, mid)| !zones.contains(f) && (*mid < t) == before)
-                    .min_by(|a, b| (a.2 - t).abs().total_cmp(&(b.2 - t).abs()))
-                    .expect("a side of the peak")
-                    .0
+    // each dip's zone on its corner ball, met G1 along its two circles
+    for &t in &dips {
+        let (centre, r) = ball(t);
+        let &(zone, ref points, _) = rounds
+            .iter()
+            .find(|(f, _, mid)| zones.contains(f) && (mid - t).abs() < 1.0)
+            .expect("the dip's zone");
+        let off = points
+            .iter()
+            .map(|p| (p.distance(centre) - r).abs())
+            .fold(0.0, f64::max);
+        let (mut kink, mut circles) = (0.0_f64, 0);
+        for e in solidcore::topology::face::p4::edges(&body, zone, None, false, None).unwrap() {
+            let faces = edge::faces(&body, e, None).unwrap();
+            let Some(&side) = faces.iter().find(|&&f| f != zone) else {
+                continue;
             };
-            let (before, after) = (side(true), side(false));
-            let crossing: Vec<EdgeId> = solidcore::topology::brep::p1::edges(&body, None)
-                .unwrap()
-                .into_iter()
-                .filter(|&e| {
-                    let faces = edge::faces(&body, e, None).unwrap();
-                    faces.contains(&before) && faces.contains(&after)
-                })
-                .collect();
-            assert_eq!(crossing.len(), 1, "{name}: the peak at {t}");
-            let c = edge::curve(&body, crossing[0]).unwrap().unwrap();
-            let ivl = edge::interval(&body, crossing[0]).unwrap();
-            let (mut off, mut crease_lo, mut crease_hi) = (0.0_f64, f64::INFINITY, 0.0_f64);
+            circles += 1;
+            let c = edge::curve(&body, e).unwrap().unwrap();
+            let ivl = edge::interval(&body, e).unwrap();
             for i in 1..16 {
                 let p = c
                     .evaluate_point(&k, ivl.evaluate(f64::from(i) / 16.0))
                     .unwrap();
-                // each side's ball through p, and the normal it gives there
-                let n0 = p - ball(nearest_ball(p, lo, t, ball).1).0;
-                let n1 = p - ball(nearest_ball(p, t, hi, ball).1).0;
-                let crease = line_angle(n0, n1);
-                crease_lo = crease_lo.min(crease);
-                crease_hi = crease_hi.max(crease);
-                off = off.max(line_angle(surface_normal_at(&k, &body, before, p), n0));
-                off = off.max(line_angle(surface_normal_at(&k, &body, after, p), n1));
+                for f in [side, zone] {
+                    kink = kink.max(line_angle(surface_normal_at(&k, &body, f, p), p - centre));
+                }
             }
-            eprintln!(
-                "{name}: the peak at {t}: crease {crease_lo:.6} to {crease_hi:.6} rad, the faces' normals {off:.3e} off their balls'"
-            );
-            assert!(off <= tols.angle, "{name}: {off}");
-            // a crease, not a tangent join: the faces cannot be parallel there
-            assert!(crease_lo > 2.0 * tols.angle, "{name}: {crease_lo}");
         }
-
-        // every face the round made is in the blend face log, so none escapes the check
-        let made = k.blend_face_log.as_ref().unwrap().last();
-        for (f, _, _) in &rounds {
-            assert!(
-                made.iter().any(|m| m.face == *f),
-                "{name}: face {} is not in the blend face log",
-                f.index()
-            );
-        }
-        assert_definitions_or_listed(name, &k, &body);
+        eprintln!(
+        "{name}: the dip at {t}: the zone {off:.3e} off its ball, {circles} circles, kinked {kink:.3e} rad"
+    );
+        assert!(off <= tols.distance, "{name}: {off}");
+        assert_eq!(circles, 2, "{name}");
+        assert!(kink <= tols.angle, "{name}: {kink}");
     }
+
+    // each peak's sides crossing at the balls' crease
+    for &t in &peaks {
+        // the faces either side of the peak, the one before first
+        let side = |before: bool| {
+            rounds
+                .iter()
+                .filter(|(f, _, mid)| !zones.contains(f) && (*mid < t) == before)
+                .min_by(|a, b| (a.2 - t).abs().total_cmp(&(b.2 - t).abs()))
+                .expect("a side of the peak")
+                .0
+        };
+        let (before, after) = (side(true), side(false));
+        let crossing: Vec<EdgeId> = solidcore::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&e| {
+                let faces = edge::faces(&body, e, None).unwrap();
+                faces.contains(&before) && faces.contains(&after)
+            })
+            .collect();
+        assert_eq!(crossing.len(), 1, "{name}: the peak at {t}");
+        let c = edge::curve(&body, crossing[0]).unwrap().unwrap();
+        let ivl = edge::interval(&body, crossing[0]).unwrap();
+        let (mut off, mut crease_lo, mut crease_hi) = (0.0_f64, f64::INFINITY, 0.0_f64);
+        for i in 1..16 {
+            let p = c
+                .evaluate_point(&k, ivl.evaluate(f64::from(i) / 16.0))
+                .unwrap();
+            // each side's ball through p, and the normal it gives there
+            let n0 = p - ball(nearest_ball(p, lo, t, ball).1).0;
+            let n1 = p - ball(nearest_ball(p, t, hi, ball).1).0;
+            let crease = line_angle(n0, n1);
+            crease_lo = crease_lo.min(crease);
+            crease_hi = crease_hi.max(crease);
+            off = off.max(line_angle(surface_normal_at(&k, &body, before, p), n0));
+            off = off.max(line_angle(surface_normal_at(&k, &body, after, p), n1));
+        }
+        eprintln!(
+        "{name}: the peak at {t}: crease {crease_lo:.6} to {crease_hi:.6} rad, the faces' normals {off:.3e} off their balls'"
+    );
+        assert!(off <= tols.angle, "{name}: {off}");
+        // a crease, not a tangent join: the faces cannot be parallel there
+        assert!(crease_lo > 2.0 * tols.angle, "{name}: {crease_lo}");
+    }
+
+    // every face the round made is in the blend face log, so none escapes the check
+    let made = k.blend_face_log.as_ref().unwrap().last();
+    for (f, _, _) in &rounds {
+        assert!(
+            made.iter().any(|m| m.face == *f),
+            "{name}: face {} is not in the blend face log",
+            f.index()
+        );
+    }
+    assert_definitions_or_listed(name, &k, &body);
+}
+
+/// The round built once and every check of `case` on it, each on a copy of its own.
+fn check_law_round(case: &LawCase) {
+    let round = LawRound::build(
+        case.size,
+        case.from,
+        case.to,
+        case.degree,
+        case.knots,
+        case.radii,
+    );
+    assert_balls_union(case, &round);
+    if case.split {
+        assert_split(case, &round);
+    }
+    if case.envelope {
+        assert_pieces_on_envelope(case, &round);
+    }
+    let (want, faces) = case.removed;
+    let (removed, got) = round.removed(case.size);
+    eprintln!("{}: removed {removed}, want {want}, {got} faces", case.name);
+    assert!(
+        (removed - want).abs() <= 1e-4 * want,
+        "{}: {removed}",
+        case.name
+    );
+    assert_eq!(got, faces, "{}", case.name);
+}
+
+/// The 20 cube's edge y = z = 20, from x = 0 to 20.
+const CUBE_FROM: Point3 = Point3::new(0.0, 20.0, 20.0);
+const CUBE_TO: Point3 = Point3::new(20.0, 20.0, 20.0);
+/// The linear law's knots, its corner at 0.5.
+const LINEAR: &[f64] = &[0.0, 0.0, 0.5, 1.0, 1.0];
+
+/// The dip 4 -> 2 -> 4 on the 20 cube's edge y = z = 20: the cube's six faces, the two
+/// sides' rounds and the corner ball's zone between them (the fork: 39.542055909305
+/// removed, 39.542073 by its capi case).
+const DIP: LawCase = LawCase {
+    name: "dip",
+    size: [20.0; 3],
+    from: CUBE_FROM,
+    to: CUBE_TO,
+    degree: 1,
+    knots: LINEAR,
+    radii: &[4.0, 2.0, 4.0],
+    edge: LawEdge::Cube,
+    law: &[(0.0, 4.0), (10.0, 2.0), (20.0, 4.0)],
+    corners: &[LawCornerKind::Dip],
+    split: true,
+    envelope: true,
+    removed: (39.542073, 9),
+};
+
+#[test]
+fn a_law_that_dips_is_its_balls_union() {
+    check_law_round(&DIP);
+}
+
+#[test]
+fn a_law_that_dips_from_the_other_end_is_its_balls_union() {
+    check_law_round(&LawCase {
+        name: "dip, reversed",
+        from: CUBE_TO,
+        to: CUBE_FROM,
+        ..DIP
+    });
+}
+
+/// The same law as a quadratic with a corner at 0.5 (the fork: 39.542055908618 removed).
+#[test]
+fn a_quadratic_law_that_dips_is_its_balls_union() {
+    check_law_round(&LawCase {
+        name: "dip, quadratic",
+        degree: 2,
+        knots: &[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+        radii: &[4.0, 3.0, 2.0, 3.0, 4.0],
+        split: false,
+        envelope: false,
+        ..DIP
+    });
+}
+
+/// The peak 2 -> 3 -> 2 on the 10 x 20 x 30 box's top edge x = 10, z = 30, from y = 0:
+/// the block's six faces and the two sides' rounds, meeting where they cross (the fork:
+/// 27.093677260694 removed, 27.093683 by its capi case).
+#[test]
+fn a_law_that_peaks_is_its_balls_union() {
+    check_law_round(&LawCase {
+        name: "peak",
+        size: [10.0, 20.0, 30.0],
+        from: Point3::new(10.0, 0.0, 30.0),
+        to: Point3::new(10.0, 20.0, 30.0),
+        degree: 1,
+        knots: LINEAR,
+        radii: &[2.0, 3.0, 2.0],
+        edge: LawEdge::Block,
+        law: &[(0.0, 2.0), (10.0, 3.0), (20.0, 2.0)],
+        corners: &[LawCornerKind::Peak],
+        split: true,
+        envelope: true,
+        removed: (27.093683, 8),
+    });
+}
+
+/// 4, 2, 4, 2 at 0, 0.25, 0.75, 1 on the 20 cube's edge y = z = 20: a dip, then a peak;
+/// the cube's six faces, three rounds and the zone at the dip (the fork: 38.818141402826
+/// removed, 38.818277 by its capi case). Its last side's law, 4 -> 2 over the last
+/// quarter, carried on past the edge's end as the trace's stations run, 10 past it, falls
+/// through zero at 25.
+#[test]
+fn a_law_that_dips_then_peaks_is_its_balls_union() {
+    check_law_round(&LawCase {
+        name: "dip then peak",
+        knots: &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0],
+        radii: &[4.0, 2.0, 4.0, 2.0],
+        law: &[(0.0, 4.0), (5.0, 2.0), (15.0, 4.0), (20.0, 2.0)],
+        corners: &[LawCornerKind::Dip, LawCornerKind::Peak],
+        split: false,
+        envelope: false,
+        removed: (38.818277, 10),
+        ..DIP
+    });
 }
 
 // The fork's capi cases, with the volume removed its 5e8c9c1 build gives through its C API
-// (a scratch driver running the capi cases, at `smlib_brep_volume`'s 1e-7).
+// (a scratch driver running the capi cases, at `smlib_brep_volume`'s 1e-7): the dip, the
+// dip then peak and the peak at w 3 are checked with their rounds above.
 
 #[test]
 fn law_peak() {
@@ -1145,75 +1186,21 @@ fn law_peak() {
     // block's six faces and the two sides' rounds, meeting where they cross
     for (w, want, fork) in [
         (2.5, 21.799882, 21.799877917178),
-        (3.0, 27.093683, 27.093677260694),
         (3.2, 29.389966, 29.389911194516),
         (4.0, 39.541034, 39.541083296321),
     ] {
-        let (removed, faces) = law_round(
-            [10.0, 20.0, 30.0],
+        let size = [10.0, 20.0, 30.0];
+        let (removed, faces) = LawRound::build(
+            size,
             Point3::new(10.0, 0.0, 30.0),
             Point3::new(10.0, 20.0, 30.0),
             1,
-            &[0.0, 0.0, 0.5, 1.0, 1.0],
+            LINEAR,
             &[2.0, w, 2.0],
-        );
+        )
+        .removed(size);
         eprintln!("peak {w}: removed {removed}, want {want} (fork {fork}), {faces} faces");
         assert!((removed - want).abs() <= 1e-4 * want, "{removed}");
         assert_eq!(faces, 8);
     }
-}
-
-#[test]
-fn law_dip() {
-    // 4 -> 2 -> 4 on the 20 cube's edge y = z = 20 from either end, and the same law as a
-    // quadratic with a corner at 0.5: the cube's six faces, the two sides' rounds and the
-    // corner ball's zone between them (the fork: 39.542055909305 linear, 39.542055908618
-    // quadratic)
-    let (a, b) = (Point3::new(0.0, 20.0, 20.0), Point3::new(20.0, 20.0, 20.0));
-    for (from, to, degree, knots, radii) in [
-        (
-            a,
-            b,
-            1,
-            &[0.0, 0.0, 0.5, 1.0, 1.0][..],
-            &[4.0, 2.0, 4.0][..],
-        ),
-        (
-            b,
-            a,
-            1,
-            &[0.0, 0.0, 0.5, 1.0, 1.0][..],
-            &[4.0, 2.0, 4.0][..],
-        ),
-        (
-            a,
-            b,
-            2,
-            &[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0][..],
-            &[4.0, 3.0, 2.0, 3.0, 4.0][..],
-        ),
-    ] {
-        let (removed, faces) = law_round([20.0; 3], from, to, degree, knots, radii);
-        eprintln!("dip: removed {removed}, want 39.542073, {faces} faces");
-        assert!((removed - 39.542073).abs() <= 1e-4 * 39.542073, "{removed}");
-        assert_eq!(faces, 9);
-    }
-}
-
-#[test]
-fn law_dips() {
-    // 4, 2, 4, 2 at 0, 0.25, 0.75, 1 on the 20 cube's edge y = z = 20: a dip, then a peak;
-    // the cube's six faces, three rounds and the zone at the dip (the fork:
-    // 38.818141402826)
-    let (removed, faces) = law_round(
-        [20.0; 3],
-        Point3::new(0.0, 20.0, 20.0),
-        Point3::new(20.0, 20.0, 20.0),
-        1,
-        &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0],
-        &[4.0, 2.0, 4.0, 2.0],
-    );
-    eprintln!("dips: removed {removed}, want 38.818277, {faces} faces");
-    assert!((removed - 38.818277).abs() <= 1e-4 * 38.818277, "{removed}");
-    assert_eq!(faces, 10);
 }

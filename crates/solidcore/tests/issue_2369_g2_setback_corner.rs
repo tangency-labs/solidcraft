@@ -26,7 +26,8 @@
 //! is checked to 1e-9 relative. The others pin what the port builds (measured; flag on: the
 //! Setback's G2 fill, 16, 16 and 20 faces). SolidCraft's expected values for them (9361.3087
 //! within 0.29%, 9545.9794 within 0.28%, the pocket by its invariants only) are graded by
-//! SolidCraft, not here.
+//! SolidCraft, not here. Each volume is integrated on the rounds' certified nets, so its
+//! check is widened by the most they can move it (`volume`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
 use solidcore::blend::blend_corner::BlendCornerEvent;
@@ -38,10 +39,11 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::mass::integrator::properties::{brep_area, brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::surface::procedural_blend::NetScope;
 use solidcore::topology::api_files::read_brep_from_file;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
@@ -94,13 +96,33 @@ fn read(k: &mut Kernel, file: &str) -> Brep {
     b
 }
 
-fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+/// The tolerance the volume asks of the blends' definitions (`NetScope::within`, #2510): a
+/// definition whose certified net is within it of the definition (the G2 rounds here, about
+/// 2.3e-9) is integrated by its net, a B-spline evaluation where the definition solves a
+/// station per point.
+const NET_TOL: f64 = 1e-8;
+
+/// The body's volume (`SmApiBrepComputeVolume` at 1e-8) with every definition whose net is
+/// within [`NET_TOL`] integrated by its net, and the most that can move it from the
+/// definitions' volume: each such face lies within its certified bound of its definition,
+/// so the volume moves by at most the largest of those bounds times the body's area.
+fn volume(k: &Kernel, b: &mut Brep) -> (f64, f64) {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-8, &attrs).unwrap()
+    let bound = b
+        .faces()
+        .ids()
+        .filter_map(|f| face2::surface(b, f).unwrap())
+        .filter_map(|s| s.procedural_definition().map(|d| d.bound()))
+        .filter(|&d| d <= NET_TOL)
+        .fold(0.0, f64::max);
+    let _net = NetScope::within(k, NET_TOL);
+    let v = brep_volume(k, b, 1e-8, &attrs).unwrap();
+    let area = brep_area(k, b, 1e-6).unwrap();
+    (v, bound * area)
 }
 
 fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
@@ -187,15 +209,16 @@ const POCKET: [[f64; 3]; 3] = [[30.0, 10.0, 5.0], [15.0, 20.0, 5.0], [15.0, 10.0
 /// The outside-setback case's closed form (SolidCraft's expected.json).
 const OUTSIDE_SETBACK: f64 = 9526.705048390453;
 
-/// The body has volume `want` to 1e-9 relative, is valid and has `faces` faces.
+/// The body has volume `want` to 1e-9 relative (and the most its nets can move it, see
+/// [`volume`]), is valid and has `faces` faces.
 fn assert_built(k: &mut Kernel, b: &mut Brep, faces: usize, want: f64) {
     // the volume before the check, which may refine the body's tolerances
-    let v = volume(k, b);
+    let (v, moved) = volume(k, b);
     assert!(check_brep(k, b, CheckLevel::Level2).unwrap().is_valid());
     assert_eq!(b.faces().ids().count(), faces);
     assert!(
-        (v - want).abs() <= 1e-9 * v.abs().max(want.abs()),
-        "volume {v:.12}, want {want:.12}"
+        (v - want).abs() <= 1e-9 * v.abs().max(want.abs()) + moved,
+        "volume {v:.12}, want {want:.12} (the nets move it by at most {moved:e})"
     );
 }
 
@@ -358,7 +381,7 @@ fn the_setback_fills_are_their_definitions() {
         // itself changes no number: its build makes the fill again and requires it bit for bit)
         let (k0, mut b0, _) = round_kept(true, false, file, picks);
         assert!(corner_faces(&b0, CornerKind::Setback).is_empty());
-        let (v, v0) = (volume(&k, &mut b), volume(&k0, &mut b0));
+        let (v, v0) = (volume(&k, &mut b).0, volume(&k0, &mut b0).0);
         eprintln!("{file}: volume {v:.17e}, without the definition {v0:.17e}");
         assert!((v - v0).abs() <= 1e-12 * v0, "{v} against {v0}");
         let (on, off) = (face_bits(&k, &b), face_bits(&k0, &b0));

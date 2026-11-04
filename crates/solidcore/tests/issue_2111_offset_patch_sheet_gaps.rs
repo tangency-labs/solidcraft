@@ -43,18 +43,28 @@ const SHEET: &str = concat!(
     "/../../fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
 );
 
+/// The accuracy the offsets' areas are integrated at: they are compared to 1e-6 relative,
+/// and at 1e-7 each lands within 6e-8 relative of its value at 1e-8 (measured on these
+/// offsets).
+const AREA_ACCURACY: f64 = 1e-7;
+
 /// The sheet read from its file, copied, offset by `d` and checked at `Level2`.
 fn offset_check(d: f64) -> BrepCheck {
-    offset_checked(d, false).0
+    check_of(d, false).2
 }
 
 /// The sheet read from its file, copied, offset by `d` (with
-/// `offset_edges_keep_source_tolerance` set to `keep`), checked at `Level2`, and the
-/// offset's area.
-fn offset_checked(d: f64, keep: bool) -> (BrepCheck, f64) {
+/// `offset_edges_keep_source_tolerance` set to `keep`) and checked at `Level2`.
+fn check_of(d: f64, keep: bool) -> (Kernel, Brep, BrepCheck) {
     let (mut k, mut r) = offset(d, keep);
     let check = check_brep(&mut k, &mut r, CheckLevel::Level2).expect("check_brep answers");
-    let area = brep_area(&k, &mut r, 1e-8).unwrap();
+    (k, r, check)
+}
+
+/// [`check_of`], and the offset's area.
+fn offset_checked(d: f64, keep: bool) -> (BrepCheck, f64) {
+    let (k, mut r, check) = check_of(d, keep);
+    let area = brep_area(&k, &mut r, AREA_ACCURACY).unwrap();
     (check, area)
 }
 
@@ -158,7 +168,7 @@ fn kept_source_tolerances_check_clean() {
 /// 6.8e-5, exceed half the sheet's vertex tolerance (4.15e-5) and are still reported.
 #[test]
 fn kept_source_tolerances_at_a_half_leave_the_larger_gaps() {
-    let (c, _) = offset_checked(0.5, true);
+    let (_, _, c) = check_of(0.5, true);
     assert_eq!(c.assert_valid, Some(true), "{:?}", c.lines());
     assert_eq!(bad_gaps(&c), 4, "{:?}", c.lines());
     assert_eq!(c.failures().count(), 5, "{:?}", c.lines());
@@ -278,7 +288,7 @@ fn offset_updates_its_result_tolerances() {
     // the update moves no geometry, only tolerances: the area is that of the offset
     // without it, to the integrator's accuracy (as `kept_source_tolerances_check_clean`)
     let (_, area) = offset_checked(0.5, true);
-    let updated = brep_area(&k, &mut r, 1e-8).unwrap();
+    let updated = brep_area(&k, &mut r, AREA_ACCURACY).unwrap();
     assert!((updated - area).abs() <= 1e-6 * area, "{updated} {area}");
 }
 

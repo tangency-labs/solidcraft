@@ -118,15 +118,16 @@ fn round(k: &mut Kernel, b: &mut Brep, at: [f64; 3], r: f64) -> Result<(), Strin
     Ok(())
 }
 
+/// `SmApiBrepComputeVolume` at 1e-9: the volume the r 0.25 round removes, a difference of
+/// two of these, lies 4e-3 inside the bound it is checked to, and at 1e-9 it lands within
+/// 4e-9 of its value at 1e-12 (measured).
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-12, &attrs)
-        .or_else(|_| brep_volume(k, b, 1e-9, &attrs))
-        .unwrap()
+    brep_volume(k, b, 1e-9, &attrs).unwrap()
 }
 
 fn clean(k: &mut Kernel, b: &mut Brep) {

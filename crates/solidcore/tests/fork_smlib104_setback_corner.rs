@@ -356,14 +356,29 @@ fn blend_body(
     }
 }
 
+/// `SmApiBrepComputeVolume` at 1e-12, as the fork printed its values.
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    volume_at(k, b, 1e-12)
+}
+
+/// `SmApiBrepComputeVolume` at `accuracy`.
+fn volume_at(k: &Kernel, b: &mut Brep, accuracy: f64) -> f64 {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-12, &attrs).unwrap()
+    brep_volume(k, b, accuracy, &attrs).unwrap()
 }
+
+/// The accuracy the regression cases' volumes are integrated at: at 1e-9 every body here
+/// lands within 2.3e-12 (relative) of its value at the fork's 1e-12 (measured), in a
+/// twentieth to a fiftieth of the time.
+const PIN_ACCURACY: f64 = 1e-9;
+/// How close (relative) each volume at [`PIN_ACCURACY`] must be to the fork's printed one:
+/// forty times the integration's own spread above, and far below what a different fill,
+/// setback or scale moves (the flag alone moves these by 1.2e-5 to 1.5e-3).
+const PIN_TOL: f64 = 1e-10;
 
 /// Faces, edges and vertices of `b`.
 fn counts(b: &Brep) -> (usize, usize, usize) {
@@ -502,7 +517,7 @@ fn dump_blend_matrix(exact_classes: bool) {
 // face, edge and vertex counts, `SmApiBrepComputeVolume` at 1e-12 (printed to 15
 // digits) and every vertex, which the port matched bit for bit. The values without the
 // flag are the port's pinned corners (difftest gates those), recorded to show the flag is
-// what changes them.
+// what changes them. The volumes are checked at `PIN_ACCURACY`, to `PIN_TOL`.
 
 /// The edges at the box corner (40, 30, 20) of a 40 x 30 x 20 box.
 const UNEQUAL_AT: [[f64; 3]; 3] = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
@@ -534,17 +549,18 @@ fn short(setback: f64) -> SetbackAsk {
 }
 
 /// A built blend: sound (no check lines), its counts and its volume to the fork's printed
-/// 15 digits; the thousandth-search cases are compared by the native executive gate.
+/// value within [`PIN_TOL`]; the thousandth-search cases are compared by the native
+/// executive gate.
 fn built(k: &mut Kernel, r: Blended, counts_want: (usize, usize, usize), volume_want: f64) -> Brep {
     assert_eq!(r.code, 0, "{}", r.comment);
     let mut b = r.body.expect("a body");
     let lines = check_brep(k, &mut b, CheckLevel::Level2).unwrap().lines();
     assert!(lines.is_empty(), "{lines:?}");
     assert_eq!(counts(&b), counts_want);
-    let v = volume(k, &mut b);
+    let v = volume_at(k, &mut b, PIN_ACCURACY);
     println!("  volume {v:.17e}");
     assert!(
-        (v - volume_want).abs() <= 1e-14 * volume_want,
+        (v - volume_want).abs() <= PIN_TOL * volume_want,
         "{v} against {volume_want}"
     );
     b
@@ -572,7 +588,7 @@ fn three_unequal_rounds_are_the_certified_setback_fill() {
     );
     // Local native executive: 23841.674295048841; also agrees with the handoff to 1e-9.
     let mut b = built(&mut k, r, (15, 36, 23), 23841.67429504884);
-    let v = volume(&k, &mut b);
+    let v = volume_at(&k, &mut b, PIN_ACCURACY);
     assert!((v - 23841.674296328).abs() <= 1e-9 * v.abs().max(23841.674296328));
     let mut k = all_fixes(false);
     let r = blend_box(
