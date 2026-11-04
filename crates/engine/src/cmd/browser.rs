@@ -493,16 +493,21 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
 /// bodies named `world` in some placement.
 fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<String> {
     let mut keys = std::collections::BTreeSet::new();
+    if s.visibility.hidden_folders.is_empty() {
+        return keys;
+    }
     let st = s.model.state();
     let names = solidcraft_doc::WorldNames::new(&s.doc, &st);
+    // Each body's component, found once rather than once per placement.
+    let owned: Vec<(u64, &str)> = s.doc.model_body_components(&st).into_iter().zip(st.bodies.iter().map(|b| b.name.as_str())).collect();
     for (component, path, _) in s.doc.placements() {
         let scope = Session::folder_scope(&path);
-        for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == component) {
-            if !world.contains(&names.name(&b.name, component, &path)) {
+        for b in owned.iter().filter(|(c, _)| *c == component).map(|(_, name)| *name) {
+            if !world.contains(&names.name(b, component, &path)) {
                 continue;
             }
             keys.insert(format!("{scope}/bodies"));
-            for g in s.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies" && g.has_item(&b.name)) {
+            for g in s.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies" && g.has_item(b)) {
                 for id in std::iter::successors(Some(g.id), |id| s.doc.browser_group(*id).and_then(|g| g.parent))
                     .take(solidcraft_doc::MAX_GROUP_NESTING + 1)
                 {
