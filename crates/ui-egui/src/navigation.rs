@@ -834,8 +834,11 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 Some(NavMode::Zoom) => {
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
-                    let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
+                    let preset = crate::prefs::nav_preset(&app.preferences.nav);
+                    // Preserve the preset's drag direction when selected; the preference toggles that baseline.
+                    let reversed = preset.reverse_drag_zoom ^ (app.preferences.zoom_reverse != preset.reverse_zoom);
+                    let sign = if reversed { -1.0 } else { 1.0 };
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign).exp(), anchor);
                 }
                 _ => {}
             }
@@ -1946,20 +1949,34 @@ mod tests {
             }
         }
         // The navigation bar's Zoom tool also uses the shared drag handler.
-        for preset in ["fusion", "creo"] {
+        for preset in ["fusion", "creo", "solidworks"] {
             bindings.push((preset, PointerButton::Primary, Modifiers::NONE, true));
         }
         for (preset, button, mods, tool) in bindings {
             for caps in [super::NavCaps::MODEL, super::NavCaps { orbit: false, pick: false }] {
                 for perspective in [false, true] {
                     for reverse in [false, true] {
-                        for dy in [-80.0, 80.0] {
+                        for dy in [80.0, -80.0] {
                             let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-                            crate::prefs::set(&mut app, &json!({"nav":preset, "zoom_reverse":reverse, "zoom_stop_at_model":false})).unwrap();
+                            crate::prefs::choose_nav_preset(&mut app.preferences, crate::prefs::nav_preset(preset));
+                            let selected_reverse = app.preferences.zoom_reverse;
+                            crate::prefs::set(&mut app, &json!({"zoom_reverse":selected_reverse ^ reverse, "zoom_stop_at_model":false})).unwrap();
                             app.ui.perspective = perspective;
                             app.cam.fov = if perspective { 45.0_f64.to_radians() } else { 0.0 };
                             if tool {
                                 app.run("view.tool", json!({"tool":"zoom"})).unwrap();
+                            }
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let evidence = std::env::var_os("SOLIDCRAFT_DRAG_ZOOM_EVIDENCE").is_some()
+                                && preset == "solidworks"
+                                && !tool
+                                && caps == super::NavCaps::MODEL
+                                && !perspective
+                                && dy == 80.0;
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if evidence {
+                                app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+                                save_drag_zoom_evidence(&app, "start");
                             }
                             let before = app.cam;
                             let ctx = crate::fonts::test_context();
@@ -1985,9 +2002,14 @@ mod tests {
                             frame(vec![Event::PointerMoved(to)]);
                             frame(vec![Event::PointerButton { pos: to, button, pressed: false, modifiers: mods }]);
                             frame(Vec::new());
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if evidence {
+                                save_drag_zoom_evidence(&app, if reverse { "toggled" } else { "preset" });
+                                eprintln!("SolidWorks toggle={reverse}: distance {} -> {}", before.distance, app.cam.distance);
+                            }
                             assert!(app.cam.is_valid());
                             assert_ne!(app.cam.distance, before.distance, "the drag must zoom");
-                            // Creo zooms in on a downward drag by default; the preference reverses that too.
+                            // Selecting any preset keeps its old drag direction; toggling Reverse reverses it.
                             let default_zooms_out = if preset == "creo" { dy < 0.0 } else { dy > 0.0 };
                             assert_eq!(
                                 app.cam.distance > before.distance,
@@ -2001,6 +2023,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Optional review capture, drawn by the viewport's actual GPU pipeline.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_drag_zoom_evidence(app: &crate::SolveApp, name: &str) {
+        let dir = std::path::PathBuf::from(std::env::var_os("SOLIDCRAFT_DRAG_ZOOM_EVIDENCE").unwrap());
+        let size = 768;
+        let proj = crate::viewport::projection(app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size as f32, size as f32)));
+        let eye = proj.cam.eye().to_f32();
+        let rgba = crate::gpu::render_offscreen(
+            crate::viewport::build_scene(app),
+            None,
+            proj.vp.to_f32(),
+            proj.cam.back().to_f32(),
+            [eye[0], eye[1], eye[2], 0.0],
+            size,
+            None,
+            [0.0; 8],
+            crate::gpu::analysis_colors(&crate::theme::Tokens::get().analysis),
+        )
+        .expect("evidence capture requires a GPU");
+        std::fs::create_dir_all(&dir).unwrap();
+        image::save_buffer(dir.join(format!("{name}.png")), &rgba, size, size, image::ColorType::Rgba8).unwrap();
     }
 
     #[test]

@@ -92,7 +92,8 @@ pub struct NavPreset {
     pub help: &'static str,
     /// Choosing the preset turns the wheel the other way.
     pub reverse_zoom: bool,
-    /// Dragging down zooms in instead of out (independent of the wheel preference).
+    /// The selected preset's drag direction: down zooms in instead of out.
+    /// Toggling Reverse zoom direction reverses this baseline too.
     pub reverse_drag_zoom: bool,
     /// Choosing the preset sets what a middle double-click does (`None` leaves it as it is).
     pub middle_double_click: Option<&'static str>,
