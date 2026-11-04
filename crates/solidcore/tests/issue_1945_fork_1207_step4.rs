@@ -244,7 +244,16 @@ fn edge_by(k: &Kernel, b: &Brep, pts: &[[f64; 3]; 5]) -> EdgeId {
 }
 
 fn run(nd_fix: bool) -> (usize, usize, usize, f64, Vec<String>) {
+    run_memo(nd_fix, None)
+}
+
+/// [`run`] with `Kernel::memoize_curve_caches` set to `memo` (left at its default for
+/// `None`).
+fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<String>) {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
+    if let Some(memo) = memo {
+        k.memoize_curve_caches = memo;
+    }
     sc_fixes(&mut k);
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.oscillating_skips_failed_guesses = nd_fix;
@@ -332,4 +341,19 @@ fn step4_round_upstream_solve_keeps_short_trim_span() {
             .any(|l| l.contains("#15") || l.contains("Repeated CPts") || l.contains("#13")),
         "{lines:#?}"
     );
+}
+
+/// #2568: the check's curve analysis shortcuts change no report. Without the fix the
+/// body has a straight UV trim on which the radius search returns a radius of 0 (its
+/// objective fails to evaluate there); the shortcut once skipped that search and lost
+/// the report.
+#[test]
+fn step4_checks_the_same_with_and_without_the_curve_analysis_shortcuts() {
+    for nd_fix in [false, true] {
+        let full = run_memo(nd_fix, Some(false));
+        let fast = run_memo(nd_fix, Some(true));
+        assert_eq!(fast.4, full.4, "nd_fix {nd_fix}");
+        assert_eq!((fast.0, fast.1, fast.2), (full.0, full.1, full.2));
+        assert_eq!(fast.3.to_bits(), full.3.to_bits());
+    }
 }

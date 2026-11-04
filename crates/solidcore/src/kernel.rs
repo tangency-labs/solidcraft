@@ -130,11 +130,16 @@ impl Rng {
 
 /// Memoisation caches owned by a [`Kernel`] (upstream `SmCacheMgr*`).
 ///
-/// Empty until the cache units are ported; clearing must never change results, only
-/// speed.
+/// Clearing must never change results, only speed.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct Caches {}
+pub struct Caches {
+    /// Not upstream (#2568): the results of `SmBSplineCurve::AssertValid`'s global
+    /// property analyses by the exact content of their inputs, so a curve checked again
+    /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
+    /// it takes (the kernel stays `Send`; it is not shared between threads).
+    pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+}
 
 impl Caches {
     /// Drops all cached data.

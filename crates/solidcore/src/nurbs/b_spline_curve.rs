@@ -6,6 +6,7 @@
 //! The file is split over several plan units (`nurbs.b_spline_curve_p1`, `_p2`, ...);
 //! each lives in its own submodule and adds methods to [`BSplineCurve`].
 
+pub(crate) mod analysis;
 pub mod p1;
 pub mod p2;
 pub mod p3;

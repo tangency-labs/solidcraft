@@ -113,6 +113,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_curve::analysis::{analysis_key, curve_bounds, BOUND_MARGIN};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -259,7 +260,63 @@ impl SolutionObject for SelfCurve {
 /// solutions' start ends (including any partial solutions found before a failure, as
 /// upstream's `rSolutionArray`); [`SolidError::Unported`] and
 /// [`SolidError::Cancelled`] are passed on.
+///
+/// Not upstream (#2568): with `Kernel::memoize_curve_caches`, the result is kept in the
+/// kernel's [`AnalysisMemo`](crate::nurbs::b_spline_curve::analysis::AnalysisMemo) by the
+/// exact content of its inputs (the curve, the interval, the property, the separation,
+/// the kernel's tolerances and fixes), and a curve analysed before gets its result again.
 fn global_property_analysis(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    domain: &Extent1d,
+    property: CurveProperty,
+    min_sep: f64,
+) -> Result<(bool, Vec<SolutionEnd>)> {
+    let key = if k.memoize_curve_caches {
+        analysis_key(
+            curve,
+            domain.min(),
+            domain.max(),
+            property as u64,
+            min_sep,
+            &analysis_settings(k),
+        )
+    } else {
+        None
+    };
+    if let Some(key) = &key {
+        if let Some(hit) = k
+            .caches
+            .curve_analysis
+            .try_borrow()
+            .ok()
+            .and_then(|memo| memo.get(key))
+        {
+            return Ok(hit);
+        }
+    }
+    let result = global_property_analysis_run(k, curve, domain, property, min_sep)?;
+    if let (Some(key), Ok(mut memo)) = (key, k.caches.curve_analysis.try_borrow_mut()) {
+        memo.insert(key, result.clone());
+    }
+    Ok(result)
+}
+
+/// The kernel settings an analysis depends on, for [`analysis_key`]: its tolerances (by
+/// their debug text, which writes each double so that it reads back exactly) and its
+/// fixes.
+fn analysis_settings(k: &Kernel) -> Vec<u64> {
+    let mut settings: Vec<u64> = format!("{:?}", k.tolerances)
+        .bytes()
+        .map(u64::from)
+        .collect();
+    settings.push(u64::MAX);
+    settings.extend(k.fixes.flags().map(|(_, on)| u64::from(on)));
+    settings
+}
+
+/// [`global_property_analysis`] without the memo.
+fn global_property_analysis_run(
     k: &Kernel,
     curve: &BSplineCurve,
     domain: &Extent1d,
@@ -1688,7 +1745,16 @@ impl BSplineCurve {
                 5.0
             };
 
-            let solutions = if sized {
+            // Not upstream (#2568): where the curve's speed is bounded above the tolerance
+            // the search cannot report, and is not run (`analysis`; off without
+            // `Kernel::memoize_curve_caches`, and with `query_statuses_pass_on`, which
+            // reports the search's own status)
+            let shortcut = k.memoize_curve_caches && !k.fixes.query_statuses_pass_on;
+            let bounds = if shortcut { curve_bounds(cur) } else { None };
+            let speed_clear = bounds.is_some_and(|b| b.speed >= tol * BOUND_MARGIN);
+            let solutions = if sized && speed_clear {
+                Vec::new()
+            } else if sized {
                 let (first_derivs_ok, sols) = global_property_analysis(
                     k,
                     self,
@@ -1792,7 +1858,22 @@ impl BSplineCurve {
 
             // Another type of kink check: vanishing radius of curvature.
             let mut radii = false;
-            let solutions = if radius_sized {
+            // Not upstream (#2568): the search's solutions only reach a report through
+            // `bspline_check_min_radius` (below); without it, or where the radius is
+            // bounded above the tolerance and the search's objective evaluates everywhere
+            // (a failed evaluation is returned as a radius of 0), it cannot report and is
+            // not run
+            let radius_clear = shortcut
+                && (!k.fixes.bspline_check_min_radius
+                    || match mapped.as_ref() {
+                        None => bounds,
+                        Some(m) => m.nurb.as_ref().and_then(curve_bounds),
+                    }
+                    .is_some_and(|b| b.radius_clears(radius_tol)));
+            let solutions = if radius_sized && radius_clear {
+                radii = true;
+                Vec::new()
+            } else if radius_sized {
                 let (radii_ok, sols) = global_property_analysis(
                     k,
                     copy_curve,
