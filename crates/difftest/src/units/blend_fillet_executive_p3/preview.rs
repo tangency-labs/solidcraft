@@ -91,10 +91,8 @@ pub(super) fn cpp(input: &FilletPreview) -> Result<Output, HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
-        SolidError::Upstream { code, .. } | SolidError::FilletRefused { code, .. } => {
-            f64::from(*code)
-        }
-        _ => -1.0,
+        // every error carrying its exact C++ status (SolidError::sm_status)
+        e => e.sm_status().map_or(-1.0, f64::from),
     }
 }
 

@@ -673,13 +673,12 @@ fn point(out: &mut Vec<f64>, p: Vec3) {
 pub(super) fn status(error: SolidError) -> SolidResult<f64> {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
-        // a refusal naming the size that builds is the same status (SolidError::sm_status)
-        SolidError::Upstream { code, .. } | SolidError::FilletRefused { code, .. } => {
-            Ok(f64::from(code))
-        }
-        // a failure in solidcore's terms (#2615; a shell's): its C++ comparison status
-        e @ SolidError::Failed(_) => Ok(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))),
-        error => Err(error),
+        // every error carrying its exact C++ status (an upstream status, a typed refusal of
+        // an edge, a corner or a size, a failure in solidcore's terms) is that status
+        error => match error.sm_status() {
+            Some(code) => Ok(f64::from(code)),
+            None => Err(error),
+        },
     }
 }
 pub(super) fn sample(out: &mut Vec<f64>, value: SolidResult<Vec3>) -> SolidResult<()> {

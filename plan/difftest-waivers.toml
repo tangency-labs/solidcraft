@@ -107,3 +107,39 @@ unit = "offset.offset_executive_p2"
 check = "ratchet"
 case = "tiny_tolerance_sheet_above_boundary"
 reason = "#2393, WR-749 (confirmed): as tiny_tolerance_sheet_exact_boundary"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "fuzz00087"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "empty_static_offset_negative_zero_not_success"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0075"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0178"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0186"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0212"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"

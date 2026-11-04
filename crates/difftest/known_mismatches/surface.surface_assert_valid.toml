@@ -1,0 +1,19 @@
+# Known mismatches of surface.surface_assert_valid (format: crates/difftest/src/known.rs).
+
+[[mismatch]]
+unit = "surface.surface_assert_valid"
+case = "gen0528"
+cpp_defect = "WR-737"
+why = "WR-737 (addendum 2026-11-04, five sweep cases): the C++ emits SmBSplineSurface test #5 on a collapsed row whose steps are one ulp of the coordinates, inside the rounding bound; solidcore emits the case's other reports and not that one"
+
+[[mismatch]]
+unit = "surface.surface_assert_valid"
+case = "ovf0160"
+cpp_defect = "WR-737"
+why = "WR-737 (addendum 2026-11-04, five sweep cases): the C++ emits SmBSplineSurface test #5 on a collapsed row whose steps are one ulp of the coordinates, inside the rounding bound; solidcore emits the case's other reports and not that one"
+
+[[mismatch]]
+unit = "surface.surface_assert_valid"
+case = "ovf0276"
+cpp_defect = "WR-737"
+why = "WR-737 (addendum 2026-11-04, five sweep cases): the C++ emits SmBSplineSurface test #5 on a collapsed row whose steps are one ulp of the coordinates, inside the rounding bound; solidcore emits the case's other reports and not that one"

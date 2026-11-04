@@ -904,9 +904,12 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
             }
             match error {
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-                // a refusal naming the size that builds is the same status
-                SolidError::Upstream { code, .. } | SolidError::FilletRefused { code, .. } => code,
-                other => return Err(HarnessError::new(other.to_string())),
+                // every error carrying its exact C++ status (an upstream status, a typed
+                // refusal of an edge, a corner or a size, a failure in solidcore's terms)
+                other => match other.sm_status() {
+                    Some(code) => code,
+                    None => return Err(HarnessError::new(other.to_string())),
+                },
             }
         }
     };
