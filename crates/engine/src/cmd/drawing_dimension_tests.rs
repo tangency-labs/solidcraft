@@ -1314,10 +1314,9 @@ fn reopening_a_plate_keeps_dimensions_and_a_lost_bores_last_value() {
         assert_eq!(bore2["record"]["text"], second["record"]["text"], "{state}: Bore2 label moved");
         reads(&bore2, 10.0, "Ø10.00");
         match state {
-            "unchanged" => reads(&bore1, 10.0, "Ø10.00"),
             "resized" => reads(&bore1, 12.0, "Ø12.00"),
             "deleted" => reads_lost_bore(&bore1),
-            _ => unreachable!(),
+            _ => reads(&bore1, 10.0, "Ø10.00"),
         }
     }
 }
