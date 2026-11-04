@@ -334,7 +334,11 @@ fn read_session(
     let mut s = Session::default();
     s.param_check = check;
     s.set_validation(validation);
-    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) || solidcraft_engine::io::is_point_cloud_path(path) {
+    if solidcraft_engine::io::is_step_path(path)
+        || solidcraft_engine::io::is_mesh_path(path)
+        || solidcraft_engine::io::is_point_cloud_path(path)
+        || solidcraft_engine::io::is_native_cad_path(path)
+    {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         return Ok(s);
     }

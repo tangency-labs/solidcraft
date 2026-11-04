@@ -1565,22 +1565,42 @@ fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
 /// lines, circles and ellipses (their exact extreme points), the leader's hull for an
 /// intersection curve.
 fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
-    match c {
-        Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => {
-            if let Ok(e) = solidcraft_geom::brep::eval::CurveEval::new(c) {
-                let [t0, t1] = interval;
-                for i in 0..=16 {
-                    if let Some(p) = e.point(t0 + (t1 - t0) * f64::from(i) / 16.0) {
-                        b.add(p);
-                    }
+    let sample_interval = |b: &mut Aabb3| {
+        if let Ok(e) = solidcraft_geom::brep::eval::CurveEval::new(c) {
+            let [t0, t1] = interval;
+            for i in 0..=16 {
+                if let Some(p) = e.point(t0 + (t1 - t0) * f64::from(i) / 16.0) {
+                    b.add(p);
                 }
             }
         }
-        Curve::Polyline { points } | Curve::Spline { points, .. } => points.iter().for_each(|p| b.add(v3(*p))),
-        Curve::RationalSpline { homogeneous, .. } => {
-            for h in homogeneous {
-                if h[3] > 0.0 {
-                    b.add(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+    };
+    let is_trimmed = |knots: &[f64]| {
+        let [t0, t1] = interval;
+        let span = (t1 - t0).abs();
+        match (knots.first(), knots.last()) {
+            (Some(&k0), Some(&k1)) => span > 0.0 && (k1 - k0).abs() > span * 1.25,
+            _ => false,
+        }
+    };
+    match c {
+        Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => sample_interval(b),
+        Curve::Polyline { points } => points.iter().for_each(|p| b.add(v3(*p))),
+        Curve::Spline { knots, points, .. } => {
+            if is_trimmed(knots) {
+                sample_interval(b);
+            } else {
+                points.iter().for_each(|p| b.add(v3(*p)));
+            }
+        }
+        Curve::RationalSpline { knots, homogeneous, .. } => {
+            if is_trimmed(knots) {
+                sample_interval(b);
+            } else {
+                for h in homogeneous {
+                    if h[3] > 0.0 {
+                        b.add(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+                    }
                 }
             }
         }

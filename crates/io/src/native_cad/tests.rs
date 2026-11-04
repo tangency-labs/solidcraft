@@ -30,7 +30,11 @@ fn imports_the_block(bytes: &[u8], file: &str) {
 #[test]
 fn extensions() {
     assert!(is_native_cad_path("a/Part.FCStd") && is_native_cad_path("x.3DM") && is_native_cad_path("y.fcstd"));
-    for other in ["c.sat", "c.sab", "c.smt", "c.smb", "c.f3d", "c.sldprt", "c.step", "fcstd"] {
+    #[cfg(feature = "f3d")]
+    assert!(is_native_cad_path("c.f3d") && is_native_cad_path("c.F3Z"));
+    #[cfg(not(feature = "f3d"))]
+    assert!(!is_native_cad_path("c.f3d"));
+    for other in ["c.sat", "c.sab", "c.smt", "c.smb", "c.sldprt", "c.step", "fcstd"] {
         assert!(!is_native_cad_path(other), "{other}");
     }
     assert!(crate::is_step_path("c.FCStd") && crate::is_step_path("c.3dm"), "read as an Import feature like STEP and IGES");

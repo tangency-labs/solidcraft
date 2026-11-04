@@ -1,0 +1,23 @@
+From a47b2cc3a60052cf2d82018313733f054bc664d8 Mon Sep 17 00:00:00 2001
+From: Alastair D'Silva <alastair@d-silva.org>
+Date: Sun, 1 Nov 2026 22:40:47 +1100
+Subject: [PATCH 2/9] fix(derivers): relax syn dependency requirement to ^3.0
+
+---
+ truck-derivers/Cargo.toml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/truck-derivers/Cargo.toml b/truck-derivers/Cargo.toml
+index f9898594..3c157679 100644
+--- a/truck-derivers/Cargo.toml
++++ b/truck-derivers/Cargo.toml
+@@ -13,5 +13,5 @@ proc-macro = true
+ [dependencies]
+ quote = "1.0.47"
+ proc-macro2 = "1.0.107"
+-syn = { version = "3.0.9", features = ["derive", "printing"] }
++syn = { version = "3.0", features = ["derive", "printing"] }
+ proc-macro-error = "1.0.4"
+-- 
+2.53.0
+

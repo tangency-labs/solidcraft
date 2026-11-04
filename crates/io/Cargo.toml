@@ -11,10 +11,12 @@ workspace = true
 [features]
 # Tests only: trust a model cache even when the build has no git commit.
 trust-unknown-source = []
+f3d = ["cadmpeg-registry/f3d"]
 
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-profile = { workspace = true }

@@ -82,9 +82,9 @@ gethostname = "1"
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
 # and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
-cadmpeg-core = "=0.6.7"
-cadmpeg-ir = "=0.6.7"
-cadmpeg-registry = { version = "=0.6.7", default-features = false, features = ["fcstd", "rhino", "step"] }
+cadmpeg-core = "=0.6.8"
+cadmpeg-ir = "=0.6.8"
+cadmpeg-registry = { version = "=0.6.8", default-features = false, features = ["fcstd", "rhino", "step"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
@@ -156,9 +156,10 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
-
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]
+# F3D timeline profile selection, shell direction, and history provenance fixes pending next cadmpeg release.
+cadmpeg-codec-f3d = { path = "vendor/cadmpeg-codec-f3d" }
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
 

@@ -1,0 +1,546 @@
+From 5ac0f561dfe29e3488c4944e9a8100923b8a4150 Mon Sep 17 00:00:00 2001
+From: Alastair D'Silva <alastair@d-silva.org>
+Date: Mon, 2 Nov 2026 00:52:36 +1100
+Subject: [PATCH 7/9] fix(modeling): restore primitive shapes, compressed
+ topology re-exports, and generic builder vertices
+
+Signed-off-by: Alastair D'Silva <alastair@d-silva.org>
+Assisted-by: Antigravity <antigravity@google.com>
+---
+ truck-modeling/examples/bottle.rs             |   2 +-
+ truck-modeling/examples/cone.rs               |   2 +-
+ truck-modeling/examples/cylinder.rs           |   2 +-
+ truck-modeling/examples/punched-cube.rs       |   2 -
+ truck-modeling/examples/sphere.rs             |   4 +-
+ truck-modeling/examples/torus-punched-cube.rs |   3 +-
+ truck-modeling/examples/torus.rs              |   3 +-
+ truck-modeling/examples/tsudumi.rs            |   2 +-
+ truck-modeling/src/builder.rs                 |  11 +-
+ truck-modeling/src/geometry.rs                |  82 +++++++++++++-
+ truck-modeling/src/lib.rs                     |  14 ++-
+ truck-modeling/src/primitive.rs               |  34 +++---
+ truck-modeling/tests/geometry.rs              |   8 +-
+ truck-modeling/tests/topo_traits.rs           | 101 +++++++++---------
+ 14 files changed, 178 insertions(+), 92 deletions(-)
+
+diff --git a/truck-modeling/examples/bottle.rs b/truck-modeling/examples/bottle.rs
+index 9056b0d1..2fd32f4b 100644
+--- a/truck-modeling/examples/bottle.rs
++++ b/truck-modeling/examples/bottle.rs
+@@ -25,7 +25,7 @@ fn body_shell(bottom: f64, height: f64, width: f64, thickness: f64) -> Shell {
+ 
+ fn cylinder(bottom: f64, height: f64, radius: f64) -> Shell {
+     let vertex = builder::vertex(Point3::new(0.0, bottom, radius));
+-    let circle = builder::rsweep(&vertex, Point3::origin(), Vector3::unit_y(), Rad(7.0), 2);
++    let circle = builder::rsweep(&vertex, Point3::origin(), Vector3::unit_y(), Rad(7.0));
+     let disk = builder::try_attach_plane(&[circle]).unwrap();
+     let solid = builder::tsweep(&disk, Vector3::new(0.0, height, 0.0));
+     solid.into_boundaries().pop().unwrap()
+diff --git a/truck-modeling/examples/cone.rs b/truck-modeling/examples/cone.rs
+index bb7b5b4a..e0831c9a 100644
+--- a/truck-modeling/examples/cone.rs
++++ b/truck-modeling/examples/cone.rs
+@@ -9,7 +9,7 @@ fn main() {
+     let v1 = builder::vertex(Point3::new(0.0, -0.5, 0.5));
+     let v2 = builder::vertex(Point3::new(0.0, -0.5, 0.0));
+     let wire: Wire = vec![builder::line(&v0, &v1), builder::line(&v1, &v2)].into();
+-    let shell = builder::cone(&wire, Vector3::unit_y(), Rad(7.0), 4);
++    let shell = builder::cone(&wire, Vector3::unit_y(), Rad(7.0));
+     let cone = Solid::new(vec![shell]);
+     let json = serde_json::to_vec_pretty(&cone).unwrap();
+     std::fs::write("cone.json", json).unwrap();
+diff --git a/truck-modeling/examples/cylinder.rs b/truck-modeling/examples/cylinder.rs
+index f6b79d26..679c1b4e 100644
+--- a/truck-modeling/examples/cylinder.rs
++++ b/truck-modeling/examples/cylinder.rs
+@@ -6,7 +6,7 @@ use truck_modeling::*;
+ 
+ fn cylinder(height: f64, radius: f64) -> Solid {
+     let vertex = builder::vertex(Point3::new(0.0, -height / 2.0, radius));
+-    let circle = builder::rsweep(&vertex, Point3::origin(), Vector3::unit_y(), Rad(7.0), 2);
++    let circle = builder::rsweep(&vertex, Point3::origin(), Vector3::unit_y(), Rad(7.0));
+     let disk = builder::try_attach_plane(&[circle]).unwrap();
+ 
+     builder::tsweep(&disk, Vector3::new(0.0, height, 0.0))
+diff --git a/truck-modeling/examples/punched-cube.rs b/truck-modeling/examples/punched-cube.rs
+index bb2fb009..0f07fb00 100644
+--- a/truck-modeling/examples/punched-cube.rs
++++ b/truck-modeling/examples/punched-cube.rs
+@@ -15,7 +15,6 @@ fn main() {
+         Point3::origin(),
+         Vector3::unit_z(),
+         Rad(std::f64::consts::PI / 2.0),
+-        2,
+     );
+     let edge2 = builder::tsweep(wire1.back_vertex().unwrap(), Vector3::new(0.2, -0.2, 0.0));
+     let mut wire3 = builder::rsweep(
+@@ -23,7 +22,6 @@ fn main() {
+         Point3::origin(),
+         Vector3::unit_z(),
+         Rad(std::f64::consts::PI / 2.0),
+-        2,
+     );
+     let back_edge = wire3.pop_back().unwrap();
+     let tmp = Edge::new(back_edge.front(), edge0.front(), back_edge.curve());
+diff --git a/truck-modeling/examples/sphere.rs b/truck-modeling/examples/sphere.rs
+index 18415eae..7262ce32 100644
+--- a/truck-modeling/examples/sphere.rs
++++ b/truck-modeling/examples/sphere.rs
+@@ -7,8 +7,8 @@ use truck_modeling::*;
+ 
+ fn main() {
+     let v0 = builder::vertex(Point3::new(0.0, 0.5, 0.0));
+-    let wire: Wire = builder::rsweep(&v0, Point3::origin(), Vector3::unit_x(), Rad(PI), 3);
+-    let shell = builder::cone(&wire, Vector3::unit_y(), Rad(7.0), 4);
++    let wire: Wire = builder::rsweep(&v0, Point3::origin(), Vector3::unit_x(), Rad(PI));
++    let shell = builder::cone(&wire, Vector3::unit_y(), Rad(7.0));
+     let sphere = Solid::new(vec![shell]);
+     let json = serde_json::to_vec_pretty(&sphere).unwrap();
+     std::fs::write("sphere.json", json).unwrap();
+diff --git a/truck-modeling/examples/torus-punched-cube.rs b/truck-modeling/examples/torus-punched-cube.rs
+index a26155e4..2912ce27 100644
+--- a/truck-modeling/examples/torus-punched-cube.rs
++++ b/truck-modeling/examples/torus-punched-cube.rs
+@@ -20,9 +20,8 @@ fn torus_shell() -> Shell {
+         Point3::new(0.5, 0.0, 0.5),
+         -Vector3::unit_y(),
+         Rad(2.0 * PI),
+-        2,
+     );
+-    builder::rsweep(&w, Point3::origin(), Vector3::unit_z(), Rad(PI / 2.0), 1)
++    builder::rsweep(&w, Point3::origin(), Vector3::unit_z(), Rad(PI / 2.0))
+ }
+ 
+ fn find_cube_face(cube_shell: &mut Shell, normal: Vector3) -> Option<&mut Face> {
+diff --git a/truck-modeling/examples/torus.rs b/truck-modeling/examples/torus.rs
+index f8078f64..f9bddb2c 100644
+--- a/truck-modeling/examples/torus.rs
++++ b/truck-modeling/examples/torus.rs
+@@ -11,9 +11,8 @@ fn modeling(radius0: f64, radius1: f64) -> Solid {
+         Point3::new(radius0, 0.0, 0.0),
+         Vector3::unit_y(),
+         Rad(7.0),
+-        2,
+     );
+-    let shell = builder::rsweep(&w, Point3::origin(), Vector3::unit_z(), Rad(7.0), 2);
++    let shell = builder::rsweep(&w, Point3::origin(), Vector3::unit_z(), Rad(7.0));
+     Solid::new(vec![shell])
+ }
+ 
+diff --git a/truck-modeling/examples/tsudumi.rs b/truck-modeling/examples/tsudumi.rs
+index 317fea38..205c3295 100644
+--- a/truck-modeling/examples/tsudumi.rs
++++ b/truck-modeling/examples/tsudumi.rs
+@@ -8,7 +8,7 @@ fn main() {
+     let v0 = builder::vertex(Point3::new(1.0, 1.0, 0.0));
+     let v1 = builder::vertex(Point3::new(0.0, -1.0, 1.0));
+     let line = builder::line(&v0, &v1);
+-    let mut shell = builder::rsweep(&line, Point3::origin(), Vector3::unit_y(), Rad(7.0), 2);
++    let mut shell = builder::rsweep(&line, Point3::origin(), Vector3::unit_y(), Rad(7.0));
+     let wires = shell.extract_boundaries();
+     shell.push(
+         builder::try_attach_plane(&[wires[0].clone()])
+diff --git a/truck-modeling/src/builder.rs b/truck-modeling/src/builder.rs
+index 0e4fda58..8c4e1d70 100644
+--- a/truck-modeling/src/builder.rs
++++ b/truck-modeling/src/builder.rs
+@@ -12,7 +12,16 @@ const PI: Rad<f64> = Rad(std::f64::consts::PI);
+ /// # assert_eq!(vertex.point(), Point3::new(1.0, 2.0, 3.0));
+ /// ```
+ #[inline(always)]
+-pub fn vertex(pt: Point3) -> Vertex { Vertex::new(pt) }
++pub fn vertex<P: Into<Point3>>(pt: P) -> Vertex { Vertex::new(pt.into()) }
++
++/// Creates and returns vertices by three dimensional points.
++#[inline(always)]
++pub fn vertices<P: Into<Point3>>(points: impl IntoIterator<Item = P>) -> Vec<Vertex> {
++    points
++        .into_iter()
++        .map(|p| Vertex::new(p.into()))
++        .collect()
++}
+ 
+ /// Returns a line from `vertex0` to `vertex1`.
+ /// # Examples
+diff --git a/truck-modeling/src/geometry.rs b/truck-modeling/src/geometry.rs
+index cdd637cd..19dd648b 100644
+--- a/truck-modeling/src/geometry.rs
++++ b/truck-modeling/src/geometry.rs
+@@ -250,13 +250,27 @@ impl IncludeCurve<Curve> for Surface {
+                 Curve::IntersectionCurve(_) => unimplemented!(),
+             },
+             Surface::RevolutedCurve(surface) => match surface.entity_curve() {
+-                Curve::Line(curve) => self.include(&Curve::BSplineCurve(curve.to_bspline())),
++                Curve::Line(entity_curve) => {
++                    let rev = RevolutedCurve::by_revolution(
++                        BSplineCurve::from(*entity_curve),
++                        surface.origin(),
++                        surface.axis(),
++                    );
++                    let surface = Processor::with_transform(rev, *surface.transform());
++                    match curve {
++                        Curve::Line(curve) => surface.include(&curve.to_bspline()),
++                        Curve::BSplineCurve(curve) => surface.include(curve),
++                        Curve::NurbsCurve(curve) => surface.include(curve),
++                        Curve::IntersectionCurve(_) => unimplemented!(),
++                    }
++                }
+                 Curve::BSplineCurve(entity_curve) => {
+-                    let surface = RevolutedCurve::by_revolution(
+-                        entity_curve,
++                    let rev = RevolutedCurve::by_revolution(
++                        entity_curve.clone(),
+                         surface.origin(),
+                         surface.axis(),
+                     );
++                    let surface = Processor::with_transform(rev, *surface.transform());
+                     match curve {
+                         Curve::Line(curve) => surface.include(&curve.to_bspline()),
+                         Curve::BSplineCurve(curve) => surface.include(curve),
+@@ -265,11 +279,12 @@ impl IncludeCurve<Curve> for Surface {
+                     }
+                 }
+                 Curve::NurbsCurve(entity_curve) => {
+-                    let surface = RevolutedCurve::by_revolution(
+-                        entity_curve,
++                    let rev = RevolutedCurve::by_revolution(
++                        entity_curve.clone(),
+                         surface.origin(),
+                         surface.axis(),
+                     );
++                    let surface = Processor::with_transform(rev, *surface.transform());
+                     match curve {
+                         Curve::Line(curve) => surface.include(&curve.to_bspline()),
+                         Curve::BSplineCurve(curve) => surface.include(curve),
+@@ -310,3 +325,60 @@ impl SearchNearestParameter<D2> for Surface {
+         }
+     }
+ }
++
++impl ToSameGeometry<Curve> for Line<Point3> {
++    #[inline]
++    fn to_same_geometry(&self) -> Curve { Curve::from(*self) }
++}
++
++impl ToSameGeometry<Curve> for Processor<TrimmedCurve<UnitCircle<Point3>>, Matrix4> {
++    #[inline]
++    fn to_same_geometry(&self) -> Curve { Curve::NurbsCurve(self.to_same_geometry()) }
++}
++
++impl ToSameGeometry<Curve> for BSplineCurve<Point3> {
++    #[inline]
++    fn to_same_geometry(&self) -> Curve { Curve::from(self.clone()) }
++}
++
++impl ToSameGeometry<Surface> for Plane {
++    fn to_same_geometry(&self) -> Surface { (*self).into() }
++}
++
++impl ToSameGeometry<Surface> for RevolutedCurve<Curve> {
++    fn to_same_geometry(&self) -> Surface { Surface::RevolutedCurve(Processor::new(self.clone())) }
++}
++
++impl ToSameGeometry<Surface> for HomotopySurface<Curve, Curve> {
++    fn to_same_geometry(&self) -> Surface {
++        let curve0 = self.curve0().clone().lift_up();
++        let curve1 = self.curve1().clone().lift_up();
++        NurbsSurface::new(BSplineSurface::homotopy(curve0, curve1)).into()
++    }
++}
++
++impl ToSameGeometry<Surface> for ExtrudedCurve<Curve, Vector3> {
++    fn to_same_geometry(&self) -> Surface {
++        let (curve0, vector) = (self.entity_curve(), self.extruding_vector());
++        let trsl = Matrix4::from_translation(vector);
++        let curve1 = self.entity_curve().transformed(trsl);
++        match (curve0, curve1) {
++            (Curve::Line(line), Curve::Line(_)) => {
++                Plane::new(line.0, line.1, line.0 + vector).into()
++            }
++            (Curve::BSplineCurve(curve0), Curve::BSplineCurve(curve1)) => {
++                BSplineSurface::homotopy(curve0.clone(), curve1.clone()).into()
++            }
++            (Curve::NurbsCurve(curve0), Curve::NurbsCurve(curve1)) => {
++                NurbsSurface::new(BSplineSurface::homotopy(
++                    curve0.clone().into_non_rationalized(),
++                    curve1.clone().into_non_rationalized(),
++                ))
++                .into()
++            }
++            (Curve::IntersectionCurve(_), Curve::IntersectionCurve(_)) => unimplemented!(),
++            _ => unreachable!(),
++        }
++    }
++}
++
+diff --git a/truck-modeling/src/lib.rs b/truck-modeling/src/lib.rs
+index 8b1d9b02..ec2a7522 100644
+--- a/truck-modeling/src/lib.rs
++++ b/truck-modeling/src/lib.rs
+@@ -18,7 +18,8 @@
+ /// re-export `truck_base`.
+ pub mod base {
+     pub use truck_base::{
+-        assert_near, assert_near2, bounding_box::BoundingBox, cgmath64::*, tolerance::*,
++        assert_near, assert_near2, bounding_box::BoundingBox, cgmath64::*, prop_assert_near,
++        prop_assert_near2, tolerance::*,
+     };
+     pub use truck_geotrait::*;
+ }
+@@ -52,6 +53,15 @@ pub mod topology {
+     pub type FaceID = truck_topology::FaceID<Surface>;
+ 
+     pub use truck_topology::shell::ShellCondition;
++    pub use truck_topology::compress::*;
++    /// Serialized compressed edge
++    pub type CompressedEdge = truck_topology::compress::CompressedEdge<Curve>;
++    /// Serialized compressed face
++    pub type CompressedFace = truck_topology::compress::CompressedFace<Surface>;
++    /// Serialized compressed shell
++    pub type CompressedShell = truck_topology::compress::CompressedShell<Point3, Curve, Surface>;
++    /// Serialized compressed solid
++    pub type CompressedSolid = truck_topology::compress::CompressedSolid<Point3, Curve, Surface>;
+ }
+ pub use topology::*;
+ 
+@@ -160,5 +170,7 @@ pub mod errors;
+ mod geom_impls;
+ mod mapped;
+ mod multi_sweep;
++/// primitive shapes
++pub mod primitive;
+ mod sweep;
+ mod topo_impls;
+diff --git a/truck-modeling/src/primitive.rs b/truck-modeling/src/primitive.rs
+index e289217b..cbce4986 100644
+--- a/truck-modeling/src/primitive.rs
++++ b/truck-modeling/src/primitive.rs
+@@ -51,11 +51,12 @@ where Line<Point3>: ToSameGeometry<C> {
+         plane.subs(max.x, max.y),
+         plane.subs(min.x, max.y),
+     ]);
++    let line = |v0: &Vertex<Point3>, v1: &Vertex<Point3>| Edge::new(v0, v1, Line(v0.point(), v1.point()).to_same_geometry());
+     wire![
+-        builder::line(&v[0], &v[1]),
+-        builder::line(&v[1], &v[2]),
+-        builder::line(&v[2], &v[3]),
+-        builder::line(&v[3], &v[0]),
++        line(&v[0], &v[1]),
++        line(&v[1], &v[2]),
++        line(&v[2], &v[3]),
++        line(&v[3], &v[0]),
+     ]
+ }
+ 
+@@ -148,19 +149,20 @@ where
+         (q.x, q.y, q.z),
+         (p.x, q.y, q.z),
+     ]);
++    let line = |v0: &Vertex<Point3>, v1: &Vertex<Point3>| Edge::new(v0, v1, Line(v0.point(), v1.point()).to_same_geometry());
+     let e = [
+-        builder::line(&v[0], &v[1]),
+-        builder::line(&v[1], &v[2]),
+-        builder::line(&v[2], &v[3]),
+-        builder::line(&v[3], &v[0]),
+-        builder::line(&v[0], &v[4]),
+-        builder::line(&v[1], &v[5]),
+-        builder::line(&v[2], &v[6]),
+-        builder::line(&v[3], &v[7]),
+-        builder::line(&v[4], &v[5]),
+-        builder::line(&v[5], &v[6]),
+-        builder::line(&v[6], &v[7]),
+-        builder::line(&v[7], &v[4]),
++        line(&v[0], &v[1]),
++        line(&v[1], &v[2]),
++        line(&v[2], &v[3]),
++        line(&v[3], &v[0]),
++        line(&v[0], &v[4]),
++        line(&v[1], &v[5]),
++        line(&v[2], &v[6]),
++        line(&v[3], &v[7]),
++        line(&v[4], &v[5]),
++        line(&v[5], &v[6]),
++        line(&v[6], &v[7]),
++        line(&v[7], &v[4]),
+     ];
+ 
+     let wire0 = wire![
+diff --git a/truck-modeling/tests/geometry.rs b/truck-modeling/tests/geometry.rs
+index 6d3a938b..74b02e1b 100644
+--- a/truck-modeling/tests/geometry.rs
++++ b/truck-modeling/tests/geometry.rs
+@@ -51,7 +51,7 @@ fn plane_xy() -> Plane {
+     )
+ }
+ 
+-fn intersection() -> IntersectionCurve<BSplineCurve<Point3>, Surface, Surface> {
++fn intersection() -> IntersectionCurve<Leader, Surface> {
+     IntersectionCurve::new(
+         plane_xy().into(),
+         Plane::new(
+@@ -60,7 +60,7 @@ fn intersection() -> IntersectionCurve<BSplineCurve<Point3>, Surface, Surface> {
+             Point3::new(0.0, 0.0, 1.0),
+         )
+         .into(),
+-        BSplineCurve::from(Line(Point3::origin(), Point3::new(1.0, 0.0, 0.0))),
++        BSplineCurve::from(Line(Point3::origin(), Point3::new(1.0, 0.0, 0.0))).into(),
+     )
+ }
+ 
+@@ -283,7 +283,7 @@ fn curve_lift_up(
+     #[strategy = 0.0f64..=1.0] t: f64,
+ ) {
+     for curve in curves(bend, weight).into_iter().take(3) {
+-        let lifted = curve.lift_up();
++        let lifted = curve.clone().lift_up();
+         prop_assert_eq!(lifted.parameter_range(), curve.parameter_range());
+         prop_assert_near!(Point3::from_homogeneous(lifted.subs(t)), curve.subs(t));
+         match &curve {
+@@ -979,7 +979,7 @@ fn curve_from_try_into(#[strategy = 0.0f64..=1.0] t: f64) {
+                 Curve::from(native)
+             }
+             Curve::IntersectionCurve(_) => {
+-                let native: IntersectionCurve<Box<Curve>, Box<Surface>, Box<Surface>> =
++                let native: IntersectionCurve<Leader, Surface> =
+                     curve.clone().try_into().unwrap();
+                 Curve::from(native)
+             }
+diff --git a/truck-modeling/tests/topo_traits.rs b/truck-modeling/tests/topo_traits.rs
+index ca53d978..1513af95 100644
+--- a/truck-modeling/tests/topo_traits.rs
++++ b/truck-modeling/tests/topo_traits.rs
+@@ -7,45 +7,42 @@ use truck_topology::{shell::ShellCondition, *};
+ type Line = truck_geometry::prelude::Line<Point3>;
+ type Surface = BSplineSurface<Point3>;
+ 
+-#[derive(Clone, Copy, Debug)]
+-struct LinearMapping;
+-impl GeometricMapping<Point3> for LinearMapping {
+-    fn mapping(self) -> impl Fn(&Point3) -> Point3 { |p| p + Vector3::new(0.0, 1.0, 0.0) }
+-}
+-impl GeometricMapping<Line> for LinearMapping {
+-    fn mapping(self) -> impl Fn(&Line) -> Line {
+-        let point_mapping = GeometricMapping::<Point3>::mapping(LinearMapping);
+-        move |Line(p, q): &Line| Line(point_mapping(p), point_mapping(q))
+-    }
+-}
+-impl GeometricMapping<Surface> for LinearMapping {
+-    fn mapping(self) -> impl Fn(&Surface) -> Surface {
+-        |surface| surface.transformed(Matrix4::from_translation(Vector3::new(0.0, 1.0, 0.0)))
+-    }
+-}
++fn point_mapping(p: &Point3) -> Point3 { *p + Vector3::new(0.0, 1.0, 0.0) }
++
++fn curve_mapping(line: &Line) -> Line { Line(point_mapping(&line.0), point_mapping(&line.1)) }
+ 
+-#[derive(Clone, Copy, Debug)]
+-struct Connection;
+-impl Connector<Point3, Line> for Connection {
+-    fn connector(self) -> impl Fn(&Point3, &Point3) -> Line { |p, q| Line(*p, *q) }
++fn surface_mapping(surface: &Surface) -> Surface {
++    surface.transformed(Matrix4::from_translation(Vector3::new(0.0, 1.0, 0.0)))
+ }
+-impl Connector<Line, Surface> for Connection {
+-    fn connector(self) -> impl Fn(&Line, &Line) -> Surface {
+-        |line0, line1| {
+-            Surface::new(
+-                (KnotVec::bezier_knot(1), KnotVec::bezier_knot(1)),
+-                vec![vec![line0.0, line1.0], vec![line0.1, line1.1]],
+-            )
+-        }
+-    }
++
++fn connect_points(p: &Point3, q: &Point3) -> Line { Line(*p, *q) }
++
++fn connect_curves(line0: &Line, line1: &Line) -> Surface {
++    Surface::new(
++        (KnotVec::bezier_knot(1), KnotVec::bezier_knot(1)),
++        vec![vec![line0.0, line1.0], vec![line0.1, line1.1]],
++    )
+ }
+ 
+-fn sweep<T: Sweep<LinearMapping, Connection, Connection, Res>, Res>(elem: &T) -> Res {
+-    elem.sweep(LinearMapping, Connection, Connection)
++fn sweep<T: Sweep<Point3, Line, Surface>>(elem: &T) -> T::Swept {
++    elem.sweep(
++        &point_mapping,
++        &curve_mapping,
++        &surface_mapping,
++        &connect_points,
++        &connect_curves,
++    )
+ }
+ 
+-fn multi_sweep<T: MultiSweep<LinearMapping, Connection, Connection, Res>, Res>(elem: &T) -> Res {
+-    elem.multi_sweep(LinearMapping, Connection, Connection, 2)
++fn multi_sweep<T: MultiSweep<Point3, Line, Surface>>(elem: &T) -> T::Swept {
++    elem.multi_sweep(
++        &point_mapping,
++        &curve_mapping,
++        &surface_mapping,
++        &connect_points,
++        &connect_curves,
++        2,
++    )
+ }
+ 
+ fn consistent_line(edge: &Edge<Point3, Line>) -> bool {
+@@ -139,7 +136,7 @@ fn test_shell() -> Shell<Point3, Line, Surface> {
+ #[test]
+ fn vertex_sweep() {
+     let p = Point3::new(0.0, 0.0, 0.0);
+-    let q = GeometricMapping::<Point3>::mapping(LinearMapping)(&p);
++    let q = point_mapping(&p);
+     let edge = sweep(&Vertex::new(p));
+     assert_near!(edge.front().point(), p);
+     assert_near!(edge.back().point(), q);
+@@ -504,29 +501,27 @@ fn shell_multi_sweep() {
+     });
+ }
+ 
+-#[derive(Clone, Copy, Debug)]
+-struct CircleMapping;
+-impl GeometricMapping<Point3> for CircleMapping {
+-    fn mapping(self) -> impl Fn(&Point3) -> Point3 {
+-        move |p| Matrix4::from_angle_y(Rad(PI / 2.0)).transform_point(*p)
+-    }
++fn circle_point_mapping(p: &Point3) -> Point3 {
++    Matrix4::from_angle_y(Rad(PI / 2.0)).transform_point(*p)
+ }
+-impl GeometricMapping<Line> for CircleMapping {
+-    fn mapping(self) -> impl Fn(&Line) -> Line {
+-        let point_mapping = GeometricMapping::<Point3>::mapping(CircleMapping);
+-        move |line| Line(point_mapping(&line.0), point_mapping(&line.1))
+-    }
++
++fn circle_curve_mapping(line: &Line) -> Line {
++    Line(circle_point_mapping(&line.0), circle_point_mapping(&line.1))
+ }
+-impl GeometricMapping<Surface> for CircleMapping {
+-    fn mapping(self) -> impl Fn(&Surface) -> Surface {
+-        move |surface| surface.transformed(Matrix4::from_angle_y(Rad(PI / 2.0)))
+-    }
++
++fn circle_surface_mapping(surface: &Surface) -> Surface {
++    surface.transformed(Matrix4::from_angle_y(Rad(PI / 2.0)))
+ }
+ 
+-fn closed_sweep<T: ClosedSweep<CircleMapping, Connection, Connection, Swept>, Swept>(
+-    elem: &T,
+-) -> Swept {
+-    elem.closed_sweep(CircleMapping, Connection, Connection, 4)
++fn closed_sweep<T: ClosedSweep<Point3, Line, Surface>>(elem: &T) -> T::Swept {
++    elem.closed_sweep(
++        &circle_point_mapping,
++        &circle_curve_mapping,
++        &circle_surface_mapping,
++        &connect_points,
++        &connect_curves,
++        4,
++    )
+ }
+ 
+ #[test]
+-- 
+2.53.0
+

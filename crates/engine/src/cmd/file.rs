@@ -429,9 +429,31 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             json!({"path": path, "features": 0, "errors": 0, "cloud": r["cloud"], "points": r["points"], "source_points": r["source_points"], "bounds": r["bounds"], "warnings": r["warnings"]}),
         );
     }
-    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
+    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) || solidcraft_io::is_native_cad_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
+
+        if solidcraft_io::is_native_cad_path(path) {
+            let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+            if let Ok(Some((mut doc, model))) = solidcraft_io::native_cad_to_document_with_model_validating(&bytes, path, s.validation()) {
+                if let Some(stem) = default_name_for(&doc.name, path) {
+                    doc.name = stem;
+                }
+                let mut fresh = Session::opened_with_model(doc, model);
+                fresh.undo.clear();
+                s.replace_design(fresh);
+                let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
+                let bodies: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+                return Ok(json!({
+                    "path": path,
+                    "features": s.doc.features.len(),
+                    "errors": errors,
+                    "bodies": bodies,
+                    "warnings": Vec::<String>::new(),
+                }));
+            }
+        }
+
         let mut fresh = Session::new(Document::new(&stem));
         fresh.set_validation(s.validation());
         let r = if solidcraft_io::is_step_path(path) {

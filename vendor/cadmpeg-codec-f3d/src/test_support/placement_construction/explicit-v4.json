@@ -1,0 +1,119 @@
+{
+  "source_bytes": "030000003330300c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f03f0000000000000000000000000000000000000000000000400000000000000000000000000000f03f0000000000000000000000000000084000000000000000000000000000000000000000000000f03f0000000000001040000000000000000000000000000000000000000000000000000000000000f03f00000000000000000000000000000000000000000000000200000000000000aa55",
+  "native": {
+    "id": "f3d:Design/BulkStream.dat:design-placement-construction#17",
+    "record_index": 12,
+    "class_tag": "300",
+    "type_version": 4,
+    "byte_offset": 17,
+    "member_offset": 38,
+    "paired_byte_offset": 227,
+    "fields": {
+      "linear_offset_on_periodic_face": null,
+      "align_up_direction": {
+        "value": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "offset": 38
+      },
+      "arc_length_for_periodic_face": null,
+      "axis_flipped": null,
+      "use_u_direction": null,
+      "definer_creator": null,
+      "extra_offset": null,
+      "global_parameters": null,
+      "inferred_x_axis": {
+        "value": 0,
+        "offset": 62
+      },
+      "inferred_z_axis": {
+        "value": 0,
+        "offset": 63
+      },
+      "z_flip": {
+        "value": 0,
+        "offset": 64
+      },
+      "identity": {
+        "value": false,
+        "offset": 65
+      },
+      "matrix": {
+        "value": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            2.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            3.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            4.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "offset": 66
+      },
+      "old_rotation": null,
+      "pick_point_parameter": null,
+      "pick_point": {
+        "value": [
+          0.0,
+          0.0
+        ],
+        "offset": 194
+      },
+      "edge_references": null,
+      "origin": {
+        "offset": 210,
+        "encoding": "00"
+      },
+      "plane_references": {
+        "count": {
+          "value": 0,
+          "offset": 211
+        },
+        "members": []
+      },
+      "x_axis": {
+        "offset": 215,
+        "encoding": "00"
+      },
+      "z_axis": {
+        "offset": 216,
+        "encoding": "00"
+      },
+      "ref_type": {
+        "value": 2,
+        "offset": 217
+      },
+      "resize_type": null,
+      "values": {
+        "count": {
+          "value": 0,
+          "offset": 221
+        },
+        "members": []
+      }
+    },
+    "base_level": {
+      "offset": 225,
+      "value": "aa55"
+    }
+  }
+}

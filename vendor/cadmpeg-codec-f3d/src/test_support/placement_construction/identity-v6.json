@@ -1,0 +1,100 @@
+{
+  "source_bytes": "030000003330300d0000000000000000000000000000000000000000000000000000000000000000000000000000000700010000000000000000000000000000000000000000000000000000000200000000000000aa55",
+  "native": {
+    "id": "f3d:Design/BulkStream.dat:design-placement-construction#17",
+    "record_index": 13,
+    "class_tag": "300",
+    "type_version": 6,
+    "byte_offset": 17,
+    "member_offset": 38,
+    "paired_byte_offset": 104,
+    "fields": {
+      "linear_offset_on_periodic_face": null,
+      "align_up_direction": {
+        "value": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "offset": 38
+      },
+      "arc_length_for_periodic_face": null,
+      "axis_flipped": null,
+      "use_u_direction": null,
+      "definer_creator": {
+        "offset": 62,
+        "encoding": "00"
+      },
+      "extra_offset": null,
+      "global_parameters": null,
+      "inferred_x_axis": {
+        "value": 0,
+        "offset": 63
+      },
+      "inferred_z_axis": {
+        "value": 7,
+        "offset": 64
+      },
+      "z_flip": {
+        "value": 0,
+        "offset": 65
+      },
+      "identity": {
+        "value": true,
+        "offset": 66
+      },
+      "matrix": null,
+      "old_rotation": null,
+      "pick_point_parameter": null,
+      "pick_point": {
+        "value": [
+          0.0,
+          0.0
+        ],
+        "offset": 67
+      },
+      "edge_references": {
+        "count": {
+          "value": 0,
+          "offset": 83
+        },
+        "members": []
+      },
+      "origin": {
+        "offset": 87,
+        "encoding": "00"
+      },
+      "plane_references": {
+        "count": {
+          "value": 0,
+          "offset": 88
+        },
+        "members": []
+      },
+      "x_axis": {
+        "offset": 92,
+        "encoding": "00"
+      },
+      "z_axis": {
+        "offset": 93,
+        "encoding": "00"
+      },
+      "ref_type": {
+        "value": 2,
+        "offset": 94
+      },
+      "resize_type": null,
+      "values": {
+        "count": {
+          "value": 0,
+          "offset": 98
+        },
+        "members": []
+      }
+    },
+    "base_level": {
+      "offset": 102,
+      "value": "aa55"
+    }
+  }
+}
