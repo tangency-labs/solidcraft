@@ -148,6 +148,21 @@ def main():
             "preserve historical value after reopen as pending design decision")
     require(items[3]["drawing_expected"]["after_every_save_reopen"] is True,
             "save/reopen checks are required")
+    # The two native extensions on top of the four recipes: each names its edits as real design
+    # commands, uses W19d's status words, and its Rust test is in the dimension test file.
+    tests = (ROOT / "crates/engine/src/cmd/drawing_dimension_tests.rs").read_text(encoding="utf-8")
+    extensions = data["early_native_extensions"]
+    require([e["id"] for e in extensions] == ["W23A-R1-WIDTH", "W23A-SUPPRESSED-BORE"], "native extension identities changed")
+    for e in extensions:
+        require(e["runtime_status"] == "NATIVE_ENGINE_TEST", e["id"] + " is an engine test, not a drawing or UI run")
+        require(all(a["session"] == "design" for a in e["source_actions"]), e["id"] + ": model edits are design commands")
+        for name in e["implemented_rust_tests"]:
+            require("fn " + name + "()" in tests, e["id"] + ": no test " + name)
+    require(extensions[0]["source_actions"][0]["params"] == {"name": "width", "expression": "100 mm"}, "width edit must change `width`")
+    require(read(extensions[0]["oracle_cross_check"] + "/expected.json")["source"] == "analytic", "width cross-check oracle")
+    require([a["command"] for a in extensions[1]["source_actions"]] == ["timeline.suppress", "timeline.suppress", "timeline.delete"],
+            "suppress, unsuppress, then delete Bore1")
+    require(all(a["params"]["feature"] == "Bore1" for a in extensions[1]["source_actions"]), "the suppressed bore is Bore1")
     print("STATIC CONTRACT PASS: four W23a recipes match source oracle metadata.")
     print("DRAWING E2E AND EARLY W19d/W20a DIMENSION INSPECTION: NOT RUN (static only).")
 

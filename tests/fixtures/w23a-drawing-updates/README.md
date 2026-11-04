@@ -4,7 +4,7 @@
 from #4962; coordinated with [#4892](https://github.com/tangency-labs/solidcraft/issues/4892)
 and [CamWight's invitation](https://github.com/tangency-labs/solidcraft/issues/4892#issuecomment-6471076927).
 
-These are four written end-to-end acceptance recipes in `cases.json`, plus **five runnable native Rust tests** in the existing `crates/engine/src/cmd/drawing_dimension_tests.rs` file. They are Engine-level subsets, **not** complete U2/UI tests or new W13/W14 production code. Source model oracles 84, 86 and 87 (with 85 as a width cross-check) remain the analytic reference.
+These are four written end-to-end acceptance recipes in `cases.json`, plus **seven runnable native Rust tests** in the existing `crates/engine/src/cmd/drawing_dimension_tests.rs` file. They are Engine-level subsets, **not** complete U2/UI tests or new W13/W14 production code. Source model oracles 84, 86 and 87 (with 85 as a width cross-check) remain the analytic reference.
 
 ## Executable engine tests and evidence
 
@@ -12,12 +12,14 @@ These are four written end-to-end acceptance recipes in `cases.json`, plus **fiv
 - **E2E-02:** Deleting Bore1 via `timeline.delete` makes its dimension `lost`, preserving `last_good ≈ 10 mm`, without rebinding to Bore2.
 - **E2E-03:** Two tests exercise resize and deletion through undo/redo, including the authored Drawing JSON, its reference records and custom dimension-text positions.
 - **E2E-04:** One test saves and reopens the unchanged, resized and deleted workshop plate in fresh sessions; it checks the preserved reference records, authored text positions and historical `last_good` value. This uses the `reopened` helper.
+- **R1 plate width** (`early_native_extensions` in `cases.json`): the plate's width as a dimension between its two side faces (#11871) reads 80, then 100 after `width` changes with the drawing closed, with the same reference, and 80 again after undo.
+- **Suppressed Bore1** (`early_native_extensions`): suppressed, its dimension reads `suppressed` (#11823) and keeps its reference; on again it reads Ø10 `ok`; deleted it is `lost` with `last_good` 10 and never moves to Bore2.
 
-All five reuse CamWight's `examples/acceptance/drawing_m2.json` from #9821 (stacked on #9254), via `Session::run_script`. No duplicate model script or per-case Rust test file was added.
+All seven reuse CamWight's `examples/acceptance/drawing_m2.json` from #9821 (stacked on #9254), via `Session::run_script`. No duplicate model script or per-case Rust test file was added.
 
 **Verified native integration CI (2 Nov 2026):** [Test #56](https://github.com/Benny1496/solidcraft/actions/runs/41430987707) ran the clean integration commit `4b0f664f7e53462aedfbee93448f3410b64804b5` on official `drawings@d5fd14135f0e220b45171010722a0064683c63f1`: **28/28** dimension (including all five W23a E2E tests), **55/55** view, **4/4** view schema, **4/4** export and **2/2** doc-view tests passed. **93 distinct targeted native Rust tests, zero failed or ignored**, plus Rust formatting and static contract validation. This is not the full engine or rendered/UI test suite.
 
-Only the Engine/dimension-inspection portions are runnable today. **All four complete rendered-paper/UI E2E scenarios, U2 automatic refresh, R1/R2 sheet dimensions and publication semantics remain NOT RUN.** `cases.json` keeps the full acceptance rows at `NOT_RUN` and documents which native subsets are implemented.
+Only the Engine/dimension-inspection portions are runnable today. **All four complete rendered-paper/UI E2E scenarios, U2 automatic refresh, R2 centre dimensions, R1 on paper and publication semantics remain NOT RUN.** R1 is measured at Engine level by the plate-width test. `cases.json` keeps the full acceptance rows at `NOT_RUN` and documents which native subsets are implemented.
 
 Reapplied on official `drawings` with #9254 and #10713 already merged; neither one's production code is carried by this PR. CamWight's shared W23-1 plate (#9821) remains unmerged and is included **temporarily, byte-identically** so the tests run. Once #9821 merges, the matching fixture disappears from this PR's diff. No separate model implementation is claimed.
 

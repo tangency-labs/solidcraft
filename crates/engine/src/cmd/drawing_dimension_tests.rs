@@ -1320,3 +1320,51 @@ fn reopening_a_plate_keeps_dimensions_and_a_lost_bores_last_value() {
         }
     }
 }
+
+/// The workshop plate's width as a dimension between its two side faces, which the top view sees
+/// edge-on (R1, #11871). It reads 80; with the width changed to 100 while the drawing is closed, the
+/// same dimension reads 100 when it is opened again, and 80 after the change is undone.
+#[test]
+fn the_plates_width_between_its_side_faces_follows_a_width_change() {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let made = s.run_script(&script).unwrap();
+    let top = made.last().unwrap()["view"].clone();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let width = run(&mut s, ADD, json!({"view": top, "kind": {"faces": {"a": [50, 0, 10], "b": [50, 80, 10]}}}));
+    reads(&width, 80.0, "80.00");
+    let after = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", drawing.clone());
+        let read = run(s, INSPECT, json!({"dimension": width["dimension"]}));
+        assert_eq!(read["record"]["kind"], width["record"]["kind"], "the side faces' reference moved: {read}");
+        read
+    };
+    reads(&after(&mut s, "parameters.change", json!({"name": "width", "expression": "100 mm"})), 100.0, "100.00");
+    reads(&after(&mut s, "edit.undo", json!({})), 80.0, "80.00");
+}
+
+/// Bore1 suppressed reads `suppressed`, not lost (#11823), and keeps its reference; on again, the
+/// same dimension reads Ø10 `ok`; deleted, it is lost and never moves to Bore2. Bore2 reads Ø10
+/// throughout. Every model edit is made with the drawing closed.
+#[test]
+fn a_suppressed_bore_says_so_and_its_dimension_comes_back() {
+    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+    let drawing = json!({"drawing": ids::encode(drawing)});
+    let after = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", drawing.clone());
+        let [one, two] = [&first, &second].map(|d| run(s, INSPECT, json!({"dimension": d["dimension"]})));
+        assert_eq!(one["record"]["kind"], first["record"]["kind"], "Bore1 reference moved: {one}");
+        assert_eq!(two["record"]["kind"], second["record"]["kind"], "Bore2 reference moved: {two}");
+        reads(&two, 10.0, "Ø10.00");
+        one
+    };
+    let off = after(&mut s, "timeline.suppress", json!({"feature": "Bore1", "suppressed": true}));
+    assert_eq!(off["status"], "suppressed", "{off}");
+    let on = after(&mut s, "timeline.suppress", json!({"feature": "Bore1", "suppressed": false}));
+    reads(&on, 10.0, "Ø10.00");
+    reads_lost_bore(&after(&mut s, "timeline.delete", json!({"feature": "Bore1"})));
+}

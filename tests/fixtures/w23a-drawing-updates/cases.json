@@ -587,6 +587,41 @@
       }
     }
   ],
+  "early_native_extensions": [
+    {
+      "id": "W23A-R1-WIDTH",
+      "goal": "plate_width as a dimension between the plate's two side faces (R1) follows width 80 -> 100 -> 80 with the same reference",
+      "requires": ["R1 faces dimension (#11871, on drawings through #11823)"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "width", "expression": "100 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "dimension.record.kind stays identical to the authored faces reference",
+        "plate_width.status == ok and reads 80, then 100, then 80"
+      ],
+      "oracle_cross_check": "tests/oracle/85-plate-width-100",
+      "implemented_rust_tests": ["the_plates_width_between_its_side_faces_follows_a_width_change"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-SUPPRESSED-BORE",
+      "goal": "Bore1 suppressed reads suppressed and keeps its reference; on again it reads 10 ok; deleted it is lost and never moves to Bore2",
+      "requires": ["suppressed and failed references (#11823)"],
+      "source_actions": [
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": true}, "session": "design"},
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": false}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"}
+      ],
+      "checks": [
+        "dimension.record.kind stays identical to the authored reference after every edit",
+        "diam_bore1.status == suppressed, then ok (10), then lost with last_good 10",
+        "diam_bore2.status == ok (10) throughout, and diam_bore1 never rebinds to Bore2"
+      ],
+      "implemented_rust_tests": ["a_suppressed_bore_says_so_and_its_dimension_comes_back"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    }
+  ],
   "not_tested": [
     "R5 drawing records",
     "U2 publishing and updates",
