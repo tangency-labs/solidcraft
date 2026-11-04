@@ -3106,6 +3106,83 @@ fn a_hole_drills_its_picked_body_and_an_edit_keeps_its_scope() {
     assert!(vol(&s, "Upper") < small - 1.0);
 }
 
+/// #7520 (history): a hole made with a body hidden stores the bodies it drills, so it replays
+/// the same way: volumes match exactly after a save and reopen, a rebuild from scratch, undo and
+/// redo, showing the hidden body, renaming bodies and editing an earlier feature.
+#[test]
+fn a_hole_made_with_a_hidden_body_replays_the_same() {
+    let build = |plate_height: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": plate_height, "operation": "new", "body_name": "Plate"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "solid.hole", json!({"position": [20, 20, 0], "diameter": 5, "depth": 3, "name": "Hole1"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    // A new session evaluated from the saved text alone, as a rebuild from scratch does.
+    let scratch = |s: &Session| Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let s = build(5.0);
+    let (block, plate) = (vol(&s, "Block"), vol(&s, "Plate"));
+    assert_eq!(block, 40.0 * 40.0 * 20.0, "the hidden body is not drilled");
+    assert!(plate < 40.0 * 40.0 * 5.0 - 1.0, "the shown one is");
+    let same = |s: &Session, what: &str| {
+        assert_eq!(vol(s, "Block"), block, "{what}: Block");
+        assert_eq!(vol(s, "Plate"), plate, "{what}: Plate");
+    };
+    // (1) Save and reopen.
+    let dir = std::env::temp_dir().join(format!("solidcraft-hole-history-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("hole.solidcraft");
+    let mut saved = build(5.0);
+    run(&mut saved, "file.save_as", json!({"path": file.to_string_lossy()}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": file.to_string_lossy()}));
+    same(&reopened, "reopened");
+    let _ = std::fs::remove_dir_all(&dir);
+    // (2) Rebuild from scratch.
+    same(&scratch(&s), "rebuilt");
+    // (3) Undo and redo.
+    let mut u = build(5.0);
+    run(&mut u, "edit.undo", json!({}));
+    assert_eq!(vol(&u, "Plate"), 40.0 * 40.0 * 5.0, "undone: no hole");
+    run(&mut u, "edit.redo", json!({}));
+    same(&u, "redone");
+    same(&scratch(&u), "redone and rebuilt");
+    // (4) Show the hidden body, then rebuild.
+    let mut shown = build(5.0);
+    run(&mut shown, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    same(&shown, "shown");
+    same(&scratch(&shown), "shown and rebuilt");
+    // (5) Rename the drilled body (and the hidden one), then rebuild.
+    let mut renamed = build(5.0);
+    run(&mut renamed, "body.rename", json!({"body": "Plate", "name": "Slab"}));
+    run(&mut renamed, "body.rename", json!({"body": "Block", "name": "Core"}));
+    for r in [&renamed, &scratch(&renamed)] {
+        assert_eq!(vol(r, "Slab"), plate, "renamed: Slab");
+        assert_eq!(vol(r, "Core"), block, "renamed: Core");
+    }
+    // (6) Edit an earlier feature (the plate's own box, then the hidden block's), then rebuild:
+    // the same as a design made with the new size from the start.
+    let feature = |s: &Session, body: &str| {
+        let id = s.world_state().body(body).unwrap().feature;
+        s.doc.features.iter().find(|f| f.id == id).unwrap().name.clone()
+    };
+    let mut edited = build(5.0);
+    let (plate_box, block_box) = (feature(&edited, "Plate"), feature(&edited, "Block"));
+    run(&mut edited, "timeline.edit", json!({"feature": plate_box, "set": {"height": "8"}}));
+    let fresh = build(8.0);
+    for r in [&edited, &scratch(&edited)] {
+        assert_eq!(vol(r, "Plate"), vol(&fresh, "Plate"), "plate edited");
+        assert_eq!(vol(r, "Block"), block, "plate edited: Block");
+    }
+    run(&mut edited, "timeline.edit", json!({"feature": block_box, "set": {"height": "30"}}));
+    for r in [&edited, &scratch(&edited)] {
+        assert_eq!(vol(r, "Block"), 40.0 * 40.0 * 30.0, "block edited stays undrilled");
+        assert_eq!(vol(r, "Plate"), vol(&fresh, "Plate"), "block edited: Plate");
+    }
+}
+
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a
 /// neighbouring edge; an imported STEP's body and face colours survive a hole.
 #[test]
