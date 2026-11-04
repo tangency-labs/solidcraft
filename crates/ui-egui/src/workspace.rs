@@ -1294,6 +1294,24 @@ mod tests {
         assert!(h.widget("Add configuration").is_some());
     }
 
+    /// #11482: promoted buttons in one ribbon panel must not reuse the same icon id.
+    #[test]
+    fn promoted_ribbon_icons_are_unique_within_each_panel() {
+        let by_id: std::collections::HashMap<_, _> = solidcraft_engine::command_specs().into_iter().map(|c| (c.id, c)).collect();
+        for section in SECTIONS {
+            let mut seen = std::collections::BTreeMap::new();
+            for id in section.ids.iter().take(section.promoted) {
+                let Some(spec) = by_id.get(id) else { continue };
+                if spec.icon.is_empty() {
+                    continue;
+                }
+                if let Some(prev) = seen.insert(spec.icon, *id) {
+                    panic!("{} / {}: promoted `{prev}` and `{id}` both use icon `{}`", section.tab, section.panel, spec.icon);
+                }
+            }
+        }
+    }
+
     /// Shared assembly, sheet and plastic commands remain reachable in their ribbon sections.
     #[test]
     fn ribbon_sections_keep_shared_commands_reachable() {

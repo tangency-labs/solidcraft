@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("component")
         .params("name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool (default true); grounded?: bool (default: true for the design's first part, false otherwise)"),
     CommandSpec::new("component.from_bodies", "Create Components from Bodies", from_bodies)
-        .icon("component")
+        .icon("component_from_bodies")
         .params("bodies: [names] → one new component per body, named after it"),
     CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
     CommandSpec::new("component.edit_in_place", "Edit in Place", crate::checked!("component.edit_in_place", edit_in_place))
@@ -104,7 +104,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
     ),
     CommandSpec::new("component.properties", "Component Physical Properties", properties::component)
-        .icon("measure").noundo()
+        .icon("component_properties").noundo()
         .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", properties::occurrence)
         .icon("measure").noundo()

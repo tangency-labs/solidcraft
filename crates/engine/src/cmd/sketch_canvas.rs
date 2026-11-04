@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path | data; face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
-        .icon("canvas")
+        .icon("canvas_edit")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<CanvasEdited>)
         .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?"),

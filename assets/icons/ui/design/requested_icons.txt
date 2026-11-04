@@ -44,6 +44,7 @@ c_tangent	false
 cam	false
 camera	false
 canvas	false
+canvas_edit	false
 capture	false
 center_of_mass	false
 centerline	false
@@ -63,6 +64,8 @@ colored_components	false
 combine	false
 compare	false
 component	false
+component_from_bodies	false
+component_properties	false
 compute	false
 cone	false
 configuration_table	false
@@ -80,6 +83,7 @@ construction_line_tangent_external	false
 construction_line_tangent_two	false
 construction_line_vertical	false
 contact_all	false
+contact_check	false
 contact_new	false
 contact_off	false
 contact_sets	false
@@ -134,9 +138,12 @@ hem	false
 hole	false
 home	false
 import	false
+import_mesh	false
+import_point_cloud	false
 import_tray	false
 include	false
 infinite	false
+insert_design	false
 inspect	false
 interference	false
 intersect	false
@@ -321,6 +328,7 @@ trim	false
 undo	false
 unfold	false
 update	false
+view_save	false
 warning	false
 web	false
 ws_animate	false

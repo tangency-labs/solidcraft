@@ -39,6 +39,15 @@ sketch_scale = { master = "scale", accent = "sketch" }
 sketch_text = { master = "text", accent = "sketch" }
 surface_fair = { master = "spline_cv", accent = "surface" }
 mesh_export = { master = "export", accent = "mesh" }
+# Same toolbar row: colour the shared master so each command reads apart (#11482).
+component_from_bodies = { master = "component", accent = "form" }
+insert_design = { master = "component", accent = "mesh" }
+import_mesh = { master = "import", accent = "mesh" }
+import_point_cloud = { master = "import", accent = "construction" }
+component_properties = { master = "measure", accent = "form" }
+canvas_edit = { master = "canvas", accent = "form" }
+contact_check = { master = "interference", accent = "form" }
+view_save = { master = "camera", accent = "form" }
 
 # Legacy feature-history id for the same Split Body operation.
 split = "split_body"
