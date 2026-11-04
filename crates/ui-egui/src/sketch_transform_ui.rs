@@ -80,9 +80,18 @@ fn picked_box(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec<Vec<Vec
     let sk = &state.sketch(app.session.active_sketch?)?.sketch;
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut points: Vec<Vec2> = Vec::new();
+    let mut drawn: Vec<usize> = Vec::new();
     for id in crate::sketch_modify_ui::entity_ids(&app.session, &d.inputs, 0) {
         if let Some(i) = sk.curve_index(&id) {
-            lines.push(sk.polyline(i));
+            // An ellipse's axes go with it when OK applies (`sketch.transform`), so they are
+            // drawn with it.
+            let (major, minor) = sk.ellipse_axis_lines(i).unwrap_or((None, None));
+            for c in std::iter::once(i).chain(major.map(|(l, _)| l)).chain(minor.map(|(l, ..)| l)) {
+                if !drawn.contains(&c) {
+                    drawn.push(c);
+                    lines.push(sk.polyline(c));
+                }
+            }
         } else if let Some(p) = sk.resolve_point(&id).and_then(|i| sk.point(i)) {
             points.push(p);
         }
@@ -269,5 +278,39 @@ mod tests {
         assert_eq!(plain(12.0), "12");
         assert_eq!(plain(1.23456), "1.235");
         assert_eq!(plain(-0.0001), "0");
+    }
+
+    /// An ellipse picked alone is drawn where OK would leave it with its axes, as OK moves,
+    /// turns and scales them with it.
+    #[test]
+    fn an_ellipse_picked_alone_is_previewed_with_its_axes() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.ellipse", serde_json::json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8})).unwrap();
+        h.call("ui.view", serde_json::json!({"view": "top"}));
+        h.settle();
+        h.step(&serde_json::json!({"click": {"sketch": [10.0, 6.928]}})).unwrap();
+        h.step(&serde_json::json!({"start": "sketch.transform"})).unwrap();
+        h.frames(3);
+        let d = h.app.dialog.as_ref().expect("the Transform window");
+        let (lines, middle, size) = picked_box(&h.app, d).expect("a box round the ellipse");
+        assert_eq!(lines.len(), 3, "the ellipse and its two axes");
+        assert!(
+            middle[0].abs() < 1e-6 && middle[1].abs() < 1e-6 && (size[0] - 40.0).abs() < 1e-3 && (size[1] - 16.0).abs() < 1e-3,
+            "{middle:?} {size:?}"
+        );
+        // With its minor axis deleted, the major one that is left.
+        h.step(&serde_json::json!({"key": "Escape"})).unwrap();
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let minor = sk.curves.iter().rev().find(|c| c.construction).unwrap().id.clone();
+        h.app.run("sketch.delete", serde_json::json!({"entities": [minor]})).unwrap();
+        h.settle();
+        h.step(&serde_json::json!({"click": {"sketch": [10.0, 6.928]}})).unwrap();
+        h.step(&serde_json::json!({"start": "sketch.transform"})).unwrap();
+        h.frames(3);
+        let d = h.app.dialog.as_ref().expect("the Transform window");
+        let (lines, _, size) = picked_box(&h.app, d).expect("a box round the ellipse");
+        assert_eq!(lines.len(), 2, "the ellipse and its major axis");
+        assert!((size[0] - 40.0).abs() < 1e-3, "{size:?}");
     }
 }

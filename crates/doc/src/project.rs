@@ -1034,8 +1034,16 @@ fn refresh_links_in(
         if !l.auto_face
             && let (Some(name), LinkSource::Face { body, at }) = (&l.face_name, &mut source)
         {
-            let (index, p) =
-                st.body(body).and_then(|target| crate::naming::face_on_body(target, name, *at)).ok_or_else(|| DocError::reselect(name.as_str()))?;
+            let (index, p) = st
+                .body(body)
+                .and_then(|target| {
+                    if l.kind == LinkKind::Project {
+                        crate::name_lookup::locate_projected_face(target, name, *at)
+                    } else {
+                        crate::naming::face_on_body(target, name, *at)
+                    }
+                })
+                .ok_or_else(|| DocError::reselect(name.as_str()))?;
             *at = p;
             named_face = Some((body.clone(), index, p));
         }

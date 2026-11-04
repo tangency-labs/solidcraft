@@ -1386,6 +1386,77 @@ fn an_interrupted_turns_changes_undo_as_one_step() {
     assert!(Arc::ptr_eq(&app.session.doc, &before));
 }
 
+/// What the user changes by hand between two messages is told to the agent before the next one,
+/// with the parameters and features it touched (#10854): the agent built a hole on a parameter,
+/// the user changed it, and the agent picked the old rim. Its own changes, and a design it has not
+/// seen yet (a new chat), bring no note.
+#[test]
+fn a_change_by_hand_between_messages_is_told_to_the_agent() {
+    use solidcraft_engine::doc::Param;
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.attach_selection = false;
+    let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
+
+    send(&mut app, &ctx, "a box and a parameter w".into());
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "thanks".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: thanks"), "the agent made those changes itself");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    let old = expr(&app);
+    app.run("parameters.change", json!({"name": "w", "expression": "25"})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+    let added = app.session.doc.features.last().map(|f| f.name.clone()).unwrap();
+    send(&mut app, &ctx, "chamfer it".into());
+    let sent = text_of(script.prompts().last().unwrap());
+    // The new box may bring parameters of its own after `w`.
+    let new = expr(&app);
+    assert!(sent.starts_with(&format!("[The user changed the design by hand since your last reply (parameters: w {old} -> {new}")), "{sent}");
+    assert!(sent.contains(&format!("; features: {added} (new)). Read it again before")), "{sent}");
+    assert!(sent.ends_with("chat.]\n\nchamfer it"), "{sent}");
+    assert!(
+        matches!(app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })), Some(Item::User { text, .. }) if text == "chamfer it")
+    );
+    script.report(Event::Text { thought: false, text: "done".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "and again".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: and again"), "told once");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    // The note's other parts, and its bound on what it lists.
+    let seen = app.session.doc.as_ref().clone();
+    assert!(changed_note(&seen, &seen.clone()).is_none());
+    let mut rolled = seen.clone();
+    rolled.marker = Some(0);
+    let first = seen.features.first().map(|f| f.name.clone()).unwrap();
+    assert!(changed_note(&seen, &rolled).unwrap().contains(&format!("(the History marker is now before {first}, so it")));
+    let mut many = seen.clone();
+    let w = seen.params.iter().find(|p| p.name == "w").cloned().unwrap();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..w.clone() }));
+    assert!(changed_note(&seen, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", w.expr)));
+
+    // A new chat starts a session that has seen nothing.
+    app.run("parameters.change", json!({"name": "w", "expression": "30"})).unwrap();
+    new_chat(&mut app);
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "hello".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: hello"));
+}
+
 /// The same with a real agent process speaking ACP: `session/cancel` goes out, the agent answers
 /// the held prompt with the cancelled stop reason, and only then does the queued text go as a new
 /// `session/prompt`.
@@ -4540,6 +4611,21 @@ fn the_copy_message_button_copies_the_prompt_as_entered() {
     let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
     click_at(&mut h, at, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// A prompt at the top of a short conversation is as tall as its text and its Copy message
+/// button: the button sits at the bubble's foot and the reply follows straight after, instead of
+/// the bubble stretching over the empty view below it.
+#[test]
+fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let button = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let prompt = crate::scenario::rect_of("agent_chat:msg:0").expect("the prompt's message area");
+    let reply = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    let row = crate::theme::Tokens::get().control_height;
+    assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
+    assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and

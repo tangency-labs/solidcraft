@@ -702,15 +702,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, state_color(state));
     let waiting = app.agent_chat.waiting();
     if waiting > 0 {
-        let at = button.right_top() + vec2(-3.0, 3.0);
-        ui.painter().circle_filled(at, 6.5, t.warning);
-        ui.painter().text(
-            at,
-            Align2::CENTER_CENTER,
-            waiting.min(9).to_string(),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_badge),
-            t.panel,
-        );
+        ui_kit::attention_mark(ui.painter(), button, Some(waiting));
     }
     ui.painter().line_segment(
         if app.preferences.agent_chat_side == "left" { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] },
@@ -1745,7 +1737,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     context_chips(ui, context, false);
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| copy_message_button(ui, n, text));
+                        // Top-aligned: a row centred across its height takes all the height left in
+                        // the conversation's view, which stretched a prompt near the top.
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| copy_message_button(ui, n, text));
                     }
                 });
                 if copyable {

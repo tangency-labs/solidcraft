@@ -46,6 +46,7 @@ pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub use file::open_steps::OpenSteps;
+pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
@@ -73,6 +74,7 @@ mod libraries;
 pub mod mass_properties;
 mod material_properties;
 mod materials;
+mod measure_exact;
 mod measure_sel;
 mod measure_shape;
 mod mesh;
@@ -260,16 +262,12 @@ impl CommandSpec {
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
-        let (label, icon) = match self.id {
-            "inspect.colored_components" if s.colored_components.is_some() => ("Disable Component Colors", "colored_components_off"),
-            _ => (self.label, self.icon),
-        };
         CommandInfo {
             id: self.id,
-            label,
+            label: self.label,
             tab: self.tab,
             panel: self.panel,
-            icon,
+            icon: self.icon,
             shortcut: self.shortcut,
             params: self.params,
             enabled: e.is_ok(),

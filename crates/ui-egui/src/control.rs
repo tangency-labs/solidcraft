@@ -10,6 +10,8 @@
 //!   of it first
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
+//! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
+//!   for a host that keeps the files itself (#8517)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -821,6 +823,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // A host that keeps the files itself (an editing embed, #8517).
+        "document.export" => wrap(crate::documents::export(app)),
+        "document.import" => wrap(crate::documents::import(app, p)),
+        "document.saved" => wrap(crate::documents::saved(app, p)),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -2636,12 +2642,23 @@ mod tests {
             assert_eq!(call("ui.render", json!({"path": at(&root, "a.png"), "width": 32, "height": 32}), true)["ok"], true);
         }
         assert_eq!(call("ui.screenshot", json!({"path": at(&root, "b.png")}), true)["ok"], true);
+        // Settings profiles are read and written by the app, not the engine, and stay inside too (#11362).
+        let profile = |id: &str, params: Value| json!({"command": id, "params": params});
+        let poc = json!({"format": "solidcraft-profile/1", "name": "scope-poc"});
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"profile": poc})), true)["ok"], true);
+        let inside = json!({"name": "scope-poc", "path": at(&root, "p.json")});
+        assert_eq!(call("engine.execute", profile("settings.profile.export", inside), true)["ok"], true);
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"path": at(&root, "p.json")})), true)["ok"], true);
+        std::fs::write(at(&base, "p.json"), poc.to_string()).unwrap();
         for (method, params) in [
             ("engine.execute", export(at(&out, "a.step"))),
             ("engine.execute", export(at(&root, "../out/a.step"))),
             ("engine.script", json!({"commands": [{"command": "file.export", "params": {"path": at(&out, "a.step")}}]})),
             ("ui.render", json!({"path": at(&out, "a.png"), "width": 32, "height": 32})),
             ("ui.screenshot", json!({"path": at(&out, "b.png")})),
+            ("engine.execute", profile("settings.profile.export", json!({"name": "scope-poc", "path": at(&out, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&base, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&out, "missing.json")}))),
         ] {
             let v = call(method, params, true);
             assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{method}: {v}");

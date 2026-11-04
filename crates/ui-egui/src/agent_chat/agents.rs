@@ -305,6 +305,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "Mistral AI", base_url: "https://api.mistral.ai/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
     ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
@@ -467,6 +468,7 @@ mod tests {
         assert_eq!(Kind::Anthropic.id(), "anthropic");
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mistral AI" && p.base_url == "https://api.mistral.ai/v1"));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
     }
 

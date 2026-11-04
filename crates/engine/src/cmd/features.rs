@@ -105,7 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -744,6 +744,8 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
             names
         } else if pts.is_empty() {
             Vec::new()
+        } else if matches!(kind, FeatureKind::Hole { .. }) {
+            hole_face_names(s, p, &kind)?
         } else {
             solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)?
         }
@@ -1080,6 +1082,22 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
         )));
     }
     Ok(Some(body.name.clone()))
+}
+
+/// A hole's face points, named on the bodies it drills where one of theirs holds the point
+/// (#7520): a face of another body in the same plane, a hidden one the hole leaves alone, would
+/// otherwise take the name of the face that was picked. Over every body, as before, elsewhere.
+fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Result<Vec<String>> {
+    let st = s.model.state();
+    let all = solidcraft_doc::face_point_names(&s.doc, &st, kind, s.active_component)?;
+    let drilled = string_list_or_default(p, "participants");
+    if drilled.is_empty() || drilled.iter().any(|b| b == "*") {
+        return Ok(all);
+    }
+    let mut scoped = solidcraft_doc::ModelState::default();
+    scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
+    let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component)?;
+    Ok(own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect())
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
@@ -2600,6 +2618,18 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
 }
 
+/// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
+const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
+
+/// A value typed by the user, cut short for a message.
+fn brief(text: &str) -> String {
+    const MAX: usize = 32;
+    match text.char_indices().nth(MAX) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_string(),
+    }
+}
+
 /// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.
 fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     const TABLE: [(f64, f64, f64, f64); 21] = [
@@ -2808,10 +2838,18 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let position = if references.is_empty() { position } else { referenced_centre(s, cmd, &references, position, direction)? };
     // The diameter: given, or a metric-estimate/Unified-table tap drill, or an ISO 273
     // clearance hole for a bolt size (close, normal or loose fit).
+    // A diameter number out of range says so, rather than that none was given (#9625).
+    if matches!(p.get("diameter"), Some(Value::Number(_))) && expr(p, "diameter").is_none() {
+        return Err(bad(cmd, format!("`diameter` {}", expr_problem(p.get("diameter")))));
+    }
     let diameter = match (expr(p, "diameter"), &thread, str_(p, "clearance")) {
         (Some(d), _, _) => d,
         (None, _, Some(c)) => {
             let fit = str_(p, "fit").unwrap_or("normal").to_ascii_lowercase();
+            // An unknown fit is not an unknown bolt size (#9625).
+            if !CLEARANCE_FITS.contains(&fit.as_str()) {
+                return Err(bad(cmd, format!("`fit` must be close, normal or loose, not `{}`", brief(&fit))));
+            }
             let d = clearance_diameter(c, &fit).ok_or_else(|| bad(cmd, format!("no clearance hole for `{c}` ({fit} fit): M1.6 to M64")))?;
             Expr::new(format!("{d} mm"))
         }
@@ -2838,22 +2876,41 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         let e = req_expr(cmd, p, k)?;
         Ok(e)
     };
+    // Given but unreadable (`true`, a list, an empty text): refused, never a plain counterbore.
+    let bridge = match (expr(p, "bridge"), p.get("bridge")) {
+        (Some(b), _) => Some(b),
+        (None, None | Some(Value::Null)) => None,
+        (None, v) => return Err(bad(cmd, format!("`bridge` {}", expr_problem(v)))),
+    };
     let kind = match str_(p, "type").unwrap_or("simple") {
         "simple" => match expr(p, "tip_angle") {
             Some(t) if depth.is_some() => solidcraft_doc::HoleKind::Drilled { tip_angle: t },
             _ => solidcraft_doc::HoleKind::Simple,
         },
         "drilled" => solidcraft_doc::HoleKind::Drilled { tip_angle: expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()) },
-        "counterbore" => {
-            solidcraft_doc::HoleKind::Counterbore { cb_diameter: get("cb_diameter")?, cb_depth: get("cb_depth")?, tip_angle: expr(p, "tip_angle") }
-        }
+        "counterbore" => solidcraft_doc::HoleKind::Counterbore {
+            cb_diameter: get("cb_diameter")?,
+            cb_depth: get("cb_depth")?,
+            tip_angle: expr(p, "tip_angle"),
+            bridge: bridge.clone(),
+        },
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
-            cs_angle: expr(p, "cs_angle").unwrap_or_else(|| "90 deg".into()),
+            // The default only when no angle is given: a supplied one out of range is refused (#9625).
+            cs_angle: match p.get("cs_angle") {
+                None | Some(Value::Null) => "90 deg".into(),
+                Some(Value::String(t)) if t.trim().is_empty() => "90 deg".into(),
+                Some(_) => req_expr(cmd, p, "cs_angle")?,
+            },
             tip_angle: expr(p, "tip_angle"),
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
+    match (&kind, &bridge) {
+        (solidcraft_doc::HoleKind::Counterbore { .. }, Some(b)) => check_expr(s, b, Kind::Length, cmd, "bridge")?,
+        (_, Some(_)) => return Err(bad(cmd, "`bridge` needs `type: counterbore`")),
+        _ => {}
+    }
     let to = match p.get("to") {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`to` must be a point [x, y, z] on the face to drill to"))?),
         None => None,
@@ -2876,6 +2933,20 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // placed) cuts that body: the pick is already in that body's frame, and the
             // component's own bodies alone would leave nothing to cut.
             p["participants"] = json!([body]);
+        } else if let Some(mut shown) = shown_scope(s) {
+            // Like a cut (#3961), a hole leaves hidden bodies alone (#7520): while some are
+            // hidden, it drills the shown ones, stored so showing the others later changes
+            // nothing. The body whose face was picked is drilled though hidden (picked through
+            // Select Other, or hidden with the dialog open): it is the one the hole is for.
+            if !shown.is_empty()
+                && points.is_none()
+                && let Some(body) = hidden_body_picked_at(s, position, &shown)
+            {
+                shown.push(body);
+            }
+            if !shown.is_empty() {
+                p["participants"] = json!(shown);
+            }
         }
     }
     add_feature(
@@ -2961,16 +3032,36 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
 /// component than the active one.
 fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
     let st = s.model.state();
-    let (_, body) = st
-        .bodies
+    let body = body_with_face_at(&st, p, |_| true)?;
+    (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+}
+
+/// The hidden body whose face holds `p`, when no shown body has a face there: a face shared by
+/// a shown and a hidden body is the shown one's, as a pick in the view would take it (#7520).
+fn hidden_body_picked_at(s: &Session, p: Vec3, shown: &[String]) -> Option<String> {
+    let st = s.model.state();
+    if body_with_face_at(&st, p, |b| shown.contains(&b.name)).is_some() {
+        return None;
+    }
+    let scope: Vec<&str> = active_scope(s, &st).into_iter().map(|b| b.name.as_str()).collect();
+    body_with_face_at(&st, p, |b| scope.contains(&b.name.as_str())).map(|b| b.name.clone())
+}
+
+/// The body, among those `keep` takes, with the face nearest `p` within its pick tolerance.
+fn body_with_face_at(
+    st: &solidcraft_doc::ModelState,
+    p: Vec3,
+    keep: impl Fn(&solidcraft_doc::ModelBody) -> bool,
+) -> Option<&solidcraft_doc::ModelBody> {
+    st.bodies
         .iter()
-        .filter(|b| !b.body.is_mesh())
+        .filter(|b| !b.body.is_mesh() && keep(b))
         .filter_map(|b| {
             let (d, _) = solidcraft_doc::appearance::nearest_face(b, p)?;
             (d <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((d, b))
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0))?;
-    (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b)| b)
 }
 
 /// The points of a sketch a hole drills at when only the sketch is given.

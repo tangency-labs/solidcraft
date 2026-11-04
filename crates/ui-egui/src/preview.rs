@@ -438,8 +438,10 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
     // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
     let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let job = solidcraft_engine::doc::progress::watch(watched, || {
-            if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+        let job = scratch.stop_token().within(|| {
+            solidcraft_engine::doc::progress::watch(watched, || {
+                if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+            })
         });
         let _ = tx.send(job);
     });
@@ -1258,6 +1260,21 @@ mod tests {
             let built = compute(&s, &[cmd], colors()).unwrap_or_else(|e| panic!("{op}: {e}"));
             assert!(built.error.is_none(), "{op}: {:?}", built.error);
         }
+    }
+
+    /// #7520: a Hole's preview leaves a hidden body out, drawn nor drilled, as OK does; before,
+    /// it replaced the hidden body with a drilled one while the dialog was open.
+    #[test]
+    fn a_hole_preview_leaves_hidden_bodies_out() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"})).unwrap();
+        s.execute("solid.box", &json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 20, "operation": "new", "body_name": "Block"}))
+            .unwrap();
+        s.execute("browser.visibility", &json!({"items": ["Block"], "visible": false})).unwrap();
+        let cmd = ("solid.hole".to_string(), json!({"position": [20, 20, 0], "diameter": 5, "depth": 10}));
+        let built = compute(&s, &[cmd], colors()).unwrap();
+        assert!(built.error.is_none(), "{:?}", built.error);
+        assert_eq!(built.replaced, vec!["Plate".to_string()]);
     }
 
     /// A plate in its own component, stood up by its placement (an imported part set upright)

@@ -185,6 +185,13 @@ messages go as one prompt, in order, when the turn ends normally.
   fresh session on the same agent, keeping the agent and its mode. It asks first when a message
   is running or queued, or files are waiting. The design's undo history is untouched.
 
+When you change the design yourself between two messages (a parameter, a feature, an undo, the
+History marker), your next message tells the agent so first, in a short note the conversation
+doesn't show: which parameters changed and from what to what, which features are new, edited or
+removed, and where the History marker went. The note asks the agent to read the design again
+instead of picking edges and faces where they were before. A new chat or a new agent session has
+seen nothing yet, so its first message carries no note.
+
 ## Agents
 
 Preferences → AI → **Agents** lists every agent the chat can use, each with its kind (a program or
@@ -222,10 +229,15 @@ doesn't change the last known login state.
 | Codex | `npm install -g @agentclientprotocol/codex-acp` |
 | Google Antigravity | Google's ACP server, a separate download from Google's `agy` command (which has no ACP mode): take the zip for your system from the [ACP registry](https://agentclientprotocol.com/registry), unzip it and put `agy_acp_server.par` (`agy_acp_server.exe` on Windows) on your `PATH`. The zip also holds `localharness_external`: leave the two together. It signs in itself (browser). |
 | OpenCode | `npm install -g opencode-ai` (`opencode acp`) |
+| Mistral Vibe | `uv tool install mistral-vibe` (`vibe-acp`) |
 | XAI Grok | [Grok Build installer](https://docs.x.ai/build/overview), then `grok login` (`grok agent stdio` speaks ACP) |
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+
+For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
+prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
+See [Mistral's ACP setup guide](https://docs.mistral.ai/vibe/code/use-vibe-in-other-ides).
 **Refresh** looks again after you install one. An agent whose program is there but fails its
 `--version` check without printing a version (an install that didn't finish, such as an npm
 install whose setup script didn't run, or a program built for another kind of computer) is
@@ -277,8 +289,9 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mammouth AI
-  `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
+  `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
+  `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
+  OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),

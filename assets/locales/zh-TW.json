@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "可達性分析",
   "cmd.inspect_center_of_mass": "質心",
   "cmd.inspect_clearance": "間隙",
-  "cmd.inspect_colored_components": "啟用元件顏色",
-  "cmd.inspect_colored_components_disable": "停用元件顏色",
   "cmd.inspect_compare": "比較實體",
   "cmd.inspect_compare_picture": "與圖片比較",
   "cmd.inspect_continuity": "連續性分析",

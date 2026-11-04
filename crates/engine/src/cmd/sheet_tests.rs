@@ -527,6 +527,25 @@ fn rules_are_parameters() {
     assert!(s.execute("sheet.manage_rules", &json!({"name": "Bad", "k_factor": 3})).is_err());
 }
 
+/// A refused rule names the value at fault and its range (#9625): a thickness too large is not
+/// "not positive", and a negative bend radius is not blamed on the K-factor (or the other way).
+#[test]
+fn a_refused_rule_names_the_value_at_fault() {
+    let mut s = Session::default();
+    let refused =
+        |s: &mut Session, p: Value| s.execute("sheet.manage_rules", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+    let e = refused(&mut s, json!({"name": "R", "thickness": 10000}));
+    assert!(e.contains("the sheet thickness must be more than 0 and less than 10000 mm") && !e.contains("positive"), "{e}");
+    let e = refused(&mut s, json!({"name": "R", "thickness": 0}));
+    assert!(e.contains("the sheet thickness must be more than 0 and less than 10000 mm"), "{e}");
+    let e = refused(&mut s, json!({"name": "R", "thickness": 2, "bend_radius": -1}));
+    assert!(e.contains("the bend radius must not be negative") && !e.contains("K-factor"), "{e}");
+    let e = refused(&mut s, json!({"name": "R", "thickness": 2, "k_factor": 3}));
+    assert!(e.contains("the K-factor must be between 0 and 1") && !e.contains("bend radius"), "{e}");
+    // A sharp bend (radius 0) is allowed, and the message no longer says otherwise.
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "bend_radius": 0}));
+}
+
 #[test]
 fn contour_flange_hem_and_tray() {
     // Oracle 72.
@@ -4911,6 +4930,48 @@ fn returns_follow_the_rules_gap_and_stay_open_with_a_warning_when_it_is_zero() {
     assert!(warnings.iter().all(|w| w.matches("left open").count() == 4), "{warnings:?}");
     let lengths = bend_lengths(&mut s);
     assert!((lengths[4] - lengths[0]).abs() < 1e-9 && (lengths[0] - (120.0 - 6.0 * 55f64.to_radians().tan())).abs() < 1e-6, "{lengths:?}");
+}
+
+#[test]
+fn returns_on_a_notched_tray_close_at_the_corner_away_from_the_notch() {
+    // A 500 x 400 tray (#8823) with a 100 x 100 notch out of one corner: walls 20 high on its six
+    // edges, then returns 15 high turned in on all but the notch's side on x = 400. In the flat,
+    // the walls on either side of the notch's inner corner both unfold into the notch, so the
+    // return on y = 300 lies over the wall on x = 400 there whatever happens at its other end.
+    // That overlap used to keep the return's corner at (500, 300) open ("closed, the flanges
+    // would overlap in the flat pattern"), and the two returns ran through each other there.
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true}),
+    );
+    let pts: [(f64, f64); 6] = [(0.0, 0.0), (500.0, 0.0), (500.0, 300.0), (400.0, 300.0), (400.0, 400.0), (0.0, 400.0)];
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": pts.map(|p| [p.0, p.1]), "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    // The middle of edge k, `into` in from it (toward the base) and `z` up.
+    let pick = |k: usize, into: f64, z: f64| {
+        let (a, b) = (pts[k], pts[(k + 1) % pts.len()]);
+        let l = (b.0 - a.0).hypot(b.1 - a.1);
+        json!([(a.0 + b.0) / 2.0 - (b.1 - a.1) / l * into, (a.1 + b.1) / 2.0 + (b.0 - a.0) / l * into, z])
+    };
+    let walls: Vec<Value> = (0..6).map(|k| pick(k, 0.0, 2.0)).collect();
+    run(&mut s, "sheet.flange", json!({"edges": walls, "height": 20, "angle": "90 deg"}));
+    let returns: Vec<Value> = [0, 1, 2, 4, 5].iter().map(|&k| pick(k, 2.0, 20.0)).collect();
+    run(&mut s, "sheet.flange", json!({"edges": returns, "height": 15, "angle": "90 deg"}));
+    let warnings: Vec<String> = s.model.results.iter().filter_map(|r| r.warning.clone()).collect();
+    assert!(s.model.results.iter().all(|r| r.error.is_none()) && warnings.is_empty(), "{warnings:?}");
+    // The returns on x = 500 and y = 300 (z 18 … 20) are mitred on the diagonal through their
+    // corner, the rule's gap apart: open on it, material on either side of it.
+    assert!(!contains(&s, [490.0, 290.0, 19.0]), "the returns run through each other at (500, 300)");
+    assert!(contains(&s, [490.0, 285.0, 19.0]) && contains(&s, [485.0, 290.0, 19.0]));
+    // The other corners close as before, and the part is one valid solid.
+    assert!(!contains(&s, [10.0, 10.0, 19.0]) && !contains(&s, [490.0, 10.0, 19.0]) && !contains(&s, [10.0, 390.0, 19.0]));
+    let state = s.model.state();
+    let body = &state.bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1);
 }
 
 #[test]

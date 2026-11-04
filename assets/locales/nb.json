@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "Tilgjengelighetsanalyse",
   "cmd.inspect_center_of_mass": "Massesenter",
   "cmd.inspect_clearance": "Klaring",
-  "cmd.inspect_colored_components": "Aktiver komponentfarger",
-  "cmd.inspect_colored_components_disable": "Deaktiver komponentfarger",
   "cmd.inspect_compare": "Sammenlign kropper",
   "cmd.inspect_compare_picture": "Sammenlign bilde",
   "cmd.inspect_continuity": "Kontinuitetsanalyse",

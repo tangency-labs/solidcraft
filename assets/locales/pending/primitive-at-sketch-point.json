@@ -1,8 +1,0 @@
-{
-  "en": { "dialog.selection_external_point": "{point} · {sketch}" },
-  "ar": { "dialog.selection_external_point": "{point} · {sketch}" },
-  "he": { "dialog.selection_external_point": "{point} · {sketch}" },
-  "ja": { "dialog.selection_external_point": "{point} · {sketch}" },
-  "vi": { "dialog.selection_external_point": "{point} · {sketch}" },
-  "zh": { "dialog.selection_external_point": "{point} · {sketch}" }
-}

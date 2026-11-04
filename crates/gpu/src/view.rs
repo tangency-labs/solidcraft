@@ -18,6 +18,7 @@ use crate::pbr;
 use wgpu::util::DeviceExt;
 
 mod ao;
+pub use ao::GroundAo;
 mod clouds;
 pub use clouds::{CloudFilter, CloudStyle, ColorMode, DOT_SIZE, Dot, FILTERS, GpuCloud, cloud_dot};
 #[cfg(not(target_arch = "wasm32"))]
@@ -494,6 +495,8 @@ impl InstancedMesh {
 pub struct GpuScene {
     /// The colours every vertex, line and instance index into.
     pub palette: Arc<Palette>,
+    /// Non-selectable virtual ground receiving viewport AO, separate from model triangles.
+    pub ground_ao: Option<GroundAo>,
     /// Opaque triangles. A zero normal draws the colour flat (unlit).
     pub tris: Vec<u8>,
     /// Opaque triangles of open bodies, drawn as `tris` but left out of a section's crossing
@@ -1017,6 +1020,9 @@ pub struct Frame {
     pub pv_slot: SceneSlot,
     /// Preview reselect: skip drawing the preview while Primary rolls it back.
     pub pv_hide: bool,
+    /// World bounds of the active preview. Ground effects update their small receiver without
+    /// changing the model scene's key or re-uploading model geometry/colours.
+    pub preview_bounds: Option<solidcraft_geom::Aabb3>,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
     /// Direction toward the eye (for lighting).
@@ -1700,6 +1706,8 @@ struct Batches {
     tris: Option<Batch>,
     /// [`GpuScene::open_tris`].
     open_tris: Option<Batch>,
+    ground_ao: Option<Batch>,
+    ground_input: Option<GroundAo>,
     pbr: Option<Batch>,
     trans: Option<Batch>,
     shadow: Option<Batch>,
@@ -1792,6 +1800,7 @@ impl Batches {
                 geometry += data.len() as u64;
                 upload(device, label, data, stride)
             };
+            self.ground_input = sc.ground_ao;
             self.tris = own("sc_tris", &sc.tris, TRI_SIZE);
             self.open_tris = own("sc_open_tris", &sc.open_tris, TRI_SIZE);
             self.pbr = own("sc_pbr", &sc.pbr, PBR_SIZE);
@@ -2077,6 +2086,8 @@ pub struct Renderer {
     ss_stats: DrawStats,
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
+    ground_ao: wgpu::RenderPipeline,
+    ground_ao_key: Option<(u64, u64, bool, u32, bool)>,
     tri: wgpu::RenderPipeline,
     /// `tri` and `tri_cut` for planned bodies (positions and normals from the GPU evaluation,
     /// colours per vertex, indexed).
@@ -2737,6 +2748,29 @@ impl Renderer {
             bind_group_layouts: &[Some(&bgl), Some(&access_bgl), Some(&ao_layout)],
             immediate_size: 0,
         });
+        let ground_ao = || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("sc_ground_ao"),
+                layout: Some(&solid_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_tri"),
+                    buffers: &[Some(tri_layout())],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                multisample: wgpu::MultisampleState { count: t.samples.max(1), ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_ground_ao"),
+                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         let built = [Some(tri_layout())];
         let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
@@ -2982,6 +3016,7 @@ impl Renderer {
             let cloud_pipes = jobs.spawn(cloud_pipes);
             let image = jobs.spawn(image);
             let ao = jobs.spawn(ao);
+            let ground_ao = jobs.spawn(ground_ao);
             let oit = jobs.spawn(oit);
             let blits = jobs.spawn(blits);
             let resets = jobs.spawn(resets);
@@ -3000,6 +3035,8 @@ impl Renderer {
             let oit = oit.join();
             Renderer {
                 ao: ao.join(),
+                ground_ao: ground_ao.join(),
+                ground_ao_key: None,
                 depth_reset,
                 section_stencil,
                 #[cfg(test)]
@@ -3484,6 +3521,17 @@ impl Renderer {
             res.model.sort_glass(queue, cb.back);
         }
         res.model.cull(queue, &cb.view_proj, cb.size_px);
+        let ground_visible = res.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
+        let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
+        if res.ground_ao_key != Some(ground_key) {
+            let preview = if cb.pv_hide { None } else { cb.preview_bounds };
+            res.model.ground_ao = res
+                .model
+                .ground_input
+                .filter(|_| ground_visible)
+                .and_then(|ground| upload(device, "sc_ground_ao", &ground.vertices_with_radius(preview, cb.ao_radius), TRI_SIZE));
+            res.ground_ao_key = Some(ground_key);
+        }
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
         if let Some(a) = &cb.access
             && a.version != res.access_version
@@ -3491,8 +3539,9 @@ impl Renderer {
             res.access_bind = access_texture(device, Some(queue), &res.access_bgl, a.size, &a.depth);
             res.access_version = a.version;
         }
-        let ao_binds = [scene_bind(&res.model, &res.bind), scene_bind(&res.preview, &res.bind)];
-        res.ao.prepare(device, encoder, ao_binds, cb.ao_radius, cb.size_px, res.target.reversed_depth(), [&res.model, &res.preview]);
+        let preview = if cb.pv_hide { &res.empty } else { &res.preview };
+        let ao_binds = [scene_bind(&res.model, &res.bind), scene_bind(preview, &res.bind)];
+        res.ao.prepare(device, encoder, ao_binds, cb.ao_radius, cb.size_px, res.target.reversed_depth(), [&res.model, preview]);
         // Images: upload new or changed textures, drop removed ones, rebuild the quads.
         res.textures.retain(|id, _| cb.images.iter().any(|i| i.id == *id));
         res.quads.clear();
@@ -3838,6 +3887,9 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
         lines(pass, &res.line, &pv.lines);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        if !cb.product && cb.ao_radius > 0.0 {
+            tris(pass, &res.ground_ao, &m.ground_ao);
+        }
         for (id, q) in res.quads.iter().filter(|_| !cb.product) {
             if let Some((_, bind)) = res.textures.get(id) {
                 pass.set_pipeline(&res.image);
@@ -3854,6 +3906,9 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         tris(pass, &res.ghost, &m.ghost);
         tris(pass, &res.trans, &m.shadow);
+        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+        tris(pass, &res.trans, &sk.shadow);
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         if phase == Phase::BeforeSeeThrough {
             return;
         }
@@ -4511,6 +4566,7 @@ mod tests {
             pv_key: 4,
             pv_slot: slot(),
             pv_hide: false,
+            preview_bounds: None,
             view_proj: [[0.0; 4]; 4],
             back: [0.0; 3],
             size_px: [800.0, 600.0],
@@ -4751,18 +4807,35 @@ mod glass_tests {
             scene.shadow_tri(p, shadow_color);
         }
         for samples in [1, 4] {
-            let Some(shadow) = middle_pixel_with_samples(scene.clone(), true, samples) else {
-                eprintln!("skipping: no GPU adapter");
-                return;
-            };
-            assert!(shadow[..3].iter().all(|c| (125..=129).contains(c)), "{samples}× alpha-blended shadow: {shadow:?}");
-            let mut occluded = scene.clone();
-            let green = occluded.color([0, 255, 0, 255]);
-            for mut p in square {
-                p[2] = 5.0;
-                occluded.tri(p, [0.0; 3], green);
+            for view_dependent in [false, true] {
+                let draw = |mut scene: GpuScene| {
+                    let sketch = if view_dependent {
+                        GpuScene { shadow: std::mem::take(&mut scene.shadow), palette: scene.palette.clone(), ..Default::default() }
+                    } else {
+                        GpuScene::default()
+                    };
+                    if view_dependent {
+                        // The shadow must use its own palette, not the model's same-numbered slot.
+                        assert!(Arc::make_mut(&mut scene.palette).set(shadow_color, [255, 0, 0, 255]));
+                    }
+                    middle_pixel_in_slots_with_samples(scene, sketch, true, samples)
+                };
+                let Some(shadow) = draw(scene.clone()) else {
+                    eprintln!("skipping: no GPU adapter");
+                    return;
+                };
+                assert!(
+                    shadow[..3].iter().all(|c| (125..=129).contains(c)),
+                    "{samples}x view-dependent={view_dependent} alpha-blended shadow: {shadow:?}"
+                );
+                let mut occluded = scene.clone();
+                let green = occluded.color([0, 255, 0, 255]);
+                for mut p in square {
+                    p[2] = 5.0;
+                    occluded.tri(p, [0.0; 3], green);
+                }
+                assert_eq!(draw(occluded), Some([0, 255, 0, 255]), "opaque geometry hides the ground shadow");
             }
-            assert_eq!(middle_pixel_with_samples(occluded, true, samples), Some([0, 255, 0, 255]), "opaque geometry hides the ground shadow");
         }
     }
 
@@ -4926,6 +4999,10 @@ mod glass_tests {
     }
 
     fn middle_pixel_with_samples(scene: GpuScene, oit: bool, samples: u32) -> Option<[u8; 4]> {
+        middle_pixel_in_slots_with_samples(scene, GpuScene::default(), oit, samples)
+    }
+
+    fn middle_pixel_in_slots_with_samples(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless().ok()?;
         let depth = crate::depth_format(&device, true);
@@ -4942,13 +5019,14 @@ mod glass_tests {
             upload_error: None,
             key: 1,
             slot: Arc::new(Mutex::new(Some(scene))),
-            sketch_key: 0,
-            sketch_slot: none(),
+            sketch_key: 2,
+            sketch_slot: Arc::new(Mutex::new(Some(sketch))),
             hl_key: 0,
             hl_slot: none(),
             pv_key: 0,
             pv_slot: none(),
             pv_hide: false,
+            preview_bounds: None,
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
@@ -5126,6 +5204,7 @@ mod glass_tests {
             pv_key: 0,
             pv_slot: none(),
             pv_hide: false,
+            preview_bounds: None,
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],

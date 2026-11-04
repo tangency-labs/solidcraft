@@ -47,6 +47,7 @@ pub struct DocSlot {
     pre_sketch_component: Option<crate::PreSketchComponent>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
+    reveals: crate::browser::PendingReveals,
     agent_chat: crate::agent_chat::AgentChat,
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
     link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
@@ -142,6 +143,7 @@ impl DocSlot {
             pre_sketch_component: None,
             view: DocView::default(),
             occurrence_move: None,
+            reveals: Default::default(),
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
             edit_in_place: None,
@@ -215,6 +217,8 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    let reveals = crate::browser::take_reveals(app);
+    crate::semantic_content::leave_document(app);
     if crate::render_workspace::active(app) {
         let _ = crate::render_workspace::enter(app, false);
     }
@@ -248,12 +252,14 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
+        reveals,
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
         jobs: app.swap_jobs(slot.jobs),
     };
+    crate::browser::restore_reveals(app, slot.reveals);
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;
     out.session.crash_journal = false;
@@ -458,6 +464,8 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 pub fn adopt(app: &mut SolveApp, session: Session) {
     if active_is_blank(app) {
         let rev = app.session.revision;
+        crate::browser::discard_reveals(app);
+        crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
         crate::design_properties::close_object(app);
@@ -476,6 +484,49 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
     } else if let Err(e) = open_tab(app, session) {
         app.set_status(e, true);
     }
+}
+
+/// The active design as its file holds it (`document.export`): what a host that keeps the files
+/// itself writes (#8517). `text` is the design's JSON, the same a `.json` design file holds, and
+/// `revision` is the one `document.revision` names this state by.
+pub fn export(app: &mut SolveApp) -> Result<Value, String> {
+    let revision = app.session.design_revision();
+    let design = app.session.design();
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
+}
+
+/// Replace the active design with one a host kept (`document.import {text, name?}`): the text of
+/// a design file (its JSON, as `document.export` gives it). It opens saved, with nothing to undo,
+/// in the active design's place: as a design opened in a tab of its own, with that tab closed
+/// without asking. A text that does not read changes nothing.
+pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err("a file is being opened or saved, or designs are being closed: try again".into());
+    }
+    let text = p.get("text").and_then(Value::as_str).ok_or("missing `text` (the design's JSON)")?;
+    let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
+    if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
+        doc.name = name.to_string();
+    }
+    let replaced = app.docs.active;
+    open_tab(app, Session::opened(doc, None))?;
+    close(app, replaced, true);
+    let errors = app.session.model.results.iter().filter(|r| r.error.is_some()).count();
+    let revision = app.session.design_revision();
+    Ok(json!({"name": app.session.doc.name, "features": app.session.doc.features.len(), "errors": errors, "revision": revision}))
+}
+
+/// The host saved the design at `revision` (`document.saved`): it counts as saved from there.
+/// Refused when the design has changed since.
+pub fn saved(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let revision = p.get("revision").and_then(Value::as_u64).ok_or("missing `revision`")?;
+    let now = app.session.design_revision();
+    if revision != now {
+        return Err(format!("the design changed since revision {revision} (now {now})"));
+    }
+    app.session.mark_saved();
+    Ok(json!({"revision": revision, "dirty": app.session.is_dirty()}))
 }
 
 /// A new, empty design in its own tab. One that is already empty keeps its tab and still
@@ -545,6 +596,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     }
     app.docs.closing = None;
     if n <= 1 {
+        crate::browser::discard_reveals(app);
+        crate::semantic_content::leave_document(app);
         // The last design: a blank one takes its place.
         reset_chat(app);
         if let Some(a) = app.autosave.as_mut().and_then(|a| a.active.take()) {
@@ -573,10 +626,11 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let next = if i + 1 < n { i + 1 } else { i - 1 };
         switch(app, next);
     }
-    if let Some(slot) = app.docs.slots.remove(i)
-        && let Some(a) = slot.autosave
-    {
-        a.discard();
+    if let Some(slot) = app.docs.slots.remove(i) {
+        slot.session.stop_computing();
+        if let Some(a) = slot.autosave {
+            a.discard();
+        }
     }
     if app.docs.active > i {
         app.docs.active -= 1;
@@ -756,6 +810,25 @@ pub fn designs_to_reopen(app: &SolveApp) -> Vec<String> {
         return Vec::new();
     }
     app.preferences.open_designs.iter().filter(|p| std::path::Path::new(p.as_str()).is_file()).take(MAX_OPEN).cloned().collect()
+}
+
+/// What this launch reopens (#5542), with the crash guard applied (#5064): when the recovery
+/// folder still holds the marker of a session that died mid-reopen, nothing is reopened this
+/// time and the designs it died on come back as the reason, so the app starts usable instead
+/// of hanging on the same design every launch. The marker is written here and cleared as each
+/// design finishes opening (`file_load`), so a healthy session leaves nothing behind.
+pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String>, Vec<String>) {
+    let Some(dir) = dir else {
+        return (designs_to_reopen(app), Vec::new());
+    };
+    let stuck = solidcraft_engine::recovery::stuck_reopen(dir);
+    if !stuck.is_empty() {
+        solidcraft_engine::recovery::clear_reopen(dir);
+        return (Vec::new(), stuck);
+    }
+    let reopen = designs_to_reopen(app);
+    solidcraft_engine::recovery::begin_reopen(dir, &reopen);
+    (reopen, Vec::new())
 }
 
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
@@ -1738,6 +1811,35 @@ mod tests {
         a.preferences.reopen_designs = true;
         let _ = std::fs::remove_file(&file);
         assert!(designs_to_reopen(&a).is_empty(), "a file that is gone is skipped");
+    }
+
+    /// #5064: a design that kills the app while it is being reopened is skipped once, with the
+    /// reason said, and the launch after that reopens normally again.
+    #[test]
+    fn reopen_plan_skips_what_killed_the_last_session() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reopen-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("part.solidcraft");
+        std::fs::write(&file, []).unwrap();
+        let path = file.to_string_lossy().to_string();
+        let mut a = app();
+        a.preferences.open_designs = vec![path.clone()];
+
+        // A normal launch: it reopens the design and marks that it is doing so.
+        assert_eq!(reopen_plan(&a, Some(&dir)), (vec![path.clone()], Vec::new()));
+        // The session dies while opening it: the marker survives, so the next launch skips it
+        // and says what it skipped.
+        assert_eq!(
+            reopen_plan(&a, Some(&dir)),
+            (Vec::new(), vec![path.clone()]),
+            "the design that killed the last session is skipped, with the reason"
+        );
+        // The skip cleared the marker: the launch after it works normally again.
+        assert_eq!(reopen_plan(&a, Some(&dir)), (vec![path.clone()], Vec::new()));
+        // No recovery folder on this system: the guard is off, the plain list is used.
+        assert_eq!(reopen_plan(&a, None).0, vec![path]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Cancel, Esc's answer, or a Save that saves nothing (a never-saved design whose Save As

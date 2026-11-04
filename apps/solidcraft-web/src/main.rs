@@ -3,7 +3,8 @@
 //! Runs the same [`solidcraft_ui_egui::SolveApp`] as the desktop app through eframe's web runner
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this
 //! directory (output in `dist/web`). URL flags: `?webgl` forces WebGL2 (remembered until
-//! `?webgpu`), `?sample` opens the sample part.
+//! `?webgpu`), `?sample` opens the sample part, `?embed=editor` runs it as an editing embed in a
+//! host page (no application bar or start page; nothing kept in the browser; #8517).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(target_arch = "wasm32")]
@@ -42,6 +43,8 @@ fn query_flag(query: &str, name: &str) -> bool {
 struct Launch {
     open: Option<String>,
     embed: bool,
+    /// `?embed=editor` (#8517): an editing embed in a host page that keeps the files itself.
+    editor: bool,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -52,16 +55,19 @@ impl Launch {
         for (key, value) in url::form_urlencoded::parse(query.trim_start_matches('?').as_bytes()) {
             match key.as_ref() {
                 "open" if launch.open.is_none() => launch.open = Some(value.into_owned()),
+                "embed" if value == "editor" => launch.editor = true,
                 "embed" => embed = true,
                 _ => {}
             }
         }
-        launch.embed = embed && launch.open.is_some();
+        launch.embed = embed && launch.open.is_some() && !launch.editor;
         launch
     }
 
+    /// The browser's own storage (designs, autosave, recovery, preferences) is used: not when
+    /// embedded, where the host keeps what is kept.
     fn persists(&self) -> bool {
-        !self.embed
+        !self.embed && !self.editor
     }
 
     fn full_app_url(&self, mut url: url::Url) -> String {
@@ -928,7 +934,7 @@ mod web {
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
-                        let services = if launch.embed { Services::default() } else { Services {
+                        let services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
@@ -972,6 +978,7 @@ mod web {
                         let (sender, receiver) = std::sync::mpsc::channel();
                         let mut app = SolveApp::new(Session::default(), services).with_control(receiver);
                         app.embedded = launch.embed;
+                        app.embed_editor = launch.editor;
                         // Listening before reading: settings another tab writes from now on are
                         // newer than those read here.
                         let other_tab_prefs = PrefsInbox::default();
@@ -1080,6 +1087,17 @@ mod tests {
         assert!(!reopened.embed);
         assert!(reopened.persists());
         assert!(full.fragment().is_none());
+    }
+
+    #[test]
+    fn embed_editor_needs_no_design_link_and_keeps_nothing_in_the_browser() {
+        let editor = Launch::parse("?embed=editor");
+        assert!(editor.editor && !editor.embed && !editor.persists());
+        let linked = Launch::parse("?embed=editor&open=https://example.org/a.sc");
+        assert!(linked.editor && !linked.embed, "an editing embed may open a linked design, still editable");
+        let viewer = Launch::parse("?embed=viewer&open=https://example.org/a.sc");
+        assert!(viewer.embed && !viewer.editor, "any other value is the viewer embed, as before");
+        assert!(!Launch::parse("?other=editor").editor);
     }
 
     #[test]

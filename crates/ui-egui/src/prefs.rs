@@ -608,17 +608,33 @@ pub enum NavigatorStyle {
     #[default]
     Axes,
     Cube,
+    /// A body of the user's choice, drawn the cube's size ([`crate::view_gizmo`]); the cube
+    /// until one is chosen.
+    Custom,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 2] = [Self::Axes, Self::Cube];
+    pub const ALL: [Self; 3] = [Self::Axes, Self::Cube, Self::Custom];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
             Self::Cube => "Cube",
+            Self::Custom => "Custom",
         }
     }
+}
+
+/// How the custom view gizmo colours its body.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorTexture {
+    /// The navigation cube's colours. Also what a value this version doesn't know reads as
+    /// (`lenient`).
+    #[default]
+    Themed,
+    /// The body's own appearance, as the viewport shows it.
+    Modeled,
 }
 
 /// How the History at the left lists sketches (Preferences: "Sketches", #6489). The timeline
@@ -1043,8 +1059,18 @@ preference_settings! {
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
     /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
     right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
+    /// A middle or right drag keeps the mode it started with until its button is released, as a
+    /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
+    /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
+    nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
+    /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
+    navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
+    /// The custom view gizmo has the cube's orbit and roll arrows around it.
+    navigator_arrows: bool = true, PAGE_NAVIGATION;
+    /// The custom view gizmo has the cube's Home button beside it.
+    navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
@@ -1584,6 +1610,9 @@ preference_settings! {
     /// tangent arc, and the same again back to lines (#9489). Off (the default): resting there
     /// does nothing, and tangent arcs are the Arc tool's.
     line_hover_tangent_arc: bool = false, PAGE_SKETCH;
+    /// Allow ordinary edge picks through faces in Shaded with hidden edges.
+    /// Off preserves the visible-only picking used in v0.30.1.
+    select_hidden_edges: bool = false, PAGE_SKETCH;
     /// Include hidden geometry and a small pointer neighbourhood in Select Other.
     select_other_hidden: bool = true, PAGE_SKETCH;
     /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
@@ -1603,9 +1632,14 @@ preference_settings! {
     /// glyphs and dimensions are red, in `error`, as before.
     sketch_conflict_colour: bool = true, PAGE_SKETCH;
     /// Hide constraint glyphs when the sketch is zoomed out so far that a millimetre of the plane
-    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980). Off: glyphs stay at a
-    /// fixed screen size at every zoom, as before.
+    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980) and the sketch spans
+    /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
+    /// size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
+    /// The Ellipse tool draws the major and minor axes as construction lines with the ellipse, so
+    /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
+    /// minor radius, labelled R, as before.
+    ellipse_axes: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
@@ -6070,6 +6104,7 @@ mod tests {
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
             ("select_other_hidden", json!(false), PAGE_SKETCH),
+            ("select_hidden_edges", json!(true), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
@@ -6255,6 +6290,29 @@ mod tests {
             assert_eq!(app.ui.pick_bodies, page != PAGE_SKETCH);
             assert_eq!(app.ui.agent_cursor.show, page != PAGE_ASSISTANT);
             assert_eq!(app.keymap.custom.is_empty(), page == PAGE_SHORTCUTS);
+        }
+    }
+
+    /// The Ellipse tool draws its axes with "Draw ellipses with their axes" on (the default),
+    /// and the ellipse alone, as before, with it off.
+    #[test]
+    fn the_ellipse_tool_draws_its_axes_as_the_preference_says() {
+        for (on, curves) in [(None, 3), (Some(false), 1), (Some(true), 3)] {
+            let mut h = crate::scenario::Harness::new();
+            if let Some(on) = on {
+                set(&mut h.app, &serde_json::json!({"ellipse_axes": on})).unwrap();
+            }
+            assert_eq!(h.app.preferences.ellipse_axes, on.unwrap_or(true));
+            h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
+            h.call("ui.view", serde_json::json!({"view": "top"}));
+            h.step(&serde_json::json!({"start": "sketch.ellipse"})).unwrap();
+            for at in [[0.0, 0.0], [20.0, 0.0], [0.0, 8.0]] {
+                h.step(&serde_json::json!({"click": {"sketch": at}})).unwrap();
+            }
+            h.settle();
+            let sid = h.app.session.active_sketch.unwrap();
+            let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+            assert_eq!(sk.curves.len(), curves, "preference {on:?}: {:?}", sk.curves);
         }
     }
 
@@ -7379,7 +7437,7 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_some(), "changed raw value must reappear");
         h.call(
             "ui.prefs",
-            json!({"theme_import":{"format":"solidcraft-theme/1","name":"Future blur","base":"dark","requires":2,
+            json!({"theme_import":{"format":"solidcraft-theme/1","name":"Future blur","base":"dark","requires":crate::theme_files::REQUIREMENTS_LEVEL + 1,
             "options":[{"id":"blur","type":"range","default":18}]}}),
         );
         h.frames(2);
@@ -7389,7 +7447,7 @@ mod tests {
         h.frames(2);
         assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_none());
         assert!(active_theme_file(&h.app).unwrap().options.is_empty(), "unsupported tables were discarded, never auto-restored");
-        h.app.preferences.custom_themes.iter_mut().find(|f| f.id == "future-blur").unwrap().requires = 3;
+        h.app.preferences.custom_themes.iter_mut().find(|f| f.id == "future-blur").unwrap().requires = crate::theme_files::REQUIREMENTS_LEVEL + 2;
         h.frames(2);
         assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_some());
         for identity in 0..80 {
@@ -9696,6 +9754,27 @@ mod tests {
         assert!(!restored.preferences.cosmetic_threads, "an explicitly disabled value also survives reload");
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
+    }
+
+    #[test]
+    fn hidden_edge_preference_defaults_persists_and_uses_real_checkbox() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!Prefs::default().select_hidden_edges);
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().select_hidden_edges);
+        h.call("ui.prefs", json!({"open":"Sketch"}));
+        super::reveal_preference(&mut h, "prefs:select_hidden_edges");
+        h.step(&json!({"click":{"handle":"prefs:select_hidden_edges"}})).unwrap();
+        assert!(h.app.preferences.select_hidden_edges);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.select_hidden_edges);
+        h.call("ui.prefs", json!({"open":"Sketch","select_hidden_edges":true,"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.select_hidden_edges);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.select_hidden_edges);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.select_hidden_edges);
     }
 
     #[test]

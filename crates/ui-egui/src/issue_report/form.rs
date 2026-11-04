@@ -17,7 +17,13 @@ fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, row
     ui_kit::text(ui, tr_label(hint), ui_kit::Text::Note(hint));
     let response = ui_kit::text_area(ui, tr_label(label), Id::new(id), text, rows, MAX_ANSWER);
     crate::scenario::publish_handle(id, response.rect.center());
-    super::truncate(text, MAX_ANSWER);
+    super::truncate_chars(text, MAX_ANSWER);
+    // What doesn't fit is not added: near the limit, say how much room is left (#7191).
+    let left = MAX_ANSWER.saturating_sub(text.chars().count());
+    if left < super::ANSWER_ROOM {
+        let key = if left == 1 { "ui.report_characters_left_one" } else { "ui.report_characters_left_other" };
+        ui_kit::text(ui, &crate::i18n::format(key, &[("count", &left.to_string())]), ui_kit::Text::Note(id));
+    }
     response
 }
 

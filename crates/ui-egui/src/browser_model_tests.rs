@@ -95,7 +95,10 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     let (one, two) = (super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy]));
     h.app.tree.collapsed.extend([one.clone(), two.clone(), format!("{two}/bodies")]);
     h.frames(2);
-    assert!(!h.app.tree.order.contains(&format!("b:{second}")), "the body's row is closed away");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{second}")),
+        "the body's row is closed away"
+    );
     let face = Sel::Face { body: second.clone(), index: 0, point: solidcore_record::Vec3::new(55.0, 5.0, 10.0) };
     crate::viewport::select(&mut h.app, Some(face), false, false);
     assert_eq!(h.app.tree.reveal.as_deref(), Some(second.as_str()));
@@ -103,8 +106,14 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     assert!(h.app.tree.reveal.is_none(), "revealed");
     assert!(!h.app.tree.collapsed.contains(&two) && !h.app.tree.collapsed.contains(&format!("{two}/bodies")));
     assert!(h.app.tree.collapsed.contains(&one), "the other placement stays as it was");
-    assert!(h.app.tree.order.contains(&format!("b:{second}")), "the row is drawn");
-    assert!(!h.app.tree.order.contains(&format!("b:{first}")), "the other placement's row stays closed away");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{second}")),
+        "the row is drawn"
+    );
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{first}")),
+        "the other placement's row stays closed away"
+    );
 }
 
 /// Hovering a placement row lights its whole subtree: the subtree is walked once per model, not
@@ -553,5 +562,8 @@ fn find_in_browser_opens_placements_that_start_closed() {
     super::reveal_body(&mut h.app, &body);
     h.frames(3);
     assert!(super::is_open(&h.app, &super::occurrence_key(&[occurrence]), true));
-    assert!(h.app.tree.order.contains(&format!("b:{body}")), "the body's row is drawn");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
+        "the body's row is drawn"
+    );
 }

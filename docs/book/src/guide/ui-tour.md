@@ -1,6 +1,15 @@
 # A tour of the window
 
-![The SolidCraft window](../generated/sample-plate.png)
+![The SolidCraft window with the sample plate open, its parts numbered 1 to 8](../media/ui-tour/window.png)
+
+**1** Title bar · **2** Toolbar · **3** Browser · **4** Viewport · **5** Axis view ·
+**6** Navigation bar · **7** Timeline · **8** Command search
+
+To get around the view, drag with the right button to orbit, drag with the middle button to pan
+and turn the wheel to zoom at the pointer. The house above the axis view goes back to the Home
+view.
+
+<video src="../media/ui-tour/navigate.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Orbiting the sample plate with a right drag, panning with a middle drag, zooming with the wheel, then clicking Home"></video>
 
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
@@ -191,7 +200,7 @@ compass. Tool sheets remain draggable: their four corners round away from the ri
 edge, and their two right corners square when docked there. Browser keeps only the height its contents need. Assistant remains on the
 outside edge, and History keeps its chosen bottom, left or shared Browser column.
 The choice is saved between launches. Switching preserves the current tool,
-camera, selection and design; Cancel and Restore Defaults work like other preferences.
+camera, selection and design; Cancel and Restore page defaults work like other preferences.
 
 General › **Show text under ribbon icons** is a separate, saved option for either
 layout. Turn it off for shorter icon-only command buttons; tooltips, section names
@@ -385,7 +394,7 @@ Four ids are reserved for definitions owned by the app:
 | Id | Type | Bounds | Unit | Parent |
 |---|---|---|---|---|
 | `opacity` | range | 40–100 | `%` | — |
-| `blur` | range | 0–40 | `px` | — |
+| `blur` | range | 0–60 | `px` | — |
 | `tab_colours` | bool | — | — | — |
 | `tab_fade_ms` | range | 0–600 | `ms` | `tab_colours` |
 
@@ -399,8 +408,8 @@ absent from the list until its behaviour is registered.
 The resolver exposes declared standard options in the order `opacity`, `blur`, `tab_colours`,
 each immediately followed by its child, then custom options in declared order.
 
-Opacity scales only these floating surface fill tokens: `panel`, `panel_header`, `dialog_bg`,
-`dialog_body`, `dialog_footer`, `overlay` and `nav_tip`. Scaling is applied after matching
+Opacity scales only these floating surface fill tokens: `panel`, `panel_header`, `toolbar`,
+`timeline`, `dialog_bg`, `dialog_body`, `dialog_footer`, `overlay` and `nav_tip`. Scaling is applied after matching
 overlays. All other tokens, including text, icons, borders, controls, viewport and document
 colours, retain their resolved values. At 100%, with the implicit 100% default, or without
 offered opacity, every token is exactly the original resolved value. The supported range is
@@ -453,6 +462,21 @@ Saved selections and settings profiles using the former `-soft` and `-hard` ids
 select the corresponding family and contrast. Selecting a family again restores its
 last contrast; Reset returns it to Standard.
 
+**Onyx** is an original dark stone-grey theme with quiet surface layers, fine etched edges
+and a restrained blue-grey accent. Its defaults pair **80% Opacity** (adjustable from 60–100%) with a broad **60 px Blur**:
+Opacity sets how much of the scene shows through; Blur sets how widely its detail softens.
+Its custom controls are **Accent** (Slate blue, Silver or Sage), **Contrast** (Soft or Defined),
+**Brightness** (60–120%, default 100%), then **Foreground colours** (Vibrant or Muted),
+with optional **Tab colours** and a Fade control in the standard controls above.
+Edges always use the fine Etched finish. Brightness smoothly adjusts stone surfaces,
+viewport backgrounds and grid tones while preserving text and semantic foreground colours.
+Vibrant is the default, giving the axes, icons and modelling guides stronger colour.
+Muted preserves the original quiet palette. Accent independently controls selection and highlights; foreground modes
+keep the stone-grey backgrounds and red/green/blue axis meanings.
+Tab colours gently tint panels and the viewport while preserving the selected accent.
+Accent changes selection and control accents; Foreground colours sets semantic glyphs,
+workspace colours and status colours while retaining their meaning. As with other themes, the existing blur availability and readability limits apply.
+
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`
 for an exact, correctly typed comparison, or `gte`, `lte`, or both for inclusive range bounds.
@@ -461,13 +485,21 @@ malformed values are refused with the overlay's one-based position. An overlay m
 `colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
 Overlays only select literal tables: there are no scripts, expressions or interpolation.
 
-The optional integer `requires` defaults to 1, this app's supported level. A larger level
+The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
 loads the authored base value tables, disables options and overlays, and exposes a
 `needs_newer` flag through the theme API for future UI. The theme-definition API can export
 options and overlays intact; the existing token snapshot export keeps its previous shape.
 The value resolver reports notices for unknown saved ids, wrong types, unknown choices,
 non-finite numbers and clamped values. Invalid saved values for declared options fall back to defaults;
 unknown saved ids are omitted because they have no definition or default.
+
+A custom percent range may declare `"effect":"surface_brightness"` with `requires: 2`.
+Its bounds must stay within 60–120%, include 100%, and use default 100 and step 1.
+This continuously scales neutral surface, viewport, grid and border RGB after overlays
+and tab tables, before opacity readability protection. Alpha, text, semantic colours
+and selection colours stay authored. At 100% the transform is exactly unchanged.
+Only one such effect is allowed per theme; other effects and non-range bindings are rejected.
+The custom option keeps its authored label and order, after the standard controls.
 
 #### Follow a theme file
 

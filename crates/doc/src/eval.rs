@@ -1650,6 +1650,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     for (sketch, _) in f.kind.profile_sels() {
         if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
             reads.sketch(doc, sketch);
+            // A later transfer can preserve this profile's historical frame. Changes to that
+            // boundary (including suppression and rollback) must invalidate the constructor.
+            if let Some(relative) = crate::body_transfer::profile_frame(doc, f, sketch) {
+                "transferred profile".hash(&mut h);
+                sketch.hash(&mut h);
+                hash_placement(&relative, &mut h);
+            }
         }
     }
     let path = match &f.kind {
@@ -2930,11 +2937,65 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         return Ok(tools);
     }
     let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-    Ok(match kernel::union_apart(&bodies)? {
+    let one = match kernel::union_apart(&bodies)? {
+        Some(one) => Some(one),
+        // The kernel only compares the tools' boxes, so copies of a through hole close together
+        // on a circle (their boxes overlap) seem to meet (#9007). Their exact shapes may still
+        // be apart.
+        None if tools_clearly_apart(&bodies) => kernel::join_apart(&bodies).ok().flatten(),
+        None => None,
+    };
+    #[cfg(test)]
+    cost_tests::count(|c| c.cut_tools += one.as_ref().map_or(tools.len(), |_| 1));
+    Ok(match one {
         // Each piece's faces keep the names of the tool it is.
         Some(one) => vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())],
         None => tools,
     })
+}
+
+/// Most pairs of tools whose boxes meet that [`tools_clearly_apart`] tests.
+const MAX_CLOSE_TOOL_PAIRS: usize = 4096;
+
+/// Whether no two of `bodies` meet or touch, decided on their exact shapes. Only pairs whose
+/// exact boxes, grown by twice the bodies' tolerances (as [`kernel::apart`] grows them), meet
+/// are tested, by [`apart_by_union`]. `false` whenever that cannot be shown: a mesh body, a body
+/// without an exact box, too many pairs to test, a union that fails.
+fn tools_clearly_apart(bodies: &[Body]) -> bool {
+    if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
+        return false;
+    }
+    let Some(boxes) = bodies.iter().map(more::exact_box).collect::<Option<Vec<_>>>() else { return false };
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map_or(0.0, |b| b.min.x).total_cmp(&boxes.get(j).map_or(0.0, |b| b.min.x)));
+    let mut close = Vec::new();
+    for (k, &i) in order.iter().enumerate() {
+        let Some(a) = boxes.get(i) else { return false };
+        for &j in order.iter().skip(k + 1) {
+            let Some(b) = boxes.get(j) else { return false };
+            if b.min.x > a.max.x {
+                break;
+            }
+            if more::boxes_apart(&Some(*a), &Some(*b)) {
+                continue;
+            }
+            if close.len() == MAX_CLOSE_TOOL_PAIRS {
+                return false;
+            }
+            close.push((i, j));
+        }
+    }
+    close.into_iter().all(|(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b)))
+}
+
+/// Whether the exact union of `a` and `b` comes out in two pieces that share no face, edge or
+/// vertex. Crossing and nested bodies come out in one piece, touching ones in one or in two that
+/// share an edge or a face.
+fn apart_by_union(a: &Body, b: &Body) -> bool {
+    match kernel::boolean(a, b, BoolOp::Union) {
+        Ok(Some(u)) => u.record().material_regions().len() == 2 && u.region_contacts().is_ok_and(|c| c.is_empty()),
+        _ => false,
+    }
 }
 
 /// An intersect never deletes a body by accident (#5295): it is refused when nothing of a named
@@ -4635,18 +4696,41 @@ fn hole_tools_and_prisms(
     match hole {
         HoleKind::Simple => tools.extend(bore(None)?),
         HoleKind::Drilled { tip_angle } => tools.extend(bore(Some(tip_angle))?),
-        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle } => {
+        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle, bridge } => {
             let (rc, dc) = (val(vals, cb_diameter, Kind::Length)? / 2.0, val(vals, cb_depth, Kind::Length)?);
             if !(rc > r && dc > 0.0 && -dc > bottom) {
                 return Err(DocError::Invalid("the counterbore must be wider than the hole and shallower than it".into()));
             }
             // Wide and shallow first: the narrow hole then crosses the pocket floor.
             tools.push(cyl(rc, -dc, top, "cbore")?);
+            if let Some(layer) = bridge {
+                let layer = val(vals, layer, Kind::Length)?;
+                tools.extend(bridge_tools(&plane, r, rc, dc, bottom, layer)?);
+                // Through all, `bottom` is the tool's reach, not the material's: the second layer
+                // must end inside a body (exact classification), short of the exit face.
+                if depth.is_none() {
+                    let past = *position + dir * (dc + 2.0 * layer + size * 1e-6);
+                    let classes = st.bodies.iter().map(|b| b.body.classify_point(past)).collect::<std::result::Result<Vec<_>, _>>()?;
+                    if !classes.contains(&kernel::PointClass::Inside) {
+                        return Err(bridge_too_deep(layer, "make the counterbore shallower or the bridge thinner"));
+                    }
+                }
+            }
             tools.extend(bore(tip_angle.as_ref())?);
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle } => {
             let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
-            if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+            // The angle and the width are told apart: an angle out of range is not a countersink
+            // too narrow (#9625). The cone's length grows as 1 / tan(half), so a near-flat angle
+            // is refused at a floor the message names, rather than built kilometres long.
+            const MIN_ANGLE_DEG: f64 = 0.115;
+            if !(2.0 * half > MIN_ANGLE_DEG.to_radians() && half < std::f64::consts::FRAC_PI_2) {
+                return Err(DocError::Invalid(format!(
+                    "the countersink angle must be more than {MIN_ANGLE_DEG}° and less than 180°, not {}°",
+                    ((2.0 * half).to_degrees() * 1e6).round() / 1e6
+                )));
+            }
+            if !(rc > r) {
                 return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
             }
             // One revolved tool: the cone from its rim on the face to just inside the hole
@@ -4666,6 +4750,59 @@ fn hole_tools_and_prisms(
             );
             tools.extend(bore(tip_angle.as_ref())?);
         }
+    }
+    Ok(tools)
+}
+
+/// How much wider than the hole a bridged counterbore's slot and square are, in mm.
+const BRIDGE_CLEARANCE: f64 = 0.02;
+
+/// Why a bridged counterbore's two layers of `layer` were refused: they reach past the hole, and
+/// `fix` says what to change.
+fn bridge_too_deep(layer: f64, fix: &str) -> DocError {
+    DocError::Invalid(format!("the two bridge layers ({:.3} mm) must fit in the hole below the counterbore: {fix}", 2.0 * layer))
+}
+
+/// The bridge layers of a counterbore printed opening down: below its floor, a slot across the
+/// whole counterbore, along X (one `layer` thick), then a square (one more), both
+/// [`BRIDGE_CLEARANCE`] wider than the hole, so each layer spans between supported edges.
+/// `plane` is the hole's, its normal out of the material; the bore crosses both layers, clear of
+/// their sides.
+fn bridge_tools(plane: &Plane, r: f64, rc: f64, dc: f64, bottom: f64, layer: f64) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+    if !(layer > 0.0 && layer.is_finite()) {
+        return Err(DocError::Invalid("the bridge layer must be a positive length, such as 0.2 mm".into()));
+    }
+    let (t1, t2) = (-dc - layer, -dc - 2.0 * layer);
+    if t2 <= bottom {
+        return Err(bridge_too_deep(layer, "make the hole deeper or the bridge thinner"));
+    }
+    // Both a hair wider than the hole, so the bore's rim doesn't touch their sides.
+    let q = r + BRIDGE_CLEARANCE / 2.0;
+    // The slot's ends need room on the counterbore's wall past that.
+    if !(rc >= q + BRIDGE_CLEARANCE / 2.0) {
+        return Err(DocError::Invalid(format!("a bridged counterbore must be at least {} mm wider than the hole", 2.0 * BRIDGE_CLEARANCE)));
+    }
+    // The slot along world X where the axis allows it, else along the hole plane's own x.
+    let n = plane.normal();
+    let x = (Vec3::X - n * Vec3::X.dot(n)).normalized().filter(|_| Vec3::X.dot(n).abs() < 0.99).unwrap_or(plane.x);
+    let bp = Plane::new(plane.origin, x, n.cross(x)).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+    // The slot ends on the counterbore's wall: two lines and two arcs of its circle.
+    let a = (rc * rc - q * q).sqrt();
+    let phi = q.atan2(a);
+    let slot = solidcore_record::Loop2 {
+        segs: vec![
+            solidcore_record::Seg2::Line { a: Vec2::new(-a, -q), b: Vec2::new(a, -q) },
+            solidcore_record::Seg2::Arc { center: Vec2::ZERO, radius: rc, start: -phi, sweep: 2.0 * phi },
+            solidcore_record::Seg2::Line { a: Vec2::new(a, q), b: Vec2::new(-a, q) },
+            solidcore_record::Seg2::Arc { center: Vec2::ZERO, radius: rc, start: std::f64::consts::PI - phi, sweep: 2.0 * phi },
+        ],
+    };
+    let square = solidcore_record::Loop2::polygon(&[Vec2::new(-q, -q), Vec2::new(q, -q), Vec2::new(q, q), Vec2::new(-q, q)]);
+    let mut tools = Vec::new();
+    for (outline, lo, hi) in [(slot, t1, -dc), (square, t2, t1)] {
+        let region = Region2 { outer: outline, holes: vec![] };
+        let tool = kernel::extrude(&bp, &[region], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
+        tools.push((crate::lineage::part_tool(tool, "bridge"), None));
     }
     Ok(tools)
 }
@@ -4798,6 +4935,22 @@ struct ExtrudeConstructor {
     interval: (f64, f64),
 }
 
+/// How far from its sketch plane an extrude may reach, in mm. It mirrors the limit the kernel's
+/// `finite` check in `crates/kernel/src/build.rs` puts on an extrusion's start and end (a literal
+/// there, not exported), so a too-long extrusion is refused here, by name, before the kernel is
+/// called: the kernel's own message, `end = 1000000000`, names no field (#9625).
+const MAX_EXTRUDE_REACH: f64 = 1e7;
+
+/// Refuse an extrusion whose ends lie past [`MAX_EXTRUDE_REACH`] from the sketch plane.
+fn extrude_within_reach(ends: [f64; 2]) -> Result<()> {
+    match ends.into_iter().find(|x| x.abs() >= MAX_EXTRUDE_REACH) {
+        Some(x) => Err(DocError::Invalid(format!(
+            "the extrusion is too long: its end is {x} mm from the sketch plane, past the limit of {MAX_EXTRUDE_REACH} mm"
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// Construct planar caps locally before placing the completed tool.
 fn centered_extrude(
     plane: &Plane,
@@ -4905,10 +5058,10 @@ fn feature_tools_with_constructor(
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
     match &f.kind {
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets, thin } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
             let regions = match thin {
                 Some(thin) => thin_regions(vals, &ss, thin)?,
@@ -4981,6 +5134,7 @@ fn feature_tools_with_constructor(
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
+                extrude_within_reach([base, base + sign * len])?;
                 let start_plane = ss.plane.offset(base);
                 let caps = [
                     Some(crate::lineage::extrude_cap_role(base)),
@@ -5050,6 +5204,7 @@ fn feature_tools_with_constructor(
                     lo = hs.iter().cloned().fold(lo, f64::min) - margin;
                 }
             }
+            extrude_within_reach([lo + off, hi + off])?;
             let untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
             let mut tools = Vec::new();
             for r in &regions {
@@ -5130,10 +5285,10 @@ fn feature_tools_with_constructor(
             Ok(tools)
         }
         FeatureKind::Revolve { sketch, profiles, axis, angle, angle2, symmetric, convention, to, .. } => {
-            let ss = sketch_in_feature_frame(
+            let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
-                f.component,
+                f,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) =
@@ -5538,16 +5693,27 @@ fn sketch_in_feature_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64)
     profile_in_frame(doc, sketch, consumer)
 }
 
+fn constructor_profile_in_frame(doc: &Document, sketch: &SolvedSketch, feature: &Feature) -> Result<SolvedSketch> {
+    match crate::body_transfer::profile_frame(doc, feature, sketch.feature) {
+        Some(relative) => profile_with_transform(sketch, &relative),
+        None => sketch_in_feature_frame(doc, sketch, feature.component),
+    }
+}
+
 fn profile_in_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64) -> Result<SolvedSketch> {
     let owner = doc.feature(sketch.feature).map(|feature| feature.component).unwrap_or(0);
     let inverse =
         crate::mat_inverse(&doc.component_transform(consumer)).ok_or_else(|| DocError::Invalid("profile consumer frame is invalid".into()))?;
     let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    profile_with_transform(sketch, &relative)
+}
+
+fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<SolvedSketch> {
     let mut mapped = sketch.clone();
     mapped.plane = Plane::new(
-        crate::apply_point(&relative, sketch.plane.origin),
-        crate::apply_vector(&relative, sketch.plane.x),
-        crate::apply_vector(&relative, sketch.plane.y),
+        crate::apply_point(relative, sketch.plane.origin),
+        crate::apply_vector(relative, sketch.plane.x),
+        crate::apply_vector(relative, sketch.plane.y),
     )
     .ok_or_else(|| DocError::Invalid("profile sketch frame is invalid".into()))?;
     Ok(mapped)
@@ -6075,7 +6241,6 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
     (Vec3::ZERO, Vec3::X)
 }
 
-/// Whether a copy has no material to cut in any of its eligible targets.
 /// The bodies a hole cuts: those its feature names, else its component's and its own (as
 /// `apply_traced` picks a cut's targets).
 fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
@@ -6105,18 +6270,120 @@ fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
     targets.iter().all(|b| more::boxes_apart(&tool_box, &b.body.exact_bounds().ok()))
 }
 
-fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
+/// The bodies a pattern's cut copies are checked against for missing them ([`copy_misses`]).
+fn miss_scope<'a>(st: &'a ModelState, f: &'a Feature, targets: &'a [String]) -> impl Iterator<Item = &'a ModelBody> + 'a {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     st.bodies
         .iter()
-        .filter(|b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
-        .all(|b| {
-            tools.iter().all(|t| {
-                // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
-                matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
-            })
+        .filter(move |b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
+}
+
+/// Whether a copy has no material to cut in any of its eligible targets.
+fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
+    miss_scope(st, f, targets).all(|b| {
+        tools.iter().all(|t| {
+            #[cfg(test)]
+            cost_tests::count(|c| c.miss_intersects += 1);
+            // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
+            matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
         })
+    })
+}
+
+/// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
+/// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
+/// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
+/// shows takes material from a target ([`shares_material`]) is not a miss, and skips it; only
+/// copies the test cannot place (in an earlier hole, on the edge, thinner than its samples) are
+/// intersected.
+fn count_copy_misses(
+    st: &ModelState,
+    f: &Feature,
+    targets: &[String],
+    copies: &[Traced],
+    instances: &[std::ops::Range<usize>],
+    axes: &[Vec<(Vec3, Vec3)>],
+) -> (usize, usize) {
+    let scope: Vec<&ModelBody> = miss_scope(st, f, targets).collect();
+    let (mut missed, mut total) = (0, 0);
+    for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
+        total += 1;
+        let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
+        let takes = tools.iter().any(|t| scope.iter().any(|b| shares_material(&b.body, &t.body, lines)));
+        if !takes && copy_misses(st, f, targets, tools) {
+            missed += 1;
+        }
+    }
+    (missed, total)
+}
+
+/// Whether some point lies in the material of both B-rep bodies `target` and `tool`, by their
+/// exact point classification (a point on either's boundary does not count). Tried along
+/// `lines` (a hole's axis: through the wall it drills into, however thin and slanted), along the
+/// axes of the tool's round faces (a cylinder's axis, the middle of a slot's ends) and along the
+/// three lines parallel to the axes through the middle of the box both exact boxes hold (the
+/// axis of a straight hole through a plate), within that box. `false` says nothing.
+fn shares_material(target: &Body, tool: &Body, lines: &[(Vec3, Vec3)]) -> bool {
+    if target.is_mesh() || tool.is_mesh() {
+        return false;
+    }
+    let (Some(a), Some(b)) = (more::exact_box(target), more::exact_box(tool)) else { return false };
+    let both = a.intersection(&b);
+    if both.is_empty() {
+        return false;
+    }
+    let c = both.center();
+    let mut all = lines.to_vec();
+    all.extend(round_face_axes(tool, MAX_PROBED_FACES));
+    all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
+    let inside = |b: &Body, p: Vec3| matches!(b.classify_point(p), Ok(kernel::PointClass::Inside));
+    all.iter().any(|&(o, d)| {
+        let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
+        (0..SAMPLES_PER_LINE).any(|k| {
+            let p = o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64);
+            inside(tool, p) && inside(target, p)
+        })
+    })
+}
+
+/// Points tried on each line by [`shares_material`].
+const SAMPLES_PER_LINE: usize = 16;
+/// Most faces of a tool whose surfaces [`shares_material`] looks along.
+const MAX_PROBED_FACES: usize = 32;
+
+/// The axes of the round faces among the first `max` faces of `body`, from their exact surfaces:
+/// a cylinder's, a cone's and a torus's axis, and the lines along X, Y and Z through a sphere's
+/// centre.
+fn round_face_axes(body: &Body, max: usize) -> Vec<(Vec3, Vec3)> {
+    let mut lines = Vec::new();
+    for face in 0..body.face_count().min(max) {
+        match kernel::face_surface(body, face) {
+            Some(kernel::FaceSurface::Cylinder { origin, axis, .. }) => lines.push((origin, Vec3::from(axis))),
+            Some(kernel::FaceSurface::Cone { apex, axis, .. }) => lines.push((apex, Vec3::from(axis))),
+            Some(kernel::FaceSurface::Torus { center, axis, .. }) => lines.push((center, Vec3::from(axis))),
+            Some(kernel::FaceSurface::Sphere { center, .. }) => lines.extend([(center, Vec3::X), (center, Vec3::Y), (center, Vec3::Z)]),
+            Some(kernel::FaceSurface::Plane { .. }) | None => {}
+        }
+    }
+    lines
+}
+
+/// The stretch of the line `o + t d` inside `b`, as the range of `t`; `None` when it misses.
+fn line_in_box(b: &solidcraft_geom::Aabb3, o: Vec3, d: Vec3) -> Option<(f64, f64)> {
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (o, d, min, max) in [(o.x, d.x, b.min.x, b.max.x), (o.y, d.y, b.min.y, b.max.y), (o.z, d.z, b.min.z, b.max.z)] {
+        if d.abs() < 1e-12 {
+            if o < min || o > max {
+                return None;
+            }
+        } else {
+            let (a, c) = ((min - o) / d, (max - o) / d);
+            lo = lo.max(a.min(c));
+            hi = hi.min(a.max(c));
+        }
+    }
+    (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
 }
 
 /// The deepest a pattern or mirror reaches through patterns and mirrors of features (#395).
@@ -6358,6 +6625,9 @@ fn replay(
         let targets = if present.is_empty() { targets } else { present };
         let mut copies = Vec::new();
         let mut instances = Vec::with_capacity(mats.len());
+        // Each hole copy's axes (spot and direction), where the check for copies that miss looks
+        // for material first.
+        let mut axes: Vec<Vec<(Vec3, Vec3)>> = Vec::new();
         if let FeatureKind::Hole { diameter, depth, hole, to, .. } = &src.kind {
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
@@ -6366,8 +6636,10 @@ fn replay(
             for (k, m) in mats.iter().enumerate() {
                 let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                 let start = copies.len();
+                let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {
                     let at = hole_on_surface(st, crate::apply_point(m, *p), d, hole_scope(src));
+                    on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
@@ -6378,6 +6650,7 @@ fn replay(
                     );
                 }
                 instances.push(start..copies.len());
+                axes.push(on);
             }
         } else if let FeatureKind::Rib { .. } = &src.kind {
             // A rib is built again at each copy of its sketch, against the bodies there (#4593):
@@ -6404,12 +6677,9 @@ fn replay(
             }
         }
         if op == Operation::Cut {
-            for instance in &instances {
-                if let Some(tools) = copies.get(instance.clone()) {
-                    total += 1;
-                    missed += usize::from(copy_misses(st, f, &targets, tools));
-                }
-            }
+            let (m, t) = count_copy_misses(st, f, &targets, &copies, &instances, &axes);
+            missed += m;
+            total += t;
         }
         // Copies of a cut through sheet metal are cut-outs of its flat pattern, as the cut is
         // (#6841): each machined into the sheets in turn, then cut from the other targets.

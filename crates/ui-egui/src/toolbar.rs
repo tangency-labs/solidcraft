@@ -393,7 +393,7 @@ pub enum VersionPlace {
 
 /// The closed search field goes in the application bar rather than the ribbon.
 pub(crate) fn search_in_header(app: &SolveApp) -> bool {
-    app.header.search == SearchPlace::Header && !app.embedded
+    app.header.search == SearchPlace::Header && !app.embedded && !app.embed_editor
 }
 
 /// Space between the header search field and Settings.
@@ -1152,16 +1152,26 @@ const PERSISTENT_COMMANDS: &[&str] = &[
     "inspect.zebra",
 ];
 
+/// Component Colors is a plain on/off display setting: it shows pressed like the effects above,
+/// but is no status item (nothing to clear with Esc), so it stays out of the list.
+const COMPONENT_COLORS: &str = "inspect.colored_components";
+
 fn persistent_command(id: &str) -> bool {
-    PERSISTENT_COMMANDS.contains(&id)
+    PERSISTENT_COMMANDS.contains(&id) || id == COMPONENT_COLORS
 }
 
 fn persistent_available(app: &SolveApp, id: &str) -> bool {
     persistent_command(id) && (id != "inspect.section" || app.preferences.viewport_section_status)
 }
 
-fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
-    app.preferences.persistent_ribbon_pressed && persistent_available(app, id) && app.session.status_items().iter().any(|item| item.command == id)
+pub(crate) fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
+    app.preferences.persistent_ribbon_pressed
+        && persistent_available(app, id)
+        && if id == COMPONENT_COLORS {
+            app.session.colored_components.is_some()
+        } else {
+            app.session.status_items().iter().any(|item| item.command == id)
+        }
 }
 
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
@@ -1171,7 +1181,7 @@ pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine
 }
 
 fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, enabled: bool) -> Option<String> {
-    (enabled && persistent_pressed(app, command.id)).then(|| {
+    (enabled && command.id != COMPONENT_COLORS && persistent_pressed(app, command.id)).then(|| {
         let name = persistent_button_name(app, command);
         crate::i18n::Locale::for_language(&app.preferences.language).format("ui.viewport_status_clear_hint", &[("name", &name)])
     })
@@ -2608,18 +2618,24 @@ fn dropdown_row(
     let pin = ui.interact(pr, ui.id().with(("dropdown_pin", c.id)), Sense::click());
     let pointer_on = (resp.hovered() || pin.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
     let label = app.tr_label(info.label).to_string();
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label));
+    let mut checked = None;
+    if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
+        checked = Some(persistent_pressed(app, c.id));
+    }
+    if c.id == "view.shots_strip" {
+        checked = Some(app.preferences.render_shots_strip);
+    }
+    // A checkable row announces its on/off state, since its label no longer says it.
+    resp.widget_info(|| match checked {
+        Some(on) => egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled() && info.enabled, on, &label),
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label),
+    });
     crate::scenario::publish_handle(&format!("toolbar:{}", c.id), rect.center());
     crate::scenario::publish_handle(&format!("dropdown:{}", c.id), rect.center());
     let hot = info.enabled && (pointer_on || resp.has_focus());
     let mut row = crate::ui_kit::MenuItem::new(c.id, &label, info.icon);
     row.enabled = info.enabled;
-    if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
-        row.checked = Some(persistent_pressed(app, c.id));
-    }
-    if c.id == "view.shots_strip" {
-        row.checked = Some(app.preferences.render_shots_strip);
-    }
+    row.checked = checked;
     row.highlighted = hot || revealed.is_some();
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
     row.shortcut = &shortcut;
@@ -3380,6 +3396,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if mods.command {
             match k {
+                // An editing embed's host has its own New, Open, Save, Close and settings.
+                Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
                 Key::O => {
@@ -5671,6 +5689,96 @@ mod sketch_return_tab_tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         assert_eq!(h.app.ui.tab, "MODEL", "{start}: falls back to MODEL");
+    }
+}
+
+#[cfg(test)]
+mod command_start_tab_tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// The issue's starting point: a design with a box, nothing selected, the ribbon on MODEL.
+    fn on_model_with_a_box() -> Harness {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.ui.tab = "MODEL".into();
+        h.app.status = None;
+        h
+    }
+
+    /// #10540: a command that only reports a missing parameter or that there is nothing to work
+    /// on starts nothing, so the ribbon stays on the tab it was started from, as a disabled
+    /// command already does. The commands are the issue's table, started from MODEL.
+    #[test]
+    fn a_refused_command_leaves_the_ribbon_on_the_tab_it_was_started_from() {
+        for id in [
+            "occurrence.ground",
+            "joint.limits",
+            "component.break_link",
+            "timeline.dependents",
+            "view.rename",
+            "view.delete",
+            "view.navigate",
+            "edit.restore_checkpoint",
+            "parameters.move",
+            "library.inspect",
+            "surface.fair",
+            "surface.match",
+            "sheet.export_bend_table",
+        ] {
+            let mut h = on_model_with_a_box();
+            h.app.start(id);
+            assert_eq!(h.app.ui.tab, "MODEL", "{id}: a refused command leaves the tab where it was");
+            assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "{id}: nothing started");
+        }
+    }
+
+    /// The issue's exact repro through the control channel: Ground from MODEL says `occurrence`
+    /// must be an id or name; the status line keeps the refusal, the ribbon does not move to
+    /// ASSEMBLE.
+    #[test]
+    fn ground_from_command_search_names_the_missing_occurrence_and_stays_on_model() {
+        let mut h = on_model_with_a_box();
+        h.call("ui.start", json!({"command": "occurrence.ground"}));
+        assert_eq!(h.app.ui.tab, "MODEL", "Ground started nothing: the ribbon stays on MODEL");
+        let (status, _, error) = h.app.status.clone().expect("the refusal reaches the status line");
+        assert!(error, "{status}");
+        assert!(status.contains("occurrence"), "{status}");
+    }
+
+    /// #10540: View Fit, Home and the other view display commands act on the view the same way
+    /// however they are started. F6, the navigation bar and the view cube never move the ribbon,
+    /// so command search and the VIEW tab's menus must not either.
+    #[test]
+    fn view_display_commands_keep_the_ribbon_on_the_tab_they_were_started_from() {
+        for id in ["view.fit", "view.home", "view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar", "view.visual_style", "view.tool"] {
+            let mut h = on_model_with_a_box();
+            h.app.ui.tab = "INSPECT".into();
+            h.app.start(id);
+            assert_eq!(h.app.ui.tab, "INSPECT", "{id}: started from INSPECT, the ribbon stays there");
+        }
+    }
+
+    /// The other half of #10540: a command that does start still moves the ribbon to its tab —
+    /// Extrude's dialog opens and the ribbon follows it to MODEL from INSPECT.
+    #[test]
+    fn a_command_that_opens_still_moves_the_ribbon_to_its_tab() {
+        let mut h = on_model_with_a_box();
+        h.app.ui.tab = "INSPECT".into();
+        h.app.start("solid.extrude");
+        assert!(h.app.dialog.is_some(), "Extrude's dialog opens");
+        assert_eq!(h.app.ui.tab, "MODEL", "the ribbon follows the command that started");
+    }
+
+    /// A command that runs without a dialog or tool has run: the ribbon keeps the tab it moved
+    /// to (#10540's "or it runs"). List Contact Sets answers with the sets, no parameters.
+    #[test]
+    fn a_command_that_runs_still_moves_the_ribbon() {
+        let mut h = on_model_with_a_box();
+        h.app.start("contact.list");
+        assert_eq!(h.app.ui.tab, "ASSEMBLE", "the command ran: the ribbon stays on its tab");
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 }
 

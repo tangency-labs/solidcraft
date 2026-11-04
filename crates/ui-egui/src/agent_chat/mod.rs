@@ -427,6 +427,9 @@ pub struct AgentChat {
     running_endpoint: String,
     backend: Option<Box<dyn ChatBackend>>,
     turn: Option<Turn>,
+    /// The design as the agent last saw it: at the end of its last turn that it answered or worked
+    /// in. The next message tells it when the design is no longer that one (#10854).
+    seen: Option<Arc<solidcraft_engine::doc::Document>>,
     tools_available: Option<bool>,
     /// The latest completed turn's notice; older notices remain in the transcript.
     turn_warning: Option<String>,
@@ -609,6 +612,8 @@ impl AgentChat {
 
     fn stop_backend(&mut self, wait: bool) {
         self.steering = false;
+        // The next agent starts without this one's memory of the design.
+        self.seen = None;
         if let Some(mut b) = self.backend.take() {
             b.cancel();
             b.shutdown(wait);
@@ -1207,6 +1212,71 @@ const MAX_PENDING: usize = 20;
 /// Said to the agent before a message that interrupted it, so it knows its last step may be
 /// incomplete.
 const INTERRUPT_NOTE: &str = "[The user interrupted your previous step.]";
+/// Most names one list of [`changed_note`] carries; the rest are counted.
+const CHANGED_ITEMS: usize = 12;
+
+/// Said to the agent before a message when the design is not the one its last turn left: the user
+/// changed it by hand in between (#10854). Names the parameters and features that changed and
+/// where the History marker went, so the agent reads the design again instead of reusing
+/// positions and picks from before.
+fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine::doc::Document) -> Option<String> {
+    use solidcraft_engine::doc::Feature;
+    use std::collections::HashMap;
+    if seen == now {
+        return None;
+    }
+    let clip = |s: &str| s.chars().take(60).collect::<String>();
+    let list = |items: Vec<String>| {
+        let more = items.len().saturating_sub(CHANGED_ITEMS);
+        let mut text = items.into_iter().take(CHANGED_ITEMS).collect::<Vec<_>>().join(", ");
+        if more > 0 {
+            text.push_str(&format!(" and {more} more"));
+        }
+        text
+    };
+    let mut parts = Vec::new();
+    let before: HashMap<&str, &str> = seen.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+    let after: HashMap<&str, &str> = now.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+    let params: Vec<String> = now
+        .params
+        .iter()
+        .filter_map(|p| match before.get(p.name.as_str()) {
+            Some(old) if *old == p.expr => None,
+            Some(old) => Some(format!("{} {} -> {}", clip(&p.name), clip(old), clip(&p.expr))),
+            None => Some(format!("{} = {} (new)", clip(&p.name), clip(&p.expr))),
+        })
+        .chain(seen.params.iter().filter(|p| !after.contains_key(p.name.as_str())).map(|p| format!("{} (removed)", clip(&p.name))))
+        .collect();
+    if !params.is_empty() {
+        parts.push(format!("parameters: {}", list(params)));
+    }
+    let name = |f: &Feature| if f.name.is_empty() { format!("#{}", f.id) } else { clip(&f.name) };
+    let before: HashMap<u64, &Feature> = seen.features.iter().map(|f| (f.id, f)).collect();
+    let after: HashMap<u64, &Feature> = now.features.iter().map(|f| (f.id, f)).collect();
+    let features: Vec<String> = now
+        .features
+        .iter()
+        .filter_map(|f| match before.get(&f.id) {
+            Some(old) if *old == f => None,
+            Some(_) => Some(format!("{} (edited)", name(f))),
+            None => Some(format!("{} (new)", name(f))),
+        })
+        .chain(seen.features.iter().filter(|f| !after.contains_key(&f.id)).map(|f| format!("{} (removed)", name(f))))
+        .collect();
+    if !features.is_empty() {
+        parts.push(format!("features: {}", list(features)));
+    }
+    if seen.marker != now.marker {
+        parts.push(match now.marker.and_then(|i| now.features.get(i)) {
+            Some(f) => format!("the History marker is now before {}, so it and the features after it are rolled back", name(f)),
+            None => "the History marker is now at the end".into(),
+        });
+    }
+    let what = if parts.is_empty() { String::new() } else { format!(" ({})", parts.join("; ")) };
+    Some(format!(
+        "[The user changed the design by hand since your last reply{what}. Read it again before you reuse positions, edge or face picks or sizes from earlier in this chat.]"
+    ))
+}
 
 /// How many things the selection is, counting what was clicked (the two halves of a rim are one).
 pub fn selected_count(app: &mut SolveApp) -> usize {
@@ -1412,6 +1482,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.steering = false;
     chat.stopped = false;
     chat.ended = None;
+    chat.seen = None;
     chat.discard_end = running;
     chat.model_revert = None;
     if matches!(chat.state(), State::Ready | State::Busy) {
@@ -1457,15 +1528,15 @@ fn start_turn(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, 
     start_turn_with(app, text, image, at, files, None);
 }
 
-/// Start a message; `note` goes before the text for the agent, not into the conversation. The
+/// Start a message; `note` goes before the text for the agent, not into the conversation, and so
+/// does what changed in the design since the agent's last turn ([`changed_note`]). The
 /// files are named after the text (text files in full), and pictures go as images to an agent
 /// that takes them. `at` is the message's place in the conversation, where its picture is kept.
 fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, files: Vec<attach::Attachment>, note: Option<&str>) {
     let (pictures, documents) = (app.agent_chat.images, app.agent_chat.documents);
-    let lead = match note {
-        Some(n) => format!("{n}\n\n{text}"),
-        None => text.clone(),
-    };
+    let changed = app.agent_chat.seen.as_deref().and_then(|seen| changed_note(seen, &app.session.doc));
+    let notes: Vec<&str> = note.into_iter().chain(changed.as_deref()).collect();
+    let lead = if notes.is_empty() { text.clone() } else { format!("{}\n\n{text}", notes.join("\n")) };
     // The whole message stays within the cap: the files' text gets what the words leave.
     let budget = MAX_PROMPT.saturating_sub(lead.chars().count() + FILE_NAMES_ROOM);
     let about_files = attach::note(&files, pictures, documents, budget);
@@ -1739,6 +1810,10 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     let Some(turn) = chat.turn.take() else { return };
     turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
     let steps = merge_undo(&mut session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    // A turn the agent never answered (a sign-in, an error before its reply) showed it nothing.
+    if turn.replied || turn.tool_called || turn.requests > 0 {
+        chat.seen = Some(session.doc.clone());
+    }
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
         && turn.tools_available

@@ -120,6 +120,60 @@ fn painted_text(h: &mut Harness) -> Vec<String> {
     output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_string()) } else { None }).collect()
 }
 
+/// A point's complete position must be painted, not merely retained in an ellipsized galley.
+#[test]
+fn point_coordinates_are_not_truncated_in_the_measure_panel() {
+    for layout in ["floating", "compact"] {
+        for decimals in [2, 8] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.length_decimals = decimals;
+            h.call("ui.set", json!({"layout":layout}));
+            let point = [-99.56, -75.0, 12.345678];
+            h.app.run("solid.box", json!({"corner":point,"length":1,"width":1,"height":1,"body_name":"Box"})).unwrap();
+            h.app.session.selection = vec![Sel::Vertex { body: "Box".into(), point: point.into() }];
+            h.app.start("inspect.measure");
+            h.call("ui.view", json!({"view":"fit"}));
+            h.frames(6);
+            let line = crate::quick_measure::item_lines(&h.app, &result(&h)["items"][0]).remove(0);
+            h.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&h.ctx);
+            let mut textures = std::collections::HashMap::new();
+            let mut last = None;
+            for frame in 0..6 {
+                let mut output = h.ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+                        time: Some(frame as f64 / 60.0),
+                        ..Default::default()
+                    },
+                    |ui| h.app.ui(ui),
+                );
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+                last = Some(output);
+            }
+            let output = last.unwrap();
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_MEASURE_EVIDENCE") {
+                let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+                let image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), output.pixels_per_point, bounds, &textures);
+                std::fs::create_dir_all(&dir).unwrap();
+                image.save(std::path::Path::new(&dir).join(format!("coordinates-{layout}-{decimals}.png"))).unwrap();
+            }
+            let painted = output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text().contains(&line) => Some((s.clip_rect, t)),
+                    _ => None,
+                })
+                .expect("the position is painted");
+            assert!(!painted.1.galley.elided, "{layout}, {decimals} decimals: {line}");
+            assert!(painted.0.expand(1.0).contains_rect(painted.1.visual_bounding_rect()), "the complete position stays inside its clip");
+        }
+    }
+}
+
 fn component_rects() -> Vec<egui::Rect> {
     ["measure:label", "measure:label:x", "measure:label:y", "measure:label:z"].into_iter().map(|key| crate::scenario::rect_of(key).unwrap()).collect()
 }

@@ -81,21 +81,35 @@ CommandSpec::new("render.preset.apply", "Apply Native Studio", studio_presets::a
     .params("Same reviewed input as render.preset.resolve, expected_revision required, replace_lighting_and_environment:true and replace_stage:true when an existing stage would change. Re-resolves the complete candidate and publishes one undo or no mutation; camera, optical bindings, geometry and engineering materials are preserved."),
 CommandSpec::new("render.quality.prepare", "Review Fixed Sampling Budget", studio_presets::quality).icon("settings").noundo().doc_only()
     .params("id: Q-*; variant:fixed_samples_png; acknowledge_omissions:true. Read-only bounded GPU still-budget projection, not full adaptive/convergence/linear-master quality acceptance. Returns dimensions/samples/depth/seed/denoise and explicit omissions. Never switches executor or mutates a shot."),
-CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", shots::duplicate).icon("copy").doc_only()
+CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", crate::checked!("render.shot.duplicate", shots::duplicate)).icon("copy").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, new_name, expected_revision:u64. Copies exact saved setup and resource references in one undo. Existing destinations refuse; captured jobs and camera navigation are unchanged."),
-CommandSpec::new("render.shot.rename", "Rename Render Shot", shots::rename).icon("settings").doc_only()
+CommandSpec::new("render.shot.rename", "Rename Render Shot", crate::checked!("render.shot.rename", shots::rename)).icon("settings").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, new_name, expected_revision:u64. Renames exact saved setup in one undo; an existing destination or stale review refuses."),
-CommandSpec::new("render.shot.remove", "Remove Render Shot", shots::remove).icon("delete").doc_only()
+CommandSpec::new("render.shot.remove", "Remove Render Shot", crate::checked!("render.shot.remove", shots::remove)).icon("delete").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, expected_revision:u64. Removes only that saved setup in one undo; retains resources, geometry and captured results."),
-CommandSpec::new("render.library.preview", "Inspect Original Surface Map", library::preview).icon("appearance").noundo().doc_only()
+CommandSpec::new("render.library.preview", "Inspect Original Surface Map", crate::checked!("render.library.preview", library::preview)).icon("appearance").noundo().doc_only()
+    .contract(&library::PREVIEW_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryPreview>)
     .params("id: SURF-*. Returns bounded hash-verified original base-color PNG bytes and source-map fidelity label, not a rendered material thumbnail. No external paths, rendering or document edits."),
 CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", physical_library::prepare).icon("inspect").noundo().doc_only()
     .params("id: named built-in physical profile, name: proposed new material label, acknowledge_reference:true. Read-only loss-aware creation plan using native ValidatedCard admission and one point density; returns source receipts, extended fields and omissions. Does not execute material.create, assign bodies or infer effective-part physics."),
-CommandSpec::new("render.stage.ground", "Save Render Ground", staging::ground).icon("render_scene")
+CommandSpec::new("render.stage.ground", "Save Render Ground", crate::checked!("render.stage.ground", staging::ground)).icon("render_scene")
+    .contract(&staging::GROUND_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: typed raytrace setup, set?: setup patch, margin_fraction?:0.25, gap_mm?:0.1, reflectance_linear?:[0.18,0.18,0.18], replace_stage?:false. Fits one finite passive ground below the visible product once and saves its physical transforms in one undo. Product AABB separation is rechecked on every render."),
-CommandSpec::new("render.stage.backdrop", "Save Physical Render Background", staging::backdrop).icon("render_scene").doc_only()
+CommandSpec::new("render.stage.backdrop", "Save Physical Render Background", crate::checked!("render.stage.backdrop", staging::backdrop)).icon("render_scene").doc_only()
+    .contract(&staging::BACKDROP_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: typed raytrace setup, set?: setup patch, kind: floor_wall or cyclorama, reflectance_linear?: [0.18,0.18,0.18], expected_revision: reviewed revision, replace_stage?:false. Fits a finite floor/wall or a 24-strip polygonal cyclorama behind the visible subject using the saved camera azimuth; world +Z up and a minimum one-mm stage envelope. Preserves subject geometry, lighting, output, pose and engineering materials; one undo and rechecked product separation. Not an infinite/analytically smooth/terrain background."),
-CommandSpec::new("render.stage.clear", "Remove Render Stage", staging::clear).icon("render_scene").doc_only()
+CommandSpec::new("render.stage.clear", "Remove Render Stage", crate::checked!("render.stage.clear", staging::clear)).icon("render_scene").doc_only()
+    .contract(&staging::CLEAR_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_stage::StageSaved>)
     .params("name: setup, set?: setup patch. Removes saved render-only panels atomically; CAD geometry and lighting are unchanged."),
 CommandSpec::new("render.library.surface.bind", "Save Surface Binding", surface_bindings::bind).icon("appearance")
     .params("name: GPU setup; set?: setup patch; surface: same input as render.library.surface.prepare; replace?: false. Pins exact source hashes and definition/feature/occurrence identity with local-mm mapping in one undo. No paths, mesh ordinals or physical material changes."),
@@ -103,11 +117,17 @@ CommandSpec::new("render.library.surface.unbind", "Remove Surface Binding", surf
     .params("name: setup, target: saved definition/feature/component/occurrence_path, set?: setup patch. Removes only that explicit binding in one undo; no device or current geometry required."),
     CommandSpec::new("render.result.pin", "Retain Displayed Render Result", jobs::pin).icon("inspect").noundo().doc_only()
         .params("job?: completed JobId (default selected result), or null to clear selection. Selects within the eight retained completed results; oldest is evicted first. Preserves exact export bytes and original host memory accounting. No design/undo change; preview or foreign jobs refuse."),
-CommandSpec::new("render.library.targets", "Find Render Library Targets", library::targets).icon("list").noundo()
+CommandSpec::new("render.library.targets", "Find Render Library Targets", crate::checked!("render.library.targets", library::targets)).icon("list").noundo()
+    .contract(&library::TARGETS_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryTargets>)
     .params("query?: exact-name substring; offset?:0; limit?:128 (1..128). Returns a bounded page of captured body ordinals/names, revision and scene bounds. Settles the model through ordinary command handling; never returns a large mesh payload."),
-CommandSpec::new("render.library.list", "Browse Render Library", library::list).icon("list").noundo().doc_only()
+CommandSpec::new("render.library.list", "Browse Render Library", crate::checked!("render.library.list", library::list)).icon("list").noundo().doc_only()
+    .contract(&library::LIST_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryPage>)
     .params("kind?: surfaces, selene_appearances, hdr, rigs, scenes, materials, lighting, environments, quality, native_scenes, selene_shots or capabilities; query?: bounded search; availability?: all/usable/specification/blocked; offset?:0; limit?:48 (1..128). Returns source status and explicit implemented projections separately. No device, file IO or design change."),
-CommandSpec::new("render.library.describe", "Inspect Render Library Resource", library::describe).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.library.describe", "Inspect Render Library Resource", crate::checked!("render.library.describe", library::describe)).icon("inspect").noundo().doc_only()
+    .contract(&library::DESCRIBE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryDescription>)
     .params("kind, id: exact authored resource. Returns original specification, runtime projection variants and explicit omissions. A concept is not an executable preset."),
 CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appearance", library::apply_appearance).icon("appearance")
     .params("id: SURF-* or SELENE-AP-*; variant: uniform_opaque (required); bodies: 1..256 exact body names. Applies the original scalar baseline through ordinary appearance assignment in one undo, preserving physical properties. Spatial maps and advanced target effects are explicitly excluded."),
