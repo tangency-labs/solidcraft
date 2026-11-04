@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{ConstraintKind, CurveKind};
+use solidcraft_sketch::{ConstraintKind, CurveKind, LinkSource};
 
 use crate::Session;
 
@@ -4842,6 +4842,51 @@ fn mirror_origin_axis_in_rotated_plane_reuses_projection_and_rejects_invalid_lin
     for line in [json!({"axis":"Z"}), json!({"axis":"bad"}), json!({"plane":"XY"}), json!("circle"), json!("missing")] {
         assert!(s.execute("sketch.mirror", &json!({"entities":["source"],"line":line})).is_err(), "{line}");
         assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+/// #8201: a sketch on a face or on any other plane that an origin axis does not lie in still
+/// mirrors about that axis, using the axis's projection into the sketch plane.
+#[test]
+fn mirror_uses_the_projection_of_an_origin_axis_outside_the_sketch_plane() {
+    // Slanted through the origin: world X is outside the plane, and its projection is the
+    // sketch's y line, so a mirror about it turns the x coordinate around.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[0,1,-1],"y_dir":[-2,1,1]}}));
+    run(&mut s, "sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]}));
+    let out = run(&mut s, "sketch.mirror", json!({"entities":["source"],"line":{"axis":"X"}}));
+    let sk = sketch(&s);
+    let copy = out["curves"][0].as_str().unwrap();
+    for (source_end, copy_end) in [("start", "end"), ("end", "start")] {
+        let source = sk.point(sk.resolve_point(&format!("source.{source_end}")).unwrap()).unwrap();
+        let copy = sk.point(sk.resolve_point(&format!("{copy}.{copy_end}")).unwrap()).unwrap();
+        assert!(copy.dist(Vec2::new(-source.x, source.y)) < 1e-6, "{source:?}: {copy:?}");
+    }
+    let link = sk.links.iter().find(|l| matches!(&l.source, LinkSource::Axis { name } if name == "X")).expect("the projected X axis is a link");
+    let line = sk.link_curves(&link.id)[0];
+    assert!(sk.curves[line].construction && sk.is_linked_curve(line));
+    match sk.shape(line) {
+        Some(solidcraft_sketch::Shape::Line { a, b }) => {
+            assert!(a.x.abs() < 1e-6 && b.x.abs() < 1e-6, "the projected X axis is the sketch y: {a:?} {b:?}");
+        }
+        other => panic!("the projected X axis is not a line: {other:?}"),
+    }
+    // A second mirror reuses the same projected axis instead of adding another.
+    run(&mut s, "sketch.mirror", json!({"entities":["source"],"line":{"axis":"X"}}));
+    assert_eq!(sketch(&s).links.len(), 1);
+
+    // Offset above the origin, as a sketch on a part's top face: the projection is still the
+    // world X line, which is the sketch's own x here.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}}));
+    run(&mut s, "sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]}));
+    let out = run(&mut s, "sketch.mirror", json!({"entities":["source"],"line":{"axis":"X"}}));
+    let sk = sketch(&s);
+    let copy = out["curves"][0].as_str().unwrap();
+    for (source_end, copy_end) in [("start", "end"), ("end", "start")] {
+        let source = sk.point(sk.resolve_point(&format!("source.{source_end}")).unwrap()).unwrap();
+        let copy = sk.point(sk.resolve_point(&format!("{copy}.{copy_end}")).unwrap()).unwrap();
+        assert!(copy.dist(Vec2::new(source.x, -source.y)) < 1e-6, "{source:?}: {copy:?}");
     }
 }
 

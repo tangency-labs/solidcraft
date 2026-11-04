@@ -251,7 +251,8 @@ pub(super) mod refresh_count {
     }
 }
 
-/// Resolve an origin axis as a mirror line, keeping its projection linked and fixed.
+/// Resolve an origin axis as a mirror line: the axis's projection into the sketch plane, kept
+/// linked and fixed. An axis perpendicular to the plane has no line in it and is refused.
 pub(super) fn origin_axis_line(s: &Session, p: &Value, line: &Value, cmd: &str) -> Result<(LinkSource, Vec<solidcraft_sketch::LinkGeom>)> {
     let id = sketch_store::target(s, p, cmd)?;
     let doc = placed_candidate(s, &s.doc);
@@ -266,8 +267,10 @@ pub(super) fn origin_axis_line(s: &Session, p: &Value, line: &Value, cmd: &str) 
         "Z" => Vec3::Z,
         _ => return Err(bad(cmd, "the origin axis must be X, Y or Z")),
     };
-    if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(plane.origin).abs() > 1e-6 {
-        return Err(bad(cmd, "the origin axis must lie in the sketch plane"));
+    // The resolve below projects the axis into the plane: its direction there is the plane's
+    // share of `dir`, and empty means a point, not a mirror line.
+    if Vec2::new(dir.dot(plane.x), dir.dot(plane.y)).len() <= 1e-9 {
+        return Err(bad(cmd, "the origin axis is perpendicular to the sketch plane, so it has no line in it"));
     }
     let (vals, _) = doc.param_values();
     let r = resolve(&doc, &vals, &st, &plane, LinkKind::Project, &src)?;

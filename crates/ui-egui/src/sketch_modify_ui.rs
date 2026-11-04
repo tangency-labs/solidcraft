@@ -965,15 +965,11 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 Some(sel @ Sel::Axis { name }) if matches!(name.as_str(), "X" | "Y" | "Z") => {
                     if let Some(axis) = crate::tools::sketch_axis_of(app, name) {
                         json!(axis)
-                    } else {
-                        let (origin, dir) = crate::dialogs::axis_of(app, sel).ok_or("Select an origin axis")?;
-                        let st = crate::open_meshing::session_world(&app.session);
-                        let plane =
-                            st.sketch(app.session.active_sketch.ok_or("No sketch is being edited")?).ok_or("The sketch no longer exists")?.plane;
-                        if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(origin - plane.origin).abs() > 1e-6 {
-                            return Err("The origin axis must lie in the sketch plane".into());
-                        }
+                    } else if sketch_dir(app, sel).is_some() {
+                        // An axis outside the plane still gives the line it makes in the plane.
                         json!({"axis":name})
+                    } else {
+                        return Err("The origin axis is perpendicular to the sketch plane, so it has no line in the plane".into());
                     }
                 }
                 Some(_) => return Err("The mirror line must be a straight curve of this sketch or an origin axis in its plane".into()),

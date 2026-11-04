@@ -1,0 +1,26 @@
+{
+  "en": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "The origin axis is perpendicular to the sketch plane, so it has no line in the plane"
+  },
+  "ar": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "محور الأصل عمودي على مستوى الرسم، لذا ليس له خط في المستوى"
+  },
+  "de": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "Die Ursprungsachse steht senkrecht auf der Skizzenebene und hat daher keine Linie in ihr"
+  },
+  "he": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "ציר הראשית ניצב למישור הסקיצה, ולכן אין לו קו במישור"
+  },
+  "ja": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "原点軸はスケッチ平面に垂直なため、平面内に線がありません"
+  },
+  "ru": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "Ось начала координат перпендикулярна плоскости эскиза, поэтому линии в этой плоскости нет"
+  },
+  "vi": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "Trục gốc vuông góc với mặt phẳng phác thảo nên không có đường thẳng trong mặt phẳng này"
+  },
+  "zh": {
+    "The origin axis is perpendicular to the sketch plane, so it has no line in the plane": "原点轴垂直于草图平面，因此在该平面内没有直线"
+  }
+}
