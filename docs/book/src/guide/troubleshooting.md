@@ -151,7 +151,8 @@ starts SolidCraft again with it (or the next start does), and it asks *Keep thes
 settings?* Keep saves them; **Go back**, or no answer within 15 seconds, starts again with the
 previous ones. If the new settings leave the window white or black, crash it, or hang it, the
 next start goes back to the previous settings and says so, so a choice can't leave SolidCraft
-stuck. A change made over the control channel (`ui.prefs`) is saved at once, without a trial.
+stuck. A start on new settings that draws no window within a minute starts again on the
+previous ones by itself. A change made over the control channel (`ui.prefs`) is saved at once, without a trial.
 On AMD integrated graphics, Preferences warns when Direct3D 12 is chosen: there it has frozen
 the whole screen, at times until the computer was restarted, which no trial start can undo. If
 SolidCraft crashes there on Direct3D 12 after you kept it (opening a design, say), the next

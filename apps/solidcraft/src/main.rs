@@ -219,6 +219,7 @@ impl eframe::App for App {
                     solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
                     solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
                 }
+                startup::first_frame_drawn();
                 if let Some(dir) = self.starting.take() {
                     startup::started(&dir);
                 }
@@ -329,8 +330,13 @@ impl Drop for App {
         } else if let Some((restart, (backend, _))) = self.restart.zip(self.renderer) {
             restart_after_hang(restart, backend);
         } else if self.solve.graphics.restart {
-            // Preferences: to try graphics settings, or to go back from them (#4015).
+            // Preferences: to try graphics settings, or to go back from them (#4015). The next
+            // start has begun: this one leaves at once. Tearing down a window's swap chain, device
+            // and pipelines can hang or crash in a graphics driver (#9044), on the very API that
+            // the user is leaving, and a crash here would be taken for one of the new start.
             relaunch(None);
+            control_server::remove_token_file();
+            device_lost::end();
         }
         // An update asked to restart into the new version or to run its installer.
         if let Some((program, args)) = solidcraft_ui_egui::update::take_launch(&mut self.solve) {
@@ -1236,6 +1242,15 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     let _driver_client = DriverClient;
     mark("run_native");
+    if trying {
+        // A new graphics API that hangs before the window draws leaves nothing to click on.
+        startup::watch_trial_start(startup::TRIAL_START_LIMIT, || {
+            eprintln!("SolidCraft graphics: the settings on trial drew no window in {} s; starting again", startup::TRIAL_START_LIMIT.as_secs());
+            relaunch(None);
+            control_server::remove_token_file();
+            device_lost::end();
+        });
+    }
     let result = eframe::run_native(
         "SolidCraft",
         options,
@@ -1503,6 +1518,9 @@ fn no_window(
 ) -> eframe::Result {
     log::error!("the window could not open: {error}");
     eprintln!("SolidCraft: the window could not open: {error}");
+    // The retry below runs as a child that this process waits for, for as long as it runs: not a
+    // start that never draws.
+    startup::first_frame_drawn();
     // This failure was handled, so neither the marker nor the journal should call it a crash.
     if let Some(dir) = settings {
         startup::started(dir);

@@ -264,6 +264,7 @@ fn graphics_trial_question_keeps_goes_back_or_gives_up() {
     }
     h.frames(1);
     assert!(h.app.graphics.trial.is_none() && h.app.graphics.restart && h.app.quit_requested, "gave up: closes for a restart");
+    assert!(h.ctx.has_requested_repaint(), "an idle window still draws the frame that closes it");
     assert_eq!(h.app.preferences.graphics_api, "vulkan", "nothing saved: the next start drops the trial");
 
     // A start from the desktop opens on Home: the question shows there too.

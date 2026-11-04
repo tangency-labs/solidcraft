@@ -116,6 +116,46 @@ pub fn begin(dir: &Path) -> u32 {
     before
 }
 
+/// How long a start that tries graphics settings has to draw its first frame (`watch_trial_start`).
+pub const TRIAL_START_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+static FIRST_FRAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The first frame was drawn (or the start handed over to a retry): `watch_trial_start` stands down.
+pub fn first_frame_drawn() {
+    FIRST_FRAME.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// A start that tries a new graphics API can hang inside the driver before any window draws (a
+/// black or frozen window, no question, nothing to click). If [`first_frame_drawn`] isn't called
+/// within `limit`, run `give_up` once (it starts again with the saved settings: the trial is
+/// marked as started, so the next start drops it). Returns the thread, for tests.
+pub fn watch_trial_start(limit: std::time::Duration, give_up: impl FnOnce() + Send + 'static) -> Option<std::thread::JoinHandle<()>> {
+    watch_start(&FIRST_FRAME, limit, give_up)
+}
+
+fn watch_start(
+    drawn: &'static std::sync::atomic::AtomicBool,
+    limit: std::time::Duration,
+    give_up: impl FnOnce() + Send + 'static,
+) -> Option<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("solidcraft-trial-start".into())
+        .spawn(move || {
+            let begun = std::time::Instant::now();
+            while begun.elapsed() < limit {
+                if drawn.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50).min(limit));
+            }
+            if !drawn.load(std::sync::atomic::Ordering::SeqCst) {
+                give_up();
+            }
+        })
+        .ok()
+}
+
 /// The window is up: this launch did not fail to start.
 pub fn started(dir: &Path) {
     let _ = std::fs::remove_file(dir.join(MARKER));
@@ -720,6 +760,34 @@ mod tests {
 
     fn cards() -> Vec<AdapterChoice> {
         ["Integrated", "Discrete small", "Discrete large"].into_iter().map(|name| AdapterChoice { name: name.into(), compatible: true }).collect()
+    }
+
+    /// A start on trial that draws no frame in time gives up once; one that draws stands down
+    /// (#4015).
+    #[test]
+    fn a_trial_start_that_draws_nothing_gives_up_once() {
+        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+        use std::time::Duration;
+        static HUNG: AtomicBool = AtomicBool::new(false);
+        static HUNG_GAVE_UP: AtomicU32 = AtomicU32::new(0);
+        watch_start(&HUNG, Duration::from_millis(150), || {
+            HUNG_GAVE_UP.fetch_add(1, Ordering::SeqCst);
+        })
+        .map(|t| t.join())
+        .unwrap()
+        .unwrap();
+        assert_eq!(HUNG_GAVE_UP.load(Ordering::SeqCst), 1);
+
+        static DRAWN: AtomicBool = AtomicBool::new(false);
+        static DRAWN_GAVE_UP: AtomicU32 = AtomicU32::new(0);
+        let watch = watch_start(&DRAWN, Duration::from_millis(400), || {
+            DRAWN_GAVE_UP.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(60));
+        DRAWN.store(true, Ordering::SeqCst);
+        watch.join().unwrap();
+        assert_eq!(DRAWN_GAVE_UP.load(Ordering::SeqCst), 0, "the window drew: nothing to give up");
     }
 
     #[test]

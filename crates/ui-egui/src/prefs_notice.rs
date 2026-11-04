@@ -57,6 +57,9 @@ pub fn graphics_trial(app: &mut SolveApp, ctx: &egui::Context) {
         app.graphics.trial = None;
         app.graphics.restart = true;
         app.quit_requested = true;
+        // The host closes the window in its next frame, and an idle window draws none: without
+        // this it waited for the pointer to move, still on the settings that didn't work.
+        ctx.request_repaint();
         return;
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(250));
