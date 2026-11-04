@@ -153,17 +153,13 @@ render.effects.describe
 render.export
 render.hdr.inspect
 render.library.appearance.apply
-render.library.describe
 render.library.environment.apply
-render.library.list
 render.library.physical.prepare
-render.library.preview
 render.library.studio.apply
 render.library.studio.prepare
 render.library.surface.bind
 render.library.surface.prepare
 render.library.surface.unbind
-render.library.targets
 render.optics.bind
 render.optics.unbind
 render.preflight
