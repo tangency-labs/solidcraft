@@ -957,8 +957,6 @@
   "cmd.inspect_accessibility": "Анализа доступности",
   "cmd.inspect_center_of_mass": "Центар масе",
   "cmd.inspect_clearance": "Провера зазора",
-  "cmd.inspect_colored_components": "Омогући боје компоненти",
-  "cmd.inspect_colored_components_disable": "Онемогући боје компоненти",
   "cmd.inspect_compare": "Упореди тела",
   "cmd.inspect_compare_picture": "Упореди слику",
   "cmd.inspect_continuity": "Анализа континуитета",

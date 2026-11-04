@@ -963,8 +963,6 @@
   "cmd.inspect_analysis": "Перегляд аналізу",
   "cmd.inspect_center_of_mass": "Центр мас",
   "cmd.inspect_clearance": "Зазор",
-  "cmd.inspect_colored_components": "Увімкнути кольори компонентів",
-  "cmd.inspect_colored_components_disable": "Вимкнути кольори компонентів",
   "cmd.inspect_compare": "Порівняти тіла",
   "cmd.inspect_compare_picture": "Порівняти зображення",
   "cmd.inspect_continuity": "Аналіз неперервності",

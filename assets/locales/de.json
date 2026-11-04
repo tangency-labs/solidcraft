@@ -960,8 +960,6 @@
   "cmd.inspect_accessibility": "Zugänglichkeitsanalyse",
   "cmd.inspect_center_of_mass": "Massenschwerpunkt",
   "cmd.inspect_clearance": "Freiraum",
-  "cmd.inspect_colored_components": "Komponentenfarben einschalten",
-  "cmd.inspect_colored_components_disable": "Komponentenfarben ausschalten",
   "cmd.inspect_compare": "Körper vergleichen",
   "cmd.inspect_continuity": "Kontinuitätsprüfung",
   "cmd.inspect_curvature_comb": "Krümmungskamm-Analyse",

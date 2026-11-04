@@ -964,8 +964,6 @@
   "cmd.inspect_analysis": "Näytä analyysi",
   "cmd.inspect_center_of_mass": "Massakeskipiste",
   "cmd.inspect_clearance": "Välys",
-  "cmd.inspect_colored_components": "Ota komponenttivärit käyttöön",
-  "cmd.inspect_colored_components_disable": "Poista komponenttivärit käytöstä",
   "cmd.inspect_compare": "Vertaa kappaleita",
   "cmd.inspect_compare_picture": "Vertaa kuvaa",
   "cmd.inspect_continuity": "Jatkuvuusanalyysi",
