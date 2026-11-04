@@ -26,7 +26,7 @@ mod model;
 mod system;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 pub use integrate::simulate;
 pub use math::{Mat3, Quat};

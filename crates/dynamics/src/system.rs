@@ -13,7 +13,8 @@
 //! through the Schur complement `(J M⁻¹ Jᵀ) λ = J M⁻¹ F − γ` (`linalg::solve_psd`, which takes
 //! repeated joint equations), and `λ` gives the joints' reactions.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::linalg::{Sym, solve_psd};
 use crate::math::{Mat3, Quat, cross2};
