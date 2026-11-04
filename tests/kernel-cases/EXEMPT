@@ -85,6 +85,7 @@ file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
+frame.trim                        frame member ends; tested in crates/engine/src/cmd/frame_tests.rs
 inspect.accessibility             display analysis: shading
 inspect.analysis                  display analysis: which one is on
 inspect.colored_components        display: component colours
@@ -307,6 +308,7 @@ timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
+timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
 view.ambient_occlusion            the view: camera, layout, display

@@ -235,10 +235,8 @@ fn trim_from_picked_members_and_targets() {
     let mut d = app.dialog.clone().unwrap();
     assert_eq!(d.inputs[0].items, [Sel::Body { name: "Rail".into() }], "the selected member is picked");
     assert!(apply_commands(&app, &d).is_err(), "nothing to trim to yet");
-    d.inputs[1].items = vec![
-        Sel::Face { body: "Post".into(), index: 0, point: solidcraft_engine::geom::Vec3::new(22.5, 0.0, 0.0) },
-        Sel::Plane { name: "YZ".into() },
-    ];
+    d.inputs[1].items =
+        vec![Sel::Face { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(22.5, 0.0, 0.0) }, Sel::Plane { name: "YZ".into() }];
     let t = trim(&mut d);
     t.end = 1;
     t.gap = "2 mm".into();
@@ -288,7 +286,7 @@ fn a_face_target_is_the_exact_face_picked() {
     app.session.selection = vec![Sel::Body { name: "Rail".into() }];
     app.start("frame.trim");
     let mut d = app.dialog.clone().unwrap();
-    d.inputs[1].items = vec![Sel::Face { body: "Block".into(), index: 2, point: solidcraft_engine::geom::Vec3::new(400.0, 5.0, 5.0) }];
+    d.inputs[1].items = vec![Sel::Face { body: "Block".into(), index: 2, point: solidcore_record::Vec3::new(400.0, 5.0, 5.0) }];
     let c = apply_commands(&app, &d).unwrap();
     let plane = &c[0].1["to"][0]["plane"];
     assert_eq!((&plane["face"], &plane["body"], &plane["index"]), (&json!([400.0, 5.0, 5.0]), &json!("Block"), &json!(2)), "{}", c[0].1);

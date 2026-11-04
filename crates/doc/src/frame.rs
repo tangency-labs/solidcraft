@@ -17,7 +17,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
 use crate::{DocError, Expr, Result};
@@ -349,7 +349,7 @@ pub struct MemberRecord {
     pub body: String,
     /// The plane each end (start, end) is cut in, its normal out of the member; none: square at
     /// its line's end.
-    pub ends: [Option<solidcraft_geom::Plane>; 2],
+    pub ends: [Option<Plane>; 2],
     /// Shared body of the last member/trim build. Body identity detects even a symmetric
     /// rotation or a modification entirely inside the outline. Saved states preserve whether
     /// the live body still shares this shape; old caches are evaluated again.
