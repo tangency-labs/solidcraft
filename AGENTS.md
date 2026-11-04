@@ -3,7 +3,7 @@
 SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
 
 ## Start here
-Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Act when the code, docs and rules settle a question; ask only when it changes what users see. Local `plan/` notes are optional.
+Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Act when the code, docs and rules settle a question; ask only when it changes what users see.
 
 ## Hard rules (what enforces each)
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
@@ -11,7 +11,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
 - Never crash: no unwrap/expect/panic/unsafe in non-test code (unsafe allowlist in crash-safety), errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
 - Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
-- New kernel cases go to solidcore: `cargo xtask lists`.
+- Kernel ops and math go to solidcore; features call its API: `cargo xtask lists`.
 - Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
 - Layering (geom, sketch/kernel/render, doc, io, engine, ui-egui, apps); only `crates/kernel` uses truck: `cargo xtask layers`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
@@ -31,7 +31,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 ## Working on X: read the skill first
 | Working on | Read |
 |---|---|
-| A PR, a claim, review, CI or evidence | `skills/solidcraft-contributing/SKILL.md` |
+| A feature, PR, claim, review, CI, evidence | `skills/solidcraft-contributing/SKILL.md` |
 | Licences, assets, clean-room, the name | `skills/solidcraft-ground-rules/SKILL.md` |
 | Non-test Rust, hostile input, a crash report | `skills/solidcraft-crash-safety/SKILL.md` |
 | A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
