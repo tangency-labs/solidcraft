@@ -106,8 +106,6 @@ material.delete
 material.edit
 material.inspect
 material.list
-material.properties.directional
-material.properties.validate
 mesh.convert
 motion.delete
 motion.export
