@@ -37,6 +37,7 @@ mod delete_face;
 mod distance;
 mod draft_corners;
 mod emboss;
+mod eval_geometry;
 #[cfg(test)]
 mod face_source_tests;
 mod fair;
@@ -127,9 +128,11 @@ mod splitface;
 mod step;
 mod step_in;
 mod step_out;
+mod stitch_split;
 mod surface_extend;
 mod surface_kind;
 mod surface_offset;
+mod surface_replace;
 mod surface_ruled;
 #[cfg(test)]
 mod surface_second_derivative_tests;
@@ -184,6 +187,7 @@ pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
+pub use eval_geometry::{BoundaryEdge, CurveGeometry, FaceGeometry, edge_geometry, face_boundaries, face_geometry, face_parameter_span};
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
@@ -225,20 +229,24 @@ pub use step_in::{
     step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
+pub use stitch_split::stitch_split;
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
 pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_surface};
 pub use surface_offset::offset_surface;
+pub use surface_replace::replace_matched_face;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
 pub use surface_untrim::{UntrimHoles, untrim};
 pub use surfaces::{
-    copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces, revolve_sheet,
-    stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
+    copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_edges_on_face, patch_region, remove_faces,
+    reverse_faces, revolve_sheet, stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
-pub use tspline::tspline_sheet;
+pub use tspline::{
+    fitted_nurbs_region_sheet, fitted_nurbs_sheet, nurbs_region_sheet, nurbs_region_sheet_with_planar_support, nurbs_sheet, tspline_sheet,
+};
 pub use validation::{Validation, check_kept, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 

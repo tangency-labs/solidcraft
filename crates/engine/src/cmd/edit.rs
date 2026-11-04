@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
-        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
+        .params("→ {checkpoint: id}: remember the design, active editors and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
     CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
         .noundo()
         .doc_only()
@@ -200,20 +200,29 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
     let checkpoint = s.checkpoint();
-    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, param_warnings: Vec::new() })
+    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, form_restored: None, param_warnings: Vec::new() })
 }
 
 fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.restore_checkpoint";
     let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
-    let done =
-        |restored: bool| reply(cmd, crate::schema::edit::CheckpointResult { checkpoint: id, restored: Some(restored), param_warnings: Vec::new() });
+    let done = |restored: bool, form_restored: bool| {
+        reply(
+            cmd,
+            crate::schema::edit::CheckpointResult {
+                checkpoint: id,
+                restored: Some(restored),
+                form_restored: form_restored.then_some(true),
+                param_warnings: Vec::new(),
+            },
+        )
+    };
     if bool_(p, "forget") == Some(true) {
         s.drop_checkpoint(id);
-        return done(false);
+        return done(false, false);
     }
-    s.restore_checkpoint(id)?;
-    done(true)
+    let form_restored = s.restore_checkpoint_with_form(id)?;
+    done(true, form_restored)
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {

@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use solidcraft_doc::Document;
 
+use crate::forms_prototype::draft::{self, Draft};
 use crate::{EngineError, Result, Session};
 
 /// The recovery folder: `SOLIDCRAFT_RECOVERY_DIR`, else the platform's per-user data folder.
@@ -157,6 +158,11 @@ pub fn orphans(dir: &Path) -> Vec<Entry> {
 
 /// Read an entry's design.
 pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
+    let (bytes, entry) = load_package(dir, id)?;
+    Ok((solidcraft_io::read_design(&bytes)?, entry))
+}
+
+pub(crate) fn load_package(dir: &Path, id: &str) -> Result<(Vec<u8>, Entry)> {
     if !valid_id(id) {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
     }
@@ -164,7 +170,63 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
     let path = design_file(dir, id);
     let bytes = solidcraft_io::limits::read(&path.to_string_lossy(), solidcraft_io::limits::Kind::Design)
         .map_err(|e| EngineError::Other(format!("recovered design `{id}`: {e}")))?;
-    Ok((solidcraft_io::read_design(&bytes)?, entry))
+    Ok((bytes, entry))
+}
+
+/// The independent revision of the accepted Form in this design, for autosave
+/// hosts that track document revisions separately.
+pub type FormRevision = ([u64; 3], bool);
+
+pub fn form_revision(session: &Session) -> Option<FormRevision> {
+    session.forms_prototype.as_ref().map(|form| (draft::revision(form), base_is_dirty(session)))
+}
+
+/// Encode one coherent autosave for a host that supplies its own file storage.
+pub fn capture_bytes(session: &Session) -> Result<Vec<u8>> {
+    let draft = capture_draft(session);
+    encode(&session.design(), draft)
+}
+
+fn capture_draft(s: &Session) -> Option<Draft> {
+    let form = s.forms_prototype.as_ref()?;
+    Some(Draft::capture(form, base_is_dirty(s)))
+}
+
+fn base_is_dirty(s: &Session) -> bool {
+    (!Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility
+}
+
+fn encode(doc: &Document, draft: Option<Draft>) -> Result<Vec<u8>> {
+    let draft = draft.map(Draft::encode).transpose()?;
+    Ok(solidcraft_io::write_recovery_container(doc, draft.as_deref())?)
+}
+
+/// Build a complete recovered session before replacing the live one. A damaged
+/// editor cannot partially change the document, nor trigger ordinary file Open.
+pub fn restore_bytes(bytes: &[u8], path: Option<&str>) -> Result<Session> {
+    let (doc, draft) = solidcraft_io::read_recovery_container(bytes)?;
+    restore(doc, draft.as_deref(), path)
+}
+
+pub(crate) fn restore(doc: Document, draft: Option<&[u8]>, path: Option<&str>) -> Result<Session> {
+    restore_validating(doc, draft, path, crate::kernel::Validation::default())
+}
+
+pub(crate) fn restore_validating(doc: Document, draft: Option<&[u8]>, path: Option<&str>, validation: crate::kernel::Validation) -> Result<Session> {
+    let mut session = Session::opened_at_validating(doc, None, path, validation);
+    let base_dirty = if let Some(bytes) = draft {
+        let (form, dirty) = Draft::restore(&session, bytes)?;
+        session.active_component = form.authoring_component;
+        session.active_occurrence_path = form.authoring_path.clone();
+        session.forms_prototype = Some(form);
+        dirty
+    } else {
+        true
+    };
+    if base_dirty {
+        session.mark_unsaved();
+    }
+    Ok(session)
 }
 
 /// Delete an entry. Only a real one: `<id>.json` must describe entry `id` and its design must
@@ -235,8 +297,8 @@ pub struct Autosaver {
     /// Autosave this often while there are unsaved changes.
     pub interval: Duration,
     lock: Option<File>,
-    /// The design and what was hidden at the last autosave.
-    last: Option<(Arc<Document>, crate::Visibility)>,
+    /// The design and editor source at the last autosave.
+    last: Option<SavedSource>,
     last_at: Instant,
     has_entry: bool,
     /// The autosave being written on a worker thread: the design and what was hidden as it
@@ -257,38 +319,53 @@ impl Drop for Autosaver {
 
 /// An autosave a worker thread is writing.
 struct Writing {
+    source: SavedSource,
+    done: std::sync::mpsc::Receiver<Result<()>>,
+}
+
+#[derive(Clone)]
+struct SavedSource {
     doc: Arc<Document>,
     visibility: crate::Visibility,
-    done: std::sync::mpsc::Receiver<Result<()>>,
+    path: Option<String>,
+    form: Option<FormRevision>,
+}
+
+impl SavedSource {
+    fn matches(&self, s: &Session) -> bool {
+        (Arc::ptr_eq(&self.doc, &s.doc) || *self.doc == *s.doc)
+            && self.visibility == s.visibility
+            && self.path == s.path
+            && self.form == form_revision(s)
+    }
 }
 
 /// What one autosave writes, taken from the session in an instant.
 struct Snapshot {
     dir: PathBuf,
     id: String,
-    doc: Arc<Document>,
-    visibility: crate::Visibility,
-    path: Option<String>,
+    source: SavedSource,
+    draft: Option<Draft>,
 }
 
 impl Snapshot {
     /// Write the design and its entry (the slow part: serialising and compressing the design).
-    fn write(&self) -> Result<()> {
+    fn write(self) -> Result<()> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
-        let bytes = if self.visibility.is_empty() {
-            solidcraft_io::write_design_container(&self.doc)?
+        let bytes = if self.source.visibility.is_empty() {
+            encode(&self.source.doc, self.draft)?
         } else {
-            let mut doc = (*self.doc).clone();
-            doc.visibility = self.visibility.clone();
-            solidcraft_io::write_design_container(&doc)?
+            let mut doc = (*self.source.doc).clone();
+            doc.visibility = self.source.visibility;
+            encode(&doc, self.draft)?
         };
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
-            path: self.path.clone(),
-            name: self.doc.name.clone(),
+            path: self.source.path,
+            name: self.source.doc.name.clone(),
             saved_at: unix_now(),
-            features: self.doc.features.len(),
+            features: self.source.doc.features.len(),
         };
         let meta = serde_json::to_vec_pretty(&entry).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, "json"), &meta, false).map_err(io)?;
@@ -326,8 +403,7 @@ impl Autosaver {
     pub fn save(&mut self, s: &Session) -> Result<bool> {
         self.finish(s, true)?;
         let Some(snapshot) = self.begin(s) else { return Ok(false) };
-        let written = snapshot.write();
-        self.written(s, snapshot.doc, snapshot.visibility, written)?;
+        self.write(s, snapshot)?;
         Ok(true)
     }
 
@@ -335,8 +411,21 @@ impl Autosaver {
     /// crash now would leave for the next launch to offer. A finished write counts once a
     /// [`Self::tick`] has taken its outcome.
     pub fn caught_up(&self, s: &Session) -> bool {
-        self.writing.is_none()
-            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == s.visibility)
+        self.writing.is_none() && self.last.as_ref().is_some_and(|source| source.matches(s))
+    }
+
+    fn snapshot(&self, s: &Session) -> Snapshot {
+        Snapshot {
+            dir: self.dir.clone(),
+            id: self.id.clone(),
+            source: SavedSource { doc: s.doc.clone(), visibility: s.visibility.clone(), path: s.path.clone(), form: form_revision(s) },
+            draft: capture_draft(s),
+        }
+    }
+
+    fn write(&mut self, s: &Session, snapshot: Snapshot) -> Result<()> {
+        let source = snapshot.source.clone();
+        self.written(s, source, snapshot.write())
     }
 
     /// Autosave when the interval has passed, or right away after a big operation. The design
@@ -353,28 +442,25 @@ impl Autosaver {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (tx, rx) = std::sync::mpsc::channel();
-            let (doc, visibility) = (snapshot.doc.clone(), snapshot.visibility.clone());
+            let source = snapshot.source.clone();
             let started = std::thread::Builder::new().name("autosave".into()).spawn(move || {
                 let _ = tx.send(snapshot.write());
             });
             match started {
                 Ok(_) => {
-                    self.writing = Some(Writing { doc, visibility, done: rx });
+                    self.writing = Some(Writing { source, done: rx });
                     Ok(true)
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, path: s.path.clone() };
-                    let written = snapshot.write();
-                    self.written(s, snapshot.doc, snapshot.visibility, written)?;
+                    self.write(s, self.snapshot(s))?;
                     Ok(true)
                 }
             }
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let written = snapshot.write();
-            self.written(s, snapshot.doc, snapshot.visibility, written)?;
+            self.write(s, snapshot)?;
             Ok(true)
         }
     }
@@ -395,10 +481,10 @@ impl Autosaver {
             crate::crash::rebased(s, s.path.as_deref().map(Path::new), false);
             return None;
         }
-        if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
+        if self.last.as_ref().is_some_and(|source| source.matches(s)) {
             return None;
         }
-        Some(Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc: s.doc.clone(), visibility: s.visibility.clone(), path: s.path.clone() })
+        Some(self.snapshot(s))
     }
 
     /// The running write's outcome, once it has one (`wait`: wait for it). True when no write
@@ -417,20 +503,22 @@ impl Autosaver {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(EngineError::Other("autosave: the writer stopped".into())),
             }
         };
-        self.written(s, w.doc, w.visibility, outcome)?;
+        self.written(s, w.source, outcome)?;
         Ok(true)
     }
 
-    /// A write of `doc` (with `visibility`) ended with `outcome`.
-    fn written(&mut self, s: &Session, doc: Arc<Document>, visibility: crate::Visibility, outcome: Result<()>) -> Result<()> {
+    /// A write of this source ended with `outcome`.
+    fn written(&mut self, s: &Session, source: SavedSource, outcome: Result<()>) -> Result<()> {
         outcome?;
         self.has_entry = true;
         // Crash replays start from this autosave from here, unless the design changed while it
         // was written: the journal then keeps the commands since its older start.
-        if Arc::ptr_eq(&s.doc, &doc) {
+        // Crash replay opens a regular design. A recovery-only Form must not be
+        // mistaken for a document checkpoint that already includes that editor.
+        if source.form.is_none() && source.matches(s) {
             crate::crash::rebased(s, Some(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT)), true);
         }
-        self.last = Some((doc, visibility));
+        self.last = Some(source);
         Ok(())
     }
 
@@ -551,6 +639,105 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    #[test]
+    fn form_draft_edits_are_autosaved_even_when_the_document_revision_stays_the_same() {
+        let d = dir("form-draft");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::ZERO).unwrap();
+        let id = a.id.clone();
+        let initial = s.execute("form.prototype.create", &json!({"size":10,"segments":[1,1,1],"levels":1})).unwrap();
+        assert!(a.save(&s).unwrap());
+        let revision = s.revision;
+        let moved = s.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[-5,-5,-6]]})).unwrap();
+        assert_eq!(s.revision, revision, "editing Form points leaves the document revision alone");
+        assert!(a.save(&s).unwrap(), "the new cage must be written");
+        assert!(!a.save(&s).unwrap());
+
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        let preview = s.execute("form.prototype.tool.preview", &json!({"topology":{"tool":"delete_faces","faces":[0]}})).unwrap();
+        assert_ne!(preview["faces"], moved["faces"]);
+        assert!(!a.save(&s).unwrap(), "an unaccepted tool does not replace the autosaved source");
+        drop(a);
+
+        let mut recovered = Session::default();
+        recovered.execute("doc.recover", &json!({"dir":d,"id":id})).unwrap();
+        let draft = recovered.execute("form.prototype.inspect", &json!({})).unwrap();
+        assert!(recovered.is_dirty());
+        assert_eq!(recovered.doc.features.len(), 0);
+        assert_eq!(draft["points"], moved["points"]);
+        assert_eq!(draft["faces"], moved["faces"]);
+        assert_eq!(draft["tool_preview"], false);
+        assert_eq!(recovered.execute("form.prototype.undo", &json!({})).unwrap()["points"], initial["points"]);
+        assert_eq!(recovered.execute("form.prototype.redo", &json!({})).unwrap()["points"], moved["points"]);
+        recovered.execute("form.prototype.close", &json!({})).unwrap();
+        assert!(!recovered.is_dirty(), "cancelling a new draft restores its clean base");
+        remove(&d, &id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn recovery_package_restores_an_edited_form_without_replacing_its_saved_feature() {
+        let mut s = Session::default();
+        s.execute("form.prototype.create", &json!({"size":10,"segments":[1,1,1],"levels":1})).unwrap();
+        let id = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
+        s.mark_saved();
+        let original = s.doc.clone();
+        s.execute("form.edit", &json!({"feature":id})).unwrap();
+        let refined = s.execute("form.prototype.refine", &json!({"faces":[0],"counts":[2,2]})).unwrap();
+        let prepared = s.scratch().compute_commands(&[("form.prototype.commit".into(), json!({"tolerance":0.05}))], None).unwrap();
+        let before_options = form_revision(&s);
+        let options = s.execute("form.prototype.finish_options", &json!({"tolerance":"0.04 mm","operation":"subtract"})).unwrap();
+        assert_ne!(form_revision(&s), before_options, "changing only Finish options updates autosave");
+        assert_eq!(options, json!({"tolerance":"0.04 mm","operation":"cut"}));
+        assert!(s.accept_commands(prepared).is_err(), "a prepared Finish cannot override newer output choices");
+        assert!(s.execute("form.prototype.finish_options", &json!({"tolerance":"2 mm","operation":"new"})).is_err());
+        assert_eq!(s.execute("form.prototype.inspect", &json!({})).unwrap()["finish_options"], options);
+        let bytes = capture_bytes(&s).unwrap();
+        assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *original, "normal Open sees the base document");
+        let mut recovered = restore_bytes(&bytes, Some("Example.sc")).unwrap();
+        assert_eq!(recovered.path.as_deref(), Some("Example.sc"));
+        assert_eq!(*recovered.doc, *original);
+        let draft = recovered.execute("form.prototype.inspect", &json!({})).unwrap();
+        assert_eq!(draft["editing_feature"], id);
+        assert_eq!(draft["hierarchy"], refined["hierarchy"]);
+        assert_eq!(draft["points"], refined["points"]);
+        assert_eq!(draft["finish_options"], options);
+        assert_eq!(recovered.execute("form.prototype.undo", &json!({})).unwrap()["finish_options"], options);
+        recovered.execute("form.prototype.redo", &json!({})).unwrap();
+
+        let mut cancel = restore_bytes(&bytes, Some("Example.sc")).unwrap();
+        cancel.execute("form.prototype.close", &json!({})).unwrap();
+        assert_eq!(*cancel.doc, *original);
+        assert!(!cancel.is_dirty());
+        let reply = recovered.execute("form.prototype.commit", &json!({"operation":"new"})).unwrap();
+        assert_eq!(reply["feature"], id, "finishing edits the same feature");
+        assert_eq!(recovered.doc.features.len(), 1);
+        assert_ne!(*recovered.doc, *original);
+        let feature = recovered.doc.feature(id).unwrap();
+        let crate::doc::FeatureKind::Form { tolerance, operation, .. } = &feature.kind else { panic!("not a Form") };
+        assert_eq!(*operation, crate::doc::Operation::NewBody);
+        assert_eq!(recovered.doc.eval(tolerance.as_str(), crate::doc::expr::Kind::Length).unwrap(), 0.04);
+    }
+
+    #[test]
+    fn corrupt_form_recovery_keeps_both_the_open_design_and_the_entry() {
+        let d = dir("bad-form-draft");
+        let mut s = Session::default();
+        s.execute("form.prototype.create", &json!({"size":8})).unwrap();
+        let expected = s.execute("form.prototype.inspect", &json!({})).unwrap();
+        let mut a = Autosaver::new(&d, Duration::ZERO).unwrap();
+        assert!(a.save(&s).unwrap());
+        let id = a.id.clone();
+        drop(a);
+        let bad = solidcraft_io::write_recovery_container(&s.doc, Some(br#"{"version":999}"#)).unwrap();
+        fs::write(design_file(&d, &id), bad).unwrap();
+        assert!(s.execute("doc.recover", &json!({"dir":d,"id":id,"discard":true})).is_err());
+        assert_eq!(s.execute("form.prototype.inspect", &json!({})).unwrap(), expected);
+        assert_eq!(orphans(&d).len(), 1);
+        remove(&d, &id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
     /// A tick doesn't wait for the autosave (#3044): it starts the write on a worker and
     /// returns; the outcome is taken up by a later tick, and nothing new starts meanwhile. The
     /// entry is the design as it was when the write started, even when it changed since.
@@ -573,8 +760,8 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert!(a.has_entry);
-        assert!(a.last.as_ref().is_some_and(|(doc, _)| Arc::ptr_eq(doc, &written)), "the first write was the design as it started");
-        assert!(a.writing.as_ref().is_some_and(|w| Arc::ptr_eq(&w.doc, &s.doc)), "the next one writes the changed design");
+        assert!(a.last.as_ref().is_some_and(|source| Arc::ptr_eq(&source.doc, &written)), "the first write was the design as it started");
+        assert!(a.writing.as_ref().is_some_and(|w| Arc::ptr_eq(&w.source.doc, &s.doc)), "the next one writes the changed design");
         drop(a);
         let found = orphans(&d);
         assert_eq!(found.len(), 1);
