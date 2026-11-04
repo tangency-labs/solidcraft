@@ -249,6 +249,7 @@ impl PreviewState {
                 self.stopped = None;
                 self.tapered.clear();
                 self.mirror_meets = None;
+                self.mirror_decided = None;
             }
         }
     }
