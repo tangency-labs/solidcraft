@@ -34,6 +34,7 @@
 use super::trim_at_creases::with_target_env_of;
 use super::{FilletSession, SolverObject};
 use crate::blend::definition_check::{BlendFaceKind, CornerKind};
+use crate::blend::fillet_corner::p1::nurbs_curve;
 use crate::blend::law_corners::{
     curve_between, find_law_corner_pieces, sphere_zone, LawCornerKind, LawCornerPieces,
 };
@@ -49,6 +50,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1::faces as brep_faces;
 use crate::topology::brep::p2::OldSurface;
@@ -470,7 +472,7 @@ impl FilletSession<'_> {
             let ivl = first.natural_interval();
             let two = first.evaluate_point(k, ivl.min())?;
             let one = first.evaluate_point(k, ivl.max())?;
-            let zone = Surface::from(sphere_zone(
+            let mut zone = Surface::from(sphere_zone(
                 corner.centre,
                 corner.radius,
                 one,
@@ -500,6 +502,18 @@ impl FilletSession<'_> {
                 } else {
                     OrientType::Opposite
                 });
+            }
+            // the zone keeps its corner definition (#2357), as every corner ball's patch does:
+            // the ball's sphere and the zone's own loop, certified on it
+            if k.fixes.fillet_round_as_definition {
+                let boundary = curves_3d
+                    .iter()
+                    .flatten()
+                    .map(|c| nurbs_curve(c).cloned())
+                    .collect::<Result<Vec<_>>>()?;
+                let definition = CornerDefinition::ball(corner.centre, corner.radius, boundary)?;
+                definition.recertify(k, &zone)?;
+                zone.set_corner_definition(definition);
             }
             let input = FaceCurvesInput {
                 loops: vec![2],

@@ -1026,6 +1026,12 @@ fn move_curve(c: &mut Curve, d: f64) -> bool {
             }
             true
         }
+        Curve::Circle { frame, .. } | Curve::Ellipse { frame, .. } => {
+            for x in &mut frame.origin {
+                *x += d;
+            }
+            true
+        }
         Curve::Spline { points, .. } => {
             for p in points.iter_mut() {
                 for x in p.iter_mut() {
@@ -1102,11 +1108,13 @@ fn a_ball_patch_off_its_sphere_reads_as_its_nurbs() {
             panic!("face {i}: an edge loop");
         };
         let e = &mut off.edges[edges[0].edge as usize];
+        // the curve and its NURBS form move together, so the record stays consistent and the
+        // loop curve lies 1e-7 off the sphere
         let moved = match &mut e.nurbs {
-            Some(n) => move_curve(n, 1e-7),
+            Some(n) => move_curve(n, 1e-7) && move_curve(&mut e.curve, 1e-7),
             None => move_curve(&mut e.curve, 1e-7),
         };
-        assert!(moved, "face {i}: a loop curve with a NURBS form");
+        assert!(moved, "face {i}: a loop curve that can be moved");
         assert!(read_ball(&mut k, &off, i).is_none(), "face {i}: loop moved");
     }
     // unchanged, every corner still reads as its ball patch
