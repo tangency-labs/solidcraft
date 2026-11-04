@@ -542,6 +542,7 @@ pub fn boolean_post_process(
     relations: &CleanupRelations,
     check_all_edges: bool,
 ) -> Result<()> {
+    crate::profile::profile_scope!(k, "boolean::post_process");
     boolean_post_process_with_notifications(k, brep, relations, check_all_edges, None)
 }
 

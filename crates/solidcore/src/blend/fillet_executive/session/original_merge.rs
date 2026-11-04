@@ -162,6 +162,7 @@ impl FilletSession<'_> {
     /// target, retaining the temporary tags for the post-merge tail. Errors destroy
     /// the tags. The caller holds the original trim mark scope.
     pub(super) fn tag_and_merge_retained(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::tag_and_merge");
         if self.objects.merge_attributes.is_some() {
             return Err(invalid("fillet faces have already been merged"));
         }

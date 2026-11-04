@@ -1838,6 +1838,7 @@ impl<'target> FilletSession<'target> {
         continuity: u32,
         thumbweight: f64,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::prepare");
         if edges.is_empty() {
             return Err(SolidError::Upstream {
                 operation: OP,
@@ -1984,6 +1985,7 @@ impl<'target> FilletSession<'target> {
         continuity: u32,
         thumbweight: f64,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::prepare");
         if edges.is_empty() {
             return Err(SolidError::Upstream {
                 operation: OP,
@@ -2110,6 +2112,7 @@ impl<'target> FilletSession<'target> {
         xsect_type: u32,
         continuity: u32,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::prepare");
         if edges.is_empty() {
             return Err(SolidError::Upstream {
                 operation: OP,
@@ -2168,6 +2171,7 @@ impl<'target> FilletSession<'target> {
         k: &Kernel,
         error_info: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::create_corners");
         // solvers loaded since the last sync (`SetFilletParameters`) read the handler
         // during the corners' traces
         self.sync_self_intersection_handler();

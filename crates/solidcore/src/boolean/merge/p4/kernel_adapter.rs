@@ -86,6 +86,9 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         work_counters: crate::kernel::WorkCounters::default(),
         // (building cache trees makes no blend faces)
         blend_face_log: None,
+        // (the caller's profiler: the copy's scopes record into its tree)
+        #[cfg(feature = "profile")]
+        profiler: k.profiler.clone(),
     }
 }
 

@@ -538,6 +538,7 @@ pub fn definition_partials_over_box(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
+    crate::profile::profile_scope!(k, "blend::certificate::definition_partials_over_box");
     if !(lk < MAX_S && (ub > ua || vb > va)) {
         return definition_partials_naive(k, d, net, ku, kv, ua, ub, va, vb, lk);
     }

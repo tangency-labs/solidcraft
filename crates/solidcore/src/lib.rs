@@ -57,6 +57,7 @@ pub mod nurbs;
 pub mod offset;
 pub mod primitive;
 pub mod prism;
+pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;

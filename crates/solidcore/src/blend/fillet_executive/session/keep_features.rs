@@ -469,6 +469,7 @@ impl FilletSession<'_> {
     /// # Errors
     /// The refusals as `SM_ERR`; those of the steps.
     pub(super) fn keep_features_in_bands(&mut self, k: &mut Kernel) -> Result<bool> {
+        crate::profile::profile_scope!(k, "blend::session::keep_features");
         let saved = (*self.objects.target).clone();
         let result = self.keep_features_steps(k);
         if result.is_err() {

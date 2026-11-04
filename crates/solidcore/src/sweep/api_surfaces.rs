@@ -350,6 +350,7 @@ pub fn create_surface_revolution(
 /// `InvalidInput` for fewer than two profiles; those of
 /// [`BSplineSurface::create_skinned_surface`].
 pub fn create_skin(k: &Kernel, profiles: &[BSplineCurve]) -> Result<BSplineSurface> {
+    crate::profile::profile_scope!(k, "sweep::skin");
     if profiles.len() < 2 {
         return Err(SolidError::invalid_input(
             OP_SKIN,

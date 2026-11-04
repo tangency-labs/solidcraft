@@ -427,6 +427,7 @@ impl FilletSolver {
         solvers: GeometrySolvers<'a>,
         error_info: Option<&'a mut ErrorInfo<SolverErrorObject>>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::solver::calc_fillet_geom");
         let mut cx = Cx {
             k,
             target,
@@ -1330,6 +1331,7 @@ fn c2_sort_points(
     use crate::geom::geom_utility::p1::line_closest_point;
     use crate::geom::global_solver::{SolutionRequested, SolverOperation};
     use crate::math::{BIG_DOUBLE, EFF_ZERO};
+    crate::profile::profile_scope!(cx.k, "blend::solver::sort_points");
 
     // UVPos(lWhichSurf) (upstream indexes past the pair for other values)
     let srf = c2_srf_index(which_surf)?;
@@ -2013,6 +2015,7 @@ fn c3_trace_setup(
     cx: &mut Cx<'_>,
     st: &mut CalcState,
 ) -> Result<[Surface; 2]> {
+    crate::profile::profile_scope!(cx.k, "blend::solver::trace_setup");
     // get fillet baseSurface domains
     let mut domain1 = st.base_surfaces[0].natural_uv_domain_if_built();
     let mut domain2 = st.base_surfaces[1].natural_uv_domain_if_built();
@@ -2510,6 +2513,7 @@ fn c4_trace(
     fi: &mut TraceIntersector<'_>,
 ) -> Result<()> {
     use super::p1::FilStatus;
+    crate::profile::profile_scope!(cx.k, "blend::solver::trace");
 
     // ULONG lMaxLoopCount = 10; ULONG lLoopCount = 0; (:2081-2082)
     let max_loop_count: u32 = 10;
@@ -2520,6 +2524,7 @@ fn c4_trace(
     loop {
         cx.k.check_cancelled(OP)?;
         loop_count += 1;
+        crate::profile::profile_count!(cx.k, TracePasses, 1);
         if loop_count > max_loop_count {
             // Either too many self-intersections or other
             // suspicious situations might have happened
@@ -2643,6 +2648,7 @@ fn c4_cusp_recovery(
     use super::p1::FilStatus;
     use crate::curve::curve::p1::GlobalPointSolveOptions;
     use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+    crate::profile::profile_scope!(cx.k, "blend::solver::cusp_recovery");
 
     fi.set_self_intersect(true);
 
@@ -2916,6 +2922,7 @@ fn c5_post_process(
     cx: &mut Cx<'_>,
     st: &mut CalcState,
 ) -> Result<()> {
+    crate::profile::profile_scope!(cx.k, "blend::solver::post_process");
     // when just one filletGeom was created (no selfIntersections), see if we are
     // required to split FG
     if ops.solver().fillet_geoms.len() == 1 && st.split_original_fillet {

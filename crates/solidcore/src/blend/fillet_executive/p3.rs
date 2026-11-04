@@ -2781,6 +2781,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl CornerVertexAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::corner_vertices");
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
@@ -2857,6 +2858,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl CornerAdjustmentAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::adjust_corner_topology");
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
@@ -2883,6 +2885,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl SolverGeometryAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::solver_geometry");
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             k.check_cancelled(OP)?;
@@ -2912,6 +2915,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_blends_larger_than_faces");
         if k.fixes.fillet_refuse_rails_leaving_faces && k.fixes.fillet_cliff_overflow {
             return self.choose_cliff_overflow(k, access);
         }
@@ -3239,6 +3243,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl CornerEdgeAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::corner_edges");
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
@@ -3287,6 +3292,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl RailTrimAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::trim_rails");
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             k.check_cancelled(OP)?;
@@ -3370,6 +3376,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl RailClassificationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::classify_rails");
         self.classify_solver_rails_with_adjusted(k, access)
             .map(|_| ())
     }
@@ -3425,6 +3432,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl FaceConstructionAccess<O>,
     ) -> Result<O> {
+        crate::profile::profile_scope!(k, "blend::executive::build_faces");
         let target = self.target.ok_or(SolidError::Upstream {
             operation: OP,
             code: 1006,
@@ -3487,6 +3495,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl FaceStitchAccess<O>,
         fillet: O,
     ) -> Result<StitchAttempt> {
+        crate::profile::profile_scope!(k, "blend::executive::stitch");
         for edge in access.stitch_edges(fillet)? {
             ignore(access.stitch_attribute(edge, self.edge_attribute))?;
         }
@@ -3559,6 +3568,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_blends_breaking_through");
         let mut worst: Option<(SolverCut<O>, O)> = None;
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
@@ -3625,6 +3635,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_irregular_balls");
         let mut worst = BallStation {
             check: BallCheck::Regular,
             ..BallStation::default()
@@ -3763,6 +3774,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_rails_below_resolution");
         let mut worst: Option<(crate::blend::fillet_exact::RailBelowResolution, O)> = None;
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
@@ -3813,6 +3825,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_collapsed_offsets");
         // the least of the radii named (solidcore #2652: the smallest size that fits)
         let mut least: Option<(crate::blend::fillet_exact::CollapsedOffset, O)> = None;
         let mut index = 0;
@@ -3851,6 +3864,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::refuse_blends_cutting_the_part");
         let mut worst: Option<SolverCut<O>> = None;
         let mut worst_solver: Option<O> = None;
         let mut index = 0;
@@ -3897,6 +3911,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl BrepCreationAccess<O>,
         error_out: Option<&mut ErrorInfo<O>>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::create_fillet_brep");
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
         self.target.ok_or(SolidError::Upstream {
             operation: OP,
@@ -3991,6 +4006,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl FaceShrinkAccess<O>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::shrink_faces");
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             if let Some(geom) = access.faces_solver_geom(solver, 0)? {

@@ -906,6 +906,7 @@ pub fn gn_enclose_over(
     law: Option<&GnLaw<'_>>,
     defs: Option<&mut GnDefs<'_>>,
 ) -> Result<Option<Enclosure>> {
+    crate::profile::profile_scope!(k, "blend::certificate::gn_enclose_over");
     let s = at.s;
     let tr = Trunc::new(order_s, n)?;
     // a ball whose radius varies: its law over the span (0d43b4c)
@@ -1771,6 +1772,7 @@ pub fn gn_certify_span(
     law: Option<&GnLaw<'_>>,
     mut defs: Option<&mut GnDefs<'_>>,
 ) -> Result<f64> {
+    crate::profile::profile_scope!(k, "blend::certificate::gn_certify_span");
     // the series' orders are checked once (the fork leaves them to its callers)
     Trunc::new(4 + TAYLOR, n)?;
     let mut bound_out = f64::INFINITY;

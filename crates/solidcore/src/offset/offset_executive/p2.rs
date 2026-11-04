@@ -1602,6 +1602,7 @@ pub fn api_shell_brep_full(
     copy: &ShellCopyIdentities<'_>,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
+    crate::profile::profile_scope!(kernel, "offset::shell");
     let original = original.ok_or_else(|| invalid_input(OP_API_SHELL))?;
     validate_shell_faces(original, faces)?;
 
@@ -1695,6 +1696,7 @@ pub fn api_offset_brep_full(
     options: OffsetOptions,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
+    crate::profile::profile_scope!(kernel, "offset::offset");
     let original = original.ok_or_else(|| invalid_input(OP_API_OFFSET))?;
     let mut result = offset_brep(kernel, original, options, notifications)?;
     // (not upstream: the port's cached topology, true again for the caller)

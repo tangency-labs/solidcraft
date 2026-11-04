@@ -261,6 +261,7 @@ impl FilletSession<'_> {
     /// Missing executive objects, the corners' insertion, the merge, the mark lock,
     /// and the manifold, topology-removal and deletion edits.
     pub(super) fn do_piecewise_merge(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::piecewise_merge");
         let manifold_solid = p2::is_manifold_solid(self.objects.target)?;
         // the current topological edges and vertices remain after the fillets
         let original_edges = p1::topological_edges(k, self.objects.target)?;

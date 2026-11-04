@@ -1788,6 +1788,12 @@ pub struct Kernel {
     /// ([`crate::blend::definition_check`]), for the check that every blend face is a
     /// definition. `None` (the default) marks and keeps nothing; it changes no result.
     pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
+    /// Not upstream: the profiler of the operations run on this kernel (feature
+    /// `profile`; [`crate::profile`]). It only observes: no result reads it. Shared with
+    /// the kernel copies an operation makes for its caches, which record into the same
+    /// tree.
+    #[cfg(feature = "profile")]
+    pub profiler: crate::profile::Profiler,
 }
 
 impl Default for Kernel {
@@ -1824,7 +1830,17 @@ impl Kernel {
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
+            #[cfg(feature = "profile")]
+            profiler: crate::profile::Profiler::default(),
         }
+    }
+
+    /// What the profiler recorded since the last call (feature `profile`;
+    /// [`crate::profile::Profiler::take`]); the records then start afresh.
+    #[cfg(feature = "profile")]
+    #[must_use]
+    pub fn take_profile(&self) -> crate::profile::Profile {
+        self.profiler.take()
     }
 
     /// Installs `token` as this kernel's cooperative cancellation token.

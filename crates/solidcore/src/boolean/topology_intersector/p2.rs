@@ -1245,6 +1245,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         brep: &mut impl IntersectorBrepP2<O>,
         ti: O,
     ) -> Result<Vec<O>> {
+        crate::profile::profile_scope!(k, "boolean::intersect_insert_relate");
         // Capture Distance (see upstream's [B669] note)
         let mut capture_distance = 0.01;
 

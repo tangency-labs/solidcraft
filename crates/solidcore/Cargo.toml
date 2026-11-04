@@ -15,6 +15,9 @@ categories = ["graphics", "mathematics", "science"]
 # Kernels start with the curve cache memo off (`Kernel::memoize_curve_caches`), to
 # run difftest and the tests in both positions. Results never depend on it.
 curve-memo-off = []
+# The profiler (`solidcore::profile`): scopes and counters recorded in `Kernel::profiler`,
+# written as JSON Lines. Off, every scope compiles to nothing. Results never depend on it.
+profile = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

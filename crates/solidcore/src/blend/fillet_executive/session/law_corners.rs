@@ -131,6 +131,7 @@ impl FilletSession<'_> {
     /// Those of the surface equality, the split, the knot search, the trims, the shrink and
     /// the curve replacement.
     pub(super) fn split_fillet_faces_at_radius_corners(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::split_at_radius_corners");
         let noted = std::mem::take(&mut self.objects.radius_corner_surfaces);
         if noted.is_empty() {
             return Ok(());

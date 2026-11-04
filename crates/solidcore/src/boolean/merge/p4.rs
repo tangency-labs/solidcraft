@@ -1545,6 +1545,7 @@ pub fn manifold_boolean(
     operation: BooleanOperation,
     caller_lock: Option<&mut MarkLock>,
 ) -> Result<bool> {
+    crate::profile::profile_scope!(kernels.primary, "boolean::manifold_boolean");
     manifold_boolean_transformed(
         kernels,
         primary,

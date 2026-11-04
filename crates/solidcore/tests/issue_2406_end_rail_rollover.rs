@@ -38,6 +38,8 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+#[path = "support/profile.rs"]
+mod profile;
 use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::surface::procedural_blend::{ProceduralBlend, PROCEDURAL_BLEND_TYPE};
 use solidcore::surface::surface::p4::NoObject;
@@ -788,4 +790,5 @@ fn the_size_the_collapsed_offset_names_builds() {
     round(&mut k, &mut b, MIDDLE, fit).unwrap();
     clean(&mut k, &mut b);
     check_top_end(&k, &b, fit, 1e-8);
+    profile::write_profile(&k);
 }

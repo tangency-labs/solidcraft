@@ -453,6 +453,7 @@ fn pieces(pb: &ProceduralBlend, ld: usize) -> Result<Vec<Piece>> {
 /// net's distance from its rows and the floor follow the round's size, not where it lies;
 /// the move's own rounding ([`frame_rounding`]) is added to the net's distance.
 pub fn recertify(k: &Kernel, pb: &ProceduralBlend) -> Result<f64> {
+    crate::profile::profile_scope!(k, "blend::certificate::recertify");
     let centre = frame_centre(pb.net())?;
     let local = pb.translated(k, centre * -1.0)?;
     recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)

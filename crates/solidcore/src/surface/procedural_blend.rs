@@ -380,6 +380,7 @@ pub(crate) fn count_evaluation(k: &Kernel) {
     let mut c = k.blend_counts.get();
     c.evaluations = c.evaluations.wrapping_add(1);
     k.blend_counts.set(c);
+    crate::profile::profile_count!(k, Evaluations, 1);
 }
 
 /// One evaluation the net answered (#2510).
@@ -387,6 +388,7 @@ fn count_net_evaluation(k: &Kernel) {
     let mut c = k.blend_counts.get();
     c.net_evaluations = c.net_evaluations.wrapping_add(1);
     k.blend_counts.set(c);
+    crate::profile::profile_count!(k, NetEvaluations, 1);
 }
 
 /// `CountSolve`: one station solve of `newton_steps` Newton steps.
@@ -398,6 +400,8 @@ pub(crate) fn count_solve(k: &Kernel, newton_steps: u32) {
         c.most_newton_steps = u64::from(newton_steps);
     }
     k.blend_counts.set(c);
+    crate::profile::profile_count!(k, Solves, 1);
+    crate::profile::profile_count!(k, NewtonSteps, u64::from(newton_steps));
 }
 
 /// `CountAreaSum`: one area sum a certificate summed outside its cells.

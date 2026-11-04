@@ -413,6 +413,7 @@ impl FilletSession<'_> {
     /// The refusals as `SM_ERR`; those of the steps.
     #[allow(clippy::too_many_lines)] // one fork routine
     pub(super) fn trim_at_creases(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::trim_at_creases");
         if self.objects.intermediate.is_none() {
             return Err(SolidError::null_pointer(OP));
         }

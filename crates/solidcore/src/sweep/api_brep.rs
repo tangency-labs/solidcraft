@@ -193,6 +193,7 @@ pub fn create_linear_sweep(
     sweep_dist: f64,
     cap_ends: bool,
 ) -> Result<Brep> {
+    crate::profile::profile_scope!(k, "sweep::linear");
     // Sweep copies of the inputs: CreateLinearSweep consumes the curves.
     let curve_copies = copy_curves_for_consuming_sweep(k, curves_to_sweep)?;
 
@@ -226,6 +227,7 @@ pub fn create_rotational_sweep(
     angle_deg: f64,
     cap_ends: bool,
 ) -> Result<Brep> {
+    crate::profile::profile_scope!(k, "sweep::rotational");
     // Sweep copies of the inputs: CreateRotationalSweep consumes the curves.
     let curve_copies = copy_curves_for_consuming_sweep(k, curves_to_sweep)?;
 
@@ -304,6 +306,7 @@ pub fn create_pipe_sweep(
     path_curve: Option<&Curve>,
     cap_ends: bool,
 ) -> Result<Brep> {
+    crate::profile::profile_scope!(k, "sweep::pipe");
     let Some(path_curve) = path_curve else {
         return Err(SolidError::invalid_input(OP_PIPE, "no path curve"));
     };
@@ -404,6 +407,7 @@ pub fn create_curve_sweep(
     scale_curve: Option<&Curve>,
     options: Option<&SweepOptions>,
 ) -> Result<CurveSweep> {
+    crate::profile::profile_scope!(k, "sweep::curve");
     let Some(path_curve) = path_curve.filter(|_| !profile_curves.is_empty()) else {
         return Err(SolidError::invalid_input(
             OP_CURVE_SWEEP,

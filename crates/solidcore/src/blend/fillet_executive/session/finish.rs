@@ -507,6 +507,7 @@ impl FilletSession<'_> {
     /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
     /// (a station of a definition) takes S.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::do_fillet");
         let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
     }
@@ -688,6 +689,7 @@ impl FilletSession<'_> {
         k: &mut Kernel,
         mut error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::filleting");
         self.sync_self_intersection_handler();
         // solidcore-native (WR-697 addendum; the fork refuses this only in its capi): a
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
@@ -828,6 +830,7 @@ impl FilletSession<'_> {
     }
 
     fn merge_fillet(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::merge");
         self.executive
             .intersector
             .set_primary_brep(Some(FilletObject::Body(FilletBody::Target)));

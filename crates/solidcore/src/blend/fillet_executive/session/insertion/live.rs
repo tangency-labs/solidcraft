@@ -648,6 +648,7 @@ impl FilletSession<'_> {
     /// # Errors
     /// Original mapping/insertion errors or a genuine missing live capability.
     pub fn insert_fillet_intersection_topology(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::insert_intersection_topology");
         let editing = self.objects.target.editing_enabled();
         self.objects.target.set_editing_enabled(true);
         let result = (|| {
