@@ -11,6 +11,7 @@
 //! | [`make_face_with_curves`], [`make_face_with_curves_with_kernel_context`], [`make_face_with_curve_owners`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
 //! | [`glue_edges_general`]                       | `SmBrep::GlueEdgesGeneral`                   |
 //! | [`copy_faces`], [`copy_faces_with_merge`]    | `SmBrep::CopyFaces`                          |
+//! | [`unstitch`]                                 | `SmBrep::UnStitch` (the fork's, returning its status) |
 //! | [`merge_self_intersection_curves`], [`SelfIntersectionCurve`] | `SmBrep::MergeSelfIntersectionCurves` |
 //!
 //! Deviations:
@@ -2092,6 +2093,75 @@ pub fn glue_edges_general(
         }
     }
     Ok(())
+}
+
+// ---- UnStitch -------------------------------------------------------------------------------
+
+/// `UnStitch(pOptFaces)`: breaks `faces` (every face when `None`) out of the stitched
+/// B-rep into separate faces: each copied on its own into a new B-rep of `b`'s tolerance
+/// (`CopyFaces` with the merge, its default: copied one at a time, so they come out
+/// separate), the faces removed from `b`, and the copies copied back. The faces'
+/// identities change (the copies are new faces). The objects' attributes travel with
+/// the copies as `CopyFaces` gives them (`SM_NO_COPY`), as upstream's live on the
+/// objects.
+///
+/// The fork's version (tangency-labs/smlib, its law corners): upstream's is `void` and
+/// ignores each step's status; the fork's returns the first failure.
+///
+/// # Errors
+///
+/// `SM_ERR` where a face is not copied; those of the B-rep construction, `SetTolerance`,
+/// `CopyFaces` and `RemoveFaces`.
+pub fn unstitch(k: &mut Kernel, b: &mut Brep, faces: Option<&[FaceId]>) -> Result<()> {
+    // copy faces one at a time into the second B-rep
+    let mut second = super::p3::new_brep(k, -1.0, -1.0)?;
+    brep_set_tolerance(k, &mut second, b.tolerance(), true, true)?;
+    let faces = match faces {
+        Some(faces) => faces.to_vec(),
+        None => p1::faces(b, None)?,
+    };
+    for &face in &faces {
+        // you have to copy them individually to make them separate
+        copy_faces_carrying(k, b, &[face], &mut second)?;
+    }
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let removed = super::p5::remove_faces(k, b, true, &faces);
+    b.set_editing_enabled(editing);
+    removed?;
+    let back = p1::faces(&second, None)?;
+    copy_faces_carrying(k, &mut second, &back, b)
+}
+
+/// `CopyFaces(crFaces, pDest)` with its defaults (the merge) between two B-reps' own
+/// attribute stores (`p2::CopyNotifyState`), `SM_ERR` where a face is not copied (the
+/// fork's `SER`).
+fn copy_faces_carrying(
+    k: &mut Kernel,
+    src: &mut Brep,
+    faces: &[FaceId],
+    dest: &mut Brep,
+) -> Result<()> {
+    let mut state = p2::CopyNotifyState::with_attributes_of(src, dest)?;
+    let face_ref = |f: FaceId| crate::topology::loopuse::notify_ref(EntityRef::Face(f));
+    let copied = copy_faces_between_stores(
+        k,
+        src,
+        faces,
+        dest,
+        true,
+        &p2::copy_source_ref,
+        &face_ref,
+        &mut state.env(None),
+    );
+    let restored = state.restore_attributes(src, dest);
+    let (_, all) = copied?;
+    restored?;
+    if all {
+        Ok(())
+    } else {
+        Err(SolidError::sm_err("topology::brep::p7::unstitch"))
+    }
 }
 
 // ---- CopyFaces ------------------------------------------------------------------------------
