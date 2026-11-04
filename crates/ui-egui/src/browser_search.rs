@@ -1,7 +1,9 @@
-//! The browser's search (#1413): a field above the tree, always there or opened from the header's
-//! action (a preference, [`bar_shown`]), with Ctrl+F giving it the keyboard. It keeps only the rows whose names match, each with its parents (dimmed, opened for the search), a
-//! list that narrows it to one kind, and Select all / Hide others for what it found. The matching is the engine's
-//! ([`browser_find`]), the same as the `browser.find` command's.
+//! The browser's search (#1413): a magnifier in the Browser's header row that opens a field over that
+//! row (no height added), with Ctrl+F giving it the keyboard and Esc closing it. It keeps only the rows
+//! whose names match, each with its parents (dimmed, opened for the search); a list in the row narrows it
+//! to one kind, and a line under the header (only once there is a search) counts the matches and offers
+//! Select all / Hide others. The matching is the engine's ([`browser_find`]), the same as the
+//! `browser.find` command's.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -26,7 +28,7 @@ pub struct BrowserSearch {
     closed: BTreeSet<String>,
     /// What the search found (`None`: no search).
     hits: Option<Hits>,
-    /// The bar was asked for (the magnifier or Ctrl+F).
+    /// The field was asked for (the magnifier or Ctrl+F).
     shown: bool,
     /// The field takes the keyboard on the next frame.
     focus: bool,
@@ -246,76 +248,48 @@ fn kind_label(kind: Option<Kind>) -> &'static str {
     }
 }
 
-/// The bar is above the tree: always, or once asked for, and with a search on, which only the bar
-/// can end. Never in Render, which has its own search.
+/// The field covers the header row once asked for, and while a search is on, which only the
+/// field can end. Never in Render, which has its own search.
 pub(crate) fn bar_shown(app: &SolveApp) -> bool {
     let search = &app.tree.search;
-    !crate::render_workspace::active(app)
-        && (app.preferences.browser_search_bar == crate::prefs::BrowserSearchBar::Always || search.shown || search.on())
+    !crate::render_workspace::active(app) && (search.shown || search.on())
 }
 
-/// The search field, the kind it is narrowed to with its count, and the actions on what it
-/// found: above the browser's rows, in both browser layouts. Made of the UI kit's field,
-/// dropdown, text and buttons, like the Appearance library's search.
-pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// The search field, the kind it is narrowed to and the ×, laid over the header row `rect`
+/// (the Browser's title row), so the search adds no height. The × (or Esc) ends the search and
+/// gives the row back to the title.
+pub(crate) fn header_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
     let t = Tokens::get();
     refresh(app);
-    crate::scenario::publish_rect("browser:search:bar", ui.max_rect());
-    ui.spacing_mut().item_spacing = vec2(t.space_4, t.space_4);
-    ui.horizontal(|ui| {
-        // The × ends a search or closes a bar that was asked for; a bar always there with nothing to
-        // clear has no use for it, and its field takes the room.
-        let search = &app.tree.search;
-        let clears = !search.text.is_empty() || search.kind.is_some() || app.preferences.browser_search_bar != crate::prefs::BrowserSearchBar::Always;
-        let clear_width = if clears { t.space_24 + ui.spacing().item_spacing.x } else { 0.0 };
-        let size = vec2((ui.available_width() - clear_width).max(t.space_24), crate::ui_kit::row_height());
-        let hint = crate::i18n::tr("ui.browser_search_hint");
-        let field = ui
-            .allocate_ui(size, |ui| {
-                crate::ui_kit::bounded_cell_editor(
-                    ui,
-                    ui.scope_id().with("browser_search"),
-                    &mut app.tree.search.text,
-                    hint,
-                    false,
-                    MAX_PATTERN_CHARS,
-                )
-            })
-            .inner;
-        crate::scenario::publish_handle("browser:search", field.rect.center());
-        if std::mem::take(&mut app.tree.search.focus) {
-            field.request_focus();
-        }
-        // Esc in the field ends the search (egui gives up the focus on Esc).
-        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            app.tree.search.clear();
-        }
-        field.on_hover_text(crate::i18n::tr("ui.browser_search_tip"));
-        if clears {
-            let (rect, _) = ui.allocate_exact_size(vec2(t.space_24, t.space_24), Sense::hover());
-            let clear = crate::ui_kit::icon_button_at(ui, rect, "close", crate::i18n::tr("ui.browser_search_clear"));
-            crate::scenario::publish_handle("browser:search:clear", clear.rect.center());
-            if clear.clicked() {
-                app.tree.search.clear();
-            }
-        }
-    });
-    let count = app.tree.search.hits().map(|h| {
-        let id = if h.search.incomplete { "ui.browser_search_found_more" } else { "ui.browser_search_found" };
-        crate::i18n::format(id, &[("count", &h.total().to_string())])
-    });
-    // One row high, with the count centred on the list.
-    let row = vec2(ui.available_width(), crate::ui_kit::row_height());
-    ui.allocate_ui_with_layout(row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        let font = egui::FontId::proportional(t.font_small);
-        let count_width =
-            count.as_ref().map_or(0.0, |c| ui.painter().layout_no_wrap(c.clone(), font, t.form_dim).size().x + ui.spacing().item_spacing.x);
-        let size = vec2((ui.available_width() - count_width).max(t.space_24), crate::ui_kit::row_height());
+    crate::scenario::publish_rect("browser:search:bar", rect);
+    let mut row =
+        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(t.space_4, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    row.spacing_mut().item_spacing = vec2(t.space_4, t.space_4);
+    let ui = &mut row;
+    let clear_width = t.space_24 + ui.spacing().item_spacing.x;
+    // The kind list takes a third of the row at most, and none of it when the row is narrow.
+    let kind_width = if ui.available_width() > 220.0 { (ui.available_width() / 3.0).min(110.0) } else { 0.0 };
+    let field_width =
+        (ui.available_width() - clear_width - if kind_width > 0.0 { kind_width + ui.spacing().item_spacing.x } else { 0.0 }).max(t.space_24);
+    let hint = crate::i18n::tr("ui.browser_search_hint");
+    let field = ui
+        .allocate_ui(vec2(field_width, crate::ui_kit::row_height()), |ui| {
+            crate::ui_kit::bounded_cell_editor(ui, ui.scope_id().with("browser_search"), &mut app.tree.search.text, hint, false, MAX_PATTERN_CHARS)
+        })
+        .inner;
+    crate::scenario::publish_handle("browser:search", field.rect.center());
+    if std::mem::take(&mut app.tree.search.focus) {
+        field.request_focus();
+    }
+    // Esc in the field ends the search and closes it (egui gives up the focus on Esc).
+    let escaped = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+    field.on_hover_text(crate::i18n::tr("ui.browser_search_tip"));
+    {
         let current = kind_label(app.tree.search.kind);
         let picker = ui
-            .allocate_ui(size, |ui| {
+            .allocate_ui(vec2(kind_width, crate::ui_kit::row_height()), |ui| {
                 crate::ui_kit::dropdown_menu(ui, "browser_search_kind", current, |ui| {
-                    // Only while the list is open: the bar is there on every frame.
+                    // Only while the list is open: the field is there on every frame.
                     let kinds: Vec<Option<Kind>> = std::iter::once(None).chain(kinds_present(app).into_iter().map(Some)).collect();
                     for kind in &kinds {
                         let name = format!("browser:search:kind:{}", kind.map_or("all", Kind::id));
@@ -330,25 +304,35 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             .inner;
         crate::scenario::publish_handle("browser:search:kinds", picker.rect.center());
         crate::scenario::publish_rect("browser:search:kinds", picker.rect);
-        if let Some(count) = &count {
-            crate::ui_kit::text(ui, count, crate::ui_kit::Text::Note("browser_search_count"));
-        }
-    });
+    }
+    let (clear_rect, _) = ui.allocate_exact_size(vec2(t.space_24, t.space_24), Sense::hover());
+    let clear = crate::ui_kit::icon_button_at(ui, clear_rect, "close", crate::i18n::tr("ui.browser_search_clear"));
+    crate::scenario::publish_handle("browser:search:clear", clear.rect.center());
+    if clear.clicked() || escaped {
+        app.tree.search.clear();
+    }
+}
+
+/// Under the header, only once there is a search: how many it found, with Select all and Hide
+/// others, or that it found none. The matches themselves are the tree below.
+pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
     // This frame's typing and kind.
     refresh(app);
-    let Some(hits) = app.tree.search.hits() else {
-        ui.add_space(t.space_4);
-        return;
-    };
-    let (total, hide) = (hits.total(), hits.shows_bodies());
+    let Some(hits) = app.tree.search.hits() else { return };
+    let (total, hide, more) = (hits.total(), hits.shows_bodies(), hits.search.incomplete);
+    crate::scenario::publish_rect("browser:search:bar", ui.max_rect());
+    ui.spacing_mut().item_spacing = vec2(t.space_4, t.space_4);
     if total == 0 {
         crate::ui_kit::text(ui, crate::i18n::tr("ui.browser_search_none"), crate::ui_kit::Text::Note("browser_search_none"));
         return;
     }
+    let count = crate::i18n::format(if more { "ui.browser_search_found_more" } else { "ui.browser_search_found" }, &[("count", &total.to_string())]);
     // Wrapped, so a long translation moves Hide others to the next line rather than cutting it off;
     // a label stays on one line, so the whole button moves, never half its text.
     ui.horizontal_wrapped(|ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        crate::ui_kit::text(ui, &count, crate::ui_kit::Text::Note("browser_search_count"));
         let label = crate::i18n::format("ui.browser_select_all", &[("count", &total.to_string())]);
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small);
         crate::scenario::publish_handle("browser:search:select-all", r.rect.center());

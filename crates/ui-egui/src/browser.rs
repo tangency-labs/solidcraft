@@ -1480,9 +1480,8 @@ fn show_search(app: &mut SolveApp) {
     app.tree.search.show();
 }
 
-/// The header: the title, the body count, the search action (unless its bar is always there) and
-/// (on the floating card) a chevron
-/// that folds the card to just this row. The whole row is the button. A browser that reveals on
+/// The header: the title, the body count, the search magnifier (which opens a field over the whole
+/// row) and (on the floating card) a chevron that folds the card to just this row. The whole row is the button. A browser that reveals on
 /// hover never folds: the whole card is what the pointer finds.
 fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let collapsible = collapsible && !reveals(app);
@@ -1511,14 +1510,13 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
     }
-    let searching = crate::browser_search::bar_shown(app);
-    let mut search_clicked = false;
-    if app.preferences.browser_search_bar == crate::prefs::BrowserSearchBar::Magnifier {
-        let search = Rect::from_center_size(pos2(right - t.space_12, rect.center().y), vec2(t.space_24, t.space_24));
-        search_clicked = crate::ui_kit::quiet_icon_toggle_at(ui, search, "zoom", crate::i18n::tr("ui.browser_search_hint"), searching).clicked();
-        crate::scenario::publish_handle("browser:search:show", search.center());
-        right = search.left() - t.space_4;
-    }
+    let searching = crate::browser_search::bar_shown(app) && !collapsed;
+    // The magnifier (and, while searching, the field over the whole row), in the row the title is in.
+    let search = Rect::from_center_size(pos2(right - t.space_12, rect.center().y), vec2(t.space_24, t.space_24));
+    let search_clicked =
+        !searching && crate::ui_kit::quiet_icon_toggle_at(ui, search, "zoom", crate::i18n::tr("ui.browser_search_hint"), false).clicked();
+    crate::scenario::publish_handle("browser:search:show", search.center());
+    right = search.left() - t.space_4;
     let bodies = app.session.model.state().bodies.len();
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
     let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
@@ -1541,12 +1539,12 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
             }
         }
     }
-    if search_clicked {
-        if searching {
-            app.tree.search.clear();
-        } else {
-            show_search(app);
-        }
+    if searching {
+        // Over the whole row, the title and count included: the row keeps its height.
+        ui.painter().rect_filled(rect, 0.0, t.toolbar);
+        crate::browser_search::header_field(app, ui, rect);
+    } else if search_clicked {
+        show_search(app);
     }
 }
 
@@ -1632,18 +1630,18 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
     prepare_model(app);
-    if crate::browser_search::bar_shown(app) {
-        // Above the rows and never scrolled with them, but clipped to the card's height, so it folds
-        // away with the card as the rows do. The bar ends with its own gap, so none between the two.
+    if app.tree.search.on() {
+        // Under the header and never scrolled with the rows, but clipped to the card's height, so it
+        // folds away with the card as the rows do.
         ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical()
-            .id_salt("browser_search_bar")
+            .id_salt("browser_search_results")
             .max_height(ui.available_height())
             .min_scrolled_height(0.0)
             .auto_shrink([false, true])
             .scroll_source(egui::scroll_area::ScrollSource::NONE)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| crate::browser_search::bar(app, ui));
+            .show(ui, |ui| crate::browser_search::results(app, ui));
         if app.tree.search.hits().is_some_and(|h| h.total() == 0) {
             return;
         }

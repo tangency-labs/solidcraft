@@ -44,14 +44,6 @@ fn assembly() -> Harness {
     h
 }
 
-/// The same with the bar waiting for the header's action.
-fn magnifier() -> Harness {
-    let mut h = assembly();
-    h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Magnifier;
-    h.frames(2);
-    h
-}
-
 fn occurrence(h: &Harness, parent: u64, name: &str) -> u64 {
     h.app.session.doc.occurrences.iter().find(|o| o.parent == parent && o.name == name).map(|o| o.id).unwrap()
 }
@@ -74,11 +66,31 @@ fn search(h: &mut Harness, text: &str) {
     h.frames(2);
 }
 
+/// Opens the field from the header's magnifier.
+fn open(h: &mut Harness) {
+    if handle_at("browser:search").is_none() {
+        click(h, "browser:search:show");
+    }
+    assert!(handle_at("browser:search").is_some(), "the field is over the header row");
+}
+
 fn click(h: &mut Harness, handle: &str) {
     let p = handle_at(handle).unwrap_or_else(|| panic!("no {handle}"));
     let r = h.call("ui.click", json!({"x": p.x, "y": p.y}));
     assert_eq!(r["ok"], true, "{r}");
     h.frames(2);
+}
+
+/// Every body hidden, one by one or with the placement that holds it.
+fn hidden_world(h: &Harness) -> Vec<String> {
+    let v = &h.app.session.visibility;
+    let mut hidden = v.hidden_bodies.clone();
+    for path in &v.hidden_occurrences {
+        hidden.extend(h.app.session.occurrence_bodies(path, true).unwrap_or_default());
+    }
+    hidden.sort();
+    hidden.dedup();
+    hidden
 }
 
 fn total(h: &Harness) -> usize {
@@ -89,7 +101,8 @@ fn total(h: &Harness) -> usize {
 fn typing_keeps_the_matches_with_their_parents() {
     let mut h = assembly();
     assert!(rows().iter().any(|r| r == "Document Settings"));
-    assert!(handle_at("browser:search:show").is_none(), "the bar is there, with no action to open it");
+    assert!(handle_at("browser:search").is_none(), "the field waits for the magnifier");
+    open(&mut h);
     click(&mut h, "browser:search");
     h.call("ui.text", json!({"text": "m20"}));
     h.frames(2);
@@ -149,6 +162,7 @@ fn pick_kind(h: &mut Harness, kind: &str) {
 #[test]
 fn the_kind_list_narrows_a_search_and_alone_lists_a_kind() {
     let mut h = assembly();
+    open(&mut h);
     // The list holds every kind the design has, and All, and closes when one is picked.
     click(&mut h, "browser:search:kinds");
     for kind in ["all", "component", "body", "sketch", "construction", "joint"] {
@@ -199,16 +213,16 @@ fn hide_others_leaves_only_what_was_found_shown() {
     click(&mut h, "browser:search:hide-others");
     let washer = h.app.session.occurrence_bodies(&[occurrence(&h, 0, "Washer M20:1")], true).unwrap();
     assert_eq!(washer.len(), 1);
-    let mut hidden = h.app.session.visibility.hidden_bodies.clone();
-    hidden.sort();
+    let hidden = hidden_world(&h);
     let mut others: Vec<String> = world.iter().filter(|b| !washer.contains(b)).cloned().collect();
     others.sort();
     assert_eq!(hidden, others);
     // A search that found no body or placement has nothing to keep: the button is off.
     h.app.session.visibility.hidden_bodies.clear();
+    h.app.session.visibility.hidden_occurrences.clear();
     search(&mut h, "holes");
     click(&mut h, "browser:search:hide-others");
-    assert!(h.app.session.visibility.hidden_bodies.is_empty());
+    assert!(hidden_world(&h).is_empty());
 }
 
 #[test]
@@ -229,6 +243,7 @@ fn a_search_opens_closed_rows_and_ending_it_restores_the_tree() {
     search(&mut h, "m20:");
     assert_eq!(placements().iter().filter(|p| p.len() == 2 && p[0] == c1).count(), 2);
     // Esc in the field ends it: the tree as it was, Column:1 still closed.
+    open(&mut h);
     click(&mut h, "browser:search");
     h.call("ui.key", json!({"key": "Escape"}));
     h.frames(2);
@@ -237,13 +252,13 @@ fn a_search_opens_closed_rows_and_ending_it_restores_the_tree() {
     assert_eq!(h.app.tree.collapsed, folds);
     assert!(rows().iter().any(|r| r == "Document Settings"));
     assert!(!placements().iter().any(|p| p.len() == 2 && p[0] == c1));
-    assert!(handle_at("browser:search").is_some(), "the bar stays");
+    assert!(handle_at("browser:search").is_none(), "the field closes");
 }
 
-/// The bar opened from the magnifier goes when Esc ends the search, and comes back empty.
+/// The field opened from the magnifier goes when Esc ends the search, and comes back empty.
 #[test]
 fn esc_closes_a_bar_that_was_asked_for() {
-    let mut h = magnifier();
+    let mut h = assembly();
     click(&mut h, "browser:search:show");
     h.call("ui.text", json!({"text": "web"}));
     h.frames(2);
@@ -263,11 +278,12 @@ fn the_clear_button_ends_a_search() {
     click(&mut h, "browser:search:clear");
     assert!(!h.app.tree.search.on());
     assert_eq!((h.app.tree.search.text.as_str(), h.app.tree.search.kind), ("", None));
-    assert!(handle_at("browser:search:clear").is_none(), "nothing left to clear");
-    assert!(handle_at("browser:search").is_some(), "the bar stays");
+    assert!(handle_at("browser:search").is_none(), "the field closes");
     // A kind alone is a search to clear too.
+    h.app.tree.search.show();
     h.app.tree.search.kind = Some(Kind::Body);
     h.frames(2);
+    assert!(h.app.tree.search.on());
     click(&mut h, "browser:search:clear");
     assert_eq!(h.app.tree.search.kind, None);
 }
@@ -275,65 +291,30 @@ fn the_clear_button_ends_a_search() {
 /// The × of a bar that was asked for is there from the start, and closes it.
 #[test]
 fn the_clear_button_closes_a_bar_that_was_asked_for() {
-    let mut h = magnifier();
+    let mut h = assembly();
     click(&mut h, "browser:search:show");
     click(&mut h, "browser:search:clear");
     assert!(handle_at("browser:search").is_none());
     assert!(!crate::browser_search::bar_shown(&h.app));
 }
 
-/// Changing the row mid-search never strands a filtered tree without its bar.
+/// A restart brings back the closed header, not the last search.
 #[test]
-fn changing_the_preference_keeps_a_search_endable() {
+fn a_restart_drops_the_search() {
     let mut h = assembly();
-    click(&mut h, "browser:search");
-    h.call("ui.text", json!({"text": "web"}));
-    h.frames(2);
-    h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Magnifier;
-    h.frames(2);
-    assert!(handle_at("browser:search").is_some() && handle_at("browser:search:clear").is_some());
-    click(&mut h, "browser:search:clear");
-    assert!(handle_at("browser:search").is_none());
-    assert_eq!(count("Origin"), 1);
-    h.app.preferences.browser_search_bar = crate::prefs::BrowserSearchBar::Always;
-    h.frames(2);
-    assert!(handle_at("browser:search").is_some() && handle_at("browser:search:show").is_none());
-}
-
-/// A restart brings the preference back, not the last search.
-#[test]
-fn a_restart_keeps_the_mode_and_drops_the_search() {
-    for mode in crate::prefs::BrowserSearchBar::ALL {
-        let mut h = assembly();
-        h.app.preferences.browser_search_bar = mode;
-        search(&mut h, "web");
-        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
-        restored.load_prefs(&h.app.prefs());
-        assert_eq!(restored.preferences.browser_search_bar, mode);
-        assert!(restored.tree.search.text.is_empty() && !restored.tree.search.on());
-    }
-}
-
-/// Always there, the bar gives its field the ×'s room until there is something to clear.
-#[test]
-fn the_idle_bar_has_no_clear_button() {
-    let mut h = assembly();
-    assert!(handle_at("browser:search").is_some() && handle_at("browser:search:clear").is_none());
-    assert!(handle_at("browser:search:select-all").is_none() && !h.app.tree.search.on());
-    assert!(rows().iter().any(|r| r == "Document Settings"), "the whole tree under it");
-    h.call("ui.key", json!({"key": "Escape"}));
-    h.frames(2);
-    let idle = handle_at("browser:search").unwrap();
     search(&mut h, "web");
-    assert!(handle_at("browser:search").unwrap().x < idle.x, "the field gives way to the ×");
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert!(restored.tree.search.text.is_empty() && !restored.tree.search.on());
 }
 
 #[test]
 fn the_header_action_shows_the_bar_and_ends_the_search() {
-    let mut h = magnifier();
+    let mut h = assembly();
     h.ctx.enable_accesskit();
     h.frames(2);
-    assert_eq!(header_action_on(&h), Some(false));
+    assert!(header_action_on(&h).is_some(), "the magnifier is in the header row");
+    let header_height = crate::scenario::rect_of("browser:header").unwrap().height();
     assert!(handle_at("browser:search").is_none(), "the bar waits for the header's action");
     h.app.preferences.browser_collapsed = true;
     h.frames(2);
@@ -341,16 +322,18 @@ fn the_header_action_shows_the_bar_and_ends_the_search() {
     click(&mut h, "browser:search:show");
     assert!(!h.app.preferences.browser_collapsed, "the bar's card unfolds");
     assert!(handle_at("browser:search").is_some());
-    assert_eq!(header_action_on(&h), Some(true));
+    assert_eq!(crate::scenario::rect_of("browser:header").unwrap().height(), header_height, "the field adds no height");
+    assert!(header_action_on(&h).is_none(), "the field covers the magnifier");
     h.call("ui.text", json!({"text": "washer"}));
     h.frames(2);
     assert_eq!(count("Washer"), 1);
     assert_eq!(count("Origin"), 0);
-    click(&mut h, "browser:search:show");
+    click(&mut h, "browser:search:clear");
     assert!(handle_at("browser:search").is_none());
     assert!(!h.app.tree.search.on());
     assert!(h.app.tree.search.text.is_empty());
     assert_eq!(count("Origin"), 1);
+    assert!(header_action_on(&h).is_some(), "the magnifier is back");
 }
 
 /// Hide others is one undo step (the plan on #1413), also when what it keeps was hidden.
@@ -364,7 +347,7 @@ fn hide_others_is_one_undo_step() {
     search(&mut h, "washer m20");
     click(&mut h, "browser:search:hide-others");
     assert_eq!(h.app.session.undo.len(), steps + 1);
-    assert_eq!(h.app.session.visibility.hidden_bodies.len(), bodies - washer.len());
+    assert_eq!(hidden_world(&h).len(), bodies - washer.len());
     h.app.run("edit.undo", json!({})).unwrap();
     h.frames(2);
     assert_eq!(h.app.session.visibility.hidden_bodies, hidden, "one undo brings back what was hidden before");
@@ -431,7 +414,7 @@ fn header_action_on(h: &Harness) -> Option<bool> {
 /// A narrow card keeps the title and the action; the body count gives way, never overlaps.
 #[test]
 fn a_narrow_card_drops_the_body_count() {
-    let mut h = magnifier();
+    let mut h = assembly();
     assert!(crate::scenario::rect_of("browser:body-count").is_some());
     h.app.preferences.browser_width = 170.0;
     h.frames(3);
@@ -540,7 +523,7 @@ fn ctrl_f_over_the_browser_takes_the_keyboard() {
 /// In the magnifier's mode Ctrl+F opens the bar first, unfolding its card.
 #[test]
 fn ctrl_f_opens_a_bar_that_waits() {
-    let mut h = magnifier();
+    let mut h = assembly();
     let row = handle_at("row:Document Settings").unwrap();
     h.call("ui.move", json!({"x": row.x, "y": row.y}));
     h.frames(1);
@@ -563,6 +546,7 @@ fn names_in_any_script_are_found() {
         search(&mut h, text);
         assert_eq!((total(&h), count(name)), (1, 1), "{name}");
     }
+    open(&mut h);
     click(&mut h, "browser:search");
     h.app.tree.search.text.clear();
     h.call("ui.text", json!({"text": "ב".repeat(300)}));
@@ -572,7 +556,7 @@ fn names_in_any_script_are_found() {
 
 #[test]
 fn ctrl_f_leaves_a_field_being_typed_in() {
-    let mut h = magnifier();
+    let mut h = assembly();
     h.call("ui.palette", json!({}));
     h.frames(10);
     assert!(h.ctx.text_edit_focused(), "the toolbar's search is being typed in");
@@ -739,6 +723,7 @@ fn hostile_text_in_the_field_never_panics() {
         assert_eq!(h.app.tree.search.hits().map(|hits| hits.total()), want, "{text:?}");
     }
     // Longer than the field takes: the field keeps the first 256 characters.
+    open(&mut h);
     click(&mut h, "browser:search");
     h.app.tree.search.text.clear();
     h.call("ui.text", json!({"text": "b".repeat(300)}));
