@@ -1040,7 +1040,13 @@ pub(super) fn sheet_eval(
             if let Some(p) = fixed
                 && !sk.touches(p.0, (t * 1e-3).max(1e-6))
             {
-                *warning = Some(format!("{} at ({:.3}, {:.3}, {:.3}); the side of the fold line it lies on stays", sheet::FOLD_FIXED_OFF_SHEET, p.x, p.y, p.z));
+                *warning = Some(format!(
+                    "{} at ({:.3}, {:.3}, {:.3}); the side of the fold line it lies on stays",
+                    sheet::FOLD_FIXED_OFF_SHEET,
+                    p.x,
+                    p.y,
+                    p.z
+                ));
             }
             if let Some(sk) = st.surface_sheets.get_mut(i) {
                 let n0 = sk.sheet.panels.len();
@@ -1303,7 +1309,8 @@ pub(super) fn surface_prism_cut(
     // The tools' span along the sketch's normal, one for all of them, and each footprint: the
     // tools' own, else the sketch's profiles.
     // The extrusion's own interval where it was built on the sketch's plane.
-    let mut span: Option<(f64, f64)> = constructor.filter(|c| c.plane == cut.plane).map(|c| (c.interval.0.min(c.interval.1), c.interval.0.max(c.interval.1)));
+    let mut span: Option<(f64, f64)> =
+        constructor.filter(|c| c.plane == cut.plane).map(|c| (c.interval.0.min(c.interval.1), c.interval.0.max(c.interval.1)));
     let mut footprints: Option<Vec<(Plane, Region2)>> = if span.is_some() { None } else { Some(Vec::with_capacity(tools.len())) };
     let read_tools = footprints.is_some();
     for tool in tools.iter().filter(|_| read_tools) {
@@ -1386,7 +1393,10 @@ pub(super) fn surface_prism_cut(
                 let (a, b) = (r.outer.polyline(1e-3).bounds(), mapped.outer.polyline(1e-3).bounds());
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
-            if out.recesses.iter().any(|r| r.panel == p && near(&r.region)) || out.loose.iter().any(|l| l.panel == p && near(&l.region)) || !out.sheet.cuts.is_empty() {
+            if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
+                || out.loose.iter().any(|l| l.panel == p && near(&l.region))
+                || !out.sheet.cuts.is_empty()
+            {
                 return Ok(Vec::new());
             }
             let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
@@ -1515,7 +1525,12 @@ pub(super) fn surface_hole_cut(st: &mut ModelState, tools: &[(Traced, Option<Pri
 /// the sheet: its footprint becomes part of the panel's outline, so the flat, its DXF and a
 /// refold keep it, and it follows its sketch as a cut there does. The sheets' bodies it joined;
 /// none, and nothing changed, for any other join, which the generic path takes.
-pub(super) fn surface_sheet_join(f: &Feature, st: &mut ModelState, targets: &[String], constructor: Option<&ExtrudeConstructor>) -> Result<Vec<String>> {
+pub(super) fn surface_sheet_join(
+    f: &Feature,
+    st: &mut ModelState,
+    targets: &[String],
+    constructor: Option<&ExtrudeConstructor>,
+) -> Result<Vec<String>> {
     let FeatureKind::Extrude { sketch, profiles, extent, .. } = &f.kind else { return Ok(Vec::new()) };
     if extent.taper.is_some() {
         return Ok(Vec::new());
@@ -1560,7 +1575,11 @@ pub(super) fn surface_sheet_join(f: &Feature, st: &mut ModelState, targets: &[St
                     Vec2::new(w.x, w.y)
                 };
                 let mapped = crate::sheet_surface_convert::rigid_region(region, chart);
-                let Ok(joined) = kernel::planar_regions_boolean(std::slice::from_ref(own), std::slice::from_ref(&mapped), kernel::BoolOp::Union, 1e-7) else { continue };
+                let Ok(joined) =
+                    kernel::planar_regions_boolean(std::slice::from_ref(own), std::slice::from_ref(&mapped), kernel::BoolOp::Union, 1e-7)
+                else {
+                    continue;
+                };
                 if joined.len() != 1 {
                     continue;
                 }
@@ -1568,8 +1587,8 @@ pub(super) fn surface_sheet_join(f: &Feature, st: &mut ModelState, targets: &[St
                 let flat = at.region(&mapped);
                 let others: Vec<Region2> =
                     pieces.iter().filter(|(k, _)| !matches!(k, crate::sheet_surface::Piece::Panel(q) if q == p)).map(|(_, r)| r.clone()).collect();
-                let overlap =
-                    kernel::planar_regions_boolean(std::slice::from_ref(&flat), &others, kernel::BoolOp::Intersect, 1e-7).map(|r| r.iter().map(Region2::area).sum::<f64>());
+                let overlap = kernel::planar_regions_boolean(std::slice::from_ref(&flat), &others, kernel::BoolOp::Intersect, 1e-7)
+                    .map(|r| r.iter().map(Region2::area).sum::<f64>());
                 if !overlap.is_ok_and(|a| a <= 1e-9) {
                     return Ok(Vec::new());
                 }
@@ -1578,7 +1597,8 @@ pub(super) fn surface_sheet_join(f: &Feature, st: &mut ModelState, targets: &[St
             }
             let Some((p, mapped)) = found else { break };
             let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
-            let grown = kernel::planar_regions_boolean(std::slice::from_ref(&panel.region), std::slice::from_ref(&mapped), kernel::BoolOp::Union, 1e-7)?;
+            let grown =
+                kernel::planar_regions_boolean(std::slice::from_ref(&panel.region), std::slice::from_ref(&mapped), kernel::BoolOp::Union, 1e-7)?;
             let Ok([one]) = <[Region2; 1]>::try_from(grown) else { return Ok(Vec::new()) };
             panel.region = one;
             placed += 1;

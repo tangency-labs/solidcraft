@@ -320,7 +320,10 @@ fn machining_a_folded_parallel_panel_preserves_its_pocket_on_unfold() {
     // The pocket in the flat, where the flat pattern has it.
     let pocket = flat(&mut s)["pockets"][0]["outline"].as_array().cloned().unwrap_or_default();
     let n = pocket.len().max(1) as f64;
-    let c = pocket.iter().fold(solidcore_record::Vec2::ZERO, |sum, p| sum + solidcore_record::Vec2::new(p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0))) / n;
+    let c = pocket
+        .iter()
+        .fold(solidcore_record::Vec2::ZERO, |sum, p| sum + solidcore_record::Vec2::new(p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0)))
+        / n;
     let state = s.model.state();
     let body = &state.bodies[0].body;
     assert_eq!(body.classify_point(Vec3::new(c.x, c.y, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
@@ -2173,7 +2176,8 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         sk.build().unwrap();
         super::surface_dxf(s, &sk, &super::DxfOptions::default()).unwrap()
     };
-    let dxf = with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());
+    let dxf =
+        with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());
     assert_eq!(dxf.matches("0\nCIRCLE\n").count(), 1, "{dxf}");
     assert!(!dxf.contains("0\nARC\n"), "a full circle must not become a zero-length ARC");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
@@ -4421,7 +4425,12 @@ fn an_edge_flange_feature_can_tear_its_corners_under_a_notch_rule() {
     let (v0, stepped) = (volume(&mut notch), outline_points(&flat(&mut notch)));
     let mut s = two_flange_groups(json!({}), json!({"corner_relief_shape": "tear"}), json!({}));
     assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
-    let torn = s.model.state().surface_sheets.last().map_or(0, |k| k.sheet.corners.iter().filter(|c| c.relief == solidcraft_develop::CornerRelief::Tear).count());
+    let torn = s
+        .model
+        .state()
+        .surface_sheets
+        .last()
+        .map_or(0, |k| k.sheet.corners.iter().filter(|c| c.relief == solidcraft_develop::CornerRelief::Tear).count());
     assert_eq!(torn, 2, "{torn:?}");
     let want = 2.0 * ba * grow / 2.0 * 2.0;
     assert!((volume(&mut s) - v0 - want).abs() < 0.05, "{} - {v0} vs {want}", volume(&mut s));

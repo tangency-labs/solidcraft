@@ -703,6 +703,7 @@ impl ModelState {
         }
         serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
         serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.surface_sheets).unwrap_or_default().hash(&mut h);
         h.finish()
     }
 
@@ -2259,7 +2260,9 @@ impl Model {
                 track_altered_sheets(&state, &mut next, f, &mut warning);
                 note_join_apart(&state, &next, f, &mut warning);
             }
-            let r = r.and_then(|()| absorb_sheet_cuts(&state, &mut next, f, validation, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string())));
+            let r = r.and_then(|()| {
+                absorb_sheet_cuts(&state, &mut next, f, validation, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+            });
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
             let error = match r {
@@ -2385,10 +2388,12 @@ impl Model {
                 .all(|r| r.state.bodies.iter().all(|b| if b.name == old { b.feature == feature } else { !b.name.starts_with(&derived) }))
         };
         let quoted = self.results.iter().skip(at).any(|r| [&r.error, &r.warning].into_iter().flatten().any(|m| m.contains(old)));
-        let named_elsewhere = self
-            .results
-            .iter()
-            .any(|r| r.state.body(new).is_some() || r.state.sheets.iter().any(|x| x.body == old) || r.state.threads.iter().any(|t| t.body == old));
+        let named_elsewhere = self.results.iter().any(|r| {
+            r.state.body(new).is_some()
+                || r.state.sheets.iter().any(|x| x.body == old)
+                || r.state.surface_sheets.iter().any(|x| x.body == old)
+                || r.state.threads.iter().any(|t| t.body == old)
+        });
         let faces_named = doc.features.iter().skip(at + 1).any(|f| f.face_names.iter().any(|n| n.contains(old)));
         if !(untouched || (one_run && same_body())) || quoted || named_elsewhere || faces_named {
             return false;
@@ -2750,7 +2755,13 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
 /// Reads what a feature cut from a sheet made from surfaces back onto its sheet, and puts the
 /// body built again from the sheet in place (#6748, see `sheet_surface_cuts`). Checking each
 /// step, the body built again is weighed against the body cut.
-fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature, validation: kernel::Validation, warning: &mut Option<String>) -> Result<()> {
+fn absorb_sheet_cuts(
+    before: &ModelState,
+    after: &mut ModelState,
+    f: &Feature,
+    validation: kernel::Validation,
+    warning: &mut Option<String>,
+) -> Result<()> {
     let weigh = validation == kernel::Validation::EachStep;
     let letters = more::cut_letters(after, f);
     // What takes material away that the sheet can't hold (a cut, a hole, a chamfer or fillet on
@@ -2834,7 +2845,10 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
         let Some(old) = before.surface_sheets.iter().find(|s| s.body == sk.body) else { continue };
         if old.altered_by.is_some() && (f.kind.is_sheet() || old.sheet != sk.sheet) {
             if let Some(lost) = sk.altered_by.take() {
-                append_warning(warning, format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sk.body));
+                append_warning(
+                    warning,
+                    format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sk.body),
+                );
             }
         }
     }

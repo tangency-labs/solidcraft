@@ -635,8 +635,11 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => Vec::new(),
         Some(_) => points(p, "bends", cmd)?,
     };
+    // A face given with no mode is the face to thicken from, as Convert took it before it read
+    // the body's own faces.
     let thicken = match str_(p, "mode").map(str::to_ascii_lowercase).as_deref() {
-        None | Some("convert") => false,
+        None => p.get("face").is_some_and(|f| !f.is_null()),
+        Some("convert") => false,
         Some("thicken") => true,
         Some(_) => return Err(bad(cmd, "`mode` must be convert or thicken")),
     };
@@ -790,10 +793,7 @@ fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn no_sheet_body(cmd: &str) -> EngineError {
-    bad(
-        cmd,
-        "there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)",
-    )
+    bad(cmd, "there is no sheet metal body: start one with Flange > Base, or turn a body into sheet metal with Convert to Sheet Metal")
 }
 
 /// The flat of a converted body (#6748): the named body's, or with none named

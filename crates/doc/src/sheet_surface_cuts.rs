@@ -130,12 +130,16 @@ fn union(regions: Vec<Region2>, tol: f64) -> Result<Vec<Region2>> {
 /// outlines' boxes are apart, or one lies inside the box of a hole of the other.
 fn apart(regions: &[Region2], tol: f64) -> bool {
     let bounds = |l: &Loop2| l.polyline(1e-3).bounds().inflated(tol);
-    let boxes: Vec<(solidcraft_geom::Aabb2, Vec<solidcraft_geom::Aabb2>)> = regions.iter().map(|r| (bounds(&r.outer), r.holes.iter().map(bounds).collect())).collect();
-    let clear = |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y;
-    let within = |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| b.min.x < a.min.x && a.max.x < b.max.x && b.min.y < a.min.y && a.max.y < b.max.y;
-    boxes.iter().enumerate().all(|(i, (a, ah))| {
-        boxes.iter().skip(i + 1).all(|(b, bh)| clear(a, b) || bh.iter().any(|h| within(a, h)) || ah.iter().any(|h| within(b, h)))
-    })
+    let boxes: Vec<(solidcraft_geom::Aabb2, Vec<solidcraft_geom::Aabb2>)> =
+        regions.iter().map(|r| (bounds(&r.outer), r.holes.iter().map(bounds).collect())).collect();
+    let clear =
+        |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y;
+    let within =
+        |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| b.min.x < a.min.x && a.max.x < b.max.x && b.min.y < a.min.y && a.max.y < b.max.y;
+    boxes
+        .iter()
+        .enumerate()
+        .all(|(i, (a, ah))| boxes.iter().skip(i + 1).all(|(b, bh)| clear(a, b) || bh.iter().any(|h| within(a, h)) || ah.iter().any(|h| within(b, h))))
 }
 
 fn area(regions: &[Region2]) -> f64 {
@@ -171,9 +175,8 @@ fn same_regions(a: &[Region2], b: &[Region2], tol: f64) -> bool {
 fn inside_by_loops(a: &[Region2], b: &[Region2], tol: f64) -> bool {
     let holds = |x: &Region2, y: &Region2| same_loop(&x.outer, &y.outer, tol) && y.holes.iter().all(|k| x.holes.iter().any(|h| same_loop(h, k, tol)));
     let new_hole_at = |p: Vec2| {
-        a.iter().any(|x| {
-            b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| h.ccw().contains(p) && !y.holes.iter().any(|k| same_loop(h, k, tol))))
-        })
+        a.iter()
+            .any(|x| b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| h.ccw().contains(p) && !y.holes.iter().any(|k| same_loop(h, k, tol)))))
     };
     a.iter().all(|x| b.iter().any(|y| holds(x, y)) || x.outer.segs.first().is_some_and(|s| new_hole_at(s.start())))
 }
@@ -345,7 +348,9 @@ fn parted_note(sk: &SurfaceSheet, had: usize) -> Option<String> {
         1 => format!("1 piece of `{body}` is no longer joined to its base ({area:.2} mm², near {at} in the flat pattern); it is kept"),
         n => {
             let more = if n > 4 { format!(" and {} more", n - 4) } else { String::new() };
-            format!("{n} pieces of `{body}` are no longer joined to its base ({area:.2} mm² in all, near {at}{more} in the flat pattern); they are kept")
+            format!(
+                "{n} pieces of `{body}` are no longer joined to its base ({area:.2} mm² in all, near {at}{more} in the flat pattern); they are kept"
+            )
         }
     })
 }
@@ -491,7 +496,11 @@ fn left(region: &Region2, through: &[Region2], name: &str, holders: &[Vec2], tol
             .flat_map(|t| &t.holes)
             .map(|h| {
                 let outer = h.ccw();
-                let holes = through.iter().filter(|o| o.outer.segs.first().is_some_and(|g| outer.contains(g.start()))).map(|o| o.outer.ccw().reversed()).collect();
+                let holes = through
+                    .iter()
+                    .filter(|o| o.outer.segs.first().is_some_and(|g| outer.contains(g.start())))
+                    .map(|o| o.outer.ccw().reversed())
+                    .collect();
                 Region2 { outer, holes }
             })
             .collect();
@@ -506,7 +515,11 @@ fn left(region: &Region2, through: &[Region2], name: &str, holders: &[Vec2], tol
         if r.contains(p) {
             return 0.0;
         }
-        std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).map(|s| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p)).fold(f64::MAX, f64::min)
+        std::iter::once(&r.outer)
+            .chain(&r.holes)
+            .flat_map(|l| &l.segs)
+            .map(|s| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p))
+            .fold(f64::MAX, f64::min)
     };
     let holder = |p: Vec2| (0..left.len()).min_by(|&i, &j| gap(&left[i], p).total_cmp(&gap(&left[j], p)));
     let held: BTreeSet<usize> = holders.iter().filter_map(|p| holder(*p)).collect();

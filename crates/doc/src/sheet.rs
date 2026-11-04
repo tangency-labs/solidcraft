@@ -5060,7 +5060,12 @@ impl Letters {
     pub fn of(labels: &[Region2]) -> Letters {
         let regions = labels
             .iter()
-            .map(|r| (r.outer.polyline(1e-3).bounds().inflated(0.01), std::iter::once(&r.outer).chain(&r.holes).flat_map(|lp| lp.segs.iter().copied()).collect()))
+            .map(|r| {
+                (
+                    r.outer.polyline(1e-3).bounds().inflated(0.01),
+                    std::iter::once(&r.outer).chain(&r.holes).flat_map(|lp| lp.segs.iter().copied()).collect(),
+                )
+            })
             .collect();
         Letters { regions }
     }

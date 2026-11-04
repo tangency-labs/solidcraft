@@ -2392,7 +2392,8 @@ impl SurfaceSheet {
             };
             let mapped: Vec<Region2> = regions.iter().map(|r| rigid_region(r, map)).collect();
             // The panel's material in the flat, short of its bends.
-            let own: Vec<Region2> = pieces.iter().filter(|(p, _)| matches!(p, crate::sheet_surface::Piece::Panel(k) if *k == i)).map(|(_, r)| r.clone()).collect();
+            let own: Vec<Region2> =
+                pieces.iter().filter(|(p, _)| matches!(p, crate::sheet_surface::Piece::Panel(k) if *k == i)).map(|(_, r)| r.clone()).collect();
             out.extend(solidcraft_kernel::planar_regions_boolean(&own, &mapped, solidcraft_kernel::BoolOp::Intersect, 1e-9)?);
         }
         if !found {
@@ -2470,10 +2471,12 @@ impl SurfaceSheet {
         let (mut body, mut names) = crate::sheet_surface_fold::solid(&dev, &folded, self.thickness, &pieces, &mut work, &|p, r| namer.name(p, r))?;
         // Each loose piece where its panel is folded to.
         for l in &self.loose {
-            let frame = folded.places.get(l.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a loose piece's panel has no place".into()))?;
+            let frame =
+                folded.places.get(l.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a loose piece's panel has no place".into()))?;
             let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a loose piece's panel has no plane".into()))?;
             let piece = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&l.region), 0.0, self.thickness)?;
-            body = solidcraft_kernel::boolean(&body, &piece, solidcraft_kernel::BoolOp::Union)?.ok_or_else(|| DocError::Invalid("a loose piece".into()))?;
+            body = solidcraft_kernel::boolean(&body, &piece, solidcraft_kernel::BoolOp::Union)?
+                .ok_or_else(|| DocError::Invalid("a loose piece".into()))?;
             names = crate::sheet::carried(&names, &body);
         }
         let (body, names) = self.recessed_named(body, names, &folded.places)?;
@@ -2509,14 +2512,16 @@ impl SurfaceSheet {
     /// `body` with the sheet's bores cut from it, each from its panel where `frames` put it.
     fn bored(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
         for b in &self.bores {
-            let frame = b.panel.and_then(|p| frames.get(p).copied().flatten()).ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
+            let frame =
+                b.panel.and_then(|p| frames.get(p).copied().flatten()).ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
             let axis = frame.vector(b.axis);
             let base = frame.point(b.base);
             let Some(plane) = axis.normalized().and_then(|a| Plane::new(base, a.any_perp(), a.cross(a.any_perp()))) else { continue };
             let circle = Region2 { outer: Loop2::circle(Vec2::new(0.0, 0.0), b.radius), holes: Vec::new() };
             let (from, to) = (b.height.min(0.0), b.height.max(0.0));
             let tool = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&circle), from, to)?;
-            body = solidcraft_kernel::boolean(&body, &tool, solidcraft_kernel::BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a bore takes the whole sheet".into()))?;
+            body = solidcraft_kernel::boolean(&body, &tool, solidcraft_kernel::BoolOp::Cut)?
+                .ok_or_else(|| DocError::Invalid("a bore takes the whole sheet".into()))?;
         }
         Ok(body)
     }

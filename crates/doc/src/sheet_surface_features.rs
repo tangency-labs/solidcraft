@@ -113,7 +113,8 @@ impl SurfaceSheet {
         let strip = if by > 0.0 { [a, b, q, p] } else { [p, q, b, a] };
         let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
         let op = if by > 0.0 { BoolOp::Union } else { BoolOp::Cut };
-        let mut out = crate::sheet_surface::boolean_past_holes(std::slice::from_ref(&panel.region), &[strip], op, &mut crate::sheet::FlatWork::new())?;
+        let mut out =
+            crate::sheet_surface::boolean_past_holes(std::slice::from_ref(&panel.region), &[strip], op, &mut crate::sheet::FlatWork::new())?;
         if out.len() != 1 {
             return err("the flange's bend would cut its panel apart");
         }
@@ -606,7 +607,8 @@ impl SurfaceSheet {
     fn turn_charts_over(&mut self) {
         let f = |p: Vec2| Vec2::new(p.x, -p.y);
         let r = |g: &Region2| crate::sheet_surface_convert::rigid_region(g, f);
-        let seg = |s: &Seg2| crate::sheet_surface_convert::rigid_region(&Region2 { outer: Loop2 { segs: vec![*s] }, holes: Vec::new() }, f).outer.segs;
+        let seg =
+            |s: &Seg2| crate::sheet_surface_convert::rigid_region(&Region2 { outer: Loop2 { segs: vec![*s] }, holes: Vec::new() }, f).outer.segs;
         for p in &mut self.sheet.panels {
             p.region = r(&p.region);
         }
@@ -737,7 +739,11 @@ impl SurfaceSheet {
     /// flat panel's material through its thickness, in a bend, or in a loose piece.
     pub(crate) fn touches(&self, p: Vec3, tol: f64) -> bool {
         let near = |r: &Region2, q: Vec2| {
-            r.contains(q) || std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(q).clamp(0.0, 1.0)).dist(q) <= tol)
+            r.contains(q)
+                || std::iter::once(&r.outer)
+                    .chain(&r.holes)
+                    .flat_map(|l| &l.segs)
+                    .any(|s| s.point_at(s.closest_param(q).clamp(0.0, 1.0)).dist(q) <= tol)
         };
         let t = self.thickness;
         let Some((panels, _)) = self.pieces_in_space() else { return true };
@@ -761,7 +767,12 @@ impl SurfaceSheet {
         }
         let Ok(fold) = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places) else { return true };
         dev.zones.iter().any(|z| {
-            fold.bends.get(z.joint).copied().flatten().and_then(|bent| bent.unwrapped(p)).is_some_and(|(flat, depth, _)| depth >= -tol && depth <= t + tol && near(&z.region, flat))
+            fold.bends
+                .get(z.joint)
+                .copied()
+                .flatten()
+                .and_then(|bent| bent.unwrapped(p))
+                .is_some_and(|(flat, depth, _)| depth >= -tol && depth <= t + tol && near(&z.region, flat))
         })
     }
 

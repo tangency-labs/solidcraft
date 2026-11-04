@@ -320,7 +320,11 @@ fn rim_names(sheet: &Sheet, i: usize, own: &[Region2], zones: &[Region2]) -> Vec
     let on_zone = |a: Vec2, b: Vec2| {
         let m = (a + b) * 0.5;
         zones.iter().any(|z| {
-            z.contains(m) || std::iter::once(&z.outer).chain(&z.holes).flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(m).clamp(0.0, 1.0)).dist(m) <= small)
+            z.contains(m)
+                || std::iter::once(&z.outer)
+                    .chain(&z.holes)
+                    .flat_map(|l| &l.segs)
+                    .any(|s| s.point_at(s.closest_param(m).clamp(0.0, 1.0)).dist(m) <= small)
         })
     };
     let mut out: Vec<(Vec2, Vec2, String)> = Vec::new();
