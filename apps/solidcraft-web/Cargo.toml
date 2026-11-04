@@ -14,10 +14,7 @@ name = "solidcraft-web"
 path = "src/main.rs"
 
 [features]
-# Cloud Open/Save against the CloudCraft deployment that serves this bundle.
-# A standalone hosting (project Pages) has no service: build without it there.
-cloud = ["dep:craft-cloud-client", "dep:collabcraft-share"]
-default = ["profile", "cloud"]
+default = ["profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 # The profiler, compiled in so any build can say where its time goes (the Profile operations
 # preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
@@ -33,12 +30,6 @@ percent-encoding = "2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
-# How this app reaches CloudCraft (the async browser transport; the session
-# rides the service's cookie). No provider credential or protocol in here.
-craft-cloud-client = { git = "https://github.com/wdunn001/collab-craft", rev = "dbfc5e3", optional = true }
-# The Share dialog's backend. On the web it reads the page it is served from,
-# so a bundle CloudCraft hosts needs no configuration.
-collabcraft-share = { git = "https://github.com/wdunn001/collab-craft", rev = "dbfc5e3", optional = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

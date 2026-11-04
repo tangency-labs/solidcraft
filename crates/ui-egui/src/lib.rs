@@ -484,9 +484,6 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
-    /// Open a URL in the system browser (the cloud sign-in link); None: the
-    /// link is only shown, never followed.
-    pub open_url: Option<Box<dyn Fn(&str)>>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -545,20 +542,12 @@ pub struct SolveApp {
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
     pub services: Services,
-    /// Cloud Open/Save state; the pages are `craft_ui::cloud` (see `cloud`).
+    /// Cloud Open/Save state (see `cloud`). Always empty: no backend is wired into
+    /// this build.
     pub cloud: cloud::CloudFiles,
-    /// The design snapshot each cloud save in flight encoded ([`cloud::Sent`]).
-    pub(crate) cloud_sent: cloud::Sent,
-    /// The Share dialog the cloud pages draw.
-    pub share: craft_ui::share::ShareDialog,
-    /// Who else is in the design, when shared editing is connected.
-    pub presence: craft_ui::presence::PresenceBar,
-    /// The Save to Cloud window, when open ([`cloud::save_window`]).
+    /// The Save to Cloud window, when open ([`cloud::save_window`]). Never set in
+    /// this build.
     pub cloud_save_window: bool,
-    /// Home shows the cloud file list. Off until a gesture asks for it: the
-    /// first thing the list does is ask who is signed in, and the worker then
-    /// opens a browser to sign in. A launch must not do that by itself.
-    pub cloud_browse: bool,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
@@ -825,11 +814,7 @@ impl SolveApp {
             pre_sketch_component: None,
             services,
             cloud: cloud::CloudFiles::new(),
-            cloud_sent: cloud::Sent::new(),
-            share: craft_ui::share::ShareDialog::new(),
-            presence: craft_ui::presence::PresenceBar::new().badges_only(),
             cloud_save_window: false,
-            cloud_browse: false,
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -3057,7 +3042,6 @@ impl SolveApp {
         self.poll_delete_check(ui.ctx());
         timeline::tick_playback(self, ui.ctx());
         cloud::pump(self, ui.ctx());
-        self.share.show(&ui.ctx().clone());
         cloud::conflict_modal(self, ui.ctx());
         cloud::save_window(self, ui.ctx());
         if !self.embedded {
