@@ -31,6 +31,8 @@ type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), 
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
+    /// Physical round-member data, valid only for the exact shape it certifies.
+    pub(crate) round_member: Option<Arc<crate::frame_cope::CertifiedMember>>,
     pub name: String,
     /// Definition identity for a computed placement; never parsed from its display name.
     pub source_name: Option<String>,
@@ -93,6 +95,7 @@ pub struct ModelBody {
 impl ModelBody {
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
+            round_member: None,
             name,
             source_name: None,
             source_transform: crate::IDENTITY,
@@ -1705,6 +1708,12 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
             reads.placed_body(st, target);
+            for tool in tools {
+                reads.placed_body(st, tool);
+            }
+        }
+        FeatureKind::FrameCope { member, tools, .. } => {
+            reads.placed_body(st, member);
             for tool in tools {
                 reads.placed_body(st, tool);
             }
@@ -7615,6 +7624,7 @@ fn eval_feature(
             Ok(())
         }
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
+        FeatureKind::FrameCope { .. } => frame_member::cope(doc, f, st),
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;
             let mut bb = solidcraft_geom::Aabb3::EMPTY;

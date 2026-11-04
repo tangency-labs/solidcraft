@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::MemberParams;
+use super::{CopeDxfParams, CopeDxfResult, CopeParams, MemberParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, conforms};
@@ -43,4 +43,28 @@ fn schemas_and_the_key_check_agree() {
     let mut unknown = p;
     unknown["typo"] = json!(true);
     assert!(s.execute("frame.member", &unknown).unwrap_err().to_string().contains("typo"));
+}
+
+#[test]
+fn cope_contracts_and_physical_dxf_reply_conform() {
+    assert_keys(input_schema_for::<CopeParams>(), &["body_name", "body_names", "end", "member", "name", "participants", "tools"]);
+    assert_keys(input_schema_for::<CopeDxfParams>(), &["end", "member", "path", "seam", "tolerance"]);
+    let p = json!({"member":"Rail", "end":"end", "seam":"45 deg", "tolerance":0.01});
+    let schema = input_schema_for::<CopeDxfParams>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    assert!(serde_json::from_value::<CopeDxfParams>(p).is_ok());
+    let p = json!({"member":"Rail", "tools":["Post"], "end":"start"});
+    let schema = input_schema_for::<CopeParams>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    let out = serde_json::json!({
+        "member":"Rail", "end":"start", "units":"mm", "scale":1.0, "outer_diameter":40.0,
+        "circumference":125.66370614359172, "seam":0.0, "origin":[0.0,0.0,0.0], "component":0,
+        "axis":[1.0,0.0,0.0], "seam_direction":[0.0,1.0,0.0], "wrap_direction":"right_hand_about_inward_axis",
+        "tolerance":0.01, "segments":1, "max_segments":65536, "profile":[[0.0,20.0],[125.66370614359172,20.0]], "dxf":"drawing"
+    });
+    let schema = output_schema_for::<CopeDxfResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &out));
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let err = s.execute("frame.export_cope_dxf", &json!({"member":"Rail", "end":"start", "typo":true})).unwrap_err();
+    assert!(err.to_string().contains("typo"));
 }

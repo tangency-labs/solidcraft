@@ -124,6 +124,7 @@ flange	false
 flat	false
 fold	false
 folder	false
+frame_cope	false
 frame_member	false
 gear	false
 graph	false

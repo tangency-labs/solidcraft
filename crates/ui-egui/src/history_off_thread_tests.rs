@@ -850,6 +850,63 @@ fn an_agent_export_runs_on_a_copy() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn an_agent_cope_computes_ahead_and_its_template_export_reads_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, points, diameter) in [("Rail", json!([[0, 0], [200, 0]]), 40), ("Mate", json!([[0, -150], [0, 150]]), 60)] {
+        let sketch = format!("{name} path");
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY", "name":sketch})),
+            ("sketch.line", json!({"points":points, "ids":["l1"], "infer":false})),
+            ("sketch.finish", json!({})),
+            ("frame.member", json!({"sketch":sketch, "profile":{"kind":"round_tube", "diameter":diameter, "wall":2}, "body_name":name})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let cope = ask(&tx, "engine.execute", json!({"command":"frame.cope", "params":{"member":"Rail", "tools":["Mate"], "end":"start"}}));
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true), "the window answers meanwhile");
+    // The worker may already have finished; while it computes, the design is untouched.
+    if h.app.agent_computing().is_some() {
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    }
+    let reply = reply_to(&mut h, &cope);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(h.app.session.doc.features.len(), before.features.len() + 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.model.last_recomputed, 0, "the window reuses the computed cut");
+
+    let treated = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let path = h.dir.join("rail-start.dxf");
+    let export = ask(
+        &tx,
+        "engine.execute",
+        json!({"command":"frame.export_cope_dxf", "params":{"member":"Rail", "end":"start", "tolerance":0.05, "path":path}}),
+    );
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    // The worker may already have finished; while it reads its copy, no design change waits on it.
+    if !h.app.control_answering.is_empty() {
+        assert!(h.app.agent_computing().is_none(), "export holds no design-change slot");
+    }
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true));
+    let reply = reply_to(&mut h, &export);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(path.is_file());
+    assert!(std::sync::Arc::ptr_eq(&treated, &h.app.session.doc));
+    assert_eq!(h.app.session.undo.len(), undo);
+}
+
 /// #4604: measuring the whole design (an inspection measures every body) reads a copy off the
 /// window thread, preference or not: on a large assembly it took a minute, the window answered
 /// nothing meanwhile and was closed as not responding. The window answers `ui.*` while it

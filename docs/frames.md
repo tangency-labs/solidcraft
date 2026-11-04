@@ -2,7 +2,8 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles. Corners, trims, end caps, gussets, welds and the cut list follow.
+members, their profiles and retained round-tube copes with printable DXF templates. Corners,
+general trims, end caps, gussets, welds and the cut list follow.
 
 ## The workflow
 
@@ -22,7 +23,61 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 ```
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
-commands. Where members meet they overlap until corner treatments land.
+commands. Untreated members overlap where they meet.
+
+## Round-tube cope templates
+
+`frame.cope` cuts a round-tube member to the **outside** of one or more straight mating round
+tubes. It fills the mating bores for the subtraction, so it removes the whole end stub instead
+of leaving disconnected material inside a mate. The target keeps its name and physical-member
+identity; the saved feature retains the member names and selected path end. Profile and path
+edits, rename, undo/redo and reopening reevaluate the same cut. Change the treatment with
+`timeline.redefine` and `command: "frame.cope"`.
+
+```json
+{"command":"frame.cope","params":{"member":"Rail","tools":["Post","Brace"],"end":"start","name":"Rail joint"}}
+{"command":"frame.export_cope_dxf","params":{"member":"Rail","end":"start","seam":"30 deg","tolerance":0.01,"path":"rail-start.dxf"}}
+```
+
+Both commands are available through the command registry, CLI, MCP and desktop control channel.
+They currently have no dedicated interactive dialog. `end` is required: `start` or `end` of the
+original ordered member path. Export omits `path` to return DXF text. It does not change the
+design or undo history; file output uses the scoped VFS and an atomic replacement, after the
+entire drawing has been validated.
+
+The template develops the **outer** cylindrical surface, with X from zero to `OD × π` and Y
+measured inward from the original path endpoint. Keep the material on the positive-Y side of
+`CUT_PROFILE`. Two copies of the seam terminate this open polyline; there is no closing segment
+across the sheet. `seam` is in radians, or an angle expression, from the member's transported
+section X. Wrap direction follows the right-hand rule about the inward axial direction. At the
+far end the section Y is reversed, so the same convention still points into the stock. The
+reply and DXF notes identify the component, original endpoint, inward direction, seam radial
+direction, member and end. Coordinates and tolerances are **millimetres**, regardless of the
+design's display units. Print at **100%**, turn off fit-to-page and measure the 100 mm scale
+check before using the template. No kerf allowance is applied.
+
+For a member radius r and mate radius R, with axes meeting at the datum and joint angle a,
+write w = radial(theta) · mate_axis. The exit station is
+`(cos(a)*w + sqrt(w*w + sin(a)^2*(R*R-r*r))) / sin(a)^2`. The largest exit station among the
+mates selects the surviving side. Equal perpendicular tubes give `r * |cos(theta)|` when the
+mate lies along the section X. This is the same cylindrical envelope used by the solid cut.
+
+Sampling does not depend on viewport tessellation. Each exit function has the conservative
+derivative bound `L = r*(1+|cos(a)|)/sin(a)`; their maximum has the largest such bound, even at
+cusps and cutter switches. With angular step h, axial interpolation error is at most `L*h/2`
+and wrapped radial sag at most `r*h*h/8`. Each gets half the requested tolerance. The default is
+0.01 mm, allowed range 0.001–1 mm. Output is capped at 65,536 segments and 16 cutters; requests
+that exceed the bound fail before writing a file and suggest a larger tolerance.
+
+Supported stock is a built-in, centred round-tube member with a straight cylindrical terminal;
+the rest of the target may contain tangent bends. Mates must be untreated straight round-tube
+members in the same component, at least the target OD. Their axes must meet at the selected
+endpoint (sketch roundoff up to 0.0000001 mm is snapped to that datum), with joint sine at least
+0.001, and their caps must be clear of the cut. Conservative clearance bounds refuse a cutter
+that may also touch a bend or another portion of the target, and end cuts that may cross.
+Rectangular sections, off-axis joints, smaller mates, arc-only ends, modified/offset/transferred
+bodies, flattening bends and machine cutting programs are refused. Unsupported geometry never
+produces a nominal-stock template that could be mistaken for the actual cut.
 
 The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member and
 Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
@@ -93,8 +148,8 @@ The result is one tube, with two straight lengths of 200 and 300 mm and a 100 mm
 bend radius. Its nominal centreline length is `500 + 50π` mm. Grouping three separate
 members or combining their solids does not record this continuous manufacturing path.
 
-Bend-list output and flattened round-tube cope DXF templates are subsequent fabrication
-steps tracked under #4003. A continuous member does not yet produce either export.
+Bend-list output is a subsequent fabrication step tracked under #9795. Straight cylindrical
+terminals of continuous round-tube members support retained copes and DXF templates, above.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the

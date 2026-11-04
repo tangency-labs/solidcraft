@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{AngleExpr, FeatureCommon, LengthExpr, ProfilesParam, SketchRef, feature_common};
 
@@ -58,4 +58,59 @@ pub struct MemberParams {
     pub names: Option<BTreeMap<String, String>>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CopeParams {
+    pub member: String,
+    /// One to sixteen distinct straight round-tube mating members.
+    pub tools: Vec<String>,
+    /// start or end of the original ordered path; required, never chosen by proximity.
+    pub end: String,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopeDxfParams {
+    pub member: String,
+    pub end: String,
+    /// Angle in radians or an angle expression, measured from the terminal's x datum.
+    #[serde(default)]
+    pub seam: Option<AngleExpr>,
+    /// Millimetres, independent of the design's display units: 0.001..1, default 0.01.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// Optional DXF destination; without it the reply contains the drawing text.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CopeDxfResult {
+    pub member: String,
+    pub end: String,
+    pub units: String,
+    pub scale: f64,
+    pub outer_diameter: f64,
+    pub circumference: f64,
+    pub seam: f64,
+    /// Original endpoint in the member component's coordinates.
+    pub origin: [f64; 3],
+    pub component: u64,
+    /// Positive axial direction into the surviving stock, in that component.
+    pub axis: [f64; 3],
+    pub seam_direction: [f64; 3],
+    pub wrap_direction: String,
+    pub tolerance: f64,
+    pub segments: usize,
+    pub max_segments: usize,
+    /// Open profile, from x=0 to x=circumference; the two seam copies have equal stations.
+    pub profile: Vec<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
