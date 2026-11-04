@@ -1269,6 +1269,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         distance2,
         start_offset,
         through_all,
+        second_follows_first: false,
         taper,
         corner,
         to: p.get("to").and_then(vec3).map(FacePick),

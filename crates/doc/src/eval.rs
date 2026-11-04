@@ -16,7 +16,7 @@ use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, UnitVec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
-use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_drawn_profiles};
+use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
@@ -1992,7 +1992,7 @@ impl Model {
             feature,
             name: last.name.clone(),
             plane: last.plane,
-            profiles: find_drawn_profiles(&sketch),
+            profiles: find_profiles(&sketch),
             ends: solidcraft_sketch::loose_ends(&sketch),
             sketch,
             report,
@@ -6097,7 +6097,7 @@ pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Exten
             // and a sign only turns its own side over. A reach computed from the model (To
             // Object, Through All) has the sign of where the object is, so the other side
             // follows it.
-            let second = if extent.to.is_some() || extent.through_all {
+            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
                 if first < 0.0 { d2 } else { -d2 }
             } else if negative {
                 d2

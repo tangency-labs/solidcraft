@@ -252,3 +252,34 @@ fn an_older_reversed_two_sided_extrude_keeps_its_shape() {
     let FeatureKind::Extrude { extent, .. } = &s.doc.find_feature("Depth").unwrap().kind else { panic!("extrude") };
     assert_eq!(extent.direction, solidcraft_doc::Direction::Positive);
 }
+
+/// Designs saved before entered distances kept their sides sent Distance 2 to the other side of
+/// a negative first distance. Opening one keeps that, for an expression too and after its
+/// parameter changes, and leaves the distance and its named input as they were.
+#[test]
+fn an_older_two_sided_extrude_with_a_negative_distance_keeps_its_sides() {
+    let mut base = fixture(json!({"direction":"positive","distance":"10 mm","distance2":"10 mm"}));
+    run(&mut base, "parameters.add", json!({"name":"width","expression":"20 mm"}));
+    let mut saved: Value = serde_json::from_str(&base.doc.to_json()).unwrap();
+    // As the last release saved it: the format before this build's pending changes.
+    let version: u32 = saved["format"].as_str().unwrap().trim_start_matches("solidcraft/").parse().unwrap();
+    saved["format"] = json!(format!("solidcraft/{}", version - 1));
+    saved.as_object_mut().unwrap().remove("format_pending");
+    for (distance, lo, hi) in [("-width", -20.0, 10.0), ("-0 mm", -10.0, 0.0), ("-10 mm", -10.0, 10.0)] {
+        let mut file = saved.clone();
+        for f in file["features"].as_array_mut().unwrap() {
+            if f["type"] == "extrude" {
+                f["extent"]["distance"] = json!(distance);
+            }
+        }
+        let mut opened = Session::new(Document::from_json(&file.to_string()).unwrap());
+        check(&opened, lo, hi);
+        let FeatureKind::Extrude { extent, .. } = &opened.doc.find_feature("Depth").unwrap().kind else { panic!("extrude") };
+        assert_eq!(extent.distance, distance);
+        if distance == "-width" {
+            run(&mut opened, "parameters.change", json!({"name":"width","expression":"15 mm"}));
+            check(&opened, -15.0, 10.0);
+        }
+        check(&Session::new(Document::from_json(&opened.doc.to_json()).unwrap()), if distance == "-width" { -15.0 } else { lo }, hi);
+    }
+}
