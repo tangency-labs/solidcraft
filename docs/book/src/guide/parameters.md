@@ -6,7 +6,7 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 uses them.
 
 When creating or editing a sketch dimension, its value editor shows its model parameter
-name (`d1`, `d2`, …). Click another driving dimension to use its name: when the value is
+name (`d1`, `d2`, …). Click another dimension to use its name: when the value is
 just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
 cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
 `d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
@@ -18,6 +18,14 @@ Add and edit user parameters through the existing **Change Parameters** command.
 **1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
 **3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
 **5** The value it works out to
+
+A **driven** (reference) dimension has a model parameter too. Its value is what the dimension
+measures once its sketch is solved, and nothing can set it: **Parameters** lists it read-only
+in its sketch's group, and double-clicking the dimension shows its name. Any expression can
+use the name, such as `d7 / 2`, and follows the measured value as the sketch changes. A
+feature that comes before the driven dimension's sketch in the timeline can't use it. A
+dimension of the same sketch can, unless the driven dimension measures geometry that this
+dimension moves: then the dimension would depend on itself, and the change is refused.
 
 ## Naming a value as you type it
 

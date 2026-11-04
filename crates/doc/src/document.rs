@@ -4349,6 +4349,7 @@ impl Document {
         if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
             return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
+        self.refuse_driven(name)?;
         let mut next = self.clone();
         let inferred = match unit {
             Some(u) => u.trim().to_string(),
@@ -4531,7 +4532,8 @@ impl Document {
         self.apply_point_values(vals, sk)?;
         self.apply_equation_values(vals, sk)?;
         self.apply_pattern_values(vals, sk)?;
-        for c in &mut sk.constraints {
+        // A driven dimension measures: its parameter is read from it, never written to it.
+        for c in sk.constraints.iter_mut().filter(|c| !c.driven) {
             if let Some(p) = &c.param {
                 let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
                 let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
@@ -4687,6 +4689,20 @@ impl Document {
     /// application, continuation and offset refreshes run regardless of the requested level.
     /// Model evaluation uses `solve_sketch` so its published report always has full diagnostics.
     pub fn solve_sketch_with_analysis(
+        &self,
+        vals: &std::collections::BTreeMap<String, expr::Value>,
+        sk: &mut Sketch,
+        stored: &solidcraft_sketch::DrivingValues,
+        moved_from: Option<&Sketch>,
+        analysis: solidcraft_sketch::Analysis,
+    ) -> Result<solidcraft_sketch::SolveReport> {
+        let report = self.solve_sketch_once(vals, sk, stored, moved_from, analysis)?;
+        // Dimensions that use the sketch's own driven dimensions take what they measure (#5582).
+        self.settle_own_driven(vals, sk, report, analysis)
+    }
+
+    /// One solve of [`Self::solve_sketch_with_analysis`], with the driven values in `vals`.
+    pub(crate) fn solve_sketch_once(
         &self,
         vals: &std::collections::BTreeMap<String, expr::Value>,
         sk: &mut Sketch,
