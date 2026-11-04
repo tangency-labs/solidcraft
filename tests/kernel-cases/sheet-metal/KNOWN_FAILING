@@ -1,4 +1,3 @@
-# The sheet-metal cases that fail today, one a line: `<case> <why it fails today>`. Sorted. The kernel
-# rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
-# and on a listed case that passes: a fix removes its line in the same pull request.
-# Baseline: not seeded yet; seeded from a develop run after the SMLib pin bump.
+# The sheet-metal cases that fail today on solidcore, one a line: `<case> <why it fails today>`. Sorted.
+# The kernel rig gate fails on a case that fails and is not listed, and on a listed case that passes.
+# Baseline: solidcore pin de85a3e00, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.

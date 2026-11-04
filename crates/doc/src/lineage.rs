@@ -9,9 +9,10 @@
 //! bodies the feature built itself (whose faces are named by their role: the sketch curve they
 //! sweep, the cap they are). Naming (`history_names`) reads it; nothing here samples geometry.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::{Region2, Vec3};
+use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
 
@@ -232,13 +233,16 @@ impl<'a> ProfileRoles<'a> {
         if history.operands != 0 {
             return None;
         }
-        let segments: Vec<&solidcraft_geom::Seg2> =
+        let segments: Vec<&solidcore_record::Seg2> =
             self.region.map(|r| std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).collect()).unwrap_or_default();
         let curves = self.sketch.map(crate::config::ExactSketchCurves::new);
         // Every curve the segment is drawn on (one, or several coincident or collinear ones).
         let curve = |segment: usize| -> Vec<String> {
             let (Some(curves), Some(segment)) = (curves.as_ref(), segments.get(segment)) else { return Vec::new() };
-            let drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            let mut drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            if drawn.is_empty() {
+                drawn.extend(curves.find_free_form(segment).map(|id| format!("side:{id}")));
+            }
             match self.thin {
                 // A thin wall's side beside its curve (the other side may lie on it).
                 Some(thin) if drawn.is_empty() => curves.find_offset(segment, &thin.curves, thin.distances),
@@ -294,7 +298,7 @@ impl<'a> ProfileRoles<'a> {
 /// numbered through the chains in order. It has no caps.
 pub(crate) struct ChainRoles<'a> {
     pub sketch: &'a SolvedSketch,
-    pub chains: &'a [Vec<solidcraft_geom::Seg2>],
+    pub chains: &'a [Vec<solidcore_record::Seg2>],
 }
 
 impl ChainRoles<'_> {
@@ -305,7 +309,7 @@ impl ChainRoles<'_> {
     }
 
     fn of(&self, history: &History) -> Vec<Vec<String>> {
-        let segments: Vec<&solidcraft_geom::Seg2> = self.chains.iter().flatten().collect();
+        let segments: Vec<&solidcore_record::Seg2> = self.chains.iter().flatten().collect();
         let curves = crate::config::ExactSketchCurves::new(self.sketch);
         history
             .faces
@@ -336,7 +340,7 @@ impl ChainRoles<'_> {
 /// answering to the others; its caps `start` and `end`.
 pub(crate) struct SectionRoles<'a> {
     /// Each section's sketch and loops (outer, then holes), in the order given.
-    pub sections: Vec<(&'a SolvedSketch, Vec<&'a solidcraft_geom::Loop2>)>,
+    pub sections: Vec<(&'a SolvedSketch, Vec<&'a solidcore_record::Loop2>)>,
 }
 
 impl SectionRoles<'_> {
@@ -753,10 +757,19 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438).
         let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
-        for ((name, feature), (_, i)) in names.into_iter().zip(keys) {
-            if let Some(b) = bodies.get_mut(i) {
-                b.name = name;
-                b.feature = feature;
+        // The pieces take the family's places in that order too, so the state lists them as
+        // their names run. The session pins a feature's body names in state order, and the next
+        // evaluation hands them out in this order: listed in the kernel's order, the pieces
+        // swapped names once the design was evaluated again from its pinned names (opened).
+        let moved: Vec<crate::ModelBody> = keys.iter().filter_map(|(_, i)| bodies.get(*i).cloned()).collect();
+        if moved.len() != members.len() || names.len() != members.len() {
+            continue;
+        }
+        for ((mut b, (name, feature)), place) in moved.into_iter().zip(names).zip(&members) {
+            b.name = name;
+            b.feature = feature;
+            if let Some(slot) = bodies.get_mut(*place) {
+                *slot = b;
             }
         }
     }

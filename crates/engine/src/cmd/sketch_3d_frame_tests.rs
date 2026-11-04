@@ -1,6 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::WireSpace;
 
 fn run(s: &mut Session, cmd: &str, params: Value) -> Value {

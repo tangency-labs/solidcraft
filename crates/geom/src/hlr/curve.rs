@@ -4,10 +4,11 @@
 //! `breaks` are the edge's.
 
 use super::HlrError;
-use crate::Vec3;
 use crate::brep::eval::{CurveEval, SurfaceEval};
-use crate::brep::{Curve, Edge, Frame};
+use crate::prelude::*;
 use crate::section::CurveAccuracy;
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Curve, Edge, Frame};
 
 #[derive(Clone, Debug)]
 pub(crate) enum C3 {
@@ -46,7 +47,7 @@ pub(crate) fn frame_axes(f: &Frame) -> (Vec3, Vec3, Vec3) {
 
 /// Whether every sample of `c`, a few to each of its breaks, lies within `tolerance` of both
 /// `surfaces`.
-fn on_both_surfaces(c: &C3, surfaces: &[Box<crate::brep::Surface>; 2], tolerance: f64) -> bool {
+fn on_both_surfaces(c: &C3, surfaces: &[Box<solidcore_record::brep::Surface>; 2], tolerance: f64) -> bool {
     /// Most samples checked; a longer curve's are spread evenly over it.
     const MAX_SAMPLES: usize = 512;
     let [Ok(a), Ok(b)] = [SurfaceEval::new(&surfaces[0]), SurfaceEval::new(&surfaces[1])] else { return false };
@@ -66,7 +67,7 @@ fn on_both_surfaces(c: &C3, surfaces: &[Box<crate::brep::Surface>; 2], tolerance
 impl C3 {
     /// The bounded curve of an edge. A line, circle or ellipse with a NURBS form has its bounds
     /// on the form ([`Edge::parameters`]): a line's ends are evaluated there, a conic's angles come
-    /// from [`Edge::curve_interval`].
+    /// from [`crate::brep::label::edge_curve_interval`].
     pub fn of_edge(e: &Edge) -> Result<(C3, CurveAccuracy), HlrError> {
         let exact = |c: C3| (c, CurveAccuracy::Analytic);
         match (&e.curve, &e.nurbs) {
@@ -92,7 +93,7 @@ impl C3 {
                 Ok(exact(C3::Line { a: end(e.interval[0])?, b: end(e.interval[1])? }))
             }
             (Curve::Circle { .. } | Curve::Ellipse { .. }, _) => {
-                let angles = e.curve_interval().ok_or(HlrError::Invalid("edge form"))?;
+                let angles = crate::brep::label::edge_curve_interval(e).ok_or(HlrError::Invalid("edge form"))?;
                 Ok(exact(C3::bounded(&e.curve, angles)?))
             }
             (curve, _) => Ok(exact(C3::bounded(curve, e.interval)?)),

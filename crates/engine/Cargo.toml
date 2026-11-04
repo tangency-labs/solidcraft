@@ -13,8 +13,6 @@ default = []
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
-# Link SMLib into the kernel (solidcraft-kernel/smlib; needs scripts/fetch-smlib.sh).
-smlib = ["solidcraft-kernel/smlib"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
@@ -37,6 +35,7 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }

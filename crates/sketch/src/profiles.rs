@@ -7,11 +7,13 @@
 //! the innermost loop containing it, so a circle inside a rectangle gives two profiles: the
 //! rectangle with a hole, and the disc.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Region2, Ring, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::Ring;
 
 use crate::model::{CurveKind, Sketch};
 use crate::shape::{Shape, intersections_within};
@@ -906,7 +908,7 @@ fn seg_boxes(s: &Seg2, out: &mut Vec<solidcraft_geom::Aabb2>) {
         }
         Seg2::Cubic { p0, p1, p2, p3 } => out.push(hull(&[p0, p1, p2, p3])),
         Seg2::Conic { a, apex, b, w } if w.is_finite() && w > 0.0 => out.push(hull(&[a, apex, b])),
-        Seg2::Bezier { n, ref p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE).contains(&(n as usize)) => {
+        Seg2::Bezier { n, ref p } if (1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&(n as usize)) => {
             out.push(hull(p.get(..=n as usize).unwrap_or(p)));
         }
         // Anything else: the very points the search samples.

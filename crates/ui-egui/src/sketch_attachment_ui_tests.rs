@@ -1,6 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{FaceAttachmentStatus, FeatureKind, PlaneRef};
+use solidcraft_engine::geom::prelude::*;
 
 fn picked_sketch() -> (Harness, u64) {
     let mut h = Harness::new();
@@ -249,9 +250,9 @@ fn actual_nested_second_placement_face_pick_keeps_target_and_author_paths() {
 
 #[test]
 fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() {
+    use solidcore_record::Plane;
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{EmbossFace, apply_point, apply_vector};
-    use solidcraft_engine::geom::Plane;
-    use solidcraft_engine::geom::Vec3;
     let mut h = Harness::new();
     h.app.session.auto_project = false;
     let created = h.app.run("component.create", json!({"name":"Author"})).unwrap();

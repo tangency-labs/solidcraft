@@ -1392,6 +1392,7 @@
   "document.read_only_save": "Den här konstruktionen öppnades skrivskyddad: spara den som en ny fil",
   "document.save_changes": "Spara ändringar i {name}?",
   "document.save_copy": "Spara en kopia…",
+  "document.tab_unsaved_changes": "Osparade ändringar",
   "document.unsaved_changes": "{name} har osparade ändringar. Om du inte sparar går de förlorade.",
   "drive.rigid": "{joint} är ett stelt led: det håller sina delar stilla och har därför inget att driva. Om delarna ska kunna röra sig, ändra ledets typ i Redigera led: Roterande för att rotera, Glidande för att glida, Cylindrisk för båda.",
   "drive.stopped_by_contact": "Stoppade vid {value}: {a} skulle gå igenom {b}",

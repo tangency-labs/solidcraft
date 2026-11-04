@@ -53,6 +53,11 @@ in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. 
 pointer back over the model does not change this: click outside Assistant to return the
 keyboard to CAD. Closing or minimising the panel also releases it.
 
+To select more of the conversation than fits in the panel, drag the selection to its top or
+bottom edge and hold it there: the conversation scrolls, faster the further past the edge you
+go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
+all of it.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick

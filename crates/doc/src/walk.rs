@@ -5,7 +5,7 @@
 //! traits here carry the walks through the types the fields have: options, lists, arrays, planes
 //! and construction definitions.
 
-pub(crate) use solidcraft_geom::Vec3;
+pub(crate) use solidcore_record::Vec3;
 
 pub(crate) use crate::ProfileSel;
 use crate::construct::{AxisDef, GeoRef, PointDef};
@@ -54,6 +54,7 @@ impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
+impl Walk for crate::document::FilletTurn {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
@@ -67,6 +68,8 @@ impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}
 impl Walk for crate::thread_forms::SteepFlank {}
+// An Align frame's joint origin: picks in its component's coordinates, found by their names.
+impl Walk for Box<crate::joints::JointOrigin> {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {

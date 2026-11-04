@@ -2,8 +2,9 @@
 
 use egui::Stroke;
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::cmd::{construction_line_choice, construction_line_mode, construction_line_solutions, construction_segment};
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::tools::Tool;
@@ -73,7 +74,7 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
         .fixed_pos(length_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
         .order(egui::Order::Background)
         .show(ui.ctx(), |ui| {
-            frame.show(ui, |ui| {
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
                 let segments = crate::ui_kit::Segments {
                     disabled_reasons: if has_length { &[] } else { &refused },
                     targets: &["construction_switch:construction", "construction_switch:normal"],

@@ -4,9 +4,11 @@
 pub(super) mod review;
 
 use super::{ImageMethod, materials, setups};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, theme::Tokens, ui_kit};
 use serde_json::{Value, json};
-use solidcraft_engine::{doc::Document, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::doc::Document;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Weak},
@@ -1146,7 +1148,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                         None,
                     );
                     crate::scenario::publish_target(identities.get(index).map(String::as_str).unwrap_or("render:library:item"), r.rect);
-                    if r.on_hover_text(tip).clicked() {
+                    if r.backing_on_hover_text(tip).clicked() {
                         selected = Some(index);
                     }
                 }

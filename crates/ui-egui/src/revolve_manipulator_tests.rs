@@ -154,7 +154,7 @@ fn selected_second_placement_custom_axis_handle_and_preview_stay_in_its_frame() 
     let frame = h.app.session.active_component_frame();
     let world = |degrees: f64| {
         let a = degrees.to_radians();
-        let p = solidcraft_engine::doc::apply_point(&frame, solidcraft_engine::geom::Vec3::new(12.5 * a.cos(), 2.5, 12.5 * a.sin()));
+        let p = solidcraft_engine::doc::apply_point(&frame, solidcore_record::Vec3::new(12.5 * a.cos(), 2.5, 12.5 * a.sin()));
         json!([p.x, p.y, p.z])
     };
     let axis = match &h.app.session.doc.find_feature("Turn").unwrap().kind {
@@ -186,7 +186,7 @@ fn curved_to_object_has_surface_feedback_without_an_angular_handle_or_input() {
     h.step(&json!({"click":{"handle":"dialog:Type:To Object"}})).unwrap();
     let mut dialog = h.app.dialog.take().unwrap();
     dialog.active = dialog.inputs.iter().position(|input| input.label == "To Object").unwrap();
-    dialog.pick(&h.app.session, solidcraft_engine::Sel::Vertex { body: "Target".into(), point: solidcraft_engine::geom::Vec3::new(0.0, 2.0, 15.0) });
+    dialog.pick(&h.app.session, solidcraft_engine::Sel::Vertex { body: "Target".into(), point: solidcore_record::Vec3::new(0.0, 2.0, 15.0) });
     h.app.dialog = Some(dialog);
     h.frames(8);
     assert!(h.widget("To surface").is_some());
@@ -345,8 +345,8 @@ fn canonical_symmetric_ring_preview_drag_and_reopen_match_material() {
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         let preview = h.app.session.preview_world(&commands).unwrap();
         let body = &preview.after.body("Main").unwrap().body;
-        assert_eq!(body.classify_point(solidcraft_engine::geom::Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
-        assert_eq!(body.classify_point(solidcraft_engine::geom::Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_engine::kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_engine::kernel::PointClass::Outside);
         let bounds = preview.after.body("Main").unwrap().mesh().bounds();
         assert!((bounds.min.x - 2.0f64.sqrt()).abs() < 0.02 && (bounds.max.x - 4.0).abs() < 0.02, "{bounds:?}");
         assert!((bounds.min.z + 2.0 * 2.0f64.sqrt()).abs() < 0.02 && (bounds.max.z - 2.0 * 2.0f64.sqrt()).abs() < 0.02);
@@ -385,12 +385,9 @@ fn reversed_axis_to_object_canvas_sweep_and_preview_follow_the_quarter_target() 
     let preview = h.app.session.preview_world(&commands).unwrap();
     let result = preview.after.body("Main").unwrap();
     assert_eq!(result.mesh().bounds(), before);
-    assert_eq!(result.body.classify_point(solidcraft_engine::geom::Vec3::new(p, 2.5, p)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+    assert_eq!(result.body.classify_point(solidcore_record::Vec3::new(p, 2.5, p)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
     for (x, z) in [(-p, p), (-p, -p), (p, -p)] {
-        assert_eq!(
-            result.body.classify_point(solidcraft_engine::geom::Vec3::new(x, 2.5, z)).unwrap(),
-            solidcraft_engine::kernel::PointClass::Outside
-        );
+        assert_eq!(result.body.classify_point(solidcore_record::Vec3::new(x, 2.5, z)).unwrap(), solidcraft_engine::kernel::PointClass::Outside);
     }
     assert!((kernel::measure(&result.body).unwrap().volume - expected_volume(90.0)).abs() < 0.03);
     h.step(&json!({"widget":"OK"})).unwrap();

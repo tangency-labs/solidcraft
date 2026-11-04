@@ -14,11 +14,11 @@ fn measure_input_fits_external_sketch_geometry() {
     assert!(fits(accept, &point));
     assert_eq!(d.items(), vec![curve.clone(), point.clone()]);
     assert_eq!(
-        d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO }),
+        d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcore_record::Vec3::ZERO }),
         Some(curve.clone())
     );
     assert_eq!(
-        d.candidate(&h.app.session, &Hit::SketchPoint { sketch: 17, id: "p1".into(), at: solidcraft_engine::geom::Vec2::new(0.0, 0.0) }),
+        d.candidate(&h.app.session, &Hit::SketchPoint { sketch: 17, id: "p1".into(), at: solidcore_record::Vec2::new(0.0, 0.0) }),
         Some(point.clone())
     );
     d.take_box(&h.app.session, vec![curve.clone(), point.clone()], false);
@@ -34,6 +34,53 @@ fn feature_inputs_reject_external_sketch_geometry() {
     ] {
         let d = Dialog::for_command(&h.app, command).unwrap();
         assert!(!fits(d.inputs.first().unwrap().accept, &sel), "{command}");
+    }
+}
+
+#[test]
+fn point_at_edge_and_plane_accepts_preselected_axes() {
+    for (name, expected) in [("TestAxis", Vec3::new(20.0, 10.0, 0.0)), ("Z", Vec3::ZERO)] {
+        let mut h = Harness::new();
+        h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[20,10,20]},"name":"TestAxis"})).unwrap();
+        let axis = Sel::Axis { name: name.into() };
+        h.app.session.selection = vec![axis.clone(), Sel::Plane { name: "XY".into() }];
+        let d = Dialog::for_command(&h.app, "construct.point.edge_plane").unwrap();
+        assert_eq!(d.inputs[0].items, vec![axis], "{name}: the preselected axis fills Edge");
+        let commands = apply_commands(&h.app, &d).unwrap();
+        assert_eq!(commands[0].1["edge"], json!({"axis":name}));
+        for (command, params) in commands {
+            h.app.run(&command, params).unwrap();
+        }
+        let points = solidcraft_engine::view::construction_points(&h.app.session);
+        assert_eq!(points.len(), 1);
+        assert!(points[0].2.dist(expected) < 1e-9, "{name}: {:?}", points[0].2);
+    }
+}
+
+#[test]
+fn point_at_edge_and_plane_picks_a_construction_axis() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.tree.collapsed.insert("c0/features".into());
+        h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[20,10,20]},"name":"TestAxis"})).unwrap();
+        h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+        h.app.start("construct.point.edge_plane");
+        h.frames(4);
+        let axis = Sel::Axis { name: "TestAxis".into() };
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.candidate(&h.app.session, &Hit::Axis { name: "TestAxis".into() }), Some(axis.clone()));
+        assert!(fits(d.inputs[0].accept, &Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::ZERO }));
+        assert!(fits(d.inputs[0].accept, &Sel::SketchCurve { id: "l1".into(), sketch: None }));
+        let target = if browser { json!({"handle":"row:TestAxis"}) } else { json!({"world":[20,10,-20]}) };
+        h.step(&json!({"click":target})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![axis], "browser: {browser}");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        let points = solidcraft_engine::view::construction_points(&h.app.session);
+        assert_eq!(points.len(), 1);
+        assert!(points[0].2.dist(Vec3::new(20.0, 10.0, 0.0)) < 1e-9, "{:?}", points[0].2);
     }
 }
 
@@ -1145,7 +1192,7 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         let state = h.app.session.world_state().unwrap();
         let ss = state.sketch(sketch).unwrap();
         assert_eq!(ss.profiles.len(), 3, "the lens, the crescent past the face and the rest of the face");
-        let index = ss.profiles.iter().position(|p| p.region.contains(solidcraft_engine::geom::Vec2::new(x, 0.0))).unwrap();
+        let index = ss.profiles.iter().position(|p| p.region.contains(solidcore_record::Vec2::new(x, 0.0))).unwrap();
         let area = ss.profiles[index].area;
         let mut d = Dialog::for_command(&h.app, "solid.extrude").unwrap();
         if let Kind::Extrude { distance, .. } = &mut d.kind {
@@ -1421,6 +1468,12 @@ fn dialog_profile_labels_name_the_sketch_in_coil_and_mirror() {
         h.app.start(command);
         h.app.dialog.as_mut().unwrap().preview_enabled = false;
         h.frames(3);
+        // A field that takes several picks lists them, labels and all, behind its arrow (#3683).
+        let (multi, label) = h.app.dialog.as_ref().map(|d| (d.inputs[0].multi, d.inputs[0].label)).unwrap();
+        if multi {
+            h.step(&json!({"click": {"handle": format!("dialog:list_toggle:{label}")}})).unwrap();
+            h.frames(2);
+        }
         let d = h.app.dialog.as_ref().unwrap();
         let input = &d.inputs[0];
         assert_eq!(input.items, vec![Sel::Profile { sketch, index: 0 }]);

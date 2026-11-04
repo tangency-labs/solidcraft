@@ -802,7 +802,9 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     let sb = cb.xy / max(cb.w, 1e-6) * half;
     var dir = sb - sa;
     let len = length(dir);
-    if (len < 1e-6) { dir = vec2<f32>(1.0, 0.0); } else { dir = dir / len; }
+    // Intel OpenGL can miscompile vector/scalar division here (#8053). Scalar
+    // quotients keep the same direction and the fallback for a point.
+    if (len < 1e-6) { dir = vec2<f32>(1.0, 0.0); } else { dir = vec2<f32>(dir.x / len, dir.y / len); }
     let nrm = vec2<f32>(-dir.y, dir.x);
     // Two triangles: corners (t, side).
     var ts = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);

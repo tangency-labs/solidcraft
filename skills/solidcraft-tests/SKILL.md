@@ -16,7 +16,7 @@ The long form is `docs/book/src/dev/testing.md`.
 
 ## Unit test or rig case
 - Unit tests assert the code's logic: which edges a chain picks, name resolution, history labels, refusal wording, hostile input, parsing and saving (`a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`: per-edge radii, which no command takes).
-- The rig (`tests/kernel-cases/`) asserts geometry: exact volumes, shapes, seam continuity, geometric refusals, through commands with a hand-derived answer, so it survives a kernel swap (`fillets/190-fillet-disc-rim-past-its-2mm-wall`). A test doing both keeps only its logic.
+- The rig asserts geometry (exact volumes, shapes, seams, refusals) with a hand-derived answer. A test doing both keeps only its logic. `tests/kernel-cases/` only shrinks: kernel cases go to solidcore (CONTRIBUTING.md "Tests"); command, UI and product-rule cases stay here.
 
 ## A failing test needs its fix
 A failing test cannot merge without its fix (it turns `main` red): include it, or list the test and cause in `tests/KNOWN_FAILING_TESTS` (`cargo xtask known-failing`); the fix drops the line.
@@ -28,7 +28,7 @@ A failing test cannot merge without its fix (it turns `main` red): include it, o
 
 ## Goldens, matrices and skipped tests
 - The kernel's reference is the ladder (`tests/kernel-cases/ladder/`, `cargo xtask kernel-cases --ladder`, `docs/kernel-ladder.md`).
-- Kernel PRs run `kernel-rig.yml` (areas by `PATHS` against `KNOWN_FAILING`, the ladder against its golden). In the same PR a fix drops its line, a new failing case adds one, a changed ladder result is re-recorded (`--record "why"`), a new command gets a case or an `EXEMPT` line (`tests/kernel-cases/README.md`).
+- Kernel PRs run `kernel-rig.yml` (areas by `PATHS` against `KNOWN_FAILING`, the ladder against its golden). In the same PR a fix drops its line, a pin bump's new failure adds one, a changed ladder result is re-recorded (`--record "why"`), a new command gets an `EXEMPT` line (`tests/kernel-cases/README.md`).
 - Maintainers' PRs run native, GPU and reference tests on affected packages; others wait for `approved-for-ci`. `release-gate.yml` runs all before develop replaces main.
 - The action matrix is a ratchet: bless a newly passing action (`cargo xtask action-matrix --bless`, `docs/action-matrix.md`).
 - PRs skip a few heavy tests, run in the merge queue, nightly and on `main`. Check them after merging (`.config/nextest.toml`).

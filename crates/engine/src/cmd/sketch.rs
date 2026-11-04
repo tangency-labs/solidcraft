@@ -1,8 +1,9 @@
 //! Sketch commands: create/edit/finish sketches, draw curves, constraints and dimensions.
 
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::{FeatureKind, PlaneRef, expr::Kind};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, PointExprs, Sketch, SolveReport, TwoCircles, solve, solve_with};
 
 use super::{CommandSpec, in_sketch};
@@ -480,7 +481,7 @@ pub(super) mod solve_counts {
 }
 
 /// How close (mm) a new point must land to an existing one to be connected to it.
-const CONNECT_TOL: f64 = 1e-6;
+pub(super) const CONNECT_TOL: f64 = 1e-6;
 
 /// New points (index `first` on) that land on an existing point, the origin included, get a
 /// coincident constraint to it, as when a click snaps there; `connect: false` leaves them free.
@@ -1170,7 +1171,8 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
         for i in 0..segs {
             let j = (i + 1) % n;
             let (Some(a), Some(b)) = (args.get(i), args.get(j)) else { continue };
-            if a.pos().dist(b.pos()) < 1e-9 {
+            // Ends closer than this would both be connected to one point (#11001).
+            if a.pos().dist(b.pos()) < CONNECT_TOL {
                 return Err(bad(cmd, "zero-length line"));
             }
             let id = ids.get(i).map(String::as_str);
@@ -3299,7 +3301,7 @@ fn diameter_about(sk: &Sketch, l: usize, ty: &str) -> bool {
 
 fn arc_len(sk: &Sketch, c: usize) -> Option<f64> {
     match sk.segs(c).first()? {
-        solidcraft_geom::Seg2::Arc { radius, sweep, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
+        solidcore_record::Seg2::Arc { radius, sweep, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
         _ => None,
     }
 }

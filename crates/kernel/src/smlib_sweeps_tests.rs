@@ -1,10 +1,10 @@
 //! The sweeps through SMLib ([`crate::smlib_sweeps`]): analytic volumes, and the history and
 //! construction sources the builders' vocabulary gives each face.
-#![cfg(feature = "smlib")]
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::FaceSource;
 use crate::body::Body;

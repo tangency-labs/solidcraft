@@ -1,6 +1,8 @@
 //! Helical sweeps (coils, springs) and lofts to a point (pyramids, cones).
 
-use solidcraft_geom::{Loop2, Mesh, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::{KernelError, Result};

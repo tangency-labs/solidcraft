@@ -7,8 +7,9 @@
 //! way stays a box selection.
 
 use egui::Pos2;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, planar_face};

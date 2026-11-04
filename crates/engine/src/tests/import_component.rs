@@ -5,7 +5,8 @@
 //! imports sit loose in a component open and rebuild as they did.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
 
 use super::run;

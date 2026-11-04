@@ -1,13 +1,32 @@
 {
  "sources": [
   "tangency-labs/solidcraft#1443",
-  "tangency-labs/solidcraft#3060",
-  "tangency-labs/solidcraft#1018",
-  "tangency-labs/solidcraft#2853"
+  "tangency-labs/solidcraft#11609"
  ],
- "what": "a modelled thread on a hole that isn't the thread's size: refused with the size to use, never a silent change of the hole",
+ "what": "a modelled M5x0.7 thread in a 5 mm hole, the hole as wide as the thread: the bore is narrowed to the thread's minor diameter and the thread cut into it",
  "source": "analytic",
- "method": "Decision (#1018, #2853): a modelled thread never changes the size of the hole it is on; one that isn't the thread's size is refused, naming the size to use. A fill-to-tap-drill or turn-down option would be opt-in, off by default (see #3060), and get its own case. The refusal's numbers, from ISO 68-1 (H = P sqrt3/2, basic depth 5H/8): M5x0.7: tap drill = 5 - 0.7 = 4.3 mm; depth 5H/8 = 5/8 x 0.7 x sqrt3/2 = 0.379 mm; the 5 mm hole is at the major diameter, so nothing would be cut. Expected message: \"this 5 mm hole is too wide for a modelled M5x0.7 thread: it would cut 0.00 mm of the thread's 0.38 mm depth; drill 4.3 mm for M5x0.7, or thread this hole M6\".",
- "outcome": "refused",
- "refusal": "this 5 mm hole is too wide for a modelled M5x0.7 thread: it would cut 0.00 mm of the thread's 0.38 mm depth; drill 4.3 mm for M5x0.7, or thread this hole M6"
+ "method": "Decision (#11609): a modelled thread in a hole as wide as the thread or wider no longer refuses; the bore is filled in to the thread's minor radius r1 = d/2 - 5H/8 over the threaded length and the groove is cut into that (the feature's warning says so). ISO 68-1 (H = P sqrt3/2, basic depth 5H/8): M5x0.7: P 0.7, 5H/8 = 0.3789 mm, r1 = 2.1211 mm. Internal groove: P/8 wide at the major radius d/2, widening by 2 tan30 per unit of radius to 3P/4 at r1; Pappus gives 1.65166 mm3 per turn (2 pi times the integral of r w(r) dr from r1 to d/2). Both ends free, thread over the full 4.2 mm: V = pi (R^2 - rho^2) L + pi (rho^2 - r1^2) L - (L/P) x V_turn = 577.2653 mm3, with R 7, rho 2.5. COM on the axis at z = L/2. Tolerance 1%: the thread is a faceted helical solid.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 577.2653,
+ "center_of_mass": [
+  0,
+  0,
+  2.1
+ ],
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   -7,
+   -7,
+   0
+  ],
+  "max": [
+   7,
+   7,
+   4.2
+  ]
+ }
 }

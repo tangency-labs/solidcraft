@@ -66,7 +66,7 @@ pub(crate) use choice::*;
 pub(crate) use color::*;
 pub(crate) use compare::*;
 pub(crate) use confirm::{Confirm, Tone};
-pub use container::{Container, DockEdges, Edge, Surface};
+pub use container::{BackingTooltipExt, Container, DockEdges, Edge, Surface};
 pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
@@ -93,6 +93,10 @@ pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
 pub(crate) use preferences_cards::*;
+pub(crate) use preferences_figure_data::{
+    paint_aa_2x, paint_aa_4x, paint_aa_8x, paint_aa_off, paint_ao_on, paint_frame_rate, paint_quick_measure, paint_tess_coarse, paint_tess_fine,
+    paint_tess_normal, paint_tess_ultra, paint_vertex_markers, paint_view_angles, paint_view_grid, paint_view_perspective, paint_view_shadow,
+};
 pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;

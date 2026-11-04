@@ -2,6 +2,8 @@
 //! sketch text's outlines; OK runs `sketch.edit_text`. The canvas follows the fields as they
 //! change (live `sketch.edit_text`); the whole edit is one undo step and Cancel puts the text
 //! back. The Text tool places a text and opens this dialog on it, so a new text is typed here too.
+use crate::ui_kit::BackingTooltipExt as _;
+use solidcraft_engine::geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
 use serde_json::{Value, json};
@@ -345,7 +347,7 @@ pub(crate) fn open(app: &mut SolveApp, entity: &str) {
 /// The Text tool's click: put a placeholder text down at `at` (sketch coordinates) and open
 /// Edit Text on it, its text selected so that typing replaces it. Cancel takes it away again;
 /// OK keeps it as one undo step.
-pub(crate) fn place(app: &mut SolveApp, at: solidcraft_engine::geom::Vec2, height: f64) {
+pub(crate) fn place(app: &mut SolveApp, at: solidcore_record::Vec2, height: f64) {
     let Some(checkpoint) = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64()) else { return };
     let placed = app.run("sketch.text", json!({"text": PLACEHOLDER, "at": [at.x, at.y], "height": height}));
     let curve = placed.as_ref().ok().and_then(|v| v["curves"].get(0)?.as_str().map(str::to_owned));
@@ -508,7 +510,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
-    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).on_hover_text(crate::i18n::tr("sketch_text.formula"));
+    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(crate::i18n::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
     if k.focus {
         response.request_focus();
@@ -550,7 +552,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!on_path, |ui| ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], None));
         enter |= response.inner;
         if on_path {
-            response.response.on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
         }
     }
     for (i, (label, value)) in LABELS.iter().skip(2).zip(rest).enumerate() {
@@ -558,7 +560,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!(on_path && index == ANGLE), |ui| ui_kit::row(ui, label, |ui| ui_kit::field(ui, value)));
         enter |= response.inner;
         if on_path && index == ANGLE {
-            response.response.on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
         }
     }
     path_row(ui, k, inputs, active);
@@ -572,7 +574,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
         let on = k.style.path.is_some();
         let text = if on { crate::i18n::format("dialog.selected_count", &[("count", "1")]) } else { crate::i18n::tr("dialog.select").into() };
         let chip = ui_kit::selection_field(ui, &text, ui_kit::Selection { active: k.picking, filled: on })
-            .on_hover_text(crate::i18n::tr("sketch_text.path_hint"));
+            .backing_on_hover_text(crate::i18n::tr("sketch_text.path_hint"));
         let chip_rect = chip.rect;
         crate::scenario::publish_handle("dialog:Path", chip.rect.center());
         if chip.clicked() {
@@ -894,7 +896,7 @@ mod tests {
         let sk = h.app.session.doc.sketch(sid).unwrap();
         let expected = LinkSource::Text {
             text: "O".into(),
-            at: solidcraft_engine::geom::Vec2::new(25.0, 12.0),
+            at: solidcore_record::Vec2::new(25.0, 12.0),
             height: 20.0,
             angle: std::f64::consts::FRAC_PI_2,
             font: None,
@@ -1314,7 +1316,7 @@ mod tests {
         // A placeholder is down at once, Edit Text is open on it with the text selected, and the tool has ended.
         assert!(editing(&h.app));
         assert!(h.app.tool.is_none());
-        let at = solidcraft_engine::geom::Vec2::new(5.0, 5.0);
+        let at = solidcore_record::Vec2::new(5.0, 5.0);
         assert!(matches!(texts(&h).as_slice(), [LinkSource::Text { text, at: a, .. }] if text == PLACEHOLDER && a.dist(at) < 1e-9));
         // Typing replaces it, and the canvas follows every key.
         h.step(&json!({"text":"Hi"})).unwrap();
@@ -1445,7 +1447,7 @@ mod tests {
         };
         let whole = area(&h, &text_profiles(&h.app.session, sid, i).unwrap());
         // The I's stem, below where the rectangle's top will cross it.
-        let stem = solidcraft_engine::geom::Vec2::new(h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid.x, 2.0);
+        let stem = solidcore_record::Vec2::new(h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid.x, 2.0);
         h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[40,8]})).unwrap();
         let state = h.app.session.world_state().unwrap();
         let profiles = &state.sketch(sid).unwrap().profiles;
@@ -1454,7 +1456,7 @@ mod tests {
         assert_eq!(picked[0], below);
         assert!(picked.len() > 2, "the letters are cut in pieces: {picked:?}");
         assert!((area(&h, &picked) - whole).abs() < 1e-5 * whole, "{} {whole}", area(&h, &picked));
-        let round = solidcraft_engine::sketch::profile_at_point(profiles, solidcraft_engine::geom::Vec2::new(-3.0, -3.0)).unwrap();
+        let round = solidcraft_engine::sketch::profile_at_point(profiles, solidcore_record::Vec2::new(-3.0, -3.0)).unwrap();
         assert!(text_profiles(&h.app.session, sid, round).is_none());
     }
 

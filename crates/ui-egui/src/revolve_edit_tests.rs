@@ -1,6 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{AxisRef, FeatureKind};
+use solidcraft_engine::geom::prelude::*;
 
 fn make(h: Harness, axis: Value) -> Harness {
     make_params(h, axis, json!({}))
@@ -61,11 +62,11 @@ fn to_object_noop_preserves_cut_targets_and_untargeted_body() {
     assert!((before_a - (2000.0 - removed)).abs() < 0.2, "cut results {:?}: {before_a}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
     let in_cut_stock =
         |p| state.bodies.iter().filter(|b| b.name != "B").any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside);
-    assert!(in_cut_stock(solidcraft_engine::geom::Vec3::new(2.0, 2.0, 2.0)));
-    assert!(in_cut_stock(solidcraft_engine::geom::Vec3::new(18.0, 2.0, 18.0)));
-    assert!(!in_cut_stock(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)));
+    assert!(in_cut_stock(solidcore_record::Vec3::new(2.0, 2.0, 2.0)));
+    assert!(in_cut_stock(solidcore_record::Vec3::new(18.0, 2.0, 18.0)));
+    assert!(!in_cut_stock(solidcore_record::Vec3::new(9.0, 2.0, 9.0)));
     assert_eq!(
-        state.body("B").unwrap().body.classify_point(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)).unwrap(),
+        state.body("B").unwrap().body.classify_point(solidcore_record::Vec3::new(9.0, 2.0, 9.0)).unwrap(),
         solidcraft_engine::kernel::PointClass::Inside
     );
     let before_bounds: Vec<_> = state.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
@@ -120,7 +121,7 @@ fn second_active_occurrence_noop_preserves_definition_axis_target_and_instances(
     h.app.run("component.activate", json!({"component":owner["component"],"occurrence":second,"path":[second]})).unwrap();
     let original = serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap();
     let frame = h.app.session.active_component_frame();
-    let expected_origin = solidcraft_engine::doc::apply_point(&frame, solidcraft_engine::geom::Vec3::ZERO);
+    let expected_origin = solidcraft_engine::doc::apply_point(&frame, solidcore_record::Vec3::ZERO);
     let before: Vec<_> = h.app.session.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     open(&mut h);
     let (origin, _) = crate::canvas::revolve_axis(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();

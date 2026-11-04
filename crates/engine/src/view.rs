@@ -2,9 +2,11 @@
 //! grid and the origin. Used by the headless snapshot renderer; the GPU viewport draws the same
 //! content.
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
-use solidcraft_geom::{Aabb3, Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::Aabb3;
 use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 use solidcraft_sketch::Sketch;
 
@@ -144,7 +146,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
         // All four corners: on a tilted plane two opposite ones don't span the rectangle.
         if let Some((lo, hi)) = ss.sketch.bounds() {
-            for p in [lo, hi, solidcraft_geom::Vec2::new(lo.x, hi.y), solidcraft_geom::Vec2::new(hi.x, lo.y)] {
+            for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
                 b.add(ss.plane.to_world(p));
             }
         }

@@ -1,9 +1,10 @@
 //! Incremental product rasterization. Every phase yields between bounded work units.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
 use crate::{FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};

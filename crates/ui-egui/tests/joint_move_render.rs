@@ -3,7 +3,9 @@
 mod raster;
 use egui::{ColorImage, Event, PointerButton, Pos2, Rect, TextureId, vec2};
 use serde_json::json;
-use solidcraft_engine::{Sel, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::{
     scenario::{self, Harness},
     theme, viewport,

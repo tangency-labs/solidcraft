@@ -7,11 +7,12 @@
 //! The helpers here read a body's schema 4 record: planar faces' outward normals, the direction
 //! into a face across an edge, an edge's tangent at its ends.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Brep, Curve, Loop, OrientedEdge, Shell, Surface};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{Brep, Curve, Loop, OrientedEdge, Shell, Surface};
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -23,6 +24,34 @@ pub(crate) fn unsupported(msg: &str) -> KernelError {
 /// A blend too large for the faces around it.
 pub(crate) fn too_large(msg: &str) -> KernelError {
     KernelError::TooLarge(msg.into())
+}
+
+/// The note on a blend's refusal as too large that names the largest `size` (radius, distance)
+/// that fits: "the largest radius that fits is 3 mm". The kernel's own sized refusals and a fillet
+/// feature's search for the size ([`fillet_max`]) word it alike.
+pub fn largest_fit_note(size: &str, largest: f64) -> String {
+    format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
+}
+
+/// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
+pub fn names_largest_fit(why: &str) -> bool {
+    why.contains("that fits is ")
+}
+
+/// `why` with the largest size that fits it names ([`largest_fit_note`]) replaced by `largest`:
+/// solidcore names the size less a margin (34.99 where 35 builds), a feature's search the
+/// largest it built. `why` itself where it names none.
+pub fn with_fit_note(why: &str, size: &str, largest: f64) -> String {
+    let Some(start) = why.find("the largest ") else { return why.to_owned() };
+    let Some(len) = why.get(start..).and_then(|rest| rest.find(" mm")) else { return why.to_owned() };
+    let (head, tail) = (why.get(..start).unwrap_or_default(), why.get(start + len + 3..).unwrap_or_default());
+    format!("{head}{}{tail}", largest_fit_note(size, largest))
+}
+
+/// `v` to the micrometre, without trailing zeros.
+pub(crate) fn trimmed_mm(v: f64) -> String {
+    let s = format!("{v:.6}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 fn v3(p: [f64; 3]) -> Vec3 {
@@ -205,22 +234,40 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
     }
 }
 
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane, such as the rounds along a boss's base at its upright edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FilletTurn {
+    /// The rounds run on to where they cross and meet in a mitre.
+    #[default]
+    Mitre,
+    /// The rounds end at the side edge and the corner is their section revolved about it, a
+    /// torus tangent to both. Refused where it is not built (unequal or variable rounds, a
+    /// concave, curved or tangent side edge, a corner of four edges), with the reason.
+    Swept,
+}
+
 /// Constant-radius fillet of the edges nearest to the given points. A radius too large for the
 /// faces around the edges is refused with [`KernelError::TooLarge`] ([`fillet_max`] finds the
 /// largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "fillet");
-    body.require_brep("fillet")?;
-    crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
+    fillet_turning(body, edges, radius, FilletTurn::Mitre)
 }
 
-/// [`fillet`], with the picks whose edges are gone: where some of the rounds overflow their
-/// faces, those are built first, and a picked edge one of them removes whole is not rounded (the
-/// others round what is left of their edges).
-pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Vec3>)> {
+/// [`fillet`], its rounds turning at side edges as `turn` says.
+fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
-    let (b, gone) = crate::blend_smlib::fillet_removing(body, edges, radius)?;
+    crate::blend_smlib::fillet(body, edges, radius, turn).and_then(|b| closed(body, b))
+}
+
+/// [`fillet`], its rounds turning at side edges as `turn` says, with the picks whose edges are
+/// gone: where some of the rounds overflow their faces, those are built first, and a picked edge
+/// one of them removes whole is not rounded (the others round what is left of their edges).
+pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+    let _span = solidcraft_profile::span("kernel", "fillet");
+    body.require_brep("fillet")?;
+    let (b, gone) = crate::blend_smlib::fillet_removing(body, edges, radius, turn)?;
     Ok((closed(body, b)?, gone))
 }
 
@@ -486,10 +533,11 @@ fn radius_step(radius: f64) -> f64 {
 /// them (a refusal of a fillet feature's exact fit runs it to name the largest that fits, and
 /// so does `fit: reduce`). Only a refusal as too large
 /// ([`KernelError::TooLarge`]) narrows the search: any other failure of a candidate is the
-/// search's error, since a smaller radius would not be the largest that fits.
-pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f64, Body)>> {
+/// search's error, since a smaller radius would not be the largest that fits. The rounds turn at
+/// side edges as `turn` says.
+pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(f64, Body)>> {
     let _span = solidcraft_profile::span("kernel", "fillet_max");
-    largest_that_fits(radius, |r| fillet(body, edges, r))
+    largest_that_fits(radius, |r| fillet_turning(body, edges, r, turn))
 }
 
 /// [`fillet_max`] for an equal-distance chamfer of these edges: the largest distance below
@@ -537,21 +585,21 @@ fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<O
 /// each reduced to fit, are too large together, or there are too many to search (each search is
 /// up to 16 fillets, and this runs in the live preview). Any failure other than a refusal as too
 /// large is the error.
-pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(Vec<f64>, Body)>> {
+pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(Vec<f64>, Body)>> {
     let _span = solidcraft_profile::span("kernel", "fillet_max_each");
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
-    let one = || -> Result<Option<(Vec<f64>, Body)>> { Ok(fillet_max(body, edges, radius)?.map(|(r, b)| (vec![r; edges.len()], b))) };
+    let one = || -> Result<Option<(Vec<f64>, Body)>> { Ok(fillet_max(body, edges, radius, turn)?.map(|(r, b)| (vec![r; edges.len()], b))) };
     let Some(groups) = interacting_groups(body, edges).filter(|g| g.len() > 1 && g.len() <= MAX_GROUPS) else { return one() };
     let mut radii = vec![radius; edges.len()];
     let mut searches = 0;
     for g in &groups {
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
-        let r = match fillet(body, &pts, radius) {
+        let r = match fillet_turning(body, &pts, radius, turn) {
             Ok(_) => continue,
             Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
                 searches += 1;
-                match fillet_max(body, &pts, radius)? {
+                match fillet_max(body, &pts, radius, turn)? {
                     Some((r, _)) => r,
                     None => return one(),
                 }
@@ -565,7 +613,7 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Optio
             }
         }
     }
-    match fillet_each(body, edges, &radii) {
+    match fillet_each(body, edges, &radii, turn) {
         Ok(b) => Ok(Some((radii, b))),
         Err(KernelError::TooLarge(_)) => one(),
         Err(e) => Err(e),
@@ -574,16 +622,16 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Optio
 
 /// The fillet of each edge at its own radius (`radii` in `edges`' order), all in one SMLib
 /// blend.
-pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_each");
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
     if let Some(r) = radii.first().filter(|r| radii.iter().all(|x| x.to_bits() == r.to_bits())) {
-        return fillet(body, edges, *r);
+        return fillet_turning(body, edges, *r, turn);
     }
     body.require_brep("fillet")?;
-    crate::blend_smlib::fillet_each(body, edges, radii).and_then(|b| closed(body, b))
+    crate::blend_smlib::fillet_each(body, edges, radii, turn).and_then(|b| closed(body, b))
 }
 
 /// The points' edges (each the edge a blend's pick there takes) grouped where they share a face
@@ -1110,7 +1158,7 @@ pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelErr
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
 
     /// A round (`round`) or an equal-distance chamfer of the edges nearest `pts`.
     fn blend(body: &Body, pts: &[Vec3], size: f64, round: bool) -> Result<Body> {
@@ -1570,7 +1618,7 @@ mod tests {
         assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
         let e = e.to_string();
         assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
-        let (largest, _) = fillet_max(&case, &[top], 7.0).unwrap().unwrap();
+        let (largest, _) = fillet_max(&case, &[top], 7.0, FilletTurn::Mitre).unwrap().unwrap();
         assert!((largest - 6.828).abs() < 1e-9, "{largest}");
 
         // Just short of the corner it rounds, its whole section along the 104.
@@ -1584,8 +1632,8 @@ mod tests {
         // inner R7's arc (centre (23, 33)) only at sqrt2 (r - 9) + 7 = r, r = 13.83.
         let inside = Vec3::new(0.0, 30.0, 40.0);
         assert!(fillet(&case, &[top, inside], 7.0).is_ok());
-        assert!(fillet_each(&case, &[top, inside], &[13.8, 7.0]).is_ok());
-        let e = fillet_each(&case, &[top, inside], &[13.9, 7.0]).unwrap_err().to_string();
+        assert!(fillet_each(&case, &[top, inside], &[13.8, 7.0], FilletTurn::Mitre).is_ok());
+        let e = fillet_each(&case, &[top, inside], &[13.9, 7.0], FilletTurn::Mitre).unwrap_err().to_string();
         assert!(e.contains("into the hollow at"), "{e}");
     }
 

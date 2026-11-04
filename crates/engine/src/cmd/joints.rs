@@ -3,13 +3,15 @@
 //! joint graph and moves the occurrences it places; the session re-solves after any edit too,
 //! so joints follow the geometry their origins snap to.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
@@ -496,7 +498,7 @@ fn same_frame(s: &Session, o: &JointOrigin, at: Vec3, z: Vec3) -> bool {
 const MAX_FACE_NAME: usize = 16_384;
 
 /// The component an occurrence places (0 for the root, or an unknown occurrence).
-fn component_of(s: &Session, occurrence: u64) -> u64 {
+pub(crate) fn component_of(s: &Session, occurrence: u64) -> u64 {
     if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.component) }
 }
 

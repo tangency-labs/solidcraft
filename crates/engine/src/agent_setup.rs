@@ -1,9 +1,9 @@
 //! `solidcraft-cli mcp setup` and Help > Connect AI assistants: add a `solidcraft` MCP server entry
 //! to the AI clients installed on this machine, using the `solidcraft-cli` path given.
 //!
-//! The clients' own files are edited in place, not rewritten: only the `solidcraft` entries change,
-//! every other byte (other servers, other settings, comments, key order) stays as it was. The file
-//! is copied to `<name>.bak` first. A file that cannot be read as JSON (with comments) or TOML is
+//! Only the `solidcraft` entries change; every other byte (other servers, other settings, comments,
+//! key order) stays as it was. Updates replace the file atomically, keeping the previous version
+//! as `<name>.bak`. A file that cannot be read as JSON (with comments) or TOML is
 //! left alone, and so is an entry the user changed (its command is not a SolidCraft CLI, or its
 //! arguments differ); an entry that only has an old path to the CLI is updated.
 //! A client counts as installed when its configuration folder exists; no client program is run.
@@ -606,11 +606,7 @@ fn toml_to_json(t: &toml_edit::Table) -> Value {
 /// One client's outcome, a line of the report.
 fn configure_file(t: &Target, exe: &str, live: bool, dry_run: bool, mode: Mode) -> Result<(String, Vec<(&'static str, Change)>), String> {
     let fail = |e: String| format!("{}: {e}; left unchanged", t.file.display());
-    let existing = match std::fs::read_to_string(&t.file) {
-        Ok(s) => Some(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("{}: {e}", t.file.display())),
-    };
+    let existing = read_config(&t.file).map_err(|e| format!("{}: {e}", t.file.display()))?;
     let mut text = existing.clone().unwrap_or_default();
     let changes =
         if t.shape == Shape::Codex { edit_toml(&mut text, exe, live, mode) } else { edit_json(&mut text, t.shape, exe, live, mode) }.map_err(fail)?;
@@ -633,18 +629,28 @@ fn configure_file(t: &Target, exe: &str, live: bool, dry_run: bool, mode: Mode) 
     if !changed {
         return done(said);
     }
-    if existing.is_some() {
-        let mut bak = t.file.clone().into_os_string();
-        bak.push(".bak");
-        // The first backup is the user's original: later runs keep it.
-        if !Path::new(&bak).exists() {
-            std::fs::copy(&t.file, &bak).map_err(|e| format!("{}: cannot back up: {e}", t.file.display()))?;
-        }
-    } else if let Some(dir) = t.file.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    std::fs::write(&t.file, text).map_err(|e| format!("{}: {e}", t.file.display()))?;
+    write_config(&t.file, existing.as_deref(), &text).map_err(|e| format!("{}: {e}", t.file.display()))?;
     done(format!("{said} ({})", t.file.display()))
+}
+
+fn read_config(path: &Path) -> std::io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Refuse a stale edit before writing. Other clients do not share a lock with SolidCraft, so
+/// this narrows the race with their writes; it cannot exclude a write after the comparison.
+fn write_config(path: &Path, expected: Option<&str>, text: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if read_config(path)?.as_deref() != expected {
+        return Err(std::io::Error::other("configuration changed during setup; left unchanged, try again"));
+    }
+    solidcraft_io::safe_write::write_atomic(path, text.as_bytes(), true)
 }
 
 /// Set up every detected client (or `--client NAME`; flags `--dry-run`, `--live`) for the
@@ -840,6 +846,96 @@ mod tests {
             "[mcp_servers.other]\ncommand = \"o\"\n\n[mcp_servers.solidcraft]\ncommand = \"/old/solidcraft-cli\"\nargs = [\"mcp\"]\n".to_owned();
         assert_eq!(edit_toml(&mut toml, EXE, false, Mode::Remove).unwrap(), [("solidcraft", Change::Removed)]);
         assert!(toml.contains("[mcp_servers.other]") && !toml.contains("solidcraft"), "{toml}");
+    }
+
+    fn config_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("solidcraft-agent-config-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn configuration_backup_tracks_the_file_before_each_change() {
+        let dir = config_dir("backup");
+        let target = Target { client: "claude-code", file: dir.join("config.json"), shape: Shape::ClaudeCode };
+        let backup = dir.join("config.json.bak");
+        let original = "{\n  \"personal_setting\": true\n}\n";
+        std::fs::write(&target.file, original).unwrap();
+        configure_file(&target, EXE, false, false, Mode::Add).unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+        let changed_by_client = std::fs::read_to_string(&target.file).unwrap().replace("true", "false");
+        std::fs::write(&target.file, &changed_by_client).unwrap();
+        configure_file(&target, "/new/solidcraft-cli", false, false, Mode::Add).unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), changed_by_client);
+        let current = std::fs::read_to_string(&target.file).unwrap();
+        assert!(current.contains("false") && current.contains("/new/solidcraft-cli"));
+        // A no-op or dry run must leave both the file and its backup alone.
+        configure_file(&target, "/new/solidcraft-cli", false, false, Mode::Add).unwrap();
+        configure_file(&target, "/future/solidcraft-cli", false, true, Mode::Add).unwrap();
+        assert_eq!(std::fs::read_to_string(&target.file).unwrap(), current);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), changed_by_client);
+        configure_file(&target, "/new/solidcraft-cli", false, false, Mode::Remove).unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), current);
+        assert!(!std::fs::read_to_string(&target.file).unwrap().contains("solidcraft"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn configuration_is_unchanged_when_its_backup_cannot_be_replaced() {
+        let dir = config_dir("backup-failure");
+        let target = Target { client: "codex", file: dir.join("config.toml"), shape: Shape::Codex };
+        let original = "# personal setting\nmodel = \"custom\"\n";
+        std::fs::write(&target.file, original).unwrap();
+        std::fs::create_dir(dir.join("config.toml.bak")).unwrap();
+        assert!(configure_file(&target, EXE, false, false, Mode::Add).is_err());
+        assert_eq!(std::fs::read_to_string(&target.file).unwrap(), original);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "no temporary files remain");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn configuration_refuses_an_edit_based_on_an_outdated_read() {
+        let dir = config_dir("concurrent");
+        let path = dir.join("config.json");
+        let backup = dir.join("config.json.bak");
+        std::fs::write(&backup, "previous backup").unwrap();
+        for (expected, current) in [(Some("old"), Some("new")), (Some("old"), None), (None, Some("new"))] {
+            if let Some(text) = current {
+                std::fs::write(&path, text).unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+            }
+            let error = write_config(&path, expected, "stale edit").unwrap_err();
+            assert!(error.to_string().contains("configuration changed"), "{error}");
+            assert_eq!(read_config(&path).unwrap().as_deref(), current);
+            assert_eq!(std::fs::read_to_string(&backup).unwrap(), "previous backup");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configuration_replaces_a_complete_file_and_keeps_links_and_permissions() {
+        use std::io::Read;
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir = config_dir("atomic");
+        let real = dir.join("real.json");
+        let target = Target { client: "claude-code", file: dir.join("config.json"), shape: Shape::ClaudeCode };
+        let original = "{\"personal_setting\": true}\n";
+        std::fs::write(&real, original).unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        symlink("real.json", &target.file).unwrap();
+        let mut reader = std::fs::File::open(&target.file).unwrap();
+        configure_file(&target, EXE, false, false, Mode::Add).unwrap();
+        let mut old = String::new();
+        reader.read_to_string(&mut old).unwrap();
+        assert_eq!(old, original, "an existing reader sees the complete old file");
+        assert!(std::fs::read_to_string(&target.file).unwrap().contains(EXE));
+        assert!(std::fs::symlink_metadata(&target.file).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(dir.join("real.json.bak")).unwrap(), original);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

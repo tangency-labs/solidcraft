@@ -1,7 +1,8 @@
 use super::build_scene;
 use crate::{Services, SolveApp};
 use serde_json::json;
-use solidcraft_engine::{Session, doc, geom::Vec3, kernel};
+use solidcore_record::Vec3;
+use solidcraft_engine::{Session, doc, kernel};
 
 #[test]
 fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
@@ -326,7 +327,7 @@ fn bodies_out_of_the_view_are_not_drawn() {
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     let both = frames.stats().triangles;
     assert_eq!(both, near + far, "both boxes in view");
-    app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, 5.0, 5.0);
+    app.cam.target = solidcore_record::Vec3::new(5.0, 5.0, 5.0);
     app.cam.distance = 40.0;
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     assert_eq!(frames.stats().triangles, near, "the far box is not drawn");

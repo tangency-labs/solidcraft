@@ -9,9 +9,10 @@
 //! evaluated on the GPU into the vertex buffer the pass draws (see [`PlannedBody`]), with nothing
 //! built or read back on the CPU.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, Mutex};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::pbr;
 use wgpu::util::DeviceExt;
@@ -4345,7 +4346,8 @@ mod tests {
     #[test]
     fn shared_tris_share_each_vertex_once() {
         use super::{SHARED_SIZE, SharedTris};
-        use solidcraft_geom::{Mesh, Vec3};
+        use solidcore_record::Vec3;
+        use solidcraft_geom::Mesh;
         let p = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
         // Two triangles of a square, each corner its own vertex (as an STL is read).
         let mut flat = Mesh::default();
@@ -4678,6 +4680,55 @@ mod tests {
 #[cfg(test)]
 mod glass_tests {
     use super::*;
+
+    /// Intel UHD 620 OpenGL collapsed long line quads or expanded short ones across the
+    /// viewport with vector/scalar direction division (#8053). Exercise the actual
+    /// OpenGL shader rather than the native headless selector, which skips GL on Windows.
+    #[test]
+    fn opengl_draws_grid_lines_in_every_direction_and_at_a_point() {
+        let mut descriptor = crate::instance_descriptor_from_env();
+        descriptor.backends = wgpu::Backends::GL;
+        let instance = wgpu::Instance::new(descriptor);
+        let policy = crate::select::Policy::from_env().expect("a valid GPU test policy");
+        let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
+            eprintln!("skipped: no OpenGL adapter qualifies under {}", policy.name());
+            return;
+        };
+        eprintln!("OpenGL regression adapter: {:?}", adapter.get_info());
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .expect("the OpenGL adapter opens a device");
+        let window = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false };
+        // Ten world units span 32 pixels here; a four-pixel line covers over 100 pixels.
+        // A point or a very short line stays a small cap, never a fill over the viewport.
+        let cases = [
+            ([-5.0, 0.0, 0.0], [5.0, 0.0, 0.0], 100..=256),
+            ([5.0, 0.0, 0.0], [-5.0, 0.0, 0.0], 100..=256),
+            ([0.0, -5.0, 0.0], [0.0, 5.0, 0.0], 100..=256),
+            ([0.0, 5.0, 0.0], [0.0, -5.0, 0.0], 100..=256),
+            ([-5.0, -5.0, 0.0], [5.0, 5.0, 0.0], 120..=256),
+            ([5.0, 5.0, 0.0], [-5.0, -5.0, 0.0], 120..=256),
+            ([-5.0, 5.0, 0.0], [5.0, -5.0, 0.0], 120..=256),
+            ([0.0; 3], [0.0; 3], 10..=64),
+            ([0.0; 3], [0.0001, 0.0001, 0.0], 10..=64),
+        ];
+        for offscreen in [false, true] {
+            let target = if offscreen { GpuTarget { depth: Some(wgpu::TextureFormat::Depth24PlusStencil8), ..window } } else { window };
+            let mut renderer = Renderer::with_window_target(&device, target, window, None);
+            for (index, (a, b, expected)) in cases.iter().enumerate() {
+                let mut scene = GpuScene::default();
+                let red = scene.color([255, 0, 0, 255]);
+                scene.under_line(*a, *b, red, 4.0);
+                let mut frame = test_frame(scene, 1.0);
+                frame.key = index as u64 + 1;
+                let pixels = render_frame(&mut renderer, &device, &queue, &frame, false);
+                let coloured = pixels.as_chunks::<4>().0.iter().filter(|p| p[0] > 240 && p[1] < 30 && p[2] < 30).count();
+                assert!(expected.contains(&coloured), "{a:?} to {b:?}, offscreen {offscreen}: {coloured} line pixels, expected {expected:?}");
+            }
+        }
+    }
 
     #[test]
     fn ground_shadow_does_not_require_order_independent_transparency() {

@@ -1,19 +1,20 @@
 //! Solid feature commands: extrude, revolve, fillet, chamfer, primitives, combine, move.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{
     AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
     Touching, expr::Kind, point_expr,
 };
 use solidcraft_doc::{BodyName, FeatureName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::features::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureNotice, FeatureResult, NoticeAction, OffsetPlaneParams,
-    PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    AppliedRadius, BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureNotice, FeatureResult, FilletParams,
+    FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -29,6 +30,7 @@ const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContrac
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
 const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::new();
 const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
+const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -77,11 +79,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("radius | diameter, height: expr (the base circle, and the top's distance along the axis; a negative height goes the other way); top_radius? | top_diameter?: expr (the top circle; default 0: a full cone ending in an apex); base?: [x,y,z] (centre of the base circle: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); operation?, touching?, targets?: [body], name?, body_name?"),
-    CommandSpec::new("solid.fillet", "Fillet", fillet)
+    CommandSpec::new("solid.fillet", "Fillet", crate::checked!("solid.fillet", fillet))
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
-        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
+        .contract(&FILLET_CONTRACT)
+        .output(output_schema_for::<FilletResult>)
+        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
     CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
@@ -131,7 +135,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its drill); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, after the groove is cut, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a shaft thicker than the thread is refused with the size to make it, never turned down"),
+        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, after the groove is cut, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so; a shaft thicker than the thread is refused with the size to make it, never turned down"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -826,8 +830,10 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         }
     }
     let r = s.model.result(id).cloned();
-    if let Some(e) = r.as_ref().and_then(|r| r.error.clone()) {
-        return Err(EngineError::Other(e));
+    if let Some(r) = &r
+        && let Some(e) = r.error.clone()
+    {
+        return Err(EngineError::of_feature(r, e));
     }
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
@@ -1179,7 +1185,7 @@ fn thin_param(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result<ThinWall
 }
 
 /// The regions of a thin wall in its (solved) sketch, with the current parameter values.
-fn thin_regions(s: &Session, ss: &solidcraft_doc::SolvedSketch, thin: &ThinWall) -> std::result::Result<Vec<solidcraft_geom::Region2>, String> {
+fn thin_regions(s: &Session, ss: &solidcraft_doc::SolvedSketch, thin: &ThinWall) -> std::result::Result<Vec<solidcore_record::Region2>, String> {
     let length = |e: &str| s.doc.eval(&s.doc.with_design_unit(e, Kind::Length), Kind::Length).map_err(|e| e.to_string());
     let t = length(&thin.thickness)?;
     let (inside, outside) = match thin.side {
@@ -1188,7 +1194,7 @@ fn thin_regions(s: &Session, ss: &solidcraft_doc::SolvedSketch, thin: &ThinWall)
         ThinSide::Outside => (0.0, t),
         ThinSide::TwoSides => (t, length(thin.thickness2.as_deref().unwrap_or("0"))?),
     };
-    let curves: Vec<Vec<solidcraft_geom::Seg2>> = thin
+    let curves: Vec<Vec<solidcore_record::Seg2>> = thin
         .curves
         .iter()
         .filter_map(|id| ss.sketch.curve_index(id))
@@ -1785,6 +1791,15 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`setbacks` are built for a constant-radius fillet (`type: constant`, `fit: exact`) only"));
         }
     }
+    // How two rounds turn at a sharp side edge.
+    let turn = match str_(p, "turn").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("mitre") => solidcraft_doc::FilletTurn::Mitre,
+        Some("swept") => solidcraft_doc::FilletTurn::Swept,
+        Some(o) => return Err(bad(cmd, format!("unknown turn `{o}` (mitre or swept)"))),
+    };
+    if !turn.is_mitre() && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty()) {
+        return Err(bad(cmd, solidcraft_doc::SWEPT_TAKES));
+    }
     let mut out = add_feature(
         s,
         p,
@@ -1796,6 +1811,7 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             fit,
             corner,
             setbacks,
+            turn,
             tangent_chain: bool_(p, "tangent_chain").unwrap_or(true),
         },
     )?;
@@ -1805,9 +1821,9 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(r) = state.fitted_radius(id)
     {
         out["radius_applied"] = serde_json::json!(r);
-        let each: Vec<Value> =
-            state.fitted_edges(id).unwrap_or_default().into_iter().map(|(p, r)| serde_json::json!({"edge": [p.x, p.y, p.z], "radius": r})).collect();
-        out["radii_applied"] = Value::Array(each);
+        let each: Vec<AppliedRadius> =
+            state.fitted_edges(id).unwrap_or_default().into_iter().map(|(p, radius)| AppliedRadius { edge: [p.x, p.y, p.z], radius }).collect();
+        out["radii_applied"] = serde_json::to_value(each).map_err(|e| EngineError::Internal(cmd.into(), e.to_string()))?;
     }
     Ok(out)
 }
@@ -2377,7 +2393,7 @@ pub(super) fn check_plane_name(name: &str, cmd: &str) -> Result<()> {
 
 /// What [`check_plane_name`] says about `name`, or `None` when a construction plane may take it.
 pub(crate) fn plane_name_problem(name: &str) -> Option<String> {
-    solidcraft_geom::Plane::named(name.trim()).map(|_| {
+    solidcore_record::Plane::named(name.trim()).map(|_| {
         format!("`{}` is reserved for an origin plane (XY, XZ, YZ, Top, Front, Right); give the construction plane another name", name.trim())
     })
 }
@@ -2388,10 +2404,10 @@ pub(crate) const PLANE_FORMS: &str =
 
 /// The plane an explicit plane object gives through `origin`, as [`plane_param`] reads it: from
 /// `x_dir` and `y_dir` when both are points, else from `normal`; `None` when they don't make one.
-pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcraft_geom::Plane> {
+pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record::Plane> {
     match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
-        (Some(x), Some(y), _) => solidcraft_geom::Plane::new(origin, x, y),
-        (_, _, Some(n)) => solidcraft_geom::Plane::from_normal(origin, n),
+        (Some(x), Some(y), _) => solidcore_record::Plane::new(origin, x, y),
+        (_, _, Some(n)) => solidcore_record::Plane::from_normal(origin, n),
         _ => None,
     }
 }
@@ -2409,7 +2425,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
         None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
-        Some(Value::String(n)) if solidcraft_geom::Plane::named(n.trim()).is_some() => {
+        Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
             if let Some(f) = s.doc.find_feature(n.trim())
                 && matches!(f.kind, FeatureKind::ConstructionPlane { .. })
             {
@@ -3313,6 +3329,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, msg));
     }
+    let designation_is_none = designation.is_none();
     let kind = FeatureKind::Thread {
         face: FacePick(face),
         designation,
@@ -3328,11 +3345,18 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         chamfer_angle,
         chamfer_depth,
         steep_flank,
+        // Only a thread saved before holes were sized by nominal diameter, edited by `timeline.redefine`.
+        old_auto_size: designation_is_none && bool_(p, "old_auto_size").unwrap_or(false),
     };
     let v = add_feature(s, p, kind)?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
-    Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))
+    let mut reply = json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t});
+    // A hole narrowed to the thread's minor diameter says so.
+    if let Some(w) = v.get("warning").filter(|w| !w.is_null()) {
+        reply["warning"] = w.clone();
+    }
+    Ok(reply)
 }
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3555,6 +3579,87 @@ mod corner_tests {
         let err = s.execute("solid.fillet", &mixed).unwrap_err().to_string();
         eprintln!("mixed corner g2: {err}");
         assert!(err.contains("not supported yet") && err.contains("(40.000, 20.000, 20.000)") && err.contains("all convex or all concave"), "{err}");
+    }
+
+    /// `solid.fillet turn?: mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
+    /// 40 x 30 x 10 plate, r 1: at each upright boss edge the two rounds turn round it. Each base
+    /// edge gains the spandrel A = (1 - π/4) r² along its 10, and the corners the rounds' part
+    /// beyond both walls, whose section's first moment about the upright edge is
+    /// M = (5/6 - π/4) r³: mitred (the default), 8 M; swept, that section revolved a quarter turn at
+    /// each corner, 2π M, the corner's face the horn torus of radii r, r about the upright edge,
+    /// centred r above the plate. The turn is saved; an unknown turn and a swept chord round are
+    /// refused as parameters, and swept rounds along a pocket's floor (its upright edges concave)
+    /// with the kernel's reason.
+    #[test]
+    fn rounds_turning_round_a_boss_edge_are_mitred_or_swept() {
+        use std::f64::consts::PI;
+        const BASE: [[f64; 3]; 4] = [[20.0, 10.0, 10.0], [25.0, 15.0, 10.0], [20.0, 20.0, 10.0], [15.0, 15.0, 10.0]];
+        let boss = || {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
+            run(&mut s, "solid.box", &json!({"corner": [15, 10, 10], "length": 10, "width": 10, "height": 5, "operation": "join"}));
+            s
+        };
+        let turned = |turn: Option<&str>| {
+            let mut s = boss();
+            let mut p = json!({"edges": BASE, "radius": 1});
+            if let Some(t) = turn {
+                p["turn"] = json!(t);
+            }
+            let reply = run(&mut s, "solid.fillet", &p);
+            assert_eq!(reply["warning"], json!(null), "{reply}");
+            let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+            assert!(body.validity().is_empty(), "{:?}", body.validity());
+            (s, solidcraft_kernel::measure(&body).unwrap(), body)
+        };
+        let (mitred, mitre, _) = turned(None);
+        let (_, named, _) = turned(Some("mitre"));
+        let (swept_session, swept, body) = turned(Some("swept"));
+        eprintln!("mitre: {} faces, {:.9}; swept: {} faces, {:.9}", mitre.faces, mitre.volume, swept.faces, swept.volume);
+        let r: f64 = 1.0;
+        let (a, m) = ((1.0 - PI / 4.0) * r * r, (5.0 / 6.0 - PI / 4.0) * r * r * r);
+        let near = |v: f64, want: f64| (v - want).abs() < 1e-9 * want;
+        assert!(near(mitre.volume, 12500.0 + 40.0 * a + 8.0 * m), "{}", mitre.volume);
+        assert!(near(swept.volume, 12500.0 + 40.0 * a + 2.0 * PI * m), "{}", swept.volume);
+        assert_eq!(named.volume.to_bits(), mitre.volume.to_bits(), "mitre is the default");
+        assert_eq!((mitre.faces, swept.faces), (15, 19));
+        // The four corner faces (the record's torus is a ring torus, so a horn torus is its exact
+        // rational form): every point on the horn torus about its upright edge.
+        let mut corners = 0;
+        for f in &body.record().faces {
+            if !matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            corners += 1;
+            let eval = solidcraft_geom::brep::eval::SurfaceEval::new(&f.surface).unwrap();
+            let [[u0, u1], [v0, v1]] = f.domain;
+            for i in 0..=4 {
+                for j in 0..=4 {
+                    let p = eval.point([u0 + (u1 - u0) * f64::from(i) / 4.0, v0 + (v1 - v0) * f64::from(j) / 4.0]).unwrap();
+                    let (cx, cy) = (if p.x < 20.0 { 15.0 } else { 25.0 }, if p.y < 15.0 { 10.0 } else { 20.0 });
+                    let rho = (p.x - cx).hypot(p.y - cy);
+                    let off = ((rho - r).powi(2) + (p.z - 10.0 - r).powi(2)).sqrt() - r;
+                    assert!(off.abs() < 1e-9, "{p:?} is {off} off the horn torus");
+                }
+            }
+        }
+        assert_eq!(corners, 4);
+        assert!(!mitred.doc.to_json().contains("\"turn\""));
+        assert!(swept_session.doc.to_json().contains("\"turn\": \"swept\""));
+        let mut s = boss();
+        let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "round"})).unwrap_err().to_string();
+        assert!(e.contains("unknown turn `round` (mitre or swept)"), "{e}");
+        let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "swept", "type": "chord"})).unwrap_err().to_string();
+        assert!(e.contains(solidcraft_doc::SWEPT_TAKES), "{e}");
+        // A pocket 5 deep in the plate, its floor's edges rounded: the rounds meet at its concave
+        // upright edges.
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "P"}));
+        run(&mut s, "solid.box", &json!({"corner": [10, 10, 5], "length": 20, "width": 10, "height": 6, "operation": "cut"}));
+        let rim = json!([[20, 10, 5], [30, 15, 5], [20, 20, 5], [10, 15, 5]]);
+        let e = s.execute("solid.fillet", &json!({"edges": rim, "radius": 1, "turn": "swept"})).unwrap_err().to_string();
+        eprintln!("swept along a pocket's rim: {e}");
+        assert!(e.contains("swept corner at (") && e.contains("round that edge at a radius of at least 1 first"), "{e}");
     }
 }
 #[cfg(test)]

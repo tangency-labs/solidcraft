@@ -1,12 +1,14 @@
 //! Contact Sets, Motion Study and Exploded views.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::Mat;
 use solidcraft_doc::joints::{self, JointKind};
 use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 use solidcraft_kernel::Body;
 
 use super::CommandSpec;

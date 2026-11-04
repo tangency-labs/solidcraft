@@ -1,6 +1,7 @@
 //! Keyboard-authored intent must survive stage transitions and later model edits.
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
 
 fn start(command: &str) -> Harness {
@@ -264,7 +265,7 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         h.app.run("sketch.construction", json!({"curves":["l1"]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 60.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(0.0, 5.0, 0.0);
         h.settle();
         h.step(&json!({"start":command})).unwrap();
         for p in picks {

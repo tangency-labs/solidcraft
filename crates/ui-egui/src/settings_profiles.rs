@@ -15,8 +15,10 @@
 //! parameters, and [`command`] does the rest after `SolveApp::run`.
 
 use serde_json::{Map, Value, json};
+use solidcraft_engine::io::vfs;
 use solidcraft_engine::{MAX_PROFILE_NAME, profile_name};
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, prefs, theme_files, ui_kit};
 
 /// The format tag of a profile document.
@@ -417,13 +419,14 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     skipped
 }
 
-/// A profile file read and checked, refusing one too large to be a profile.
+/// A profile file read and checked, refusing one too large to be a profile. Read through `vfs`, so
+/// an MCP agent's folders apply as they do to the engine's files (#11362).
 fn read_file(path: &str) -> Result<Value, String> {
-    let size = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.len();
+    let size = vfs::len(path).map_err(|e| format!("{path}: {e}"))?;
     if size > MAX_FILE_BYTES {
         return Err(format!("{path}: a settings profile file is at most {} MiB", MAX_FILE_BYTES / 1024 / 1024));
     }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let text = vfs::read_to_string(path, MAX_FILE_BYTES as usize).map_err(|e| format!("{path}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{path}: not a settings profile: {e}"))
 }
 
@@ -493,7 +496,7 @@ pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String>
             let doc = app.settings_profiles.get(name)?.clone();
             if let Some(path) = v.get("path").and_then(Value::as_str) {
                 let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
-                std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))?;
+                vfs::write(path, text.as_bytes()).map_err(|e| format!("{path}: {e}"))?;
                 return Ok(json!({ "profile": doc, "path": path }));
             }
             Ok(json!({ "profile": doc }))
@@ -616,8 +619,8 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.settings_profiles.draft = draft;
                 let name = app.settings_profiles.draft.trim().to_string();
                 let valid = profile_name(&name).is_some();
-                let save =
-                    ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true).on_hover_text(app.tr("prefs.profiles_note"));
+                let save = ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true)
+                    .backing_on_hover_text(app.tr("prefs.profiles_note"));
                 crate::scenario::publish_target("prefs:profile:save", save.rect);
                 if valid && (enter || save.clicked()) {
                     act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
@@ -639,11 +642,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (
                     app.tr("prefs.general.held"),
                     &[
-                        ("prefs.structure.appearance", "settings_palette"),
-                        ("prefs.structure.layout", "settings_monitor"),
-                        ("ui.navigation", "settings_mouse"),
-                        ("prefs.structure.sketch", "select_sketch"),
-                        ("prefs.shortcuts", "settings_keyboard"),
+                        ("prefs.structure.appearance", "prefs_appearance"),
+                        ("prefs.structure.layout", "prefs_layout"),
+                        ("ui.navigation", "prefs_navigation"),
+                        ("prefs.structure.sketch", "prefs_sketch"),
+                        ("prefs.shortcuts", "prefs_shortcuts"),
                         ("ui.language", "settings"),
                     ][..],
                     true,
@@ -787,6 +790,6 @@ pub(crate) fn tag(ui: &mut egui::Ui) {
         crate::i18n::tr("prefs.structure.in_profile"),
         ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
     )
-    .on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    .backing_on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }

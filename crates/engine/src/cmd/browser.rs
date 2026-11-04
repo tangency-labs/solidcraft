@@ -16,11 +16,12 @@ use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
 use crate::params::{bad, bool_, expr, str_};
-use crate::schema::browser::{RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn};
+use crate::schema::browser::{DocumentUnitsParams, DocumentUnitsResult, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
+const UNITS_CONTRACT: TypedContract<DocumentUnitsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
@@ -42,8 +43,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.rename_group", "Rename Group", rename_group).icon("rename").params("group: id, name"),
     CommandSpec::new("browser.move", "Move Browser Items", move_items).icon("reorder")
         .params("folder, component?, items: [keys (strings) and group ids (numbers)]; group?: id (into it; omit for the folder's top level); before?: key or group id (position in it; default the end). A group cannot go into itself or past 8 levels"),
-    CommandSpec::new("document.units", "Change Design Units", document_units)
+    CommandSpec::new("document.units", "Change Design Units", crate::checked!("document.units", document_units))
         .icon("settings")
+        .contract(&UNITS_CONTRACT)
+        .output(crate::schema::output_schema_for::<DocumentUnitsResult>)
         .params("units: mm|cm|m|in|ft (display and unit-less parameters; values keep their meaning)"),
     CommandSpec::new("view.save", "New Named View", view_save)
         .icon("camera")
@@ -61,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
         "path?: [occurrence ids] (that placement and its descendants); component?: id (that component's own folders); \
@@ -433,6 +436,89 @@ fn tree_folder_key(k: &str) -> bool {
     k.len() <= 2048 && scope_ok && last_ok
 }
 
+/// Isolate bodies (#7896): the picked bodies stay, and so do the placements that hold them, down
+/// to their own; those placements' other bodies and the root's other bodies are hidden one by
+/// one, and every other placement is hidden as a placement, so its Browser row shows it is off and
+/// its eye brings it back.
+fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
+    let cmd = "browser.visibility";
+    if !visible {
+        return Err(bad(cmd, "isolate requires visible:true"));
+    }
+    if ["folder", "features", "joints"].iter().any(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, "isolate takes `paths` or `items` (bodies)"));
+    }
+    let keys = keys(p, "items", cmd)?;
+    if keys.is_empty() {
+        return Err(bad(cmd, "isolate needs `paths` or `items` (bodies)"));
+    }
+    let world = s.world_state()?;
+    let keep: Vec<String> = keys
+        .iter()
+        .map(|k| match shown_item(s, &world, k) {
+            Some(Shown::Body(name)) => Ok(name),
+            _ => Err(bad(cmd, format!("no body `{k}`"))),
+        })
+        .collect::<Result<_>>()?;
+    let mut hidden_bodies: Vec<String> =
+        s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0 && !keep.contains(&b.name)).map(|b| b.name.clone()).collect();
+    let mut hidden = Vec::new();
+    let mut stack = vec![Vec::<u64>::new()];
+    let mut count = 0;
+    while let Some(parent) = stack.pop() {
+        for child in s.occurrence_children(&parent)? {
+            count += 1;
+            if count > 100_000 {
+                return Err(bad(cmd, "isolate exceeds 100000 placements"));
+            }
+            if s.occurrence_bodies_shared(&child.path, true)?.iter().any(|b| keep.contains(b)) {
+                hidden_bodies.extend(child.bodies.into_iter().map(|b| b.world).filter(|b| !keep.contains(b)));
+                stack.push(child.path);
+            } else {
+                hidden.push(child.path);
+            }
+        }
+    }
+    // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
+    // again. Their other bodies are hidden one by one above, as the root's are.
+    let shown_folders = folders_holding(s, &keep);
+    s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
+    s.visibility.hidden_occurrences = hidden;
+    s.visibility.hidden_bodies = hidden_bodies;
+    s.refresh_display();
+    Ok(json!({"visible":true,"isolated":keep,"visibility":s.visibility}))
+}
+
+/// The tree keys of the Bodies folders and groups (with the groups they are in) that hold the
+/// bodies named `world` in some placement.
+fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    if s.visibility.hidden_folders.is_empty() {
+        return keys;
+    }
+    let st = s.model.state();
+    let names = solidcraft_doc::WorldNames::new(&s.doc, &st);
+    // Each body's component, found once rather than once per placement.
+    let owned: Vec<(u64, &str)> = s.doc.model_body_components(&st).into_iter().zip(st.bodies.iter().map(|b| b.name.as_str())).collect();
+    for (component, path, _) in s.doc.placements() {
+        let scope = Session::folder_scope(&path);
+        for b in owned.iter().filter(|(c, _)| *c == component).map(|(_, name)| *name) {
+            if !world.contains(&names.name(b, component, &path)) {
+                continue;
+            }
+            keys.insert(format!("{scope}/bodies"));
+            for g in s.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies" && g.has_item(b)) {
+                for id in std::iter::successors(Some(g.id), |id| s.doc.browser_group(*id).and_then(|g| g.parent))
+                    .take(solidcraft_doc::MAX_GROUP_NESTING + 1)
+                {
+                    keys.insert(format!("{scope}/g{id}"));
+                }
+            }
+        }
+    }
+    keys
+}
+
 fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.visibility";
     let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
@@ -521,6 +607,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.refresh_display();
         return Ok(json!({"visible":visible,"changed":paths.len(),"visibility":s.visibility}));
+    }
+    if bool_(p, "isolate").unwrap_or(false) {
+        return isolate_bodies(s, p, visible);
     }
     let items: Vec<Shown> = match (str_(p, "folder"), p.get("items")) {
         _ if p.get("features").is_some() => {
@@ -844,8 +933,11 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`units` must be mm, cm, m, in or ft"));
     }
     let old = s.doc.units.clone();
+    let reply = |kept: Vec<String>| {
+        serde_json::to_value(DocumentUnitsResult { units: u.to_string(), kept, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    };
     if old == u {
-        return Ok(json!({ "units": u, "kept": [] }));
+        return reply(Vec::new());
     }
     // What the geometry reads: every feature's length inputs.
     let matched_configuration = s.doc.configuration_matches().then(|| s.doc.configs.active.clone()).flatten();
@@ -886,7 +978,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().apply_configuration(&row)?;
     }
     s.settle_value_edit(&solved)?;
-    Ok(json!({ "units": u, "kept": kept }))
+    reply(kept)
 }
 
 fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2166,7 +2258,7 @@ mod tests {
         assert!(s.camera.is_none());
         let r = run(&mut s, "view.apply", json!({"view": "Photo"}));
         let c = s.camera.expect("a camera for the view");
-        assert_eq!((c.target, c.yaw, c.pitch, c.distance), (solidcraft_geom::Vec3::new(1.0, 2.0, 3.0), 0.5, -0.6, 150.0));
+        assert_eq!((c.target, c.yaw, c.pitch, c.distance), (solidcore_record::Vec3::new(1.0, 2.0, 3.0), 0.5, -0.6, 150.0));
         assert_eq!(r["camera"]["yaw"], 0.5);
         // A standard view looks from its direction and frames the model.
         run(&mut s, "view.apply", json!({"view": "top"}));

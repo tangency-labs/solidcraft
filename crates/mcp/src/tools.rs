@@ -102,8 +102,26 @@ pub fn tool_definitions() -> Vec<Value> {
              enabled right now. Ids are dotted and lower-case (solid.extrude, sketch.create, \
              solid.fillet, sketch.inspect, timeline.rollback). Optional case-insensitive \
              substring `filter` over id, label, tab and panel (not the parameter docs, so a command id \
-             finds that command rather than every command whose docs mention it).",
-            obj(json!({"filter": string("Substring to match, e.g. \"sketch\", \"fillet\", \"pattern\"")}), &[]),
+             finds that command rather than every command whose docs mention it). Narrow it further with `prefix` \
+             (start of the id) and `panel` (a whole panel or tab name); shrink each entry with `compact` (id and label) \
+             or `fields`; page it with `limit` and `offset`, which make the reply {commands, total, offset, next_offset}. \
+             With none of these the reply is the whole catalog, about 350 KB.",
+            obj(
+                json!({
+                    "filter": string("Substring to match, e.g. \"sketch\", \"fillet\", \"pattern\""),
+                    "prefix": string("Case-insensitive start of the command id, e.g. \"sketch.\""),
+                    "panel": string("A whole toolbar panel or tab name, case-insensitive, e.g. \"Modify\" or \"SKETCH\""),
+                    "compact": {"type": "boolean", "description": "Each entry is only {id, label} (default false)"},
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": COMMAND_FIELDS},
+                        "description": "Keep only these keys of each entry; overrides `compact`",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "description": "At most this many commands; the reply becomes {commands, total, offset, next_offset}"},
+                    "offset": {"type": "integer", "minimum": 0, "description": "Skip this many matches first (default 0); with it the reply is paged as with `limit`"},
+                }),
+                &[],
+            ),
             Effect::ReadOnly,
         ),
         tool(
@@ -146,7 +164,7 @@ pub fn tool_definitions() -> Vec<Value> {
             "Run commands in order, stopping at the first error. Each step is {command, params}: an engine command id \
              (as list_commands lists them). A step may also name one of these tools with that tool's arguments as params, \
              and runs the engine command it stands for: set_parameter (parameters.change; `value` or `expression`), \
-             list_commands (engine.commands, with `filter`), describe_command (engine.describe), execute ({command, params}), \
+             list_commands (engine.commands, narrowed by its arguments), describe_command (engine.describe), execute ({command, params}), \
              measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
@@ -514,6 +532,13 @@ fn text_result(v: &Value, is_error: bool) -> Value {
     let mut r = json!({"content": [{"type": "text", "text": text}]});
     if is_error {
         r["isError"] = json!(true);
+        if let Some(reason) = v
+            .as_str()
+            .and_then(solidcraft_engine::panels::commands::structured_error)
+            .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
+        {
+            r["structuredContent"] = json!({"panel_error":reason});
+        }
     }
     r
 }
@@ -860,8 +885,9 @@ fn measure_summary_wanted(a: &Map<String, Value>) -> bool {
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<Value, String> {
     match name {
         "list_commands" => {
+            let query = CommandQuery::parse(a)?;
             let all = b.call("engine.commands", json!({}))?;
-            Ok(filter_commands(all, str_arg(a, "filter")))
+            Ok(query.apply(all))
         }
         "describe_command" => {
             let id = str_arg(a, "id").ok_or("`id` is required")?;
@@ -934,11 +960,100 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
 
 /// The command catalog filtered by a case-insensitive substring of id, label, panel or tab
 /// (`list_commands`; not the parameter docs, which name other commands, #269).
-fn filter_commands(all: Value, filter: Option<&str>) -> Value {
-    let Some(f) = filter.map(str::to_lowercase).filter(|f| !f.is_empty()) else { return all };
-    let hit =
-        |c: &Value| ["id", "label", "panel", "tab"].iter().any(|k| c.get(*k).and_then(Value::as_str).is_some_and(|s| s.to_lowercase().contains(&f)));
-    Value::Array(all.as_array().map(|v| v.iter().filter(|c| hit(c)).cloned().collect()).unwrap_or_default())
+/// The keys of a `list_commands` entry, which `fields` may keep.
+const COMMAND_FIELDS: &[&str] = &["id", "label", "tab", "panel", "icon", "shortcut", "params", "enabled", "disabled_reason", "planned"];
+
+/// How `list_commands` narrows the catalog (#11726): which commands, which keys of each, and
+/// which page. The default keeps the whole catalog as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct CommandQuery {
+    filter: Option<String>,
+    prefix: Option<String>,
+    panel: Option<String>,
+    fields: Option<Vec<String>>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+impl CommandQuery {
+    fn parse(a: &Map<String, Value>) -> Result<Self, String> {
+        let text = |k: &str| -> Result<Option<String>, String> {
+            match a.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(s)) => Ok(Some(s.to_lowercase()).filter(|s| !s.is_empty())),
+                Some(_) => Err(format!("`{k}` must be a string")),
+            }
+        };
+        let count = |k: &str, least: u64| -> Result<Option<usize>, String> {
+            match a.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v
+                    .as_u64()
+                    .filter(|n| *n >= least)
+                    .map(|n| Some(usize::try_from(n).unwrap_or(usize::MAX)))
+                    .ok_or_else(|| format!("`{k}` must be a whole number of at least {least}")),
+            }
+        };
+        let compact = match a.get("compact") {
+            None | Some(Value::Null) => false,
+            Some(v) => v.as_bool().ok_or("`compact` must be true or false")?,
+        };
+        let fields = match a.get("fields") {
+            None | Some(Value::Null) => compact.then(|| vec!["id".to_string(), "label".to_string()]),
+            Some(Value::Array(v)) => {
+                let mut keep = Vec::new();
+                for f in v {
+                    let name = f.as_str().filter(|n| COMMAND_FIELDS.contains(n)).ok_or_else(|| {
+                        let shown: String = f.to_string().chars().take(64).collect();
+                        format!("`fields` takes the entry keys {}; not {shown}", COMMAND_FIELDS.join(", "))
+                    })?;
+                    if !keep.iter().any(|k| k == name) {
+                        keep.push(name.to_string());
+                    }
+                }
+                Some(keep)
+            }
+            Some(_) => return Err("`fields` must be a list of entry keys".into()),
+        };
+        Ok(Self {
+            filter: text("filter")?,
+            prefix: text("prefix")?,
+            panel: text("panel")?,
+            fields,
+            limit: count("limit", 1)?,
+            offset: count("offset", 0)?,
+        })
+    }
+
+    fn matches(&self, c: &Value) -> bool {
+        let field = |k: &str| c.get(k).and_then(Value::as_str).map(str::to_lowercase).unwrap_or_default();
+        self.filter.as_ref().is_none_or(|f| ["id", "label", "panel", "tab"].iter().any(|k| field(k).contains(f.as_str())))
+            && self.prefix.as_ref().is_none_or(|p| field("id").starts_with(p.as_str()))
+            && self.panel.as_ref().is_none_or(|p| field("panel") == *p || field("tab") == *p)
+    }
+
+    /// The catalog narrowed: a list, or `{commands, total, offset, next_offset}` when paged.
+    fn apply(&self, all: Value) -> Value {
+        let Value::Array(all) = all else { return all };
+        let hits: Vec<Value> = all.into_iter().filter(|c| self.matches(c)).collect();
+        let total = hits.len();
+        let offset = self.offset.unwrap_or(0).min(total);
+        let take = self.limit.unwrap_or(usize::MAX);
+        let page: Vec<Value> = hits
+            .into_iter()
+            .skip(offset)
+            .take(take)
+            .map(|c| match (&self.fields, c) {
+                (Some(keep), Value::Object(m)) => Value::Object(m.into_iter().filter(|(k, _)| keep.contains(k)).collect()),
+                (_, c) => c,
+            })
+            .collect();
+        if self.limit.is_none() && self.offset.is_none() {
+            return Value::Array(page);
+        }
+        let end = offset + page.len();
+        json!({"commands": page, "total": total, "offset": offset, "next_offset": (end < total).then_some(end)})
+    }
 }
 
 /// `pending`: the end of a request still running when its call returned (bridged only; a
@@ -968,8 +1083,8 @@ fn pending(b: &mut dyn Backend) -> Result<Value, String> {
 
 /// How a tool step's result is cut down to what the tool itself would reply.
 enum Narrow {
-    /// A `list_commands` step's catalog, filtered as the tool filters it.
-    Commands(String),
+    /// A `list_commands` step's catalog, narrowed as the tool narrows it.
+    Commands(CommandQuery),
     /// A `measure {summary: true}` step's reply, as `measure_summary` shapes it.
     MeasureSummary,
 }
@@ -977,7 +1092,7 @@ enum Narrow {
 impl Narrow {
     fn apply(&self, v: Value) -> Value {
         match self {
-            Narrow::Commands(f) => filter_commands(v, Some(f)),
+            Narrow::Commands(q) => q.apply(v),
             Narrow::MeasureSummary => measure_summary(v),
         }
     }
@@ -1003,7 +1118,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
     let a = params.as_object().unwrap_or(&empty);
     let mapped = |c: &str, p: Value| Ok((c.to_string(), p, None));
     match command {
-        "list_commands" => Ok(("engine.commands".into(), json!({}), str_arg(a, "filter").map(|f| Narrow::Commands(f.to_string())))),
+        "list_commands" => {
+            let query = CommandQuery::parse(a)?;
+            Ok(("engine.commands".into(), json!({}), (query != CommandQuery::default()).then_some(Narrow::Commands(query))))
+        }
         "set_parameter" => {
             let mut p = pick(a, &["name", "unit", "comment"]);
             p["expression"] = parameter_value(a)?;
@@ -1161,12 +1279,36 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     }
 }
 
+fn layout_step(step: &Value) -> bool {
+    let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or_default();
+    let command = if command == "execute" {
+        step.get("params").and_then(|params| params.get("command")).and_then(Value::as_str).unwrap_or_default()
+    } else {
+        command
+    };
+    command.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout"))
+}
+
+fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> (Value, bool) {
+    use solidcraft_engine::panels::{commands, error};
+    let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
+    reply["not_run_count"] = json!(count);
+    reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
+    (reply, true)
+}
+
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let Some(steps) = a.get("commands").and_then(Value::as_array) else {
         return (json!("`commands` must be an array of {command, params}"), true);
     };
     if steps.len() > MAX_BATCH {
+        if a.get("rollback").and_then(Value::as_bool).unwrap_or(true) && steps.iter().any(layout_step) {
+            return atomic_layout_refusal(steps.len(), solidcraft_engine::panels::Rule::CollectionLimit, "atomic layout batch step count cap");
+        }
         return (json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
     }
     let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
@@ -1217,6 +1359,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         }
     }
     let steps = &mapped;
+    let atomic_layout = rollback && steps.iter().any(layout_step);
     // A step the batch would refuse at its turn refuses it now, before anything runs (#5853).
     // Only where the commands run in this process: a running app may be another version, with
     // commands this one lacks, and checks the batch against its own registry when it gets it.
@@ -1251,7 +1394,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         o.insert("timings".into(), Value::Bool(true));
         o.insert("profile".into(), Value::Bool(profile));
     }
-    if params.to_string().len() + 64 * 1024 <= solidcraft_engine::MAX_LINE {
+    let fits_transport = params.to_string().len().saturating_add(64 * 1024) <= solidcraft_engine::MAX_LINE;
+    if fits_transport {
         match b.call("engine.batch", params) {
             Ok(mut r) => {
                 if let Some(failed) = r.get_mut("failed")
@@ -1266,6 +1410,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
+            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
             // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
             // the `pending` tool gets its result.
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
@@ -1277,6 +1422,20 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 return (Value::String(msg), true);
             }
         }
+    }
+    // Application layout is outside document checkpoints. Neither an unavailable
+    // batch endpoint nor an oversized transport request authorizes a sequential
+    // emulation of an atomic layout/mixed transaction.
+    if atomic_layout {
+        return atomic_layout_refusal(
+            steps.len(),
+            if fits_transport { solidcraft_engine::panels::Rule::Capability } else { solidcraft_engine::panels::Rule::CollectionLimit },
+            if fits_transport {
+                "authoritative atomic layout batch capability is unavailable"
+            } else {
+                "atomic layout batch exceeds transport size cap"
+            },
+        );
     }
     let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());

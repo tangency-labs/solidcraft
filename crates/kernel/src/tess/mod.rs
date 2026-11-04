@@ -38,10 +38,11 @@ pub(crate) mod surface;
 pub(crate) mod tangle;
 pub(crate) mod uv;
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{self, Curve, Loop, Shell};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self, Curve, Loop, Shell};
 use solidcraft_geom::tess::{EvalSurface, FacePlan, TessPlan};
 
 use crate::{KernelError, Result};
@@ -280,7 +281,7 @@ fn boundary(
     for oe in face_edges(face) {
         let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
         let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
-        let Some(q) = oe.pcurve.eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
+        let Some(q) = solidcraft_geom::brep::pcurve::eval(&oe.pcurve, if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
         if tol.is_finite() && tol > reach && (0..2).any(|d| uv::degenerate_within(s, &dom, q, d, tol)) {
             reach = tol;
         }
@@ -319,7 +320,8 @@ fn boundary(
             let mut es: Vec<bool> = n.params.iter().map(|t| n.snapped.contains(t)).collect();
             let mut eq: Vec<[f64; 2]> = Vec::with_capacity(ep.len());
             for (k, (t, p)) in n.params.iter().zip(&n.points).enumerate() {
-                let q = oe.pcurve.eval(t.clamp(p0, p1)).ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
+                let q = solidcraft_geom::brep::pcurve::eval(&oe.pcurve, t.clamp(p0, p1))
+                    .ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
                 let q = map.to_eval(q);
                 let on =
                     s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| fail(oe.edge, format!("node {k}: the surface does not evaluate at {q:?}")))?;

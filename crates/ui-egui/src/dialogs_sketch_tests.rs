@@ -25,7 +25,7 @@ fn a_context_error_offers_no_create_issue_button_10181() {
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.settle();
-    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcraft_engine::geom::Vec3::new(20.0, 15.0, 20.0) }];
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcore_record::Vec3::new(20.0, 15.0, 20.0) }];
     h.app.start("sketch.project");
     h.frames(4);
     assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SketchProject { .. })), "the Project panel opens for the live sketch");
@@ -249,7 +249,7 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
     assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
     // A model edge is cut with the plane too (#10484).
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcraft_engine::geom::Vec3::new(0.0, 0.0, 10.0) }];
+    d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 10.0) }];
     let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false}))]);
 }
@@ -285,7 +285,7 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     let link = &sk.sketch.links[0].id;
     let at: Vec<_> = sk.sketch.link_points(link).iter().filter_map(|p| sk.sketch.point(*p)).map(|p| sk.plane.to_world(p)).collect();
     assert_eq!(at.len(), 1, "{at:?}");
-    assert!(at[0].dist(solidcraft_engine::geom::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
+    assert!(at[0].dist(solidcore_record::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
 }
 
 #[test]
@@ -406,6 +406,14 @@ fn picked_list_removes_one_item_and_field_still_activates_input() {
     d.inputs[0].items.push(Sel::SketchCurve { id: second.clone(), sketch: None });
     h.app.dialog = Some(d);
     h.frames(4);
+    assert!(crate::scenario::handle_at("dialog:list:Entities:0:remove").is_none(), "the list starts folded, as in every dialog");
+    h.step(&json!({"click":{"handle":"dialog:list_toggle:Entities"}})).unwrap();
+    h.frames(2);
+    // Hovering a row lights its curve in the sketch.
+    let row = crate::scenario::handle_at("dialog:list:Entities:1:remove").unwrap();
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    h.frames(2);
+    assert!(matches!(&h.app.viewport.hover, Some(crate::viewport::Hit::SketchCurve { id, .. }) if *id == second), "{:?}", h.app.viewport.hover);
     h.step(&json!({"click":{"handle":"dialog:list:Entities:0:remove"}})).unwrap();
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::SketchCurve { id: second, sketch: None }]);
     h.step(&json!({"click":{"handle":"dialog:Base point"}})).unwrap();
@@ -639,4 +647,37 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
     assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");
+}
+
+#[test]
+fn transform_applies_the_dimensioned_rectangle_shown_in_its_preview() {
+    for profile in [false, true] {
+        let mut h = fixture();
+        for (line, value) in [("l1", 30), ("l2", 20)] {
+            h.app.run("sketch.dimension", json!({"entities": [line], "type": "length", "value": value})).unwrap();
+        }
+        let mut dialog = Dialog::for_command(&h.app, "sketch.transform").unwrap();
+        dialog.inputs[0].items = if profile {
+            vec![Sel::Profile { sketch: h.app.session.active_sketch.unwrap(), index: 0 }]
+        } else {
+            ["l1", "l2", "l3", "l4"].map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).to_vec()
+        };
+        h.app.dialog = Some(dialog);
+        h.frames(4);
+        if let Some(Kind::SketchModify(Mod::Transform { factor, angle, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *factor = "2".into();
+            *angle = "30 deg".into();
+        }
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let state = h.app.session.world_state().unwrap();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+        let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+        let edge = b - a;
+        assert!((edge.len() - 60.0).abs() < 1e-6, "the applied width matches Scale 2: {edge:?}");
+        assert!((edge.angle().to_degrees() - 30.0).abs() < 1e-6, "the applied rotation matches Angle 30: {edge:?}");
+    }
 }

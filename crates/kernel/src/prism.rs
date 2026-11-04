@@ -4,7 +4,8 @@
 //! result's boundaries are the operands' curves, cut at their crossings and never refitted.
 //! Also the test of whether a record surface is a wall swept along a direction.
 
-use solidcraft_geom::{Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Plane, Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::{BoolOp, KernelError, Result};
@@ -108,19 +109,18 @@ struct Regions {
     touching: bool,
 }
 
-#[cfg(feature = "smlib")]
 mod sheets {
-    use solidcraft_geom::Loop2;
-    use solidcraft_geom::Vec3;
-    use solidcraft_geom::brep::Loop;
-    use solidcraft_geom::brep::Surface;
+    use solidcore_record::Loop2;
+    use solidcore_record::Vec3;
+    use solidcore_record::brep::Loop;
+    use solidcore_record::brep::Surface;
     use solidcraft_smlib::{BooleanOp, Brep};
 
     use super::*;
     use crate::prism_curve::{Run, projected};
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib planar regions: {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib planar regions: {what}"), e)
     }
 
     /// `regions` (in the plane's own coordinates) as one sheet on z = 0. SMLib's face builder
@@ -289,35 +289,11 @@ mod sheets {
     }
 }
 
-#[cfg(not(feature = "smlib"))]
-mod sheets {
-    use super::*;
-
-    fn refused<T>() -> Result<T> {
-        Err(KernelError::Failed("not supported yet: planar region booleans run on SMLib (build with the feature `smlib`)".into()))
-    }
-
-    /// A sheet stands for nothing without SMLib.
-    pub(super) enum Sheet {}
-
-    pub(super) fn sheet(_: &[Region2], _: f64) -> Result<Sheet> {
-        refused()
-    }
-
-    pub(super) fn combine(a: &Sheet, _: &Sheet, _: BoolOp) -> Result<Option<Sheet>> {
-        match *a {}
-    }
-
-    pub(super) fn regions(sheet: &Sheet, _: f64) -> Result<Regions> {
-        match *sheet {}
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod planar_tests {
     use super::*;
-    use solidcraft_geom::Loop2;
+    use solidcore_record::Loop2;
     #[test]
     fn single_prism_intersection_uses_common_height_in_both_orders() {
         for k in [1.0, 0.05] {
@@ -328,9 +304,9 @@ mod planar_tests {
                 (22.5, 10.0, None),
                 (25.0, 10.0, None),
             ] {
-                let a = crate::cylinder(solidcraft_geom::Vec3::new(12.5, 5.0, 5.0) * k, solidcraft_geom::Vec3::Z, 2.5 * k, 17.5 * k).unwrap();
-                let b =
-                    crate::box_solid(solidcraft_geom::Vec3::new(10.0, 5.0, lo) * k, solidcraft_geom::Vec3::new(22.5, 10.0, lo + height) * k).unwrap();
+                let a = crate::cylinder(solidcore_record::Vec3::new(12.5, 5.0, 5.0) * k, solidcore_record::Vec3::Z, 2.5 * k, 17.5 * k).unwrap();
+                let b = crate::box_solid(solidcore_record::Vec3::new(10.0, 5.0, lo) * k, solidcore_record::Vec3::new(22.5, 10.0, lo + height) * k)
+                    .unwrap();
                 for (lhs, rhs) in [(&a, &b), (&b, &a)] {
                     let result = crate::boolean(lhs, rhs, BoolOp::Intersect).unwrap();
                     if let Some((bottom, top)) = expected {

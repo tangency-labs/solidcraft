@@ -680,6 +680,79 @@ fn an_agent_command_is_refused_when_its_design_was_replaced() {
     assert!(h.app.session.doc.features.is_empty(), "nothing went into the new design");
 }
 
+/// The tab of a design whose command is still computing closes: the requests behind it are for
+/// the design shown now, and don't wait for a computation that may take minutes. The worker is
+/// held open here by an agent command that never finishes on this frame's clock: it is refused
+/// on the next frame, whether or not its result has come in.
+#[test]
+fn an_agent_command_for_a_closed_design_is_refused_at_once_and_holds_up_nothing() {
+    let (mut h, tx) = agent_harness();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    crate::documents::close(&mut h.app, 0, true);
+    h.frames(1);
+    let r = hole.try_recv().expect("refused on the next frame");
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["error"].as_str().is_some_and(|e| e.contains("replaced")), "{r}");
+    assert!(h.app.agent_computing().is_none());
+    let next = ask(&tx, "engine.execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    assert_eq!(reply_to(&mut h, &next)["ok"], true);
+    assert_eq!(h.app.session.doc.features.len(), 1, "only the new design's box");
+}
+
+/// A history command of a design closed while it computes (the last tab: a blank design takes its
+/// place), and those waiting behind it, go with it: the new design starts with nothing computing,
+/// its Extrude from a finished sketch doesn't wait for them, and their late result is dropped.
+#[test]
+fn a_design_closed_while_its_history_computes_holds_up_nothing() {
+    let mut h = block_boss_hole();
+    let (job, late) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
+    h.app.deferred = Some(job);
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+    h.app.start_after_roll = Some(("solid.extrude".into(), 1));
+    crate::documents::close(&mut h.app, 0, true);
+    assert!(h.app.computing_since().is_none(), "the blank design has nothing computing");
+    assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.start_after_roll.is_none());
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    h.app.start("solid.extrude");
+    assert!(h.app.start_after_roll.is_none(), "the extrude waits for nothing");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+    assert!(late.send(None).is_err(), "nobody is left to take the closed design's result");
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+}
+
+/// A design's history command stays with its tab: another tab doesn't wait for it and doesn't get
+/// its result, even once it is in. Shown again, the design picks it up.
+#[test]
+fn a_history_command_stays_with_its_tab() {
+    let mut h = block_boss_hole();
+    let (job, done) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
+    h.app.deferred = Some(job);
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+
+    crate::documents::new_tab(&mut h.app);
+    assert_eq!(h.app.docs.active, 1);
+    assert!(h.app.computing_since().is_none(), "the new tab has nothing computing");
+    assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty());
+    // The other design's command finishes while this one is shown: nothing lands here.
+    done.send(None).unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run_heavy("timeline.roll_to", json!({"position": 0})).unwrap();
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), 1, "this tab's box and nothing else");
+    assert_eq!(marker(&h), Some(0), "this tab's own marker move ran at once");
+
+    crate::documents::switch(&mut h.app, 0);
+    assert_eq!(h.app.deferred_queue.len(), 1, "the first tab's command and the one behind it came back with it");
+    assert!(h.app.computing_since().is_some());
+    until_settled(&mut h);
+    assert_eq!(marker(&h), Some(2), "they ran on the design they were asked for");
+}
+
 /// Stop answers the agent at once, applies nothing, and lets the requests behind it go on.
 #[test]
 fn stopping_an_agent_command_applies_nothing_and_goes_on() {

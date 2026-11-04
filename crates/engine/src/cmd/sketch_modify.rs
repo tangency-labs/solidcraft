@@ -1,11 +1,12 @@
 //! Sketch modify tools: trim, extend, break, fillet, chamfer, offset, mirror, circular and
 //! rectangular patterns, move/copy and scale.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::ProfileSel;
-use solidcraft_geom::{Plane, Vec2};
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, Wire, WireSpace, intersections, intersections_within};
 
 use super::sketch::{add_c, coincident_points, edit, ids_of, line_or_axis_ref, solve_current};
@@ -3537,15 +3538,74 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (cs, ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(c + (q - c) * k) + t;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        let moved = involved_points(sk, &cs, &ps);
+        rotate_axis_constraints(sk, doc, &moved, ang)?;
+        scale_dimensions(sk, doc, &cs, &moved, k)?;
         Ok(ids_of(sk, &cs))
     })?;
+    s.doc_mut().prune_model_params();
     Ok(json!({"curves": out, "sketch": info}))
+}
+
+/// The driving lengths wholly inside a transformed selection scale with it. Keep formulas
+/// tied to their user parameters, and compensate references between scaled dimensions so a
+/// dimension such as `d1 / 2` does not get the factor twice.
+fn scale_dimensions(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, curves: &[usize], points: &[usize], factor: f64) -> Result<()> {
+    if factor == 1.0 {
+        return Ok(());
+    }
+    let selected: Vec<usize> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            let pts = sk.constraint_points(&c.kind);
+            !c.driven
+                && c.kind.is_dimension()
+                && !c.kind.is_angle()
+                && !pts.is_empty()
+                && pts.iter().all(|p| points.contains(p))
+                // A circle's centre may move with another curve while its radius stays put.
+                && c.kind.indices().1.iter().all(|i| {
+                    curves.contains(i)
+                        || !matches!(sk.curves.get(*i).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. }))
+                })
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let mut expressions = std::collections::BTreeMap::new();
+    for i in selected {
+        let Some(c) = sk.constraints.get_mut(i) else { continue };
+        if let Some(value) = c.kind.value() {
+            c.kind.set_value(value * factor);
+        }
+        if let Some(name) = &c.param
+            && let Some(param) = doc.param(name)
+        {
+            let expression = if solidcraft_doc::expr::references(&param.expr).is_empty() {
+                format!("{} mm", doc.eval(name, solidcraft_doc::expr::Kind::Length)? * factor)
+            } else {
+                let formula = param.expr.trim().strip_prefix('=').unwrap_or(&param.expr);
+                format!("({formula}) * {factor}")
+            };
+            expressions.insert(name.clone(), expression);
+        }
+    }
+    for (name, mut expression) in expressions.clone() {
+        for reference in solidcraft_doc::expr::references(&expression) {
+            if expressions.contains_key(&reference) {
+                expression = solidcraft_doc::expr::rename_reference(&expression, &reference, &format!("({reference} / {factor})"));
+            }
+        }
+        doc.set_param(&name, &expression, None, None)?;
+    }
+    Ok(())
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

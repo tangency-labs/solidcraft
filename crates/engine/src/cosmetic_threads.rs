@@ -1,9 +1,11 @@
 //! Original schematic cylindrical hatching for evaluated cosmetic threads. The segments lie
 //! on the displayed triangles, so neither a separate cylinder nor a helical B-rep is needed.
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{ModelBody, ThreadInfo};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::Mesh;
 
 /// Shared upper bound for cosmetic strokes in one viewport/snapshot scene.
 pub const MAX_SCENE_SEGMENTS: usize = 65_536;

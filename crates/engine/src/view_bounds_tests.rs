@@ -1,7 +1,9 @@
 // Home and Fit frame what is visible now: bodies where they are placed (occurrence moves,
 // joints, motion), sketches only while they are drawn, nothing hidden or consumed.
 use serde_json::{Value, json};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 

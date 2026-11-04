@@ -11,10 +11,11 @@
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::HoleReference;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::hole_reference::{ReferenceFrame, on_reference_face, reference_frame};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;

@@ -29,4 +29,5 @@ done < <(find . -name '*.html' | sort)
   for u in "${urls[@]}"; do echo "  <url><loc>$u</loc></url>"; done
   echo '</urlset>'
 } > sitemap.xml
-printf 'User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n' "$base" > robots.txt
+# The release candidate and edge web apps can break: keep them out of search results.
+printf 'User-agent: *\nAllow: /\nDisallow: /app-rc/\nDisallow: /app-edge/\n\nSitemap: %s/sitemap.xml\n' "$base" > robots.txt

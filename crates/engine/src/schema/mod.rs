@@ -54,8 +54,11 @@ mod coverage_tests;
 mod tests;
 
 // The contracts, by command file.
+pub mod appearance;
 pub mod bom;
 pub mod browser;
+pub mod clearance;
+pub mod compare;
 pub mod component;
 pub mod config;
 pub mod construct;
@@ -67,10 +70,14 @@ pub mod inspect;
 pub mod joints;
 pub mod libraries;
 pub mod mass_properties;
+pub mod material_properties;
+pub mod metadata;
 pub mod motion;
+pub mod panels;
 pub mod print_face;
 pub mod render;
 pub mod render_lights;
+pub mod render_stage;
 pub mod render_ui;
 pub mod section;
 pub mod sheet;
@@ -82,6 +89,7 @@ pub mod sketch_equation;
 pub mod sketch_inspect;
 pub mod surface_analysis;
 pub mod surface_boundary;
+pub mod surface_match;
 pub mod ui_prefs;
 pub mod view_navigation;
 
