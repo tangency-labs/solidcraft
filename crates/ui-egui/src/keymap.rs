@@ -3,6 +3,7 @@
 //! already uses is reported and only taken over on request; keys the app itself handles (Esc, S,
 //! V, Delete, Ctrl+Z…) can't be bound. Changes are kept between runs.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -655,7 +656,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
                 let export = ui_kit::icon_label_button(ui, app.tr("prefs.profile_export"), "export_tray", true, false)
-                    .on_hover_text(app.tr_label("Keys, S box favorites and the toolbar, as a file"));
+                    .backing_on_hover_text(app.tr_label("Keys, S box favorites and the toolbar, as a file"));
                 crate::scenario::publish_target("keymap:export", export.rect);
                 if export.clicked() {
                     action = Some((String::new(), "export"));
@@ -672,7 +673,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
             }
             ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
-                .on_hover_text(app.tr("ui.sketch_keys_only_tip"));
+                .backing_on_hover_text(app.tr("ui.sketch_keys_only_tip"));
             if let Some(chosen) = outcome(app, ui) {
                 action = Some((String::new(), chosen));
             }
@@ -910,7 +911,7 @@ fn shortcut_row(
         let name =
             egui::Rect::from_min_size(rect.min + egui::vec2(0.0, t.space_4), egui::vec2(if beside { name_width } else { width }, label_height));
         ui.painter().galley(egui::pos2(name.left(), name.center().y - label_galley.size().y / 2.0), label_galley, t.form_ink);
-        let response = ui.interact(name, ui.id().with("command"), egui::Sense::hover()).on_hover_text(command.id);
+        let response = ui.interact(name, ui.id().with("command"), egui::Sense::hover()).backing_on_hover_text(command.id);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{label} ({})", command.id)));
         let top = if beside { name.top() } else { name.bottom() + t.space_4 };
         let total = widths.iter().sum::<f32>() + widths.len().saturating_sub(1) as f32 * t.space_8;
@@ -937,7 +938,7 @@ fn shortcut_row(
                             ui_kit::quiet_icon_button_at(ui, r, "plus", app.tr_label("Click, then press the new key"))
                         };
                         if editing {
-                            let capture = capture.on_hover_text(app.tr_label("Click, then press the new key"));
+                            let capture = capture.backing_on_hover_text(app.tr_label("Click, then press the new key"));
                             let name = if *slot == 0 { command.id.to_owned() } else { format!("{}:{slot}", command.id) };
                             crate::scenario::publish_target(&format!("keymap:capture:{name}"), capture.rect);
                             if ui.is_rect_visible(capture.rect) {

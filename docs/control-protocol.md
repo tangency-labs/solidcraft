@@ -235,14 +235,34 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
-Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
-session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..60; the optional
 capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
-preference. The reply contains requested radius, capability/reason and cumulative
+preference. Theme-authored blur is edited with `ui.prefs {theme_options:{theme_id:{blur:18}}}`;
+the theme must declare the option. Finite fractional values remain valid, although
+the UI slider edits in steps of one physical pixel. The `ui.prefs` option definition's
+`available`/translated `reason` describes current app/device/OS availability; its
+value remains the saved/default intent while unavailable.
+
+The `ui.blur` reply contains requested radius, renderer capability, app-aware
+`available`/`reason`, `guard` (tier cap, streak, notice, session opt-out), and cumulative
 actual effect counters, including live resources and encoded passes. Unsupported
 software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
 panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
 fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+Supplying `radius_px` selects the legacy session-only rendering harness override;
+`fixture:"clear"` removes that override and any injected availability reason,
+returning to theme intent. It does not revoke a quality-guard Undo opt-out.
+
+Explicit evidence-only fixtures are `gpu-software`, `reduce-transparency`, and
+`web-unsupported` (force an unavailable reason), plus `guard-60` (inject sixty
+eligible 23 ms samples into the transient guard at the current positive radius).
+The reply labels the active injection as `evidence_fixture`; `null` means none.
+These are not end-user settings, real adapter/OS readings or performance measurements.
+There is no fixture that makes an unsupported renderer available. They do not
+change saved options, host OS settings or document history. All supplied fields
+are validated before mutation. Capture fixture screenshots with that label in the
+evidence description, and clear the fixture before checking real capabilities.
 
 | Launch | What listens |
 |---|---|
@@ -519,8 +539,8 @@ drawing and answering while it runs:
   design changes, from any connection, wait their turn and run in the order they arrived.
 - A person's edit made meanwhile goes first. The agent's command is then computed again for the
   design as it is and lands after that edit, never in the middle of it. If the design was replaced
-  (another tab made active, a new file opened), the request fails with `… the design was
-  replaced … nothing was applied`.
+  (another tab made active, a new file opened, its tab closed), the request fails at once with
+  `… the design was replaced … nothing was applied`, and the requests behind it go on.
 - A chip in the view names the command, with **Stop**. Stop answers
   `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and the requests
   waiting behind it go on. The computation finishes unseen in the background.
@@ -682,6 +702,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
+- `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
+- `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
+- `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)

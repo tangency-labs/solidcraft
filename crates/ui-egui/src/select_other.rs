@@ -21,6 +21,7 @@
 //!
 //! The control channel's `ui.selectOther` opens, describes and picks from the list.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Align2, FontId, Pos2, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
@@ -292,7 +293,7 @@ pub(crate) fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> S
 }
 
 /// "Point (arc 2 centre)": the role it plays in the first curve that uses it.
-fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
+pub(crate) fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
     let Some(pi) = sk.points.iter().position(|p| p.id == id) else { return id.to_string() };
     let role = sk.curves.iter().find_map(|c| {
         let name = format!("{} {}", curve_kind_name(&c.kind).to_lowercase(), id_number(&c.id).unwrap_or(0));
@@ -416,7 +417,7 @@ pub fn close(app: &mut SolveApp) {
     if let Some(p) = app.viewport.select_other.popup.take()
         && p.lit_body
     {
-        app.viewport.hover_bodies.clear();
+        crate::semantic_content::set_external_body_hover(app, Vec::new());
     }
 }
 
@@ -556,12 +557,12 @@ pub fn hover_override(app: &mut SolveApp) {
     app.viewport.hover = if body.is_some() { None } else { row.map(|r| r.hit.clone()) };
     match body {
         Some(b) => {
-            app.viewport.hover_bodies = vec![b];
             p.lit_body = true;
+            crate::semantic_content::set_external_body_hover(app, vec![b]);
         }
         None if p.lit_body => {
-            app.viewport.hover_bodies.clear();
             p.lit_body = false;
+            crate::semantic_content::set_external_body_hover(app, Vec::new());
         }
         None => {}
     }
@@ -684,7 +685,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         let elided = galley.elided;
                         let at = pos2(text_rect.left(), r.center().y - galley.size().y / 2.0);
                         ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(at, galley, t.text);
-                        let resp = if elided { resp.on_hover_text(&row.label) } else { resp };
+                        let resp = if elided { resp.backing_on_hover_text(&row.label) } else { resp };
                         if resp.clicked() {
                             picked = Some(i);
                         }

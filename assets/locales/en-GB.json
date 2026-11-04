@@ -69,6 +69,7 @@
   "help.solid.split_face": "Divides the selected faces along a plane, the face of another body or sketch curves, without cutting the body. Use it to give part of a face its own draft, colour or offset.",
   "help.third_party": "Third-party licences",
   "home.new_mm_hint": "Millimetres · opens in Design",
+  "measure.line_to_centre": "Line to centre",
   "navbar.custom.anchor.bottom_centre": "Bottom centre",
   "navbar.custom.anchor.top_centre": "Top centre",
   "navbar.custom.customise": "Customise navigation bar…",

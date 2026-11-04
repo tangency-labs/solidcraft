@@ -1,6 +1,7 @@
 //! Deliberately composed preference illustrations. A shared orthographic projection keeps
 //! faces, ground contact, rotation cues and axes consistent at their small display size.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, vec2};
 
 struct Canvas {
@@ -280,7 +281,8 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
     crate::scenario::publish_rect("prefs:layout_preview:dialog", dialog);
     crate::scenario::publish_rect("prefs:layout_preview", outer);
-    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).on_hover_text(crate::i18n::tr("prefs.layout_note"));
+    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
+        .backing_on_hover_text(crate::i18n::tr("prefs.layout_note"));
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]

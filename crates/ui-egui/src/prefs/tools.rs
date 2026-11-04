@@ -18,7 +18,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (setting::hole_moves, "prefs.design_tools.hole_moves_help", "hole_moves", "Move holes by clicking or dragging"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
-                            let response = setting(app, ui).on_hover_text(app.tr(help));
+                            let response = setting(app, ui).backing_on_hover_text(app.tr(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
                             if !crate::prefs_search::suppress_chrome(ui) {
@@ -37,7 +37,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (setting::auto_operation, "prefs.auto_operation_note", "auto_operation"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
-                            let response = setting(app, ui).on_hover_text(app.tr(help));
+                            let response = setting(app, ui).backing_on_hover_text(app.tr(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             if !crate::prefs_search::suppress_chrome(ui) {
                                 ui_kit::help_icon(ui, app.tr(help));
@@ -55,7 +55,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let response = setting::placement_handles(app, ui).on_hover_text(app.tr("ui.placement_handles_tip"));
+                        let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));
                         crate::scenario::publish_target("prefs:placement_handles", response.rect);
                         if !crate::prefs_search::suppress_chrome(ui) {
                             ui_kit::help_icon(ui, app.tr("ui.placement_handles_tip"));
@@ -67,7 +67,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
             tool_group(ui, "", ui_kit::paint_assembly_move, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let response = setting::assembly_move_handles(app, ui).on_hover_text(app.tr("joint_move.legacy_hint"));
+                    let response = setting::assembly_move_handles(app, ui).backing_on_hover_text(app.tr("joint_move.legacy_hint"));
                     crate::scenario::publish_target("prefs:assembly_move_handles", response.rect);
                     crate::scenario::publish_target("dialog:Use joint motion handles for assembly Move", response.rect);
                     if !crate::prefs_search::suppress_chrome(ui) {
@@ -137,7 +137,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     }
                     if key == "direct_interaction" {
-                        response.on_hover_text(app.tr_label("Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size"));
+                        response.backing_on_hover_text(app.tr_label("Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size"));
                     }
                 }
             });
@@ -187,8 +187,9 @@ fn create_card(ui: &mut egui::Ui, rows: impl FnOnce(&mut egui::Ui)) {
         rows(ui);
         return;
     }
-    egui::Frame::NONE.fill(t.control_fill).stroke(egui::Stroke::new(1.0, t.dialog_border)).corner_radius(f32::from(t.radius_lg) + t.space_2).show(
+    ui_kit::Container::show_backing(
         ui,
+        egui::Frame::NONE.fill(t.control_fill).stroke(egui::Stroke::new(1.0, t.dialog_border)).corner_radius(f32::from(t.radius_lg) + t.space_2),
         |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(ui.available_width());

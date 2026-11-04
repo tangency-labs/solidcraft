@@ -104,7 +104,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).on_hover_text(&tip);
+                    ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).backing_on_hover_text(&tip);
                 });
                 ui_kit::help_icon(ui, &tip);
             });
@@ -135,7 +135,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let badge = ui_kit::settings_state_badge(ui, &label, tone);
                 crate::scenario::publish_rect("prefs:crash_count", badge.rect);
                 if ui_kit::button(ui, app.tr("prefs.crash_reports"), ui_kit::Button::Normal)
-                    .on_hover_text(app.tr("prefs.crash_reports_note"))
+                    .backing_on_hover_text(app.tr("prefs.crash_reports_note"))
                     .clicked()
                 {
                     crate::crash_ui::open(app);
@@ -192,7 +192,7 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
                                     ui_kit::number_field(ui, value, default..=top, 1.0, "")
                                 })
                                 .inner
-                                .on_hover_text(&help);
+                                .backing_on_hover_text(&help);
                             crate::scenario::publish_rect(handle, field.rect);
                             let size = limits::describe(value.saturating_mul(limits::MB));
                             let note = if *value >= 1024 { format!("{unit} ({size})") } else { unit.to_owned() };

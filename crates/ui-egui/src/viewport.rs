@@ -1,6 +1,7 @@
 //! The 3D viewport: navigation, GPU (or CPU fallback) rendering, picking, overlays, the axis
 //! view and the navigation bar.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
@@ -3221,6 +3222,61 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
     })
 }
 
+/// The item as a hit: what lights up when it is hovered. `None` for bodies, features and
+/// components, which light up whole instead, and for constraints.
+pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
+    let st = app.session.world_state().ok()?;
+    let active = app.session.active_sketch;
+    let point = |sketch: u64, id: &str| {
+        let sk = &st.sketch(sketch)?.sketch;
+        sk.resolve_point(id).and_then(|i| sk.point(i))
+    };
+    let curve = |sketch: u64, id: &str| {
+        let ss = st.sketch(sketch)?;
+        let sk = &ss.sketch;
+        let c = sk.curves.get(sk.curve_index(id)?)?;
+        // Its start is where an orbit from the hover would turn about.
+        let point = c.kind.ends().and_then(|(a, _)| sk.point(a)).map_or(Vec3::ZERO, |at| ss.plane.to_world(at));
+        Some(Hit::SketchCurve { sketch, id: id.to_string(), straight: matches!(c.kind, CurveKind::Line { .. }), point })
+    };
+    Some(match sel {
+        Sel::Edge { body, index, point } => Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point },
+        Sel::Face { body, index, point } => Hit::Face { body: body.clone(), index: *index, point: *point },
+        Sel::Vertex { body, point } => Hit::Vertex { body: body.clone(), point: *point },
+        Sel::Profile { sketch, index } => Hit::Profile { sketch: *sketch, index: *index },
+        Sel::Plane { name } => Hit::Plane { name: name.clone(), point: Vec3::ZERO },
+        Sel::Axis { name } => Hit::Axis { name: name.clone() },
+        Sel::ConstructionPoint { name } => Hit::ConstructionPoint { name: name.clone() },
+        Sel::SketchCurve { id, sketch } => curve((*sketch).or(active)?, id)?,
+        Sel::ExternalSketchCurve { sketch, id } => curve(*sketch, id)?,
+        Sel::ExternalSketchPoint { sketch, id } => Hit::SketchPoint { sketch: *sketch, id: id.clone(), at: point(*sketch, id)? },
+        // A point of another sketch is picked as `sketch:id`.
+        Sel::SketchPoint { id } => {
+            let (sketch, id) = match id.split_once(':').and_then(|(s, p)| Some((s.parse().ok()?, p))) {
+                Some(other) => other,
+                None => (active?, id.as_str()),
+            };
+            Hit::SketchPoint { sketch, id: id.to_string(), at: point(sketch, id)? }
+        }
+        Sel::SketchMidpoint { id } => {
+            let sketch = active?;
+            let sk = &st.sketch(sketch)?.sketch;
+            let at = crate::selection::line_midpoint(sk, sk.curve_index(id)?)?;
+            Hit::SketchMidpoint { sketch, id: id.clone(), at }
+        }
+        Sel::Body { .. } | Sel::Feature { .. } | Sel::Occurrence { .. } | Sel::SketchConstraint { .. } => return None,
+    })
+}
+
+/// A dialog's picked-items row under the pointer (#3683) is the hover, as the item would be
+/// under the pointer in the view. Bodies, components and features light up as their Browser
+/// and timeline rows do instead (`build_highlight`).
+fn list_hover(app: &mut SolveApp) {
+    if let Some((_, item)) = app.dialog.as_ref().and_then(|d| d.list_hover.as_ref()) {
+        app.viewport.hover = sel_hit(app, item);
+    }
+}
+
 /// What lights up under the pointer while a tool runs: the nearest hit its click takes.
 fn tool_hover(app: &SolveApp, hits: &[Hit]) -> Option<Hit> {
     let cmd = app.tool.as_ref()?.cmd;
@@ -3575,6 +3631,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
+    app.dialog.as_ref().and_then(|d| d.list_hover.as_ref()).map(|(_, item)| format!("{item:?}")).hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
     // which display quality its plan and edges are made.
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
@@ -3877,6 +3934,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
     }
+    // A picked item whose dialog row is under the pointer shows as hovered, not as picked.
+    if let Some((_, item)) = app.dialog.as_ref().and_then(|d| d.list_hover.as_ref()) {
+        let lit = displayed_selection(app, item);
+        sel.retain(|x| !lit.iter().any(|y| crate::selection::same_item(x, y)));
+    }
     // Component hover expands through the same occurrence selection as a Browser row.
     let component_hover = crate::render_workspace::assign::hover(app).map(|sel| displayed_selection(app, sel)).or_else(|| {
         app.viewport
@@ -4144,6 +4206,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     hovered.extend(component_hover.into_iter().flatten());
     let body_hover = hovered_body(app);
     hovered.extend(body_hover.iter().map(|name| Sel::Body { name: name.clone() }));
+    if let Some((_, item @ (Sel::Body { .. } | Sel::Occurrence { .. } | Sel::Feature { .. }))) =
+        app.dialog.as_ref().and_then(|d| d.list_hover.as_ref())
+    {
+        hovered.extend(displayed_selection(app, item));
+    }
     // By name, once: a whole assembly holds thousands of bodies, and scanning the list for
     // each of them is quadratic (as is a body lookup by name in the world).
     let hovered_whole: std::collections::HashSet<&str> =
@@ -4497,6 +4564,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
+    list_hover(app);
     let painter = ui.painter_at(rect);
     crate::gpu::paint_background(&painter, rect, &t);
 
@@ -5775,7 +5843,7 @@ fn toast_close(ui: &egui::Ui, rect: Rect, id: egui::Id, left: Option<f32>) -> eg
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// The one toast painter: its text in a card at the bottom centre of `free`, led by a dot or a
@@ -5861,7 +5929,7 @@ fn paint_toast_ext(
     let blocked = crate::issue_report::cad_input_blocked();
     let card_clicked = extras.card_hint.is_some_and(|hint| {
         let sense = if blocked { Sense::hover() } else { Sense::click() };
-        ui.interact(r, egui::Id::new(("sc_toast_card", extras.close.unwrap_or_default())), sense).on_hover_text(hint).clicked()
+        ui.interact(r, egui::Id::new(("sc_toast_card", extras.close.unwrap_or_default())), sense).backing_on_hover_text(hint).clicked()
     });
     let mut clicked = None;
     let mut buttons = Vec::with_capacity(actions.len());
@@ -5886,7 +5954,7 @@ fn paint_toast_ext(
             })
             .inner;
         let response = match extras.tips.get(index).filter(|tip| !tip.is_empty()) {
-            Some(tip) => response.on_hover_text(*tip),
+            Some(tip) => response.backing_on_hover_text(*tip),
             None => response,
         };
         if response.clicked() {
@@ -6854,7 +6922,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         && let Some((name, d, _, _)) = tips.get(i)
     {
         crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover()).on_hover_text(
+        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover()).backing_on_hover_text(
             format!(
                 "View from {}. Click again to reverse. Drag to orbit{}.",
                 name.to_uppercase(),
@@ -6887,7 +6955,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     } else if in_circle && hovered.is_none() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    if hr.on_hover_text(crate::i18n::tr_label("Home view")).clicked() {
+    if hr.backing_on_hover_text(crate::i18n::tr_label("Home view")).clicked() {
         app.animate_view("home");
     }
 }
@@ -10046,26 +10114,30 @@ mod tests {
     fn smooth_wall_display_preserves_wireframe_and_edge_selection() {
         let mut s = solidcraft_engine::Session::default();
         let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
-        s.execute("sketch.ellipse", &json!({"center":[0,0],"major":[25,0],"minor_radius":5})).unwrap();
-        let inner =
-            s.execute("sketch.offset", &json!({"curves":["e1"],"distance":-1,"chain":false})).unwrap()["curves"][0].as_str().unwrap().to_string();
-        let outer =
-            s.execute("sketch.offset", &json!({"curves":[inner],"distance":-0.5,"chain":false})).unwrap()["curves"][0].as_str().unwrap().to_string();
-        s.execute(
-            "solid.extrude",
-            &json!({"sketch":sketch,"distance":3,"profiles":{"type":"whole_boundaries","profiles":[{"outer":[outer],"holes":[[inner]]}]}}),
-        )
-        .unwrap();
+        // A circle r10 drawn as eight cubic sketch splines, each the same eighth-arc turned by 45
+        // degrees, so every two neighbours meet with one tangent and one curvature (G2).
+        let step = std::f64::consts::TAU / 8.;
+        let k = 4. / 3. * (step / 4.).tan() * 10.;
+        for i in 0..8 {
+            let (a, b) = (i as f64 * step, (i + 1) as f64 * step);
+            let p0 = [10. * a.cos(), 10. * a.sin()];
+            let p3 = if i == 7 { [10., 0.] } else { [10. * b.cos(), 10. * b.sin()] };
+            let p1 = [p0[0] - k * a.sin(), p0[1] + k * a.cos()];
+            let p2 = [p3[0] + k * b.sin(), p3[1] - k * b.cos()];
+            s.execute("sketch.spline.control_point", &json!({"points":[p0,p1,p2,p3]})).unwrap();
+        }
+        s.execute("solid.extrude", &json!({"sketch":sketch,"distance":3})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
         app.ui.ground_shadow = false;
         let st = app.session.world_state().unwrap();
         let b = st.bodies.first().unwrap();
         let mesh = b.mesh();
-        assert_eq!(mesh.edges.len(), 1536);
-        // SMLib sweeps each piece of the offset curves as itself (none is taken for a circle
-        // near it), so the pieces meet with one curvature at all 512 wall joins (the largest
-        // curvature jump 4.2e-7) and no join is drawn.
-        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 512);
+        // Each spline extrudes as one wall: eight walls and two caps. Edges: the eight-piece loop
+        // on each cap and one upright edge where each two walls meet: 24.
+        assert_eq!(mesh.edges.len(), 24);
+        // The walls are distinct faces meeting with one curvature (G2) along the eight upright
+        // edges, so the shaded view draws none of them.
+        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 8);
         let smooth = mesh.smooth_edges.iter().position(|f| *f).unwrap();
         let expected = mesh.edges.iter().enumerate().filter(|(i, _)| mesh.shaded_edge_visible(*i)).map(|(_, e)| e.len() - 1).sum::<usize>();
         // Vertex markers are lines from a point to itself; count the edges' segments.
@@ -10115,7 +10187,7 @@ mod tests {
                 }
                 assert!(crate::gpu::test_picture_renderer(), "SMOOTH_SCREENSHOTS needs a GPU");
                 let png = solidcraft_engine::capture::png(&scene, &cam, 1200, 800).unwrap();
-                std::fs::write(std::path::Path::new(&directory).join(format!("smooth-ring-{name}.png")), png.bytes).unwrap();
+                std::fs::write(std::path::Path::new(&directory).join(format!("smooth-walls-{name}.png")), png.bytes).unwrap();
             }
         }
     }

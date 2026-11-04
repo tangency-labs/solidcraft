@@ -55,9 +55,6 @@ doc.recover
 doc.recovery_discard
 doc.recovery_list
 document.inspect
-document.metadata
-document.metadata.remove
-document.metadata.set
 engine.commands
 explode.create
 explode.delete
@@ -78,8 +75,6 @@ frame.member
 frame.profile.insert
 frame.profile.list
 frame.profile.properties
-inspect.clearance
-inspect.compare
 inspect.interference
 inspect.measure
 inspect.parameter_sweep
@@ -107,8 +102,6 @@ material.delete
 material.edit
 material.inspect
 material.list
-material.properties.directional
-material.properties.validate
 mesh.convert
 motion.delete
 motion.export
@@ -187,9 +180,6 @@ render.settings.set
 render.shot.duplicate
 render.shot.remove
 render.shot.rename
-render.stage.backdrop
-render.stage.clear
-render.stage.ground
 render.start
 render.status
 select.clear
@@ -308,7 +298,6 @@ solid.coil
 solid.combine
 solid.draft
 solid.emboss
-solid.fillet
 solid.hole
 solid.loft
 solid.mirror
@@ -333,7 +322,6 @@ surface.extend
 surface.extrude
 surface.fair
 surface.loft
-surface.match
 surface.offset
 surface.patch
 surface.reverse_normal

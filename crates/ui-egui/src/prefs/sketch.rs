@@ -74,7 +74,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     })
-                    .on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
+                    .backing_on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
                     crate::scenario::publish_target("prefs:suppress_sketch_snap", response.rect);
                 });
             });
@@ -172,6 +172,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
             });
         });
+        dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
     });
 }
 
@@ -232,7 +233,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         width,
                     )
-                    .on_hover_text(app.tr("prefs.sketch_exit_view_note"));
+                    .backing_on_hover_text(app.tr("prefs.sketch_exit_view_note"));
                     crate::scenario::publish_target(&format!("prefs:sketch_exit_view:{key}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:list:{}", choice.label_id()), response.rect);
                     if app.preferences.sketch_exit_view == choice {
@@ -307,7 +308,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     width,
                 )
-                .on_hover_text(crate::i18n::tr(help));
+                .backing_on_hover_text(crate::i18n::tr(help));
                 targets(key, &response);
                 if response.clicked() {
                     *value = !*value;
@@ -451,7 +452,7 @@ fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &
             if show_help && response.rect.is_positive() {
                 ui_kit::help_icon(ui, help);
             }
-            response.on_hover_text(help)
+            response.backing_on_hover_text(help)
         } else {
             response
         }
@@ -479,4 +480,36 @@ fn targets(key: &str, response: &egui::Response) {
         _ => return,
     };
     crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
+}
+
+/// Where a dimension's value is typed, and what the window's arrows step lengths and angles by
+/// (#7246). The steps only matter in the window, so they wait for it.
+fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let label = app.tr("prefs.dimension_values").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.dimension_values_note"), label_width, |ui| {
+        let options = [app.tr("prefs.dimension_values_view"), app.tr("prefs.dimension_values_window")];
+        let mut selected = usize::from(app.preferences.dimension_input == DimensionInput::Window);
+        if ui_kit::settings_segments(ui, &label, &mut selected, &options) {
+            app.preferences.dimension_input = if selected == 1 { DimensionInput::Window } else { DimensionInput::View };
+        }
+    });
+    let window = app.preferences.dimension_input == DimensionInput::Window;
+    let units = app.session.doc.units.clone();
+    let decimals = app.preferences.length_decimals;
+    ui_kit::settings_block(ui, app.tr("prefs.dimension_steps"), label_width, |ui| {
+        ui.add_enabled_ui(window, |ui| {
+            ui.horizontal(|ui| {
+                let t = Tokens::get();
+                ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
+                    let p = &mut app.preferences;
+                    ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
+                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
+                });
+                ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
+                    ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
+                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
+                });
+            });
+        });
+    });
 }

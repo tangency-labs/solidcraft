@@ -2,11 +2,14 @@
 
 use super::*;
 use crate::history_rows::{HistoryFeature, HistoryRows};
+use crate::semantic_content::FeatureDrag;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Reveal {
     pub id: u64,
     pub path: Vec<u64>,
+    /// Native Features and combined History are distinct presentations of the same feature.
+    history: bool,
 }
 
 #[cfg(test)]
@@ -19,6 +22,7 @@ thread_local! {
 /// active component or history marker. The folder is the one of the placement `body` belongs to:
 /// without a body there is no telling which copy of a component was meant.
 pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
+    sync_reveals(app);
     let Some(feature) = app.session.doc.feature(id) else { return };
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
         return; // Sketches are listed in Sketches, not Features.
@@ -46,17 +50,31 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.open_row(&scope);
     app.tree.expanded.insert(format!("{scope}/features"));
-    app.tree.reveal_feature = Some(Reveal { id, path });
+    app.tree.reveal_feature = Some(Reveal { id, path, history: false });
 }
 
 /// With the history in the browser: open the feature's component and history, and scroll to it.
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    sync_reveals(app);
     let Some(component) = app.session.doc.feature(id).map(|feature| feature.component) else { return };
+    let path = if component == 0 {
+        Vec::new()
+    } else {
+        app.session
+            .active_occurrence_path
+            .clone()
+            .filter(|_| app.session.active_component == component)
+            .unwrap_or_else(|| app.session.doc.first_path(component))
+    };
     app.ui.show_browser = true;
     app.tree.collapsed.remove("c0");
-    app.tree.collapsed.remove(&format!("c{component}"));
-    app.tree.collapsed.remove(&format!("c{component}/history"));
-    app.tree.reveal_feature = Some(Reveal { id, path: Vec::new() });
+    for depth in 1..=path.len() {
+        app.tree.open_row(&occurrence_key(&path[..depth]));
+    }
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
+    app.tree.open_row(&scope);
+    app.tree.collapsed.remove(&format!("{scope}/history"));
+    app.tree.reveal_feature = Some(Reveal { id, path, history: true });
 }
 
 /// Feature folders hide later rows only while editing; history always lists every feature.
@@ -150,8 +168,8 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let mut slots: Vec<(f32, usize)> = Vec::new();
     // Where dragged rows can be dropped, as in the History at the left: these slots and one
     // before the marker, each with the folder the rows join (#9565).
-    let drag_id = egui::Id::new(("sc_browser_history_drag", &scope));
-    let mut dragged: Option<Vec<u64>> = ui.data(|d| d.get_temp(drag_id));
+    let drag_id = ui.id().with(("sc_browser_history_drag", &scope));
+    let mut dragged = app.tree.content.current_mut().feature_drags.get(&drag_id).cloned();
     let mut drops: Vec<DropSlot> = Vec::new();
     let mut marker_resp = None;
     for row in &plan.rows {
@@ -251,7 +269,7 @@ fn feature_row(
     depth: usize,
     fold: Option<bool>,
     mark: Mark,
-    drag: Option<&mut Option<Vec<u64>>>,
+    drag: Option<&mut Option<FeatureDrag>>,
 ) -> bool {
     let Some(feature) = app.session.doc.features.get(index) else { return false };
     let (component, path) = (here.component, here.path);
@@ -315,9 +333,15 @@ fn feature_row(
     let scope = here.scope;
     if let Some(rect) = r.rect {
         crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
-        if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
-            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+        let history = app.preferences.history_in_browser;
+        if app.tree.content.browser_presentation()
+            && app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path && target.history == history)
+            && crate::semantic_content::scroll_acknowledged(ui, rect)
+        {
             app.tree.reveal_feature = None;
+        }
+        if history && app.tree.timeline_reveal == Some(id) && crate::semantic_content::scroll_acknowledged(ui, rect) {
+            app.tree.timeline_reveal = None;
         }
     }
     if r.double {
@@ -335,8 +359,9 @@ fn feature_row(
     if let Some(drag) = drag
         && !r.on_control
         && r.resp.as_ref().is_some_and(egui::Response::drag_started)
+        && let Some(source) = crate::semantic_content::current_source(app)
     {
-        *drag = Some(crate::timeline_left::drag_features(app, id, selected));
+        *drag = Some(FeatureDrag { source, features: crate::timeline_left::drag_features(app, id, selected) });
     }
     r.fold
 }
@@ -345,13 +370,14 @@ fn feature_row(
 fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
+    crate::semantic_content::record_capture(ui, &response);
     let line = Rect::from_min_max(pos2(rect.left() + 2.0 + depth as f32 * INDENT, rect.top()), rect.max);
     crate::ui_kit::history_marker(ui.painter(), line, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    response.on_hover_text(crate::i18n::tr("ui.history_marker_tip"))
+    response.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"))
 }
 
 /// Dragging the marker shows where it lands; letting go rolls the history there, through the
@@ -366,7 +392,11 @@ fn drag_marker(app: &mut SolveApp, ui: &egui::Ui, resp: &egui::Response, slots: 
         let accent = crate::theme::TabAccent::current(ui.ctx()).color;
         ui.painter().hline(resp.rect.left() + 4.0..=resp.rect.right() - 4.0, slot_y, Stroke::new(2.0, accent));
     }
-    if resp.drag_stopped() && position != marker {
+    if resp.drag_stopped()
+        && position != marker
+        && crate::semantic_content::current_source(app).is_some_and(|source| crate::semantic_content::source_present(app, source))
+        && crate::semantic_content::claim_action(ui, resp.id)
+    {
         let n = app.session.doc.features.len();
         let _ = app.run_heavy("timeline.roll_to", if position >= n { json!({}) } else { json!({ "position": position }) });
     }
@@ -374,11 +404,23 @@ fn drag_marker(app: &mut SolveApp, ui: &egui::Ui, resp: &egui::Response, slots: 
 
 /// Dragging feature rows shows where they land with the History's drop bar; letting go moves them
 /// with the History's own move, before or behind the marker by the side of it they land on.
-fn drag_rows(app: &mut SolveApp, ui: &egui::Ui, plan: &HistoryRows, drag_id: egui::Id, dragged: Option<Vec<u64>>, drops: &[DropSlot], marker_y: f32) {
-    let Some(features) = dragged else { return };
+fn drag_rows(
+    app: &mut SolveApp,
+    ui: &egui::Ui,
+    plan: &HistoryRows,
+    drag_id: egui::Id,
+    dragged: Option<FeatureDrag>,
+    drops: &[DropSlot],
+    marker_y: f32,
+) {
+    let Some(drag) = dragged else { return };
+    if !crate::semantic_content::source_present(app, drag.source) {
+        app.tree.content.current_mut().feature_drags.remove(&drag_id);
+        return;
+    }
     let (released, down) = ui.input(|i| (i.pointer.any_released(), i.pointer.any_down()));
     if released || !down {
-        ui.data_mut(|d| d.remove::<Vec<u64>>(drag_id));
+        app.tree.content.current_mut().feature_drags.remove(&drag_id);
     }
     if !released && !down {
         return;
@@ -394,7 +436,7 @@ fn drag_rows(app: &mut SolveApp, ui: &egui::Ui, plan: &HistoryRows, drag_id: egu
         .and_then(|p| drops.iter().min_by(|a, b| (a.y - p.y).abs().total_cmp(&(b.y - p.y).abs())).copied());
     if released {
         if let Some(drop) = slot {
-            crate::timeline_left::drop_items(app, plan, &features, &[], drop.group, drop.position, drop.y < marker_y);
+            crate::timeline_left::drop_items(app, plan, &drag.features, &[], drop.group, drop.position, drop.y < marker_y);
         }
         return;
     }
@@ -407,7 +449,7 @@ fn drag_rows(app: &mut SolveApp, ui: &egui::Ui, plan: &HistoryRows, drag_id: egu
             Tokens::get().sketch_accent,
         );
     }
-    ui.data_mut(|d| d.insert_temp(drag_id, features));
+    app.tree.content.current_mut().feature_drags.insert(drag_id, drag);
 }
 
 #[cfg(test)]
@@ -423,9 +465,20 @@ mod tests {
             _ => None,
         };
         h.app.tree.expanded.insert("c0/features".into());
-        DRAWN.with(|d| d.borrow_mut().clear());
         let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
-        h.ctx.run_ui(raw, |ui| rows(&mut h.app, ui, 0, &[], 0, &mut Actions::default())).textures_delta.clear();
+        h.ctx
+            .run_ui(raw, |ui| {
+                use crate::semantic_content::{self, ContentOwner, ContentRequest};
+                semantic_content::begin(&mut h.app, ui.ctx());
+                semantic_content::render_scope(&mut h.app, ui, ContentOwner::BROWSER, ContentRequest::Browser { shrink_height: false }, |app, ui| {
+                    let mut actions = Actions::default();
+                    rows(app, ui, 0, &[], 0, &mut actions);
+                    actions
+                });
+                semantic_content::finalize(&mut h.app, ui.ctx());
+            })
+            .textures_delta
+            .clear();
         drawn_rows().into_iter().map(|(label, ..)| label).collect()
     }
 

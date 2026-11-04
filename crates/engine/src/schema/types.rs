@@ -464,6 +464,66 @@ fn enum_schema(values: &[&str], description: &str) -> Schema {
     json_schema!({"description": description, "type": "string", "enum": values})
 }
 
+/// A keyword a handler reads with `str_` and lowercases, refusing any other word with `unknown
+/// <what> `<word>` (<expected>)`; the lowercased word is kept for the handler.
+macro_rules! keyword_param {
+    ($(#[$doc:meta])* $name:ident, $what:literal, $values:expr, $expected:literal, $description:literal) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $name(pub String);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let ok = |s: &str| $values.contains(&s.to_ascii_lowercase().as_str());
+                let unknown = |s: &str| whole(format!(concat!("unknown ", $what, " `{}` (", $expected, ")"), s.to_ascii_lowercase()));
+                string_matching(d, ok, $expected, unknown).map(|s| $name(s.to_ascii_lowercase()))
+            }
+        }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+            fn json_schema(_: &mut SchemaGenerator) -> Schema {
+                enum_schema($values, $description)
+            }
+        }
+    };
+}
+
+keyword_param!(
+    /// `solid.fillet`'s `type`.
+    FilletTypeParam,
+    "fillet type",
+    &["constant", "rolling_ball", "chord", "chord_length", "curvature", "g2", "variable", "spline"],
+    "constant, chord, variable, spline or curvature",
+    "The round's section: constant (the default; rolling_ball is an alias), chord (`radius` is the width across; alias chord_length), curvature (alias g2: curvature-continuous between planar faces along straight edges, `radius` the equivalent circular setback), variable (`radius` at the end nearest `start`, `radius2` at the other) or spline (the radius a clamped B-spline from `start`: `radius`, then `radii`, over `knots`). Matching ignores case."
+);
+keyword_param!(
+    /// `solid.fillet`'s `fit`.
+    FilletFitParam,
+    "fit",
+    &["exact", "reduce", "taper"],
+    "exact, reduce or taper",
+    "What a radius too large for the geometry around the edges does: exact (the default) refuses it naming the largest that fits, reduce reduces it where it doesn't fit, taper follows the room along straight edges between planar faces. reduce and taper take type: constant. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.fillet`'s `corner`.
+    FilletCornerParam,
+    "corner",
+    &["rolling", "g2"],
+    "rolling or g2",
+    "What fills a corner where three rounded edges meet: rolling (the default), the rolling ball's sphere, or g2, a set-back patch meeting the rounds to the second order (type: constant, fit: exact only). Matching ignores case."
+);
+keyword_param!(
+    /// `solid.fillet`'s `turn`.
+    FilletTurnParam,
+    "turn",
+    &["mitre", "swept"],
+    "mitre or swept",
+    "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
+);
+
 /// How a feature combines with existing bodies, as `features::operation` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OperationParam(pub Operation);

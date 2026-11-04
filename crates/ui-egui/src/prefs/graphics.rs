@@ -30,7 +30,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         &|p, rect, ink| paint_preset_glyph(p, rect, id, ink),
                         width,
                     )
-                    .on_hover_text(app.tr("ui.graphics_preset_help"));
+                    .backing_on_hover_text(app.tr("ui.graphics_preset_help"));
                     crate::scenario::publish_target(&format!("view:graphics_preset:{id}"), response.rect);
                     if id == "performance" {
                         crate::scenario::publish_target("view:graphics_preset", response.rect);
@@ -71,7 +71,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         width,
                     )
-                    .on_hover_text(app.tr("settings.display_quality_note"));
+                    .backing_on_hover_text(app.tr("settings.display_quality_note"));
                     crate::scenario::publish_target(&format!("prefs:display_quality:{}", q.id()), response.rect);
                     crate::scenario::publish_target(&format!("prefs:option:{label}"), response.rect);
                     if response.clicked() {
@@ -111,8 +111,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         (t.space_24 * 5.0 + t.space_10).min(ui.max_rect().width()),
                     )
-                    .on_hover_text(app.tr("settings.msaa_applies_on_restart"))
-                    .on_disabled_hover_text(app.tr("settings.msaa_applies_on_restart"));
+                    .backing_on_hover_text(app.tr("settings.msaa_applies_on_restart"))
+                    .backing_on_disabled_hover_text(app.tr("settings.msaa_applies_on_restart"));
                     crate::scenario::publish_target(&format!("prefs:msaa:{m}"), response.rect);
                     crate::scenario::publish_target(&format!("prefs:option:{label}"), response.rect);
                     if enabled && response.clicked() {
@@ -154,7 +154,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::scenario::publish_target("prefs:supersampling_adaptive", response.rect);
                 crate::scenario::publish_target("dialog:Only when the view is still", response.rect);
             });
-            let response = setting::dark_parts_shading(app, ui).on_hover_text(app.tr("prefs.dark_parts_shading_help"));
+            let response = setting::dark_parts_shading(app, ui).backing_on_hover_text(app.tr("prefs.dark_parts_shading_help"));
             crate::scenario::publish_target("prefs:dark_parts_shading", response.rect);
         });
         ui_kit::settings_section(ui, "current_view", app.tr("prefs.graphics_page.current_view"), |ui| {
@@ -262,7 +262,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         width,
                     )
-                    .on_hover_text(help);
+                    .backing_on_hover_text(help);
                     crate::scenario::publish_target(&format!("prefs:{id}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:{label}"), response.rect);
                     if id == "quick_measure" {
@@ -285,10 +285,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             ui.add_enabled_ui(app.preferences.show_frame_rate, |ui| {
                 let response = ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
-                    .on_hover_text(app.tr("settings.frame_rate_details_note"));
+                    .backing_on_hover_text(app.tr("settings.frame_rate_details_note"));
                 crate::scenario::publish_target("prefs:frame_rate_details", response.rect);
             });
-            let profile = setting::profile_operations(app, ui).on_hover_text(app.tr("prefs.profile_operations_note"));
+            let profile = setting::profile_operations(app, ui).backing_on_hover_text(app.tr("prefs.profile_operations_note"));
             crate::scenario::publish_target("prefs:profile_operations", profile.rect);
             ui.horizontal_wrapped(|ui| {
                 ui_kit::settings_inline_note(ui, app.tr("prefs.graphics_page.status_chips"));
@@ -310,7 +310,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         if id == "viewport_section_status" { crate::i18n::tr_label(label) } else { crate::i18n::tr(label) },
                         *value,
                     )
-                    .on_hover_text(crate::i18n::tr(help));
+                    .backing_on_hover_text(crate::i18n::tr(help));
                     crate::scenario::publish_target(&format!("prefs:{id}"), response.rect);
                     if response.clicked() {
                         *value = !*value;
@@ -320,7 +320,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_section(ui, "surfaces_edges", app.tr("prefs.graphics_page.surfaces_edges"), |ui| {
             let response = ui_kit::checkbox(ui, app.tr("ui.cosmetic_thread_markings"), &mut app.preferences.cosmetic_threads)
-                .on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
+                .backing_on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
             crate::scenario::publish_target("prefs:cosmetic_threads", response.rect);
             setting::sketch_halo(app, ui);
             ui_kit::row(ui, app.tr("prefs.section_hatch"), |ui| {
@@ -336,17 +336,17 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.section_hatch = *style;
                 }
             });
-            let tint_new = setting::preview_tint_new_faces(app, ui).on_hover_text(app.tr("prefs.preview_tint_new_faces_help"));
+            let tint_new = setting::preview_tint_new_faces(app, ui).backing_on_hover_text(app.tr("prefs.preview_tint_new_faces_help"));
             crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
-            let cut_tint = setting::cut_preview_tint(app, ui).on_hover_text(app.tr("prefs.cut_preview_tint_help"));
+            let cut_tint = setting::cut_preview_tint(app, ui).backing_on_hover_text(app.tr("prefs.cut_preview_tint_help"));
             crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
             let reference =
-                setting::reference_geometry_through_bodies(app, ui).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
+                setting::reference_geometry_through_bodies(app, ui).backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);
             ui.add_enabled_ui(app.ui.show_grid, |ui| {
-                setting::grid_follows_view(app, ui).on_hover_text(app.tr("ui.grid_follows_view_hint"));
+                setting::grid_follows_view(app, ui).backing_on_hover_text(app.tr("ui.grid_follows_view_hint"));
             });
-            let response = setting::single_surface_analysis(app, ui).on_hover_text(app.tr("prefs.single_surface_analysis_help"));
+            let response = setting::single_surface_analysis(app, ui).backing_on_hover_text(app.tr("prefs.single_surface_analysis_help"));
             crate::scenario::publish_target("prefs:single_surface_analysis", response.rect);
             crate::scenario::publish_target("dialog:Use a single surface analysis", response.rect);
             if response.changed() {
@@ -364,7 +364,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
-                setting::render_previous_geometry_budget(app, ui).on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
+                setting::render_previous_geometry_budget(app, ui).backing_on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
             });
         });
     });
@@ -433,16 +433,19 @@ fn computer_card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
         add(ui);
         return;
     }
-    egui::Frame::NONE
-        .fill(t.pref_well)
-        .stroke(egui::Stroke::new(1.0, t.dialog_border))
-        .corner_radius(f32::from(t.radius_lg) + t.space_2)
-        .inner_margin(egui::Margin::same(t.space_14 as i8))
-        .show(ui, |ui| {
+    ui_kit::Container::show_backing(
+        ui,
+        egui::Frame::NONE
+            .fill(t.pref_well)
+            .stroke(egui::Stroke::new(1.0, t.dialog_border))
+            .corner_radius(f32::from(t.radius_lg) + t.space_2)
+            .inner_margin(egui::Margin::same(t.space_14 as i8)),
+        |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = t.space_12;
             add(ui);
-        });
+        },
+    );
 }
 
 /// The device line: a tile with a monitor, the adapter's name, its backend and renderer, and a badge.
@@ -474,8 +477,8 @@ fn computer_header(app: &SolveApp, ui: &mut egui::Ui) {
             paint_monitor(ui.painter(), egui::Rect::from_center_size(rect.center(), rect.size() * 0.56), t.form_primary);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                ui_kit::text(ui, name, ui_kit::Text::NameCell(true)).on_hover_text(adapter);
-                ui.label(egui::RichText::new(line).monospace().size(t.font_small).color(t.form_dim)).on_hover_text(renderer_details);
+                ui_kit::text(ui, name, ui_kit::Text::NameCell(true)).backing_on_hover_text(adapter);
+                ui.label(egui::RichText::new(line).monospace().size(t.font_small).color(t.form_dim)).backing_on_hover_text(renderer_details);
             });
         });
     });

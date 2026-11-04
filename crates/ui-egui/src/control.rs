@@ -653,8 +653,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.blur" => {
             // Internal rendering harness; deliberately no saved preference or product UI.
             let radius = if let Some(radius) = p.get("radius_px") {
-                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=40.0).contains(v)) else {
-                    return err("radius_px must be finite and between 0 and 40");
+                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=60.0).contains(v)) else {
+                    return err("radius_px must be finite and between 0 and 60");
                 };
                 Some(radius as f32)
             } else {
@@ -673,18 +673,70 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             } else {
                 None
             };
+            // Explicit, labelled evidence fixtures only. They can force a failure, never fake
+            // real renderer support. All validation precedes mutation, including old fields.
+            let fixture = if let Some(fixture) = p.get("fixture") {
+                let Some(fixture) =
+                    fixture.as_str().filter(|s| matches!(*s, "clear" | "gpu-software" | "reduce-transparency" | "web-unsupported" | "guard-60"))
+                else {
+                    return err("unknown blur evidence fixture");
+                };
+                Some(fixture)
+            } else {
+                None
+            };
             if let Some(radius) = radius {
                 if let Err(error) = app.blur.set_radius(radius) {
                     return err(error);
                 }
+                app.blur_session.harness_radius = Some(radius);
                 ctx.request_repaint();
             }
             if let Some(alpha) = alpha {
                 app.blur.set_surface_alpha(alpha);
                 ctx.request_repaint();
             }
+            if let Some(fixture) = fixture {
+                match fixture {
+                    "clear" => {
+                        app.blur_session.harness_unavailable = None;
+                        app.blur_session.harness_radius = None;
+                        app.blur_session.evidence_fixture = None;
+                    }
+                    "gpu-software" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_software");
+                        app.blur_session.evidence_fixture = Some("gpu-software");
+                    }
+                    "reduce-transparency" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_reduce_transparency");
+                        app.blur_session.evidence_fixture = Some("reduce-transparency");
+                    }
+                    "web-unsupported" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_web");
+                        app.blur_session.evidence_fixture = Some("web-unsupported");
+                    }
+                    "guard-60" => {
+                        let radius = app.blur.radius();
+                        for _ in 0..60 {
+                            app.blur_session.guard.observe(radius, 23.0, true);
+                        }
+                        app.blur_session.evidence_fixture = Some("guard-60");
+                    }
+                    _ => {}
+                }
+                ctx.request_repaint();
+            }
+            let availability = crate::prefs::blur_availability(app);
+            let reason = match availability {
+                crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason)),
+                crate::theme_options::Availability::Available => None,
+            };
             ok(
-                json!({"radius_px":app.blur.radius(), "max_radius_px":40, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters()}),
+                json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
+                    "available": availability == crate::theme_options::Availability::Available, "reason": reason,
+                    "evidence_fixture": app.blur_session.evidence_fixture,
+                    "guard": {"tier_cap": app.blur_session.guard.cap, "streak": app.blur_session.guard.streak,
+                        "notice": app.blur_session.guard.notice, "opted_out": app.blur_session.guard.opted_out}}),
             )
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
@@ -1694,7 +1746,7 @@ mod tests {
     #[test]
     fn blur_control_validates_before_mutation_and_reports_no_gpu() {
         let mut h = crate::scenario::Harness::new();
-        for invalid in [json!(-1), json!(41), json!("18"), json!(null)] {
+        for invalid in [json!(-1), json!(61), json!("18"), json!(null)] {
             let reply = h.call("ui.blur", json!({"radius_px":invalid}));
             assert_eq!(reply["ok"], false, "{reply}");
             assert_eq!(h.app.blur.radius(), 0.0);
@@ -1710,6 +1762,43 @@ mod tests {
         assert_eq!(h.app.blur.counters().markers_emitted, 0);
         h.call("ui.blur", json!({"radius_px":0,"surface_alpha":null}));
         assert_eq!(h.app.blur.radius(), 0.0);
+    }
+
+    #[test]
+    fn blur_evidence_fixtures_are_atomic_transient_and_never_fake_support() {
+        let mut h = crate::scenario::Harness::new();
+        let source: Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({"theme_import":source,"theme_options":{"blur-review":{"blur":40}}}))["ok"], true);
+        h.frames(2);
+        let saved = h.app.preferences.theme_options.clone();
+        let revision = h.app.session.revision;
+        for invalid in [json!(null), json!([]), json!("available"), json!("unknown")] {
+            assert_eq!(h.call("ui.blur", json!({"fixture":invalid,"radius_px":8}))["ok"], false);
+            assert_eq!(h.app.blur.radius(), 40.0);
+            assert_eq!(h.app.blur_session.harness_radius, None);
+        }
+        for fixture in ["gpu-software", "reduce-transparency", "web-unsupported"] {
+            let reply = h.call("ui.blur", json!({"fixture":fixture}));
+            assert_eq!(reply["result"]["evidence_fixture"], fixture);
+            assert_eq!(reply["result"]["available"], false);
+            h.frames(2);
+            assert_eq!(h.app.blur.counters().textures_created, 0);
+            assert_eq!(h.app.blur.counters().markers_emitted, 0);
+            assert_eq!(h.app.preferences.theme_options, saved);
+        }
+        h.call("ui.blur", json!({"fixture":"clear"}));
+        h.call("ui.blur", json!({"fixture":"guard-60"}));
+        assert_eq!((h.app.blur_session.guard.cap, h.app.blur_session.guard.notice), (4, true));
+        assert_eq!(h.app.blur_session.evidence_fixture, Some("guard-60"));
+        h.app.blur_session.guard.undo();
+        assert_eq!((h.app.blur_session.guard.cap, h.app.blur_session.guard.opted_out), (5, true));
+        h.call("ui.blur", json!({"fixture":"guard-60"}));
+        assert_eq!(h.app.blur_session.guard.cap, 5);
+        assert_eq!(h.app.session.revision, revision, "quality actions never enter document undo");
+        assert_eq!(h.app.preferences.theme_options, saved);
+        h.call("ui.blur", json!({"fixture":"clear"}));
+        assert!(h.app.blur_session.evidence_fixture.is_none());
+        assert!(matches!(h.app.blur.capability(), crate::blur::Capability::Unavailable(_)), "clearing a fixture cannot manufacture a GPU");
     }
 
     use serde_json::json;
@@ -2546,12 +2635,23 @@ mod tests {
             assert_eq!(call("ui.render", json!({"path": at(&root, "a.png"), "width": 32, "height": 32}), true)["ok"], true);
         }
         assert_eq!(call("ui.screenshot", json!({"path": at(&root, "b.png")}), true)["ok"], true);
+        // Settings profiles are read and written by the app, not the engine, and stay inside too (#11362).
+        let profile = |id: &str, params: Value| json!({"command": id, "params": params});
+        let poc = json!({"format": "solidcraft-profile/1", "name": "scope-poc"});
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"profile": poc})), true)["ok"], true);
+        let inside = json!({"name": "scope-poc", "path": at(&root, "p.json")});
+        assert_eq!(call("engine.execute", profile("settings.profile.export", inside), true)["ok"], true);
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"path": at(&root, "p.json")})), true)["ok"], true);
+        std::fs::write(at(&base, "p.json"), poc.to_string()).unwrap();
         for (method, params) in [
             ("engine.execute", export(at(&out, "a.step"))),
             ("engine.execute", export(at(&root, "../out/a.step"))),
             ("engine.script", json!({"commands": [{"command": "file.export", "params": {"path": at(&out, "a.step")}}]})),
             ("ui.render", json!({"path": at(&out, "a.png"), "width": 32, "height": 32})),
             ("ui.screenshot", json!({"path": at(&out, "b.png")})),
+            ("engine.execute", profile("settings.profile.export", json!({"name": "scope-poc", "path": at(&out, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&base, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&out, "missing.json")}))),
         ] {
             let v = call(method, params, true);
             assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{method}: {v}");

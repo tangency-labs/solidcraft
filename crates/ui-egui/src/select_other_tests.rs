@@ -7,6 +7,50 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
+#[test]
+fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
+    h.frames(4);
+    let body_row = crate::browser::drawn_rows().into_iter().find(|(label, ..)| label == "Body1").unwrap().1.center();
+    h.step(&json!({"move":[body_row.x,body_row.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_bodies, ["Body1"], "establish actual Browser row hover first");
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.viewport.select_other.popup = Some(super::Popup {
+        at: egui::pos2(500.0, 300.0),
+        rows: vec![super::Row {
+            hit: crate::viewport::Hit::Face { body: "Body1".into(), index: 0, point: solidcore_record::Vec3::ZERO },
+            sel: Sel::Body { name: "Body1".into() },
+            label: "Body1".into(),
+            icon: "body",
+        }],
+        total: 1,
+        hovered: Some(0),
+        revision: h.app.session.revision,
+        dialog: false,
+        include_hidden: h.app.preferences.select_other_hidden,
+        lit_body: false,
+        held: Default::default(),
+    });
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
+    h.ctx
+        .run_ui(raw, |ui| {
+            crate::semantic_content::begin(&mut h.app, ui.ctx());
+            // Floating show_workspace calls this real producer before semantic finalization.
+            // Its new body name is deliberately identical to the previous Browser contribution.
+            super::hover_override(&mut h.app);
+            assert_eq!(h.app.viewport.hover_bodies, ["Body1"]);
+            crate::semantic_content::finalize(&mut h.app, ui.ctx());
+        })
+        .textures_delta
+        .clear();
+    assert_eq!(h.app.viewport.hover_bodies, ["Body1"], "fresh external ownership survives missing semantic owners");
+    assert!(crate::browser::drawn_rows().is_empty());
+    super::close(&mut h.app);
+    assert!(h.app.viewport.hover_bodies.is_empty(), "Select Other retains responsibility for clearing its own contribution");
+}
+
 /// A sketch with two lines drawn on top of each other (l1, then l2), off the origin axes.
 fn two_lines() -> (Harness, Value) {
     let mut h = Harness::new();

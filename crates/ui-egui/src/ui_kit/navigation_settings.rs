@@ -1,5 +1,6 @@
 //! Preference compositions for the approved Navigation bar board.
 use super::{Container, Surface, navigation::*};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{icons, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Ui, pos2, vec2};
 
@@ -128,7 +129,7 @@ pub(crate) fn navigation_anchor_picker(ui: &mut Ui, id: &str, selected: usize, l
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), on, *label));
         crate::scenario::publish_target(&format!("prefs:navbar:anchor:{index}"), cell);
-        if response.on_hover_text(*label).clicked() {
+        if response.backing_on_hover_text(*label).clicked() {
             clicked = Some(index);
         }
     }

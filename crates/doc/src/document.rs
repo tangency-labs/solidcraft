@@ -734,6 +734,10 @@ pub enum FeatureKind {
         /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setbacks: Vec<CornerSetback>,
+        /// How two rounds turn where they meet at a sharp side edge: in a mitre (the default) or
+        /// swept round it (a constant-radius, exact, rolling-corner fillet without setbacks only).
+        #[serde(default, skip_serializing_if = "FilletTurn::is_mitre")]
+        turn: FilletTurn,
         /// Round each picked edge's tangent chain with it (the default: edges continuing it
         /// smoothly at its ends, as far as they go), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
@@ -1968,6 +1972,38 @@ pub enum FilletCorner {
 impl FilletCorner {
     pub fn is_rolling(&self) -> bool {
         matches!(self, FilletCorner::Rolling)
+    }
+}
+
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane, such as the rounds along a boss's base at its upright edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletTurn {
+    /// The rounds run on to where they cross and meet in a mitre.
+    #[default]
+    Mitre,
+    /// The rounds end at the side edge and the corner is their section revolved about it, a
+    /// torus tangent to both (`solidcraft_kernel::FilletTurn::Swept`).
+    Swept,
+}
+
+/// Why a swept turn is refused with a fillet's other options: the kernel sweeps the turn of two
+/// constant rounds of one radius, at its own corners only.
+pub const SWEPT_TAKES: &str = "a swept corner turns two constant rounds of one radius: `turn: swept` takes `type: constant`, \
+`corner: rolling`, no `setbacks` and `fit: exact` or `reduce`";
+
+impl FilletTurn {
+    pub fn is_mitre(&self) -> bool {
+        *self == FilletTurn::Mitre
+    }
+
+    /// The kernel's turn.
+    pub fn kernel(self) -> solidcraft_kernel::FilletTurn {
+        match self {
+            FilletTurn::Mitre => solidcraft_kernel::FilletTurn::Mitre,
+            FilletTurn::Swept => solidcraft_kernel::FilletTurn::Swept,
+        }
     }
 }
 

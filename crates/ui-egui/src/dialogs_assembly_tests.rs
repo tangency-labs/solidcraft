@@ -1337,3 +1337,66 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     find_limits(&app, f, id, &d.inputs);
     assert!(f.found_note.is_some() && f.found.is_empty(), "{:?}", f.found_note);
 }
+
+/// Compute in Interference intersects and meshes each overlap on the kernel's workers. On the
+/// window thread (a 1 MiB stack on Windows) the kernel ran out of stack and the app closed
+/// (#11483); here the dialog's own thread has 64 KiB.
+#[test]
+fn interference_meshes_each_overlap_on_the_kernels_stack() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 10)], |id, p| s.execute(id, &p).unwrap());
+    let r = s.execute("inspect.clearance", &json!({"clearance": 0, "nearest": 1})).unwrap();
+    assert_eq!(r["overlaps"].as_array().map(Vec::len), Some(1), "{r}");
+    let st = s.world_state().unwrap();
+    let meshes = std::thread::Builder::new().stack_size(64 << 10).spawn(move || overlap_meshes(&st, &r)).unwrap().join().unwrap();
+    // A's 0..20 and B's 10..30 along X share 10..20.
+    let b = meshes.first().map(Mesh::bounds).expect("the shared volume");
+    assert_eq!(meshes.len(), 1);
+    let near = |p: Vec3, q: [f64; 3]| (p.x - q[0]).abs() < 1e-6 && (p.y - q[1]).abs() < 1e-6 && (p.z - q[2]).abs() < 1e-6;
+    assert!(near(b.min, [10.0, 0.0, 0.0]) && near(b.max, [20.0, 20.0, 10.0]), "{b:?}");
+}
+
+/// With the app running commands off the window thread, Compute in Interference checks on a
+/// thread of its own (a slow pair froze the window until the app was closed, #11483): the
+/// overlap and its shared volume arrive in a later frame, and a check of a design changed
+/// meanwhile is dropped.
+#[test]
+fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_design() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 10)], |id, p| s.execute(id, &p).unwrap());
+    let mut app = SolveApp::new(s, Services::default());
+    app.apply_off_thread = Some(std::time::Duration::ZERO);
+    app.start("inspect.interference");
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let state = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Assembly(Asm::Interference { result, overlaps, check, .. })) => (result.clone(), overlaps.len(), check.is_some()),
+        _ => panic!("the dialog stays open"),
+    };
+    // Compute as its button starts it, then frames until its reply is read.
+    let compute = |app: &mut SolveApp, change: bool| {
+        let c = interference(app, &[], "0");
+        if let Some(Kind::Assembly(Asm::Interference { result, overlaps, check, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+            (*result, *overlaps, *check) = (None, Vec::new(), Some(c));
+        }
+        if change {
+            app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]})).unwrap();
+        }
+        for _ in 0..3000 {
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| crate::dialogs::show(app, ui.ctx()));
+            out.textures_delta.clear();
+            if !state(app).2 {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the check never came back");
+    };
+    compute(&mut app, false);
+    let (result, overlaps, _) = state(&app);
+    let result = result.expect("the check's reply");
+    assert_eq!(result["overlaps"].as_array().map(Vec::len), Some(1), "{result}");
+    assert_eq!(overlaps, 1, "the shared volume, drawn in red");
+    compute(&mut app, true);
+    assert_eq!(state(&app), (None, 0, false), "a check of the design before the change is dropped");
+}

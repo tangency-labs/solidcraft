@@ -5,6 +5,7 @@
 
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 use std::cell::{Cell, RefCell};
 
@@ -464,7 +465,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
                             crate::ui_kit::Slider { step: Some(0.25), format, ..Default::default() },
                         )
                     });
-                    length.on_hover_text(&length_tip);
+                    length.backing_on_hover_text(&length_tip);
                     let teeth = crate::ui_kit::row(ui, "ui.comb_teeth", |ui| {
                         crate::ui_kit::slider(
                             ui,
@@ -473,7 +474,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
                             crate::ui_kit::Slider { integer: true, format: |v| format!("{v:.0}"), ..Default::default() },
                         )
                     });
-                    teeth.on_hover_text(&teeth_tip);
+                    teeth.backing_on_hover_text(&teeth_tip);
                 });
             });
         });

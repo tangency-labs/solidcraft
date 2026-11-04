@@ -1741,6 +1741,75 @@ fn list_commands_filter_by_a_command_id_matches_ids() {
     assert!(ids.iter().all(|id| id.contains("sketch.delete")), "{} commands matched: {ids:?}", ids.len());
 }
 
+/// #11726: `list_commands` narrows by id prefix and by panel, shrinks each entry to id and label
+/// or to chosen keys, and pages; with none of these the reply is the whole catalog as before. A
+/// batch step narrows the same way, and a bad argument is a tool error that names it.
+#[test]
+fn list_commands_narrows_by_prefix_panel_fields_and_page() {
+    let mut s = server();
+    let all = tool(&mut s, "list_commands", json!({}));
+    let all = all.as_array().unwrap();
+    assert!(all.len() > 100 && all[0].get("params").is_some(), "the whole catalog, every key");
+    let ids = |v: &Value| v.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let sketch = tool(&mut s, "list_commands", json!({"prefix": "SKETCH."}));
+    assert!(!ids(&sketch).is_empty() && ids(&sketch).iter().all(|id| id.starts_with("sketch.")), "{:?}", ids(&sketch));
+    let want = all.iter().filter(|c| c["id"].as_str().unwrap().starts_with("sketch.")).count();
+    assert_eq!(ids(&sketch).len(), want, "every sketch command, not only those on a toolbar");
+    let modify = tool(&mut s, "list_commands", json!({"panel": "modify"}));
+    assert!(!ids(&modify).is_empty(), "{modify}");
+    assert!(
+        modify
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["panel"].as_str().unwrap().eq_ignore_ascii_case("modify") || c["tab"].as_str().unwrap().eq_ignore_ascii_case("modify")),
+        "only the whole panel name matches"
+    );
+    let compact = tool(&mut s, "list_commands", json!({"compact": true}));
+    assert_eq!(ids(&compact), ids(&Value::Array(all.clone())), "compact keeps every command");
+    assert!(compact.as_array().unwrap().iter().all(|c| c.as_object().unwrap().keys().eq(["id", "label"].iter())), "{}", compact[0]);
+    assert!(compact.to_string().len() * 5 < Value::Array(all.clone()).to_string().len(), "compact is far smaller");
+    let picked = tool(&mut s, "list_commands", json!({"prefix": "solid.fillet", "fields": ["id", "enabled"], "compact": true}));
+    assert_eq!(picked[0], json!({"id": "solid.fillet", "enabled": picked[0]["enabled"]}), "fields wins over compact");
+    // Pages: together they are the whole match list, in order.
+    let mut paged = Vec::new();
+    let mut offset = json!(0);
+    while let Some(at) = offset.as_u64() {
+        let page = tool(&mut s, "list_commands", json!({"prefix": "sketch.", "compact": true, "limit": 7, "offset": at}));
+        assert_eq!(page["total"], want, "{page}");
+        assert_eq!(page["offset"], at);
+        assert!(page["commands"].as_array().unwrap().len() <= 7);
+        paged.extend(ids(&page["commands"]));
+        offset = page["next_offset"].clone();
+    }
+    assert_eq!(paged, ids(&sketch));
+    let past = tool(&mut s, "list_commands", json!({"limit": 5, "offset": 1_000_000}));
+    assert_eq!((past["commands"].as_array().unwrap().len(), &past["next_offset"]), (0, &Value::Null), "{past}");
+    // A batch step narrows as the tool does.
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "list_commands", "params": {"prefix": "sketch.", "compact": true, "limit": 3}}]}));
+    let step = r["results"][0].clone();
+    assert_eq!(step["commands"].as_array().map(Vec::len), Some(3), "{r}");
+    assert_eq!(step["total"], want, "{r}");
+    for bad in [
+        json!({"limit": 0}),
+        json!({"limit": -1}),
+        json!({"offset": "x"}),
+        json!({"fields": ["nope"]}),
+        json!({"fields": "id"}),
+        json!({"compact": 1}),
+        json!({"prefix": 3}),
+    ] {
+        // The argument schema refuses a wrong type before the tool runs; the tool refuses the rest.
+        let r = raw_tool(&mut s, "list_commands", bad.clone());
+        let text = r["result"]["content"][0]["text"].as_str().or(r["error"]["message"].as_str()).unwrap_or_default().to_string();
+        assert!(r["result"]["isError"] == json!(true) || r["error"]["code"].is_i64(), "{bad}: {r}");
+        let key = bad.as_object().unwrap().keys().next().unwrap().clone();
+        assert!(text.contains(&format!("`{key}`")), "{bad}: the error names the argument: {text}");
+        let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": "list_commands", "params": bad.clone()}]}));
+        assert!(r["result"]["isError"] == json!(true) || r.to_string().contains(&format!("`{key}`")), "{bad} as a step: {r}");
+    }
+}
+
 /// Compatibility shims (docs/compatibility.md): a design saved before the rename (legacy
 /// extension and format tag) opens through MCP, and the legacy resource URIs still read.
 #[test]
@@ -3480,9 +3549,9 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"nonsense": 1}}));
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
     assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.fillet"), 1, "no contract here: the app decides");
+    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();

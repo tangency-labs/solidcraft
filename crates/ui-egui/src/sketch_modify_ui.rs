@@ -729,7 +729,7 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
 
 /// The curves and lone points picked in input `i`, as the engine's `entities` list. A profile
 /// pick expands to every curve of its boundary and its holes (#8390).
-fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
+pub(crate) fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
     let mut out = Vec::new();
     for x in items(inputs, i) {
         match x {

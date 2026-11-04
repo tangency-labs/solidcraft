@@ -2,6 +2,7 @@
 use crate::navigation::NavCaps;
 use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
 use crate::navigation_bar_view;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
 use egui::{Rect, Sense, vec2};
 use serde_json::json;
@@ -363,7 +364,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
         }
         ui_kit::text(ui, app.tr(slot.label), ui_kit::Text::NameCell(true));
     });
-    ui.interact(name, ui.make_persistent_id("slot_help"), Sense::hover()).on_hover_text(app.tr(slot.description));
+    ui.interact(name, ui.make_persistent_id("slot_help"), Sense::hover()).backing_on_hover_text(app.tr(slot.description));
     scenario::publish_rect("prefs:navbar:inspector:name", name);
     scenario::publish_rect("prefs:navbar:inspector:header", bounds);
     let mut actions_ui = ui.new_child(egui::UiBuilder::new().id_salt("slot_actions").max_rect(bounds));
@@ -391,7 +392,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
                 .inner
             })
             .inner
-            .on_hover_text(label);
+            .backing_on_hover_text(label);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
         scenario::publish_target(&format!("prefs:navbar:{key}"), response.rect);
         if response.clicked() {
@@ -414,7 +415,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                     let dragging =
                         egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
                     let (tile, add) = ui_kit::navigation_separator_source(ui, slot.id, app.tr(slot.label), dragging);
-                    let tile = tile.on_hover_text(hint);
+                    let tile = tile.backing_on_hover_text(hint);
                     scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
                     scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
                     if tile.drag_started() {
@@ -441,7 +442,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
                 }
                 let dragging = egui::DragAndDrop::payload::<Drag>(ui.ctx()).is_some_and(|payload| payload.from_menu && payload.id.slot == slot.id);
                 let (tile, add) = ui_kit::navigation_tile(ui, slot.id, app.tr(slot.label), slot.current_icon(app.ui.visual_style), dragging);
-                let tile = tile.on_hover_text(&caption);
+                let tile = tile.backing_on_hover_text(&caption);
                 scenario::publish_target(&format!("prefs:navbar:tile:{}", slot.id), tile.rect);
                 scenario::publish_target(&format!("prefs:navbar:add:{}", slot.id), add.rect);
                 if tile.drag_started() {
