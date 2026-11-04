@@ -16,5 +16,11 @@ solidcore = { path = "../solidcore" }
 solidcore-record = { path = "../solidcore-record" }
 solidcore-convert = { path = "../solidcore-convert" }
 
+# The kernel rig corpus's runner (tests/kernel_cases.rs): its entries are JSON, its records gzip.
+[dev-dependencies]
+flate2 = "1.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
 [lints]
 workspace = true

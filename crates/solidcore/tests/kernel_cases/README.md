@@ -4,7 +4,7 @@
 
 This folder holds the kernel's operation-level cases as data, one entry each, by area: every case of SolidCraft's kernel rig (`tests/kernel-cases/` there, which takes no new cases), and every kernel case added since. An entry holds the operation that made the case's result, its operand bodies as B-rep records (`solidcore-record`), its parameters, the fix set and the expected values. It's the input of solidcore's operation-level gate (#2394). The gate checks whole fillets, shells, booleans, sweeps and threads against exact or closed-form values.
 
-The runner that replays the entries lands with `solidcore-ops`. The operations are SolidCraft's compositions of kernel calls (picks, per-edge fillet sessions, setbacks, the overflow retry, the stitch, error mapping), and their one home is `solidcore-ops` (`docs/layers.md`). Until then, `crates/solidcore-record/tests/kernel_cases_corpus.rs` checks the corpus itself:
+The runner that replays the entries is `crates/solidcore-ops/tests/kernel_cases.rs` (see [Running](#running)). The operations are SolidCraft's compositions of kernel calls (picks, per-edge fillet sessions, setbacks, the overflow retry, the stitch, error mapping), and their one home is `solidcore-ops` (`docs/layers.md`). `crates/solidcore-record/tests/kernel_cases_corpus.rs` checks the corpus itself:
 - every record reads as the record and passes its structural validation;
 - every operation's operands are given records or earlier outputs;
 - the manifest counts every entry.
@@ -29,6 +29,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 - `<area>/<case>.bodies.json.gz`: the entry's operand records, `{"b<n>": record}`, gzip.
 - `fixes.json`: the `UpstreamFixes` flags turned on, the same for every entry (SolidCraft's `fixes()`).
 - `manifest.json`: the counts per area and every case that isn't expressible, with its reasons.
+- `known_failing.json`: the kernel cases that fail today, the one list: `case` (`<area>/<case>`), `issue` and `reason`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet.
 
 ## An entry
 
@@ -60,7 +61,15 @@ New kernel cases come here. A case about a command, the UI or a product rule sta
 
 To export a case from SolidCraft instead of writing it: draft it there as `tests/kernel-cases/<area>/<id>/recipe.json` and `expected.json`, run `cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli --export DIR`, copy `DIR/<area>/<id>.json` and its `.bodies.json.gz` here, and delete the draft there.
 
-Today `cargo test -p solidcore-record --test kernel_cases_corpus` checks the structure (the three checks at the top); the runner that executes the entries and grades them against `expected` arrives with `solidcore-ops` (stage 3b).
+`cargo test -p solidcore-record --test kernel_cases_corpus` checks the structure (the three checks at the top).
+
+## Running
+
+```sh
+cargo test --release -p solidcore-ops --test kernel_cases -- --ignored --nocapture
+```
+
+replays every entry through `solidcore-ops`' public operations, with the fixes in `fixes.json`, and grades it against its `rig` values (a hand-written entry, against `expected`): the bodies' count, their face, edge and vertex counts against the records' (`outcome.raw_counts`; the rig's merge faces across analytic surfaces) exactly, the volume within `expected.tolerance` (the rig's relative 1e-3 where none is given), and every refusal where the rig's trace has one. It prints, per area, pass, fail, unsupported (not the kernel's alone, rated unsupported by the rig, or not carried by the conversion yet), unported (an operation `solidcore-ops` doesn't have yet, named) and known-failing, and fails on a case that fails, a listed case whose result moves from the rig's (fixed, or failing differently: shrink the list), or a hang. The test is `#[ignore]`d, so the workspace run skips it; run it with `--ignored`. Environment: `KERNEL_CASES_AREA` (comma-separated areas, `ladder` taking every tier: the CI shards), `KERNEL_CASES_CASE` (a substring of the case's path), `KERNEL_CASES_TIMEOUT_S` (180 by default), `KERNEL_CASES_REPORT` (a file for the table) and `KERNEL_CASES_REPORT_ONLY` (report without failing).
 
 ## Updating
 
