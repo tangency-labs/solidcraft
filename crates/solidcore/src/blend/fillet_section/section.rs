@@ -29,6 +29,7 @@ use super::tay::{
     Ring, Tay,
 };
 use crate::error::{Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, PI};
@@ -137,6 +138,9 @@ pub struct GnLawRound<'a> {
     pub law: &'a BSplineCurve,
     /// `pPoints`.
     pub points: &'a [TsectPnt],
+    /// Not the fork's (#430): the t the round runs over, within the points' (`None`: the
+    /// points', as the fork's); the points about its ends seed its end stations there.
+    pub range: Option<Extent1d>,
 }
 
 /// What `Build` makes: the surface, and with a law and `bReplaceRails` the centre line it
@@ -1295,8 +1299,27 @@ impl GnSectionFsg {
             }
             i_min = t_front;
             i_max = t_back;
+            if let Some(r) = lr.range {
+                let inside = r.min() >= t_front && r.max() <= t_back && r.max() > r.min();
+                if !inside {
+                    // "the round's range is not within its stations"
+                    return Err(SolidError::sm_err(OP));
+                }
+                i_min = r.min();
+                i_max = r.max();
+            }
             let law_scale = smax(1.0, i_max - i_min);
-            let mut at: Vec<f64> = pts.iter().map(|p| p.0).collect();
+            let mut at: Vec<f64> = if lr.range.is_none() {
+                pts.iter().map(|p| p.0).collect()
+            } else {
+                let mut at = vec![i_min, i_max];
+                for p in &pts {
+                    if p.0 > i_min && p.0 < i_max {
+                        at.push(p.0);
+                    }
+                }
+                at
+            };
             for c in [lr.leader, lr.law] {
                 for kn in c.knots(None)?.0 {
                     if kn > i_min + 1.0e-9 * law_scale && kn < i_max - 1.0e-9 * law_scale {

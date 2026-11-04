@@ -38,6 +38,7 @@
 //! | [`VariableRadiusFs`]                                     | `SmVariableRadiusFS` (members; `Drop` is the destructor) |
 //! | [`VariableRadiusFs::fillet_law`], [`VariableRadiusFs::fillet_law_orientation`], [`VariableRadiusFs::fillet_law_interval`], [`VariableRadiusFs::set_fillet_law_interval`] | `GetFilletLaw`, `GetFilletLawOrientation`, `GetFilletLawInterval`, `SetFilletLawInterval` |
 //! | [`FilletLaw::corner_parameters`] | `SmFilletLaw::GetCornerParameters`, `SmBSplineFilletLaw::GetCornerParameters` (the fork's 6eecf04) |
+//! | [`VariableRadiusFs::radius_corner_parameters`], [`VariableRadiusFs::is_at_radius_corner`], [`VariableRadiusFs::radius_parameter`] | `SmVariableRadiusFS::GetRadiusCornerParameters`, `IsAtRadiusCorner`, `GetRadiusParameter` (the fork's 6eecf04) |
 //! | [`VariableRadiusFs::offset_radii_can_change`]            | `SmVariableRadiusFS::OffsetRadiiCanChange`            |
 //! | [`VariableRadiusFs::set_extension_flags`]                | `SmVariableRadiusFS::SetExtensionFlags`               |
 //! | [`VariableRadiusFs::setup_offset_values`]                | `SmVariableRadiusFS::SetupOffsetValues`               |
@@ -2079,6 +2080,50 @@ impl VariableRadiusFs {
     /// `SetFilletLawInterval`.
     pub fn set_fillet_law_interval(&mut self, interval: Extent1d) {
         self.law_interval = interval;
+    }
+
+    /// `GetRadiusCornerParameters` (the fork's 6eecf04, not upstream): the edge parameters
+    /// where the radius law has a corner, ascending ([`FilletLaw::corner_parameters`] over
+    /// the law's interval and orientation). Under `fixes.fillet_gn_section_generator` (the
+    /// law corners of WR-685); none without it, so that the trace, its flush and the
+    /// executive see no corner and are as before.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletLaw::corner_parameters`].
+    pub fn radius_corner_parameters(&self, k: &Kernel) -> Result<Vec<f64>> {
+        if !k.fixes.fillet_gn_section_generator {
+            return Ok(Vec::new());
+        }
+        self.law
+            .corner_parameters(&self.law_interval, self.law_orientation)
+    }
+
+    /// `IsAtRadiusCorner` (the fork's 6eecf04): whether the point's law parameter
+    /// (`m_adUserDoubles[0]`, see `SetupOffsetValues`) is at one of
+    /// [`Self::radius_corner_parameters`], within `1e-9` of the law interval's size;
+    /// `false` where those fail.
+    #[must_use]
+    pub fn is_at_radius_corner(&self, k: &Kernel, point: &TsectPnt) -> bool {
+        let Ok(corners) = self.radius_corner_parameters(k) else {
+            return false;
+        };
+        let tol = 1.0e-9 * (1.0 + self.law_interval.min().abs() + self.law_interval.max().abs());
+        let t = point.user_doubles.first().copied().unwrap_or(f64::NAN);
+        corners.iter().any(|&corner| (t - corner).abs() <= tol)
+    }
+
+    /// `GetRadiusParameter` (the fork's 6eecf04): the point's edge parameter (its law
+    /// parameter, `m_adUserDoubles[0]`) where the law has corners; `None` where it has none
+    /// or they fail.
+    #[must_use]
+    pub fn radius_parameter(&self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
+        match self.radius_corner_parameters(k) {
+            Ok(corners) if !corners.is_empty() => {
+                Some(point.user_doubles.first().copied().unwrap_or(f64::NAN))
+            }
+            _ => None,
+        }
     }
 
     /// `SmVariableRadiusFS::GetJacobianSize`: 5.

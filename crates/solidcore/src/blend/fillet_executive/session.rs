@@ -108,6 +108,7 @@ mod ease;
 pub(crate) mod finish;
 pub mod fit_size;
 mod keep_features;
+mod law_corners;
 mod original_merge;
 mod original_trim;
 mod outline_rims;
@@ -322,6 +323,10 @@ struct SessionObjects<'target> {
     /// asked to be set back, before the corners are made. Read only with
     /// `Kernel::fixes.fillet_blend_corner`.
     set_back_fills: Vec<crate::blend::blend_corner::setback::SetBackFill>,
+    /// The fork's `m_vRadiusCornerSurfaces` and `m_vRadiusCornerPieces` (6eecf04, 58d03ef):
+    /// the fillet surfaces noted before the merge where their radius law turns, which the
+    /// split after it finds again ([`law_corners`]).
+    radius_corner_surfaces: Vec<law_corners::RadiusCornerSurface>,
     /// (not upstream, #2489) The marks of the faces the session made, while
     /// `Kernel::blend_face_log` is on (`blend_face_log`).
     blend_face_marks: Vec<AttributeHandle>,
@@ -1638,6 +1643,7 @@ impl<'target> FilletSession<'target> {
                 swept_turns: false,
                 set_back_vertices: Vec::new(),
                 set_back_fills: Vec::new(),
+                radius_corner_surfaces: Vec::new(),
                 blend_face_marks: Vec::new(),
                 chamfer_corner: crate::blend::blend_corner::BlendChamferCorner::Mitre,
             },

@@ -222,7 +222,8 @@ fn generator_round(
                 law: None,
             }),
         )
-        .unwrap();
+        .unwrap()
+        .0;
     (s, r1)
 }
 
@@ -492,6 +493,7 @@ fn a_revolved_torus_stays_the_torus() {
                 law: None,
             }),
         )
-        .unwrap();
+        .unwrap()
+        .0;
     assert!(!is_definition(&s), "{:?}", s.kind());
 }

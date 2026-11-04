@@ -110,6 +110,79 @@ impl FilletSession<'_> {
         Ok(())
     }
 
+    /// With the log on, the kind face `face` of the target is marked with (`None` when it
+    /// is not marked, and always with the log off).
+    ///
+    /// # Errors
+    ///
+    /// A mark that is not live, not a tag or names no kind.
+    pub(super) fn target_blend_face_kind(
+        &self,
+        k: &Kernel,
+        face: FaceId,
+    ) -> Result<Option<BlendFaceKind>> {
+        if k.blend_face_log.is_none() {
+            return Ok(None);
+        }
+        let key = self.target_identity(EntityRef::Face(face)).key;
+        let Some(handle) = self
+            .objects
+            .attributes
+            .find_attribute(key, ids::FILLET_BLEND_FACE)
+        else {
+            return Ok(None);
+        };
+        let attribute = self
+            .objects
+            .attributes
+            .get(handle)
+            .ok_or_else(|| invalid("blend face mark is not live"))?;
+        let AttributeValue::Tag(tag) = attribute.value() else {
+            return Err(invalid("blend face mark is not a tag attribute"));
+        };
+        BlendFaceKind::from_code(tag.primary_id)
+            .map(Some)
+            .ok_or_else(|| invalid("blend face mark names no kind"))
+    }
+
+    /// With the log on, marks face `face` of the target with `kind` in place of any mark it
+    /// has: a face the session makes on the target after the merge, or one that replaces a
+    /// marked face (the split's rebuilt faces at a radius law's corners).
+    ///
+    /// # Errors
+    ///
+    /// Those of the attribute store.
+    pub(super) fn mark_target_blend_face(
+        &mut self,
+        k: &Kernel,
+        face: FaceId,
+        kind: BlendFaceKind,
+    ) -> Result<()> {
+        if k.blend_face_log.is_none() {
+            return Ok(());
+        }
+        let key = self.target_identity(EntityRef::Face(face)).key;
+        if let Some(old) = self
+            .objects
+            .attributes
+            .find_attribute(key, ids::FILLET_BLEND_FACE)
+        {
+            self.objects.attributes.destroy(old)?;
+        }
+        let mark = Attribute::tag(
+            ids::FILLET_BLEND_FACE,
+            TagData {
+                primary_id: kind.code(),
+                ..TagData::default()
+            },
+            Behavior::Copy,
+        );
+        let handle = self.objects.attributes.insert(mark)?;
+        self.objects.attributes.add_attribute(key, handle)?;
+        self.objects.blend_face_marks.push(handle);
+        Ok(())
+    }
+
     /// After filleting, with the log on: the target's marked faces, in its face order, go
     /// to the log as this session's entry, and every mark is deleted. Runs whether
     /// filleting succeeded or not (only a success's entry is kept).

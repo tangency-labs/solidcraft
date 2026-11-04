@@ -26,3 +26,4 @@ pub mod fillet_solver;
 pub mod fillet_standard_solver;
 pub mod hcr;
 pub mod identify_fillet;
+pub mod law_corners;

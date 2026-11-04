@@ -333,43 +333,7 @@ impl FilletSession<'_> {
         k: &mut Kernel,
         edit: impl FnOnce(&mut Kernel, &mut Brep, &mut NotifyEnv<'_>, BrepIdentity<'_>) -> Result<R>,
     ) -> Result<R> {
-        let serial = self.objects.target_serial;
-        let key_of = |entity| p3::topology_ref(serial, entity);
-        let keys = |object| match object {
-            CacheObject::Brep => key_of(EntityRef::Brep(BrepId::from_index(0))),
-            CacheObject::Other(owner) => owner,
-            object => crate::topology::brep::p2::caller_cache_key(&key_of, object),
-        };
-        let owner_of = |_: ObjectRef| None;
-        let identity = BrepIdentity {
-            brep_id: BrepId::from_index(
-                u32::try_from(serial)
-                    .map_err(|_| invalid("target body identity exceeds query domain"))?,
-            ),
-            keys: &keys,
-            owner_of: &owner_of,
-        };
-        let SessionObjects {
-            target,
-            notification_records,
-            attributes,
-            ..
-        } = &mut self.objects;
-        if k.context.issued_brep_serial(target.notify_identity_slot()) != Some(serial) {
-            return Err(invalid(
-                "target body belongs to another notification context",
-            ));
-        }
-        crate::geom::context::Context::with_notification_context(k, |k, context| {
-            p3::seed_records(notification_records, target, &key_of);
-            let mut env = NotifyEnv {
-                records: notification_records,
-                attributes,
-                context: Some(context),
-                key_of: &key_of,
-            };
-            edit(k, target, &mut env, identity)
-        })?
+        with_target_env_of(&mut self.objects, k, edit)
     }
 
     /// WR-706: whether the lamina edge `e` of `sheet` is a side of a section's flat face
@@ -1340,4 +1304,50 @@ impl FilletSession<'_> {
             )
         })
     }
+}
+
+/// [`FilletSession`]'s target edit through its notifications, on its objects alone (for
+/// the session's other steps, which hold other fields of the session meanwhile).
+pub(super) fn with_target_env_of<R>(
+    objects: &mut SessionObjects<'_>,
+    k: &mut Kernel,
+    edit: impl FnOnce(&mut Kernel, &mut Brep, &mut NotifyEnv<'_>, BrepIdentity<'_>) -> Result<R>,
+) -> Result<R> {
+    let serial = objects.target_serial;
+    let key_of = |entity| p3::topology_ref(serial, entity);
+    let keys = |object| match object {
+        CacheObject::Brep => key_of(EntityRef::Brep(BrepId::from_index(0))),
+        CacheObject::Other(owner) => owner,
+        object => crate::topology::brep::p2::caller_cache_key(&key_of, object),
+    };
+    let owner_of = |_: ObjectRef| None;
+    let identity = BrepIdentity {
+        brep_id: BrepId::from_index(
+            u32::try_from(serial)
+                .map_err(|_| invalid("target body identity exceeds query domain"))?,
+        ),
+        keys: &keys,
+        owner_of: &owner_of,
+    };
+    let SessionObjects {
+        target,
+        notification_records,
+        attributes,
+        ..
+    } = objects;
+    if k.context.issued_brep_serial(target.notify_identity_slot()) != Some(serial) {
+        return Err(invalid(
+            "target body belongs to another notification context",
+        ));
+    }
+    crate::geom::context::Context::with_notification_context(k, |k, context| {
+        p3::seed_records(notification_records, target, &key_of);
+        let mut env = NotifyEnv {
+            records: notification_records,
+            attributes,
+            context: Some(context),
+            key_of: &key_of,
+        };
+        edit(k, target, &mut env, identity)
+    })?
 }

@@ -792,15 +792,20 @@ fn c1_collect_points(
 
     // Now, compute 'through points' from all internal G1 knots
     // (the size is re-read every iteration, as upstream's GetSize())
+    // SolidCraft (the fork's 6eecf04, under `fillet_gn_section_generator`): the corners of
+    // the radius law are through points too, after the G1 knots, so the trace has a point
+    // where the fillet turns (a failed one fails the trace, as a G1 knot's does).
+    let corner_knots = ops.radius_corner_parameters(cx.k)?;
     let mut k = 0;
-    while k < ops.solver().g1_knots.len() {
+    while k < ops.solver().g1_knots.len() + corner_knots.len() {
         // get position and tangent at G1 knot (status checked, values unused)
-        let knot = ops
-            .solver()
-            .g1_knots
-            .get(k)
-            .copied()
-            .ok_or_else(|| invalid("G1 knot index out of range"))?;
+        let knot = match ops.solver().g1_knots.get(k) {
+            Some(&knot) => knot,
+            None => corner_knots
+                .get(k - ops.solver().g1_knots.len())
+                .copied()
+                .ok_or_else(|| invalid("G1 knot index out of range"))?,
+        };
         st.edge_curve.evaluate(cx.k, knot, 1, true, false)?;
 
         // guess point: GetSurface(0) point nearest to the end of the binormal (half
@@ -4666,6 +4671,21 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.ops.offset_radii_can_change()
     }
 
+    /// The solver's virtual `GetRadiusCornerParameters` (the fork's 6eecf04).
+    fn radius_corner_parameters(&mut self, k: &Kernel) -> Result<Vec<f64>> {
+        self.ops.radius_corner_parameters(k)
+    }
+
+    /// The solver's virtual `IsAtRadiusCorner` (the fork's 6eecf04).
+    fn is_at_radius_corner(&mut self, k: &Kernel, point: &TsectPnt) -> bool {
+        self.ops.is_at_radius_corner(k, point)
+    }
+
+    /// The solver's virtual `GetRadiusParameter` (the fork's 6eecf04).
+    fn radius_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
+        self.ops.radius_parameter(k, point)
+    }
+
     /// `GetSurface(rail)->Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` on the solver's
     /// own offset surface (a base extension the evaluation makes is kept, as
     /// upstream's `const` evaluators store it), as `ComputeSurfaceValues` evaluates it.
@@ -4784,6 +4804,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
                     law: v.fillet_law().clone(),
                     interval: v.fillet_law_interval(),
                     reverse: v.fillet_law_orientation(),
+                    span: None,
                 }),
                 None => None,
             }
@@ -4815,20 +4836,23 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             ang_tol_rad: this_ang_tol_rad,
             law,
         };
-        generator
-            .create_surface_replacing_uv(
-                k,
-                approx_tol_3d,
-                solver_type,
-                Some(center_line),
-                curve1,
-                curve2,
-                points,
-                [&sur0, &sur1],
-                [uv1, uv2],
-                Some(&ball),
-            )
-            .map(Some)
+        let (surface, kept) = generator.create_surface_replacing_uv(
+            k,
+            approx_tol_3d,
+            solver_type,
+            Some(center_line),
+            curve1,
+            curve2,
+            points,
+            [&sur0, &sur1],
+            [uv1, uv2],
+            Some(&ball),
+        )?;
+        // the fork's `rFilletSolver.AddLawCornerPieces` (7babe17)
+        if let Some(kept) = kept {
+            self.ops.solver_mut().law_corner_pieces.push(kept);
+        }
+        Ok(Some(surface))
     }
 
     fn set_fillet_surface(

@@ -127,7 +127,7 @@ use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_intersector::HandlingAlgorithmType;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_standard_solver::p1::{
-    BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg,
+    BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg, VariableRadiusFs,
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
@@ -453,6 +453,12 @@ impl FilletSurfaceGenerator {
     /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
     /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
     /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
+    /// With it and `fixes.fillet_gn_section_generator`, a round whose centre line or a
+    /// rail turns at a knot (a corner of its radius law) is skinned piece by piece between
+    /// the turns and the pieces joined there
+    /// ([`CircularCrossSectionFsg::piecewise_surface`], the fork's 6eecf04); for a ball
+    /// whose radius varies the pieces are returned too, for the solver to keep (the fork's
+    /// `AddLawCornerPieces`, 7babe17).
     #[allow(clippy::too_many_arguments)]
     pub fn create_surface_replacing_uv(
         &mut self,
@@ -466,12 +472,14 @@ impl FilletSurfaceGenerator {
         surfaces: [&Surface; 2],
         uv: [&mut BSplineCurve; 2],
         ball: Option<&crate::blend::fillet_standard_solver::p2::CircleBall>,
-    ) -> Result<Surface> {
+    ) -> Result<(Surface, Option<crate::blend::law_corners::LawCornerPieces>)> {
         use crate::blend::fillet_standard_solver::p1::RailSurface;
         if let Self::GnSection(g) = self {
             let center =
                 center_line.ok_or_else(|| SolidError::invalid_input(OP, "NULL centre line"))?;
-            return g.create_surface(k, approx_tol_3d, center, [rail1, rail2], surfaces, uv);
+            return g
+                .create_surface(k, approx_tol_3d, center, [rail1, rail2], surfaces, uv)
+                .map(|s| (s, None));
         }
         let [uv1, uv2] = uv;
         let mut center_line = center_line;
@@ -489,7 +497,37 @@ impl FilletSurfaceGenerator {
                 [&mut *uv1, &mut *uv2],
                 ball,
             )? {
-                return Ok(s);
+                return Ok((s, None));
+            }
+            // the fork's `SmGnSectionFSG::CircleSurface` (6eecf04, 5fbffc9): where the
+            // centre line or a rail turns, the round skinned piece by piece and joined
+            if k.fixes.fillet_gn_section_generator {
+                use crate::blend::fillet_standard_solver::touch_circle::{
+                    corner_angle, fillet_curve_corners,
+                };
+                let corners =
+                    fillet_curve_corners(center, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
+                if !corners.is_empty() {
+                    // (each piece by its definition where it is one, #430)
+                    let definition =
+                        crate::blend::fillet_standard_solver::p2::PieceDefinitionInputs {
+                            points,
+                            surfaces,
+                            uv: [&mut *uv1, &mut *uv2],
+                            ball,
+                        };
+                    let (s, kept) = g.piecewise_surface(
+                        k,
+                        approx_tol_3d,
+                        solver_type,
+                        center,
+                        rail1,
+                        rail2,
+                        &corners,
+                        Some(definition),
+                    )?;
+                    return Ok((Surface::from(s), kept));
+                }
             }
         }
         // (a chamfer between NURBS faces is its definition, the chord: #2486)
@@ -504,7 +542,7 @@ impl FilletSurfaceGenerator {
                 [&mut *uv1, &mut *uv2],
                 ball,
             )? {
-                return Ok(s);
+                return Ok((s, None));
             }
         }
         let uv = [uv1, uv2];
@@ -527,6 +565,7 @@ impl FilletSurfaceGenerator {
                 uv_curve: Some(uv2),
             },
         )
+        .map(|s| (s, None))
     }
 }
 
@@ -677,6 +716,10 @@ pub struct FilletSolver {
     /// ([`crate::blend::fillet_executive::session::FilletSession::prepare_chamfers`]),
     /// which its surface by its definition keeps (solidcore's, #2486).
     pub chamfer: Option<crate::surface::procedural_blend::chamfer::ChamferDefinition>,
+    /// The fork's `m_vLawCornerPieces` (7babe17; `AddLawCornerPieces`): the rounds this
+    /// solver skinned piece by piece between their radius law's corners, as their exact
+    /// pieces ([`crate::blend::law_corners::LawCornerPieces`]).
+    pub law_corner_pieces: Vec<crate::blend::law_corners::LawCornerPieces>,
     /// `m_vG1Knots`.
     pub g1_knots: Vec<f64>,
     /// Offset surfaces [`FilletSolver::set_surface`] displaced: upstream does not
@@ -729,6 +772,7 @@ impl FilletSolver {
             g1_knots: Vec::new(),
             detached: Vec::new(),
             chamfer: None,
+            law_corner_pieces: Vec::new(),
         }
     }
 
@@ -2176,11 +2220,38 @@ pub trait FilletSolverOps: AsFilletSolverOps {
     }
 
     /// `SM_CAST_PTR(SmVariableRadiusFS, this)`: mutable borrow when the concrete solver
-    /// is a [`VariableRadiusFs`](crate::blend::fillet_standard_solver::p1::VariableRadiusFs).
-    fn variable_radius_mut(
-        &mut self,
-    ) -> Option<&mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs> {
+    /// is a [`VariableRadiusFs`].
+    fn variable_radius_mut(&mut self) -> Option<&mut VariableRadiusFs> {
         None
+    }
+
+    /// `GetRadiusCornerParameters` (virtual, the fork's 6eecf04): the parameters on the
+    /// filleted edge where the radius has a corner. None for the base; the variable radius
+    /// solver's [`VariableRadiusFs::radius_corner_parameters`].
+    ///
+    /// # Errors
+    ///
+    /// Those of the variable radius solver's law.
+    fn radius_corner_parameters(&mut self, k: &Kernel) -> Result<Vec<f64>> {
+        match self.variable_radius_mut() {
+            // (the inherent methods: a method call on `vr` would resolve to this trait's)
+            Some(vr) => VariableRadiusFs::radius_corner_parameters(vr, k),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// `IsAtRadiusCorner` (virtual, the fork's 6eecf04): whether `point` lies where the
+    /// radius has a corner. `false` for the base.
+    fn is_at_radius_corner(&mut self, k: &Kernel, point: &TsectPnt) -> bool {
+        self.variable_radius_mut()
+            .is_some_and(|vr| VariableRadiusFs::is_at_radius_corner(vr, k, point))
+    }
+
+    /// `GetRadiusParameter` (virtual, the fork's 6eecf04): the edge parameter of `point`,
+    /// `None` where the solver has no radius corners (and for the base).
+    fn radius_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
+        self.variable_radius_mut()
+            .and_then(|vr| VariableRadiusFs::radius_parameter(vr, k, point))
     }
 
     /// `((SmConstantDistanceFS*)this)->GetDistance()`: the rail distance of a
