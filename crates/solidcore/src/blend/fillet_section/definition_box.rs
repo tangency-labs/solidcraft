@@ -1,14 +1,14 @@
 //! A face that is a blend by its definition, enclosed over a box of its `(u, v)` for the
-//! certificate of a blend on it (opt-in, not upstream): its feet over the box's s by
+//! certificate of a blend on it (not upstream): its feet over the box's s by
 //! Krawczyk's operator on the faces under them (every polynomial piece the feet's box
 //! covers, hulled), then its arc in rounded interval arithmetic, in the centred form where
 //! one order more is held. Only a round of the ball's circle (a constant radius) between
 //! NURBS faces is enclosed.
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletSection.cpp`
-//! (tangency-labs/smlib@c5b6bb7, smlib#101, merged at 852dd8c). Only
-//! [`crate::kernel::UpstreamFixes::fillet_round_on_round_as_definition`] builds a blend
-//! on such a face.
+//! (tangency-labs/smlib@c5b6bb7, smlib#101, merged at 852dd8c). A round of one radius
+//! is built on such a face as its definition (WR-714) where
+//! [`crate::kernel::UpstreamFixes::fillet_round_as_definition`] builds the inner one.
 //!
 //! | Rust                                  | Fork (`SmFilletSection.cpp`)                     |
 //! |---------------------------------------|--------------------------------------------------|

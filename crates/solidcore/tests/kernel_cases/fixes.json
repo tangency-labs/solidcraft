@@ -306,7 +306,6 @@
   "fillet_blend_corner",
   "fillet_exact_arc_sections",
   "fillet_exact_arc_spans",
-  "fillet_round_on_round_as_definition",
   "fillet_overflow_trim_at_creases",
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",

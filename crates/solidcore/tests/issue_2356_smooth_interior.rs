@@ -55,8 +55,6 @@ fn fixture_order(curved: bool, order: u32) -> (Kernel, ProceduralBlend) {
     let mut k = Kernel::default();
     k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
-    // Sided definition evaluation is provided by #2322, not #2274 alone.
-    k.fixes.fillet_round_on_round_as_definition = true;
     let wall = Surface::from(
         BSplineSurface::create_bilinear_surface(
             Point3::ZERO,
@@ -195,7 +193,7 @@ fn preparation_refuses_invalid_partitions_and_missing_opt_ins() {
         stations[0].parameter() + stations[0].lambda()
             < stations[1].parameter() - stations[1].lambda()
     );
-    k.fixes.fillet_round_on_round_as_definition = false;
+    k.fixes.fillet_round_as_definition = false;
     assert!(plan.jump_at(&k, 0, 0.5).is_err());
     assert!(SmoothInteriorPlan::prepare(&k, &pb, &[0.0, 0.5, 1.0]).is_err());
 }

@@ -408,30 +408,6 @@ fn round_on_a_definition_is_its_definition() {
     assert!(o.crossings >= 4 && o.missed == 0, "{o:?}");
 }
 
-/// Without WR-714 the round on the round is built as before: not a definition (the
-/// fork's known-failing mark at 7959c0e, "a round on a face that is a blend by its
-/// definition is not built as its definition: the certificate does not enclose the inner
-/// definition yet"), and the body still checks clean.
-#[test]
-fn without_wr714_the_round_on_the_round_is_built_as_before() {
-    let mut k = solidcraft_kernel();
-    k.fixes.fillet_round_on_round_as_definition = false;
-    let o = round_on_a_round(&mut k);
-    println!(
-        "{} round(s) on a round by definition, {} spans: sections off the ball's circle by {:.3e}, the net at {:.3} of its bound; {} definition evaluations, {} station solves; the rail crosses the inner round's stations {} times, {} without a station of its own",
-        o.graded,
-        o.spans,
-        o.circle,
-        o.net,
-        o.counts.evaluations,
-        o.counts.solves,
-        o.crossings,
-        o.missed
-    );
-    assert!(o.sound, "{o:?}");
-    assert_eq!(o.graded, 0, "{o:?}");
-}
-
 /// The net `net` with its distinct inner knot `kv` along s taken out (every copy of it),
 /// one control row fewer per copy: the net a knot removal leaves. Only its knots along s
 /// are read by the enclosure of its definition (they name the piece whose station seeds

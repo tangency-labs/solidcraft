@@ -402,9 +402,7 @@ pub struct StationMemo {
 /// the side after s, or with `before` on the side before it (c5b6bb7). A foot on a knot
 /// line takes its support's partials on the piece it moves into along s (comes from, with
 /// `before`), the way the seed moves; the station is solved again with those sides where
-/// that is not the piece a solve without sides takes. With
-/// [`crate::kernel::UpstreamFixes::fillet_round_on_round_as_definition`] off, `before` is
-/// not taken and no station is solved again (fork 5e8c9c1, before c5b6bb7).
+/// that is not the piece a solve without sides takes.
 ///
 /// One station solve: the feet by Newton from the seeds, then their series in s (and in
 /// tau for the G^n jets) order by order, as the G^n section's stations are built. The
@@ -433,9 +431,6 @@ pub fn evaluate_definition(
 ) -> Result<Vec<Vec<Vec3>>> {
     let def = pb.definition();
     count_evaluation(k);
-    // the side of s (c5b6bb7): only with WR-714's flag; before it the side after s
-    let sides_taken = k.fixes.fillet_round_on_round_as_definition;
-    let before = before && sides_taken;
     let n = def.order as usize;
     // the station: the jets to order n in tau (G^n), or the rails and the centre one
     // order more in s (the circle's m')
@@ -529,76 +524,63 @@ pub fn evaluate_definition(
             gn_solve_station_with(k, faces, &def.leader, s, seed, r, def.sides, tr, tol, opts);
         count_solve(k, steps);
         let mut st = solved?.0;
-        let mut sided = false;
-        if sides_taken {
-            // a foot on a knot line of its support: the support's partials there on the
-            // piece the foot moves into along s (comes from, `before`), as the stations'
-            // series were taken; the way it moves is the seed's (the stations' feet and
-            // their s-derivatives, interpolated)
-            let mut dir = [0.0_f64; 4];
-            for (f, sd) in def.seeds.iter().enumerate() {
-                let w = sd.evaluate(s, 1, !before, false)?;
-                let w1 = w.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
-                if let Some(x) = dir.get_mut(2 * f) {
-                    *x = w1.x;
-                }
-                if let Some(x) = dir.get_mut(2 * f + 1) {
-                    *x = w1.y;
-                }
+        // a foot on a knot line of its support: the support's partials there on the
+        // piece the foot moves into along s (comes from, `before`), as the stations'
+        // series were taken; the way it moves is the seed's (the stations' feet and
+        // their s-derivatives, interpolated)
+        let mut dir = [0.0_f64; 4];
+        for (f, sd) in def.seeds.iter().enumerate() {
+            let w = sd.evaluate(s, 1, !before, false)?;
+            let w1 = w.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
+            if let Some(x) = dir.get_mut(2 * f) {
+                *x = w1.x;
             }
-            let on = st.x.map(|x| x.at(0, 0));
-            let (sides, other) = feet_on_knots(k, faces, on, dir, before, tr.s() + tr.e() + 1)?;
-            if other {
-                let opts = StationOptions {
-                    law,
-                    top,
-                    sides: Some(sides),
-                    before,
-                };
-                let (solved, steps) = gn_solve_station_with(
-                    k,
-                    faces,
-                    &def.leader,
-                    s,
-                    on,
-                    r,
-                    def.sides,
-                    tr,
-                    tol,
-                    opts,
-                );
-                count_solve(k, steps);
-                st = solved?.0;
+            if let Some(x) = dir.get_mut(2 * f + 1) {
+                *x = w1.y;
             }
-            // the side matters only at one of the definition's stations: a foot on a knot
-            // line, or s a knot of the leader or the law; elsewhere the station is the same
-            // from either side
-            sided = sides.iter().any(|&q| q != 0);
-            // (the leader's derivatives to order s + 1 enter, its unit tangent's; the law's
-            // to order s; a curve is C^(p - multiplicity) at a knot, its derivatives to
-            // that order the same either side)
-            let along = [(Some(&def.leader), ts + 1), (def.law.as_ref(), ts)];
-            for (curve, used) in along {
-                if sided {
+        }
+        let on = st.x.map(|x| x.at(0, 0));
+        let (sides, other) = feet_on_knots(k, faces, on, dir, before, tr.s() + tr.e() + 1)?;
+        if other {
+            let opts = StationOptions {
+                law,
+                top,
+                sides: Some(sides),
+                before,
+            };
+            let (solved, steps) =
+                gn_solve_station_with(k, faces, &def.leader, s, on, r, def.sides, tr, tol, opts);
+            count_solve(k, steps);
+            st = solved?.0;
+        }
+        // the side matters only at one of the definition's stations: a foot on a knot
+        // line, or s a knot of the leader or the law; elsewhere the station is the same
+        // from either side
+        let mut sided = sides.iter().any(|&q| q != 0);
+        // (the leader's derivatives to order s + 1 enter, its unit tangent's; the law's
+        // to order s; a curve is C^(p - multiplicity) at a knot, its derivatives to
+        // that order the same either side)
+        let along = [(Some(&def.leader), ts + 1), (def.law.as_ref(), ts)];
+        for (curve, used) in along {
+            if sided {
+                break;
+            }
+            let Some(curve) = curve else {
+                continue;
+            };
+            let (knots, mult) = curve.knots(None)?;
+            let deg = curve.degree()?;
+            let mut m = 1;
+            while m + 1 < knots.len() && m < mult.len() {
+                let (Some(&km), Some(&mm)) = (knots.get(m), mult.get(m)) else {
                     break;
-                }
-                let Some(curve) = curve else {
-                    continue;
                 };
-                let (knots, mult) = curve.knots(None)?;
-                let deg = curve.degree()?;
-                let mut m = 1;
-                while m + 1 < knots.len() && m < mult.len() {
-                    let (Some(&km), Some(&mm)) = (knots.get(m), mult.get(m)) else {
-                        break;
-                    };
-                    let on_knot = (s - km).abs() <= 1.0e-9 * (1.0 + km.abs());
-                    // used > p - multiplicity, in signed arithmetic
-                    if on_knot && used + mm > deg {
-                        sided = true;
-                    }
-                    m += 1;
+                let on_knot = (s - km).abs() <= 1.0e-9 * (1.0 + km.abs());
+                // used > p - multiplicity, in signed arithmetic
+                if on_knot && used + mm > deg {
+                    sided = true;
                 }
+                m += 1;
             }
         }
         let mut memo = k.blend_station_memo.borrow_mut();

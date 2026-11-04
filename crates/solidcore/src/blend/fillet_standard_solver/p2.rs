@@ -2952,8 +2952,8 @@ impl CircularCrossSectionFsg {
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
     /// turn at a knot (`sm_FilletCurveCorners`: the pieces are built as before), a face is
     /// not an offset of a NURBS surface (or is a blend by its definition, unless the ball is
-    /// of one radius, the face a round of one radius between NURBS faces and
-    /// `fixes.fillet_round_on_round_as_definition` on: c5b6bb7, WR-714), the circle is
+    /// of one radius and the face a round of one radius between NURBS faces: c5b6bb7,
+    /// WR-714), the circle is
     /// not exact (approximated, mirrored or the larger arc), the solver is neither a
     /// constant-radius one with one radius above the tolerance nor (0d43b4c, b8e3594) an
     /// edge's variable-radius one whose law is a B-spline or linear one, its base curve a
@@ -3029,11 +3029,7 @@ impl CircularCrossSectionFsg {
                 | SurfaceKind::Cone(_)
                 | SurfaceKind::Sphere(_)
                 | SurfaceKind::Torus(_) => true,
-                SurfaceKind::ProceduralBlend(_) => {
-                    k.fixes.fillet_round_on_round_as_definition
-                        && constant_ball
-                        && definition_enclosable(b)
-                }
+                SurfaceKind::ProceduralBlend(_) => constant_ball && definition_enclosable(b),
                 _ => false,
             };
             if !nurbs {

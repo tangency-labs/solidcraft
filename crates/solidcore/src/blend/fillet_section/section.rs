@@ -406,13 +406,8 @@ pub(crate) fn certificate_faces<'a>(
             // the definition's feet's series hold (SM_GN_MAXS); a law's touch circle,
             // or a G^n section, takes more: "a face that is a blend by its definition:
             // only a round of one radius is certified on it, and only on a round of one
-            // radius between NURBS faces". Without WR-714 a blend by its definition is
-            // enclosed only on its net, which is not the surface the feet are solved on
-            // (4a10ed8)
-            let enclosed = k.fixes.fillet_round_on_round_as_definition
-                && order == 1
-                && !has_law
-                && definition_enclosable(face);
+            // radius between NURBS faces" (WR-714)
+            let enclosed = order == 1 && !has_law && definition_enclosable(face);
             if !enclosed {
                 return Err(SolidError::sm_err(OP));
             }

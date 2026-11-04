@@ -42,12 +42,11 @@ const BACK_TOP: Point3 = Point3::new(30.0, 0.0, 10.0);
 /// A point on the upright at the knife-edge tip.
 const TIP: Point3 = Point3::new(W + 21.0, 0.0, 5.0);
 
-/// SolidCraft's rig set: every fix but the six it leaves off (`fillet_blend_corner` on).
+/// SolidCraft's rig set: every fix but the five it leaves off (`fillet_blend_corner` on).
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
     f.cone_unbounded_parameterized_as_nurb = false;
     f.ellipse_open_arc_keeps_end_angle = false;
-    f.fillet_round_on_round_as_definition = false;
     f.fillet_overflow_crease_along_edge = false;
     f.fillet_refuse_rounds_breaking_through = false;
     f.shell_one_construction = false;
