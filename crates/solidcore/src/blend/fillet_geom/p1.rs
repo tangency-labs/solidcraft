@@ -61,7 +61,6 @@
 //! | [`check_seam_out`], [`check_seam_on`]           | `sm_CheckSeamOut`, `sm_CheckSeamOn`        |
 //! | [`is_order_correct`]                            | `sm_IsOrderCorrect`                        |
 //! | [`set_surface_closure`]                         | `sm_SetSurfaceClosure`                     |
-//! | [`find_mark_for_context2`]                      | `sm_FindMarkForContext2`                   |
 //!
 //! Deviations:
 //! - **Object model.** Upstream's `SmFilletVertexuse`, `SmFilletVertex`,
@@ -122,8 +121,7 @@
 //!   ([`FilletSolver`]) they copy from or fall back to explicitly.
 //!   `SmSurfParamType` closures are [`SurfParamType`]. `sm_IsOrderCorrect` indexes a
 //!   slice of [`TsectPnt`] values (upstream: an array of pointers) and fails on an index
-//!   out of range. `sm_FindMarkForContext2` searches a slice of [`MarkLock`] for a
-//!   context index and returns the position of the first match.
+//!   out of range.
 //!   `sm_ExamineNFixFilletGeoms` takes the two geometries' solvers (upstream:
 //!   `GetFilletSolver()`, an opaque id here) as co-ported [`ConstantRadiusAssistedFs`]
 //!   values; a geometry whose adjusting path needs a solver it does not have is a
@@ -204,7 +202,6 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::context::MarkLock;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
@@ -1612,16 +1609,6 @@ impl FilletBrep {
     /// The fillet vertices in id order.
     pub fn fillet_vertices(&self) -> impl Iterator<Item = (VertexId, &FilletVertex)> + '_ {
         self.vertices.iter().map(|(&id, v)| (id, v))
-    }
-
-    /// The fillet edge uses in id order.
-    pub fn fillet_edgeuses(&self) -> impl Iterator<Item = (EdgeuseId, &FilletEdgeuse)> + '_ {
-        self.edgeuses.iter().map(|(&id, e)| (id, e))
-    }
-
-    /// The fillet vertex uses in id order.
-    pub fn fillet_vertexuses(&self) -> impl Iterator<Item = (VertexuseId, &FilletVertexuse)> + '_ {
-        self.vertexuses.iter().map(|(&id, v)| (id, v))
     }
 
     /// The fillet geometries in id order.
@@ -4243,14 +4230,6 @@ pub fn set_surface_closure(k: &Kernel, surf: &Surface, domain: &Extent2d) -> Res
     }
 
     Ok(ret)
-}
-
-/// `sm_FindMarkForContext2`: the position in `mark_locks` of the first lock bound to
-/// the context `context` (`None` is upstream's `NULL` context, which matches a lock
-/// bound to `NULL`), or `None`.
-#[must_use]
-pub fn find_mark_for_context2(mark_locks: &[MarkLock], context: Option<usize>) -> Option<usize> {
-    mark_locks.iter().position(|lock| lock.context() == context)
 }
 
 #[cfg(test)]

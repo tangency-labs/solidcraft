@@ -1301,29 +1301,11 @@ impl FilletBrep {
         )
     }
 
-    /// Calculate a side-face end rib using actual borrowed solver/surface context.
+    /// Calculate a side-face end rib using actual borrowed solver/surface context,
+    /// with an optional [`ErrorInfo`] sink for `SmFilletCorner::RecordFilletError`.
     ///
     /// # Errors
     /// As [`Self::calc_fillet_int_side_face`], including actual context failures.
-    pub fn calc_fillet_int_side_face_with_context(
-        &mut self,
-        k: &Kernel,
-        e: EdgeId,
-        corner: Option<FilletCornerId>,
-        corners: CornerLookup<'_>,
-        context: &impl FilletEdgeContext,
-        target: &mut Brep,
-    ) -> Result<()> {
-        self.calc_fillet_int_side_face_with_context_and_error_info(
-            k, e, corner, corners, context, target, None,
-        )
-    }
-
-    /// [`Self::calc_fillet_int_side_face_with_context`] with an optional [`ErrorInfo`]
-    /// sink for `SmFilletCorner::RecordFilletError`.
-    ///
-    /// # Errors
-    /// As [`Self::calc_fillet_int_side_face_with_context`].
     #[allow(clippy::too_many_arguments)]
     pub fn calc_fillet_int_side_face_with_context_and_error_info(
         &mut self,

@@ -12,7 +12,7 @@
 //! | [`srf_srf_intersection`], [`SrfSrfCurves`], [`SrfSrfOptions`] | `sm_SrfSrfIntersection`          |
 //! | [`FilletVertex::new`](super::p1::FilletVertex::new) (in `p1`) | `SmFilletVertex::SmFilletVertex` |
 //! | [`FilletBrep::calc_rail_int_rail`]                | `SmFilletVertex::CalcRailIntRail`            |
-//! | [`FilletBrep::calc_rail_int_edgeuse`], [`FilletBrep::calc_rail_int_edgeuse_with_solver`] | `SmFilletVertex::CalcRailIntEdgeuse`         |
+//! | [`FilletBrep::calc_rail_int_edgeuse`]             | `SmFilletVertex::CalcRailIntEdgeuse`         |
 //! | [`FilletBrep::calc_vert_on_cross_section`]        | `SmFilletVertex::CalcVertOnCrossSection`     |
 //! | [`FilletBrep::calc_set_back_vert`]                | `SmFilletVertex::CalcSetBackVert`            |
 //! | [`FilletBrep::calc_join_section`]                 | the fork's `SmFilletVertex::CalcJoinSection` (`SmBlendCornerJoin.cpp`, 543d25a; WR-697) |
@@ -36,8 +36,8 @@
 //!   an id not in the table is [`SolidError::InvalidInput`], a geometry without a
 //!   solver where upstream dereferences it `SM_ERR_NULL_POINTER`). The rollover
 //!   caller can supply its single live solver with its actual id through
-//!   `calc_rail_int_edgeuse_with_solver`; the `_with_solver_ops` entry retains
-//!   derived virtual operations. An unresolved adjacent id is an error.
+//!   `calc_rail_int_edgeuse_with_solver_ops`, which retains derived virtual
+//!   operations. An unresolved adjacent id is an error.
 //!   The target B-rep
 //!   (the classifications, original faces and the solvers' edge uses) is `target`. The
 //!   constructors `SmFilletVertex(SmFilletCorner*)` and `SmFilletEdge(SmFilletBrep*,
@@ -418,7 +418,6 @@ impl InterpolationSolvers<'_> {
 
 enum RailSolvers<'a> {
     Indexed(&'a mut [FilletSolver]),
-    Single(FilletSolverId, &'a mut FilletSolver),
     Live(FilletSolverId, &'a mut dyn FilletSolverOps),
     LiveSet(Vec<(FilletSolverId, &'a mut dyn FilletSolverOps)>),
 }
@@ -429,7 +428,6 @@ impl RailSolvers<'_> {
             Self::Indexed(solvers) => {
                 solver_at(solvers, solver_index(solvers, id, OP_RAIL_EU)?, OP_RAIL_EU)
             }
-            Self::Single(key, solver) if *key == id => Ok(solver),
             Self::Live(key, solver) if *key == id => Ok(solver.solver()),
             Self::LiveSet(solvers) => solvers
                 .iter()
@@ -438,7 +436,7 @@ impl RailSolvers<'_> {
                 .ok_or_else(|| {
                     SolidError::invalid_input(OP_RAIL_EU, "unresolved adjacent fillet solver")
                 }),
-            Self::Single(..) | Self::Live(..) => Err(SolidError::invalid_input(
+            Self::Live(..) => Err(SolidError::invalid_input(
                 OP_RAIL_EU,
                 "unresolved adjacent fillet solver",
             )),
@@ -461,7 +459,6 @@ impl RailSolvers<'_> {
                 })?;
                 Ok(solver)
             }
-            Self::Single(key, solver) if *key == id => Ok(&mut **solver),
             Self::Live(key, solver) if *key == id => Ok(&mut **solver),
             Self::LiveSet(solvers) => solvers
                 .iter_mut()
@@ -470,7 +467,7 @@ impl RailSolvers<'_> {
                 .ok_or_else(|| {
                     SolidError::invalid_input(OP_RAIL_EU, "unresolved adjacent fillet solver")
                 }),
-            Self::Single(..) | Self::Live(..) => Err(SolidError::invalid_input(
+            Self::Live(..) => Err(SolidError::invalid_input(
                 OP_RAIL_EU,
                 "unresolved adjacent fillet solver",
             )),
@@ -1671,39 +1668,13 @@ impl FilletBrep {
         )
     }
 
-    /// Calculate a rail/side-edge vertex using one caller-owned solver and its
-    /// actual identity. Geometry-owned offset surfaces are used before the solver.
+    /// Calculate a rail/side-edge vertex using the retained concrete solver's
+    /// virtual operations and actual identity. Geometry-owned offset surfaces are
+    /// used before the solver.
     ///
     /// # Errors
     /// As [`Self::calc_rail_int_edgeuse`]; resolving an adjacent solver with another
     /// id returns [`SolidError::InvalidInput`] rather than fabricating its state.
-    pub fn calc_rail_int_edgeuse_with_solver(
-        &mut self,
-        k: &Kernel,
-        v: VertexId,
-        opt_fg: Option<FilletGeomId>,
-        corners: CornerLookup<'_>,
-        solver_id: FilletSolverId,
-        solver: &mut FilletSolver,
-        target: &mut Brep,
-    ) -> Result<()> {
-        self.calc_rail_int_edgeuse_with_solvers(
-            k,
-            v,
-            opt_fg,
-            corners,
-            &mut RailSolvers::Single(solver_id, solver),
-            target,
-            None,
-            0,
-        )
-    }
-
-    /// Calculate a rail/side-edge vertex using the retained concrete solver's
-    /// virtual operations and actual identity.
-    ///
-    /// # Errors
-    /// As [`Self::calc_rail_int_edgeuse_with_solver`].
     pub fn calc_rail_int_edgeuse_with_solver_ops(
         &mut self,
         k: &Kernel,
@@ -3385,25 +3356,7 @@ mod tests {
     }
 
     #[test]
-    fn single_solver_lookup_preserves_nonzero_identity_and_live_mutations() {
-        let id = FilletSolverId(37);
-        let mut solver = FilletSolver::new(1e-5, 1e-3, 0.01);
-        let mut table = RailSolvers::Single(id, &mut solver);
-        table.solver_mut(id).unwrap().set_extension_factor(4.5);
-        assert_eq!(table.solver(id).unwrap().extension_factor(), 4.5);
-        assert!(matches!(
-            table.solver(FilletSolverId(0)),
-            Err(SolidError::InvalidInput { .. })
-        ));
-        assert!(matches!(
-            table.solver_mut(FilletSolverId(38)),
-            Err(SolidError::InvalidInput { .. })
-        ));
-        assert_eq!(solver.extension_factor(), 4.5);
-    }
-
-    #[test]
-    fn geometry_offsets_precede_single_solver_resolution() {
+    fn geometry_offsets_precede_solver_resolution() {
         let k = Kernel::default();
         let mut fb = FilletBrep::new();
         let mut geom =
@@ -3421,8 +3374,9 @@ mod tests {
             .unwrap(),
         );
         let g = fb.add_geom(geom);
-        let mut solver = FilletSolver::new(1e-5, 1e-3, 0.01);
-        let table = RailSolvers::Single(FilletSolverId(37), &mut solver);
+        // An empty table: the geometry's own offset surface is read before the
+        // solver is resolved, so reaching the solver at all would be an error here.
+        let table = RailSolvers::Indexed(&mut []);
         assert_eq!(
             table
                 .offset_surface(&fb, g, 0)
