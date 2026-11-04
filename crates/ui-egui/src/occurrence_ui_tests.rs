@@ -499,7 +499,10 @@ fn find_in_browser_reaches_a_folded_body() {
     let scope = super::occurrence_key(&[second]);
     h.app.tree.collapsed.extend([super::occurrence_key(&[first]), scope.clone(), format!("{scope}/bodies")]);
     h.frames(2);
-    assert!(!h.app.tree.order.contains(&format!("b:{body}")), "the body's row is closed away");
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
+        "the body's row is closed away"
+    );
     h.app.session.selection = vec![Sel::Body { name: body.clone() }];
     let find = context_menu::items(&h.app, &Target::Viewport).into_iter().find(|i| i.id == "ui.findBrowser").unwrap();
     context_menu::run_item(&mut h.app, &find, egui::Pos2::ZERO);
@@ -507,7 +510,10 @@ fn find_in_browser_reaches_a_folded_body() {
     h.frames(2);
     assert!(h.app.tree.reveal.is_none(), "revealed");
     assert!(!h.app.tree.collapsed.contains(&scope));
-    assert!(h.app.tree.order.contains(&format!("b:{body}")), "the row is drawn");
+    assert!(
+        h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
+        "the row is drawn"
+    );
     assert!(crate::scenario::handle_at("fold:Bodies").is_none(), "with no folder row");
 }
 

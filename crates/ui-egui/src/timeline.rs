@@ -93,13 +93,16 @@ pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
 /// A new face or edge picked in the view scrolls the history shown to the feature that made it,
 /// once per pick; the history stays where it is while the pick does not change.
 pub(crate) fn follow_view_pick(app: &mut SolveApp) {
+    crate::browser::sync_reveals(app);
     let picked = picked_feature(app);
     if picked == app.tree.view_pick {
         return;
     }
     app.tree.view_pick = picked;
-    if picked.is_some() && app.ui.show_timeline {
-        app.tree.timeline_reveal = picked;
+    if app.ui.show_timeline
+        && let Some(id) = picked
+    {
+        crate::browser::request_timeline_reveal(app, id);
     }
 }
 
@@ -772,6 +775,7 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
     let t = Tokens::get();
     app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
@@ -991,7 +995,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 .collect();
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
             // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
-            let reveal = app.tree.timeline_reveal.take();
+            let reveal = app.tree.timeline_reveal;
             // The feature that made what is under the cursor or picked in the viewport.
             let from_view = [hovered_feature(app), picked_feature(app)];
             let drag_id = ui.id().with("tl_drag");
@@ -1061,8 +1065,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     *slot = x;
                 }
                 let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-                if reveal == Some(*id) {
-                    ui.scroll_to_rect(br, Some(egui::Align::Center));
+                if reveal == Some(*id) && crate::semantic_content::scroll_acknowledged(ui, br) {
+                    app.tree.timeline_reveal = None;
                 }
                 crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
                 // A chip scrolled out of the strip is neither drawn nor interactive: a long

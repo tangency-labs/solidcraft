@@ -239,6 +239,7 @@ pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;
 pub mod selection;
+pub mod semantic_content;
 pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
@@ -792,6 +793,7 @@ impl SolveApp {
         render_workspace.image_host = image_host;
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
+        let tree = browser::TreeState::for_session(session.uid);
         let mut app = SolveApp {
             panel_runtime: None,
             viewport_status: Default::default(),
@@ -824,7 +826,7 @@ impl SolveApp {
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
-            tree: browser::TreeState::default(),
+            tree,
             linked_design_clipboard: None,
             sbox: shortcut_box::ShortcutBox::default(),
             keymap: keymap::Keymap::default(),
@@ -3021,7 +3023,9 @@ impl SolveApp {
         let _language = crate::i18n::scope(&self.preferences.language);
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
+        semantic_content::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
+        semantic_content::finalize(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).
@@ -3080,6 +3084,7 @@ impl SolveApp {
                 agent_chat::poll(self, ui.ctx());
                 // Preferences and Keyboard Shortcuts open from Home too (its links, the gear, Ctrl+,).
                 prefs::show(self, ui.ctx());
+                browser::editors(self, ui);
                 return;
             }
         }
@@ -3163,6 +3168,10 @@ impl SolveApp {
         if self.ui.show_browser && !render_ui::focused(self) {
             browser::browser(self, ui);
         }
+        // All shared semantic content has now submitted its output. Apply it before the
+        // viewport/dialog/menu consumers, regardless of which presentations were visible.
+        semantic_content::finalize(self, ui.ctx());
+        browser::editors(self, ui);
         if floating {
             agent_chat::show(self, ui);
         }

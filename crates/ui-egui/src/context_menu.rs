@@ -1603,7 +1603,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                     }
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
-                app.tree.timeline_reveal = Some(f);
+                crate::browser::request_timeline_reveal(app, f);
             }
         }
         "ui.tangentChain" => tangent_chain(app),
