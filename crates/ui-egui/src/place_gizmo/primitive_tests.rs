@@ -173,6 +173,25 @@ fn a_dropped_box_in_a_metre_design_is_written_in_metres_at_the_dropped_place() {
     }
 }
 
+/// A bare size ("2") is in the design's unit for the marker, as OK reads it: in an inch design a
+/// 2 in long box dropped at x = 40 mm starts 1 in before it, and its outline is 2 in long.
+#[test]
+fn a_bare_size_is_read_in_the_design_unit_by_the_marker() {
+    let mut h = plate();
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    h.settle();
+    start(&mut h, "solid.box");
+    if let Some(Kind::Primitive { fields, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+        && let Some(f) = fields.iter_mut().find(|f| f.0 == "length")
+    {
+        f.1 = "2".into();
+    }
+    let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+    assert!((size.x - 50.8).abs() < 1e-6, "2 in: {size:?}");
+    assert!(drop_on(&mut h, [40.0, 25.0, 10.0]));
+    assert!((typed(&h, "corner").x - (40.0 - 25.4)).abs() < 1e-3, "{:?}", typed(&h, "corner"));
+}
+
 /// A size typed as a bare expression ("2 * 1") is in the design's unit, as OK reads it: in an
 /// inch design the corner a drop writes is 1 in back from the point, not 1 mm.
 #[test]
