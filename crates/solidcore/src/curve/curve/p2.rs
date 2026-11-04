@@ -636,6 +636,19 @@ impl Clone for Curve {
 }
 
 impl Curve {
+    /// This curve as a B-rep's [`Snapshot`](crate::topology::Snapshot) keeps it: the exact
+    /// evaluation copy (its kind, owner and edge tolerance, the memo of its cache shared)
+    /// under this object's notification identity.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for geometry nested deeper than `MAX_GEOMETRY_NESTING`.
+    pub(crate) fn snapshot_copy(&self) -> Result<Self> {
+        let mut copy = self.clone_for_evaluation_depth(0)?;
+        copy.notify_identity = self.notify_identity.duplicate_for_snapshot();
+        Ok(copy)
+    }
+
     /// Exact recursive copy after the caller validates the complete geometry graph.
     pub(crate) fn clone_exact_bounded(&self) -> Self {
         let kind = match &self.kind {

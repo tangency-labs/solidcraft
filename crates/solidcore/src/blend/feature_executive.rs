@@ -600,7 +600,7 @@ impl<'a> FeatureExecutive<'a> {
     /// Not upstream unless opted in (`fixes.defeature_refuses_open_base`, WR-656): a
     /// feature whose base patch could not be built is refused before its patches are
     /// applied, the base B-rep is put back as it was before the call (a
-    /// [`Brep::clone_for_rollback`] taken first) and the executive drops its features.
+    /// [`Brep::snapshot`] taken first) and the executive drops its features.
     ///
     /// # Errors
     ///
@@ -608,7 +608,7 @@ impl<'a> FeatureExecutive<'a> {
     /// loop edge of the base for a feature whose hole in the base stays open.
     pub fn do_defeature(&mut self, k: &mut Kernel) -> Result<()> {
         let mut saved = if k.fixes.defeature_refuses_open_base {
-            Some(self.base.clone_for_rollback()?)
+            Some(self.base.snapshot()?)
         } else {
             None
         };
@@ -621,7 +621,7 @@ impl<'a> FeatureExecutive<'a> {
             if !feature.base_rebuilt {
                 if let Some(saved) = saved.take() {
                     let edge = open_loop_edge(feature);
-                    self.base.restore_from(saved);
+                    self.base.restore(saved);
                     self.features.clear();
                     self.patches.clear();
                     self.marks = Marks::default();

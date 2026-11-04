@@ -365,6 +365,12 @@ impl Clone for ProgressTag {
 }
 
 impl ProgressTag {
+    /// The same tag, for a [`crate::topology::Snapshot`] that stands in for this value
+    /// while it is not live (put back in its place or dropped).
+    pub(crate) fn duplicate_for_snapshot(&self) -> Self {
+        Self(self.0.clone())
+    }
+
     /// The value's tag, made on first use.
     pub(crate) fn get(&mut self) -> Arc<()> {
         Arc::clone(self.0.get_or_insert_with(|| Arc::new(())))

@@ -949,6 +949,23 @@ impl Surface {
         }
     }
 
+    /// This surface as a B-rep's [`Snapshot`](crate::topology::Snapshot) keeps it: an
+    /// exact copy ([`Surface::clone_exact_bounded`]: its kind, its owner, the face its
+    /// owner chain reaches and that face's tolerance, its exact round and its made NURB)
+    /// under this object's notification identity, with an empty cache slot (a cache an
+    /// edit builds on this surface is not the snapshot's).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for geometry nested deeper than `MAX_GEOMETRY_NESTING`.
+    pub(crate) fn snapshot_copy(&self) -> Result<Self> {
+        self.check_evaluation_copy_depth(0)?;
+        let mut copy = self.clone_exact_bounded();
+        copy.cache_slot = CacheSlot::default();
+        copy.notify_identity = self.notify_identity.duplicate_for_snapshot();
+        Ok(copy)
+    }
+
     /// Exact recursive copy after the caller has validated the complete geometry graph.
     pub(crate) fn clone_exact_bounded(&self) -> Self {
         let kind = match &self.kind {

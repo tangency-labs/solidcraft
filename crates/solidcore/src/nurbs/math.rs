@@ -134,6 +134,16 @@ pub const ZERO_COEFFICIENT_TOL: f64 = 1.0e-12;
 /// `NL_MTOL`: model-space tolerance (default for [`CPoint::approx_eq`]).
 pub const MODEL_TOL: f64 = 1.0e-07;
 
+/// `gamma_n = n u / (1 - n u)`, `u` the unit roundoff: the relative error bound of a chain
+/// of `n` rounded floating operations (Higham, the standard model). Not upstream: the one
+/// copy every certified bound in the kernel uses.
+#[must_use]
+pub fn gamma(n: usize) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    let nu = n as f64 * f64::EPSILON / 2.0;
+    nu / (1.0 - nu)
+}
+
 /// `NL_BIGD` (`DBL_MAX`).
 pub(crate) const BIGD: f64 = f64::MAX;
 /// `NL_SMAD` (`DBL_MIN`, the smallest positive normal double).

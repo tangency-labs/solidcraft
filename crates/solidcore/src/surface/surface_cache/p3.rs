@@ -1352,7 +1352,7 @@ fn ignore<T>(r: Result<T>) -> Result<Option<T>> {
 
 /// `sm_DefinitionBound` (the fork's 729f893): how far a surface may be off its net, a blend
 /// by its definition's certified bound, 0 for any other surface (its net is it).
-fn definition_bound(surface: &Surface) -> f64 {
+pub(crate) fn definition_bound(surface: &Surface) -> f64 {
     match surface.kind() {
         SurfaceKind::ProceduralBlend(p) => p.bound(),
         _ => 0.0,

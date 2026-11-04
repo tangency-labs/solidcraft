@@ -10,6 +10,7 @@ pub mod a_object;
 pub mod assert_array;
 pub mod attribute;
 pub mod axis2_placement;
+pub mod certified;
 pub mod context;
 pub mod extent1d;
 pub mod extent2d;

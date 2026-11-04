@@ -357,6 +357,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-ops"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-record"
 version = "0.1.0"
 dependencies = [

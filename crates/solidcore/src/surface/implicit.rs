@@ -15,7 +15,7 @@ use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::math::NOW;
+use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
@@ -129,13 +129,6 @@ impl BPoly {
     fn max_abs(&self) -> f64 {
         self.c.iter().fold(0.0_f64, |m, x| m.max(x.abs()))
     }
-}
-
-/// `gamma_k = k u / (1 - k u)`.
-fn gamma(k: usize) -> f64 {
-    #[allow(clippy::cast_precision_loss)]
-    let ku = k as f64 * f64::EPSILON / 2.0;
-    ku / (1.0 - ku)
 }
 
 /// Whether `form` lies on `a`: on every Bézier patch, every Bernstein coefficient of the

@@ -253,6 +253,141 @@ impl Transform {
         )
     }
 
+    /// The rigid placement `p` as a transform: its axes' images and its origin (the
+    /// z axis as the placement derives it).
+    #[must_use]
+    pub fn of_placement(p: &crate::geom::axis2_placement::Axis2Placement) -> Self {
+        Self::from_axes(p.x_axis(), p.y_axis(), p.z_axis(), p.origin())
+    }
+
+    /// The lengths of the linear part's rows (the images of the axes), each within
+    /// `gamma_4` of exact, relatively.
+    #[must_use]
+    pub fn row_lengths(&self) -> [f64; 3] {
+        let len = |c: &[f64; 4]| (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        [len(&self.m[0]), len(&self.m[1]), len(&self.m[2])]
+    }
+
+    /// Whether the transform is a regular affine map, proved: every entry finite, the
+    /// last column `(0, 0, 0, 1)`, and its linear part's conditioning, the ratio of its
+    /// smallest scale to its largest (singular values `s_min / s_max`), above `ratio`.
+    /// `ratio` of 0 asks only for a non-zero determinant; a uniform scale of any size has
+    /// conditioning 1, a map that flattens one direction against the others (a scale of
+    /// `(1e-300, 1, 1)`) conditioning that small.
+    ///
+    /// The conditioning is bounded below without a solve. With `r_i` the rows (the images
+    /// of the axes), `F = sum |r_i|^2` and `C = sum_{i<j} |r_i|^2 |r_j|^2`:
+    /// `s_max <= |A|_F = sqrt F`, and `s_max s_mid` is the largest singular value of the
+    /// cofactor matrix, whose rows are the cross products `r_i x r_j` with
+    /// `|r_i x r_j| <= |r_i| |r_j|`, so `s_max s_mid <= sqrt C`. Then
+    /// `s_min = |det| / (s_max s_mid) >= |det| / sqrt C`, and
+    /// `s_min / s_max >= |det| / sqrt(F C)`: the map is proved regular when `|det|` is
+    /// proved above `ratio sqrt(F C)`. (The bound is within a factor 3 of the conditioning
+    /// for a rigid motion; a stretch `(2, 3, 4)`, of conditioning 0.5, proves 0.28.)
+    ///
+    /// Rounding: the linear part is first scaled by one power of two, so its largest entry
+    /// is in `[1, 2)` (exact, the ratio unchanged; a subnormal largest entry in two exact
+    /// steps). The determinant's six products round within `gamma_5` of the sum of their
+    /// sizes; `F` and `C` are sums of non-negative terms within `gamma_9` each, the root
+    /// and the product with `ratio` two more roundings (`gamma_15` in all). Entries far
+    /// below the largest underflow:
+    /// - a scaled entry below `1e-100` (judged from the source entry, so an entry flushed
+    ///   to 0 by the scaling, in a row spanning more than `2^1074`, is counted too) moves
+    ///   each product of the determinant by a few subnormal units at most, which an absolute
+    ///   term of 256 of them covers (the cofactors are at most 8, an entry moves by half a
+    ///   unit);
+    /// - a 2x2 minor that cancels to a subnormal, times an entry of at least `1e-100`, rounds
+    ///   by at most half a subnormal unit, far inside `gamma_5 size` (that term of `size` is at
+    ///   least `1e-300`);
+    /// - `size` is itself computed: the exact one is within `(1 - u)^-5` of it, and the bound's
+    ///   own sum rounds, which `gamma_5 size (1 + gamma_8)` covers;
+    /// - squares below the smallest normal double move `F` and `C` by under `1e-320`
+    ///   absolutely, so `sqrt(F C)` by under `1e-159` (`F` is at most 12), which the
+    ///   absolute term `ratio * 1e-150` covers.
+    ///
+    /// Not upstream (SolidCraft's station-map check, `maps_ok`).
+    #[must_use]
+    pub fn is_regular(&self, ratio: f64) -> crate::geom::certified::Verdict {
+        use crate::geom::certified::{gamma, Bounded, Verdict};
+        let finite = self.m.iter().flatten().all(|x| x.is_finite());
+        let affine = self.m[0][3] == 0.0
+            && self.m[1][3] == 0.0
+            && self.m[2][3] == 0.0
+            && self.m[3][3] == 1.0;
+        if !finite || !affine || ratio.is_nan() || ratio < 0.0 || ratio.is_infinite() {
+            return Verdict::No;
+        }
+        let big = self
+            .m
+            .iter()
+            .take(3)
+            .flat_map(|r| r.iter().take(3))
+            .fold(0.0_f64, |b, v| b.max(v.abs()));
+        if big == 0.0 {
+            return Verdict::No;
+        }
+        // One power of two for the whole linear part (exact; two steps for a subnormal
+        // largest entry, whose inverse power alone would overflow).
+        let pre = if big < f64::MIN_POSITIVE {
+            2.0_f64.powi(600)
+        } else {
+            1.0
+        };
+        #[allow(clippy::cast_possible_truncation)] // an exponent of a finite double
+        let scale = 2.0_f64.powi(-((big * pre).log2().floor() as i32));
+        let mut m = [[0.0_f64; 3]; 3];
+        let mut tiny_entry = false;
+        for (row, src) in m.iter_mut().zip(&self.m) {
+            for (r, &v) in row.iter_mut().zip(src) {
+                *r = (v * pre) * scale;
+                // from the source entry: one the scaling flushes to 0 counts too
+                tiny_entry |= v != 0.0 && (v * pre).abs() < 1e-100 / scale;
+            }
+        }
+        let det = m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2])
+            - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2])
+            + m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
+        let size = m[0][0].abs() * ((m[1][1] * m[2][2]).abs() + (m[2][1] * m[1][2]).abs())
+            + m[1][0].abs() * ((m[0][1] * m[2][2]).abs() + (m[2][1] * m[0][2]).abs())
+            + m[2][0].abs() * ((m[0][1] * m[1][2]).abs() + (m[1][1] * m[0][2]).abs());
+        let q = |c: &[f64; 3]| c[0] * c[0] + c[1] * c[1] + c[2] * c[2];
+        let (q0, q1, q2) = (q(&m[0]), q(&m[1]), q(&m[2]));
+        let f = q0 + q1 + q2;
+        let c = q0 * q1 + q0 * q2 + q1 * q2;
+        let floor = ratio * (f * c).sqrt();
+        let value = det.abs() - floor;
+        let tiny = if tiny_entry {
+            256.0 * f64::from_bits(1)
+        } else {
+            0.0
+        };
+        let lower = Bounded {
+            value,
+            bound: gamma(5) * size * (1.0 + gamma(8))
+                + gamma(15) * floor
+                + ratio * 1e-150
+                + gamma(1) * value.abs()
+                + tiny,
+        }
+        .above(0.0);
+        if lower == Verdict::Yes {
+            return Verdict::Yes;
+        }
+        // Proved not regular: every product of the determinant exactly 0 (no entry
+        // underflowed), or the conditioning's upper bound `|r_min| / |r_max|` (each row is
+        // the image of a unit vector, between `s_min` and `s_max` long) at most `ratio`,
+        // the squares' rounding and underflow counted against it.
+        let (q_min, q_max) = (q0.min(q1).min(q2), q0.max(q1).max(q2));
+        let flat = size == 0.0 && !tiny_entry;
+        let thin =
+            ratio * ratio * q_max * (1.0 - gamma(8)) - 1e-320 > q_min * (1.0 + gamma(4)) + 1e-320;
+        if flat || thin {
+            Verdict::No
+        } else {
+            Verdict::Undecided
+        }
+    }
+
     /// Maps a vector, ignoring translation (`SmTransform::TransformVector`).
     #[must_use]
     pub fn transform_vector(&self, v: Vec3) -> Vec3 {
@@ -268,6 +403,94 @@ impl Transform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rigid_motion_is_regular_and_a_flattening_is_not() {
+        use crate::geom::certified::Verdict;
+        let turn = Transform::from_axes(
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(-0.8, 0.6, 0.0),
+            Vec3::Z,
+            Vec3::new(1.0, 2.0, 3.0),
+        );
+        assert_eq!(turn.is_regular(1e-9), Verdict::Yes);
+        // Scaled by 2, 3, 4: conditioning 0.5; the lower bound proves 24 / sqrt(29 * 244)
+        // = 0.285, the rows' lengths cap it at 2 / 4.
+        let stretch = Transform::from_axes(
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(0.0, 3.0, 0.0),
+            Vec3::new(0.0, 0.0, 4.0),
+            Vec3::ZERO,
+        );
+        assert_eq!(stretch.is_regular(0.28), Verdict::Yes);
+        assert_eq!(stretch.is_regular(0.29), Verdict::Undecided);
+        assert_eq!(stretch.is_regular(0.5), Verdict::Undecided);
+        assert_eq!(stretch.is_regular(0.51), Verdict::No);
+        // The identity's bound is 1 / 3 exactly: not proved above it.
+        assert_eq!(
+            Transform::IDENTITY.is_regular(1.0 / 3.0),
+            Verdict::Undecided
+        );
+        // Every product of its determinant is exactly 0: proved singular.
+        let flat = Transform::from_axes(Vec3::X, Vec3::Y, Vec3::new(1.0, 1.0, 0.0), Vec3::ZERO);
+        assert_eq!(flat.is_regular(0.0), Verdict::No);
+        assert_eq!(flat.is_regular(1e-9), Verdict::No);
+        // Nearly flat: a determinant of 1e-300 rounds relatively, so it is proved non-zero.
+        let thin = Transform::from_axes(Vec3::X, Vec3::Y, Vec3::new(0.3, 0.7, 1e-300), Vec3::ZERO);
+        assert_eq!(thin.is_regular(0.0), Verdict::Yes);
+        let mut nan = Transform::IDENTITY;
+        nan.m[3][0] = f64::NAN;
+        assert_eq!(nan.is_regular(0.0), Verdict::No);
+        let mut projective = Transform::IDENTITY;
+        projective.m[0][3] = 1.0;
+        assert_eq!(projective.is_regular(0.0), Verdict::No);
+        let mut zero_row = Transform::IDENTITY;
+        zero_row.m[1] = [0.0; 4];
+        assert_eq!(zero_row.is_regular(0.0), Verdict::No);
+    }
+
+    /// A map that flattens one direction against the others is not regular however its
+    /// determinant compares with its rows' lengths (each row's scale apart, `(1e-300, 1, 1)`
+    /// was proved regular); one that flattens by less than the ratio is.
+    #[test]
+    fn a_flattening_against_the_other_directions_is_refused() {
+        use crate::geom::certified::Verdict;
+        let diag = |a: f64, b: f64, c: f64| {
+            Transform::from_axes(
+                Vec3::new(a, 0.0, 0.0),
+                Vec3::new(0.0, b, 0.0),
+                Vec3::new(0.0, 0.0, c),
+                Vec3::ZERO,
+            )
+        };
+        assert_eq!(diag(1e-300, 1.0, 1.0).is_regular(1e-9), Verdict::No);
+        assert_eq!(diag(1.0, 1e-10, 1.0).is_regular(1e-9), Verdict::No);
+        assert_eq!(diag(1.0, 1.0, 1e-5).is_regular(1e-9), Verdict::Yes);
+        // A row spanning more than 2^1022: the scaling flushes its small entry and the other
+        // rows' products underflow; never a wrong answer (conditioning about 1e-300).
+        let wide =
+            Transform::from_axes(Vec3::new(1e300, 1e-300, 0.0), Vec3::Y, Vec3::Z, Vec3::ZERO);
+        assert_eq!(wide.is_regular(1e-9), Verdict::No);
+        assert_ne!(wide.is_regular(0.0), Verdict::No);
+    }
+
+    /// A uniform scale is regular however small or large, subnormal included: its
+    /// conditioning is 1, which no underflow or overflow of the products may hide (a
+    /// subnormal scale was `Undecided`: its row scale overflowed).
+    #[test]
+    fn a_tiny_or_huge_uniform_scale_is_regular() {
+        for s in [1e-110, 1e110, 1e-300, 1e300, 1e-310, f64::from_bits(1)] {
+            let mut m = Transform::IDENTITY;
+            for (i, row) in m.m.iter_mut().enumerate().take(3) {
+                row[i] = s;
+            }
+            assert_eq!(
+                m.is_regular(1e-9),
+                crate::geom::certified::Verdict::Yes,
+                "{s}"
+            );
+        }
+    }
 
     #[test]
     #[allow(clippy::approx_constant)]

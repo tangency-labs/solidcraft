@@ -46,7 +46,7 @@ use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::math::NOW;
+use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::surface::procedural_blend::ProceduralBlend;
 use crate::surface::surface::Surface;
@@ -150,17 +150,6 @@ pub(crate) fn net_distance(b: &[Vec<Hpt>], h: &[Vec<Hpt>]) -> Result<f64> {
     } else {
         Err(SolidError::invalid_input(OP, "the net is not finite"))
     }
-}
-
-/// `u`, the unit roundoff of `f64`.
-const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
-
-/// `gamma_k = k u / (1 - k u)`: the relative error bound of k floating operations in a
-/// chain (Higham, the standard model).
-pub(crate) fn gamma(k: usize) -> f64 {
-    #[allow(clippy::cast_precision_loss)]
-    let ku = k as f64 * UNIT_ROUNDOFF;
-    ku / (1.0 - ku)
 }
 
 /// A NURBS surface's derivative bounds `(max |S_u|, max |S_v|)`: degree times the largest

@@ -24,6 +24,7 @@
 //! | [`Curve`] | [`k::Curve`] | [`curve`] | [`record_curve`] |
 //! | [`Surface`] | [`k::Surface`] | [`surface`] | [`record_surface`] |
 //! | [`Curve2`] | [`k::Curve2`] | [`curve2`] | [`record_curve2`] |
+
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
 

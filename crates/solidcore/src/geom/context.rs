@@ -322,6 +322,17 @@ impl IdentitySlot {
     pub fn value(&self) -> Option<u64> {
         self.0.as_ref().map(|i| i.value)
     }
+
+    /// The same identity in a second slot, for a [`crate::topology::Snapshot`] that stands
+    /// in for this object while it is not live: the snapshot is only ever put back in
+    /// place of the object ([`crate::topology::Brep::restore`]) or dropped, so no two live
+    /// objects hold one identity.
+    pub(crate) fn duplicate_for_snapshot(&self) -> Self {
+        Self(self.0.as_ref().map(|i| Issued {
+            domain: Arc::clone(&i.domain),
+            value: i.value,
+        }))
+    }
 }
 
 /// A context's notify callbacks and identity domain, lent to another context for a

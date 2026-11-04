@@ -12,6 +12,7 @@
 //! | [`surface`], [`uv_domain`], [`rectangular_trim`], [`tolerance`] | `SmFace::GetSurface`, `GetUVDomain`, `GetRectangularTrim`, `GetTolerance` (`SM_USE_OLDTOL`) |
 //! | [`set_uv_domain`], [`set_faceuse`]      | `SmFace::SetUVDomain`, `SetFaceuse`               |
 //! | [`faceuses`], [`upward_faceuse`]        | `SmFace::GetFaceuses`, `GetUpwardFaceuse`         |
+//! | [`outer_faceuse`]                       | `sm_OuterFaceuse` (static in the fork's `SmOffsetFaces.cpp`) |
 //! | [`loops`], [`outer_loops`]              | `SmFace::GetLoops`, `GetOuterLoops`               |
 //! | [`check_seam_crossing`]                 | `sm_CheckSeamCrossing` (static)                   |
 //! | [`calculate_an_internal_point`]         | `SmFace::CalculateAnInternalPoint`                |
@@ -306,6 +307,28 @@ pub fn set_faceuse(b: &mut Brep, f: FaceId, new_fu: Option<FaceuseId>) -> Result
 /// [`SolidError::NotFound`] for a dangling id.
 pub fn upward_faceuse(b: &Brep, f: FaceId) -> Result<Option<FaceuseId>> {
     Ok(b.face(f)?.faceuse)
+}
+
+/// `sm_OuterFaceuse` (the fork's offset faces, and SolidCraft's `outer_faceuse`): the face
+/// use of `f` on the outside of its body, the one bounding the infinite region (the upward
+/// one when it does, else its mate); `None` without face use.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn outer_faceuse(b: &Brep, f: FaceId) -> Result<Option<FaceuseId>> {
+    let Some(fu) = upward_faceuse(b, f)? else {
+        return Ok(None);
+    };
+    let outside = match b.faceuse(fu)?.shell {
+        Some(shell) => b.shell(shell)?.region == b.infinite_region(),
+        None => false,
+    };
+    Ok(if outside {
+        Some(fu)
+    } else {
+        b.faceuse(fu)?.mate
+    })
 }
 
 /// `GetFaceuses`: the primary face use and its mate (both `None` without face use).
