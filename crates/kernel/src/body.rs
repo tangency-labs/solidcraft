@@ -1140,6 +1140,18 @@ impl Body {
         crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t))
     }
 
+    /// Display-only paths embedded as actual triangle sides on certified native
+    /// spline rectangles. Leaves the body's CAD record and topology unchanged.
+    pub fn mesh_with_guides(&self, t: &MeshTolerance, guides: &[crate::DisplayGuide]) -> Result<crate::GuidedMesh> {
+        if self.is_mesh() {
+            return Err(KernelError::Invalid("a mesh body has no native charts for display guides".into()));
+        }
+        let (tol, turn) = t.rules(self.size());
+        let mut result = guard("guided display mesh", || crate::tess::guided::mesh(&self.record, tol, turn, guides))?;
+        result.mesh = self.flagged(result.mesh)?;
+        Ok(result)
+    }
+
     fn mesh_plan_untimed(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
         if self.is_mesh() {
             return Err(KernelError::Invalid("a mesh body has no surfaces to mesh".into()));

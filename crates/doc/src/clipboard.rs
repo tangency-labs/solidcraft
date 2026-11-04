@@ -246,6 +246,17 @@ impl crate::Feature {
         }
         self.kind.remap_bodies(bodies);
         match &mut self.kind {
+            K::Form { definition, .. } => {
+                if let Some(pipe) = &mut definition.pipe {
+                    pipe.source.remap_names(ids, bodies);
+                }
+                if let Some(profile) = &mut definition.profile {
+                    profile.remap_names(ids, bodies);
+                }
+                if let Some(matching) = &mut definition.matching {
+                    matching.remap_names(ids, bodies);
+                }
+            }
             K::Sketch { plane, sketch } => {
                 remap_plane(plane, ids, bodies, 0)?;
                 for c in &mut sketch.constraints {

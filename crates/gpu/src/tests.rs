@@ -223,6 +223,86 @@ fn bodies() -> Vec<(&'static str, Body)> {
 }
 
 #[test]
+fn higher_order_rational_pole_normals_match_their_exact_plane_on_the_gpu() {
+    let Some(gpu) = gpu() else { return };
+    let mut plan = solidcraft_geom::tess::TessPlan::default();
+    let mut expected_normals = Vec::new();
+
+    for degree in [2, 6, solidcraft_geom::bspline::MAX_SPLINE_DEGREE] {
+        for scale in [1e-7, 1.0, 1e7] {
+            for rational in [false, true] {
+                for reverse in [false, true] {
+                    for swap in [false, true] {
+                        let degrees = if swap { [1, degree] } else { [degree, 1] };
+                        let counts = degrees.map(|d| d + 1);
+                        let knots = degrees.map(|d| std::iter::repeat_n(0.0, d + 1).chain(std::iter::repeat_n(1.0, d + 1)).collect());
+                        let mut controls = Vec::new();
+                        for j in 0..counts[1] {
+                            for i in 0..counts[0] {
+                                let (r, t) = if swap { (j, i) } else { (i, j) };
+                                let r = if reverse { degree - r } else { r };
+                                let x = r as f64 / degree as f64;
+                                let z = (r * r.saturating_sub(1)) as f64 / (degree * (degree - 1)) as f64 * t as f64;
+                                let w = if rational { 1.0 + 0.1 * (r % 3) as f64 } else { 1.0 };
+                                controls.push([scale * (7.0 + x) * w, scale * 2.0 * w, scale * (5.0 + z) * w, w]);
+                            }
+                        }
+                        // The entire rational surface is in y=2*scale; its
+                        // positive-r side has outward normal -Y. At r=0 the
+                        // cross product vanishes quadratically, not linearly.
+                        let surface = EvalSurface::nurbs(degrees, knots, counts, controls);
+                        let expected = Vec3::Y * if reverse != swap { 1.0 } else { -1.0 };
+                        for t in [0.0, 0.37, 1.0] {
+                            let pole = if reverse { 1.0 } else { 0.0 };
+                            let uv = if swap { [t, pole] } else { [pole, t] };
+                            let surface_id = plan.surfaces.len() as u32;
+                            plan.surfaces.push(surface.clone());
+                            plan.faces.push(solidcraft_geom::tess::FacePlan {
+                                face: surface_id,
+                                surface: Some(surface_id),
+                                uv: vec![uv],
+                                ..Default::default()
+                            });
+                            expected_normals.push(expected);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let got = ok(gpu.evaluate(&plan));
+    assert_eq!(got.normals.len(), expected_normals.len());
+    for (i, (normal, expected)) in got.normals.iter().zip(&expected_normals).enumerate() {
+        assert!(normal.dist(*expected) < 2e-3, "pole {i}: {normal:?}, exact {expected:?}");
+    }
+}
+
+/// Different weights on a collapsed rational boundary must not turn placement
+/// roundoff into a new pole normal. Keep the CPU rigid-placement contract as
+/// strict as the document's placed-plan test, and compare the GPU too.
+#[test]
+fn rational_sphere_pole_normals_follow_rigid_placements_on_cpu_and_gpu() {
+    let Some(gpu) = gpu() else { return };
+    let body = ok(solidcraft_kernel::sphere(Vec3::new(0.0, 1.0, 2.0), 3.0));
+    let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: (body.size() * 1e-3).max(1e-3), angle: Some(20f64.to_radians()) }));
+    let local = plan.evaluate();
+    for matrix in [
+        solidcraft_engine::doc::rigid(Vec3::new(10.0, 20.0, 30.0), Vec3::ZERO, Vec3::Z, 0.7),
+        solidcraft_engine::doc::rigid(Vec3::new(-4.0, 5.0, 1.0), Vec3::new(1.0, 1.0, 0.0), Vec3::X, 1.1),
+    ] {
+        let placed = plan.transformed(&matrix);
+        let cpu = placed.evaluate();
+        let gpu = ok(gpu.evaluate(&placed));
+        assert_eq!(cpu.normals.len(), local.normals.len());
+        assert_eq!(gpu.normals.len(), local.normals.len());
+        for (index, ((local, cpu), gpu)) in local.normals.iter().zip(&cpu.normals).zip(&gpu.normals).enumerate() {
+            let expected = solidcraft_engine::doc::apply_vector(&matrix, *local);
+            assert!(expected.dist(*cpu) < 1e-9, "CPU pole placement vertex{index}: expected{expected:?}, actual{cpu:?}");
+            assert!(expected.dist(*gpu) < 2e-3, "GPU pole placement vertex{index}: expected{expected:?}, actual{gpu:?}");
+        }
+    }
+}
+#[test]
 fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {

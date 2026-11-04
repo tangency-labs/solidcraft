@@ -326,6 +326,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
                 | "browser.collapse_all"
         )
         && !id.starts_with("settings.")
+        && app.session.forms_prototype.is_none()
         && app.session.active_sketch.is_none()
         // Cheap test first: placing the world (`world_state`) after every step of a batch in a
         // design with components placed every component's bodies again once per step.
@@ -838,6 +839,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
+            "forms_prototype": crate::forms_prototype::inspect(app),
             "render": crate::render_workspace::inspect_state(app),
             "ui": ui_state(app),
             "visibility": app.session.visibility,
@@ -2414,6 +2416,39 @@ mod tests {
     }
 
     #[test]
+    fn failed_batches_restore_the_form_draft_and_editor() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.ui.show_browser = false;
+        h.app.ui.show_timeline = true;
+        let form = |h: &mut crate::scenario::Harness| h.call("engine.execute", json!({"command":"form.prototype.inspect"}))["result"].clone();
+        let create = json!({"command":"form.prototype.create","params":{"primitive":"box","size":10,"segments":[1,1,1],"levels":1}});
+        let pull = json!({"command":"form.prototype.set_vertices","params":{"vertices":[0],"positions":[[-6,-5,-5]]}});
+        let finish = json!({"command":"form.prototype.commit","params":{"tolerance":0.05}});
+        // A known command with parameters that are rejected at its turn.
+        let fail = json!({"command":"solid.extrude","params":{"distance":"bogus +"}});
+        let response = batch(&mut h, json!({"commands":[create.clone(),fail.clone()]}));
+        assert_eq!(response["result"]["rolled_back"], true, "{response}");
+        assert_eq!(form(&mut h)["active"], false);
+        assert!(!h.app.ui.show_browser && h.app.ui.show_timeline, "a rolled-back creation must preserve the chosen panel visibility");
+
+        assert_eq!(h.call("engine.execute", create)["ok"], true);
+        let before = form(&mut h);
+        for step in [pull.clone(), finish] {
+            let response = batch(&mut h, json!({"commands":[step,fail.clone()]}));
+            assert_eq!(response["result"]["failed"]["index"], 1, "{response}");
+            assert_eq!(response["result"]["rolled_back"], true, "{response}");
+            assert_eq!(form(&mut h), before);
+            assert!(h.app.session.doc.features.is_empty());
+            assert!(h.app.session.undo.is_empty());
+            assert!(!h.app.ui.show_browser && h.app.ui.show_timeline);
+        }
+
+        let response = batch(&mut h, json!({"rollback":false,"commands":[pull,fail]}));
+        assert_eq!(response["result"]["rolled_back"], false, "{response}");
+        assert_ne!(form(&mut h)["points"], before["points"]);
+    }
+
+    #[test]
     fn engine_batch_without_rollback_keeps_completed_steps() {
         let mut h = crate::scenario::Harness::new();
         let v = batch(
@@ -2769,6 +2804,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    #[test]
+    fn forms_inspection_keeps_the_editor_camera_in_a_single_body_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":2})).unwrap();
+        h.app.run("form.prototype.create", json!({"size":40,"segments":[1,1,1]})).unwrap();
+        h.frames(2);
+        h.call("ui.camera", json!({"target":[1,2,3],"distance":120,"yaw":0.3,"pitch":0.7}));
+        let before = json!(h.app.cam);
+        for _ in 0..3 {
+            let reply = h.call("engine.execute", json!({"command":"form.prototype.inspect"}));
+            assert_eq!(reply["ok"], true);
+            h.frames(2);
+            assert_eq!(json!(h.app.cam), before, "inspecting Forms must not refit the preceding CAD body");
+        }
+    }
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view
     /// again. Fields left out keep their values, `fit` frames occurrences, and a refused field
     /// changes nothing.

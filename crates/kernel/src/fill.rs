@@ -30,6 +30,108 @@ use crate::history::{Change, EdgeOrigin, EdgeProv, FaceProv, History};
 use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
 use crate::{KernelError, Result};
 
+mod rechart;
+
+/// Rebuild one singular subdivision chart on its original exact rim. This is
+/// deliberately separate from exact generic NURBS sheet construction.
+pub(crate) fn rechart_tensor(
+    body: &Body,
+    source: &solidcraft_geom::bspline::NurbsSurface,
+    wires: &[Vec<[f64; 2]>],
+    tolerance: f64,
+) -> Result<(Body, f64)> {
+    rechart_tensor_at_depth(body, source, wires, tolerance, 0)
+}
+
+fn rechart_tensor_at_depth(
+    body: &Body,
+    source: &solidcraft_geom::bspline::NurbsSurface,
+    wires: &[Vec<[f64; 2]>],
+    tolerance: f64,
+    depth: usize,
+) -> Result<(Body, f64)> {
+    let [wire] = wires else {
+        return Err(KernelError::Invalid("recharting a singular subdivision patch requires one simple exterior trim".into()));
+    };
+    let domain: [[f64; 2]; 2] = std::array::from_fn(|d| {
+        [wire.iter().map(|p| p[d]).fold(f64::INFINITY, f64::min), wire.iter().map(|p| p[d]).fold(f64::NEG_INFINITY, f64::max)]
+    });
+    let area = wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()).map(|(a, b)| a[0] * b[1] - a[1] * b[0]).sum::<f64>().abs() * 0.5;
+    let rectangle = (domain[0][1] - domain[0][0]) * (domain[1][1] - domain[1][0]);
+    let orthogonal = wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()).all(|(a, b)| a[0] == b[0] || a[1] == b[1]);
+    let rectangular = orthogonal && (area - rectangle).abs() <= rectangle.abs() * 1e-12;
+    if rectangular && let Some(sheet) = rechart::pole_atlas(source, domain)? {
+        return Ok((sheet, 0.0));
+    }
+    if depth == 0 && rectangular {
+        // Small exact restrictions make the new corner chart both more accurate
+        // and cheaper than exhausting a large, potentially folded single fit.
+        return partition_tensor(source, tolerance, depth, domain);
+    }
+    let record = body.record();
+    let [face] = record.faces.as_slice() else { return Err(KernelError::Invalid("recharting requires one source face".into())) };
+    let [b::Loop::Edges { edges: rim }] = face.loops.as_slice() else { return Err(KernelError::Invalid("recharting requires one edge loop".into())) };
+    let chain = rim.iter().map(|edge_use| (edge_use.edge as usize, edge_use.forward)).collect::<Vec<_>>();
+    let pieces = loop_pieces(record, &chain)?;
+    let edges = pieces.iter().map(|piece| iso_edge(record, piece)).collect::<Result<Vec<_>>>()?;
+    let boundary_uv = |k: usize, t: f64| {
+        let piece = pieces.get(k)?;
+        let edge = record.edges.get(piece.edge)?;
+        let edge_use = rim.iter().find(|edge_use| edge_use.edge as usize == piece.edge)?;
+        let t = on_record(edge.interval[0], edge.interval[1], piece.interval, piece.forward, t);
+        solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t)
+    };
+    let attempted = rechart::fit(source, &edges, wire, &boundary_uv, tolerance).and_then(|(fill, deviation)| {
+        let sheet = quilt_body(body, record, &pieces, &fill, face_tolerance(body))?;
+        checked_rechart(&sheet)?;
+        Ok((sheet, deviation))
+    });
+    let error = match attempted {
+        Ok(result) => return Ok(result),
+        Err(error) => error,
+    };
+    // A triangle/pole chart may fold on a twisted rectangular region. Partition
+    // that region along exact source isocurves; regular restricted children stay
+    // exact, and only a child still containing a singular corner is refitted.
+    // This changes the atlas rather than moving a check to hide a singularity.
+    if depth >= 3 || !rectangular {
+        return Err(error);
+    }
+    partition_tensor(source, tolerance, depth, domain)
+}
+
+fn partition_tensor(source: &solidcraft_geom::bspline::NurbsSurface, tolerance: f64, depth: usize, domain: [[f64; 2]; 2]) -> Result<(Body, f64)> {
+    let halves = domain.map(|[a, b]| [[a, a + (b - a) * 0.5], [a + (b - a) * 0.5, b]]);
+    let mut sheets = Vec::with_capacity(4);
+    let mut deviation = 0.0_f64;
+    for u in halves[0] {
+        for v in halves[1] {
+            let cropped = rechart::restricted(source, [u, v])?;
+            let boundaries = [vec![[u[0], v[0]], [u[1], v[0]], [u[1], v[1]], [u[0], v[1]]]];
+            let exact = crate::nurbs_region_sheet(&cropped, &boundaries)?;
+            let (sheet, distance) = if checked_rechart(&exact).is_ok() {
+                (exact, 0.0)
+            } else {
+                rechart_tensor_at_depth(&exact, &cropped, &boundaries, tolerance, depth + 1)?
+            };
+            sheets.push(sheet);
+            deviation = deviation.max(distance);
+        }
+    }
+    let sheet = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-7)?;
+    checked_rechart(&sheet)?;
+    Ok((sheet, deviation))
+}
+
+fn checked_rechart(sheet: &Body) -> Result<()> {
+    let native = solidcraft_smlib::Brep::from_record(sheet.record(), true).map_err(|e| KernelError::smlib("recharted subdivision sheet", e))?;
+    let checked = native.check(solidcraft_smlib::CheckLevel::All).map_err(|e| KernelError::smlib("recharted subdivision sheet", e))?;
+    if !checked.is_valid() {
+        return Err(KernelError::Invalid(format!("recharted subdivision sheet failed native validation: {checked}")));
+    }
+    Ok(())
+}
+
 /// How far (degrees) a G1 … G4 patch's normal may turn from its neighbour's along the loop.
 pub const PATCH_ANGLE_TOL_DEG: f64 = 0.05;
 

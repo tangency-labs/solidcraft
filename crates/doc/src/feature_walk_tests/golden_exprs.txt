@@ -1,3 +1,7 @@
+form
+  inputs:
+    Fit tolerance = form.tolerance (Length)
+  expressions: form.tolerance
 body_transfer
 sketch
   inputs:

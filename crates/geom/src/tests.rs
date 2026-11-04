@@ -137,6 +137,52 @@ fn ray_crossings_count_a_shared_edge_once() {
 }
 
 #[test]
+fn ray_crossings_reject_far_away_almost_point_triangles() {
+    // These two nonzero-area triangles occupy a few ULPs near (18, 14, 2). Subtracting the
+    // distant origin made their signed-volume tests invent crossings far outside their boxes.
+    let positions = vec![
+        Vec3::new(18.348227819811164, 13.69446717007305, 1.7670068594611839),
+        Vec3::new(18.34822781981117, 13.694467170073052, 1.767006859461184),
+        Vec3::new(18.348227819811168, 13.694467170073052, 1.7670068594611847),
+        Vec3::new(18.348227819811164, 13.694467170073052, 1.767006859461187),
+        Vec3::new(18.34822781981116, 13.694467170073056, 1.7670068594611938),
+    ];
+    let mesh = Mesh { positions, triangles: vec![[0, 1, 2], [3, 4, 0]], ..Default::default() };
+    let origin = Vec3::new(35.80305180979418, 17.04098651525905, 1.0);
+    for direction in [Vec3::new(0.5773, 0.5774, 0.5776), Vec3::new(-0.6123, 0.3141, 0.7254), Vec3::new(0.2718, -0.8414, 0.4673)] {
+        assert_eq!(mesh.ray_crossings(origin, direction), 0, "{direction:?}");
+    }
+    assert!(!mesh.contains(origin));
+    assert!(!mesh.inside_index().contains(origin));
+}
+
+#[test]
+fn ray_crossings_keep_small_triangles_and_shared_vertices_under_scale_and_translation() {
+    // Four triangles meet at the square's centre. Interior, shared-edge and shared-vertex
+    // crossings each count once, even when the triangles are much smaller than a model epsilon.
+    for (scale, offset) in [
+        (2.0_f64.powi(-40), Vec3::ZERO),
+        (2.0_f64.powi(-30), Vec3::new(1024.0, -2048.0, 4096.0)),
+        (1.0, Vec3::ZERO),
+        (2.0_f64.powi(20), Vec3::new(-1073741824.0, 2147483648.0, 4294967296.0)),
+    ] {
+        let point = |x, y, z| offset + Vec3::new(x, y, z) * scale;
+        let mesh = Mesh {
+            positions: vec![point(-2.0, -2.0, 0.0), point(2.0, -2.0, 0.0), point(2.0, 2.0, 0.0), point(-2.0, 2.0, 0.0), point(0.0, 0.0, 0.0)],
+            triangles: vec![[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]],
+            ..Default::default()
+        };
+        for direction in [Vec3::Z, Vec3::new(0.5, 0.25, 1.0), Vec3::new(-0.5, 0.25, -1.0)] {
+            for (x, y) in [(0.0, 0.0), (1.0, 1.0), (0.0, -1.0)] {
+                let target = point(x, y, 0.0);
+                assert_eq!(mesh.ray_crossings(target - direction * scale * 4.0, direction), 1, "scale {scale}, {offset:?}, {x}, {y}, {direction:?}");
+                assert_eq!(mesh.ray_crossings(target + direction * scale * 4.0, direction), 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn planes() {
     assert_eq!(Plane::XY.normal(), Vec3::Z);
     assert_eq!(Plane::XZ.normal(), Vec3::Y);
