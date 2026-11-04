@@ -16,7 +16,8 @@ use crate::{Result, TessError};
 /// `surface` (a face's parameters, [`brep::Face::parameters`]) in the evaluator's form, on its
 /// own parameters.
 pub(crate) fn eval_surface(surface: &brep::Surface) -> Result<EvalSurface> {
-    match SurfaceEval::new(&kernel::surface(surface)) {
+    let surface_value = kernel::surface(surface).map_err(|e| TessError::Invalid(e.to_string()))?;
+    match SurfaceEval::new(&surface_value) {
         Ok(SurfaceEval::Eval(e, _)) => Ok(e),
         // The record requires the form ([`brep::Brep::validate`]): a label the kernel's
         // evaluator keeps in its closed form (a cylinder, cone, sphere or torus) stands here

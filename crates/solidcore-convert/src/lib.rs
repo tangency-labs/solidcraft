@@ -9,7 +9,7 @@
 //! Every function copies fields from one form to the other, and none computes: no square root,
 //! trigonometry, product or solve (clippy `disallowed-methods`, this crate's `clippy.toml`, as
 //! the record's). Each record kind has its kernel kind with the same fields, so every conversion
-//! is total and its round trip is the identity. The bare name converts the record to the
+//! preserves the round trip within the record's geometry depth limit. The bare name converts the record to the
 //! kernel, by reference (the caller keeps its record); `record_*` converts the kernel's value
 //! back to the record, by value where it holds vectors that are moved rather than copied (the
 //! caller has the value from the kernel), by reference for frames and planes.
@@ -37,9 +37,8 @@
 pub mod brep;
 
 use solidcore::eval as k;
-use solidcore::prism::profile as kp;
-use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::brep::{Curve, Curve2, Frame, Invalid, Surface, MAX_DEPTH};
+use solidcore_record::{Plane, Vec3};
 
 /// The record's vector as the kernel's.
 #[must_use]
@@ -123,9 +122,69 @@ pub fn record_plane(f: &k::Frame) -> Plane {
     }
 }
 
-/// A record curve as the kernel's.
-#[must_use]
-pub fn curve(c: &Curve) -> k::Curve {
+// Preflight bounds recursion before conversion, including before consuming kernel geometry.
+macro_rules! depth_check {
+    ($curve:ident, $surface:ident, $types:ident) => {
+        fn $curve(c: &$types::Curve, depth: usize) -> bool {
+            if depth > MAX_DEPTH {
+                return false;
+            }
+            match c {
+                $types::Curve::SurfaceIntersection {
+                    surfaces, leader, ..
+                } => surfaces.iter().all(|s| $surface(s, depth + 1)) && $curve(leader, depth + 1),
+                _ => true,
+            }
+        }
+        fn $surface(s: &$types::Surface, depth: usize) -> bool {
+            if depth > MAX_DEPTH {
+                return false;
+            }
+            match s {
+                $types::Surface::PlacedRevolution { profile, .. } => $curve(profile, depth + 1),
+                _ => true,
+            }
+        }
+    };
+}
+use solidcore_record::brep as r;
+depth_check!(record_curve_fits, record_surface_fits, r);
+depth_check!(kernel_curve_fits, kernel_surface_fits, k);
+
+// Dropping a rejected owned tree recursively would itself overflow the stack.
+enum KernelNode {
+    Curve(k::Curve),
+    Surface(k::Surface),
+}
+fn dismantle(root: KernelNode) {
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        match node {
+            KernelNode::Curve(k::Curve::SurfaceIntersection {
+                surfaces: [a, b],
+                leader,
+                ..
+            }) => {
+                pending.push(KernelNode::Curve(*leader));
+                pending.push(KernelNode::Surface(*a));
+                pending.push(KernelNode::Surface(*b));
+            }
+            KernelNode::Surface(k::Surface::PlacedRevolution { profile, .. }) => {
+                pending.push(KernelNode::Curve(*profile));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A record curve as the kernel's; refuses geometry deeper than [`MAX_DEPTH`].
+pub fn curve(c: &Curve) -> Result<k::Curve, Invalid> {
+    if !record_curve_fits(c, 0) {
+        return Err(Invalid("geometry depth"));
+    }
+    Ok(curve_inner(c))
+}
+fn curve_inner(c: &Curve) -> k::Curve {
     match c {
         Curve::Line { start, end } => k::Curve::Line {
             start: *start,
@@ -155,16 +214,22 @@ pub fn curve(c: &Curve) -> k::Curve {
             leader,
             tolerance,
         } => k::Curve::SurfaceIntersection {
-            surfaces: [Box::new(surface(a)), Box::new(surface(b))],
-            leader: Box::new(curve(leader)),
+            surfaces: [Box::new(surface_inner(a)), Box::new(surface_inner(b))],
+            leader: Box::new(curve_inner(leader)),
             tolerance: *tolerance,
         },
     }
 }
 
-/// A kernel curve as the record's.
-#[must_use]
-pub fn record_curve(c: k::Curve) -> Curve {
+/// A kernel curve as the record's; refuses geometry deeper than [`MAX_DEPTH`].
+pub fn record_curve(c: k::Curve) -> Result<Curve, Invalid> {
+    if !kernel_curve_fits(&c, 0) {
+        dismantle(KernelNode::Curve(c));
+        return Err(Invalid("geometry depth"));
+    }
+    Ok(record_curve_inner(c))
+}
+fn record_curve_inner(c: k::Curve) -> Curve {
     match c {
         k::Curve::Line { start, end } => Curve::Line { start, end },
         k::Curve::Circle { frame: f, radius } => Curve::Circle {
@@ -185,16 +250,24 @@ pub fn record_curve(c: k::Curve) -> Curve {
             leader,
             tolerance,
         } => Curve::SurfaceIntersection {
-            surfaces: [Box::new(record_surface(*a)), Box::new(record_surface(*b))],
-            leader: Box::new(record_curve(*leader)),
+            surfaces: [
+                Box::new(record_surface_inner(*a)),
+                Box::new(record_surface_inner(*b)),
+            ],
+            leader: Box::new(record_curve_inner(*leader)),
             tolerance,
         },
     }
 }
 
-/// A record surface as the kernel's.
-#[must_use]
-pub fn surface(s: &Surface) -> k::Surface {
+/// A record surface as the kernel's; refuses geometry deeper than [`MAX_DEPTH`].
+pub fn surface(s: &Surface) -> Result<k::Surface, Invalid> {
+    if !record_surface_fits(s, 0) {
+        return Err(Invalid("geometry depth"));
+    }
+    Ok(surface_inner(s))
+}
+fn surface_inner(s: &Surface) -> k::Surface {
     match s {
         Surface::Plane {
             origin,
@@ -271,7 +344,7 @@ pub fn surface(s: &Surface) -> k::Surface {
             matrix,
             forward,
         } => k::Surface::PlacedRevolution {
-            profile: Box::new(curve(profile)),
+            profile: Box::new(curve_inner(profile)),
             origin: *origin,
             axis: *axis,
             matrix: *matrix,
@@ -280,9 +353,15 @@ pub fn surface(s: &Surface) -> k::Surface {
     }
 }
 
-/// A kernel surface as the record's.
-#[must_use]
-pub fn record_surface(s: k::Surface) -> Surface {
+/// A kernel surface as the record's; refuses geometry deeper than [`MAX_DEPTH`].
+pub fn record_surface(s: k::Surface) -> Result<Surface, Invalid> {
+    if !kernel_surface_fits(&s, 0) {
+        dismantle(KernelNode::Surface(s));
+        return Err(Invalid("geometry depth"));
+    }
+    Ok(record_surface_inner(s))
+}
+fn record_surface_inner(s: k::Surface) -> Surface {
     match s {
         k::Surface::Plane {
             origin,
@@ -356,7 +435,7 @@ pub fn record_surface(s: k::Surface) -> Surface {
             matrix,
             forward,
         } => Surface::PlacedRevolution {
-            profile: Box::new(record_curve(*profile)),
+            profile: Box::new(record_curve_inner(*profile)),
             origin,
             axis,
             matrix,

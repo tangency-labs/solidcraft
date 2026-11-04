@@ -150,8 +150,8 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
             capped,
         });
     }
-    let curve = CurveEval::new(&kernel::curve(edge.parameters()))
-        .map_err(|e| fail(crate::eval_message(e)))?;
+    let curve_value = kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?;
+    let curve = CurveEval::new(&curve_value).map_err(|e| fail(crate::eval_message(e)))?;
     let at = |t: f64| -> Result<Vec3> {
         curve
             .point(t)
@@ -297,7 +297,7 @@ pub(crate) fn split_segments(
     let curve = match edge.curve {
         Curve::Line { .. } => None,
         _ => Some(
-            CurveEval::new(&kernel::curve(edge.parameters()))
+            CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?)
                 .map_err(|e| fail(crate::eval_message(e)))?,
         ),
     };

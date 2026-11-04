@@ -24,7 +24,8 @@ pub const VERSION: u32 = 4;
 /// ([`Brep::validate_built`]) has no such cap.
 pub const MAX_ITEMS: usize = 4_000_000;
 pub const MAX_SHELLS: usize = 1024;
-const MAX_DEPTH: usize = 16;
+/// Maximum number of nested geometry edges, with the root at depth zero.
+pub const MAX_DEPTH: usize = 16;
 /// The highest spline degree a record may carry.
 pub const MAX_SPLINE_DEGREE: usize = 16;
 const TAU: f64 = std::f64::consts::TAU;

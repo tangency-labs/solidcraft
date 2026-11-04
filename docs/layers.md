@@ -59,7 +59,7 @@ Which copy survives in each merge is decided per job, from measurements: the rig
 
 ## 3. Dependencies
 
-Allowed edges between workspace crates, enforced by `cargo xtask layers` in both workspaces:
+Allowed edges between workspace crates (a `cargo xtask layers` checker is not yet implemented):
 
 ```
 solidcore-record   -> (no geometry crate)
@@ -78,7 +78,7 @@ apps               -> solidcore-ops, solidcore-record, solidcore-tess
 
 | Rule | Check |
 |---|---|
-| The dependency edges in §3 | `cargo xtask layers` (a table of crates and allowed edges, run in CI in both workspaces) |
+| The dependency edges in §3 | Review for now; `cargo xtask layers` is not yet implemented |
 | The record, the conversion and ops compute no geometric quantity | clippy `disallowed-methods` in `solidcore-record`, `solidcore-convert` and `solidcore-ops`: `f64::{sqrt, cbrt, hypot, sin, cos, tan, asin, acos, atan, atan2, powi, powf, exp, ln, mul_add}`, and the kernel's vector and matrix methods (`dot`, `cross`, `normalize`, `length`, `transform`, …). None of them depends on a maths crate. Comparing a returned number with a tolerance, and scaling it for display, stay allowed |
 | Apps compute no geometry | `cargo xtask app-geometry` in each app: a shrink-only allowlist of the remaining sites (as SolidCraft's `xtask/mesh-decisions.txt`). The list never grows; each refactor PR deletes its lines |
 | Display meshes decide nothing | SolidCraft's existing `cargo xtask mesh-decisions`, kept until the apps compute no geometry at all |
