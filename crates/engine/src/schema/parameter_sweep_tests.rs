@@ -40,6 +40,7 @@ fn strict_keeps_todays_errors() {
     let many: Vec<u32> = (0..201).collect();
     let long = "1".repeat(1001);
     for p in [
+        json!({}),
         json!({"parameter": 5, "values": [1]}),
         json!({"parameter": "nope", "values": [1]}),
         json!({"parameter": "w"}),

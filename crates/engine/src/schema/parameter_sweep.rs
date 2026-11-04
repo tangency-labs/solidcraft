@@ -20,8 +20,9 @@ pub const MAX_VALUES: usize = 200;
 #[schemars(deny_unknown_fields)]
 pub struct ParameterSweepParams {
     /// The parameter, by name, as `parameters.list` lists it.
-    #[serde(deserialize_with = "parameter_name")]
-    pub parameter: String,
+    #[serde(default, deserialize_with = "parameter_name")]
+    #[schemars(required)]
+    pub parameter: Option<String>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SweepValues")]
     pub values: Option<SweepValues>,
@@ -40,9 +41,9 @@ pub struct ParameterSweepParams {
 }
 
 /// The parameter's name, with the handler's message for anything that isn't text.
-fn parameter_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+fn parameter_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     match Value::deserialize(d)? {
-        Value::String(s) => Ok(s),
+        Value::String(s) => Ok(Some(s)),
         _ => Err(D::Error::custom(whole("`parameter` is required (parameters.list)"))),
     }
 }
