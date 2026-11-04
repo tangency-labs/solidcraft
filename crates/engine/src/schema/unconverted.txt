@@ -75,7 +75,6 @@ frame.member
 frame.profile.insert
 frame.profile.list
 frame.profile.properties
-inspect.compare
 inspect.interference
 inspect.measure
 inspect.parameter_sweep
