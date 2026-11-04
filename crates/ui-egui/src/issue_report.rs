@@ -1712,7 +1712,7 @@ mod tests {
         assert_eq!(draft.description, "The fillet preview vanished");
         assert_eq!(draft.note, "Close this draft to report the new problem.");
         assert!(h.widget("Close this draft to report the new problem.").is_some());
-        click_commands(&mut h, "Continue on GitHub");
+        click_commands(&mut h, "Open GitHub");
         assert!(h.app.issue_report.draft.as_ref().unwrap().opened_github);
         begin_crash(&mut h.app, &h.ctx, &crash);
         h.frames(2);
@@ -1725,7 +1725,7 @@ mod tests {
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(4);
         h.step(&json!({"text":"The fillet preview vanished"})).unwrap();
-        click_commands(&mut h, "Continue on GitHub");
+        click_commands(&mut h, "Open GitHub");
         h.step(&json!({"widget":"Close draft"})).unwrap();
         assert!(h.app.issue_report.draft.is_none() && h.app.issue_report.earlier.is_none());
         h.call("ui.help", json!({"item":"report"}));
