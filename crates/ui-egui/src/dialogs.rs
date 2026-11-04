@@ -708,12 +708,14 @@ impl Drop for Applying {
 }
 
 /// Leave OK's evaluation to run on to its end (Cancel while computing): OK pressed again on the
-/// same commands and design takes it up ([`begin_applying`]). A feature editor's job is dropped.
-fn abandon(app: &mut SolveApp) {
+/// same commands and design takes it up ([`begin_applying`]). A feature editor's job is dropped,
+/// and so is every job when `cancel_keeps_computing_ok` is off (the job's drop cancels its
+/// progress). `editing`: the closing dialog edits a feature (the caller may have taken the dialog).
+fn abandon(app: &mut SolveApp, editing: bool) {
     app.abandoned.retain_mut(|job| !job.pending_is_done());
-    let editing = app.dialog.as_ref().is_some_and(|d| d.editing.is_some());
     if let Some(mut job) = app.applying.take()
         && !editing
+        && app.preferences.cancel_keeps_computing_ok
         && app.abandoned.len() < MAX_ABANDONED
         && !job.pending_is_done()
     {
@@ -4206,7 +4208,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Cancel while computing: the result goes (its worker runs on to its end).
     if cancel && !applied {
-        abandon(app);
+        abandon(app, d.editing.is_some());
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
@@ -4449,7 +4451,8 @@ pub fn cancel(app: &mut SolveApp) {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
     }
-    abandon(app);
+    let editing = app.dialog.as_ref().is_some_and(|d| d.editing.is_some());
+    abandon(app, editing);
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {

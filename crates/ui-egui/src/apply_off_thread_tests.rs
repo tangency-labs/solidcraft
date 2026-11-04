@@ -599,3 +599,35 @@ fn quitting_does_not_wait_for_an_evaluation_left_computing() {
     h.frames(2);
     assert!(h.app.quit_requested, "the window closes with the evaluation still running");
 }
+
+/// #3962: the Cancel button (not only Esc) of a feature editor drops its computing job: only a
+/// new feature's OK is left to run on.
+#[test]
+fn cancel_button_of_a_feature_editor_drops_its_computing_job() {
+    let (mut h, target) = cut_chain();
+    h.call("ui.editFeature", json!({"feature": target}));
+    crate::dialogs::sync_feature_edit(&mut h.app);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
+    let prepared = result(&h);
+    let finish = hold_result(&mut h, false);
+    let progress = h.app.applying.as_ref().unwrap().progress.clone();
+    h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+    assert!(h.app.dialog.is_none() && h.app.applying.is_none());
+    assert!(h.app.abandoned.is_empty(), "an editor's job is not kept");
+    assert!(progress.is_cancelled());
+    assert!(finish.send(prepared).is_err());
+}
+
+/// `cancel_keeps_computing_ok` off: Cancel drops a computing OK and cancels it, as before #3962.
+#[test]
+fn cancel_drops_a_computing_ok_when_the_preference_is_off() {
+    let mut h = square_on_a_block();
+    h.app.preferences.cancel_keeps_computing_ok = false;
+    let prepared = result(&h);
+    let finish = hold_result(&mut h, false);
+    let progress = h.app.applying.as_ref().unwrap().progress.clone();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.applying.is_none() && h.app.dialog.is_none());
+    assert!(h.app.abandoned.is_empty() && progress.is_cancelled());
+    assert!(finish.send(prepared).is_err());
+}

@@ -1450,6 +1450,10 @@ preference_settings! {
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
     remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    /// Cancel (or Esc) on a dialog whose OK is still computing leaves that evaluation running in
+    /// the background, so OK pressed again on the same commands takes it up (#3962). Off: Cancel
+    /// drops the evaluation and cancels it, as before.
+    cancel_keeps_computing_ok: bool = true, PAGE_TOOLS => check_id("prefs.cancel_keeps_computing_ok");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
@@ -6168,6 +6172,7 @@ mod tests {
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
+            ("cancel_keeps_computing_ok", json!(false), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
             ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
