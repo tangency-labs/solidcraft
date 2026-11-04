@@ -14,6 +14,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::geom::PlaneGeom as _;
 
 use crate::i18n::tr;
 use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};

@@ -754,3 +754,19 @@ fn a_sketch_point_places_the_box_sphere_and_torus() {
     assert_within(made[0].0, [2.0, -3.0, 10.0], 0.05);
     assert_within(made[0].1, [22.0, 17.0, 30.0], 0.05);
 }
+
+#[test]
+fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_ends() {
+    // Starting the sphere finishes the sketch; the point picked in it is then the finished
+    // sketch's, and still where the sphere goes.
+    use solidcraft_engine::Sel;
+    let mut h = design("mm");
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 20, "name": "Marks"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [12, 7], "id": "m"})).unwrap();
+    assert!(h.app.session.active_sketch.is_some());
+    h.app.session.selection = vec![Sel::SketchPoint { id: "m".into() }];
+    h.app.start("solid.sphere");
+    h.frames(3);
+    assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
+    assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
+}

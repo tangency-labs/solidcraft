@@ -1933,6 +1933,15 @@ impl SolveApp {
         // it was clicked in, so take that one before the turn starts (#10571).
         self.pre_command_cam = finished_sketch.is_some().then(|| self.settled_cam());
         if finished_sketch.is_some() {
+            // A point picked in the sketch being finished stays a pick of that sketch: its
+            // placement reads where the sketch puts it once the sketch is no longer the open one.
+            if let (Some(sketch), "solid.box" | "solid.sphere" | "solid.torus") = (finished_sketch, id) {
+                for sel in self.session.selection.iter_mut() {
+                    if let solidcraft_engine::Sel::SketchPoint { id } = sel {
+                        *sel = solidcraft_engine::Sel::ExternalSketchPoint { sketch, id: id.clone() };
+                    }
+                }
+            }
             self.finish_sketch();
             // A feature committed before the marker is back would go in where the sketch was.
             if self.deferred.is_some() {
