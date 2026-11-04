@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit for solidcore: what reviews should look for, beyond correctness.
+reviews:
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Review for design quality as well as correctness. solidcore's rules are in AGENTS.md.
+
+        - Flag code smells: logic duplicated from elsewhere in the kernel, special cases
+          bolted onto a general routine, tolerances or constants with no derivation, flags
+          or switches that keep an old path alive, fallbacks that hide a failure, and error
+          paths that lose the reason.
+        - Flag patches that make a symptom go away without fixing its cause: a widened
+          tolerance, a retry, an early return that skips the hard case, a test changed to
+          match new output. Ask what the root cause is and whether the change removes it.
+        - When a change reads like a patch, look at the other open pull requests and recent
+          changes in the same area. If several fixes keep touching the same code, say so,
+          and ask for the bigger picture: the shared cause, and the design that removes it.
+        - It is fine to recommend stopping and narrowing the scope. A smaller change that is
+          right, or an issue that states the real problem, is better than a larger change
+          that adds code which will have to be undone. Say so when that is the better path.
+        - Each fix needs a test that fails without it, and tests should check values a
+          wrong result would change.
