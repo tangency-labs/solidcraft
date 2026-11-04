@@ -124,6 +124,13 @@ pub enum Error {
         /// The join's index: after piece `join`.
         join: usize,
     },
+    /// An extension that cannot run as far as asked (a weight of the extended surface would
+    /// vanish, a pole, an apex or a full turn is reached, or its length there cannot be
+    /// measured to the kernel's stop): the longest distance proved to work, when there is one.
+    TooFar {
+        /// The longest distance that works.
+        largest: Option<f64>,
+    },
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
@@ -304,6 +311,7 @@ impl std::fmt::Display for Error {
                 "the sweep path's pieces {join} and {} do not meet",
                 join.saturating_add(1)
             ),
+            Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
             Error::Cancelled => write!(f, "cancelled"),
             Error::Reentered => write!(

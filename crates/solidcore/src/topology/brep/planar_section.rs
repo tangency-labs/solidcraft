@@ -224,6 +224,45 @@ pub fn surface_planar_section_curves(
     })
 }
 
+/// The section of face `f` by `plane` (its origin and z axis), as the plane cutter takes it:
+/// none when the face's box `face_box` lies farther from the plane than `tol`, otherwise
+/// [`face_planar_section_curves`] on the plane's point and normal.
+///
+/// # Errors
+///
+/// Those of [`face_planar_section_curves`].
+#[allow(clippy::too_many_arguments)] // face_planar_section_curves' arguments, with the plane's
+pub fn face_plane_section_curves(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    plane: &Plane,
+    face_box: &Extent3d,
+    tol: f64,
+    approx_tol_3d: Option<f64>,
+    ang_tol_rad: Option<f64>,
+) -> Result<Option<SurfaceSection>> {
+    let at = plane.position().origin();
+    let normal = plane.position().z_axis();
+    if face_box.distance_to_plane(at, normal).abs() > tol {
+        return Ok(None);
+    }
+    face_planar_section_curves(
+        k,
+        b,
+        f,
+        surface,
+        uv_domain,
+        at,
+        normal,
+        approx_tol_3d,
+        ang_tol_rad,
+    )
+    .map(Some)
+}
+
 /// `pFace->GetSurface()->CreatePlanarSectionCurves(crContext, pFace->GetUVDomain(), ..)`
 /// as [`create_planar_section_curves`] calls it on face `f` of `b`: `surface` is an
 /// evaluation copy of the face's surface (same owner and cache slot) and `uv_domain`

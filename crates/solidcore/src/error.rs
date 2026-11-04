@@ -406,6 +406,18 @@ pub enum SolidError {
         refusal: crate::blend::round_room::RoundRefusal,
     },
 
+    /// A surface extension refused (not upstream: [`crate::surface::extend`]), naming the
+    /// longest distance that works when there is one.
+    #[error("{operation}: extension refused ({refusal:?}){}", fmt_size(*.distance))]
+    ExtendRefused {
+        /// Operation that refused.
+        operation: &'static str,
+        /// Why.
+        refusal: crate::surface::extend::ExtendRefusal,
+        /// The longest distance across the side that works, when there is one.
+        distance: Option<f64>,
+    },
+
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
     /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
@@ -863,6 +875,14 @@ impl core::fmt::Display for ErrorKind {
     }
 }
 
+/// The largest size (a distance) that works, as a refusal's message ends with it, when there
+/// is one.
+fn fmt_size(size: Option<f64>) -> String {
+    size.map_or_else(String::new, |s| {
+        format!("; the largest size that works is {s}")
+    })
+}
+
 impl SolidError {
     /// [`SolidError::Upstream`] with code [`SM_ERR`] and no entity (upstream
     /// `return SE(SM_ERR)`).
@@ -949,6 +969,7 @@ impl SolidError {
             | Self::Cancelled { .. }
             | Self::FaceTrimsUnavailable { .. }
             | Self::UnsureRegion { .. }
+            | Self::ExtendRefused { .. }
             | Self::Unported { .. } => None,
         }
     }
@@ -1007,8 +1028,10 @@ impl SolidError {
             Self::NotFound { .. } => ErrorKind::NotFound,
             Self::Degenerate { .. } => ErrorKind::Degenerate,
             Self::NotConverged { .. } => ErrorKind::NotConverged,
-            // a region the kernel cannot classify: the query does not decide it
-            Self::Unsupported { .. } | Self::UnsureRegion { .. } => ErrorKind::Unsupported,
+            // a region the kernel cannot classify, or a side it cannot extend: unsupported
+            Self::Unsupported { .. } | Self::UnsureRegion { .. } | Self::ExtendRefused { .. } => {
+                ErrorKind::Unsupported
+            }
             Self::FaceTrimsUnavailable { .. } => ErrorKind::FaceTrimsUnavailable,
             Self::Upstream { code, .. } => ErrorKind::of_status(*code),
             Self::Nlib { code, .. } => match code {
@@ -1096,6 +1119,7 @@ impl SolidError {
             | Self::FilletRefused { operation, .. }
             | Self::BlendRefused { operation, .. }
             | Self::RoundRefused { operation, .. }
+            | Self::ExtendRefused { operation, .. }
             | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
@@ -1122,6 +1146,7 @@ impl SolidError {
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }
             | Self::PortInvariant { .. }
+            | Self::ExtendRefused { .. }
             | Self::Nlib { .. }
             | Self::Unported { .. }
             | Self::Cancelled { .. }

@@ -1,0 +1,887 @@
+use super::*;
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::vector2d::Vec2;
+use crate::geom::vector3d::Vec3;
+use crate::nurbs::knots::Side;
+use crate::nurbs::srf_tool::p1::extract_iso_crv;
+use crate::surface::cone::Cone;
+use crate::surface::plane::Plane;
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
+
+fn k() -> Kernel {
+    Kernel::default()
+}
+
+/// A B-spline surface from homogeneous rows `rows[i along u][j along v]`, `w = None` for a
+/// polynomial one.
+fn spline(
+    rows: &[Vec<[f64; 4]>],
+    p: usize,
+    q: usize,
+    u: &[f64],
+    v: &[f64],
+    rational: bool,
+) -> Surface {
+    let net: Vec<Vec<CPoint>> = rows
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|&[x, y, z, w]| CPoint::new(x, y, z, if rational { w } else { NOW }))
+                .collect()
+        })
+        .collect();
+    let n = Net::new(net, p, q, u.to_vec(), v.to_vec()).unwrap();
+    Surface::from(BSplineSurface::from_gw_nurb(&n))
+}
+
+/// The parabola `y = x^2`, `x` in `[0, 1]` along u, extruded along z over `[0, 1]` in v.
+fn parabola() -> Surface {
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y, 1.0, 1.0]];
+    spline(
+        &[row(0.0, 0.0), row(0.5, 0.0), row(1.0, 1.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    )
+}
+
+/// A quarter circle of radius 2 about z along u (rational), extruded along z over `[0, 1]`.
+fn quarter() -> Surface {
+    let h = FRAC_1_SQRT_2;
+    let row = |x: f64, y: f64, w: f64| vec![[w * x, w * y, 0.0, w], [w * x, w * y, w, w]];
+    spline(
+        &[row(2.0, 0.0, 1.0), row(2.0, 2.0, h), row(0.0, 2.0, 1.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        true,
+    )
+}
+
+fn dom(s: &Surface) -> Extent2d {
+    s.natural_uv_domain_with_nurb(&k()).unwrap()
+}
+
+/// The result's points along u at the side's middle v, over its extension.
+fn past(e: &Extended, side: BoxSide) -> Vec<Vec3> {
+    let d = dom(&e.surface);
+    let (a, b) = if side.is_high() {
+        (e.dom.max().x, d.max().x)
+    } else {
+        (e.dom.min().x, d.min().x)
+    };
+    (0..=8)
+        .map(|i| {
+            let u = a + (b - a) * f64::from(i) / 8.0;
+            e.surface.evaluate_point(&k(), Vec2::new(u, 0.5)).unwrap()
+        })
+        .collect()
+}
+
+/// The parabola's arc length from `x = 0` to `x`.
+fn arc(x: f64) -> f64 {
+    0.5 * x * (1.0 + 4.0 * x * x).sqrt() + 0.25 * (2.0 * x).asinh()
+}
+
+/// The enclosure holds `d` within the stop: `max(1e-9 d, its truncation and rounding parts)`,
+/// every leaf converged, the truncation part at most `1e-9 d` and the rounding part at most
+/// `1e-6 d` (owner); the source kept and the extension's bound finite.
+fn meets(e: &Extended, d: f64) {
+    let a = e.across;
+    assert!(a.converged, "{a:?}");
+    assert!(a.truncation <= 1e-9 * d, "truncation {a:?} for {d}");
+    assert!(a.rounding <= 1e-6 * d, "rounding {a:?} for {d}");
+    assert!(
+        e.extension <= 1e-6 * d,
+        "extension bound {} for {d}",
+        e.extension
+    );
+    let b = a.enclosure;
+    let tol = (1e-9 * d).max(a.truncation + a.rounding);
+    assert!(b.lower >= d - tol && b.upper <= d + tol, "{b:?} for {d}");
+    assert_eq!(e.source, 0.0);
+    assert!(e.extension >= 0.0, "{}", e.extension);
+}
+
+fn is_spline(s: &Surface) -> bool {
+    matches!(s.kind(), SurfaceKind::BSpline(_))
+}
+
+#[test]
+fn natural_continues_the_parabola_on_itself_at_both_ends() {
+    let s = parabola();
+    let d = 0.75;
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Natural, d)
+        .unwrap();
+    assert!(is_spline(&e.surface));
+    meets(&e, d);
+    let pts = past(&e, BoxSide::UMax);
+    for p in &pts {
+        assert!((p.y - p.x * p.x).abs() < 1e-12, "{p:?}");
+    }
+    // the closed form: the arc from x = 1 to the end is d
+    let end = pts.last().unwrap().x;
+    assert!((arc(end) - arc(1.0) - d).abs() < 1e-7, "{end}");
+    // the low end: x < 0 on the same parabola
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMin, Continuity::Natural, d)
+        .unwrap();
+    meets(&e, d);
+    let pts = past(&e, BoxSide::UMin);
+    for p in &pts {
+        assert!((p.y - p.x * p.x).abs() < 1e-12, "{p:?}");
+    }
+    assert!((arc(-pts.last().unwrap().x) - d).abs() < 1e-7);
+}
+
+#[test]
+fn curvature_on_a_quadratic_is_its_natural_continuation() {
+    // a quadratic row matching value, slope and second derivative is the same quadratic
+    let s = parabola();
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Curvature, 0.4)
+        .unwrap();
+    assert!(is_spline(&e.surface));
+    meets(&e, 0.4);
+    for p in past(&e, BoxSide::UMax) {
+        assert!((p.y - p.x * p.x).abs() < 1e-12, "{p:?}");
+    }
+}
+
+#[test]
+fn tangent_is_the_mirror_of_the_boundary_piece() {
+    let s = parabola();
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Tangent, 0.4)
+        .unwrap();
+    meets(&e, 0.4);
+    // the extension at 1 + t is C(1 - t) mirrored in the plane through (1, 1) normal to the
+    // tangent (1, 2)
+    let ext = dom(&e.surface).max().x - 1.0;
+    let n = Vec3::new(1.0, 2.0, 0.0) / 5f64.sqrt();
+    let o = Vec3::new(1.0, 1.0, 0.5);
+    for i in 1..=4 {
+        let t = ext * f64::from(i) / 4.0;
+        let c = Vec3::new(1.0 - t, (1.0 - t) * (1.0 - t), 0.5);
+        let m = c - n * (2.0 * (c - o).dot(n));
+        let got = e
+            .surface
+            .evaluate_point(&k(), Vec2::new(1.0 + t, 0.5))
+            .unwrap();
+        assert!(got.distance(m) < 1e-12, "{got:?} vs {m:?}");
+    }
+}
+
+/// The unit tangent and the curvature vector of the u iso curve at v = 0.5, either side of `u`.
+fn jets(s: &Surface, u: f64) -> [(Vec3, Vec3); 2] {
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let c = extract_iso_crv(b.gw_nurb().unwrap(), 0.5, Direction::V).unwrap();
+    [Side::Left, Side::Right].map(|side| {
+        let d = c.derivs(u, side, 2).unwrap();
+        let (d1, d2) = (d[1], d[2]);
+        let t = d1 / d1.length();
+        let kappa = (d2 - t * d2.dot(t)) / d1.dot(d1);
+        (t, kappa)
+    })
+}
+
+#[test]
+fn a_circle_continues_on_itself_and_mirrors_tangent_and_curvature_continuous() {
+    let s = quarter();
+    let r = 2.0;
+    // natural: the conic continued is the circle; the across length is the arc
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Natural, 1.0)
+        .unwrap();
+    assert!(is_spline(&e.surface));
+    meets(&e, 1.0);
+    for p in past(&e, BoxSide::UMax) {
+        assert!((p.x.hypot(p.y) - r).abs() < 1e-12, "{p:?}");
+    }
+    let end = *past(&e, BoxSide::UMax).last().unwrap();
+    // from angle 90 by an arc of 1 on radius 2
+    let want = FRAC_PI_2 + 0.5;
+    assert!((end.y.atan2(end.x) - want).abs() < 1e-7, "{end:?}");
+    // curvature within the boundary span: the homogeneous quadratic matched to second order is
+    // the circle's own
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Curvature, 1.0)
+        .unwrap();
+    meets(&e, 1.0);
+    for p in past(&e, BoxSide::UMax) {
+        assert!((p.x.hypot(p.y) - r).abs() < 1e-11, "{p:?}");
+    }
+    // tangent: a different conic, tangent continuous at the joint
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Tangent, 1.0)
+        .unwrap();
+    meets(&e, 1.0);
+    let [(tl, _), (tr, _)] = jets(&e.surface, 1.0);
+    assert!(tl.distance(tr) < 1e-12, "{tl:?} {tr:?}");
+}
+
+#[test]
+fn curvature_is_curvature_continuous_across_interior_knots() {
+    // a cubic row with an interior knot, extended past more than its last span
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y, 1.0, 1.0]];
+    let s = spline(
+        &[
+            row(0.0, 0.0),
+            row(1.0, 2.0),
+            row(2.0, -1.0),
+            row(3.0, 1.0),
+            row(4.0, 0.5),
+        ],
+        3,
+        1,
+        &[0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    );
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Curvature, 2.0)
+        .unwrap();
+    meets(&e, 2.0);
+    let [(tl, kl), (tr, kr)] = jets(&e.surface, 1.0);
+    assert!(tl.distance(tr) < 1e-12, "{tl:?} {tr:?}");
+    assert!(
+        kl.distance(kr) < 1e-9 * kl.length().max(1.0),
+        "{kl:?} {kr:?}"
+    );
+    // longer than the surface's range: mirrored in steps, still continuous at the joint
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Tangent, 30.0)
+        .unwrap();
+    meets(&e, 30.0);
+    let [(tl, _), (tr, _)] = jets(&e.surface, 1.0);
+    assert!(tl.distance(tr) < 1e-12);
+}
+
+#[test]
+fn a_weight_reaching_zero_is_refused_naming_the_distance_that_works() {
+    // a rational cubic with weights 1, 3.4, 1.8, 1: continued naturally, its second weight
+    // control point reaches 0 at t = 2.25 of the span (the weight itself still 11 there)
+    let row = |x: f64, y: f64, w: f64| vec![[w * x, w * y, 0.0, w], [w * x, w * y, w, w]];
+    let s = spline(
+        &[
+            row(0.0, 0.0, 1.0),
+            row(1.0, 1.0, 3.4),
+            row(2.0, 1.0, 1.8),
+            row(3.0, 0.0, 1.0),
+        ],
+        3,
+        1,
+        &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        true,
+    );
+    let err = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Natural, 1e6)
+        .unwrap_err();
+    let SolidError::ExtendRefused {
+        refusal: ExtendRefusal::WeightVanishes,
+        distance: Some(longest),
+        ..
+    } = err
+    else {
+        panic!("{err:?}");
+    };
+    assert!(longest > 0.0 && longest < 1e6, "{longest}");
+    // the distance named works, exactly, with every weight positive
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Natural, longest)
+        .unwrap();
+    meets(&e, longest);
+    let SurfaceKind::BSpline(b) = e.surface.kind() else {
+        panic!()
+    };
+    assert!(b.gw_nurb().unwrap().rows().flatten().all(|c| c.w > 0.0));
+}
+
+#[test]
+fn analytic_kinds_widen_and_keep_their_kind() {
+    let kk = k();
+    let pl = Axis2Placement::new(Vec3::new(1.0, 2.0, 3.0), Vec3::X, Vec3::Y);
+    let mut c = Cone::create_canonical(&kk, &pl, 2.0, 2.0, 1.0, false, false).unwrap();
+    c.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 0.0, 90.0, 3.0))
+        .unwrap();
+    let s = Surface::from(c);
+    for side in BoxSide::ALL {
+        let e = s
+            .extended_by_distance(&kk, &dom(&s), side, Continuity::Natural, 1.5)
+            .unwrap();
+        assert!(matches!(e.surface.kind(), SurfaceKind::Cone(_)), "{side:?}");
+        meets(&e, 1.5);
+    }
+    // a plane: every continuity is its continuation, the plane itself
+    let p = Surface::from(Plane::new(
+        Vec3::ZERO,
+        Vec3::X,
+        Vec3::Y,
+        Vec2::new(1.0, 1.0),
+        &Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0),
+    ));
+    for how in [
+        Continuity::Natural,
+        Continuity::Tangent,
+        Continuity::Curvature,
+    ] {
+        let e = p
+            .extended_by_distance(&kk, &dom(&p), BoxSide::UMax, how, 5.0)
+            .unwrap();
+        assert!(matches!(e.surface.kind(), SurfaceKind::Plane(_)));
+        meets(&e, 5.0);
+    }
+    // round a cylinder tangent: its B-spline form mirrored, a spline at bound 0
+    let e = s
+        .extended_by_distance(&kk, &dom(&s), BoxSide::UMax, Continuity::Tangent, 1.0)
+        .unwrap();
+    assert!(is_spline(&e.surface) || matches!(e.surface.kind(), SurfaceKind::Cone(_)));
+    meets(&e, 1.0);
+}
+
+#[test]
+fn bad_asks_are_refused() {
+    let s = parabola();
+    let d = dom(&s);
+    for x in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(s
+            .extended_by_distance(&k(), &d, BoxSide::UMax, Continuity::Natural, x)
+            .is_err());
+    }
+    // a side that is not the form's end
+    let inner = Extent2d::from_bounds(0.0, 0.0, 0.5, 1.0);
+    assert!(s
+        .extended_by_distance(&k(), &inner, BoxSide::UMax, Continuity::Tangent, 0.5)
+        .is_err());
+    // an analytic form moved off its label
+    let kk = k();
+    let pl = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+    let mut c = Cone::create_canonical(&kk, &pl, 2.0, 2.0, 1.0, false, false).unwrap();
+    c.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 0.0, 90.0, 3.0))
+        .unwrap();
+    let shift = Axis2Placement::new(Vec3::new(1e-6, 0.0, 0.0), Vec3::X, Vec3::Y);
+    c.rev.base.transform(&shift, None).unwrap();
+    let m = Surface::from(c);
+    assert!(m
+        .extended_by_distance(&kk, &dom(&m), BoxSide::UMax, Continuity::Tangent, 1.0)
+        .is_err());
+}
+
+/// A refusal as not exact, its named distance.
+fn not_exact_naming(err: SolidError) -> Option<f64> {
+    match err {
+        SolidError::ExtendRefused {
+            refusal: ExtendRefusal::NotExact,
+            distance,
+            ..
+        } => distance,
+        e => panic!("{e:?}"),
+    }
+}
+
+/// The quarter circle mirrored far: Curvature's C2 rows carry the rounding of the rows before
+/// them, so past a few spans its extension bound runs past `1e-6 d`; it is refused as not
+/// exact, naming a distance that works, never accepted with a wide enclosure (owner; before
+/// the caps, Curvature at 20 came back with an enclosure [0, 4705] and Tangent at 1e5 with one
+/// 2.4% wide). Every result met has its parts within the caps.
+#[test]
+fn a_far_mirror_is_met_within_the_caps_or_refused_naming_a_distance_that_works() {
+    let s = quarter();
+    for (how, d) in [(Continuity::Curvature, 20.0), (Continuity::Tangent, 1e5)] {
+        match s.extended_by_distance(&k(), &dom(&s), BoxSide::UMax, how, d) {
+            Ok(e) => meets(&e, d),
+            Err(err) => {
+                // not exact, or (Tangent far) a mirrored weight vanishing first: either names
+                // a distance that works
+                let named = match err {
+                    SolidError::ExtendRefused {
+                        refusal: ExtendRefusal::WeightVanishes,
+                        distance,
+                        ..
+                    } => distance,
+                    e => not_exact_naming(e),
+                }
+                .unwrap_or_else(|| panic!("{how:?} {d}"));
+                assert!(named > 0.0 && named < d, "{how:?} {d}: {named}");
+                let e = s
+                    .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, how, named)
+                    .unwrap_or_else(|e| panic!("{how:?} {named}: {e:?}"));
+                meets(&e, named);
+            }
+        }
+    }
+    // Tangent by 20 is built, its bound small
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Tangent, 20.0)
+        .unwrap();
+    meets(&e, 20.0);
+    assert!(e.extension < 1e-9, "{}", e.extension);
+}
+
+/// Curvature is continuous in the extension parameter: across a knot of the mirror the
+/// length runs on, so every distance in the range is met (REVIEW2 finding 2: before one span a
+/// step, 9 fell in a gap between 8.98 and 9.53).
+#[test]
+fn curvature_meets_every_distance_across_a_mirror_knot() {
+    let s = quarter();
+    // the mirror's knots are at e = 1 and 2 (one span of length 1 a step): L(1) is about 2.0
+    for d in [1.5, 1.9, 2.0, 2.1, 2.5, 3.0, 3.3] {
+        let e = s
+            .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Curvature, d)
+            .unwrap_or_else(|e| panic!("{d}: {e:?}"));
+        meets(&e, d);
+    }
+    // and the length grows with the parameter, without a jump
+    let source = Local::of(
+        match &s.kind() {
+            SurfaceKind::BSpline(b) => b.gw_nurb().unwrap(),
+            _ => panic!(),
+        },
+        BoxSide::UMax,
+    )
+    .unwrap();
+    let net = match s.kind() {
+        SurfaceKind::BSpline(b) => b.gw_nurb().unwrap().clone(),
+        _ => panic!(),
+    };
+    let mut last = 0.0;
+    for i in 1..=60 {
+        let e = 0.85 + 0.005 * f64::from(i);
+        let Some(g) = source.extended(Continuity::Curvature, e).unwrap() else {
+            break;
+        };
+        let out = Surface::from(BSplineSurface::from_gw_nurb(
+            &g.surface(&net, BoxSide::UMax).unwrap(),
+        ));
+        let l = out
+            .length_across_side(&k(), &dom(&s), BoxSide::UMax, 1e-8)
+            .unwrap()
+            .enclosure
+            .mid();
+        assert!(
+            i == 1 || (l > last && l - last < 0.2),
+            "e {e}: {last} -> {l}"
+        );
+        last = l;
+    }
+}
+
+/// Tangent's first point past the joint is `2 Pn - Pn1`, exactly, on every row (REVIEW2
+/// finding 9): the tangent across the joint carries no rounding of the mirror map.
+#[test]
+fn tangents_first_point_is_the_exact_reflection() {
+    let s = quarter();
+    let SurfaceKind::BSpline(b) = s.kind() else {
+        panic!()
+    };
+    let net = b.gw_nurb().unwrap().clone();
+    let source = Local::of(&net, BoxSide::UMax).unwrap();
+    let g = source.extended(Continuity::Tangent, 1.0).unwrap().unwrap();
+    for (r, src) in g.rows.iter().zip(&source.rows) {
+        let n = src.len();
+        let (pn, pn1) = (src[n - 1], src[n - 2]);
+        assert_eq!(r[n], lin(2.0, pn, -1.0, pn1));
+    }
+}
+
+/// Natural past a short span amplifies the rounding (`t^p`): the extension carries a certified
+/// bound that holds the result to the closed form (REVIEW2 finding 5). `y = x^3` on [0, 1] with
+/// a knot at 0.999, along u, extruded along z. Far past the short span the bound runs past
+/// `1e-6 d` (`t` is about `1 + d / 0.001`), so that is refused as not exact, naming a
+/// distance that works.
+#[test]
+fn natural_carries_a_bound_that_holds_the_closed_form() {
+    let a = 0.999_f64;
+    let p = [[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 0.0], [1.0, 1.0]];
+    let mix = |x: [f64; 2], y: [f64; 2]| [(1.0 - a) * x[0] + a * y[0], (1.0 - a) * x[1] + a * y[1]];
+    let pts = [
+        p[0],
+        mix(p[0], p[1]),
+        mix(p[1], p[2]),
+        mix(p[2], p[3]),
+        p[3],
+    ];
+    let rows: Vec<Vec<[f64; 4]>> = pts
+        .iter()
+        .map(|&[x, y]| vec![[x, y, 0.0, 1.0], [x, y, 1.0, 1.0]])
+        .collect();
+    let s = spline(
+        &rows,
+        3,
+        1,
+        &[0.0, 0.0, 0.0, 0.0, a, 1.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    );
+    let named = not_exact_naming(
+        s.extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Natural, 10.0)
+            .unwrap_err(),
+    )
+    .unwrap();
+    assert!(named > 0.0 && named < 10.0, "{named}");
+    for d in [0.5, named] {
+        let e = s
+            .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Natural, d)
+            .unwrap_or_else(|e| panic!("{d}: {e:?}"));
+        meets(&e, d);
+        let mut off = 0.0_f64;
+        for q in past(&e, BoxSide::UMax) {
+            off = off.max((q.y - q.x.powi(3)).abs());
+        }
+        assert!(e.extension > 0.0, "{d}");
+        assert!(
+            off <= e.extension,
+            "{d}: off {off} past the bound {}",
+            e.extension
+        );
+    }
+}
+
+/// A length that is not measured to the stop is no measurement: not met however close
+/// (owner): a leaf not converged, a truncation part past `1e-9 d`, a rounding part past
+/// `1e-6 d`, an extension bound not finite, or no length at all.
+#[test]
+fn a_length_not_measured_to_the_stop_is_unproved() {
+    let at = |lower: f64, upper: f64, truncation: f64, rounding: f64, converged: bool| Across {
+        enclosure: crate::surface::side::Bracket { lower, upper },
+        truncation,
+        rounding,
+        converged,
+    };
+    let d = 1.0;
+    assert_eq!(says(Some(&at(1.0, 1.0, 0.0, 0.0, true)), 0.0, d), Says::Met);
+    assert_eq!(
+        says(Some(&at(1.0, 1.0, 0.0, 0.0, false)), 0.0, d),
+        Says::Unproved
+    );
+    assert_eq!(
+        says(Some(&at(1.0, 1.0, 0.0, 0.0, true)), f64::INFINITY, d),
+        Says::Unproved
+    );
+    assert_eq!(says(None, 0.0, d), Says::Unproved);
+    // the truncation part over 1e-9 d: not met, though the enclosure holds d
+    assert_eq!(
+        says(Some(&at(1.0 - 1e-9, 1.0 + 1e-9, 2e-9, 0.0, true)), 0.0, d),
+        Says::Unproved
+    );
+    // the rounding part within 1e-6 d: met; over it: not
+    assert_eq!(
+        says(Some(&at(1.0 - 5e-7, 1.0 + 4e-7, 1e-10, 8e-7, true)), 0.0, d),
+        Says::Met
+    );
+    assert_eq!(
+        says(Some(&at(1.0 - 1e-6, 1.0 + 1e-6, 1e-10, 2e-6, true)), 0.0, d),
+        Says::Unproved
+    );
+    // proved short and past, however wide
+    assert!(matches!(
+        says(Some(&at(0.1, 0.5, 0.0, 0.4, true)), 0.0, d),
+        Says::Short(_)
+    ));
+    assert!(matches!(
+        says(Some(&at(2.0, 9.0, 0.0, 7.0, true)), 0.0, d),
+        Says::Past(_)
+    ));
+}
+
+/// The stop is the measure's own: the quarter circle's and a rational cubic's lengths, their
+/// truncation and rounding parts as reported, the enclosure within them of the distance.
+#[test]
+fn the_stop_is_the_reported_parts() {
+    let s = quarter();
+    let e = s
+        .extended_by_distance(&k(), &dom(&s), BoxSide::UMax, Continuity::Curvature, 3.0)
+        .unwrap();
+    meets(&e, 3.0);
+    let a = e.across;
+    let width = a.enclosure.upper - a.enclosure.lower;
+    assert!(
+        (width - (a.truncation + a.rounding)).abs() <= 1e-12 * 3.0,
+        "{a:?}"
+    );
+    let row = |x: f64, y: f64, w: f64| vec![[w * x, w * y, 0.0, w], [w * x, w * y, w, w]];
+    let cubic = spline(
+        &[
+            row(0.0, 0.0, 1.0),
+            row(1.0, 1.0, 3.4),
+            row(2.0, 1.0, 1.8),
+            row(3.0, 0.0, 1.0),
+        ],
+        3,
+        1,
+        &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        true,
+    );
+    let e = cubic
+        .extended_by_distance(&k(), &dom(&cubic), BoxSide::UMax, Continuity::Natural, 1.0)
+        .unwrap();
+    meets(&e, 1.0);
+}
+
+/// Tangent and Curvature on a rational row past every side: the quarter circle along u
+/// (`UMax` and `UMin`) and along v (`VMax` and `VMin`, its net transposed). Curvature within the boundary
+/// span is the circle's own (REVIEW2's missing tests).
+#[test]
+fn mirrors_on_a_rational_row_past_every_side() {
+    let h = FRAC_1_SQRT_2;
+    let circle = [(2.0, 0.0, 1.0), (2.0, 2.0, h), (0.0, 2.0, 1.0)];
+    let along_v = spline(
+        &[
+            circle
+                .iter()
+                .map(|&(x, y, w)| [w * x, w * y, 0.0, w])
+                .collect(),
+            circle
+                .iter()
+                .map(|&(x, y, w)| [w * x, w * y, w, w])
+                .collect(),
+        ],
+        1,
+        2,
+        &[0.0, 0.0, 1.0, 1.0],
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        true,
+    );
+    let u = quarter();
+    for (s, side) in [
+        (&u, BoxSide::UMax),
+        (&u, BoxSide::UMin),
+        (&along_v, BoxSide::VMax),
+        (&along_v, BoxSide::VMin),
+    ] {
+        for how in [Continuity::Tangent, Continuity::Curvature] {
+            let e = s
+                .extended_by_distance(&k(), &dom(s), side, how, 1.0)
+                .unwrap_or_else(|e| panic!("{side:?} {how:?}: {e:?}"));
+            meets(&e, 1.0);
+            if how == Continuity::Curvature {
+                let d = dom(&e.surface);
+                for i in 0..=8 {
+                    let t = f64::from(i) / 8.0;
+                    let uv = if side.is_u() {
+                        let a = if side.is_high() {
+                            e.dom.max().x
+                        } else {
+                            e.dom.min().x
+                        };
+                        let b = if side.is_high() { d.max().x } else { d.min().x };
+                        Vec2::new(a + (b - a) * t, 0.5)
+                    } else {
+                        let a = if side.is_high() {
+                            e.dom.max().y
+                        } else {
+                            e.dom.min().y
+                        };
+                        let b = if side.is_high() { d.max().y } else { d.min().y };
+                        Vec2::new(0.5, a + (b - a) * t)
+                    };
+                    let p = e.surface.evaluate_point(&k(), uv).unwrap();
+                    assert!((p.x.hypot(p.y) - 2.0).abs() < 1e-11, "{side:?}: {p:?}");
+                }
+            }
+        }
+    }
+}
+
+/// The offset by `h` of the quarter cylinder of radius 2 about z.
+fn offset_quarter(h: f64) -> Surface {
+    let kk = k();
+    Surface::from(OffsetSurface::new(&kk, h, quarter(), true, SS_UNKNOWN).unwrap())
+}
+
+#[test]
+fn an_offset_surface_is_the_offset_of_its_base_extended() {
+    let kk = k();
+    let h = 0.5;
+    let s = offset_quarter(h);
+    // the offset's radius, off the source's box
+    let radius = |p: Vec3| p.x.hypot(p.y);
+    let r = radius(s.evaluate_point(&kk, Vec2::new(0.5, 0.5)).unwrap());
+    assert!((r - 2.0).abs() > 0.4, "{r}");
+    for (how, side) in [
+        (Continuity::Natural, BoxSide::UMax),
+        (Continuity::Natural, BoxSide::UMin),
+        (Continuity::Tangent, BoxSide::VMax),
+    ] {
+        let e = s
+            .extended_by_distance(&kk, &dom(&s), side, how, 1.0)
+            .unwrap();
+        let SurfaceKind::OffsetSurface(o) = e.surface.kind() else {
+            panic!("{side:?}: not an offset surface");
+        };
+        assert_eq!(o.offset_distance(), h);
+        // the length across is measured on the base, which is the quarter extended
+        meets(&e, 1.0);
+        // the source's box: the source's offset; past it, Natural round the axis stays on
+        // the offset cylinder (the base continued on its circle)
+        let d = dom(&e.surface);
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            let inside = Vec2::new(t, 0.5);
+            let a = e.surface.evaluate_point(&kk, inside).unwrap();
+            let b = s.evaluate_point(&kk, inside).unwrap();
+            assert!(a.distance(b) <= 1e-12, "{side:?} {a:?} {b:?}");
+            if side.is_u() {
+                let u = if side.is_high() {
+                    1.0 + t * (d.max().x - 1.0)
+                } else {
+                    d.min().x * t
+                };
+                let p = e.surface.evaluate_point(&kk, Vec2::new(u, 0.5)).unwrap();
+                assert!(
+                    (radius(p) - r).abs() <= 1e-12,
+                    "{side:?} {u}: {}",
+                    radius(p)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn every_side_extends_in_turn_and_closed_or_collapsed_sides_are_left() {
+    let kk = k();
+    let s = quarter();
+    let e = s
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 1.0)
+        .unwrap();
+    for (side, done) in BoxSide::ALL.iter().zip(e.sides) {
+        let SideExtension::Extended(a) = done else {
+            panic!("{side:?}: {done:?}");
+        };
+        let tol = (1e-9_f64).max(a.truncation + a.rounding);
+        assert!((a.enclosure.mid() - 1.0).abs() <= tol, "{side:?}: {a:?}");
+    }
+    // every side ran along the earlier ones: the box grew on all four
+    let (d0, d1) = (dom(&s), dom(&e.surface));
+    assert!(d1.min().x < d0.min().x && d1.max().x > d0.max().x);
+    assert!(d1.min().y < d0.min().y && d1.max().y > d0.max().y);
+    // only the asked sides
+    let one = s
+        .extended_sides(&kk, &[BoxSide::VMax], Continuity::Tangent, 1.0)
+        .unwrap();
+    assert!(matches!(one.sides[0], SideExtension::NotAsked));
+    assert!(matches!(one.sides[3], SideExtension::Extended(_)));
+    // a full turn closes round the axis: those sides are left, the rulings extended
+    let pl = Axis2Placement::new(Vec3::ZERO, Vec3::Z, Vec3::X);
+    let mut c = Cone::create_canonical(&kk, &pl, 2.0, 2.0, 1.0, false, false).unwrap();
+    c.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 0.0, 360.0, 3.0))
+        .unwrap();
+    let c = Surface::from(c);
+    let e = c
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 1.0)
+        .unwrap();
+    let closed = e
+        .sides
+        .iter()
+        .filter(|x| matches!(x, SideExtension::Closed))
+        .count();
+    let grown = e
+        .sides
+        .iter()
+        .filter(|x| matches!(x, SideExtension::Extended(_)))
+        .count();
+    assert_eq!((closed, grown), (2, 2), "{:?}", e.sides);
+    // a side collapsed to a point (a pole) is left: the triangle with its corner at u = 0
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y + x, 0.0, 1.0]];
+    let t = spline(
+        &[row(0.0, 0.0), row(1.0, 0.0), row(2.0, 0.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    );
+    let e = t
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 0.5)
+        .unwrap();
+    assert!(
+        matches!(e.sides[0], SideExtension::Collapsed),
+        "{:?}",
+        e.sides
+    );
+    assert!(
+        matches!(e.sides[1], SideExtension::Extended(_)),
+        "{:?}",
+        e.sides
+    );
+}
+
+#[test]
+fn an_infinite_planes_sides_are_unbounded_and_a_finite_planes_extend() {
+    let kk = k();
+    let inf = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 3.0), Vec3::Z));
+    let e = inf
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Tangent, 4.33)
+        .unwrap();
+    assert!(
+        e.sides
+            .iter()
+            .all(|x| matches!(x, SideExtension::Unbounded)),
+        "{:?}",
+        e.sides
+    );
+    let p = Surface::from(Plane::new(
+        Vec3::ZERO,
+        Vec3::X,
+        Vec3::Y,
+        Vec2::new(1.0, 1.0),
+        &Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0),
+    ));
+    let e = p
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Tangent, 4.33)
+        .unwrap();
+    assert!(
+        e.sides
+            .iter()
+            .all(|x| matches!(x, SideExtension::Extended(_))),
+        "{:?}",
+        e.sides
+    );
+    assert!(matches!(e.surface.kind(), SurfaceKind::Plane(_)));
+}
+
+#[test]
+fn a_cone_extends_as_itself_along_up_to_its_apex_and_is_left_round_its_axis() {
+    let kk = k();
+    // radius 2 at the bottom, 1 at height 1: the apex at height 2, sqrt 2 slant past the top
+    let pl = Axis2Placement::new(Vec3::ZERO, Vec3::Z, Vec3::X);
+    let mut c = Cone::create_canonical(&kk, &pl, 2.0, 1.0, 1.0, false, false).unwrap();
+    c.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 0.0, 90.0, 1.0))
+        .unwrap();
+    let c = Surface::from(c);
+    for how in [Continuity::Tangent, Continuity::Natural] {
+        let e = c.extended_sides(&kk, &BoxSide::ALL, how, 5.0).unwrap();
+        assert!(matches!(e.surface.kind(), SurfaceKind::Cone(_)), "{how:?}");
+        let around = e
+            .sides
+            .iter()
+            .filter(|x| matches!(x, SideExtension::AroundAxis))
+            .count();
+        assert_eq!(around, 2, "{:?}", e.sides);
+        // one side along runs the whole 5, the other stops short of the apex
+        let mut lengths: Vec<(bool, f64)> = e
+            .sides
+            .iter()
+            .filter_map(|x| match x {
+                SideExtension::Extended(a) => Some((false, a.enclosure.mid())),
+                SideExtension::UpToLimit(a) => Some((true, a.enclosure.mid())),
+                _ => None,
+            })
+            .collect();
+        lengths.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let [(true, short), (false, long)] = lengths[..] else {
+            panic!("{:?}", e.sides);
+        };
+        assert!((long - 5.0).abs() <= 1e-8, "{long}");
+        assert!(short < 2f64.sqrt() && short > 2f64.sqrt() - 1e-6, "{short}");
+    }
+}

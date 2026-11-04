@@ -1159,7 +1159,12 @@ impl OffsetExecutive {
                     )
                 })?
             }
-            None => create_face_from_surface(kernel, offset_brep, &new_surface, &domain)?,
+            None => crate::topology::brep::sheet::face_on(
+                kernel,
+                offset_brep,
+                new_surface.clone(),
+                &domain,
+            )?,
         };
         self.closing_faces.push(new_face); // [B549]
         Ok(())
@@ -2959,37 +2964,6 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
     )?)?
     .and_then(|boxes| boxes.normal)
     .unwrap_or_else(Extent3d::new))
-}
-
-/// `SmBrep::CreateFaceFromSurface(pSurface, sDomain, rpNewFace)` (unit
-/// `topology.brep_p8`): the new face.
-///
-/// Notifications go to an arena-only store (`ArenaNotifyState`: default records, no
-/// attributes, no context), the new face owning its surface under its arena identity;
-/// the closing face's notifications have no observer here (upstream: the offset B-rep's
-/// context, which the executive does not hold).
-fn create_face_from_surface(
-    kernel: &mut Kernel,
-    b: &mut Brep,
-    surface: &Surface,
-    domain: &Extent2d,
-) -> Result<FaceId> {
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
-    let mut env = state.env(None);
-    let mut marks = crate::topology::topology_traverser::Marks::default();
-    let this_face = |f: FaceId| loopuse::notify_ref(EntityRef::Face(f));
-    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
-        env: &mut env,
-        marks: &mut marks,
-        this_face: &this_face,
-    };
-    crate::topology::brep::p8::create_face_from_surface(
-        kernel,
-        b,
-        Some(surface.clone()),
-        domain,
-        &mut fenv,
-    )
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {

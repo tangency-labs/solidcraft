@@ -32,6 +32,7 @@ pub mod body;
 pub mod boolean;
 pub mod check;
 pub mod error;
+pub mod extend;
 pub mod file;
 pub mod measure;
 pub mod offset;
@@ -39,8 +40,10 @@ pub mod order;
 pub mod prism;
 pub mod provenance;
 pub mod session;
+pub mod split;
 pub mod stitch;
 pub mod sweep;
+pub mod untrim;
 
 pub use blend::{
     band_room, blend, chamfer_sides, edge_faces_along, fillet_variable, tangent_chain, BandRoom,
@@ -56,5 +59,7 @@ pub use measure::{
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
 
+#[cfg(test)]
+mod test_corpus;
 #[cfg(test)]
 mod tests;

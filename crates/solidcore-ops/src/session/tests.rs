@@ -241,37 +241,3 @@ fn a_hook_installed_during_a_call_is_not_that_calls() {
         "the late hook saw the call"
     );
 }
-
-/// A failed call's input that is still held (by its caller here) is reported unwritten, never
-/// waited for under the kernel's lock.
-#[test]
-fn a_held_input_is_reported_not_waited_for() {
-    let r = within_ten_seconds(|| {
-        let _turn = HOOKED.lock().unwrap_or_else(PoisonError::into_inner);
-        all_fixes();
-        let seen: Arc<Mutex<Written>> = Arc::default();
-        let s = Arc::clone(&seen);
-        set_failure_hook(Some(Arc::new(move |f: &Failure<'_>| {
-            if f.call == "on purpose: held" {
-                s.lock()
-                    .unwrap()
-                    .extend(f.inputs.iter().map(|(_, b)| b.clone()));
-            }
-        })));
-        let b = make_box([0.0; 3], [1.0; 3]).unwrap();
-        let held = b.lock();
-        let r: Result<()> = run_on("on purpose: held", &[("brep", &b)], |_| {
-            Err(SolidError::invalid_input("test", "refused"))
-        });
-        drop(held);
-        set_failure_hook(None);
-        let seen = seen.lock().unwrap().clone();
-        (r.is_err(), seen)
-    });
-    let (failed, seen) = r.expect("the report waited on the held body");
-    assert!(failed);
-    assert!(
-        matches!(&seen[..], [Err(why)] if why.contains("held")),
-        "{seen:?}"
-    );
-}

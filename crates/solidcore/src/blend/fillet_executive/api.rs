@@ -480,23 +480,7 @@ pub fn create_face_from_surface(
     surface: &Surface,
 ) -> Result<FaceId> {
     let domain = surface.natural_uv_domain_with_nurb(k)?;
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(brep);
-    let mut env = state.env(None);
-    let mut marks = crate::topology::topology_traverser::Marks::default();
-    let this_face =
-        |f: FaceId| crate::topology::loopuse::notify_ref(crate::error::EntityRef::Face(f));
-    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
-        env: &mut env,
-        marks: &mut marks,
-        this_face: &this_face,
-    };
-    crate::topology::brep::p8::create_face_from_surface(
-        k,
-        brep,
-        Some(surface.clone()),
-        &domain,
-        &mut fenv,
-    )
+    crate::topology::brep::sheet::face_on(k, brep, surface.clone(), &domain)
 }
 
 /// One surface argument of [`surface_surface_fillet`] (upstream an `SmSurface*` that

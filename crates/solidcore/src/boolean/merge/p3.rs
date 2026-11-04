@@ -824,27 +824,6 @@ pub(crate) fn combine_brep(
     restored
 }
 
-/// `SmBrep::CreateFaceFromSurface(surface, domain, face)`
-/// (`topology::brep::p8::create_face_from_surface`), notifying as [`copy_brep`]: an
-/// arena-only store, the new face owning its surface under its arena identity.
-fn create_face_from_surface(
-    k: &mut Kernel,
-    brep: &mut Brep,
-    surface: Surface,
-    domain: Extent2d,
-) -> Result<FaceId> {
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(brep);
-    let mut env = state.env(None);
-    let mut marks = Marks::default();
-    let this_face = |f: FaceId| crate::topology::loopuse::notify_ref(EntityRef::Face(f));
-    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
-        env: &mut env,
-        marks: &mut marks,
-        this_face: &this_face,
-    };
-    crate::topology::brep::p8::create_face_from_surface(k, brep, Some(surface), &domain, &mut fenv)
-}
-
 /// A surface copied by the base copy constructor `SmSurface::SmSurface(const SmSurface&)`
 /// as `BooleanLists` does (`new (*pContext) SmSurface(*pOrig)`, WR-196): `SmAObject`'s
 /// attributes and an empty owner slot, no geometry. The `Surface` enum has no
@@ -1023,7 +1002,7 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
                 let copy = source.copy(k)?;
                 let is_plane = copy.is_kind_of(PLANE_TYPE)?;
                 let domain = copy.natural_uv_domain_with_nurb(k)?;
-                create_face_from_surface(k, &mut result, copy, domain)?;
+                crate::topology::brep::sheet::face_on(k, &mut result, copy, &domain)?;
                 is_plane
             } else {
                 // new (*pContext) SmSurface(*pOrig): the base copy constructor slices the

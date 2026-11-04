@@ -1496,6 +1496,17 @@ pub fn api_brep_copy(
     brep: Option<&Brep>,
     source_key: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<Brep> {
+    api_brep_copy_mapped(k, env, brep, source_key, None)
+}
+
+/// [`api_brep_copy`], filling `reverse_map` (when given) with each source entity's copy.
+fn api_brep_copy_mapped(
+    k: &mut Kernel,
+    env: &mut NotifyEnv<'_>,
+    brep: Option<&Brep>,
+    source_key: &dyn Fn(EntityRef) -> ObjectRef,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+) -> Result<Brep> {
     let Some(brep) = brep else {
         return Err(SolidError::Upstream {
             operation: OP,
@@ -1554,7 +1565,7 @@ pub fn api_brep_copy(
             )
         })
         .collect();
-    let copy = copy_brep(k, env, brep, source, None, None, true, false);
+    let copy = copy_brep(k, env, brep, source, None, reverse_map, true, false);
     for (key, handles) in lent {
         for h in handles {
             env.attributes.remove_attribute(key, h, false)?;
@@ -1600,12 +1611,33 @@ pub fn api_brep_copy(
 /// Those of [`api_brep_copy`] (the two namings are the B-rep's own and never share an
 /// attribute key).
 pub fn brep_copy(k: &mut Kernel, brep: &Brep) -> Result<Brep> {
+    brep_copy_into(k, brep, None)
+}
+
+/// [`brep_copy`] and the copy of each of `brep`'s entities: the copy's ids are its own
+/// (numbered as it is built, not `brep`'s), so a caller holding `brep`'s ids maps them through
+/// this, never by id or by place in a list.
+///
+/// # Errors
+///
+/// Those of [`brep_copy`].
+pub fn brep_copy_mapped(k: &mut Kernel, brep: &Brep) -> Result<(Brep, CopyBrepMap<EntityRef>)> {
+    let mut map = CopyBrepMap::default();
+    let copy = brep_copy_into(k, brep, Some(&mut map))?;
+    Ok((copy, map))
+}
+
+fn brep_copy_into(
+    k: &mut Kernel,
+    brep: &Brep,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+) -> Result<Brep> {
     use crate::topology::loopuse::notify_ref;
     let mut state = p2::ArenaNotifyState::default();
     let mut env = state.env(None);
     // both B-reps under their own naming: `api_brep_copy` names the source in a
     // private domain for the copy, so the source's attribute lists stay its own
-    let mut copy = api_brep_copy(k, &mut env, Some(brep), &notify_ref)?;
+    let mut copy = api_brep_copy_mapped(k, &mut env, Some(brep), &notify_ref, reverse_map)?;
     // (not upstream) `copy_brep` records every geometry owner under `env.key_of`,
     // which is the Notify scheme's own identity: the copy is named as a fresh body
     copy.set_naming(crate::topology::NamingScheme::Notify);

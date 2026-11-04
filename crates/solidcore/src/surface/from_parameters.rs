@@ -53,8 +53,10 @@ const OP: &str = "surface::from_parameters::from_parameters";
 /// - **Cylinder:** about the frame's z through the origin moved by `v0` along it, over the
 ///   angles in degrees and the height `v1 - v0`.
 /// - **Cone:** from its apex (where the radius is 0, `-radius_at_origin / tan` along z),
-///   between the heights from it `max(v0 - apex, 0)` and `v1 - apex` (the record's cone is the
-///   nappe where the radius is not negative), radii `h tan`, over the angles in degrees.
+///   between the heights from it `v0 - apex` and `v1 - apex`, radii `h tan`, over the angles
+///   in degrees. The record's cone runs through its apex into the other nappe (its radius
+///   goes negative past it); the kernel's is one nappe, so a box reaching past the apex
+///   (beyond the rounding of finding it) is refused, never clipped.
 /// - **Sphere, torus:** over the angles in degrees, the torus's tube angle from its start.
 ///
 /// # Errors
@@ -80,26 +82,46 @@ pub fn from_parameters(
         return Err(bad("the box is not finite and increasing"));
     }
     let deg = |r: [f64; 2]| [r[0].to_degrees(), r[1].to_degrees()];
+    // at most a turn, to the rounding of the difference
+    let turn = |r: [f64; 2], what: &'static str| {
+        let rounding = gamma(2) * (r[0].abs() + r[1].abs()).max(core::f64::consts::TAU);
+        if r[1] - r[0] - core::f64::consts::TAU > rounding {
+            Err(bad(what))
+        } else {
+            Ok(())
+        }
+    };
+    // the record's parameters to the kernel's STEP ones, by kind
+    let step_of: Box<dyn Fn([f64; 2]) -> [f64; 2]>;
     let p3 = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
     let (surface, implicit) = match record {
         Record::Plane {
             origin,
             u_axis,
             v_axis,
-        } => plane(p3(*origin), p3(*u_axis), p3(*v_axis), u, v)?,
+        } => {
+            let (sf, i, [la, lb]) = plane(p3(*origin), p3(*u_axis), p3(*v_axis), u, v)?;
+            step_of = Box::new(move |[a, b]| [a * la, b * lb]);
+            (sf, i)
+        }
         Record::PlaneThrough {
             origin,
             u_point,
             v_point,
         } => {
             let o = p3(*origin);
-            plane(o, p3(*u_point) - o, p3(*v_point) - o, u, v)?
+            let (sf, i, [la, lb]) = plane(o, p3(*u_point) - o, p3(*v_point) - o, u, v)?;
+            step_of = Box::new(move |[a, b]| [a * la, b * lb]);
+            (sf, i)
         }
         Record::Cylinder { frame, radius } => {
             let (fo, fx, fy, z) = axes(frame)?;
             if !(radius.is_finite() && *radius > 0.0) {
                 return Err(bad("the radius is not finite and positive"));
             }
+            turn(u, "the sweep is over a turn")?;
+            let v0 = v[0];
+            step_of = Box::new(move |[a, b]| [a.to_degrees(), b - v0]);
             let a = deg(u);
             let o = fo + z * v[0];
             let c = Cone::new_cylinder_bounded(
@@ -134,20 +156,29 @@ pub fn from_parameters(
             {
                 return Err(bad("the half angle is not in (0, pi/2)"));
             }
+            turn(u, "the sweep is over a turn")?;
             let t = half_angle.tan();
-            // the apex where the radius is 0, heights from it along z
+            // the apex where the radius is 0, heights from it along z. The record's cone runs
+            // through it (its radius goes negative past it, the other nappe); the kernel's is
+            // one nappe, so a box reaching past the apex (beyond the rounding of finding it)
+            // is refused, never clipped
             let at = -radius_at_origin / t;
+            let rounding = gamma(4) * (at.abs() + v[0].abs());
+            if v[0] - at < -rounding {
+                return Err(bad("the box reaches past the cone's apex"));
+            }
             let (h0, h1) = ((v[0] - at).max(0.0), v[1] - at);
             if h1 <= h0 {
-                return Err(bad("the box lies past the apex"));
+                return Err(bad("the box has no height above the apex"));
             }
+            let v0 = v[0];
+            step_of = Box::new(move |[a, b]| [a.to_degrees(), b - v0]);
             let apex = fo + z * at;
             let pl = Axis2Placement::new(apex + z * h0, fx, fy);
             let mut c = Cone::create_canonical(k, &pl, h0 * t, h1 * t, h1 - h0, false, false)?;
             let a = deg(u);
-            if a[1] - a[0] < 360.0 {
-                c.adjust_step_uv_domain(k, &Extent2d::from_bounds(a[0], 0.0, a[1], h1 - h0))?;
-            }
+            // the sweep as asked, a full turn included: its seam where the record's is
+            c.adjust_step_uv_domain(k, &Extent2d::from_bounds(a[0], 0.0, a[1], h1 - h0))?;
             let i = Implicit::Cone {
                 origin: fo,
                 axis: z,
@@ -158,6 +189,13 @@ pub fn from_parameters(
         }
         Record::Sphere { frame, radius } => {
             let (fo, fx, fy, _) = axes(frame)?;
+            turn(u, "the sweep is over a turn")?;
+            let pole = core::f64::consts::FRAC_PI_2;
+            let rounding = gamma(2) * pole;
+            if v[0] < -pole - rounding || v[1] > pole + rounding {
+                return Err(bad("the latitude is past a pole"));
+            }
+            step_of = Box::new(|[a, b]| [a.to_degrees(), b.to_degrees()]);
             let (a, b) = (deg(u), deg(v));
             let anal = Extent2d::from_bounds(a[0], b[0], a[1], b[1]);
             let opts = SphereOptions {
@@ -179,6 +217,10 @@ pub fn from_parameters(
             tube_start,
         } => {
             let (fo, fx, fy, z) = axes(frame)?;
+            turn(u, "the sweep is over a turn")?;
+            turn(v, "the tube angle is over a turn")?;
+            let ts = *tube_start;
+            step_of = Box::new(move |[a, b]| [a.to_degrees(), (b + ts).to_degrees()]);
             let (a, b) = (deg(u), deg([v[0] + tube_start, v[1] + tube_start]));
             let anal = Extent2d::from_bounds(a[0], b[0], a[1], b[1]);
             let t = Torus::new(
@@ -209,6 +251,8 @@ pub fn from_parameters(
                 .map(|r| r.iter().map(|&[x, y, z]| [x, y, z, 1.0]).collect())
                 .collect();
             let s = spline(u_knots, v_knots, &rows)?;
+            in_knots(u, u_knots)?;
+            in_knots(v, v_knots)?;
             return Ok((s, given(u, v)));
         }
         Record::RationalSpline {
@@ -217,6 +261,8 @@ pub fn from_parameters(
             homogeneous,
         } => {
             let s = spline(u_knots, v_knots, homogeneous)?;
+            in_knots(u, u_knots)?;
+            in_knots(v, v_knots)?;
             return Ok((s, given(u, v)));
         }
         Record::BallPatch { .. } | Record::PlacedRevolution { .. } => {
@@ -231,8 +277,90 @@ pub fn from_parameters(
     if !lies_on(&form, &implicit)? {
         return Err(bad("the surface is off the record's numbers"));
     }
+    // the domain: the kernel's STEP box is the record box's image
+    let [a0, b0] = step_of([u[0], v[0]]);
+    let [a1, b1] = step_of([u[1], v[1]]);
+    let got = surface.step_uv_domain_with_nurb(k)?;
+    let near = |x: f64, y: f64| (x - y).abs() <= gamma(8) * (x.abs() + y.abs());
+    let (lo, hi) = (got.min(), got.max());
+    if !(near(lo.x, a0.min(a1))
+        && near(hi.x, a0.max(a1))
+        && near(lo.y, b0.min(b1))
+        && near(hi.y, b0.max(b1)))
+    {
+        return Err(bad("the kernel's domain is not the record's box"));
+    }
+    // the parametrisation: the record's points are the kernel's at the mapped parameters,
+    // at the box's corners, its sides' middles and its middle
+    evaluates_as_record(k, record, &surface, &form, u, v, &*step_of)?;
     let box_ = surface.natural_uv_domain_with_nurb(k)?;
     Ok((surface, box_))
+}
+
+/// The record's evaluator against the kernel's surface at the parameters `step_of` maps the
+/// record's to (STEP, then the kernel's NURBS), on a 3 x 3 grid of `u x v` (its corners
+/// included). The two agree within the rounding of evaluating them: the kernel's de Boor
+/// evaluation of its form (`16 (p + q + 2)` operations on the net, as
+/// [`crate::surface::implicit`]'s form checks) and the record's trigonometry (16 more), times
+/// the larger of the net's and the points' size.
+fn evaluates_as_record(
+    k: &Kernel,
+    record: &Record,
+    surface: &Surface,
+    form: &BSplineSurface,
+    u: [f64; 2],
+    v: [f64; 2],
+    step_of: &dyn Fn([f64; 2]) -> [f64; 2],
+) -> Result<()> {
+    let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
+    let eval =
+        crate::eval::SurfaceEval::new(record).map_err(|_| bad("the record does not evaluate"))?;
+    let net = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let (p, q) = net.degrees();
+    let size = net.rows().flatten().fold(0.0_f64, |m, c| {
+        let w = if c.w == crate::nurbs::math::NOW {
+            1.0
+        } else {
+            c.w
+        };
+        m.max((c.x / w).abs())
+            .max((c.y / w).abs())
+            .max((c.z / w).abs())
+    });
+    let g = gamma(32 * (p + q + 3));
+    for s in [0.0, 0.5, 1.0] {
+        for t in [0.0, 0.5, 1.0] {
+            let ru = u[0] + s * (u[1] - u[0]);
+            let rv = v[0] + t * (v[1] - v[0]);
+            let want = eval
+                .point([ru, rv])
+                .ok_or_else(|| bad("the record does not evaluate"))?;
+            let [a, b] = step_of([ru, rv]);
+            let uv = surface.convert_uv_from_step_to_nurbs(k, Vec2::new(a, b))?;
+            let got = surface.evaluate_point(k, uv)?;
+            let off = (got - Point3::new(want.x, want.y, want.z)).length();
+            if off.is_nan() || off > g * size.max(want.length()) {
+                return Err(bad(
+                    "the kernel's surface is not the record's at its parameters",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A spline box `r` finite, increasing and within the knot domain of `knots`.
+fn in_knots(r: [f64; 2], knots: &[f64]) -> Result<()> {
+    let (Some(&a), Some(&b)) = (knots.first(), knots.last()) else {
+        return Err(SolidError::invalid_input(OP, "the spline has no knots"));
+    };
+    if !(r[0].is_finite() && r[1].is_finite() && r[0] < r[1] && r[0] >= a && r[1] <= b) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the box is not finite, increasing and within the knots",
+        ));
+    }
+    Ok(())
 }
 
 /// The box `u x v` as given.
@@ -263,7 +391,7 @@ fn plane(
     dv: Vec3,
     u: [f64; 2],
     v: [f64; 2],
-) -> Result<(Surface, Implicit)> {
+) -> Result<(Surface, Implicit, [f64; 2])> {
     let (a, b) = (du.length(), dv.length());
     if !(a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0) {
         return Err(SolidError::invalid_input(OP, "a plane axis has no length"));
@@ -278,8 +406,10 @@ fn plane(
     let (a, b) = (axis_scale(du), axis_scale(dv));
     let dom = Extent2d::from_bounds(u[0] * a, v[0] * b, u[1] * a, v[1] * b);
     let p = Plane::new(origin, du, dv, Vec2::new(1.0, 1.0), &dom);
-    let normal = p.position().x_axis().cross(p.position().y_axis());
-    Ok((Surface::from(p), Implicit::Plane { origin, normal }))
+    // the record's own normal, du x dv made unit
+    let n = du.cross(dv);
+    let normal = n / n.length();
+    Ok((Surface::from(p), Implicit::Plane { origin, normal }, [a, b]))
 }
 
 /// How far a plane's parameter runs along its unit axis for a unit of the record's along
@@ -391,6 +521,8 @@ fn spline(u: &[f64], v: &[f64], rows: &[Vec<[f64; 4]>]) -> Result<Surface> {
 mod tests {
     use super::*;
     use crate::geom::vector2d::Point2;
+    use crate::surface::implicit::AnalyticSupport;
+    use crate::surface::side::BoxSide;
     use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
     fn k() -> Kernel {
@@ -510,12 +642,12 @@ mod tests {
                 [2.0, 0.0, 3.0],
             ],
         );
-        // the nappe below the apex (at -3) is not the record's
-        same_set(
-            &corners(&make(&cone, [0.0, FRAC_PI_2], [-5.0, 0.0]).unwrap()),
-            &[[0.0, 0.0, -3.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-        );
+        // a box reaching past the apex (at -3) is refused, never clipped: the record's cone
+        // runs on into the other nappe, the kernel's is one
+        assert!(make(&cone, [0.0, FRAC_PI_2], [-5.0, 0.0]).is_err());
         assert!(make(&cone, [0.0, PI], [-9.0, -4.0]).is_err());
+        // from the apex itself: built
+        assert!(make(&cone, [0.0, FRAC_PI_2], [-3.0, 0.0]).is_ok());
         let sph = Record::Sphere {
             frame: frame([0.0, 1.0, 0.0]),
             radius: 2.0,
@@ -542,6 +674,70 @@ mod tests {
     }
 
     #[test]
+    fn a_full_turn_keeps_its_seam_and_more_than_a_turn_is_refused() {
+        let cone = Record::Cone {
+            frame: frame([0.0, 0.0, 0.0]),
+            radius_at_origin: 1.0,
+            half_angle: (1.0f64 / 3.0).atan(),
+        };
+        let cyl = Record::Cylinder {
+            frame: frame([0.0, 0.0, 0.0]),
+            radius: 2.0,
+        };
+        for rec in [&cone, &cyl] {
+            let s = make(rec, [FRAC_PI_2, FRAC_PI_2 + TAU], [0.0, 3.0]).unwrap();
+            let d = s.step_uv_domain_with_nurb(&k()).unwrap();
+            assert!(
+                (d.min().x - 90.0).abs() < 1e-12 && (d.max().x - 450.0).abs() < 1e-12,
+                "{d:?}"
+            );
+            assert!(make(rec, [0.0, TAU + 1e-9], [0.0, 3.0]).is_err());
+        }
+        let sph = Record::Sphere {
+            frame: frame([0.0, 0.0, 0.0]),
+            radius: 2.0,
+        };
+        assert!(make(&sph, [0.0, TAU + 1e-9], [0.0, 1.0]).is_err());
+        assert!(make(&sph, [0.0, 1.0], [0.0, FRAC_PI_2 + 1e-9]).is_err());
+    }
+
+    #[test]
+    fn interior_points_are_the_records_at_their_parameters() {
+        // the cone's middle, off its corners: the record's evaluator against the kernel's
+        let cone = Record::Cone {
+            frame: frame([1.0, -2.0, 0.5]),
+            radius_at_origin: 1.0,
+            half_angle: (1.0f64 / 3.0).atan(),
+        };
+        let (u, v) = ([0.3, 2.0], [-1.0, 2.5]);
+        let (s, _) = from_parameters(&k(), &cone, [u, v]).unwrap();
+        let e = crate::eval::SurfaceEval::new(&cone).unwrap();
+        let (ru, rv) = (1.1, 0.7);
+        let want = e.point([ru, rv]).unwrap();
+        let uv = s
+            .convert_uv_from_step_to_nurbs(&k(), Vec2::new(ru.to_degrees(), rv - v[0]))
+            .unwrap();
+        let got = s.evaluate_point(&k(), uv).unwrap();
+        assert!(got.distance(want) < 1e-12, "{got:?} vs {want:?}");
+    }
+
+    #[test]
+    fn a_spline_box_outside_its_knots_is_refused() {
+        let p = Record::Spline {
+            u_knots: vec![0.0, 0.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 2.0, 2.0],
+            points: vec![
+                vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                vec![[1.0, 0.0, 0.5], [1.0, 1.0, 1.0]],
+            ],
+        };
+        assert!(make(&p, [0.0, 1.5], [0.0, 2.0]).is_err());
+        assert!(make(&p, [0.5, 0.5], [0.0, 2.0]).is_err());
+        assert!(make(&p, [0.0, f64::NAN], [0.0, 2.0]).is_err());
+        assert!(make(&p, [0.25, 0.75], [0.5, 2.0]).is_ok());
+    }
+
+    #[test]
     fn splines_polynomial_and_rational() {
         let p = Record::Spline {
             u_knots: vec![0.0, 0.0, 1.0, 1.0],
@@ -552,7 +748,7 @@ mod tests {
             ],
         };
         same_set(
-            &corners(&make(&p, [0.0, 0.0], [0.0, 0.0]).unwrap()),
+            &corners(&make(&p, [0.0, 1.0], [0.0, 2.0]).unwrap()),
             &[
                 [0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
@@ -571,7 +767,7 @@ mod tests {
                 vec![[0.0, 2.0, 0.0, 1.0], [0.0, 2.0, 1.0, 1.0]],
             ],
         };
-        let s = make(&r, [0.0, 0.0], [0.0, 0.0]).unwrap();
+        let s = make(&r, [0.0, 1.0], [0.0, 1.0]).unwrap();
         let mid = s.evaluate_point(&k(), Point2::new(0.5, 0.5)).unwrap();
         assert!((mid.x.hypot(mid.y) - 2.0).abs() < 1e-14 && (mid.z - 0.5).abs() < 1e-14);
         let bad = Record::RationalSpline {
@@ -606,5 +802,52 @@ mod tests {
             half_angle: 0.0,
         };
         assert!(make(&flat, [0.0, 1.0], [0.0, 1.0]).is_err());
+    }
+
+    // TODO(#2554): once AnalyticSupport::build
+    // takes a cone made by Cone::create_canonical, also round-trip the label through it.
+    #[test]
+    fn a_continued_cone_round_trips_through_its_record() {
+        // a cone continued past a side, written as the record's numbers and made again:
+        // the same surface, proved on the record's implicit surface
+        let k = k();
+        let pl = Axis2Placement::new(Vec3::new(1.0, -2.0, 0.5), Vec3::X, Vec3::Y);
+        let mut c = Cone::create_canonical(&k, &pl, 1.0, 2.0, 3.0, false, false).unwrap();
+        c.adjust_step_uv_domain(&k, &Extent2d::from_bounds(0.0, 0.0, 90.0, 3.0))
+            .unwrap();
+        let dom = Surface::from(c.clone())
+            .natural_uv_domain_with_nurb(&k)
+            .unwrap();
+        let grown = Surface::from(c.continued(&k, &dom, BoxSide::VMax, 1.0).unwrap());
+        let Some(AnalyticSupport::Cone {
+            placement,
+            base_radius,
+            semi_angle_deg,
+        }) = AnalyticSupport::of(&grown)
+        else {
+            panic!("not a cone");
+        };
+        let b = grown.step_uv_domain_with_nurb(&k).unwrap();
+        let record = Record::Cone {
+            frame: Frame {
+                origin: a(placement.origin()),
+                x_axis: a(placement.x_axis()),
+                y_axis: a(placement.y_axis()),
+            },
+            radius_at_origin: base_radius,
+            half_angle: semi_angle_deg.to_radians(),
+        };
+        let (back, _) = from_parameters(
+            &k,
+            &record,
+            [
+                [b.min().x.to_radians(), b.max().x.to_radians()],
+                [b.min().y, b.max().y],
+            ],
+        )
+        .unwrap();
+        let want: Vec<[f64; 3]> = corners(&grown).iter().map(|p| [p.x, p.y, p.z]).collect();
+        same_set(&corners(&back), &want);
+        AnalyticSupport::check(&k, &back).unwrap();
     }
 }

@@ -5,6 +5,7 @@
 //! The file is split over the plan units `surface.plane_p1` and `_p2`; each lives in
 //! its own submodule and adds methods to [`Plane`].
 
+pub mod cover;
 pub mod p1;
 pub mod p2;
 

@@ -7,6 +7,7 @@
 //! split over several plan units (`surface.cone_p1`, `_p2`, `_p3`); each lives in its
 //! own submodule and adds methods to [`Cone`] (or free functions).
 
+pub mod continued;
 pub mod p1;
 pub mod p2;
 pub mod p3;

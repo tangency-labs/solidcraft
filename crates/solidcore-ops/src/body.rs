@@ -11,11 +11,14 @@ use solidcore::kernel::Kernel;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::certified::Verdict;
 use solidcore::mass::integrator::properties::{brep_volume, no_unsure_region, PropertyAttributes};
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::{is_outward_solid, is_outward_touching_solids};
-use solidcore::{Brep, Vec3};
+use solidcore::topology::face::p2 as face_p2;
+use solidcore::topology::FaceId;
+use solidcore::{Brep, EntityRef, Vec3};
 
 use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
 use solidcore_record::brep::Brep as Record;
@@ -274,6 +277,57 @@ pub(crate) fn finish(
         return Ok(Err(Error::NotSolid));
     }
     Ok(Ok(b))
+}
+
+/// Copies of each attribute `from` carries in `src`.
+fn attribute_copies(src: &Brep, from: EntityRef) -> Vec<solidcore::geom::attribute::Attribute> {
+    src.entity_attributes(from)
+        .into_iter()
+        .map(|(_, a)| a.make_copy())
+        .collect()
+}
+
+/// `to` (in `into`) takes a copy of each attribute of `from` (in `src`): a rebuilt entity
+/// stands for the one it replaces.
+///
+/// # Errors
+/// The kernel's, from adding an attribute.
+pub(crate) fn copy_attributes(
+    src: &Brep,
+    from: EntityRef,
+    into: &mut Brep,
+    to: EntityRef,
+) -> solidcore::Result<()> {
+    for a in attribute_copies(src, from) {
+        into.add_attribute(to, a)?;
+    }
+    Ok(())
+}
+
+/// [`copy_attributes`] within one body.
+///
+/// # Errors
+/// The kernel's, from adding an attribute.
+pub(crate) fn copy_attributes_within(
+    b: &mut Brep,
+    from: EntityRef,
+    to: EntityRef,
+) -> solidcore::Result<()> {
+    for a in attribute_copies(b, from) {
+        b.add_attribute(to, a)?;
+    }
+    Ok(())
+}
+
+/// The orientation of `f`'s upward faceuse.
+///
+/// # Errors
+/// The kernel's, for a face not in `b`.
+pub(crate) fn upward(b: &Brep, f: FaceId) -> solidcore::Result<Option<OrientType>> {
+    Ok(match face_p2::upward_faceuse(b, f)? {
+        Some(fu) => Some(b.faceuse(fu)?.orientation),
+        None => None,
+    })
 }
 
 fn point(p: [f64; 3]) -> Result<Vec3> {
