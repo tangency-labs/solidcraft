@@ -1418,6 +1418,7 @@
   "document.read_only_save": "Dieses Design wurde schreibgeschützt geöffnet: Speichern Sie es als neue Datei",
   "document.save_changes": "Änderungen in {name} speichern?",
   "document.save_copy": "Kopie speichern…",
+  "document.tab_unsaved_changes": "Ungespeicherte Änderungen",
   "document.unsaved_changes": "{name} enthält ungespeicherte Änderungen. Wenn Sie nicht speichern, gehen sie verloren.",
   "drive.rigid": "{joint} ist ein starres Gelenk. Es hält die verbundenen Teile fest zusammen und ermöglicht daher keine Bewegung. Um die Teile beweglich zu machen, ändern Sie den Gelenktyp unter „Gelenk bearbeiten“: Drehgelenk für Drehbewegungen, Schubgelenk für lineare Bewegungen oder Zylindergelenk für beides.",
   "drive.stopped_by_contact": "Angehalten bei {value}: {a} würde {b} durchdringen",

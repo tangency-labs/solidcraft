@@ -1423,6 +1423,7 @@
   "document.read_only_save": "This design was opened read-only: save it as a new file",
   "document.save_changes": "Save changes to {name}?",
   "document.save_copy": "Save a Copy…",
+  "document.tab_unsaved_changes": "Unsaved changes",
   "document.unsaved_changes": "{name} has unsaved changes. If you don't save, they are lost.",
   "drive.rigid": "{joint} is a rigid joint: it holds its parts still, so it has nothing to drive. To let them move, change its type in Edit Joint: Revolute to rotate, Slider to slide, Cylindrical for both.",
   "drive.stopped_by_contact": "Stopped at {value}: {a} would pass through {b}",

@@ -1395,6 +1395,7 @@
   "document.read_only_save": "Dit ontwerp is alleen-lezen geopend: sla het op als nieuw bestand",
   "document.save_changes": "Wijzigingen in {name} opslaan?",
   "document.save_copy": "Kopie opslaan…",
+  "document.tab_unsaved_changes": "Niet-opgeslagen wijzigingen",
   "document.unsaved_changes": "{name} heeft niet-opgeslagen wijzigingen. Als u niet opslaat, gaan ze verloren.",
   "drive.rigid": "{joint} is een starre verbinding: die houdt zijn onderdelen vast en heeft dus niets om aan te sturen. Wijzig het type in Verbinding bewerken om ze te laten bewegen: Draaiend om te draaien, Schuivend om te schuiven, Cilindrisch voor beide.",
   "drive.stopped_by_contact": "Gestopt bij {value}: {a} zou door {b} heen gaan",

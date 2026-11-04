@@ -1358,6 +1358,7 @@
   "document.read_only_save": "Este diseño se abrió en solo lectura: guárdalo como un archivo nuevo",
   "document.save_changes": "¿Guardar los cambios de {name}?",
   "document.save_copy": "Guardar una copia…",
+  "document.tab_unsaved_changes": "Cambios sin guardar",
   "document.unsaved_changes": "{name} tiene cambios sin guardar. Si no los guardas, se perderán.",
   "drive.rigid": "{joint} es una junta rígida: mantiene sus partes quietas, así que no tiene nada que impulsar.",
   "drive.stopped_by_contact": "Detenido en {value}: {a} atravesaría {b}",

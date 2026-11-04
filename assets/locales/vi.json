@@ -1423,6 +1423,7 @@
   "document.read_only_save": "Thiết kế này được mở ở chế độ chỉ đọc: hãy lưu thành tệp mới",
   "document.save_changes": "Lưu các thay đổi đối với {name}?",
   "document.save_copy": "Lưu bản sao…",
+  "document.tab_unsaved_changes": "Thay đổi chưa lưu",
   "document.unsaved_changes": "{name} có các thay đổi chưa lưu. Nếu không lưu, các thay đổi sẽ bị mất.",
   "drive.rigid": "{joint} là khớp nối cứng: nó giữ cố định các chi tiết, nên không có gì để dẫn động. Để các chi tiết chuyển động, hãy đổi loại khớp nối trong “Chỉnh sửa khớp nối”: Revolute để xoay, Slider để trượt, Cylindrical cho cả hai.",
   "drive.stopped_by_contact": "Đã dừng tại {value}: {a} sẽ xuyên qua {b}",

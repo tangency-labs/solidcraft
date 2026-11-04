@@ -1423,6 +1423,7 @@
   "document.read_only_save": "התכן הזה נפתח לקריאה בלבד: יש לשמור אותו כקובץ חדש",
   "document.save_changes": "לשמור את השינויים ב־{name}?",
   "document.save_copy": "שמירת עותק…",
+  "document.tab_unsaved_changes": "שינויים שלא נשמרו",
   "document.unsaved_changes": "ב־{name} יש שינויים שלא נשמרו. ללא שמירה, הם יאבדו.",
   "drive.rigid": "{joint} הוא מפרק קשיח: הוא מחזיק את החלקים שלו במקומם, ולכן אין מה להניע. כדי שהחלקים יזוזו, שנו את הסוג שלו ב״עריכת מפרק״: Revolute לסיבוב, Slider להחלקה, Cylindrical לשניהם.",
   "drive.stopped_by_contact": "נעצר ב־{value}: {a} היה עובר דרך {b}",

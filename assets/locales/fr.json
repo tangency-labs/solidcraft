@@ -1391,6 +1391,7 @@
   "document.read_only_save": "Cette conception a été ouverte en lecture seule : enregistrez-la dans un nouveau fichier",
   "document.save_changes": "Enregistrer les modifications de {name} ?",
   "document.save_copy": "Enregistrer une copie…",
+  "document.tab_unsaved_changes": "Modifications non enregistrées",
   "document.unsaved_changes": "{name} contient des modifications non enregistrées. Si vous n'enregistrez pas, elles seront perdues.",
   "drive.rigid": "{joint} est une liaison rigide : elle maintient ses pièces immobiles, il n'y a donc rien à piloter. Pour les laisser bouger, changer son type dans Modifier la liaison : Revolute pour tourner, Slider pour coulisser, Cylindrical pour les deux.",
   "drive.stopped_by_contact": "Arrêté à {value} : {a} traverserait {b}",

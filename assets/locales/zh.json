@@ -1423,6 +1423,7 @@
   "document.read_only_save": "此设计以只读方式打开：请另存为新文件",
   "document.save_changes": "保存对 {name} 的更改？",
   "document.save_copy": "保存副本…",
+  "document.tab_unsaved_changes": "未保存的更改",
   "document.unsaved_changes": "{name} 有未保存的更改。如果不保存，将丢失这些更改。",
   "drive.rigid": "{joint} 是刚性接头：它把零件固定在原位，因此没有可驱动的运动。要让零件运动，请在“编辑接头”中更改其类型：旋转用 Revolute，滑动用 Slider，两者兼有用 Cylindrical。",
   "drive.stopped_by_contact": "停在 {value}：{a} 会穿过 {b}",

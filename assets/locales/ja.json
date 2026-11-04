@@ -1423,6 +1423,7 @@
   "document.read_only_save": "このデザインは読み取り専用で開かれています：新しいファイルとして保存してください",
   "document.save_changes": "{name} への変更を保存しますか？",
   "document.save_copy": "コピーを保存…",
+  "document.tab_unsaved_changes": "未保存の変更",
   "document.unsaved_changes": "{name} には保存されていない変更があります。保存しない場合、変更内容は失われます。",
   "drive.rigid": "{joint} は剛体ジョイントです。部品をその場に固定するため、駆動するものがありません。動かすには「ジョイントを編集」で種類を変更してください: 回転させるなら Revolute、スライドさせるなら Slider、両方なら Cylindrical。",
   "drive.stopped_by_contact": "{value} で停止: {a} が {b} を通り抜けてしまいます",
