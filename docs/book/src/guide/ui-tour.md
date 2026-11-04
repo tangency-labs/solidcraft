@@ -38,8 +38,8 @@ view.
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye at the
   row's right end shows or hides an item (**Preferences › Interface › Eye next to the fold arrow**
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
-  and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
-  **Collapse All** to open or close every folder under that row (the design row stays visible
+  and right-clicking any row gives that item's menu. Right-click the design or a component and choose
+  **Organize → Expand All** or **Collapse All** to open or close every folder under that row (the design row stays visible
   when the whole tree is collapsed). Components start closed, so a large assembly opens as a
   short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
   down to it (**Preferences › Interface › Components start open** opens every component from the
