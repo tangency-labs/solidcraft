@@ -98,6 +98,12 @@ thread_local! {
     static ANCHOR: RefCell<Option<(String, u64, Pos2)>> = const { RefCell::new(None) };
 }
 
+/// Whether the open window is under `p`: the wheel there steps its value, so the camera under it
+/// does not zoom (navigation asks).
+pub(crate) fn covers(ctx: &egui::Context, p: Pos2) -> bool {
+    super::editing() && ctx.memory(|m| m.area_rect(egui::Id::new(AREA))).is_some_and(|r| r.contains(p))
+}
+
 /// Forget the worked-out value (the edit closed).
 pub(super) fn forget() {
     EXISTING.with(|e| *e.borrow_mut() = None);
@@ -111,7 +117,9 @@ fn existing(app: &SolveApp, param: &str, expr: &str) -> (Option<Arc<solidcraft_e
             let expression = crate::length_input::expression(&app.session.doc, expr, kind(&app.session.doc, param));
             let mut scratch = app.session.scratch();
             let (sketch, error) = match scratch.execute("parameters.change", &json!({"name": param, "expression": expression})) {
-                Ok(_) => (app.session.active_sketch.and_then(|id| scratch.world_state().sketches.iter().find(|s| s.feature == id).cloned()), None),
+                Ok(_) => {
+                    (app.session.active_sketch.and_then(|id| scratch.world_state().ok()?.sketches.iter().find(|s| s.feature == id).cloned()), None)
+                }
                 Err(e) => (None, Some(shown_error("parameters.change", &e.to_string()))),
             };
             *cell = Some(Existing { doc: app.session.doc.clone(), param: param.to_string(), expr: expr.to_string(), sketch, error });
@@ -140,8 +148,8 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         Some((_, _, true)) => None,
         None => existing(app, &param, &expr).0,
     };
-    let state = app.session.world_state();
-    let changes = after.and_then(|after| crate::preview::sketch_changes(state.sketch(sketch), &after));
+    let state = app.session.world_state().ok();
+    let changes = after.and_then(|after| crate::preview::sketch_changes(state.as_ref().and_then(|state| state.sketch(sketch)), &after));
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
     let curves = changes.map_or(0, |changes| crate::preview::paint_sketch(&changes, painter, proj, &mut budget));
     crate::scenario::publish_count("dimwin:preview_curves", curves as f64);

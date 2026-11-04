@@ -1087,6 +1087,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             });
         });
     });
+    e.shown = Some(anchor);
     settle(app, e, done, escaped);
 }
 
@@ -1094,7 +1095,6 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
 /// drops it, and `escaped` the Dimension tool's picks with it), or keep it open.
 fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
-    e.shown = Some(anchor);
     match done {
         Some(true) => {
             let result = if let Some(draft) = &e.draft {

@@ -582,6 +582,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let wheel_inside = inside
         || (ui.is_enabled()
             && !crate::value_step::enabled(ui.ctx())
+            && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
             && hover.is_some_and(|p| {
                 rect.contains(p)
                     && !axes.contains(p)
