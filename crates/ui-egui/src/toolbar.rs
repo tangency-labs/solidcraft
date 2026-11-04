@@ -1833,7 +1833,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let background_slot = painter.add(egui::Shape::Noop);
                 let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
-                let neutral = if !finish
+                // The buttons that leave the sketch or the edit (Finish, Finish with AutoConstrain,
+                // Cancel, Finish Edit) never show pressed; a tool pinned into their group does.
+                let exit =
+                    finish && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit");
+                let neutral = if !exit
                     && (resp.is_pointer_button_down_on()
                         || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
@@ -5164,6 +5168,48 @@ mod dropdown_toggle_tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+    }
+
+    /// A tool pinned into the Finish Sketch group, the one at the ribbon's right edge, shows
+    /// pressed while it runs like any other tool button; only Finish and Cancel never do, not
+    /// even under a press.
+    #[test]
+    fn a_tool_pinned_into_the_finish_group_shows_pressed_while_it_runs() {
+        fn flat(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+                s => out.push(s.clone()),
+            }
+        }
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", "sketch.ellipse", "FINISH SKETCH", None);
+        h.settle();
+        h.step(&json!({"click": {"handle": "button:sketch.ellipse"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.ellipse"), "the click starts the tool");
+        h.frames(3);
+        let soft = crate::theme::TabAccent::for_tab(&crate::theme::Tokens::get(), "SKETCH").soft;
+        let pressed = |h: &Harness, id: &str| {
+            let r = rect_of(&format!("button:{id}")).unwrap();
+            let mut all = Vec::new();
+            h.shapes.iter().for_each(|s| flat(&s.shape, &mut all));
+            all.iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == soft))
+        };
+        assert!(pressed(&h, "sketch.ellipse"), "the running tool's button is pressed");
+        // A press lights any other button while the pointer is down; Finish, Cancel and Finish
+        // with AutoConstrain (a button only once pinned) stay plain. None runs as a tool or
+        // leaves a dialog, so a press is how they would light.
+        for exit in ["sketch.finish", "sketch.cancel", "sketch.finish_auto_constrain"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            crate::toolbar_custom::pin(&mut h.app, "SKETCH", exit).unwrap();
+            h.settle();
+            let at = crate::scenario::handle_at(&format!("button:{exit}")).unwrap();
+            h.frame_with(crate::test_support::pointer(at, true));
+            assert!(!pressed(&h, exit), "a press on {exit} does not show it pressed");
+        }
     }
 
     /// A drop-down row's help tooltip names the key the command runs from now, not its default.
