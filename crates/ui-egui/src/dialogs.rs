@@ -5993,13 +5993,12 @@ fn stored_frames(s: &Session) -> Option<Vec<(String, solidcraft_engine::doc::Mat
 
 /// The edge of a visible body through (or nearest) a point.
 pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
-    let st = crate::open_meshing::session_world(s);
     edge_sel_on(s, None, p0)
 }
 
 /// [`edge_sel`], searching only the body called `only` when given (a pick saved on that body).
 pub(crate) fn edge_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<Sel> {
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let frames = stored_frames(s);
     let mut best: Option<(f64, Sel)> = None;
     for b in st.bodies.iter().filter(|b| only.is_none_or(|n| b.name == n)) {
