@@ -217,6 +217,7 @@ settings.profile.import           settings profiles: preferences saved, applied 
 settings.profile.list             settings profiles: preferences saved, applied and shared
 settings.profile.rename           settings profiles: preferences saved, applied and shared
 settings.profile.save             settings profiles: preferences saved, applied and shared
+sheet.corner_join                 added after the rig froze; covered by crates/engine/src/cmd/sheet_tests.rs and crates/ui-egui/src/dialogs_sheet_tests.rs
 sheet.rules                       a listing of sheet metal rules
 sketch.arc.tangent                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation

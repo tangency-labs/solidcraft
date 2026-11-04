@@ -1252,17 +1252,22 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             // The edges, and the angle and height some have of their own (kept by the point the
             // edge's selection carries).
             let (mut picked, mut own) = (Vec::new(), Vec::new());
+            let mut restored = Vec::new();
             for e in edges {
                 let Some(sel) = edge_sel(s, e.point.0) else { continue };
-                if let (Sel::Edge { point, .. }, true) = (&sel, e.angle.is_some() || e.height.is_some()) {
-                    own.push((
-                        *point,
-                        e.angle.as_deref().map(str::to_string).unwrap_or_default(),
-                        e.height.as_deref().map(str::to_string).unwrap_or_default(),
-                    ));
+                if let Sel::Edge { point, .. } = &sel {
+                    restored.push((e.point.0, *point));
+                    if e.angle.is_some() || e.height.is_some() {
+                        own.push((
+                            *point,
+                            e.angle.as_deref().map(str::to_string).unwrap_or_default(),
+                            e.height.as_deref().map(str::to_string).unwrap_or_default(),
+                        ));
+                    }
                 }
                 picked.push(sel);
             }
+            let restored_point = |point: Vec3| restored.iter().find(|(stored, _)| stored.dist(point) < 1e-6).map_or(point, |(_, now)| *now);
             let f = Sm::Flange {
                 ty: 1,
                 height: height.to_string(),
@@ -1288,8 +1293,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 corners: corners
                     .iter()
                     .map(|corner| FlangeCornerChoice {
-                        first: corner.covering.0,
-                        second: corner.covered.0,
+                        first: restored_point(corner.covering.0),
+                        second: restored_point(corner.covered.0),
                         kind: CORNER_TYPES.iter().position(|kind| *kind == corner.corner_type).unwrap_or(0),
                         cover_second: false,
                         overlap: corner.overlap.as_deref().map(str::to_string).unwrap_or_else(|| "1 mm".into()),

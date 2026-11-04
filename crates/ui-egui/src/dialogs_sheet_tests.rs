@@ -698,6 +698,63 @@ fn flange_dialog_picks_corner_overlap_and_clears_it_on_edit() {
 }
 
 #[test]
+fn flange_dialog_restores_corner_choices_in_a_moved_component() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.run("sheet.manage_rules", json!({"name":"AL2", "thickness":"2 mm", "bend_radius":"1 mm", "gap":"0.5 mm", "active":true})).unwrap();
+    harness.app.run("component.create", json!({"name":"Part", "grounded":false})).unwrap();
+    harness.app.run("sketch.create", json!({"plane":"XY", "name":"Base"})).unwrap();
+    harness.app.run("sketch.rectangle.two_point", json!({"p0":[0,0], "p1":[120,90]})).unwrap();
+    harness.app.run("sketch.finish", json!({})).unwrap();
+    harness.app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
+    harness
+        .app
+        .run(
+            "sheet.flange",
+            json!({
+                "edges":[{"point":[60,0,2], "height":"32 mm"}, [0,45,2]],
+                "height":"30 mm",
+                "corners":[{"covering":[60,0,2], "covered":[0,45,2], "corner_type":"partial", "overlap":"1 mm", "gap":"0.8 mm"}]
+            }),
+        )
+        .unwrap();
+    let feature = harness.app.session.doc.features.last().unwrap().id;
+    harness.app.run("occurrence.move", json!({"occurrence":"Part:1", "translate":[200,30,7]})).unwrap();
+    harness.app.run("occurrence.move", json!({"occurrence":"Part:1", "axis":[0,0,1], "angle":"90 deg", "origin":[200,30,7]})).unwrap();
+    let covering = Vec3::new(200.0, 90.0, 9.0);
+    let covered = Vec3::new(155.0, 30.0, 9.0);
+    let edited = edit_dialog(&harness.app, feature, None).unwrap();
+    let points = edge_point_list(&edited.inputs);
+    assert_eq!(points.len(), 2);
+    assert!(points.iter().any(|point| point.dist(covering) < 1e-6), "{points:?}");
+    assert!(points.iter().any(|point| point.dist(covered) < 1e-6), "{points:?}");
+    let Kind::Sheet(Sm::Flange { corners, own, .. }) = &edited.kind else { panic!("not a flange") };
+    assert_eq!(corners.len(), 1);
+    assert!(corners[0].first.dist(covering) < 1e-6, "{:?}", corners[0].first);
+    assert!(corners[0].second.dist(covered) < 1e-6, "{:?}", corners[0].second);
+    assert_eq!(corners[0].kind, 1);
+    assert_eq!(corners[0].overlap, "1 mm");
+    assert_eq!(corners[0].gap, "0.8 mm");
+    assert!(!corners[0].cover_second);
+    assert_eq!(own.len(), 1);
+    assert!(own[0].0.dist(covering) < 1e-6);
+    assert_eq!(own[0].2, "32 mm");
+    let reopened = harness.call("ui.editFeature", json!({"feature":feature}));
+    assert_eq!(reopened["ok"], true, "{reopened}");
+    harness.frames(3);
+    let commands = apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+    let saved = &commands[0].1["params"]["corners"];
+    assert_eq!(saved.as_array().unwrap().len(), 1, "{saved}");
+    assert_eq!(saved[0]["corner_type"], "partial");
+    assert_eq!(saved[0]["overlap"], "1 mm");
+    assert_eq!(saved[0]["gap"], "0.8 mm");
+    for (key, expected) in [("covering", covering), ("covered", covered)] {
+        let actual = &saved[0][key];
+        let point = Vec3::new(actual[0].as_f64().unwrap(), actual[1].as_f64().unwrap(), actual[2].as_f64().unwrap());
+        assert!(point.dist(expected) < 1e-6, "{key}: {point:?} != {expected:?}");
+    }
+}
+
+#[test]
 fn flange_dialog_does_not_guess_wall_names_for_a_rotated_profile() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
