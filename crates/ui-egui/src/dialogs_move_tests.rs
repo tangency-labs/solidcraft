@@ -884,6 +884,43 @@ fn crossing_a_face_keeps_a_rims_centre_awake() {
     assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(centre) < 1e-6), "{from:?}");
 }
 
+/// A face of another body is not on the way to the rim's centre: it sleeps the rim's points
+/// and wakes its own centre.
+#[test]
+fn a_face_of_another_body_sleeps_a_rims_points() {
+    let mut h = holed_plate_picking_from();
+    h.app.run("solid.box", json!({"corner": [70, 0, 0], "length": 20, "width": 20, "height": 10})).unwrap();
+    h.settle();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Edge { .. })), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "move": { "world": [76, 6, 10] } })).unwrap();
+    assert!(matches!(&h.app.viewport.woken.item, Some(Sel::Face { body, .. }) if body != "Body1"), "{:?}", h.app.viewport.woken);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(Vec3::new(80.0, 10.0, 10.0)) < 1e-6), "{:?}", h.app.viewport.woken);
+}
+
+/// A woken point of a sketch hidden since it woke is neither shown nor picked.
+#[test]
+fn woken_points_of_a_hidden_sketch_sleep() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[60, 0], [80, 0]], "ids": ["l"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.cam.distance = 200.0;
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h.step(&json!({ "move": { "world": [65, 0, 0] } })).unwrap();
+    let Some(Sel::ExternalSketchCurve { sketch, .. }) = h.app.viewport.woken.item.clone() else { panic!("{:?}", h.app.viewport.woken) };
+    assert!(!crate::snap_wake::shown(&h.app).is_empty());
+    h.app.session.visibility.hidden_sketches.push(sketch);
+    assert!(crate::snap_wake::shown(&h.app).is_empty(), "{:?}", h.app.viewport.woken);
+}
+
 /// Snap points are on by default; with the preference off, hovering a rim wakes nothing and a
 /// click in the hole's middle picks nothing there, as before (#5912).
 #[test]

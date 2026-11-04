@@ -24,7 +24,18 @@ pub const ON: f32 = 4.0;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Woken {
     pub item: Option<Sel>,
+    /// A face of the rim's own body crossed on the way to its centre: its points are woken too.
+    pub face: Option<Sel>,
     pub points: Vec<SnapPoint>,
+    /// The design's revision the points were found in: an edit, undo or redo sleeps them.
+    pub revision: u64,
+}
+
+impl Woken {
+    /// Whether `sel` is the item, or the crossed face, whose points are awake.
+    pub fn has(&self, sel: &Sel) -> bool {
+        [&self.item, &self.face].into_iter().flatten().any(|w| same_item(w, sel))
+    }
 }
 
 /// Whether snap points are on and the active dialog input takes them.
@@ -68,15 +79,30 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     }
     let curve = hits.iter().find_map(item_of).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
     let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(item_of)) else { return };
-    if app.viewport.woken.item.as_ref().is_some_and(|w| same_item(w, &item)) {
+    if app.viewport.woken.revision != app.session.revision {
+        app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
+    }
+    if app.viewport.woken.has(&item) {
         return;
     }
-    let face = matches!(item, Sel::Face { .. });
-    if face && app.viewport.woken.item.as_ref().is_some_and(|w| !matches!(w, Sel::Face { .. })) {
-        return;
-    }
+    // Crossing a face of the rim's own body on the way to its centre keeps the rim's points and
+    // adds the face's; a face of another body sleeps them and wakes its own.
     let points = snap_points(&app.session, &item);
-    app.viewport.woken = Woken { item: Some(item), points };
+    if let Sel::Face { body: face_body, .. } = &item
+        && app.viewport.woken.item.as_ref().is_some_and(|w| matches!(w, Sel::Edge { body, .. } if body == face_body))
+    {
+        let w = &mut app.viewport.woken;
+        w.points.retain(|p| w.face.is_none() || p.kind != SnapKind::FaceCentre);
+        for p in points {
+            let tol = 1e-6 * (1.0 + p.at.x.abs().max(p.at.y.abs()).max(p.at.z.abs()));
+            if !w.points.iter().any(|q| (q.at.x - p.at.x).abs() <= tol && (q.at.y - p.at.y).abs() <= tol && (q.at.z - p.at.z).abs() <= tol) {
+                w.points.push(p);
+            }
+        }
+        w.face = Some(item);
+        return;
+    }
+    app.viewport.woken = Woken { item: Some(item), face: None, points, revision: app.session.revision };
 }
 
 /// The woken points where they show: a point of a body a Move dialog moves is where the move
@@ -87,7 +113,12 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
         Some((bodies, m)) if bodies.contains(&p.body) => solidcraft_engine::doc::apply_point(m, p.at),
         _ => p.at,
     };
-    // A point of a body hidden since it woke is not shown or picked.
+    // A point of a body or sketch hidden since it woke is not shown or picked.
+    if let Some(Sel::ExternalSketchCurve { sketch, .. }) = &app.viewport.woken.item
+        && !crate::browser::sketch_visible(app, *sketch)
+    {
+        return Vec::new();
+    }
     app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_visible(&p.body)).map(|p| (at(p), p)).collect()
 }
 
@@ -141,9 +172,10 @@ pub fn draw(app: &SolveApp, painter: &Painter, proj: &Proj) {
     }
 }
 
-/// The woken points for `ui.inspect`: where each is and what it is.
+/// The woken points for `ui.inspect`: where each shows (as `shown` draws it) and what it is.
 pub fn inspect(app: &SolveApp) -> serde_json::Value {
-    serde_json::to_value(&app.viewport.woken.points).unwrap_or_default()
+    let points: Vec<SnapPoint> = shown(app).into_iter().map(|(at, p)| SnapPoint { at, ..p.clone() }).collect();
+    serde_json::to_value(&points).unwrap_or_default()
 }
 
 /// A world point's label in an input ("(x, y, z) mm").
