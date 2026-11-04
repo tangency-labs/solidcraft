@@ -130,14 +130,14 @@ pub(crate) fn parse_svg_path(d: &str) -> Result<sk::Path, String> {
     pb.finish().ok_or_else(|| "failed to build path".to_string())
 }
 
-type TextureCache = HashMap<(&'static str, bool), TextureHandle>;
+type TextureCache = HashMap<(&'static str, Color32), TextureHandle>;
 
 fn texture_cache_id() -> egui::Id {
     egui::Id::new("solidcraft_locale_label_textures")
 }
 
-/// Retrieve or create the rasterised texture for a vector label.
-pub fn get_label_texture(ctx: &egui::Context, id: &str, dark: bool) -> Option<(TextureHandle, egui::Vec2)> {
+/// Retrieve or create the rasterised texture for a vector label using the given text colour.
+pub fn get_label_texture(ctx: &egui::Context, id: &str, color: Color32) -> Option<(TextureHandle, egui::Vec2)> {
     let (d, vb_w) = label_spec(id)?;
     let key = match id {
         "ja" => "ja",
@@ -147,25 +147,29 @@ pub fn get_label_texture(ctx: &egui::Context, id: &str, dark: bool) -> Option<(T
         _ => return None,
     };
     let mut cache = ctx.data_mut(|d| d.get_temp::<TextureCache>(texture_cache_id()).unwrap_or_default());
-    if let Some(handle) = cache.get(&(key, dark)) {
+    if let Some(handle) = cache.get(&(key, color)) {
         return Some((handle.clone(), vec2(vb_w, 16.0)));
     }
 
-    let color = if dark { Color32::from_rgb(220, 224, 230) } else { Color32::from_rgb(30, 34, 40) };
     let scale = 2.0;
     let path = parse_svg_path(d).ok()?;
     let w = (vb_w * scale).round() as u32;
     let h = (16.0 * scale).round() as u32;
     let mut pm = sk::Pixmap::new(w, h)?;
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
     let mut paint = sk::Paint::default();
-    paint.set_color_rgba8(color.r(), color.g(), color.b(), color.a());
+    paint.set_color_rgba8(r, g, b, a);
     paint.anti_alias = true;
     let tf = sk::Transform::from_scale(scale, scale);
     pm.fill_path(&path, &paint, sk::FillRule::Winding, tf, None);
 
     let image = egui::ColorImage::from_rgba_premultiplied([w as usize, h as usize], pm.data());
-    let handle = ctx.load_texture(format!("locale_label_{id}_{dark}"), image, TextureOptions::LINEAR);
-    cache.insert((key, dark), handle.clone());
+    let handle = ctx.load_texture(
+        format!("locale_label_{id}_{:02x}{:02x}{:02x}{:02x}", color.r(), color.g(), color.b(), color.a()),
+        image,
+        TextureOptions::LINEAR,
+    );
+    cache.insert((key, color), handle.clone());
     ctx.data_mut(|d| d.insert_temp(texture_cache_id(), cache));
     Some((handle, vec2(vb_w, 16.0)))
 }
@@ -175,8 +179,8 @@ pub fn get_label_texture(ctx: &egui::Context, id: &str, dark: bool) -> Option<(T
 pub(crate) fn list_picker_locale(ui: &mut Ui, id: &str, fallback_name: &str, selected: bool) -> egui::Response {
     #[cfg(target_arch = "wasm32")]
     {
-        let dark = ui.visuals().dark_mode;
-        if let Some((texture, size)) = get_label_texture(ui.ctx(), id, dark) {
+        let text_color = if selected { ui.visuals().selection.stroke.color } else { ui.visuals().text_color() };
+        if let Some((texture, size)) = get_label_texture(ui.ctx(), id, text_color) {
             let mut response = crate::ui_kit::list_picker(ui, id, "", selected);
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, fallback_name));
             if ui.is_rect_visible(response.rect) {
@@ -211,7 +215,7 @@ mod tests {
     fn label_texture_creation_succeeds() {
         let ctx = egui::Context::default();
         for id in ["ja", "ko", "zh", "zh-TW"] {
-            let (tex, size) = get_label_texture(&ctx, id, true).expect("texture renders");
+            let (tex, size) = get_label_texture(&ctx, id, Color32::from_rgb(200, 200, 200)).expect("texture renders");
             assert!(size.x > 0.0);
             assert_eq!(size.y, 16.0);
             assert_eq!(tex.size(), [(size.x * 2.0).round() as usize, 32]);

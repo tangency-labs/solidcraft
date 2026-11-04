@@ -1033,8 +1033,8 @@ mod tests {
     }
 
     #[test]
-    fn default_ui_language_is_english() {
-        assert_eq!(crate::prefs::Prefs::default().language, "en");
+    fn default_ui_language_follows_the_system() {
+        assert_eq!(crate::prefs::Prefs::default().language, crate::i18n::SYSTEM);
         assert!(!needs_cjk_font("en"));
     }
 

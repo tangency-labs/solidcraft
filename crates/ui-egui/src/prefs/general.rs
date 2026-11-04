@@ -40,8 +40,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.language = crate::i18n::SYSTEM.into();
                             }
                             for locale in crate::i18n::LOCALES {
-                                if crate::locale_labels::list_picker_locale(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id)
-                                    .clicked()
+                                if crate::locale_labels::list_picker_locale(
+                                    ui,
+                                    locale.id,
+                                    &locale.display_name(),
+                                    app.preferences.language == locale.id,
+                                )
+                                .clicked()
                                 {
                                     app.preferences.language = locale.id.into();
                                 }

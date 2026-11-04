@@ -80,10 +80,12 @@ pub struct CjkFontLoader {
 }
 
 impl CjkFontLoader {
+    /// The current download status of `face`.
     pub fn status(&self, face: WebFace) -> FontStatus {
         self.status.get(&face).copied().unwrap_or_default()
     }
 
+    /// Update the recorded status of `face`.
     fn set(&mut self, face: WebFace, status: FontStatus) {
         self.status.insert(face, status);
     }
@@ -142,6 +144,7 @@ impl CjkFontLoader {
         }
     }
 
+    /// Fall back the live language to English while saving the original preference.
     fn fall_back(&mut self, language: &mut String) {
         self.saved_language = Some(std::mem::replace(language, "en".to_owned()));
     }
@@ -168,6 +171,7 @@ impl WebFaces {
         true
     }
 
+    /// Whether `face` is loaded and available in this set.
     pub fn contains(&self, face: WebFace) -> bool {
         self.faces.contains_key(&face)
     }
@@ -182,6 +186,7 @@ impl WebFaces {
     }
 }
 
+/// Egui temporary data ID for stored web faces in context.
 fn faces_id() -> egui::Id {
     egui::Id::new("solidcraft_web_faces")
 }
@@ -347,6 +352,32 @@ mod tests {
         language = "zh".to_owned();
         assert_eq!(loader.tick(&mut language), Some(WebFace::SimplifiedChinese), "the two Chinese languages need their own faces");
         assert_eq!(loader.status(WebFace::Japanese), FontStatus::Unloaded, "Japanese was never asked for");
+    }
+
+    /// When language preference is "system", the effective locale drives the font fetch
+    /// and fallback preserves the stored "system" preference without overwriting it.
+    #[test]
+    fn default_system_preference_preserves_setting_and_handles_effective_locales() {
+        let mut loader = CjkFontLoader::default();
+        let mut language = crate::i18n::SYSTEM.to_owned();
+        assert_eq!(loader.persisted_language(&language), crate::i18n::SYSTEM);
+
+        // In test mode, effective_language("system") is "en", so tick returns None
+        assert_eq!(loader.tick(&mut language), None);
+        assert_eq!(loader.persisted_language(&language), crate::i18n::SYSTEM);
+
+        // Verify each CJK effective locale maps to its proper WebFace
+        assert_eq!(WebFace::for_language("ja"), Some(WebFace::Japanese));
+        assert_eq!(WebFace::for_language("zh"), Some(WebFace::SimplifiedChinese));
+        assert_eq!(WebFace::for_language("zh-TW"), Some(WebFace::TraditionalChinese));
+        assert_eq!(WebFace::for_language("ko"), Some(WebFace::Korean));
+
+        // When a CJK face fails, fallback preserves the stored "system" preference
+        for face in [WebFace::Japanese, WebFace::SimplifiedChinese, WebFace::TraditionalChinese, WebFace::Korean] {
+            let mut lang = crate::i18n::SYSTEM.to_owned();
+            loader.finished(face, false, &mut lang);
+            assert_eq!(loader.persisted_language(&lang), crate::i18n::SYSTEM);
+        }
     }
 
     #[test]

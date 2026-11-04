@@ -741,10 +741,10 @@ mod web {
             }
         }
 
+        /// Start an asynchronous web fetch for the given face.
         fn fetch_face(&self, face: solidcraft_ui_egui::web_fonts::WebFace, ctx: &egui::Context) {
             let slot = self.font_result.clone();
             let ctx = ctx.clone();
-            let path = path.to_owned();
             wasm_bindgen_futures::spawn_local(async move {
                 let res = fetch_font_bytes(face.path()).await;
                 *slot.borrow_mut() = Some((face, res));
