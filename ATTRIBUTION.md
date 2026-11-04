@@ -798,6 +798,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/styles/ui/themes/onyx.json | SolidCraft contributors | original Onyx stone-grey palette, option overlays and semantic icon-role mapping; existing SolidCraft artwork is unchanged | MIT OR Apache-2.0 |
 | docs/book/src/media/ui-tour/window.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, default dark theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
 | docs/book/src/media/ui-tour/navigate.mp4 | SolidCraft contributors | original screen recording of the actual SolidCraft 0.29.0 English desktop UI (`--sample`, default dark theme, software renderer) orbiting, panning and zooming, with the original drawn pointer of examples/demo/overlay.py and labels set in DejaVu Sans Bold, captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
+| assets/locales/pending/sketch-tool-hints.json | carlymx | Original sketch tool hints and engine error translations | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
