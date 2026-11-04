@@ -2545,6 +2545,123 @@ impl SheetBody {
             .sum()
     }
 
+    /// Include the physical holes that perforation fields leave out of the B-rep measurement.
+    /// `placement` maps this sheet's geometry into the measurement's frame. Hole cylinders
+    /// lie on panels, clear of bends; their volume moments follow each panel's current fold.
+    /// Bounding boxes and B-rep topology are unchanged by these interior holes.
+    pub fn correct_perforation_properties(&self, measured: &mut kernel::BodyMeasure, placement: &Mat) -> Result<()> {
+        let (mut removed, mut area_delta, mut moment_delta) = (0.0, 0.0, Vec3::ZERO);
+        self.visit_perforation_cylinders(placement, |center, volume, area, _| {
+            removed += volume;
+            area_delta += area;
+            // Use distances from the measured centre, including far-away placements.
+            moment_delta += (measured.centroid - center) * volume;
+        })?;
+        if removed == 0.0 {
+            return Ok(());
+        }
+        let volume = measured.volume - removed;
+        let area = measured.area + area_delta;
+        let centroid = measured.centroid + moment_delta / volume;
+        if !(volume.is_finite() && volume > 0.0 && area.is_finite() && area >= 0.0 && centroid.is_finite()) {
+            return Err(DocError::Invalid(format!("invalid perforation physical properties for `{}`", self.body)));
+        }
+        measured.volume = volume;
+        measured.area = area;
+        measured.centroid = centroid;
+        Ok(())
+    }
+
+    /// Remove the same hole cylinders from the inertia spread as from volume and centroid.
+    /// The input and output tensors are at unit density, about their respective centroids.
+    pub fn correct_perforation_mass_properties(&self, measured: &mut solidcraft_geom::MassProperties, placement: &Mat) -> Result<()> {
+        use solidcraft_geom::inertia;
+        let (mut removed, mut moment_delta, mut removed_inertia) = (0.0, Vec3::ZERO, [[0.0; 3]; 3]);
+        self.visit_perforation_cylinders(placement, |center, volume, _, own| {
+            let delta = measured.centroid - center;
+            removed += volume;
+            moment_delta += delta * volume;
+            let about_center = inertia::shifted(&own, volume, delta);
+            for (row, hole) in removed_inertia.iter_mut().zip(about_center) {
+                for (value, h) in row.iter_mut().zip(hole) {
+                    *value += h;
+                }
+            }
+        })?;
+        if removed == 0.0 {
+            return Ok(());
+        }
+        let volume = measured.volume - removed;
+        let delta = moment_delta / volume;
+        let centroid = measured.centroid + delta;
+        let mut tensor = measured.inertia;
+        for (row, hole) in tensor.iter_mut().zip(removed_inertia) {
+            for (value, h) in row.iter_mut().zip(hole) {
+                *value -= h;
+            }
+        }
+        // Move from the old centre to the new one, reversing the parallel-axis term.
+        let tensor = inertia::shifted(&tensor, -volume, delta);
+        if !(volume.is_finite() && volume > 0.0 && centroid.is_finite() && tensor.iter().flatten().all(|v| v.is_finite())) {
+            return Err(DocError::Invalid(format!("invalid perforation inertia for `{}`", self.body)));
+        }
+        measured.volume = volume;
+        measured.centroid = centroid;
+        measured.inertia = tensor;
+        Ok(())
+    }
+
+    /// Analytic cylinders at each panel's current fold, in the requested measurement frame.
+    fn visit_perforation_cylinders(&self, placement: &Mat, mut visit: impl FnMut(Vec3, f64, f64, solidcraft_geom::inertia::Tensor3)) -> Result<()> {
+        if self.perforations.is_empty() {
+            return Ok(());
+        }
+        let invalid = || DocError::Invalid(format!("invalid perforation physical properties for `{}`", self.body));
+        if !(self.t.is_finite() && self.t > 0.0) || placement.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(invalid());
+        }
+        let isometry = |m: &Mat| {
+            let [x, y, z] = [0, 1, 2].map(|i| Vec3::new(m[i][0], m[i][1], m[i][2]));
+            m.iter().flatten().all(|v| v.is_finite())
+                && m[0][3] == 0.0
+                && m[1][3] == 0.0
+                && m[2][3] == 0.0
+                && m[3][3] == 1.0
+                && [x, y, z].iter().all(|a| (a.dot(*a) - 1.0).abs() < 1e-9)
+                && x.dot(y).abs() < 1e-9
+                && x.dot(z).abs() < 1e-9
+                && y.dot(z).abs() < 1e-9
+        };
+        let panels: Vec<_> = self.panels().into_iter().map(|(i, region)| (mat_mul(placement, &self.world(i)), region)).collect();
+        let flat = mat_mul(placement, &self.world(None));
+        if !isometry(&flat) || panels.iter().any(|(world, _)| !isometry(world)) {
+            return Err(DocError::Invalid("not supported yet: perforation physical properties under scale or shear".into()));
+        }
+        for p in &self.perforations {
+            if !([p.diameter, p.pitch, p.margin].iter().all(|v| v.is_finite()) && p.diameter > 0.0 && p.pitch > p.diameter && p.margin >= 0.0) {
+                return Err(invalid());
+            }
+            let holes = self.perforation_holes(p)?;
+            let disk = std::f64::consts::PI * (p.diameter / 2.0).powi(2);
+            let volume = disk * self.t;
+            let area_delta = std::f64::consts::PI * p.diameter * self.t - 2.0 * disk;
+            let radius2 = (p.diameter / 2.0).powi(2);
+            let transverse = volume * (3.0 * radius2 + self.t * self.t) / 12.0;
+            let own = [[transverse, 0.0, 0.0], [0.0, transverse, 0.0], [0.0, 0.0, volume * radius2 / 2.0]];
+            for hole in holes {
+                let world = if self.flat || panels.len() == 1 {
+                    &flat
+                } else {
+                    &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
+                };
+                let center = apply_point(world, v3(hole) + Vec3::Z * (self.t / 2.0));
+                let rotation = [0, 1, 2].map(|i| [0, 1, 2].map(|j| world[j][i]));
+                visit(center, volume, area_delta, solidcraft_geom::inertia::transformed(&own, &rotation));
+            }
+        }
+        Ok(())
+    }
+
     /// Topology counted by faces and loops: a round hole is one face bounded by two closed circular
     /// edges (one vertex each), where the sewn solid splits it into arcs. Returns the change to
     /// the sewn (faces, edges, vertices).
