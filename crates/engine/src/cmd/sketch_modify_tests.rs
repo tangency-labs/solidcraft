@@ -477,6 +477,34 @@ fn trimming_the_start_half_of_a_center_rectangle_diagonal_keeps_its_parallel_dis
     assert!((after - d).abs() < 1e-9, "{after} != {d}");
 }
 
+/// A line's held midpoint trimmed at a crossing line that only happens to have its middle there
+/// ends the kept half on that point and keeps it on the crossing line, without tying the crossing
+/// line's middle to it: nothing held that middle before.
+#[test]
+fn trimming_at_a_held_midpoint_on_an_unrelated_line_adds_no_hold_to_that_line() {
+    let mut s = new_sketch();
+    let trimmed = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [10,0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let crossing = ids(&run(&mut s, "sketch.line", json!({"points": [[5,-3], [5,3]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": format!("mid:{trimmed}")}));
+    let sk = sketch(&s);
+    let mid = sk.points.iter().find(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).map(|p| p.id.clone()).unwrap();
+    run(&mut s, "sketch.trim", json!({"curve": trimmed, "at": [8, 0]}));
+    let sk = sketch(&s);
+    let l = sk.curve_index(&crossing).unwrap();
+    let m = sk.resolve_point(&mid).unwrap();
+    assert!(
+        !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: cl, .. } if cl == l)),
+        "the crossing line gets no midpoint hold: {:?}",
+        sk.constraints
+    );
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: cc } if p == m && cc == l)),
+        "the old midpoint stays on the crossing line: {:?}",
+        sk.constraints
+    );
+    assert_eq!(sk.points.iter().filter(|p| p.pos.dist(Vec2::new(5.0, 0.0)) < 1e-7).count(), 1, "one point at the cut");
+}
+
 #[test]
 fn exact_extend_ellipse_preserves_support_target_and_history() {
     for (y, expected_x) in [(3.0, 12.0), (5.0, 20.0)] {
