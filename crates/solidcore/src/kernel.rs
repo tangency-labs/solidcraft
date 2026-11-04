@@ -1717,9 +1717,11 @@ pub struct Kernel {
     pub upstream_ub_passed: Vec<&'static str>,
     /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
-    /// the surface value (`true` unless the `curve-memo-off` feature is on). The memos
-    /// never change a result, only the time; `false` builds everything fresh, to check
-    /// that.
+    /// the surface value (`true` unless the `curve-memo-off` feature is on), and whether
+    /// the check's other result-invariant shortcuts are taken (the B-spline curve
+    /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
+    /// shortcuts never change a result, only the time; `false` builds and runs
+    /// everything in full, to check that.
     pub memoize_curve_caches: bool,
     /// Opt-in fixes of upstream defects (all off: upstream behaviour).
     pub fixes: UpstreamFixes,

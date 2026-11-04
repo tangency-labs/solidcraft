@@ -2646,6 +2646,12 @@ fn loop_sample_uv_point(k: &Kernel, b: &mut Brep, l: LoopId) -> Result<Option<Po
 /// a face with fewer than two loops, an inner loop without a sample point and an
 /// unknown containment pass.
 ///
+/// Not upstream (with `Kernel::memoize_curve_caches`): an inner loop whose
+/// winding hull (`query::loop::WindingHull`) excludes the sample point is not
+/// walked for it, since its walk cannot answer inside there and cannot fail or edit the
+/// B-rep; the result is the same, and a face with many inner loops no longer walks
+/// every one of them from every other's sample point.
+///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for a face
@@ -2653,7 +2659,7 @@ fn loop_sample_uv_point(k: &Kernel, b: &mut Brep, l: LoopId) -> Result<Option<Po
 /// of [`crate::query::loop::contains_uv_point`] and `MapTo2d`.
 pub fn assert_test_face37(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
     use crate::geom::point_set::PointContainment;
-    use crate::query::r#loop::contains_uv_point;
+    use crate::query::r#loop::{contains_uv_point, lacks_uv_trim, WindingHull};
 
     // locals
     let loops = super::p2::loops(b, f, false, None)?;
@@ -2671,9 +2677,29 @@ pub fn assert_test_face37(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
 
     let zone_tol_3d = super::p2::tolerance(b, f)?;
 
+    // (not upstream) the loops' winding hulls, none without the memos, and which loops
+    // lack a UV trim: only such a loop may have a trim made (and its edge edited) when
+    // it is sampled or walked, so the hulls are taken again after that before they are
+    // read
+    let use_hulls = k.memoize_curve_caches;
+    let hulls_of = |b: &Brep| -> Vec<(Option<WindingHull>, bool)> {
+        loops
+            .iter()
+            .map(|&l| (WindingHull::of(k, b, l), lacks_uv_trim(b, l)))
+            .collect()
+    };
+    let mut hulls: Vec<(Option<WindingHull>, bool)> =
+        if use_hulls { hulls_of(&*b) } else { Vec::new() };
+    let mut stale = false;
+    let may_build = |hulls: &[(Option<WindingHull>, bool)], i: usize| {
+        hulls.get(i).is_none_or(|&(_, lacking)| lacking)
+    };
+
     // for every InnerLoop
     for (ii, &inner_loop) in loops.iter().enumerate().skip(1) {
-        let Some(sample_uv) = loop_sample_uv_point(k, b, inner_loop)? else {
+        let sampled = loop_sample_uv_point(k, b, inner_loop)?;
+        stale |= use_hulls && may_build(&hulls, ii);
+        let Some(sample_uv) = sampled else {
             continue; // inconclusive - nothing to classify
         };
 
@@ -2686,18 +2712,39 @@ pub fn assert_test_face37(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
 
         // every InnerLoop must lie inside the OuterLoop
         let containment = contains_uv_point(k, b, outer_loop, None, sample_uv, uv_tol)?.containment;
+        stale |= use_hulls && may_build(&hulls, 0);
         if containment == PointContainment::Outside || containment == PointContainment::OnBoundary {
             return Ok(false);
         }
+
+        // (not upstream) whether the sample is on a side of the surface's natural
+        // domain, as the walk first tests it: only a sample off the sides is excluded
+        let on_domain_side = if use_hulls {
+            on_natural_domain_side(k, b, f, sample_uv).unwrap_or(true)
+        } else {
+            true
+        };
 
         // no InnerLoop may lie inside another InnerLoop
         for (jj, &other) in loops.iter().enumerate().skip(1) {
             if jj == ii {
                 continue;
             }
-            if contains_uv_point(k, b, other, None, sample_uv, uv_tol)?.containment
-                == PointContainment::Inside
-            {
+            if stale {
+                hulls = hulls_of(&*b);
+                stale = false;
+            }
+            let excluded = hulls
+                .get(jj)
+                .and_then(|&(h, _)| h)
+                .is_some_and(|h| h.excludes(sample_uv, on_domain_side));
+            if excluded {
+                continue;
+            }
+            let inside = contains_uv_point(k, b, other, None, sample_uv, uv_tol)?.containment
+                == PointContainment::Inside;
+            stale |= use_hulls && may_build(&hulls, jj);
+            if inside {
                 return Ok(false);
             }
         }
@@ -2705,6 +2752,18 @@ pub fn assert_test_face37(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
 
     // arrive here when all InnerLoops are properly nested
     Ok(true)
+}
+
+/// Not upstream: whether `uv` lies on a side of the natural domain of face `f`'s
+/// surface at the UV tolerance `SmLoop::ContainsUVPoint` maps the face's tolerance to
+/// there (its first test, on a copy of the surface as it takes one); `None` where a
+/// step fails (the walk then returns that failure itself).
+fn on_natural_domain_side(k: &Kernel, b: &Brep, f: FaceId, uv: Point2) -> Option<bool> {
+    let face = b.face(f).ok()?;
+    let surface = face.surface.as_ref()?.clone_for_evaluation().ok()?;
+    let domain = surface.natural_uv_domain_with_nurb(k).ok()?;
+    let tol_uv = crate::surface::surface::p1::map_to_2d(k, face.tolerance, uv, &surface).ok()?;
+    Some(domain.point_boundaries(uv, tol_uv) != 0)
 }
 
 #[cfg(test)]
