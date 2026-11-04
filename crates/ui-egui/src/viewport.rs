@@ -2368,8 +2368,12 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
-    for p in &app.viewport.woken.points {
-        [p.at.x, p.at.y, p.at.z].map(f64::to_bits).hash(&mut h);
+    // Where each woken point shows (a Move preview moves them), on which body and of what kind:
+    // a hit of the same place on another body is another hit.
+    for (at, p) in crate::snap_wake::shown(app) {
+        [at.x, at.y, at.z].map(f64::to_bits).hash(&mut h);
+        p.body.hash(&mut h);
+        (p.kind as u8).hash(&mut h);
     }
     app.view_fov().to_bits().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
@@ -2591,10 +2595,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
         }
     }
+    // The nearest sketch or construction point: a woken point further off yields to it.
+    let point_near = best.v.iter().map(|x| x.0.0).fold(f32::INFINITY, f32::min);
     hits.extend(best.hits());
     // Sketch curves: the active sketch's own before projected and other sketches' ones, then
     // nearest (the active sketch wins ties).
     let mut bestc = Near::new(all);
+    // The nearest curve whatever its tier: a woken point wins only over a curve further off.
+    let mut curve_near = f32::INFINITY;
     for sid in sketches.clone().into_iter().filter(|_| !crate::render_workspace::active(app)) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
@@ -2618,6 +2626,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 let pts: Vec<(Pos2, Vec3)> = part.iter().filter_map(|q| proj.to_screen(*q).map(|sp| (sp, *q))).collect();
                 for w in pts.windows(2) {
                     let dd = seg_dist(pos, w[0].0, w[1].0) - bonus + helper + linked_penalty;
+                    if dd < 6.0 {
+                        curve_near = curve_near.min(dd);
+                    }
                     if dd < 6.0 && bestc.wants((tier, dd)) {
                         let point = ray_segment_closest(o, d, w[0].1, w[1].1);
                         bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight, point });
@@ -2632,6 +2643,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             let pts: Vec<(Pos2, Vec3)> = w.pts.iter().filter_map(|q| proj.to_screen(*q).map(|sp| (sp, *q))).collect();
             for seg in pts.windows(2) {
                 let dd = seg_dist(pos, seg[0].0, seg[1].0) - bonus;
+                if dd < 6.0 {
+                    curve_near = curve_near.min(dd);
+                }
                 if dd < 6.0 && bestc.wants((tier, dd)) {
                     let point = ray_segment_closest(o, d, seg[0].1, seg[1].1);
                     bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight, point });
@@ -2640,7 +2654,6 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
     }
     let before_curves = hits.len();
-    let curve_near = bestc.v.iter().map(|x| x.0.1).fold(f32::INFINITY, f32::min);
     hits.extend(bestc.hits());
     if let Some((_, far)) = woken_far
         && hits.len() == before_curves
@@ -2788,10 +2801,18 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // pointer over anything (a line's middle lies on the line), further out unless an edge or a
     // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
     let edge_near = beste.v.iter().map(|x| x.0).fold(curve_near, f32::min);
-    // Like a vertex, a woken point behind the nearest face or cut away by the section is not picked.
+    // Like a vertex, a woken point behind the nearest face or cut away by the section is not
+    // picked; a centre inside its own face (a sphere's, a torus's) is, when that face is in front.
+    let own_face_in_front = cap.is_none()
+        && matches!((&bestf, &app.viewport.woken.item), (Some((_, Hit::Face { body, index, .. })), Some(Sel::Face { body: wb, index: wi, .. })) if body == wb && index == wi);
     let woken: Vec<Hit> = crate::snap_wake::hits(app, proj, pos)
         .into_iter()
-        .filter(|(dd, h)| (*dd < crate::snap_wake::ON || *dd < edge_near) && matches!(h, Hit::Vertex { point, .. } if visible(*point, slack)))
+        .filter(|(dd, h, kind)| {
+            (*dd < crate::snap_wake::ON || *dd < edge_near)
+                && *dd < point_near
+                && matches!(h, Hit::Vertex { point, .. } if visible(*point, slack)
+                    || (kept(*point) && own_face_in_front && *kind == solidcraft_engine::snap::SnapKind::Centre))
+        })
         .map(|x| x.1)
         .collect();
     hits.splice(0..0, woken);

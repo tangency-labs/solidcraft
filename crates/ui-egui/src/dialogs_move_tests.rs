@@ -541,6 +541,21 @@ fn a_pick_on_the_moved_body_is_taken_back_by_the_current_move() {
     assert_eq!(from_shown(&h.app, elsewhere.clone()), elsewhere, "a pick on another body stays where it was made");
 }
 
+/// A woken point of the moved body shows and is picked where the preview draws the body, not
+/// where the design keeps it.
+#[test]
+fn woken_points_of_the_moved_body_follow_the_preview() {
+    let mut h = translated_box();
+    let kept = Vec3::new(20.0, 30.0, 10.0);
+    h.app.viewport.woken.points =
+        vec![solidcraft_engine::snap::SnapPoint { at: kept, kind: solidcraft_engine::snap::SnapKind::Middle, body: "Body1".into() }];
+    let shown: Vec<Vec3> = crate::snap_wake::shown(&h.app).into_iter().map(|(at, _)| at).collect();
+    assert_eq!(shown, vec![Vec3::new(30.0, 30.0, 10.0)]);
+    h.app.viewport.woken.points[0].body = "Other".into();
+    let shown: Vec<Vec3> = crate::snap_wake::shown(&h.app).into_iter().map(|(at, _)| at).collect();
+    assert_eq!(shown, vec![kept], "another body's point stays put");
+}
+
 /// The prefilled Free Move angles must re-make the turn the feature stored, whatever the axis:
 /// recomposing them the way `step` does (Z, then Y, then X) gives the same rotation matrix.
 #[test]

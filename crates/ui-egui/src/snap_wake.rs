@@ -74,19 +74,28 @@ pub fn update(app: &mut SolveApp) {
     app.viewport.woken = Woken { item: Some(item), points };
 }
 
-/// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance).
-pub fn hits(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<(f32, Hit)> {
+/// The woken points where they show: a point of a body a Move dialog moves is where the move
+/// so far draws that body, not where the design keeps it.
+pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
+    let moved = crate::dialogs_move::chained(app);
+    let at = |p: &SnapPoint| match &moved {
+        Some((bodies, m)) if bodies.contains(&p.body) => solidcraft_engine::doc::apply_point(m, p.at),
+        _ => p.at,
+    };
+    app.viewport.woken.points.iter().map(|p| (at(p), p)).collect()
+}
+
+/// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance
+/// and kind).
+pub fn hits(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<(f32, Hit, SnapKind)> {
     if !wanted(app) {
         return Vec::new();
     }
-    let mut v: Vec<(f32, Hit)> = app
-        .viewport
-        .woken
-        .points
-        .iter()
-        .filter_map(|p| {
-            let d = proj.to_screen(p.at)?.distance(pos);
-            (d < REACH).then(|| (d, Hit::Vertex { body: p.body.clone(), point: p.at }))
+    let mut v: Vec<(f32, Hit, SnapKind)> = shown(app)
+        .into_iter()
+        .filter_map(|(at, p)| {
+            let d = proj.to_screen(at)?.distance(pos);
+            (d < REACH).then(|| (d, Hit::Vertex { body: p.body.clone(), point: at }, p.kind))
         })
         .collect();
     v.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -101,8 +110,8 @@ pub fn draw(app: &SolveApp, painter: &Painter, proj: &Proj) {
     }
     let t = Tokens::get();
     let line = Stroke::new(1.5, t.hover_edge);
-    for p in &app.viewport.woken.points {
-        let Some(c) = proj.to_screen(p.at) else { continue };
+    for (at, p) in shown(app) {
+        let Some(c) = proj.to_screen(at) else { continue };
         let r = 5.0;
         match p.kind {
             SnapKind::Centre => {

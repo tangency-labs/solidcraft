@@ -464,6 +464,31 @@ fn measure_takes_woken_hole_centres() {
     assert!((result(&h)["distance_mm"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{}", result(&h));
 }
 
+/// A sphere's woken centre lies inside its own face: it is picked through that face.
+#[test]
+fn measure_takes_a_spheres_woken_centre_through_its_face() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("solid.sphere", json!({"center": [30, 30, 30], "radius": 10})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    h.step(&json!({ "move": { "world": [35.774, 35.774, 35.774] } })).unwrap();
+    let centre = solidcore_record::Vec3::new(30.0, 30.0, 30.0);
+    assert!(
+        h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6),
+        "hover {:?} woken {:?}",
+        h.app.viewport.hover,
+        h.app.viewport.woken
+    );
+    h.step(&json!({ "click": { "world": [30, 30, 30] } })).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(centre) < 1e-6), "{picked:?}");
+}
+
 /// A woken centre doesn't take a click on its own rim: zoomed out, a Ø6 hole's centre is
 /// within a woken point's reach of the rim, and a click on the rim still measures the rim.
 #[test]
