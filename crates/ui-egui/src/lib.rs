@@ -2845,6 +2845,9 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // Shortcuts run here, before `ui` installs the language scope: a tool started by its
+        // key must build its translated hint in the user's language, not in English.
+        let _language = crate::i18n::scope(&self.preferences.language);
         panel_runtime::tick_app(self);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
