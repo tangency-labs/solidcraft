@@ -239,6 +239,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-convert"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-ffi"
 version = "0.1.0"
 dependencies = [

@@ -328,6 +328,21 @@ impl Curve {
     /// [`NlibCode::MaxDerivative`] when `der > NL_MAXDER`, and with
     /// [`NlibCode::Numerical`] when a basis quotient is not computable.
     pub fn derivs(&self, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
+        self.derivs_on(u, side, der, true)
+    }
+
+    /// [`Curve::derivs`] at any `u`: past an end of the knot range, the polynomial of the
+    /// end span continued (a line extends for ever), as a surface's derivatives are
+    /// (`N_SrfDerivs` takes the end span). Inside the range the same bits as
+    /// [`Curve::derivs`].
+    ///
+    /// Errors as [`Curve::derivs`], without the parameter error.
+    pub fn derivs_continued(&self, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
+        self.derivs_on(u, side, der, false)
+    }
+
+    /// [`Curve::derivs`], refusing a parameter outside the knot range when `check`.
+    fn derivs_on(&self, u: f64, side: Side, der: usize, check: bool) -> Result<Vec<Vec3>> {
         const OP: &str = "nurbs::crv_nurb::Curve::derivs";
         const NP: usize = MAX_DEGREE + 1;
         let pu = self.degree();
@@ -339,7 +354,7 @@ impl Curve {
         let pw = self.cpts();
 
         // Check parameter and order of derivatives.
-        if u < get(uk, 0, OP)? || u > get(uk, m, OP)? {
+        if check && (u < get(uk, 0, OP)? || u > get(uk, m, OP)?) {
             return Err(SolidError::nlib(OP, NlibCode::Parameter));
         }
         if der > MAX_DERIVATIVE {

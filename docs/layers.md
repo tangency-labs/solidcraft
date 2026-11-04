@@ -11,7 +11,8 @@ layer that needs another layer's job calls that layer; it never carries its own 
 |---|---|---|---|---|
 | Kernel | `solidcore` | Every geometric computation: build, evaluate, measure, intersect, fit | **build:** skin, sweep, blend, fillet, offset, booleans, trim, sew, curves and surfaces from control points and knots; **evaluate:** points, derivatives, normals, curvature, frames, normal sections, projection; **measure:** distance, angle, area, volume, mass properties, continuity across an edge (gap, normal angle, curvature difference); **intersect:** curve/surface, surface/surface, ray/body; **fit:** knot insertion and removal, degree elevation, Greville, interpolation, approximation, constrained fits (an edge row matched to a target at G0/G1/G2); **check** | anything app-specific: defaults, command shapes, UI |
 | Record | `solidcore-record` | Geometry as data | `Brep`, `Surface`, `Curve`; serde; structural validation (counts, indices, finite numbers); the neutral STEP model and its parser | any maths |
-| Ops | `solidcore-ops` | The modelling API both apps call: record ↔ kernel conversion, and every workflow operation as a sequence of kernel calls | the align command (picks the edges and the order, calls the kernel's constrained fit); the edge-continuity check (picks sample parameters and tolerances, calls the kernel's continuity measure, compares and reports); CV-curve editing (defaults, calls the kernel's constructor); comb values (calls curvature and normal, scales for display); importing a file (parses into the record, then calls the kernel to build, sew and heal) | any geometric quantity computed itself (see below) |
+| Convert | `solidcore-convert` | The one record ↔ kernel conversion, used by ops and tess | record `Surface`, `Curve`, `Curve2`, `Frame`, `Plane`, `Vec3` to the kernel's values and back, field by field | any maths |
+| Ops | `solidcore-ops` | The modelling API both apps call: every workflow operation as a sequence of kernel calls, converting through `solidcore-convert` | the align command (picks the edges and the order, calls the kernel's constrained fit); the edge-continuity check (picks sample parameters and tolerances, calls the kernel's continuity measure, compares and reports); CV-curve editing (defaults, calls the kernel's constructor); comb values (calls curvature and normal, scales for display); importing a file (parses into the record, then calls the kernel to build, sew and heal) | any geometric quantity computed itself (see below) |
 | Tess | `solidcore-tess` | Geometry made drawable | display meshes; isoparm and curve polylines | modelling or measurement decisions |
 | View | `tlabs-view` | Drawing on the GPU | shading, edges, lines; the camera's ray for a pick (the hit itself is the kernel's ray/body intersection, called through ops) | geometry maths on the model |
 | Kit | `tlabs-kit` | Interface components | ribbon, panels, history bar, preferences, menus | app state, geometry |
@@ -61,8 +62,9 @@ Allowed edges between workspace crates, enforced by `cargo xtask layers` in both
 ```
 solidcore-record   -> (no geometry crate)
 solidcore          -> (none of the others)
-solidcore-ops      -> solidcore, solidcore-record
-solidcore-tess     -> solidcore, solidcore-record
+solidcore-convert  -> solidcore, solidcore-record
+solidcore-ops      -> solidcore, solidcore-record, solidcore-convert
+solidcore-tess     -> solidcore, solidcore-record, solidcore-convert
 tlabs-view         -> solidcore-tess (the meshes and polylines it draws)
 tlabs-kit          -> (none)
 tlabs-link         -> (none of the geometry crates; it carries bytes and revisions)
@@ -70,7 +72,7 @@ apps               -> solidcore-ops, solidcore-record, solidcore-tess, tlabs-*
 ```
 
 - **Apps never depend on `solidcore` directly.** A modelling call goes through `solidcore-ops`. A number an app needs (a distance, an area, a nearest face) is an ops call.
-- **The kernel depends on no other layer.** Record ↔ kernel conversion is ops' job, so the kernel never sees the record.
+- **The kernel depends on no other layer.** Record ↔ kernel conversion is `solidcore-convert`'s job, so the kernel never sees the record.
 - **Tess calls the kernel's evaluator.** Its own fast evaluator is allowed only if it is private, display-only, and never reachable from ops or the apps. A display mesh never decides anything a model depends on.
 
 ## 4. What each rule is enforced by
@@ -78,7 +80,7 @@ apps               -> solidcore-ops, solidcore-record, solidcore-tess, tlabs-*
 | Rule | Check |
 |---|---|
 | The dependency edges in §3 | `cargo xtask layers` (a table of crates and allowed edges, run in CI in both workspaces) |
-| The record and ops compute no geometric quantity | clippy `disallowed-methods` in `solidcore-record` and `solidcore-ops`: `f64::{sqrt, cbrt, hypot, sin, cos, tan, asin, acos, atan, atan2, powi, powf, exp, ln, mul_add}`, and the kernel's vector and matrix methods (`dot`, `cross`, `normalize`, `length`, `transform`, …). Neither crate depends on a maths crate. Comparing a returned number with a tolerance, and scaling it for display, stay allowed |
+| The record, the conversion and ops compute no geometric quantity | clippy `disallowed-methods` in `solidcore-record`, `solidcore-convert` and `solidcore-ops`: `f64::{sqrt, cbrt, hypot, sin, cos, tan, asin, acos, atan, atan2, powi, powf, exp, ln, mul_add}`, and the kernel's vector and matrix methods (`dot`, `cross`, `normalize`, `length`, `transform`, …). None of them depends on a maths crate. Comparing a returned number with a tolerance, and scaling it for display, stay allowed |
 | Apps compute no geometry | `cargo xtask app-geometry` in each app: a shrink-only allowlist of the remaining sites (as SolidCraft's `xtask/mesh-decisions.txt`). The list never grows; each refactor PR deletes its lines |
 | Display meshes decide nothing | SolidCraft's existing `cargo xtask mesh-decisions`, kept until the apps compute no geometry at all |
 | One implementation per job | `docs/jobs.toml`: each job names its one crate and module. `cargo xtask jobs` fails when a job's public entry point is defined anywhere else |
@@ -95,7 +97,7 @@ apps               -> solidcore-ops, solidcore-record, solidcore-tess, tlabs-*
 
 1. `solidcore-record`, data only: SolidCraft's `solidcraft_geom::brep` without its evaluator and NURBS-form construction, which move into the kernel.
 2. `solidcore-tess`: the one mesher.
-3. The kernel's new primitives (§1, "Primitives the kernel gains"), each with its tests. Then `solidcore-ops` gets the record ↔ kernel conversion, and the workflows rebuilt on those primitives:
+3. The kernel's new primitives (§1, "Primitives the kernel gains"), each with its tests. Then `solidcore-ops` gets the workflows rebuilt on those primitives:
    - SolidCraft's: tangent chains (the walk is ops; the tangency angle at each vertex is the kernel's measure), the offset and shell recipes, and pickers;
    - the surface-modelling workflows: the skin, align and continuity-check commands, CV-curve editing, and combs.
 4. The intersection merge in the kernel.
