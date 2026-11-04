@@ -81,6 +81,7 @@ pub fn closed_curve(c: &EvalCurve) -> bool {
 /// Whether the tensor spline closes on itself along each direction: its knots clamped at both
 /// ends of that direction (so its boundary rows are its edges) and its first and last control
 /// rows the same points with the same weights. Control point `(i, j)` is `ctrl[j·count[0] + i]`.
+/// A degree whose required knot count overflows cannot close in that direction.
 pub fn closed(
     degree: [usize; 2],
     knots: &[Vec<f64>; 2],
@@ -136,11 +137,14 @@ fn same_point(a: Option<&[f64; 4]>, b: Option<&[f64; 4]>, extent: f64) -> bool {
 /// spline over its interval, so they need not repeat: a periodic quadratic circle written with
 /// knot multiplicities `1, 2, …, 2, 1` (as some writers do) is clamped.
 fn clamped(p: usize, n: usize, k: &[f64]) -> bool {
+    let Some(last) = n.checked_add(p) else {
+        return false;
+    };
     let ends = |r: std::ops::RangeInclusive<usize>| {
         k.get(r)
             .is_some_and(|s| s.windows(2).all(|w| w.first() == w.get(1)))
     };
-    p >= 1 && k.len() == n + p + 1 && ends(1..=p) && ends(n..=n + p - 1)
+    p >= 1 && last.checked_add(1) == Some(k.len()) && ends(1..=p) && ends(n..=last - 1)
 }
 
 /// How far past an end of the interval, relative to its size, a parameter is still that end:
@@ -425,6 +429,26 @@ pub fn degenerate_within(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closure_rejects_impossible_degrees_without_overflowing() {
+        let knots = [vec![0.0, 0.0, 0.5, 1.0, 1.0], vec![0.0, 0.0, 0.5, 1.0, 1.0]];
+        let mut ctrl = Vec::new();
+        for y in [0.0, 1.0, 0.0] {
+            for x in [0.0, 1.0, 0.0] {
+                ctrl.push([x, y, 0.0, 1.0]);
+            }
+        }
+        assert_eq!(closed([1, 1], &knots, [3, 3], &ctrl), [true, true]);
+        for degree in [usize::MAX, usize::MAX - 1, usize::MAX - 2, usize::MAX - 3] {
+            assert_eq!(closed([degree, 1], &knots, [3, 3], &ctrl), [false, true]);
+            assert_eq!(closed([1, degree], &knots, [3, 3], &ctrl), [true, false]);
+            assert_eq!(
+                closed([degree, degree], &knots, [3, 3], &ctrl),
+                [false, false]
+            );
+        }
+    }
 
     fn cylinder() -> EvalSurface {
         EvalSurface::Revolved {
