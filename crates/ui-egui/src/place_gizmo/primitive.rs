@@ -261,6 +261,27 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
     true
 }
 
+/// A pick on the Cylinder's face while one reference edge holds it, with its Face input active:
+/// it moves along the edge at the typed distance, as a drag of the marker does and as a hole held
+/// so moves on a pick; where the line leaves the face it stays. False when the pick is not that
+/// (another face, a vertex, two edges or none, or a pick on the cylinder itself, within its
+/// radius of its place), for the dialog to take it as usual.
+pub(super) fn pick_held(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
+    let s = &app.session;
+    if !matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) || d.active != 0 {
+        return false;
+    }
+    let Sel::Face { body, index, point } = sel else { return false };
+    let Some(Sel::Face { body: b, index: i, point: was }) = d.inputs.first().and_then(|inp| inp.items.first()) else { return false };
+    if b != body || i != index || was.dist(*point) <= radius(app, d) {
+        return false;
+    }
+    if !matches!(crate::hole_refs::freedom(s, d, 0), super::Freedom::Line(_)) {
+        return false;
+    }
+    !matches!(crate::hole_refs::drag_to(s, d, 0, *point), Err(crate::hole_refs::Stuck::Not))
+}
+
 /// The primitive's outline on the face: the box's side that stands on it (a face square to an
 /// axis), the cylinder's, cone's or coil's base circle, the sphere's widest circle across the
 /// face, the torus's outer circle lying flat, as it is made.

@@ -278,6 +278,54 @@ fn dragging_a_cylinder_with_a_reference_edge_keeps_its_typed_distance() {
 }
 
 #[test]
+fn a_cylinder_held_by_one_edge_keeps_its_typed_distance_when_its_face_is_picked_again() {
+    let mut h = plate();
+    start(&mut h, "solid.cylinder");
+    h.step(&json!({"click": {"world": [30, 25, 10]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click": {"world": [0, 20, 10]}})).unwrap();
+    h.settle();
+    let distance = |h: &Harness| match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Primitive { refs, .. } => value(h, &refs.distance[0]),
+        other => panic!("a primitive: {other:?}"),
+    };
+    assert!((distance(&h) - 30.0).abs() < 0.5, "measured from the left edge: {}", distance(&h));
+    // A pick elsewhere on the face, as a drag of the marker does, moves it along the edge only.
+    h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
+    h.step(&json!({"click": {"world": [50, 35, 10]}})).unwrap();
+    h.settle();
+    assert!((distance(&h) - 30.0).abs() < 0.5, "the typed distance stays: {}", distance(&h));
+    let at = match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Primitive { at: Some((p, _)), .. } => *p,
+        other => panic!("a placed cylinder: {other:?}"),
+    };
+    assert!((at.x - 30.0).abs() < 0.5 && (at.y - 35.0).abs() < 0.5, "along the edge to y = 35: {at:?}");
+    // A pick on another face of the plate is the dialog's, as with the handles off: it moves there.
+    let top = match h.app.dialog.as_ref().and_then(|d| d.inputs[0].items.first()) {
+        Some(Sel::Face { index, .. }) => *index,
+        other => panic!("a face pick: {other:?}"),
+    };
+    h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
+    assert!(drop_on_pick(&mut h, [80.0, 25.0, 5.0]), "the side face is picked");
+    match h.app.dialog.as_ref().and_then(|d| d.inputs[0].items.first()) {
+        Some(Sel::Face { index, point, .. }) => assert!(*index != top && (point.x - 80.0).abs() < 1e-6, "on the side face: {index} {point:?}"),
+        other => panic!("a face pick: {other:?}"),
+    }
+}
+
+/// The open dialog takes a viewport pick of the face at `p`, the shared handles first, as a click does.
+fn drop_on_pick(h: &mut Harness, p: [f64; 3]) -> bool {
+    let Some(sel) = crate::dialogs::face_sel(&h.app.session, Vec3::new(p[0], p[1], p[2])) else { return false };
+    let mut d = h.app.dialog.take().expect("a dialog");
+    if !crate::place_gizmo::pick_held(&h.app, &mut d, &sel) {
+        d.pick(&h.app.session, sel);
+    }
+    h.app.dialog = Some(d);
+    h.settle();
+    true
+}
+
+#[test]
 fn marker_stands_a_new_cone_on_the_face() {
     let mut h = plate();
     start(&mut h, "solid.cone");

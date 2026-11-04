@@ -3739,7 +3739,8 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     let Some(mut d) = app.dialog.take() else { return };
     // With several holes on a face (Preferences), a Single hole's pick adds a hole or takes one
     // out; with holes moving by clicking, a Single hole picked again on its face moves there.
-    let picked = if crate::hole_place::pick_several(app, &mut d, &sel) {
+    // With Placement handles on, a Cylinder held by one reference edge moves along it on a pick.
+    let picked = if crate::place_gizmo::pick_held(app, &mut d, &sel) || crate::hole_place::pick_several(app, &mut d, &sel) {
         crate::hole_place::PickMove::Moved
     } else if app.preferences.hole_moves {
         crate::hole_place::pick_moves(&mut d, &app.session, &sel)
