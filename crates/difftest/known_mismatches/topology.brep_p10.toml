@@ -21,10 +21,10 @@ why = "SmBrep::SubdivideFaceAtDiscontinuities's V pass counts the U knots (SmBre
 unit = "topology.brep_p10"
 case = "subdivide_surf_rev_cinf"
 cpp_defect = "WR-589"
-why = "SmBrep::SubdivideFaceAtDiscontinuities's V pass counts the U knots (SmBrep.cpp:18483, WR-589): surf_rev.smb's bicubic sheet has one U knot and three V knots, each a C2 knot where the third V derivative jumps; the C++ v1.0.1 reference cuts at the U knot and the first V knot only (4 faces), solidcore and the SolidCraft fork (tangency-labs/smlib@6eecf04) count the V knots (8 faces, crates/solidcore/tests/subdivide_face_v_knots.rs). With upstream's count the Rust output equals the C++ bit for bit; this resolves when the difftest reference moves to the fork (#2502)"
+why = "SmBrep::SubdivideFaceAtDiscontinuities's V pass counts the U knots (SmBrep.cpp:18483, WR-589): surf_rev.smb's bicubic sheet has one U knot and three V knots, each a C2 knot where the third V derivative jumps; the C++ v1.0.1 reference cuts at the U knot and the first V knot only (4 faces), solidcore and the SolidCraft fork (tangency-labs/smlib@6eecf04) count the V knots (8 faces, crates/solidcore/tests/subdivide_face_v_knots.rs). With upstream's count the Rust output equals the C++ bit for bit; it stays parked for as long as topology.brep_p10 is gated on the frozen v1.0.1 difftest"
 
 [[mismatch]]
 unit = "topology.brep_p10"
 case = "subdivide_nurb_nurb_2_cinf"
 cpp_defect = "WR-589"
-why = "SmBrep::SubdivideFaceAtDiscontinuities's V pass counts the U knots (SmBrep.cpp:18483, WR-589): Fillet/nurb_nurb_2.smb's bicubic sheet has no U knot and three V knots, each a C2 knot where the third V derivative jumps; the C++ v1.0.1 reference makes no cut (1 face), solidcore and the SolidCraft fork (tangency-labs/smlib@6eecf04) count the V knots (4 faces, crates/solidcore/tests/subdivide_face_v_knots.rs). With upstream's count the Rust output equals the C++ bit for bit; this resolves when the difftest reference moves to the fork (#2502)"
+why = "SmBrep::SubdivideFaceAtDiscontinuities's V pass counts the U knots (SmBrep.cpp:18483, WR-589): Fillet/nurb_nurb_2.smb's bicubic sheet has no U knot and three V knots, each a C2 knot where the third V derivative jumps; the C++ v1.0.1 reference makes no cut (1 face), solidcore and the SolidCraft fork (tangency-labs/smlib@6eecf04) count the V knots (4 faces, crates/solidcore/tests/subdivide_face_v_knots.rs). With upstream's count the Rust output equals the C++ bit for bit; it stays parked for as long as topology.brep_p10 is gated on the frozen v1.0.1 difftest"
