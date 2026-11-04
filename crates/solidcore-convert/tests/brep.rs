@@ -782,11 +782,16 @@ fn split_edge(r: &mut Record, e: usize, at: [f64; 3]) {
                 panic!("a line pcurve")
             };
             let (p0, p1) = (points[0], points[1]);
-            // the pcurve's point at `at`, by the fraction along the edge
-            let len = |a: [f64; 3], b: [f64; 3]| {
-                ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
-            };
-            let f = len(start, at) / len(start, end);
+            // the pcurve's point at `at`, by the fraction along the edge (along its longest
+            // coordinate: a cube's edge runs along one axis)
+            let axis = (0..3)
+                .max_by(|&a, &b| {
+                    (end[a] - start[a])
+                        .abs()
+                        .total_cmp(&(end[b] - start[b]).abs())
+                })
+                .unwrap();
+            let f = (at[axis] - start[axis]) / (end[axis] - start[axis]);
             let f = if u.forward { f } else { 1.0 - f };
             let pm = [p0[0] + f * (p1[0] - p0[0]), p0[1] + f * (p1[1] - p0[1])];
             let line = |a: [f64; 2], b: [f64; 2]| Curve2::Spline {
