@@ -1328,6 +1328,17 @@ impl Sketch {
         (major.is_some() || minor.is_some()).then_some((major, minor))
     }
 
+    /// The ellipse whose axis line `l` is (see [`Sketch::ellipse_axis_lines`]), if any.
+    pub fn ellipse_of_axis(&self, l: usize) -> Option<usize> {
+        if !matches!(self.curves.get(l).map(|x| &x.kind), Some(CurveKind::Line { .. })) {
+            return None;
+        }
+        (0..self.curves.len()).find(|&e| {
+            self.ellipse_axis_lines(e)
+                .is_some_and(|(major, minor)| major.is_some_and(|(line, _)| line == l) || minor.is_some_and(|(line, ..)| line == l))
+        })
+    }
+
     /// Whether line `l` is one of an ellipse's axes (see [`Sketch::ellipse_axis_lines`]).
     pub fn is_ellipse_axis(&self, l: usize) -> bool {
         // An axis is bisected by its ellipse's centre: only the ellipses centred on a point that

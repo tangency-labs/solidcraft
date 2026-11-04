@@ -174,6 +174,39 @@ fn explicit_break_rejects_bad_points_atomically_and_merges_duplicates() {
     }
 }
 
+/// An axis line moved, turned or scaled on its own takes its ellipse and the other axis along,
+/// as a drag of the same line does, instead of pulling away from the ellipse.
+#[test]
+fn an_ellipse_axis_moved_turned_or_scaled_alone_takes_its_ellipse_along() {
+    for (cmd, params, centre, major) in [
+        ("sketch.move", json!({"translate": [0, 30]}), Vec2::new(0.0, 30.0), Vec2::new(20.0, 30.0)),
+        ("sketch.move", json!({"angle": 90, "center": [0, 0]}), Vec2::ZERO, Vec2::new(0.0, 20.0)),
+        ("sketch.scale", json!({"base": [0, 0], "factor": 2}), Vec2::ZERO, Vec2::new(40.0, 0.0)),
+        ("sketch.transform", json!({"translate": [5, 0]}), Vec2::new(5.0, 0.0), Vec2::new(25.0, 0.0)),
+    ] {
+        for which in ["major", "minor"] {
+            let mut s = new_sketch();
+            let e = ids(&run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}))["curves"])[0].clone();
+            let sk = sketch(&s);
+            let Some((Some((major_line, _)), Some((minor_line, ..)))) = sk.ellipse_axis_lines(sk.curve_index(&e).unwrap()) else {
+                panic!("its axes")
+            };
+            let axis = sk.curves[if which == "major" { major_line } else { minor_line }].id.clone();
+            let mut p = params.clone();
+            p["entities"] = json!([axis]);
+            let r = run(&mut s, cmd, p);
+            assert_eq!(r["sketch"]["solved"], json!(true), "{cmd} {params} {which}: {r}");
+            let sk = sketch(&s);
+            let ei = sk.curve_index(&e).unwrap();
+            let CurveKind::Ellipse { c, m, .. } = sk.curves[ei].kind else { panic!("an ellipse") };
+            assert!(sk.point(c).unwrap().dist(centre) < 1e-6, "{cmd} {params} {which}: the ellipse's centre follows: {:?}", sk.point(c));
+            assert!(sk.point(m).unwrap().dist(major) < 1e-6, "{cmd} {params} {which}: its major end follows: {:?}", sk.point(m));
+            assert!(sk.ellipse_axis_lines(ei).is_some_and(|(a, b)| a.is_some() && b.is_some()), "{cmd} {params} {which}: still its axes");
+            assert!(ids(&r["curves"]).contains(&e), "{cmd} {params} {which}: the reply lists the ellipse: {r}");
+        }
+    }
+}
+
 /// An ellipse moved, turned or scaled on its own takes its axes along, as a drag does: they
 /// stay its axes and nothing is left failing.
 #[test]

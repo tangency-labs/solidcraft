@@ -3197,9 +3197,16 @@ fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>
     Ok((cs, ps))
 }
 
-/// `cs` with the axis lines of every ellipse in it: an ellipse moved, turned or scaled takes
-/// its axes along, as a drag does, instead of leaving them behind its centre.
+/// `cs` with the ellipse of every axis line in it and the axis lines of every ellipse in it: an
+/// ellipse, or one of its axes, moved, turned or scaled takes the rest along, as a drag does,
+/// instead of leaving the axes behind its centre or pulling an axis off the ellipse.
 fn with_ellipse_axes(sk: &Sketch, cs: &mut Vec<usize>) {
+    let ellipses: Vec<usize> = cs.iter().filter_map(|&l| sk.ellipse_of_axis(l)).collect();
+    for e in ellipses {
+        if !cs.contains(&e) {
+            cs.push(e);
+        }
+    }
     let axes: Vec<usize> = cs
         .iter()
         .filter_map(|&e| sk.ellipse_axis_lines(e))
