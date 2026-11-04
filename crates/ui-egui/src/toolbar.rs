@@ -2332,7 +2332,8 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
         }
     }
     if let Some((id, br)) = start {
-        app.start_at(id, Some(br));
+        // The exact pinned command, without replacing its family's remembered ribbon choice.
+        app.start_pinned(id, Some(br));
     }
     if let Some((at, id)) = menu {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
@@ -6464,5 +6465,32 @@ mod quick_access_tests {
         h.frames(2);
         assert!(rect_of("appbar:quick_access").is_none());
         assert!(h.app.session.doc.features.is_empty(), "nothing in the design changed");
+    }
+
+    /// A quick-access click starts exactly the pinned variant and leaves the family's remembered
+    /// ribbon choice alone.
+    #[test]
+    fn a_quick_access_click_on_a_family_variant_keeps_the_remembered_ribbon_choice() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        h.app.start("sketch.rectangle.three_point");
+        h.settle();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.sketch_variants.resolve("sketch.rectangle.two_point"), "sketch.rectangle.three_point");
+
+        h.app.toolbar_custom.quick_access = vec!["sketch.rectangle.center".to_string()];
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:quick:sketch.rectangle.center"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd.to_string()).as_deref(), Some("sketch.rectangle.center"));
+        assert_eq!(
+            h.app.preferences.sketch_variants.resolve("sketch.rectangle.two_point"),
+            "sketch.rectangle.three_point",
+            "the ribbon's Rectangle button still starts its remembered choice"
+        );
     }
 }
