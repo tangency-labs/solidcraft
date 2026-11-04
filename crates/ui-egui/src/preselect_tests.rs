@@ -940,7 +940,7 @@ fn label_in(h: &crate::scenario::Harness, rect_handle: &str, text: &str) -> bool
     tree.nodes.iter().any(|(_, n)| {
         n.role() == egui::accesskit::Role::Label
             && n.label() == Some(text)
-            && n.bounds().is_some_and(|b| rect.contains(egui::pos2((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0)))
+            && n.bounds().is_some_and(|b| rect.contains(egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
     })
 }
 
