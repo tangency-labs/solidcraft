@@ -2275,6 +2275,30 @@ mod tests {
             .is_some());
     }
 
+    /// A torus with a very short sweep (1e-4 rad) has end circles whose normals differ by less than
+    /// the angle tolerance but whose planes cross at the axis: they are not one plane, so the
+    /// option must leave them to the intersection and the torus is found either way.
+    #[test]
+    fn short_sweep_torus_is_found_with_near_parallel_iso_planes() {
+        let mut k = Kernel::default();
+        let frame = Axis2Placement::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        );
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1e-4_f64.to_degrees(), 90.0);
+        let t = Torus::create_canonical(&k, &frame, 5.8, 0.1, TorusOptions::default(), Some(&dom))
+            .unwrap();
+        let nurbs = plain(&t);
+        assert!(Torus::is_nurb_surface_torus(&k, &nurbs, 1000.0)
+            .unwrap()
+            .is_some());
+        k.fixes.iso_circle_planes_parallel_within_angle_tolerance = true;
+        assert!(Torus::is_nurb_surface_torus(&k, &nurbs, 1000.0)
+            .unwrap()
+            .is_some());
+    }
+
     /// tangency-labs/solidcore#1470 and #1471 (WR-501, WR-408): a torus R 13.1934, r 1.25,
     /// 80 mm out, whose NURB runs once round its tube from the bottom (-90 to 270
     /// degrees). Its first sweep circle sits at the bottom, off the equator, so upstream

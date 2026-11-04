@@ -2013,15 +2013,13 @@ pub fn test_for_iso_circles(
 
         // find line of intersection between two isoCurve planes
         if out.common_axis {
-            // not upstream (opt-in): normals within the angle tolerance are parallel planes,
-            // whose line is only rounding
-            let near_parallel = k.fixes.iso_circle_planes_parallel_within_angle_tolerance
-                && z_axis.cross(this_ref_frame.z_axis()).length() < ang_tol_rad;
-            let planes = if near_parallel {
-                let dist = (this_ref_frame.origin() - ref_origin).dot(z_axis).abs();
-                Ok(PlanesIntersection::Parallel {
-                    coincident: dist <= tol_3d,
-                })
+            // not upstream (opt-in): normals within the angle tolerance and planes within tol_3d
+            // are one plane, whose line is only rounding; other planes are intersected as usual
+            let same_plane = k.fixes.iso_circle_planes_parallel_within_angle_tolerance
+                && z_axis.cross(this_ref_frame.z_axis()).length() < ang_tol_rad
+                && (this_ref_frame.origin() - ref_origin).dot(z_axis).abs() <= tol_3d;
+            let planes = if same_plane {
+                Ok(PlanesIntersection::Parallel { coincident: true })
             } else {
                 intersect_two_planes(
                     ref_origin,
