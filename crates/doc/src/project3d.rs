@@ -9,43 +9,68 @@ use solidcraft_sketch::{LinkSource, WireCurve};
 use crate::eval::ModelState;
 
 /// The body of a body or face reference and, for a face reference, the faces (indices in the
-/// body's face order) of the smooth surface nearest its point, on the named body or else the
-/// nearest body ([`smooth_patch`]), so a spline wall of one face per span meets as a whole (#9009).
+/// body's face order) of the freeform surface its face is part of ([`smooth_patch`]), on the named
+/// body or else the nearest body, so a spline wall of one face per span meets as a whole (#9009).
 fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<Vec<usize>>)> {
     match src {
         LinkSource::Body { body } => Some((st.body(body)?, None)),
         LinkSource::Face { body, at } => {
             let b = st.body(body).or_else(|| st.bodies.iter().min_by(|x, y| dist_to(&x.mesh(), *at).total_cmp(&dist_to(&y.mesh(), *at))))?;
-            let m = b.mesh();
-            let (f, _, _) = crate::project::nearest_face(&m, *at)?;
-            Some((b, Some(smooth_patch(&m, usize::try_from(f).ok()?))))
+            let (f, _, _) = crate::project::nearest_face(&b.mesh(), *at)?;
+            Some((b, Some(smooth_patch(&b.body, usize::try_from(f).ok()?))))
         }
         _ => None,
     }
 }
 
-/// The faces one smooth surface with `face` makes, sorted: joined across seams and across the
-/// smooth joins the shaded view hides, never across a crease. Wider than
-/// [`Mesh::surface_patch`], which keeps smooth-joined faces apart: a fit-point spline's wall is one
-/// face per span, joined smoothly, and a pick on any span means the whole wall.
-fn smooth_patch(m: &Mesh, face: usize) -> Vec<usize> {
-    let joins = |ei: usize| {
-        let flag = |v: &Vec<bool>| v.get(ei).copied().unwrap_or(false);
-        (flag(&m.seams) || flag(&m.smooth_edges)) && !flag(&m.sharp_edges)
-    };
-    let mut edges_of: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
-    for (ei, fs) in m.edge_faces.iter().enumerate().filter(|(ei, _)| joins(*ei)) {
-        for f in fs {
-            edges_of.entry(*f as usize).or_default().push(ei);
-        }
+/// The faces one freeform surface with `face` makes, sorted: `face` and the spline faces joined to
+/// it at least tangentially (G1, measured on the exact surfaces), never across a crease. A
+/// fit-point spline's wall is one face per span, and a pick on any span means the whole wall; a
+/// plane, a fillet or any other analytic face is the face alone, as are faces whose seams cannot
+/// be measured.
+fn smooth_patch(body: &crate::kernel::Body, face: usize) -> Vec<usize> {
+    use solidcore_record::brep::Surface;
+    let r = body.record();
+    let freeform = |f: usize| r.faces.get(f).is_some_and(|f| matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
+    if !freeform(face) {
+        return vec![face];
     }
+    // The two-sided edges between freeform faces, the only seams worth measuring.
+    let between: Vec<(usize, [usize; 2])> = r
+        .edges
+        .iter()
+        .enumerate()
+        .filter_map(|(ei, e)| {
+            let mut fs: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
+            fs.sort_unstable();
+            fs.dedup();
+            match fs[..] {
+                [x, y] if freeform(x) && freeform(y) => Some((ei, [x, y])),
+                _ => None,
+            }
+        })
+        .collect();
+    let edges: Vec<usize> = between.iter().map(|(ei, _)| *ei).collect();
+    let tangent: std::collections::BTreeSet<usize> = if edges.is_empty() {
+        Default::default()
+    } else {
+        crate::kernel::seam_diagnostics(body, &edges, crate::kernel::MIN_SAMPLES, crate::kernel::ContinuityTolerances::default())
+            .map(|rep| {
+                rep.seams
+                    .iter()
+                    .filter(|s| matches!(s.verdict, crate::kernel::SeamVerdict::Smooth | crate::kernel::SeamVerdict::CurvatureJump))
+                    .map(|s| s.edge)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let mut patch = std::collections::BTreeSet::from([face]);
     let mut todo = vec![face];
     while let Some(f) = todo.pop() {
-        for ei in edges_of.get(&f).into_iter().flatten() {
-            for next in m.edge_faces.get(*ei).into_iter().flatten().map(|x| *x as usize) {
-                if patch.insert(next) {
-                    todo.push(next);
+        for (_, pair) in between.iter().filter(|(ei, pair)| tangent.contains(ei) && pair.contains(&f)) {
+            for next in pair {
+                if patch.insert(*next) {
+                    todo.push(*next);
                 }
             }
         }
@@ -88,11 +113,12 @@ fn span_over(plane: &Plane, n: Vec3, lo: Vec3, hi: Vec3) -> (f64, f64) {
     (s0 - pad, s1 + pad)
 }
 
-/// Where intersection sides `a` and `b` meet: the edges SMLib's imprint of one by the other makes,
-/// each its exact record curve, its points at the display tolerance. A sketch curve stands in for
-/// its extrusion along its sketch's normal, both ways and as far as the other side reaches: a sheet
-/// made here for this alone and never added to the model (#11048).
-pub(crate) fn meeting(st: &ModelState, a: &LinkSource, b: &LinkSource) -> crate::Result<Vec<crate::kernel::MeetingEdge>> {
+/// Where intersection sides `a` and `b` meet, as whole curves ([`join_meeting`]): the edges
+/// SMLib's imprint of one by the other makes, each its exact record curve, its points at the
+/// display tolerance. A sketch curve stands in for its extrusion along its sketch's normal, both
+/// ways and as far as the other side reaches: a sheet made here for this alone and never added to
+/// the model (#11048).
+pub(crate) fn meeting(st: &ModelState, a: &LinkSource, b: &LinkSource) -> crate::Result<Vec<(Vec<Vec3>, Vec<WireCurve>)>> {
     let lost = |s: &LinkSource| crate::DocError::Unknown(format!("{} no longer exists", s.describe()));
     let (sa, sb) = (side_of(st, a).ok_or_else(|| lost(a))?, side_of(st, b).ok_or_else(|| lost(b))?);
     let unit = |p: &Plane, s: &LinkSource| p.normal().normalized().ok_or_else(|| lost(s));
@@ -127,7 +153,10 @@ pub(crate) fn meeting(st: &ModelState, a: &LinkSource, b: &LinkSource) -> crate:
     let (ka, kb) = (sheet(&sa, ra)?, sheet(&sb, rb)?);
     let (Some((ba, fa)), Some((bb, fb))) = (body_of(&sa, ka.as_ref()), body_of(&sb, kb.as_ref())) else { return Err(lost(a)) };
     let chord = (ba.size().max(bb.size()) * 1e-3).max(1e-3);
-    Ok(crate::kernel::meeting_edges(ba, fa, bb, fb, chord)?)
+    // The pieces end at the imprint's shared vertices, which the kernel places within its
+    // intersection tolerance; ten times that, as when it sews sheets, joins them and nothing else.
+    let tol = 10.0 * ba.record().tolerance.max(bb.record().tolerance).max(1e-9);
+    Ok(join_meeting(crate::kernel::meeting_edges(ba, fa, bb, fb, chord)?, tol))
 }
 
 /// The kernel body a side is intersected as: its model body (and face patch), or the curve's `sheet`.
@@ -142,7 +171,7 @@ fn body_of<'b>(side: &'b Side<'b>, sheet: Option<&'b crate::kernel::Body>) -> Op
 /// curve its points and its exact pieces in order along them. The imprint splits a crossing at
 /// every face boundary of either side, so one crossing of two spline walls comes as one edge per
 /// span; it is one curve.
-pub(crate) fn join_meeting(edges: Vec<crate::kernel::MeetingEdge>, tol: f64) -> Vec<(Vec<Vec3>, Vec<WireCurve>)> {
+fn join_meeting(edges: Vec<crate::kernel::MeetingEdge>, tol: f64) -> Vec<(Vec<Vec3>, Vec<WireCurve>)> {
     let mut left: Vec<(Vec<Vec3>, Vec<WireCurve>)> =
         edges.into_iter().filter(|e| !e.points.is_empty()).map(|e| (e.points, vec![WireCurve { curve: e.curve, interval: e.interval }])).collect();
     let flip = |(mut p, c): (Vec<Vec3>, Vec<WireCurve>)| {
