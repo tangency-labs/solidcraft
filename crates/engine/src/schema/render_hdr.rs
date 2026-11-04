@@ -24,12 +24,40 @@ fn digest_schema(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
+/// The fields of a render setup, as `render.settings.get` gives them. A `set` patch may give up
+/// to 13 of them; `patched_settings` reads the patched setup as a `RenderSetup`, which refuses any
+/// other key.
+const SETUP_FIELDS: &[&str] = &[
+    "backend",
+    "mode",
+    "camera",
+    "width",
+    "height",
+    "format",
+    "exposure_ev",
+    "environment_rotation",
+    "environment_intensity",
+    "background",
+    "job",
+    "surfaces",
+    "optics",
+    "stage",
+];
+
+/// Each setup field, without its own schema: `patched_settings` checks the values.
+fn setup_properties() -> serde_json::Map<String, Value> {
+    SETUP_FIELDS.iter().map(|field| (field.to_string(), Value::Object(serde_json::Map::new()))).collect()
+}
+
 /// `set`: changes to the setup, as `render.settings.set` takes them. `patched_settings` in
-/// `cmd/render.rs` refuses anything but an object of at most 13 fields, with its own message.
+/// `cmd/render.rs` refuses anything but an object of at most 13 setup fields, with its own
+/// message.
 fn set_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "The setup to save the HDR into, as changes in the form `render.settings.set` takes: an object of at most 13 setup fields. It must give a `job` with method `cpu_raytrace` or `gpu_path`, without an `hdr` or an `environment`.",
+        "description": "Changes to the setup the HDR is saved into, as `render.settings.set` takes them: at most 13 of the setup's fields. The setup they make (a saved one keeps the fields left out) must have a `job` with method `cpu_raytrace` or `gpu_path`, without an `hdr` or an `environment`.",
         "type": "object",
+        "properties": setup_properties(),
+        "additionalProperties": false,
         "maxProperties": 13
     })
 }
