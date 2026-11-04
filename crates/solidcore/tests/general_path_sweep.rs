@@ -301,7 +301,13 @@ fn a_circle_along_an_arc_is_the_exact_torus() {
     }
     let far = deviation(&sweep, 2001);
     assert!(far <= sweep.bound(), "{far} past {}", sweep.bound());
-    assert!(sweep.bound() <= 4.0 * far, "{} loose, {far}", sweep.bound());
+    // the net is the definition to rounding: the bound is the enclosure's, well within the
+    // kernel's tolerance, not a multiple of the (rounding-sized) distance
+    assert!(
+        sweep.bound() <= solidcore::geom::tol::ZONE_TOL_3D / 10.0,
+        "{}",
+        sweep.bound()
+    );
 }
 
 /// A circle along a straight and then an arc: two pieces joined, one wall, whose definition
@@ -435,6 +441,12 @@ fn a_circle_sweeps_along_a_wire_of_straights_and_rounds() {
                 }
             }
             let far = deviation(&sweep, 3001);
+            // the net is built from the definition: its bound is within the kernel's tolerance
+            assert!(
+                sweep.bound() <= solidcore::geom::tol::ZONE_TOL_3D,
+                "{parts}: bound {}",
+                sweep.bound()
+            );
             assert!(
                 far <= sweep.bound(),
                 "{parts}: {far} past {}",

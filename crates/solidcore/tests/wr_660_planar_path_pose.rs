@@ -133,8 +133,28 @@ fn default_keeps_upstream_pose_dependence() {
         let (mut kt, mut tilted) = body(false, false, centre, &p);
         let vf = volume(&k, &mut flat);
         let vt = volume(&kt, &mut tilted);
-        close(vf, if centre { 502.655040 } else { 452.388984 }, 1e-5);
-        close(vt, if centre { 502.654666 } else { 484.256217 }, 1e-5);
+        // the sweep's net is its definition exactly, so a centred profile's volume is the closed
+        // form pi 160 in any pose (the pose dependence that remains is the roll of the profile:
+        // the box below, and the first-point profile's volume); upstream's fitted net had
+        // 502.655040 flat and 502.654666 tilted, 4e-7 and 3e-7 of it off
+        close(
+            vf,
+            if centre {
+                std::f64::consts::PI * 160.
+            } else {
+                std::f64::consts::PI * 144.
+            },
+            1e-5,
+        );
+        close(
+            vt,
+            if centre {
+                std::f64::consts::PI * 160.
+            } else {
+                484.256381
+            },
+            1e-5,
+        );
         if centre {
             solidcore::topology::brep::p5::transform(
                 &mut kt,
@@ -258,7 +278,13 @@ fn default_two_piece_paths_keep_upstream_pose_dependence() {
     let (k, mut empty) = two_piece_body(false, true, false, &p);
     assert_eq!(volume(&k, &mut empty), 0.0);
     let (mut k, mut rolled) = two_piece_body(false, true, true, &p);
-    close(volume(&k, &mut rolled), 822.654314, 1e-5);
+    // the arc's pi 160 and the line's 320, the net being its definition exactly (upstream's
+    // fitted net: 822.654314)
+    close(
+        volume(&k, &mut rolled),
+        std::f64::consts::PI * 160. + 320.,
+        1e-5,
+    );
     solidcore::topology::brep::p5::transform(&mut k, &mut rolled, &p.invert(), None, false)
         .unwrap();
     let bb = brep_bounding_box(&k, &rolled, true).unwrap();

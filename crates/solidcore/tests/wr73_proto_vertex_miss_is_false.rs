@@ -11,7 +11,9 @@
 //! boolean's cleanup the proto vertices lie off the first proto edge's curve but inside
 //! later ones.
 //!
-//! With every other `Kernel::fixes` flag default:
+//! With every other `Kernel::fixes` flag default (the two outcomes below were those of the
+//! fitted sweep; a sweep along lines and arcs is now built to its definition, flush with the
+//! rim, so the second crossing is gone and the union builds with the flag off as well):
 //! - off (upstream): every miss returns TRUE, the cleanup breaks at the first proto edge,
 //!   and the union is refused in `boolean::merge::p2::make_faceuse` with 1001;
 //! - on: a miss returns FALSE, the cleanup goes on to the remaining proto edges, removes
@@ -33,7 +35,6 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
-use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
@@ -151,24 +152,28 @@ fn closed_form() -> f64 {
 /// counts, the volume and the check, so a body that merely looks right (same volume, a
 /// different rim split) still fails.
 #[test]
-fn wr73_proto_vertex_miss_is_false_decides_the_lip_union() {
-    // Off: pinned upstream (SmProtoTopology.cpp:6925 returns SM_SUCCESS, read as TRUE).
+fn wr73_proto_vertex_miss_is_false_lip_union_builds_with_either_setting() {
+    // Off (upstream: SmProtoTopology.cpp:6925 returns SM_SUCCESS, read as TRUE): the lip is
+    // swept to its definition, flush on the rim, so no proto vertex is missed and the union
+    // builds. The refusal this flag fixed needed the fitted net's second crossing of the rim
+    // arc, which a sweep along lines and arcs no longer has, so the flag has no input here.
     let mut k = Kernel::default();
     assert!(!k.fixes.proto_vertex_miss_is_false);
     let a = block(&mut k);
     let b = lip(&mut k);
-    let joined = boolean_union(&mut k, a, b);
-    assert!(
-        matches!(
-            joined,
-            Err(SolidError::Upstream {
-                operation: "boolean::merge::p2::make_faceuse",
-                code: 1001,
-                ..
-            })
+    let mut off = boolean_union(&mut k, a, b).unwrap();
+    assert_eq!(
+        (
+            off.face_list().len(),
+            off.edge_list().len(),
+            off.vertex_list().len()
         ),
-        "{:?}",
-        joined.map(|r| r.face_list().len())
+        (22, 50, 30)
+    );
+    let got = volume(&k, &mut off);
+    assert!(
+        (got - closed_form()).abs() <= 1e-9 * closed_form(),
+        "volume {got}"
     );
 
     // On (the opt-in): the miss is FALSE, so the caller goes on to the other proto edges.

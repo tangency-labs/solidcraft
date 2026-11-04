@@ -1014,6 +1014,36 @@ impl ProceduralSweep {
     /// # Errors
     ///
     /// Those of [`PathMotion::create`]: a net that is not the profile swept along the path.
+    /// The definition of a path sweep and the net that is it exactly ([`PathMotion::create_exact`]),
+    /// for a path of lines and circular arcs.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PathMotion::create_exact`].
+    pub(crate) fn create_path_exact(
+        profile: &BSplineCurve,
+        path: &BSplineCurve,
+        start_normal: Vec3,
+    ) -> Result<(Self, BSplineSurface)> {
+        let (motion, net, bound) = PathMotion::create_exact(profile, path, start_normal)?;
+        let mut profile = profile.copy();
+        profile.set_out_of_bounds_enabled(false);
+        let stations = motion.nodes().iter().map(|n| n.0).collect();
+        let sweep = Self {
+            profile,
+            motion: Motion::Path(motion),
+            stations,
+            half: 0.0,
+            tau: 0.0,
+            bound,
+            map: SweepMap {
+                swapped: true,
+                ..SweepMap::default()
+            },
+        };
+        Ok((sweep, net))
+    }
+
     pub(crate) fn create_path(
         profile: &BSplineCurve,
         path: &BSplineCurve,

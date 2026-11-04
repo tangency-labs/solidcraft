@@ -52,7 +52,9 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector3d::Vec3;
+use crate::nurbs::b_spline_curve::p1::KnotType;
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::math::{gamma, MODEL_TOL};
 use crate::nurbs::srf_adv::p6::SweepTrace;
@@ -64,6 +66,18 @@ const OP_EVAL: &str = "surface::procedural_sweep::PathMotion::frame";
 
 /// The most cells the bound is split into.
 pub const MAX_CELLS: usize = 400_000;
+
+/// The remainder of a cell, relative to the part's size, below which the bound of a fitted net
+/// is not refined further (the goal of #2723, kept for the fitted nets: they are far from
+/// their definition, so a finer enclosure would only cost cells).
+const FITTED_GOAL: f64 = 1e-7;
+
+/// The same for a net built from its definition, which is that definition to rounding, so the
+/// enclosure is all that is left of the bound: the bound is about the goal, `1e-8 (1 + big)`,
+/// which is at most a tenth of the kernel's tolerance (`ZONE_TOL_3D = 1e-5`) for parts up to
+/// about a hundred mm across; a larger part gets a looser bound and, above the tolerance,
+/// keeps the fit ([`crate::primitive::primitive_creation`]'s `curve_sweep`).
+const EXACT_GOAL: f64 = 1e-8;
 
 /// The deepest a cell is halved.
 const MAX_DEPTH: u32 = 40;
@@ -494,31 +508,158 @@ impl PathMotion {
         trace: &SweepTrace,
         net: &BSplineSurface,
     ) -> Result<(Self, f64, bool)> {
-        let pc = path.canonical()?;
-        if pc.dim != 3 {
-            return Err(bad("a path is a 3D curve"));
-        }
-        let closed = match (pc.control_points.first(), pc.control_points.last()) {
-            (Some(a), Some(b)) => (*a - *b).length() <= 1e-9 * (1.0 + a.length()),
-            _ => true,
-        };
-        if closed {
-            return Err(bad(
-                "a closed path's frame chain is corrected, not the rule's",
-            ));
-        }
-        let mut path = path.copy();
-        path.set_out_of_bounds_enabled(false);
-        let spans = spans_of(&path, &pc.knots, pc.degree, trace.start_normal)?;
+        let (path, spans) = open_path_spans(path, trace.start_normal)?;
         let mut motion = Self {
             path,
             spans,
             nodes: Vec::new(),
         };
-        let columns = Columns::read(profile, net)?;
+        let columns = NetView::read(profile, net)?;
         motion.nodes = motion.find_nodes(&columns, &trace.pieces)?;
-        let bound = motion.certify(&columns)?;
+        let bound = motion.certify(&columns, FITTED_GOAL)?;
         Ok((motion, bound, columns.swapped))
+    }
+
+    /// The motion of the profile along `path` and the net that is its definition exactly,
+    /// where the path is made of lines and circular arcs: under the rotation-minimizing frame
+    /// each control point of the profile traces a line or a circular arc per span, which is
+    /// a rational quadratic (or linear) B-spline in the path's own parameter, so the net is
+    /// the tensor product of those curves and the profile's, with knots at the path's joints.
+    /// Its parameter across the sweep is the path's `t` (the map is the identity at the
+    /// joints), its first parameter the path's and its second the profile's. Returns the
+    /// motion, the net, and the bound certified against it (the rounding of building and
+    /// evaluating it, unless the path's own parametrisation is not the standard one of an
+    /// arc, which the bound then shows).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a closed path, a span that is neither a line nor an arc, a joint
+    /// that is not G1, an arc of half a turn or more in one span or a bound that is not
+    /// finite; those of reading the curves.
+    pub(crate) fn create_exact(
+        profile: &BSplineCurve,
+        path: &BSplineCurve,
+        start_normal: Vec3,
+    ) -> Result<(Self, BSplineSurface, f64)> {
+        let (path, spans) = open_path_spans(path, start_normal)?;
+        let mut nodes: Vec<(f64, f64)> = spans.iter().map(|s| (s.from, s.from)).collect();
+        if let Some(last) = spans.last() {
+            nodes.push((last.to, last.to));
+        }
+        let motion = Self { path, spans, nodes };
+        let weights = bezier_weights(&motion.path)?;
+        let net = motion.exact_net(profile, &weights)?;
+        let view = NetView::read(profile, &net)?;
+        let bound = motion.certify(&view, EXACT_GOAL)?;
+        Ok((motion, net, bound))
+    }
+
+    /// The net of [`PathMotion::create_exact`].
+    fn exact_net(
+        &self,
+        profile: &BSplineCurve,
+        spans_weights: &[[f64; 3]],
+    ) -> Result<BSplineSurface> {
+        let prof = profile.canonical()?;
+        if prof.dim != 3 {
+            return Err(bad("a profile is a 3D curve"));
+        }
+        let arcs = self
+            .spans
+            .iter()
+            .any(|s| matches!(s.kind, SpanKind::Arc { .. }));
+        let degree = if arcs { 2 } else { 1 };
+        let pw = |i: usize| prof.weights.get(i).copied().unwrap_or(1.0);
+        // per profile control point, the control points along the sweep, and their weights
+        let mut omega: Vec<f64> = Vec::new();
+        let mut along: Vec<Vec<Vec3>> = vec![Vec::new(); prof.control_points.len()];
+        for (k, span) in self.spans.iter().enumerate() {
+            let start = self.frame_side(span.from, false)?;
+            let end = self.frame_side(span.to, true)?;
+            let arc: Option<(Vec3, Vec3, f64)> = match span.kind {
+                SpanKind::Line => None,
+                SpanKind::Arc { axis, radius } => {
+                    let turned = span
+                        .x0
+                        .cross(end.axes[0])
+                        .dot(axis)
+                        .atan2(span.x0.dot(end.axes[0]));
+                    if !(turned.abs() < std::f64::consts::PI - 1e-6 && turned.abs() > 0.0) {
+                        return Err(bad("an arc span turns less than half a turn"));
+                    }
+                    let centre = start.point + start.rates[0] * (radius / start.rates[0].length());
+                    let half = 0.5 * turned;
+                    Some((centre, axis, half))
+                }
+            };
+            // the path span's own weights (scaled to join the one before) keep its parametrisation
+            let [w0, w1, w2] = spans_weights.get(k).copied().unwrap_or([1.0; 3]);
+            let scale = if k == 0 {
+                1.0 / w0
+            } else {
+                omega.last().copied().unwrap_or(1.0) / w0
+            };
+            if k == 0 {
+                omega.push(w0 * scale);
+            }
+            if degree == 2 {
+                omega.push(w1 * scale);
+            }
+            omega.push(w2 * scale);
+            for (col, c) in along.iter_mut().zip(&prof.control_points) {
+                let (a, b) = (start.place(*c), end.place(*c));
+                if k == 0 {
+                    col.push(a);
+                }
+                if degree == 2 {
+                    col.push(match arc {
+                        None => (a + b) * 0.5,
+                        Some((centre, axis, half)) => {
+                            let on_axis = centre + axis * (a - centre).dot(axis);
+                            on_axis + rodrigues(a - on_axis, axis, half) * (1.0 / half.cos())
+                        }
+                    });
+                }
+                col.push(b);
+            }
+        }
+        // the net: first parameter along the sweep, second along the profile
+        let count = omega.len();
+        let mut points = Vec::with_capacity(count * prof.control_points.len());
+        let mut weights = Vec::with_capacity(points.capacity());
+        for (j, w) in omega.iter().enumerate() {
+            for (i, col) in along.iter().enumerate() {
+                points.push(
+                    col.get(j)
+                        .copied()
+                        .ok_or_else(|| bad("a column is short"))?,
+                );
+                weights.push(w * pw(i));
+            }
+        }
+        let mut u_knots: Vec<f64> = self.spans.iter().map(|s| s.from).collect();
+        u_knots.extend(self.spans.last().map(|s| s.to));
+        let mut u_mult = vec![degree; u_knots.len()];
+        if let Some(first) = u_mult.first_mut() {
+            *first = degree + 1;
+        }
+        if let Some(last) = u_mult.last_mut() {
+            *last = degree + 1;
+        }
+        let rational = weights.iter().any(|w| (w - 1.0).abs() > 1e-15);
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: degree,
+            v_degree: prof.degree,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &u_mult,
+            v_multiplicities: &prof.knot_multiplicities,
+            u_knots: &u_knots,
+            v_knots: &prof.knots,
+            knot_type: KnotType::Unspecified,
+            weights: rational.then_some(&weights[..]),
+            uv_domain: None,
+        })
     }
 
     /// The net's parameter at each section: the skin's own. Each piece of the path is
@@ -528,7 +669,7 @@ impl PathMotion {
     /// piece's are `k + tl`. The map is data (the bound holds for any), so where the net's
     /// own is not these (a wall whose domain does not end at the piece count) the sweep has
     /// no definition rather than a loose one.
-    fn find_nodes(&self, cols: &Columns, pieces: &[Vec<f64>]) -> Result<Vec<(f64, f64)>> {
+    fn find_nodes(&self, cols: &NetView, pieces: &[Vec<f64>]) -> Result<Vec<(f64, f64)>> {
         let (v0, v1) = cols.domain;
         let count = f64::from(u32::try_from(pieces.len()).unwrap_or(u32::MAX));
         if pieces.is_empty() || !(v0 == 0.0 && (v1 - count).abs() <= 1e-9 * count) {
@@ -557,7 +698,7 @@ impl PathMotion {
     /// `interp_params` of the sections of one piece: the sections' control points in
     /// homogeneous coordinates, the cumulative chord lengths normalised per control point
     /// and averaged over those with a length above `MODEL_TOL`.
-    fn chord_parameters(&self, cols: &Columns, piece: &[f64]) -> Result<Vec<f64>> {
+    fn chord_parameters(&self, cols: &NetView, piece: &[f64]) -> Result<Vec<f64>> {
         let n = piece.len();
         if n < 2 {
             return Err(bad("a piece has at least two sections"));
@@ -623,7 +764,9 @@ impl PathMotion {
     }
 
     /// The certified bound (module docs).
-    fn certify(&self, cols: &Columns) -> Result<f64> {
+    /// `goal_rel`: the remainder of a cell, relative to `1 + big` (the largest coordinate
+    /// met), below which the cell is not split.
+    fn certify(&self, cols: &NetView, goal_rel: f64) -> Result<f64> {
         let bounds = PathBounds::new(&self.path)?;
         let (v0, v1) = cols.domain;
         let to_v = |t: f64| -> Option<f64> {
@@ -651,14 +794,12 @@ impl PathMotion {
         // the sizes the floor and the goal are relative to
         let reach = cols.profile.iter().fold(0.0_f64, |m, c| m.max(c.length()));
         let big = cols
-            .splines
+            .columns
             .iter()
-            .flat_map(|s| s.ctrl.iter())
+            .flat_map(|c| c.pts.ctrl.iter())
             .fold(0.0_f64, |m, p| m.max(p.length()))
             .max(self.reach()? + reach);
-        let goal = 1e-7 * (1.0 + big);
-        let firsts: Vec<Spline> = cols.splines.iter().map(Spline::derivative).collect();
-        let seconds: Vec<Spline> = firsts.iter().map(Spline::derivative).collect();
+        let goal = goal_rel * (1.0 + big);
         let mut worst = 0.0_f64;
         let mut cells = 0_usize;
         for w in cuts.windows(2) {
@@ -686,16 +827,10 @@ impl PathMotion {
                 let can_split = depth < MAX_DEPTH && cells + stack.len() < MAX_CELLS;
                 let mut cell = 0.0_f64;
                 let mut split = false;
-                for (((p, p1), p2), cc) in cols
-                    .splines
-                    .iter()
-                    .zip(&firsts)
-                    .zip(&seconds)
-                    .zip(&cols.profile)
-                {
-                    let f = p.eval(c) - frame.place(*cc);
-                    let df = p1.eval(c) - frame.rate(*cc) * m;
-                    let mp = p2.largest(c);
+                for (col, cc) in cols.columns.iter().zip(&cols.profile) {
+                    let f = col.eval(c) - frame.place(*cc);
+                    let df = col.first(c) - frame.rate(*cc) * m;
+                    let mp = col.second_bound(c);
                     let ms = m * m * (d2 + cc.length() * turn);
                     let rem = 0.5 * (mp + ms) * h * h;
                     if rem > goal && can_split {
@@ -788,8 +923,8 @@ impl PathBounds {
 
 /// The net's control points grouped as the sweep's columns: one spline in `v` per control
 /// point of the profile.
-struct Columns {
-    splines: Vec<Spline>,
+struct NetView {
+    columns: Vec<Column>,
     /// The profile's control points, in the frame's coordinates.
     profile: Vec<Vec3>,
     /// Their weights (1 for a polynomial profile).
@@ -801,7 +936,7 @@ struct Columns {
     swapped: bool,
 }
 
-impl Columns {
+impl NetView {
     /// Reads `net` as the profile's control points swept along one parameter, in the same
     /// rational basis (module docs).
     fn read(profile: &BSplineCurve, net: &BSplineSurface) -> Result<Self> {
@@ -843,32 +978,46 @@ impl Columns {
         };
         let pw = |i: usize| pc.weights.get(i).copied().unwrap_or(1.0);
         let full = full_knots(along_knots, along_mult);
-        let mut splines = Vec::with_capacity(sections);
-        let mut ratio: Option<f64> = None;
+        // the weights are the profile's times one weight per control point along the sweep
+        // (the same for every section): `omega`
+        let weight = |i: usize, j: usize| at(i, j).1.unwrap_or(1.0);
+        let mut omega = Vec::with_capacity(along);
+        for j in 0..along {
+            omega.push(weight(0, j) / pw(0));
+        }
+        if omega.iter().any(|o| !(o.is_finite() && *o > 0.0)) {
+            return Err(bad("a net's weights are positive"));
+        }
+        for i in 0..sections {
+            for (j, o) in omega.iter().enumerate() {
+                let r = weight(i, j) / pw(i);
+                if !((r - o).abs() <= 1e-12 * o.abs()) {
+                    return Err(bad("a net's weights are not the profile's"));
+                }
+            }
+        }
+        let o0 = omega.first().copied().unwrap_or(1.0);
+        let rational = omega.iter().any(|o| (o - o0).abs() > 1e-12 * o0.abs());
+        let mut columns = Vec::with_capacity(sections);
         for i in 0..sections {
             let mut ctrl = Vec::with_capacity(along);
             for j in 0..along {
-                let (Some(p), w) = at(i, j) else {
+                let (Some(p), _) = at(i, j) else {
                     return Err(bad("a net's control points are missing"));
                 };
-                // the basis in v is the same for every column: a weight per column, within
-                // the profile's up to one common factor
-                let w = w.unwrap_or(1.0);
-                let r = w / pw(i);
-                let r0 = *ratio.get_or_insert(r);
-                if !((r - r0).abs() <= 1e-12 * r0.abs()) {
-                    return Err(bad("a net's weights are not the profile's"));
-                }
                 ctrl.push(p);
             }
-            splines.push(Spline::new(along_degree, full.clone(), ctrl)?);
+            columns.push(Column::new(
+                Spline::new(along_degree, full.clone(), ctrl)?,
+                rational.then_some(&omega[..]),
+            )?);
         }
-        let domain = splines
+        let domain = columns
             .first()
-            .map(Spline::domain)
+            .map(|c| c.pts.domain())
             .ok_or_else(|| bad("a net has sections"))?;
         Ok(Self {
-            splines,
+            columns,
             weights: (0..pc.control_points.len()).map(pw).collect(),
             rational: !pc.weights.is_empty(),
             profile: pc.control_points,
@@ -1003,4 +1152,145 @@ fn spans_of(
         return Err(bad("a path has spans"));
     }
     Ok(spans)
+}
+
+/// One control point of the profile swept along the net's parameter: the curve `P_i(v)` of
+/// the net's `i`-th column, polynomial or, when the net's weights vary along the sweep, a
+/// quotient `N / W` of a numerator and a weight (module docs).
+#[derive(Debug, Clone)]
+struct Column {
+    /// The Euclidean control points.
+    pts: Spline,
+    /// The first and second derivative of `pts`.
+    poly: [Spline; 2],
+    /// The numerator `N = W P` and the weight `W` (its `x`) with their first and second
+    /// derivatives, for a column that is rational along the sweep.
+    rat: Option<([Spline; 3], [Spline; 3])>,
+}
+
+impl Column {
+    /// The column through `pts`, rational with the weights `omega` along the sweep if given.
+    fn new(pts: Spline, omega: Option<&[f64]>) -> Result<Self> {
+        let d1 = pts.derivative();
+        let d2 = d1.derivative();
+        let rat = match omega {
+            None => None,
+            Some(o) => {
+                let n = pts
+                    .ctrl
+                    .iter()
+                    .zip(o)
+                    .map(|(p, &w)| *p * w)
+                    .collect::<Vec<_>>();
+                let w = o
+                    .iter()
+                    .map(|&w| Vec3::new(w, 0.0, 0.0))
+                    .collect::<Vec<_>>();
+                let chain = |s: Spline| {
+                    let s1 = s.derivative();
+                    let s2 = s1.derivative();
+                    [s, s1, s2]
+                };
+                Some((
+                    chain(Spline::new(pts.degree, pts.knots.clone(), n)?),
+                    chain(Spline::new(pts.degree, pts.knots.clone(), w)?),
+                ))
+            }
+        };
+        Ok(Self {
+            pts,
+            poly: [d1, d2],
+            rat,
+        })
+    }
+
+    /// The point at `v`.
+    fn eval(&self, v: f64) -> Vec3 {
+        match &self.rat {
+            None => self.pts.eval(v),
+            Some(([n, ..], [w, ..])) => n.eval(v) * (1.0 / w.eval(v).x),
+        }
+    }
+
+    /// The first derivative at `v`: `(N' - P W') / W` for a quotient.
+    fn first(&self, v: f64) -> Vec3 {
+        match &self.rat {
+            None => self.poly[0].eval(v),
+            Some(([_, n1, _], [w, w1, _])) => {
+                let wv = w.eval(v).x;
+                (n1.eval(v) - self.eval(v) * w1.eval(v).x) * (1.0 / wv)
+            }
+        }
+    }
+
+    /// An upper bound of `|P''|` over the span holding `v`: the quotient rule on the control
+    /// polygons' hulls, as for the path ([`PathBounds`]).
+    fn second_bound(&self, v: f64) -> f64 {
+        match &self.rat {
+            None => self.poly[1].largest(v),
+            Some(([_, n1, n2], [w, w1, w2])) => {
+                let wmin = w.local(v).iter().fold(f64::INFINITY, |m, p| m.min(p.x));
+                if !(wmin > 0.0) {
+                    return f64::INFINITY;
+                }
+                let pmax = self.pts.largest(v);
+                let d1 = (n1.largest(v) + pmax * w1.largest(v)) / wmin;
+                (n2.largest(v) + 2.0 * d1 * w1.largest(v) + pmax * w2.largest(v)) / wmin
+            }
+        }
+    }
+}
+
+/// A copy of `path` and its spans, for a 3D path that is not closed: the checks both ways of
+/// making a motion ([`PathMotion::create`], [`PathMotion::create_exact`]) share.
+fn open_path_spans(path: &BSplineCurve, start_normal: Vec3) -> Result<(BSplineCurve, Vec<Span>)> {
+    let pc = path.canonical()?;
+    if pc.dim != 3 {
+        return Err(bad("a path is a 3D curve"));
+    }
+    let closed = match (pc.control_points.first(), pc.control_points.last()) {
+        (Some(a), Some(b)) => (*a - *b).length() <= 1e-9 * (1.0 + a.length()),
+        _ => true,
+    };
+    if closed {
+        return Err(bad("a closed path's frame is corrected, not the rule's"));
+    }
+    let mut path = path.copy();
+    path.set_out_of_bounds_enabled(false);
+    let spans = spans_of(&path, &pc.knots, pc.degree, start_normal)?;
+    Ok((path, spans))
+}
+
+/// The weights `[w0, w1, w2]` of each knot span of `path` as a quadratic rational Bezier
+/// (the path refined so every interior knot has multiplicity 2); `[1; 3]` for every span of a
+/// path of another degree (its lines are taken at the linear parametrisation, which the
+/// bound shows where it does not hold).
+fn bezier_weights(path: &BSplineCurve) -> Result<Vec<[f64; 3]>> {
+    let pc = path.canonical()?;
+    let spans = pc.knots.len().saturating_sub(1);
+    if pc.degree != 2 {
+        return Ok(vec![[1.0; 3]; spans]);
+    }
+    let mut refined = path.clone();
+    let extra: Vec<f64> = pc
+        .knots
+        .iter()
+        .zip(&pc.knot_multiplicities)
+        .skip(1)
+        .take(spans.saturating_sub(1))
+        .flat_map(|(&k, &m)| std::iter::repeat_n(k, 2_usize.saturating_sub(m)))
+        .collect();
+    refined.insert_knots(&extra)?;
+    let rc = refined.canonical()?;
+    (0..spans)
+        .map(|k| {
+            let w = |j: usize| rc.weights.get(2 * k + j).copied().unwrap_or(1.0);
+            let ws = [w(0), w(1), w(2)];
+            if ws.iter().all(|x| x.is_finite() && *x > 0.0) {
+                Ok(ws)
+            } else {
+                Err(bad("a path's weights are positive"))
+            }
+        })
+        .collect()
 }

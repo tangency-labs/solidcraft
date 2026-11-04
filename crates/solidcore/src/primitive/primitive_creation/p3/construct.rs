@@ -41,6 +41,7 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector2d::Point2;
 use crate::math::{Vec3, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
@@ -480,16 +481,31 @@ impl PrimitiveCreation {
                     approx_tol,
                     want_placements.then_some(&mut placed),
                 )?;
-                // not upstream (#2572): a sweep along a path in the frame chain's frames,
-                // with no scale, keeps its definition and the net's certified distance
-                // from it; a net the definition does not certify keeps none (the
-                // error is the reason it has none, and the ledger keeps the kinds of wall
-                // that do not)
-                let definition = match (&trace, prepared.scale.is_none()) {
-                    (Some(trace), true) => {
-                        ProceduralSweep::create_path(&profile, &prepared.path, trace, &net).ok()
-                    }
+                // not upstream (#2572): a path sweep without a scale keeps its definition. A path of
+                // lines and circular arcs has its net built from the definition itself (exact to
+                // rounding, its bound within the kernel's tolerance); any other keeps the fit and,
+                // where the definition certifies it, the net's certified distance from it (the
+                // error is the reason it has none, and the ledger keeps the kinds of wall that do not)
+                let exact = match (&trace, prepared.scale.is_none()) {
+                    (Some(trace), true) => ProceduralSweep::create_path_exact(
+                        &profile,
+                        &prepared.path,
+                        trace.start_normal,
+                    )
+                    .ok()
+                    .filter(|(exact, _)| exact.bound() <= ZONE_TOL_3D),
                     _ => None,
+                };
+                let (net, definition) = if let Some((exact, built)) = exact {
+                    (built, Some(exact))
+                } else {
+                    let fitted = match (&trace, prepared.scale.is_none()) {
+                        (Some(trace), true) => {
+                            ProceduralSweep::create_path(&profile, &prepared.path, trace, &net).ok()
+                        }
+                        _ => None,
+                    };
+                    (net, fitted)
                 };
                 let mut surface = Surface::from(net);
                 if let Some(definition) = definition {
