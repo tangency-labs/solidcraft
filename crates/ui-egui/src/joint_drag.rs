@@ -1,11 +1,17 @@
-//! Dragging a part that joints place moves it as far as its joints allow: each frame runs
-//! `joint.reach`, taking the point grabbed toward the pointer in the plane through it that faces
-//! the view. The whole drag is one undo step.
+//! Dragging a part that joints place moves it as far as its joints allow: the point grabbed goes
+//! toward the pointer in the plane through it that faces the view. Each frame solves the reach on
+//! the drag's own copy of the design and only shows it (`Session::drag_preview`); the release
+//! applies the last frame as one `joint.reach`, the drag's one undo step, and Escape leaves the
+//! design as it was (#6325).
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use egui::Pos2;
 use serde_json::json;
 use solidcore_record::Vec3;
-use solidcraft_engine::doc::{apply_point, joints, mat_inverse};
+use solidcraft_engine::DragPreview;
+use solidcraft_engine::doc::{Document, Mat, ModelState, apply_point, joints, mat_inverse};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -20,12 +26,26 @@ pub struct Drag {
     /// The plane the pointer moves the point in: through where it was grabbed, facing the view.
     origin: Vec3,
     normal: Vec3,
-    /// The drag's undo step is on top of the history (it went in with the first frame that moved).
-    pushed: bool,
+    /// The design the drag began on. A change to it from elsewhere (undo pressed mid-drag) ends
+    /// the drag without applying it.
+    design: Arc<Document>,
+    /// The world shown when the drag began and the moves not captured then: the viewport draws
+    /// the drag's frames from it, the moving parts as layers moved on the GPU
+    /// (`viewport_layers.rs`).
+    world: Arc<ModelState>,
+    pending: BTreeMap<u64, Mat>,
+    /// The design with the joint values and placements the last frame reached: where the next
+    /// frame starts from, and what the view shows.
+    pose: Document,
+    /// The last frame's start (every joint's values) and the point it reached for: the release
+    /// does that same reach, so the design ends where the view showed it.
+    last: Option<(BTreeMap<u64, Vec<f64>>, Vec3)>,
 }
 
 /// Begin a drag on the part under `p` when joints place it and leave it free to move (it is
-/// neither grounded nor fixed to what is). True when one began.
+/// neither grounded nor fixed to what is). True when the press is the joint drag's: one began, or
+/// one would have but moves shown and not captured hold it back. Then the status says so and no
+/// other tool (a Press Pull on the part's face) takes the press instead.
 pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     // The face under the pointer, past the part's own edges and vertices (not past sketches or
     // construction geometry in front of it).
@@ -47,9 +67,25 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     if !sol.world.contains_key(&occurrence) || sol.dof.get(&occurrence).is_none_or(|d| *d == 0) {
         return false;
     }
+    // Moves shown but not captured (a free move, an exploded view) are display only: the frames
+    // would solve from the design's placements, not the ones shown, and after the release the
+    // move shown would cover where the reach put the part. Capture or revert them first; the
+    // press stays the joint drag's, so it says so rather than starting another tool on the part.
+    if !s.pending_moves.is_empty() {
+        let n = s.pending_moves.len();
+        let moved = if n == 1 {
+            crate::i18n::tr("browser.capture_one").to_string()
+        } else {
+            crate::i18n::format("browser.capture_many", &[("count", &n.to_string())])
+        };
+        app.set_status(format!("{moved} {}", crate::i18n::tr("browser.capture_note")), false);
+        return true;
+    }
     let Some(local) = mat_inverse(&joints::occurrence_world(&s.doc, occurrence)).map(|inv| apply_point(&inv, at)) else { return false };
     let normal = proj.ray(p).1;
-    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, pushed: false });
+    let (design, pose) = (s.doc.clone(), (*s.doc).clone());
+    let (world, pending) = (crate::open_meshing::session_world(s), s.pending_moves.clone());
+    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, design, world, pending, pose, last: None });
     true
 }
 
@@ -57,46 +93,69 @@ pub fn active(app: &SolveApp) -> bool {
     app.viewport.joint_drag.is_some()
 }
 
-/// Reach for the point under `p`.
+/// The design, world and uncaptured moves the drag under way began on.
+pub(crate) fn began_on(app: &SolveApp) -> Option<(&Arc<Document>, &Arc<ModelState>, &BTreeMap<u64, Mat>)> {
+    app.viewport.joint_drag.as_ref().map(|d| (&d.design, &d.world, &d.pending))
+}
+
+/// Every joint's values in `doc`.
+fn values(doc: &Document) -> BTreeMap<u64, Vec<f64>> {
+    doc.assembly.joints.iter().map(|j| (j.id, j.values.clone())).collect()
+}
+
+/// The occurrences `pose` places otherwise than `design`, and where (in their parents).
+fn moves(design: &Document, pose: &Document) -> BTreeMap<u64, Mat> {
+    let mine: BTreeMap<u64, &Mat> = design.occurrences.iter().map(|o| (o.id, &o.transform)).collect();
+    pose.occurrences.iter().filter(|o| mine.get(&o.id).is_some_and(|m| **m != o.transform)).map(|o| (o.id, o.transform)).collect()
+}
+
+/// Reach for the point under `p`: solved on the drag's copy of the design and shown.
 pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
-    let Some(d) = app.viewport.joint_drag.clone() else { return };
-    let (o, dir) = proj.ray(p);
-    let facing = dir.dot(d.normal);
-    if facing.abs() < 1e-9 {
+    let Some(mut d) = app.viewport.joint_drag.take() else { return };
+    if !Arc::ptr_eq(&d.design, &app.session.doc) {
+        app.session.drag_preview = None;
         return;
     }
+    let (o, dir) = proj.ray(p);
+    let facing = dir.dot(d.normal);
     let target = o + dir * ((d.origin - o).dot(d.normal) / facing);
-    if !target.is_finite() {
+    if facing.abs() >= 1e-9 && target.is_finite() {
+        let start = values(&d.pose);
+        let reach = joints::Reach { occurrence: d.occurrence, point: d.local, to: target, axis: None, joints: None };
+        // A reach that can't move (a limit, a loop) leaves the pose where it was.
+        let _ = solidcraft_engine::cmd::reach_preview(&mut d.pose, &app.session.model.state(), &reach);
+        d.last = Some((start, target));
+        app.session.drag_preview = Some(DragPreview { design: d.design.clone(), moves: moves(&d.design, &d.pose) });
+    }
+    app.viewport.joint_drag = Some(d);
+}
+
+/// Let go: one `joint.reach` puts the design where the last frame showed it.
+pub fn end(app: &mut SolveApp) {
+    let Some(d) = app.viewport.joint_drag.take() else { return };
+    app.session.drag_preview = None;
+    let Some((start, target)) = d.last else { return };
+    if !Arc::ptr_eq(&d.design, &app.session.doc) {
         return;
     }
     let at = apply_point(&joints::occurrence_world(&app.session.doc, d.occurrence), d.local);
-    let params =
+    let mut params =
         json!({"occurrence": d.occurrence, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "quiet": true, "continuous": true});
-    // One undo step for the whole drag: the first frame's, kept on top while the others run (not
-    // truncated by depth, which a full history would make lose its oldest steps frame by frame).
-    let own = if d.pushed { app.session.undo.pop() } else { None };
-    // A frame that changes the design adds an undo step (a full history drops its oldest for it,
-    // so its length says nothing).
-    let before = app.session.doc.clone();
-    let pushed = app.run("joint.reach", params).is_ok() && !std::sync::Arc::ptr_eq(&before, &app.session.doc);
-    match own {
-        Some(step) => {
-            if pushed {
-                app.session.undo.pop();
-            }
-            app.session.undo.push(step);
-        }
-        None if pushed => {
-            if let Some(d) = app.viewport.joint_drag.as_mut() {
-                d.pushed = true;
-            }
-        }
-        None => {}
+    let from = solidcraft_engine::cmd::reach_from(&d.design, &start);
+    if from.as_array().is_some_and(|f| !f.is_empty()) {
+        params["from"] = from;
     }
+    let _ = app.run("joint.reach", params);
 }
 
-pub fn end(app: &mut SolveApp) {
-    app.viewport.joint_drag = None;
+/// Escape: the part goes back where it was, and the drag leaves no undo step. True when a drag
+/// was cancelled.
+pub fn cancel(app: &mut SolveApp) -> bool {
+    if app.viewport.joint_drag.take().is_none() {
+        return false;
+    }
+    app.session.drag_preview = None;
+    true
 }
 
 #[cfg(test)]
@@ -205,6 +264,183 @@ mod tests {
         release(&mut h, b);
         h.frames(2);
         assert!(h.app.viewport.hover.is_some(), "hover must return after the drag");
+    }
+
+    /// The far end of the arm's body where the world state (the view) shows it.
+    fn shown_arm_reach(h: &Harness) -> f64 {
+        let s = &h.app.session;
+        let c = s.doc.find_component("Arm").unwrap_or(0);
+        let w = s.world_state().unwrap();
+        w.bodies.iter().filter(|b| b.component == c).map(|b| b.mesh().bounds().max.y).fold(f64::NEG_INFINITY, f64::max)
+    }
+
+    /// #6325: the frames of a drag only show the arm moving: the design, its history and its
+    /// evaluation stay as they were until the release applies the last frame in one `joint.reach`,
+    /// which leaves the arm where that frame showed it and where a fresh reach puts it.
+    #[test]
+    fn a_drag_shows_its_frames_and_applies_only_the_last() {
+        let (mut h, end, a, b) = hinged_arm();
+        let (doc, undo, revision) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.revision);
+        press_and_move(&mut h, a, b);
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "a drag frame changes no design");
+        assert_eq!((h.app.session.undo.len(), h.app.session.revision), (undo, revision), "nor the history");
+        assert!(arm_at(&h, end).dist(end) < 1e-9, "the design keeps the arm where it was");
+        let shown = shown_arm_reach(&h);
+        assert!((shown - 60.0).abs() < 0.5, "the view shows the arm turned a quarter round: {shown}");
+        let target = h.app.viewport.joint_drag.as_ref().and_then(|d| d.last.as_ref().map(|l| l.1)).expect("a frame");
+        release(&mut h, b);
+        assert!(h.app.session.drag_preview.is_none());
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the drag");
+        assert!((shown_arm_reach(&h) - shown).abs() < 1e-6, "the design ends where the last frame showed it");
+        let applied = arm_at(&h, end);
+        run(&mut h, "edit.undo", json!({}));
+        let at = arm_at(&h, end);
+        let fresh = run(&mut h, "joint.reach", json!({"occurrence": "Arm", "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z]}));
+        assert!(arm_at(&h, end).dist(applied) < 1e-6, "{:?} vs {applied:?} ({fresh})", arm_at(&h, end));
+    }
+
+    /// #6325: Escape in a drag leaves the design as it was, with no undo step.
+    #[test]
+    fn escape_cancels_a_joint_drag() {
+        let (mut h, end, a, b) = hinged_arm();
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        let before = shown_arm_reach(&h);
+        press_and_move(&mut h, a, b);
+        assert!((shown_arm_reach(&h) - before).abs() > 10.0, "the arm is shown turned while dragged");
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Default::default(),
+            });
+        }
+        play(&mut h);
+        assert!(h.app.viewport.joint_drag.is_none() && h.app.session.drag_preview.is_none());
+        assert!((shown_arm_reach(&h) - before).abs() < 1e-9, "the view shows the arm back where it was");
+        release(&mut h, b);
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the release after Escape changes nothing");
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(arm_at(&h, end).dist(end) < 1e-9);
+    }
+
+    /// #6325: a change to the design from elsewhere mid-drag (undo) ends the drag: its frame is no
+    /// longer shown, and the release applies nothing.
+    #[test]
+    fn a_design_changed_mid_drag_ends_the_drag() {
+        let (mut h, end, a, b) = hinged_arm();
+        press_and_move(&mut h, a, b);
+        run(&mut h, "edit.undo", json!({}));
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        assert!(h.app.session.drag_moves().is_empty(), "the frame is for the design before the undo");
+        h.app.synthetic.push(egui::Event::PointerMoved(a));
+        play(&mut h);
+        assert!(h.app.viewport.joint_drag.is_none());
+        release(&mut h, b);
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc) && h.app.session.undo.len() == undo, "the release applies nothing");
+        assert!(arm_at(&h, end).dist(end) < 1e-9);
+    }
+
+    /// #6325: on a GPU viewport the frames of a drag draw the arm as a layer moved on the GPU:
+    /// the world shown stays the one the drag began on (nothing is placed again), the layer's move
+    /// puts the arm where the frame's solve has it, the view's extent follows it, and the release
+    /// draws the design whole again. A highlight on the arm draws the frame from the world.
+    #[test]
+    fn a_drag_draws_its_moving_part_as_a_layer() {
+        let (mut h, end, a, b) = hinged_arm();
+        h.app.viewport.gpu =
+            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.frames(2);
+        let before = crate::open_meshing::shown_world(&h.app);
+        press_and_move(&mut h, a, b);
+        h.frames(1);
+        let shown = crate::open_meshing::shown_world(&h.app);
+        assert!(std::sync::Arc::ptr_eq(&before, &shown), "the world shown is the one the drag began on");
+        // Nothing in the frame placed the design at the drag's frame: the sketch tracking guides
+        // asked for the world every frame, outside a sketch too (#6325).
+        h.frames(1);
+        assert!(h.app.session.cached_world_state().is_none(), "a frame drawn in layers places nothing");
+        let layers = crate::viewport::layers::frame(&mut h.app);
+        assert_eq!(layers.len(), 2, "the arm's layer and the ground shadow's");
+        let m = layers[0].transform;
+        let moved = [0, 1, 2].map(|r| m[0][r] * end.x as f32 + m[1][r] * end.y as f32 + m[2][r] * end.z as f32 + m[3][r]);
+        let reached = h.app.session.world_state().unwrap();
+        let tip = reached.bodies.iter().filter(|b| b.mesh().bounds().max.y > 50.0).count();
+        assert_eq!(tip, 1, "the frame's exact world has the arm turned");
+        assert!(Vec3::new(f64::from(moved[0]), f64::from(moved[1]), f64::from(moved[2])).dist(Vec3::new(0.0, 55.0, 10.0)) < 0.5, "{moved:?}");
+        let bounds = crate::viewport::model_bounds(&h.app);
+        assert!(bounds.max.y > 55.0 && bounds.max.x < 10.0, "the extent follows the arm: {bounds:?}");
+        // The arm selected: its highlight is drawn from the world, so the frame is too.
+        let arm = reached.bodies.iter().find(|b| b.mesh().bounds().max.y > 50.0).map(|b| b.name.clone()).unwrap_or_default();
+        h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: arm }];
+        h.frames(1);
+        assert!(crate::viewport::layers::frame(&mut h.app).is_empty(), "a highlighted moving part draws the frame from the world");
+        assert!(!std::sync::Arc::ptr_eq(&before, &crate::open_meshing::shown_world(&h.app)));
+        h.app.session.selection.clear();
+        h.frames(1);
+        assert_eq!(crate::viewport::layers::frame(&mut h.app).len(), 2, "and back in layers without it");
+        release(&mut h, b);
+        h.frames(1);
+        assert!(h.app.viewport.layers.is_none() && crate::viewport::layers::frame(&mut h.app).is_empty(), "the release draws the design whole");
+    }
+
+    /// #6325: a frame that moves one more occurrence, one placing no bodies, splits the drag again
+    /// into the same groups: their layers still bring a scene, not empty slots under a key of 0.
+    #[test]
+    fn a_split_again_into_the_same_groups_keeps_its_layers_filled() {
+        let (mut h, _, a, b) = hinged_arm();
+        run(&mut h, "component.create", json!({"name": "Tag"}));
+        run(&mut h, "component.activate", json!({"component": "root"}));
+        let doc = &h.app.session.doc;
+        let tag = doc.find_component("Tag").and_then(|c| doc.occurrence_of(c)).map(|o| (o.id, o.transform)).expect("the empty part placed");
+        h.app.viewport.gpu =
+            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.frames(2);
+        press_and_move(&mut h, a, b);
+        h.frames(1);
+        let filled =
+            |h: &mut Harness| crate::viewport::layers::frame(&mut h.app).first().map(|l| (l.key != 0, l.slot.lock().is_ok_and(|s| s.is_some())));
+        assert_eq!(filled(&mut h), Some((true, true)), "the arm's layer brings its scene");
+        let (id, mut moved) = tag;
+        moved[3][0] += 1.0;
+        h.app.session.drag_preview.as_mut().expect("a frame").moves.insert(id, moved);
+        h.frames(1);
+        assert_eq!(filled(&mut h), Some((true, true)), "split again, the arm's layer still brings its scene");
+    }
+
+    /// #6325: while the view shows a move not captured yet (`occurrence.move` with `capture: false`,
+    /// an exploded view), a press on a jointed part starts no joint drag: its frames would solve
+    /// from where the design has the parts, not where the view shows them, and after the release
+    /// the uncaptured move would show the part again over where the reach put it. The press is
+    /// still the joint drag's: it starts no Press Pull on the arm's face, and the status says why
+    /// nothing moves and what to do.
+    #[test]
+    fn a_move_not_captured_starts_no_joint_drag() {
+        let (mut h, end, a, b) = hinged_arm();
+        // With direct interaction on, a press on a planar face that moves upward is a Press Pull.
+        h.app.preferences.direct_interaction = true;
+        let doc = &h.app.session.doc;
+        let arm = doc.find_component("Arm").and_then(|c| doc.occurrence_of(c)).map(|o| o.id).expect("the arm placed");
+        run(&mut h, "occurrence.move", json!({"occurrence": arm, "translate": [0, 0, 20], "capture": false}));
+        assert!(!h.app.session.pending_moves.is_empty(), "the move is shown, not captured");
+        h.frames(2);
+        let (doc, undo, pending) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.pending_moves.clone());
+        // Straight up on screen from the arm's top face: a pull, were the press not the joint drag's.
+        let up = a - egui::vec2(0.0, 60.0);
+        press_and_move(&mut h, a, up);
+        assert!(!crate::drag_extrude::started(&h.app) && h.app.dialog.is_none(), "the press started a Press Pull on the arm");
+        release(&mut h, up);
+        press_and_move(&mut h, a, b);
+        let started = h.app.viewport.joint_drag.is_some();
+        let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert!(status.contains(crate::i18n::tr("browser.capture_note")), "the status says to capture or revert first: {status:?}");
+        release(&mut h, b);
+        let turned = arm_at(&h, end);
+        assert!(!started, "a drag began over the uncaptured move; the design's arm ended at {turned:?}, shown at y {}", shown_arm_reach(&h));
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc) && h.app.session.undo.len() == undo, "the release applies nothing");
+        assert_eq!(h.app.session.pending_moves, pending, "the move shown stays");
+        assert!(turned.dist(end) < 1e-9, "{turned:?}");
     }
 
     /// With the undo history full, a drag still adds one step: it drops the oldest once, not one

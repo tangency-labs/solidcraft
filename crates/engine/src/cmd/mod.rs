@@ -48,6 +48,7 @@ pub use features::{auto_operation, extrude_reach, shown_scope};
 pub use file::open_steps::OpenSteps;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
+pub use joints::{reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
