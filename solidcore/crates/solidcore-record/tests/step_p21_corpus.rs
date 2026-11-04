@@ -30,6 +30,15 @@
 //! It also lists the entities where a check the record no longer makes (a direction shorter than
 //! 1e-12, unit factors equal within 1e-12) would have decided otherwise. It fails when a file
 //! does not parse; refusals are counted, not failed.
+//!
+//! `corpus_product` (ignored too, same variable, `corpus_product` as the filter) reads the
+//! product structure of each file with `step::product::read` and expands its assembly tree. It
+//! prints one line per file and the files with assemblies, and checks the structure against the
+//! file's own entity counts: products, definitions, occurrences, body items (every solid the
+//! file has is an item of a representation the structure holds), relationships with a
+//! transformation and styled items must all be there; a mapped item it does not hold must be
+//! listed only by representations it does not reach (counted by the kind that lists them). It
+//! fails when a file does not parse, is refused, or a count differs.
 
 #![allow(
     clippy::unwrap_used,
@@ -553,4 +562,216 @@ fn corpus_geometry() {
         "files that did not parse:\n{}",
         failures.join("\n")
     );
+}
+
+/// The entity types counted by `corpus_product` against what the product structure holds.
+const BODY_KINDS: [&str; 4] = [
+    "MANIFOLD_SOLID_BREP",
+    "BREP_WITH_VOIDS",
+    "FACETED_BREP",
+    "SHELL_BASED_SURFACE_MODEL",
+];
+const OCCURRENCE_KINDS: [&str; 3] = [
+    "NEXT_ASSEMBLY_USAGE_OCCURRENCE",
+    "ASSEMBLY_COMPONENT_USAGE",
+    "SPECIFIED_HIGHER_USAGE_OCCURRENCE",
+];
+const STYLED_KINDS: [&str; 3] = [
+    "STYLED_ITEM",
+    "OVER_RIDING_STYLED_ITEM",
+    "CONTEXT_DEPENDENT_OVER_RIDING_STYLED_ITEM",
+];
+
+#[test]
+#[ignore = "needs a STEP corpus in SOLIDCORE_STEP_CORPUS"]
+fn corpus_product() {
+    use solidcore_record::step::product::{self, ItemKind};
+    let Some(dir) = std::env::var_os("SOLIDCORE_STEP_CORPUS") else {
+        eprintln!("SOLIDCORE_STEP_CORPUS is not set");
+        return;
+    };
+    let root = Path::new(&dir);
+    let mut paths = Vec::new();
+    files(root, &mut paths);
+    assert!(!paths.is_empty(), "no STEP files under {dir:?}");
+    let mut failures = Vec::new();
+    let mut assemblies = Vec::new();
+    // Totals: name -> (held, census).
+    let mut totals: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+    let mut coloured_by_kind: BTreeMap<String, usize> = BTreeMap::new();
+    let mut instances_total = 0usize;
+    let mut unreached_mapped: BTreeMap<String, usize> = BTreeMap::new();
+    for path in &paths {
+        let name = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .display()
+            .to_string();
+        let ex = match std::fs::read(path)
+            .map_err(|e| e.to_string())
+            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)))
+        {
+            Ok(ex) => ex,
+            Err(e) => {
+                println!("{name}: ERROR {e}");
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        let census = |names: &[&str]| {
+            ex.entities
+                .values()
+                .filter(|e| names.contains(&e.name()))
+                .count()
+        };
+        let s = match product::read(&ex) {
+            Ok(s) => s,
+            Err(e) => {
+                println!("{name}: REFUSED {e}");
+                failures.push(format!("{name}: refused: {e}"));
+                continue;
+            }
+        };
+        let mut bodies = std::collections::BTreeSet::new();
+        let mut mapped = std::collections::BTreeSet::new();
+        for r in &s.representations {
+            for i in &r.items {
+                match i.kind {
+                    ItemKind::Body(_) => {
+                        bodies.insert(i.entity);
+                    }
+                    ItemKind::Mapped { .. } => {
+                        mapped.insert(i.entity);
+                    }
+                    ItemKind::Other(_) => {}
+                }
+            }
+        }
+        let placed = s
+            .links
+            .iter()
+            .filter(|l| l.transformation.is_some())
+            .count();
+        let coloured: Vec<_> = s
+            .styles
+            .iter()
+            .filter(|st| {
+                !st.curve.is_empty()
+                    || st
+                        .surface
+                        .iter()
+                        .any(|f| f.fill.is_some() || f.rendering.is_some())
+            })
+            .collect();
+        for st in &coloured {
+            let kind = ex.get(st.item).map_or("?", p21::Entity::name);
+            *coloured_by_kind.entry(kind.to_string()).or_default() += 1;
+        }
+        let instances = match s.instances() {
+            Ok(i) => i.len(),
+            Err(e) => {
+                failures.push(format!("{name}: instances: {e}"));
+                0
+            }
+        };
+        instances_total += instances;
+        let rows = [
+            ("products", s.products.len(), census(&["PRODUCT"])),
+            (
+                "definitions",
+                s.definitions.len(),
+                census(&[
+                    "PRODUCT_DEFINITION",
+                    "PRODUCT_DEFINITION_WITH_ASSOCIATED_DOCUMENTS",
+                ]),
+            ),
+            (
+                "occurrences",
+                s.occurrences.len(),
+                census(&OCCURRENCE_KINDS),
+            ),
+            ("body items", bodies.len(), census(&BODY_KINDS)),
+            (
+                "placed links",
+                placed,
+                ex.entities
+                    .values()
+                    .filter(|e| e.has("REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION"))
+                    .count(),
+            ),
+            ("styled items", s.styles.len(), census(&STYLED_KINDS)),
+        ];
+        // A mapped item the structure does not hold is listed only by representations it does
+        // not reach (the draughting models of PMI views): checked, and counted apart.
+        let reached: std::collections::BTreeSet<u64> =
+            s.representations.iter().map(|r| r.entity).collect();
+        let mut listers: BTreeMap<u64, Vec<(u64, &str)>> = BTreeMap::new();
+        for (&id, e) in &ex.entities {
+            for r in &e.records {
+                for p in &r.params {
+                    for m in p
+                        .as_list()
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(p21::Param::as_ref_id)
+                    {
+                        if ex.get(m).is_some_and(|m| m.name() == "MAPPED_ITEM") {
+                            listers.entry(m).or_default().push((id, e.name()));
+                        }
+                    }
+                }
+            }
+        }
+        let all_mapped = census(&["MAPPED_ITEM"]);
+        for (&id, e) in &ex.entities {
+            if e.name() != "MAPPED_ITEM" || mapped.contains(&id) {
+                continue;
+            }
+            let by = listers.get(&id).cloned().unwrap_or_default();
+            if by.iter().any(|(l, _)| reached.contains(l)) {
+                failures.push(format!(
+                    "{name}: mapped item #{id} of a reached representation not held"
+                ));
+            }
+            for (_, kind) in by {
+                *unreached_mapped.entry(kind.to_string()).or_default() += 1;
+            }
+        }
+        let t = totals.entry("mapped items").or_default();
+        t.0 += mapped.len();
+        t.1 += all_mapped;
+        let mut line = format!("{name}: mapped items {}/{all_mapped};", mapped.len());
+        for (what, held, n) in rows {
+            let _ = std::fmt::Write::write_fmt(&mut line, format_args!(" {what} {held}/{n};"));
+            let t = totals.entry(what).or_default();
+            t.0 += held;
+            t.1 += n;
+            if held != n {
+                failures.push(format!("{name}: {what}: {held} held, {n} in the file"));
+            }
+        }
+        println!(
+            "{line} coloured items {}; roots {}; instances {instances}",
+            coloured.len(),
+            s.roots.len()
+        );
+        if !s.occurrences.is_empty() {
+            assemblies.push(format!(
+                "{name}: {} definitions, {} occurrences, {} roots, {instances} instances, {} mapped items",
+                s.definitions.len(),
+                s.occurrences.len(),
+                s.roots.len(),
+                mapped.len()
+            ));
+        }
+    }
+    println!("totals (held / in the files): {totals:?}");
+    println!("coloured items by kind: {coloured_by_kind:?}");
+    println!("mapped items not held, by the kind of entity listing them: {unreached_mapped:?}");
+    println!("instances: {instances_total}");
+    println!("files with assemblies: {}", assemblies.len());
+    for a in &assemblies {
+        println!("  {a}");
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
