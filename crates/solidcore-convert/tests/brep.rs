@@ -655,3 +655,281 @@ fn every_face_owns_its_surface_and_keeps_its_trims() {
         }
     }
 }
+
+/// The unit cube with a square fin sheet on its bottom edge at x = 1 (from (1, 1, 0) to
+/// (1, 0, 0)), in the plane z = 0 out to x = 2: a non-manifold body, the edge used by the
+/// bottom, the fin and the right face in that radial order about its direction (-y).
+fn cube_with_fin() -> Record {
+    let mut r = cube(1.0);
+    let vertex =
+        |r: &Record, p: [f64; 3]| r.vertices.iter().position(|v| v.point == p).unwrap() as u32;
+    let (c1, c2) = (vertex(&r, [1., 0., 0.]), vertex(&r, [1., 1., 0.]));
+    let shared = r.edges.iter().position(|e| e.vertices == [c2, c1]).unwrap();
+    let (v8, v9) = (r.vertices.len() as u32, r.vertices.len() as u32 + 1);
+    for point in [[2., 0., 0.], [2., 1., 0.]] {
+        r.vertices.push(Vertex {
+            point,
+            tolerance: 1e-6,
+        });
+    }
+    let fin = r.faces.len() as u32;
+    let corners = [[1., 0., 0.], [2., 0., 0.], [2., 1., 0.], [1., 1., 0.]];
+    let ids = [c1, v8, v9, c2];
+    let uv = |p: [f64; 3]| [p[0] - 1.0, p[1]];
+    let mut loop_edges = Vec::new();
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        let edge = if i == 3 {
+            r.edges[shared].uses.insert(
+                1,
+                EdgeUseRef {
+                    face: fin,
+                    r#loop: 0,
+                    position: 3,
+                    upper: false,
+                },
+            );
+            shared as u32
+        } else {
+            r.edges.push(Edge {
+                nurbs: None,
+                curve: Curve::Line { start: a, end: b },
+                interval: [0.0, 1.0],
+                vertices: [ids[i], ids[(i + 1) % 4]],
+                tolerance: 1e-6,
+                uses: vec![EdgeUseRef {
+                    face: fin,
+                    r#loop: 0,
+                    position: i as u32,
+                    upper: false,
+                }],
+            });
+            r.edges.len() as u32 - 1
+        };
+        loop_edges.push(OrientedEdge {
+            edge,
+            forward: true,
+            pcurve: Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![uv(a), uv(b)],
+            },
+        });
+    }
+    r.faces.push(Face {
+        nurbs: None,
+        surface: Surface::Plane {
+            origin: [1.0, 0.0, 0.0],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+        },
+        domain: [[0.0, 1.0], [0.0, 1.0]],
+        loops: vec![Loop::Edges { edges: loop_edges }],
+    });
+    r.shells.push(Shell::Faces {
+        faces: vec![OrientedFace {
+            face: fin,
+            forward: true,
+        }],
+        wires: vec![],
+    });
+    r.regions[0].shells.push(1);
+    r
+}
+
+/// B3: a sheet attached to a solid along an edge is refused going out (`NotYet`), not
+/// written as a sheet beside the solid on its own copy of the edge, which would detach it.
+#[test]
+fn a_sheet_on_a_solids_edge_is_refused_not_detached() {
+    let mut k = kernel();
+    let r = cube_with_fin();
+    r.validate_built().unwrap();
+    let (mut b, order) = to_kernel(&mut k, &r, true).unwrap();
+    order_is_total(&order, &r, &b);
+    assert_eq!(b.face_list().len(), 7);
+    match to_record(&mut k, &mut b) {
+        Err(Unsupported::NotYet(w)) => assert!(w.contains("sheet"), "{w}"),
+        other => panic!("not refused: {:?}", other.map(|(r, _)| r.edges.len())),
+    }
+}
+
+/// `r`'s edge `e` split at `at` (a point on it) into two edges, the second from `at` to the
+/// old end, every use of `e` followed (or, reversed, preceded) by one of the new edge in its
+/// loop; every use's position renumbered from the loops.
+fn split_edge(r: &mut Record, e: usize, at: [f64; 3]) {
+    let m = r.vertices.len() as u32;
+    r.vertices.push(Vertex {
+        point: at,
+        tolerance: 1e-6,
+    });
+    let Curve::Line { start, end } = r.edges[e].curve.clone() else {
+        panic!("a line")
+    };
+    let second = r.edges.len() as u32;
+    let mut tail = r.edges[e].clone();
+    tail.curve = Curve::Line { start: at, end };
+    tail.vertices = [m, r.edges[e].vertices[1]];
+    r.edges[e].curve = Curve::Line { start, end: at };
+    r.edges[e].vertices[1] = m;
+    r.edges.push(tail);
+    for face in &mut r.faces {
+        for l in &mut face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            let Some(i) = edges.iter().position(|u| u.edge == e as u32) else {
+                continue;
+            };
+            let u = edges[i].clone();
+            let Curve2::Spline { points, .. } = &u.pcurve else {
+                panic!("a line pcurve")
+            };
+            let (p0, p1) = (points[0], points[1]);
+            // the pcurve's point at `at`, by the fraction along the edge
+            let len = |a: [f64; 3], b: [f64; 3]| {
+                ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+            };
+            let f = len(start, at) / len(start, end);
+            let f = if u.forward { f } else { 1.0 - f };
+            let pm = [p0[0] + f * (p1[0] - p0[0]), p0[1] + f * (p1[1] - p0[1])];
+            let line = |a: [f64; 2], b: [f64; 2]| Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![a, b],
+            };
+            let (first, last) = (line(p0, pm), line(pm, p1));
+            if u.forward {
+                edges[i].pcurve = first;
+                edges.insert(
+                    i + 1,
+                    OrientedEdge {
+                        edge: second,
+                        forward: true,
+                        pcurve: last,
+                    },
+                );
+            } else {
+                edges[i].pcurve = last;
+                edges.insert(
+                    i,
+                    OrientedEdge {
+                        edge: second,
+                        forward: false,
+                        pcurve: first,
+                    },
+                );
+            }
+        }
+    }
+    // canonical order: edges by first appearance through the faces' loops, vertices through
+    // the edges
+    let mut edge_new: Vec<Option<u32>> = vec![None; r.edges.len()];
+    let mut next = 0u32;
+    for face in &r.faces {
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                if edge_new[u.edge as usize].is_none() {
+                    edge_new[u.edge as usize] = Some(next);
+                    next += 1;
+                }
+            }
+        }
+    }
+    let mut old_edges: Vec<Option<Edge>> = r.edges.drain(..).map(Some).collect();
+    let mut by_new: Vec<(u32, usize)> = edge_new
+        .iter()
+        .enumerate()
+        .map(|(o, n)| (n.unwrap(), o))
+        .collect();
+    by_new.sort_unstable();
+    r.edges = by_new
+        .iter()
+        .map(|&(_, o)| old_edges[o].take().unwrap())
+        .collect();
+    for face in &mut r.faces {
+        for l in &mut face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                u.edge = edge_new[u.edge as usize].unwrap();
+            }
+        }
+    }
+    let mut vertex_new: Vec<Option<u32>> = vec![None; r.vertices.len()];
+    let mut next = 0u32;
+    for edge in &r.edges {
+        for v in edge.vertices {
+            if vertex_new[v as usize].is_none() {
+                vertex_new[v as usize] = Some(next);
+                next += 1;
+            }
+        }
+    }
+    let mut old_vertices: Vec<Option<Vertex>> = r.vertices.drain(..).map(Some).collect();
+    let mut by_new: Vec<(u32, usize)> = vertex_new
+        .iter()
+        .enumerate()
+        .map(|(o, n)| (n.unwrap(), o))
+        .collect();
+    by_new.sort_unstable();
+    r.vertices = by_new
+        .iter()
+        .map(|&(_, o)| old_vertices[o].take().unwrap())
+        .collect();
+    for edge in &mut r.edges {
+        for v in &mut edge.vertices {
+            *v = vertex_new[*v as usize].unwrap();
+        }
+    }
+    let mut at_of = std::collections::HashMap::new();
+    for (fi, face) in r.faces.iter().enumerate() {
+        for (li, l) in face.loops.iter().enumerate() {
+            let Loop::Edges { edges } = l else { continue };
+            for (pi, u) in edges.iter().enumerate() {
+                at_of.insert((u.edge, fi as u32), (li as u32, pi as u32));
+            }
+        }
+    }
+    for (ei, edge) in r.edges.iter_mut().enumerate() {
+        for u in &mut edge.uses {
+            let (l, p) = at_of[&(ei as u32, u.face)];
+            u.r#loop = l;
+            u.position = p;
+        }
+    }
+}
+
+/// B2: the order of an untrusted record whose topology the healer changes is not known: the
+/// cube with one edge split 1e-8 from its end (an edge shorter than its tolerance, which the
+/// healer removes) is refused with `NotYet` where an order is asked for, and built as its
+/// healed body where it is not. Trusted, the same record keeps its order (no healer).
+#[test]
+fn a_healed_record_whose_topology_the_healer_changed_has_no_order() {
+    use solidcore_convert::brep::to_kernel_body;
+    let mut k = kernel();
+    let mut r = cube(2.0);
+    let e = r
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Line { start: [0., 0., 0.], end } if end == [2., 0., 0.] || end == [0., 2., 0.] || end == [0., 0., 2.]))
+        .unwrap();
+    let Curve::Line { end, .. } = r.edges[e].curve.clone() else {
+        unreachable!()
+    };
+    let at = end.map(|x| if x == 2.0 { 2.0 - 1e-8 } else { x });
+    split_edge(&mut r, e, at);
+    r.validate_built().unwrap();
+    let (b, order) = to_kernel(&mut k, &r, true).unwrap();
+    order_is_total(&order, &r, &b);
+    match to_kernel(&mut k, &r, false) {
+        Err(Unsupported::NotYet(w)) => assert!(w.contains("healer"), "{w}"),
+        Err(e) => panic!("refused: {e}"),
+        Ok((b, _)) => panic!(
+            "an order after healing: {} edges for the record's {}",
+            b.edge_list().len(),
+            r.edges.len()
+        ),
+    }
+    let healed = to_kernel_body(&mut k, &r, false).unwrap();
+    assert_eq!(
+        healed.edge_list().len(),
+        12,
+        "the healer removed the short edge"
+    );
+}

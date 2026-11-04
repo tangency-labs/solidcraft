@@ -31,7 +31,7 @@ use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::face_surface;
 use solidcore::topology::brep::enclosing::put_enclosing_shells_first;
 use solidcore::topology::brep::p10::{
-    make_topology_from_data, MakeTopologyOptions, TopologyEnv, HEALER_VERSION,
+    heal_made, make_topology_from_data, MakeTopologyOptions, TopologyEnv, HEALER_VERSION,
 };
 use solidcore::topology::brep_data::{
     BrepData, DataSourceType, EdgeData, EuData, FaceData, FaceuseData, Keyed, LoopData, RegionData,
@@ -110,9 +110,21 @@ fn undefined(t: &mut TopologyData) {
 ///
 /// [`Unsupported::Invalid`] for a record that fails its validation or a tolerance past the
 /// kernel's limit; [`Unsupported::NotYet`] for wire and vertex shells, wire edges and traced
-/// intersection curves; [`Unsupported::Kernel`] for a step the kernel refuses.
+/// intersection curves, and for an untrusted record whose topology the healer changed (its
+/// record order is then not known: [`to_kernel_body`] gives the body alone);
+/// [`Unsupported::Kernel`] for a step the kernel refuses.
 pub fn to_kernel(k: &mut Kernel, record: &r::Brep, trusted: bool) -> R<(Brep, Order)> {
     to_kernel_with_bare_uses(k, record, trusted, &[])
+}
+
+/// The record built as the kernel's body, as [`to_kernel`], without its record order: an
+/// untrusted record whose topology the healer changed is its healed body.
+///
+/// # Errors
+///
+/// As [`to_kernel`], except for the healer's changes.
+pub fn to_kernel_body(k: &mut Kernel, record: &r::Brep, trusted: bool) -> R<Brep> {
+    build(k, record, trusted, &[]).map(|(b, _)| b)
 }
 
 /// [`to_kernel`], the uses `bare` names (each `(face, loop, position)`, sorted) going without
@@ -130,6 +142,26 @@ pub fn to_kernel_with_bare_uses(
     trusted: bool,
     bare: &[(u32, u32, u32)],
 ) -> R<(Brep, Order)> {
+    match build(k, record, trusted, bare)? {
+        (b, Some(order)) => Ok((b, order)),
+        (_, None) => Err(Unsupported::NotYet(
+            "the healer changed the record's topology, so its record order is not known",
+        )),
+    }
+}
+
+/// The body, and its record order unless the healer changed its topology. The kernel makes
+/// its faces, edges and vertices in the data's order, which is the record's, and lists them so;
+/// for an untrusted record it then heals the body ([`heal_made`]). Entities the healer keeps
+/// keep their identities (the kernel never reuses one), so the order stands exactly when every
+/// list is the same after healing as before; otherwise the healer removed, added or replaced
+/// one, which entity a record index names is not known, and there is no order.
+fn build(
+    k: &mut Kernel,
+    record: &r::Brep,
+    trusted: bool,
+    bare: &[(u32, u32, u32)],
+) -> R<(Brep, Option<Order>)> {
     record
         .validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
@@ -153,17 +185,16 @@ pub fn to_kernel_with_bare_uses(
         records: &mut records,
         next_key,
     };
+    // the healer runs after the order is taken (`heal_made`, as the kernel would run it)
     let options = MakeTopologyOptions {
         make_uv_trim_curves: false,
         add_analytics: false,
         force_same_tol: true,
         check_uv_trim_curves: false,
         always_heal: false,
-        healer_enabled: true,
+        healer_enabled: false,
     };
     make_topology_from_data(k, &mut b, &mut data, &mut env, options)?;
-    put_enclosing_shells_first(k, &mut b)?;
-    // The kernel lists its faces, edges and vertices in the data's order, which is the record's.
     let order = Order {
         faces: b.face_list().to_vec(),
         edges: b.edge_list().to_vec(),
@@ -180,11 +211,22 @@ pub fn to_kernel_with_bare_uses(
             "the kernel built another number of faces, edges or vertices than the record has",
         ));
     }
-    Ok((b, order))
+    let kept = if trusted {
+        true
+    } else {
+        heal_made(k, &mut b, &notify_ref, false)?;
+        b.face_list() == order.faces.as_slice()
+            && b.edge_list() == order.edges.as_slice()
+            && b.vertex_list() == order.vertices.as_slice()
+    };
+    put_enclosing_shells_first(k, &mut b)?;
+    Ok((b, kept.then_some(order)))
 }
 
 /// The record as the kernel's B-rep data: edgeuses face by face, loop by loop, in loop order;
-/// edges and vertices in the record's order.
+/// edges and vertices in the record's order. Each edge and vertex keeps its own tolerance (at
+/// least the body's); the body and every face take the body's. The record has no face
+/// tolerance: a face's own crosses as its edges' (`to_record` puts it into them).
 fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     let zone = zone_tolerance(rec.tolerance);
     let mut d = BrepData::new(UNSURE, DataSourceType::Usd);

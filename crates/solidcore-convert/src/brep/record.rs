@@ -332,6 +332,10 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         }
     }
     let mut regions = record_regions(&region_shells, &region_of, &groups, material)?;
+    let sheet: Vec<bool> = groups
+        .iter()
+        .map(|g| matches!(g.side, Side::Sheet(_)))
+        .collect();
     let shells: Vec<Vec<(u32, bool)>> = groups.into_iter().map(|g| g.faces).collect();
     // Shells renumbered in first appearance walking the regions.
     let mut order: Vec<u32> = Vec::new();
@@ -355,6 +359,10 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         .iter()
         .filter_map(|s| shells.get(*s as usize).cloned())
         .collect();
+    let sheets: Vec<bool> = order
+        .iter()
+        .map(|s| sheet.get(*s as usize).copied().unwrap_or(false))
+        .collect();
 
     // Round each edge: the kernel's radial order of its uses, and the side of each face the
     // material is on, which say which faces bound the same material where a solid touches
@@ -373,6 +381,7 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         faces,
         edges,
         shells,
+        sheets,
         regions,
         radial,
     };
@@ -630,6 +639,8 @@ struct Parts {
     faces: Vec<Face>,
     edges: Vec<Edge>,
     shells: Vec<Vec<(u32, bool)>>,
+    /// Whether each record shell is a sheet's (not a solid's closed boundary).
+    sheets: Vec<bool>,
     regions: Vec<r::Region>,
     radial: Radial,
 }
@@ -716,11 +727,12 @@ fn canonical(
         mut faces,
         mut edges,
         shells,
+        sheets,
         regions,
         radial,
     } = parts;
     let (mut edge_source, vertex_source) =
-        split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
+        split_shared(&mut faces, &mut edges, &shells, &sheets, n_vertices)?;
     split_touching(&mut faces, &mut edges, &mut edge_source, &radial)?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
@@ -932,12 +944,18 @@ fn canonical(
 /// use them), split into one copy per shell, so each shell is a closed manifold boundary of
 /// its own. The geometry is unchanged. Returns, for every edge and vertex after the split, the
 /// data edge and vertex it is (a copy's original).
+///
+/// A sheet (`sheets[s]`) attached to another shell along an edge or at a vertex is refused
+/// (`NotYet`): a copy would detach it, and the record would hold another body.
 fn split_shared(
     faces: &mut [Face],
     edges: &mut Vec<Edge>,
     shells: &[Vec<(u32, bool)>],
+    sheets: &[bool],
     n_vertices: usize,
 ) -> R<(Vec<usize>, Vec<usize>)> {
+    let attached = || Unsupported::NotYet("a sheet sharing an edge or vertex with another shell");
+    let is_sheet = |s: usize| sheets.get(s).copied().unwrap_or(false);
     let mut shell_of = vec![None; faces.len()];
     for (s, shell) in shells.iter().enumerate() {
         for &(f, _) in shell {
@@ -963,6 +981,7 @@ fn split_shared(
                 match slot {
                     None => *slot = Some(s),
                     Some(owner) if *owner == s => {}
+                    Some(owner) if is_sheet(*owner) || is_sheet(s) => return Err(attached()),
                     Some(_) => {
                         let copy = if let Some(c) = copies.get(&(*e, s)) {
                             *c
@@ -995,6 +1014,7 @@ fn split_shared(
         match slot {
             None => *slot = Some(s),
             Some(owner) if *owner == s => {}
+            Some(owner) if is_sheet(*owner) || is_sheet(s) => return Err(attached()),
             Some(_) => {
                 let copy = if let Some(c) = vertex_copies.get(&(*v, s)) {
                     *c

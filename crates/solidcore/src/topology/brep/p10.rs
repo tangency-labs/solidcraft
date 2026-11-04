@@ -512,23 +512,40 @@ fn make_topology(
     // When requested and needed - find and heal common AssertValid problems
     let heal_this_brep = data.healer_version() < HEALER_VERSION;
     if options.healer_enabled && (heal_this_brep || options.always_heal) {
-        // Run the Assert/Heal sequences as needed (status ignored upstream)
-        p1::heal_brep(
-            k,
-            b,
-            HealerOpType::All,
-            None,
-            None,
-            None,
-            options.make_uv_trim_curves,
-        )?;
-        // UV trim curves created inside the healer (Make_UVTrimCurves and
-        // ClassifyLoops' snapshot write-back) have no caller owner yet; bind them to
-        // their edge uses as upstream's SetUVTrimCurve(this) does.
-        bind_uv_trim_owners(b, env.key_of)?;
+        heal_made(k, b, env.key_of, options.make_uv_trim_curves)?;
     }
     let _ = options.check_uv_trim_curves; // SM_REF1: not used
     Ok(())
+}
+
+/// The healing [`make_topology_from_data`] runs on the B-rep it made from data (all the
+/// Assert/Heal sequences, `HealBrep(SM_HO_ALL)`), for a caller that makes the B-rep with the
+/// healer off and heals it after, to see what the healer changed (the conversion's record
+/// order: entities the healer removes or adds are no longer the data's).
+///
+/// # Errors
+///
+/// Those of the healer and of binding the UV trims it makes.
+pub fn heal_made(
+    k: &mut Kernel,
+    b: &mut Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    make_uv_trim_curves: bool,
+) -> Result<()> {
+    // Run the Assert/Heal sequences as needed (status ignored upstream)
+    p1::heal_brep(
+        k,
+        b,
+        HealerOpType::All,
+        None,
+        None,
+        None,
+        make_uv_trim_curves,
+    )?;
+    // UV trim curves created inside the healer (Make_UVTrimCurves and
+    // ClassifyLoops' snapshot write-back) have no caller owner yet; bind them to
+    // their edge uses as upstream's SetUVTrimCurve(this) does.
+    bind_uv_trim_owners(b, key_of)
 }
 
 /// Takes the data's zone tolerance or computes one relative to the vertex box.
