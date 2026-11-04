@@ -464,3 +464,53 @@ fn transform(app: &mut SolveApp) {
         json!({"vertices":indices,"positions":positions}),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plane_alias_and_programmatic_parameters_keep_the_primitive_and_numeric_controls_in_sync() {
+        for kind in ["plane", "face", "tube"] {
+            let mut app = SolveApp::new(Default::default(), Default::default());
+            app.run("form.prototype.create", json!({"primitive":kind,"dimensions":[8,8,6],"segments":[4,2,1],"radii":[4,2],"levels":1})).unwrap();
+            assert_eq!(app.forms_prototype.primitive, if kind == "tube" { 7 } else { 5 }, "{kind} must select its own displayed primitive");
+            let before = app.session.forms_prototype.as_ref().unwrap().inspect();
+            let original = (
+                app.forms_prototype.controls.dimensions.clone(),
+                app.forms_prototype.controls.segments.clone(),
+                app.forms_prototype.controls.radii.clone(),
+            );
+            app.run("form.prototype.parameters", json!({"dimensions":[12,10,9],"segments":[6,3,1],"radii":[6,3]})).unwrap();
+            let form = app.session.forms_prototype.as_ref().unwrap();
+            let updated = form.inspect();
+            assert_eq!(form.parameters.kind, kind, "display synchronization must not rewrite the authored alias");
+            let expected = (
+                form.parameters.dimensions.map(|v| format!("{v:.4}")),
+                form.parameters.segments.map(|v| v.to_string()),
+                form.parameters.radii.map(|v| v.to_string()),
+            );
+            assert_ne!(expected, original);
+            assert_eq!(
+                (
+                    app.forms_prototype.controls.dimensions.clone(),
+                    app.forms_prototype.controls.segments.clone(),
+                    app.forms_prototype.controls.radii.clone()
+                ),
+                expected
+            );
+            for (command, source, fields) in [("form.prototype.undo", &before, &original), ("form.prototype.redo", &updated, &expected)] {
+                app.run(command, json!({})).unwrap();
+                // History counters change; the authored primitive and its parameters must return exactly.
+                let form = app.session.forms_prototype.as_ref().unwrap();
+                assert_eq!(form.inspect()["parameters"], source["parameters"]);
+                assert_eq!(form.parameters.kind, kind);
+                assert_eq!(app.forms_prototype.primitive, if kind == "tube" { 7 } else { 5 });
+                assert_eq!(
+                    (&app.forms_prototype.controls.dimensions, &app.forms_prototype.controls.segments, &app.forms_prototype.controls.radii),
+                    (&fields.0, &fields.1, &fields.2)
+                );
+            }
+        }
+    }
+}

@@ -14,7 +14,8 @@ const PRIMITIVES: [(&str, &str); 8] = [
 ];
 pub(super) fn sync(app: &mut SolveApp) {
     if let Some(form) = &app.session.forms_prototype {
-        app.forms_prototype.primitive = PRIMITIVES.iter().position(|(kind, _)| *kind == form.parameters.kind).unwrap_or(0);
+        let kind = if form.parameters.kind == "plane" { "face" } else { &form.parameters.kind };
+        app.forms_prototype.primitive = PRIMITIVES.iter().position(|(primitive, _)| *primitive == kind).unwrap_or(0);
     }
 }
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -50,6 +51,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     egui::ScrollArea::vertical().id_salt("forms_panel_scroll").auto_shrink([false, false]).show(ui, |ui| {
                         if tool_panel::active(app) {
                             tool_panel::show(app, ui);
+                            return;
+                        }
+                        if app.session.forms_prototype.as_ref().is_some_and(|f| f.repair.is_some()) {
+                            repair_settings(app, ui);
                             return;
                         }
                         if profile {
@@ -148,10 +153,44 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
 }
+fn repair_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui.add(egui::Label::new(app.tr("forms.repair.retained")).wrap());
+    if let Some(error) = app.session.forms_prototype.as_ref().and_then(|form| form.repair.as_ref()) {
+        ui.add(egui::Label::new(egui::RichText::new(error).color(Tokens::get().error)).wrap());
+    }
+    let mode =
+        if app.session.forms_prototype.as_ref().is_some_and(|f| f.profile.is_some()) { tool_panel::Mode::Surface } else { tool_panel::Mode::Match };
+    let response = ui_kit::button(ui, app.tr("forms.repair.reattach"), ui_kit::Button::Primary);
+    crate::scenario::publish_handle("forms_repair_reattach", response.rect.center());
+    if response.clicked() {
+        tool_panel::start(app, mode);
+    }
+    ui.horizontal(|ui| {
+        let (undo, redo) = app
+            .session
+            .forms_prototype
+            .as_ref()
+            .map(|f| {
+                let state = f.inspect();
+                (state["undo"].as_u64().unwrap_or(0) > 0, state["redo"].as_u64().unwrap_or(0) > 0)
+            })
+            .unwrap_or_default();
+        if ui_kit::button(ui, app.tr("forms.prototype.undo"), ui_kit::Button::Enabled(undo)).clicked() {
+            run(app, "form.prototype.undo", json!({}));
+        }
+        if ui_kit::button(ui, app.tr("forms.prototype.redo"), ui_kit::Button::Enabled(redo)).clicked() {
+            run(app, "form.prototype.redo", json!({}));
+        }
+    });
+}
+
 fn header(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        let busy =
-            app.forms_prototype.pending.is_some() || app.forms_prototype.interchange.is_some() || tool_panel::active(app) || extrusion::active(app);
+        let busy = app.forms_prototype.pending.is_some()
+            || app.forms_prototype.interchange.is_some()
+            || tool_panel::active(app)
+            || extrusion::active(app)
+            || app.session.forms_prototype.as_ref().is_some_and(|f| f.repair.is_some());
         let r = ui.add_enabled_ui(!busy, |ui| ui_kit::button(ui, app.tr("forms.prototype.finish"), ui_kit::Button::Primary)).inner;
         crate::scenario::publish_handle("forms_finish", r.rect.center());
         if r.clicked() {

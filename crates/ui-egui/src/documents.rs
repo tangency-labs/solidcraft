@@ -281,6 +281,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     put_work(app, slot.work);
     if let Some(forms) = slot.forms {
         app.forms_prototype = forms;
+        crate::forms_prototype::resume_document(app);
     } else {
         crate::forms_prototype::opened(app);
     }

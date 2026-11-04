@@ -852,6 +852,9 @@ impl InsideIndex<'_> {
 /// opposite signs; a ray exactly on the edge's line is put on one side by the edge's endpoints
 /// in lexicographic order, the same for both. A triangle the ray runs along is not crossed.
 fn ray_crosses(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
+    if !ray_meets_triangle_bounds(a, b, c, o, dir) {
+        return false;
+    }
     let side = |p: Vec3, q: Vec3| {
         let v = dir.dot((p - o).cross(q - o));
         if v != 0.0 { v > 0.0 } else { (p.x, p.y, p.z) < (q.x, q.y, q.z) }
@@ -863,4 +866,31 @@ fn ray_crosses(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
     }
     let s = side(a, b);
     side(b, c) == s && side(c, a) == s && (a - o).dot(normal) / along > 0.0
+}
+
+/// Certify a possible crossing before using signed volumes. Subtracting a distant ray origin
+/// can hide almost-point triangles' edge differences: cancellation then gives three agreeing
+/// side signs for a ray nowhere near the triangle. Intersect the triangle's three coordinate
+/// slabs, rounding each subtraction and division outwards, so this guard excludes only rays
+/// that cannot reach its box. No triangle-size tolerance discards genuine small triangles;
+/// the half-open edge ownership above still decides shared-edge and shared-vertex crossings.
+fn ray_meets_triangle_bounds(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
+    let (mut near, mut far) = (0.0_f64, f64::INFINITY);
+    for (a, b, c, o, d) in [(a.x, b.x, c.x, o.x, dir.x), (a.y, b.y, c.y, o.y, dir.y), (a.z, b.z, c.z, o.z, dir.z)] {
+        let (lo, hi) = (a.min(b).min(c), a.max(b).max(c));
+        if d == 0.0 {
+            if o < lo || o > hi {
+                return false;
+            }
+            continue;
+        }
+        let (lo, hi) = ((lo - o).next_down(), (hi - o).next_up());
+        let (lo, hi) = if d > 0.0 { (lo / d, hi / d) } else { (hi / d, lo / d) };
+        near = near.max(lo.next_down());
+        far = far.min(hi.next_up());
+        if near > far {
+            return false;
+        }
+    }
+    true
 }

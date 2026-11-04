@@ -12,12 +12,15 @@ with other workbenches or of general downstream kernel robustness.
 
 In the **Surface** tab, choose **Forms** to create a primitive, **Form Pipe**
 for a sketch/edge path, or **Form Surface** for an existing CAD face. The
-primitive selector offers Box, Cylinder, Quadball, Sphere, Pipe, Face, Torus
+primitive selector offers Box, Cylinder, Quadball, Sphere, Pipe, Plane, Torus
 and Tube.
 
 1. Choose the primitive's dimensions and segment counts before sculpting.
-2. Use the All, Points, Edges or Faces selection filter. Shift adds to the
-   selection; the panel also provides connected and edge-loop selection.
+   Primitive settings lock after sculpting; the transform tools remain available.
+2. Use the All, Points, Edges or Faces selection filter. Ctrl-click toggles
+   an element; Shift-click extends a range through connected elements.
+   Double-click an edge to select its continuous loop. Connected and edge-loop
+   selection are also available in the panel.
 3. Pull the selection directly or use the Move/Rotate and Scale handles.
    Global, View and Selection orientations, numeric transforms and a custom
    pivot are available. Shift-drag a face or free boundary edge to extrude.
@@ -25,9 +28,30 @@ and Tube.
    be refined. A mirrored face moves with its partner. If they share a seam,
    the drag follows the mirror plane to keep the seam joined.
 4. Use Insert Edge, Insert Point or Refine Selected Faces for local detail.
-   Topology and alignment tools have their own Apply/Cancel preview.
+   Tools with an Apply/Cancel preview stage their result before accepting it.
+   Delete faces and Dissolve edge act immediately and can be undone.
 5. Choose **Finish Form** to save the editable feature, or **Cancel Form**
    to discard the editing session. Edit the saved timeline feature to reopen it.
+
+The topology section includes Fill Hole, Erase and Fill, Bridge, Collapse,
+Weld, Unweld, Thicken, creases and uniform subdivision. Fill Hole offers
+Automatic, Single quad, Minimal quads and Reduced star; Single quad requires
+a four-edge opening. Thicken offers Normal or Sharp construction and Reverse.
+The alignment section provides directed or best-fit Flatten and Straighten.
+These tools can act on control points or points on the evaluated Form. Some
+topology operations require a base cage; unsupported inputs leave the accepted
+source intact.
+
+If a saved Match or Form Surface support no longer resolves, normal Edit refuses
+it without changing the source. The UI offers **Open retained source**; scripts
+use `form.repair {"feature": id}` explicitly. The retained cage and sculpted
+offsets remain visible with the source error, while editing and Finish stay
+blocked. Choose **Reattach support** to stage a replacement with Apply/Cancel.
+For Surface, choose the U/V swap/reverse correspondence explicitly; guide counts
+stay fixed and offsets retain their lengths in the chosen logical grid frames.
+A qualified Apply makes the repaired source editable; Undo restores the retained
+unresolved state. Cancel leaves the saved feature unchanged. Recovery autosaves
+retain that unresolved state and its history, never an unaccepted replacement.
 
 Undo/Redo during editing acts on Form actions. A staged tool can be cancelled
 without accepting its preview; finishing publishes the Form to document history.

@@ -29,6 +29,7 @@ pub(crate) mod coons;
 pub(crate) mod cutgrid;
 pub(crate) mod edges;
 pub(crate) mod grid;
+pub(crate) mod guided;
 pub(crate) mod motorcycle;
 pub(crate) mod pieces;
 pub(crate) mod sag;
@@ -146,6 +147,10 @@ fn face_edges(f: &brep::Face) -> impl Iterator<Item = &brep::OrientedEdge> {
 /// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
 /// record's, in its order.
 pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
+    plan_with_stations(b, tol, turn, &[])
+}
+
+fn plan_with_stations(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, stations: &[Vec<f64>]) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -189,6 +194,11 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     .collect::<Result<_>>()?;
     relax_crowded_faces(b, &jobs, &rules, &mut nodes)?;
     split_thin_loops(b, &mut nodes)?;
+    for (edge, parameters) in stations.iter().enumerate() {
+        if !parameters.is_empty() {
+            edges::insert_parameters(b, edge, nodes.get_mut(edge).ok_or_else(|| unsupported("missing guided edge"))?, parameters)?;
+        }
+    }
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let face_boundary = |fi: usize, nodes: &[edges::Nodes]| {
         let (Some(face), Some(eval), Some(map)) = (faces.get(fi), evals.get(fi), params.get(fi)) else {
@@ -199,6 +209,9 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     let mut boundaries: Vec<Boundary> =
         crate::par::map("face boundaries", &indexed, curved >= PARALLEL_FACES, |&fi| face_boundary(fi, &nodes)).into_iter().collect::<Result<_>>()?;
     let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary)?;
+    if !stations.is_empty() && nodes.iter().any(|nodes| !nodes.snapped.is_empty()) {
+        return Err(unsupported("guided charts require original exact edge nodes, without tolerance-snapped contacts"));
+    }
     let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
         let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
             return Err(unsupported(format!("face {fi}: missing")));

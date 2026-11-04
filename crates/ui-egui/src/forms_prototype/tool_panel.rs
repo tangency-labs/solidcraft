@@ -47,6 +47,8 @@ struct OtherForm {
     openings: Vec<Vec<usize>>,
 }
 pub(super) struct State {
+    repair: bool,
+    surface_mapping: usize,
     pipe: Option<pipe_panel::Inputs>,
     surface_partition: bool,
     surface_segments: [String; 2],
@@ -102,6 +104,9 @@ pub(super) fn start(app: &mut SolveApp, mode: Mode) {
         return;
     }
     let Some(form) = &app.session.forms_prototype else { return };
+    if form.repair.is_some() && !((form.profile.is_some() && mode == Mode::Surface) || (form.matching.is_some() && mode == Mode::Match)) {
+        return;
+    }
     if form.profile.is_some() && !matches!(mode, Mode::Surface | Mode::Flatten | Mode::Straighten) {
         app.set_status(app.tr("forms.prototype.surface_fixed_grid").to_owned(), true);
         return;
@@ -235,6 +240,8 @@ pub(super) fn start(app: &mut SolveApp, mode: Mode) {
         return;
     }
     let mut state = State {
+        repair: form.repair.is_some(),
+        surface_mapping: 0,
         pipe: (mode == Mode::Pipe).then(|| pipe_panel::Inputs::new(app)),
         surface_partition: form.profile.as_ref().map_or(app.preferences.forms_surface_partition, |p| p.partition),
         surface_segments: form.profile.as_ref().map_or(["2".into(), "2".into()], |p| p.segments.map(|v| v.to_string())),
@@ -305,9 +312,12 @@ fn params(app: &SolveApp, state: &State) -> Result<serde_json::Value, String> {
                 .ok_or_else(|| app.tr("forms.prototype.invalid_number").to_owned())?;
             segments[i] = n as usize;
         }
-        return Ok(
-            json!({"surface":{"partition":state.surface_partition,"body":body,"face":state.support_face,"segments":segments,"continuity":state.match_order.min(1)}}),
-        );
+        let mut given = json!({"surface":{"partition":state.surface_partition,"body":body,"face":state.support_face,"segments":segments,"continuity":state.match_order.min(1)}});
+        if state.repair {
+            let bits = state.surface_mapping.checked_sub(1).filter(|n| *n < 8).ok_or_else(|| app.tr("forms.repair.choose_mapping").to_owned())?;
+            given["surface"]["reattach"] = json!({"swap":bits & 4 != 0,"reverse_u":bits & 1 != 0,"reverse_v":bits & 2 != 0});
+        }
+        return Ok(given);
     }
     if state.mode == Mode::Match {
         let (body, _) = state.supports.get(state.support).ok_or_else(|| app.tr("forms.prototype.match_required").to_owned())?;
@@ -510,8 +520,35 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
             }
         } else {
-            for (i, key) in ["forms.prototype.surface_u", "forms.prototype.surface_v"].iter().enumerate() {
-                crate::ui_kit::expr_row(ui, app.tr(key), &mut state.surface_segments[i]);
+            ui.add_enabled_ui(!state.repair, |ui| {
+                for (i, key) in ["forms.prototype.surface_u", "forms.prototype.surface_v"].iter().enumerate() {
+                    crate::ui_kit::expr_row(ui, app.tr(key), &mut state.surface_segments[i]);
+                }
+            });
+            if state.repair {
+                ui.add(egui::Label::new(app.tr("forms.repair.mapping_help")).wrap());
+                let options: Vec<_> = [
+                    "forms.repair.choose_mapping",
+                    "forms.repair.uv",
+                    "forms.repair.reverse_u",
+                    "forms.repair.reverse_v",
+                    "forms.repair.reverse_both",
+                    "forms.repair.swap",
+                    "forms.repair.swap_reverse_u",
+                    "forms.repair.swap_reverse_v",
+                    "forms.repair.swap_reverse_both",
+                ]
+                .map(|key| app.tr(key).to_owned())
+                .into_iter()
+                .collect();
+                let response = crate::ui_kit::choice_row(
+                    ui,
+                    app.tr("forms.repair.mapping"),
+                    "forms_repair_mapping",
+                    &mut state.surface_mapping,
+                    &options.iter().map(String::as_str).collect::<Vec<_>>(),
+                );
+                crate::scenario::publish_handle("forms_repair_mapping", response.rect.center());
             }
             let r = crate::ui_kit::choice_row(
                 ui,
@@ -877,6 +914,44 @@ pub(super) fn cancel(app: &mut SolveApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_surface_mapping_is_explicit_and_qualification_uses_the_existing_preview_worker() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.session.execute("solid.box", &json!({"length":4,"width":6,"height":1,"body_name":"Support","operation":"new"})).unwrap();
+        let body = app.session.model.state().body("Support").unwrap().body.clone();
+        let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        app.session.execute("form.surface", &json!({"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":false})).unwrap();
+        let feature = app.session.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+        let solidcraft_engine::doc::FeatureKind::Form { definition, .. } = &mut app.session.doc_mut().feature_mut(feature).unwrap().kind else {
+            panic!("Form")
+        };
+        let solidcraft_engine::doc::forms::SupportRef::Face { body, .. } = &mut definition.profile.as_mut().unwrap().source else { panic!("face") };
+        *body = "Missing support".into();
+        app.session.refresh();
+        app.session.execute("form.repair", &json!({"feature":feature})).unwrap();
+        opened(&mut app);
+        let source = app.session.forms_prototype.as_ref().unwrap().definition();
+        start(&mut app, Mode::Surface);
+        let mut state = app.forms_prototype.tool_panel.take().unwrap();
+        assert!(params(&app, &state).is_err());
+        assert_eq!(state.surface_segments, ["3", "2"]);
+        state.support_face = top;
+        state.surface_mapping = 1;
+        let given = params(&app, &state).unwrap();
+        assert_eq!(given["surface"]["reattach"], json!({"swap":false,"reverse_u":false,"reverse_v":false}));
+        app.forms_prototype.tool_panel = Some(state);
+        let revision = app.session.forms_prototype.as_ref().unwrap().revision;
+        let prepared = app.session.scratch().compute_commands(&[("form.prototype.tool.preview".into(), given.clone())], None).unwrap();
+        inject(&mut app, revision, given, prepared);
+        tick(&mut app);
+        assert!(app.forms_prototype.tool_panel.as_ref().unwrap().error.is_none());
+        assert!(app.session.forms_prototype.as_ref().unwrap().repair.is_some());
+        assert!(run(&mut app, "form.prototype.tool.apply", json!({})), "the accepted worker result carries the qualified source identity");
+        assert!(app.session.forms_prototype.as_ref().unwrap().repair.is_none());
+        app.session.execute("form.prototype.undo", &json!({})).unwrap();
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), source);
+        assert!(app.session.forms_prototype.as_ref().unwrap().repair.is_some());
+    }
     #[test]
     fn pipe_ribbon_uses_expression_fields_segment_overrides_and_source_based_cancel() {
         let mut app = SolveApp::new(Default::default(), Default::default());

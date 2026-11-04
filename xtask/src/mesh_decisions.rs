@@ -83,6 +83,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
     ("crates/doc/src/forms/profile.rs:Profile::display", "the fitted CAD surface's display mesh and editable guide drawing"),
     ("crates/doc/src/forms/profile.rs:Profile::preview", "the editable Surface guide grid's preview mesh and picking index"),
+    ("crates/doc/src/forms/profile/partition.rs:display_mesh", "the Surface display's skin triangles and logical guide drawing"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/engine/src/cmd/forms_prototype/blend.rs:export", "triangle counts in the Blender surface export summary"),
     ("crates/engine/src/cmd/forms_prototype/blend/surface.rs:bodies", "Blender surface export's triangle meshes of evaluated CAD bodies"),

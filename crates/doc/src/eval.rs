@@ -744,7 +744,11 @@ impl ModelState {
             {
                 b.transferred = true;
                 b.component = old.component;
-                b.source_transform = old.source_transform;
+                // Move has already composed the source frame in its result;
+                // retaining ownership must not replace it with the input frame.
+                if !matches!(f.kind, FeatureKind::Move { copy: false, .. }) {
+                    b.source_transform = old.source_transform;
+                }
             }
             let kept = olds.iter().find(|x| x.body.same(&b.body));
             match kept {
@@ -8224,7 +8228,9 @@ fn eval_feature(
                     st.bodies.push(ModelBody::traced_new(name, traced, f.id));
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name.clone(), Traced::step(nb, &[&mb.traced()]), mb.feature);
+                    let mut moved = ModelBody::traced_new(mb.name.clone(), Traced::step(nb, &[&mb.traced()]), mb.feature);
+                    moved.source_transform = crate::mat_mul(&crate::rigid(t, Vec3::ZERO, axis, ang), &mb.source_transform);
+                    *slot = moved;
                 }
             }
             if !*copy {
@@ -9066,6 +9072,83 @@ mod display_preparation_tests {
 #[cfg(test)]
 mod world_placement_cache_tests {
     use super::*;
+
+    #[test]
+    fn ordinary_moves_retain_the_definition_frame_through_transfers_and_component_placement() {
+        for transferred in [false, true] {
+            let mut doc = Document::new("Moved support frame");
+            let component = doc.add_component(Some("Part"), 0).unwrap();
+            let source = doc
+                .add_feature(
+                    FeatureKind::Cylinder {
+                        base: crate::point_expr(Vec3::ZERO),
+                        axis: Vec3::Z.into(),
+                        radius: "3".into(),
+                        height: "2".into(),
+                        operation: Operation::NewBody,
+                        references: Vec::new(),
+                    },
+                    None,
+                )
+                .unwrap();
+            doc.feature_mut(source).unwrap().component = component;
+            doc.feature_mut(source).unwrap().body_names = vec!["Support".into()];
+            let mut model = Model::new();
+            model.evaluate(&doc);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+            let original = model.state();
+            let point = kernel::edge_geometry(&original.bodies[0].body, &[0]).unwrap()[0].at(0.25).unwrap().0;
+            let mut expected = crate::IDENTITY;
+            if transferred {
+                expected = crate::rigid(Vec3::new(3.0, -2.0, 1.0), Vec3::ZERO, Vec3::Z, 0.3);
+                doc.add_feature(
+                    FeatureKind::BodyTransfer { bodies: vec!["Support".into()], from: component, to: component, transform: expected },
+                    None,
+                )
+                .unwrap();
+            }
+            for (translate, axis, angle, text) in [
+                (Vec3::new(7.0, -4.0, 9.0), Vec3::X, std::f64::consts::FRAC_PI_2, "90 deg"),
+                (Vec3::new(-1.0, 2.0, 0.5), Vec3::Z, std::f64::consts::FRAC_PI_4, "45 deg"),
+            ] {
+                let moved = doc
+                    .add_feature(
+                        FeatureKind::Move {
+                            bodies: vec!["Support".into()],
+                            translate: [translate.x.to_string().into(), translate.y.to_string().into(), translate.z.to_string().into()],
+                            rotate_axis: Some(axis.into()),
+                            angle: Some(text.into()),
+                            copy: false,
+                        },
+                        None,
+                    )
+                    .unwrap();
+                doc.feature_mut(moved).unwrap().component = component;
+                expected = crate::mat_mul(&crate::rigid(translate, Vec3::ZERO, axis, angle), &expected);
+                model.evaluate(&doc);
+                assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+                let state = model.state();
+                let body = &state.bodies[0];
+                assert_eq!(body.source_transform, expected, "ordinary Move discarded its support source frame (transferred={transferred})");
+                assert_eq!(body.transferred, transferred);
+                assert_eq!(doc.model_body_component(body), component);
+                let physical = kernel::edge_geometry(&body.body, &[0]).unwrap()[0].at(0.25).unwrap().0;
+                assert!(physical.dist(crate::apply_point(&expected, point)) < 1e-9);
+            }
+            let placement = crate::rigid(Vec3::new(20.0, 10.0, -3.0), Vec3::ZERO, Vec3::Y, 0.4);
+            doc.occurrences.iter_mut().find(|o| o.component == component).unwrap().transform = placement;
+            let state = model.state();
+            let world = world_state(&doc, &state).unwrap();
+            let world_body = &world.bodies[0];
+            let world_frame = crate::mat_mul(&placement, &expected);
+            assert_eq!(world_body.source_transform, world_frame);
+            let physical = kernel::edge_geometry(&world_body.body, &[0]).unwrap()[0].at(0.25).unwrap().0;
+            assert!(physical.dist(crate::apply_point(&world_frame, point)) < 1e-9);
+            // Component-local support resolution also uses the real frame path.
+            let local = state_in_frame(&doc, &state, component).unwrap();
+            assert!(local.bodies[0].source_transform.iter().flatten().zip(expected.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-12));
+        }
+    }
 
     #[test]
     fn placed_real_feature_retains_names_from_its_original_feature_context() {

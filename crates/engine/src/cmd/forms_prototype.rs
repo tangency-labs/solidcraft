@@ -48,7 +48,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("sketch and optional curves, or body and optional edges: source path; diameter?, section_density?:1..12, path_samples?:1..20. Overrides replace the segment list; zero diameter/samples inherit globals. regenerate?: false, required to replace a sculpted pipe cage."),
     CommandSpec::new("form.surface","Form Surface",crate::checked!("form.surface",surface)).icon("edit").at("SURFACE","FORMS")
         .noundo().doc_only().contract(&SURFACE).output(output_schema_for::<params::Reply>)
-        .params("body, face: existing CAD source; segments?: [U,V] (2,2); continuity?:0|1. Edit interior guide points while retaining the source rim; Finish replaces that face in its solid."),
+        .params("body, face: existing CAD source; segments?: [U,V] (2,2); continuity?:0|1. Edit interior guide points while retaining the source rim; Finish replaces that face in its solid. A retained-repair tool preview requires reattach:{swap,reverse_u,reverse_v} and unchanged guide counts."),
     CommandSpec::new("form.prototype.match","Match Form Boundary",crate::checked!("form.prototype.match",matching)).icon("edit")
         .noundo().doc_only().contract(&MATCH).output(output_schema_for::<params::Reply>)
         .params("body and exactly one of face or closed edges; edge: a free Form boundary edge; order?:0,1,2. Match exact CAD support with persistent references. Tolerances: position_mm?.001, tangent_deg?.1, curvature_relative?.01; tolerance?: fitted CAD mm (.01)."),
@@ -103,6 +103,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("form.prototype.finish_options","Form Finish Options",crate::checked!("form.prototype.finish_options",finish_options)).icon("edit")
         .noundo().doc_only().contract(&FINISH_OPTIONS).output(output_schema_for::<params::FinishOptions>)
         .params("tolerance?: CAD fitting expression in mm; operation?: new|join|cut|intersect. Stages output settings in the active Form without committing it."),
+    CommandSpec::new("form.repair","Repair Form Support",crate::checked!("form.repair",repair)).icon("edit").noundo().doc_only().contract(&EDIT).output(output_schema_for::<params::RepairReply>)
+        .params("feature: saved associated Form id. Explicitly open structurally valid retained source after support resolution fails; ordinary edit stays strict. Reattach through a qualified tool preview and Apply, or Cancel; unresolved source cannot Finish."),
     CommandSpec::new("form.edit","Edit Form",crate::checked!("form.edit",edit)).icon("edit").noundo().doc_only().contract(&EDIT).output(output_schema_for::<params::Reply>)
         .params("feature: Form feature id. Enter an editable session without changing its saved CAD result until Finish Form."),
     CommandSpec::new("form.prototype.set_surface_vertices", "Pull Form Surface", crate::checked!("form.prototype.set_surface_vertices", set_surface)).icon("move")
@@ -163,13 +165,19 @@ fn form(s: &mut Session) -> Result<&mut crate::forms_prototype::Form> {
     if f.tool_original.is_some() {
         return Err(EngineError::Other("apply or cancel the active Form tool first".into()));
     }
+    if f.repair.is_some() {
+        return Err(EngineError::Other("reattach the retained Form support and Apply, or Cancel".into()));
+    }
     Ok(f)
 }
 fn raw_form(s: &mut Session) -> Result<&mut crate::forms_prototype::Form> {
     s.forms_prototype.as_mut().ok_or_else(|| EngineError::Other("create a Form first".into()))
 }
 fn tool_begin(s: &mut Session, _: &Value) -> Result<Value> {
-    let f = form(s)?;
+    let f = raw_form(s)?;
+    if f.tool_original.is_some() {
+        return Err(EngineError::Other("apply or cancel the active Form tool first".into()));
+    }
     f.tool_original = Some(std::sync::Arc::new(f.clone()));
     Ok(f.inspect())
 }
@@ -178,13 +186,18 @@ fn tool_preview(s: &mut Session, p: &Value) -> Result<Value> {
     let f = raw_form(s)?;
     let source = f.tool_original.clone().ok_or_else(|| EngineError::Other("start a Form tool preview first".into()))?;
     let revision = f.revision;
+    if source.repair.is_some() && !((source.matching.is_some() && args.matching.is_some()) || (source.profile.is_some() && args.surface.is_some())) {
+        return Err(EngineError::Other("retained Form repair requires its Match or Surface reattachment preview".into()));
+    }
+    let repairing_match = source.repair.is_some() && source.matching.is_some();
+    let repairing_surface = source.repair.is_some() && source.profile.is_some();
     let mut scratch = s.scratch();
     scratch.forms_prototype = Some(source.as_ref().clone());
     type Preview = (&'static str, bool, fn(&mut Session, &Value) -> Result<Value>);
     let operations: [Preview; 7] = [
         ("pipe", args.pipe.is_some(), pipe::create),
-        ("surface", args.surface.is_some(), surface),
-        ("matching", args.matching.is_some(), matching),
+        ("surface", args.surface.is_some(), if repairing_surface { surface_repair } else { surface }),
+        ("matching", args.matching.is_some(), if repairing_match { matching_repair } else { matching }),
         ("topology", args.topology.is_some(), topology),
         ("project", args.project.is_some(), project),
         ("unweld", args.unweld.is_some(), unweld),
@@ -198,6 +211,11 @@ fn tool_preview(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("preview exactly one Form operation".into()));
     }
     handler(&mut scratch, p.get(key).ok_or_else(|| EngineError::Other("missing Form tool parameters".into()))?)?;
+    if source.repair.is_some() {
+        qualify_repair(&mut scratch)?;
+        let context = crate::forms_prototype::RepairContext { document: scratch.doc.clone(), moves: scratch.pending_moves.clone() };
+        raw_form(&mut scratch)?.repair_context = Some(context);
+    }
     let mut next = scratch.forms_prototype.take().ok_or_else(|| EngineError::Other("tool preview did not produce a Form".into()))?;
     next.tool_original = Some(source);
     next.revision = revision.wrapping_add(1);
@@ -205,11 +223,39 @@ fn tool_preview(s: &mut Session, p: &Value) -> Result<Value> {
     s.forms_prototype = Some(next);
     Ok(reply)
 }
+fn qualify_repair(s: &mut Session) -> Result<()> {
+    let form = s.forms_prototype.as_ref().ok_or_else(|| EngineError::Other("no retained Form is open".into()))?;
+    let definition = form.definition();
+    let tolerance = active_tolerance(s, None)?;
+    let state = match_state(s)?;
+    if let Some(profile) = &definition.profile {
+        let (resolved, cage) = profile.recompute(&definition, &state)?;
+        if resolved != **profile || cage != definition.cage {
+            return Err(EngineError::Other("the Surface support changed; refresh its reattachment preview before Apply".into()));
+        }
+        profile.fit(&state, &cage, &definition.placement, tolerance)?;
+    } else if let Some(matching) = &definition.matching {
+        let (resolved, report) = matching.recompute(&definition, &state, tolerance)?;
+        crate::doc::forms::convert(&resolved, tolerance)?;
+        raw_form(s)?.refresh_match_preview(resolved, report)?;
+    } else {
+        return Err(EngineError::Other("retained support repair lost its association".into()));
+    }
+    Ok(())
+}
 fn tool_apply(s: &mut Session, _: &Value) -> Result<Value> {
+    if let Some(form) = &s.forms_prototype
+        && form.repair.is_some()
+        && !form.repair_context.as_ref().is_some_and(|context| std::sync::Arc::ptr_eq(&context.document, &s.doc) && context.moves == s.pending_moves)
+    {
+        return Err(EngineError::Other("refresh and qualify the replacement support preview before Apply".into()));
+    }
     let f = raw_form(s)?;
     if f.tool_original.take().is_none() {
         return Err(EngineError::Other("no Form tool preview is open".into()));
     }
+    f.repair = None;
+    f.repair_context = None;
     Ok(f.inspect())
 }
 fn tool_cancel(s: &mut Session, _: &Value) -> Result<Value> {
@@ -221,6 +267,9 @@ fn tool_cancel(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(f.inspect())
 }
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.forms_prototype.as_ref().is_some_and(|f| f.repair.is_some()) {
+        return Err(EngineError::Other("reattach the retained Form support and Apply, or Cancel".into()));
+    }
     if s.forms_prototype.as_ref().is_some_and(|f| f.tool_original.is_some()) {
         return Err(EngineError::Other("apply or cancel the active Form tool first".into()));
     }
@@ -258,6 +307,12 @@ fn match_state(s: &Session) -> Result<crate::doc::ModelState> {
     Ok(crate::doc::world_state(&document, &before)?)
 }
 fn surface(s: &mut Session, p: &Value) -> Result<Value> {
+    surface_with_mode(s, p, false)
+}
+fn surface_repair(s: &mut Session, p: &Value) -> Result<Value> {
+    surface_with_mode(s, p, true)
+}
+fn surface_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value> {
     let args: params::Surface = parse(p)?;
     if s.active_sketch.is_some() {
         return Err(EngineError::Other("finish the sketch before creating a Form Surface".into()));
@@ -267,6 +322,27 @@ fn surface(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let state = match_state(s)?;
     let body = state.body(&args.body).ok_or_else(|| EngineError::Other("the Form Surface source body is missing".into()))?;
+    let repairing = s.forms_prototype.as_ref().is_some_and(|form| form.repair.is_some());
+    if repairing || args.reattach.is_some() {
+        if !repairing || !retained {
+            return Err(EngineError::Other("start an explicit retained Surface reattachment preview first".into()));
+        }
+        let mapping = args.reattach.ok_or_else(|| EngineError::Other("choose the Surface U/V swap and reverse mapping explicitly".into()))?;
+        let current = s.forms_prototype.as_ref().ok_or_else(|| EngineError::Other("no retained Surface source".into()))?;
+        let old = current.profile.as_ref().ok_or_else(|| EngineError::Other("this retained Form requires Match reattachment".into()))?;
+        if args.segments != old.segments {
+            return Err(EngineError::Other("Surface repair keeps the existing guide counts".into()));
+        }
+        let mut definition = current.definition();
+        let source = crate::doc::forms::SupportRef::face(body, args.face)?;
+        let (mut profile, cage) = old.reattach(&definition, &state, source, [mapping.swap, mapping.reverse_u, mapping.reverse_v])?;
+        profile.continuity = args.continuity;
+        profile.partition = args.partition.unwrap_or(old.partition);
+        definition.profile = Some(Box::new(profile));
+        definition.cage = cage;
+        raw_form(s)?.adopt_profile(definition)?;
+        return Ok(raw_form(s)?.inspect());
+    }
     let (mut profile, cage) = crate::doc::forms::Profile::seed(body, args.face, args.segments, args.continuity)?;
     profile.partition = args.partition.unwrap_or_else(|| s.forms_prototype.as_ref().and_then(|f| f.profile.as_ref()).is_none_or(|p| p.partition));
     let mut definition = crate::doc::forms::Definition {
@@ -308,8 +384,22 @@ fn surface(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(s.forms_prototype.as_ref().map_or_else(|| json!({"active":false}), |f| f.inspect()))
 }
 fn matching(s: &mut Session, p: &Value) -> Result<Value> {
+    matching_with_mode(s, p, false)
+}
+fn matching_repair(s: &mut Session, p: &Value) -> Result<Value> {
+    matching_with_mode(s, p, true)
+}
+fn matching_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value> {
     let args: params::Match = parse(p)?;
-    let definition = form(s)?.definition();
+    let definition = if retained {
+        let form = raw_form(s)?;
+        if form.repair.is_none() || form.matching.is_none() || form.tool_original.is_some() {
+            return Err(EngineError::Other("start a retained Match reattachment preview first".into()));
+        }
+        form.definition()
+    } else {
+        form(s)?.definition()
+    };
     let state = match_state(s)?;
     let body = state.body(&args.body).ok_or_else(|| EngineError::Other("Match support body is missing or follows the edited Form".into()))?;
     let source = match (args.face, args.edges) {
@@ -340,7 +430,7 @@ fn matching(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let request = crate::doc::forms::MatchRequest { adjacent_faces: args.adjacent_faces, source, edge: args.edge, order: args.order, tolerances };
     let (definition, report) = crate::doc::forms::Matching::attach(&definition, &state, request, args.tolerance.unwrap_or(0.01))?;
-    let form = form(s)?;
+    let form = raw_form(s)?;
     form.apply_matching(definition, report)?;
     Ok(form.inspect())
 }
@@ -511,6 +601,54 @@ fn finish_options(s: &mut Session, p: &Value) -> Result<Value> {
     active.update_finish_options(update);
     Ok(json!(active.finish_options))
 }
+// Named support identity is authoritative. Its original point can legitimately
+// be stale after a source edit or a component move; recapturing that hint on every
+// Finish would replace a healthy persistent reference with a nearest-face guess.
+fn same_support(a: &crate::doc::forms::SupportRef, b: &crate::doc::forms::SupportRef) -> bool {
+    use crate::doc::forms::SupportRef;
+    match (a, b) {
+        (SupportRef::Face { body: a, name: an, .. }, SupportRef::Face { body: b, name: bn, .. }) => a == b && an == bn,
+        (SupportRef::Wire { body: a, edges: ae }, SupportRef::Wire { body: b, edges: be }) => {
+            a == b && ae.len() == be.len() && ae.iter().zip(be).all(|(a, b)| a.name == b.name)
+        }
+        _ => false,
+    }
+}
+fn form_support(definition: &crate::doc::forms::Definition) -> Option<&crate::doc::forms::SupportRef> {
+    definition.profile.as_ref().map(|p| &p.source).or_else(|| definition.matching.as_ref().map(|m| &m.source))
+}
+fn form_attachment_changed(old: &crate::doc::FeatureKind, new: &crate::doc::FeatureKind) -> bool {
+    use crate::doc::FeatureKind;
+    let (FeatureKind::Form { definition: old, .. }, FeatureKind::Form { definition: new, .. }) = (old, new) else { return false };
+    let bindings_changed = |a: Option<&crate::doc::forms::support::BoundaryBinding>, b: Option<&crate::doc::forms::support::BoundaryBinding>| {
+        // Capturing a certificate when opening a legacy source keeps its old named
+        // support. It is not explicit reattachment and needs no hint recapture.
+        matches!((a, b), (Some(a), Some(b)) if !a.same_attachment(b))
+    };
+    match (&old.profile, &new.profile, &old.matching, &new.matching) {
+        (Some(a), Some(b), _, _) => {
+            !same_support(&a.source, &b.source) || bindings_changed(a.chart.as_ref().map(|c| &c.binding), b.chart.as_ref().map(|c| &c.binding))
+        }
+        (None, None, Some(a), Some(b)) => !same_support(&a.source, &b.source) || bindings_changed(a.binding.as_ref(), b.binding.as_ref()),
+        (None, None, None, None) => false,
+        _ => true,
+    }
+}
+fn reattached_face_names(s: &Session, feature: &crate::doc::Feature, kind: &crate::doc::FeatureKind) -> Result<Vec<String>> {
+    let state = s.model.state_before(feature.id);
+    let mut state = crate::doc::face_point_state(&s.doc, &state, kind, feature.component)?.into_owned();
+    if let crate::doc::FeatureKind::Form { definition, .. } = kind
+        && let Some(source) = form_support(definition)
+    {
+        // Coincident independent bodies can have the same pick. The user chose
+        // this exact support, so the standard capture helper must see that body.
+        state.bodies.retain(|body| body.name == source.body().as_ref());
+        if state.bodies.is_empty() {
+            return Err(EngineError::Other("the reattached Form support body is missing".into()));
+        }
+    }
+    Ok(crate::doc::face_point_names(&s.doc, &state, kind, feature.component)?)
+}
 fn commit(s: &mut Session, p: &Value) -> Result<Value> {
     let f = s.forms_prototype.as_ref().ok_or_else(|| EngineError::Other("no Form is being edited".into()))?;
     let component = f.authoring_component;
@@ -528,6 +666,9 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let args: params::Commit = parse(p)?;
     let form = s.forms_prototype.as_ref().ok_or_else(|| EngineError::Other("no Form is being edited".into()))?;
+    if form.repair.is_some() {
+        return Err(EngineError::Other("reattach the retained Form support and Apply before Finish".into()));
+    }
     let tolerance = if args.tolerance.is_some() {
         args.tolerance
     } else {
@@ -548,10 +689,10 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
         let inverse = crate::doc::mat_inverse(&frame).ok_or_else(|| EngineError::Other("the Form component frame is not invertible".into()))?;
         definition.placement = crate::doc::forms::Placement::from_matrix(&crate::doc::mat_mul(&inverse, &definition.placement.matrix()))?;
         if let Some(matching) = &mut definition.matching {
-            matching.source.transform_picks(&inverse);
+            matching.transform_picks(&inverse);
         }
         if let Some(profile) = &mut definition.profile {
-            profile.source.transform_picks(&inverse);
+            profile.transform_picks(&inverse);
         }
         if let Some(pipe) = &mut definition.pipe {
             pipe.source.transform_picks(&inverse);
@@ -601,6 +742,12 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
             args.targets.into_iter().map(Into::into).collect()
         },
     };
+    let recaptured = editing_feature
+        .and_then(|id| s.doc.feature(id))
+        .filter(|feature| form_attachment_changed(&feature.kind, &kind))
+        .map(|feature| reattached_face_names(s, feature, &kind))
+        .transpose()?;
+    let before_reattach = recaptured.as_ref().map(|_| (s.doc.clone(), s.model.clone()));
     for &id in consumed.keys() {
         s.doc_mut().delete_feature(id)?;
     }
@@ -608,6 +755,9 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
         let feature =
             s.doc_mut().features.iter_mut().find(|f| f.id == id).ok_or_else(|| EngineError::Other("the edited Form feature was removed".into()))?;
         feature.kind = kind;
+        if let Some(names) = recaptured {
+            feature.face_names = names;
+        }
         s.refresh();
         if let Some(error) = s.model.result(id).and_then(|r| r.error.as_ref()) {
             return Err(EngineError::Other(error.clone()));
@@ -638,6 +788,15 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let joined = result.get("feature").and_then(Value::as_u64).ok_or_else(|| EngineError::Other("new Form did not return its identity".into()))?;
     references.apply(s, joined)?;
+    if let Some((document, model)) = before_reattach {
+        let broken = super::edit::newly_broken_in_history(&document, &model, &s.doc, &s.model);
+        if !broken.is_empty() {
+            return Err(EngineError::Other(format!(
+                "reattaching the Form would break: {}",
+                broken.into_iter().map(|(name, error)| format!("{name}: {error}")).collect::<Vec<_>>().join("; ")
+            )));
+        }
+    }
     s.forms_prototype = None;
     Ok(result)
 }
@@ -761,18 +920,34 @@ fn symmetry(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(form.inspect())
 }
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    edit_with_mode(s, p, false)
+}
+fn repair(s: &mut Session, p: &Value) -> Result<Value> {
+    edit_with_mode(s, p, true)
+}
+fn edit_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value> {
     let args: params::Edit = parse(p)?;
     if s.active_sketch.is_some() {
         return Err(EngineError::Other("finish the active sketch before editing a Form".into()));
     }
     if let Some(form) = &s.forms_prototype {
         if form.editing_feature == Some(args.feature) {
+            if form.repair.is_some() && !retained {
+                return Err(EngineError::Other("this retained Form still requires explicit support repair".into()));
+            }
+            if retained {
+                let error = form.repair.as_ref().ok_or_else(|| EngineError::Other("the Form is already open for normal editing".into()))?;
+                return Ok(json!({"feature":args.feature,"error":error,"form":form.inspect()}));
+            }
             return Ok(form.inspect());
         }
         return Err(EngineError::Other("finish or cancel the active Form before editing another feature".into()));
     }
     let feature = s.doc.features.iter().find(|f| f.id == args.feature).ok_or_else(|| EngineError::Other("no such feature".into()))?;
     let crate::doc::FeatureKind::Form { definition, .. } = &feature.kind else { return Err(EngineError::Other("select a Form feature".into())) };
+    if retained && (definition.pipe.is_some() || (definition.profile.is_none() && definition.matching.is_none())) {
+        return Err(EngineError::Other("retained support repair requires a saved Match or Surface".into()));
+    }
     let levels = definition.cage.preview_level(3).map_err(|e| EngineError::Other(e.to_string()))?;
     let mut definition = definition.as_ref().clone();
     let mut pipe_segments = Vec::new();
@@ -787,36 +962,50 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             pipe_segments = pipe.rebuild(&state).map(|built| built.segments).unwrap_or_default();
         }
     }
-    if let Some(matching) = &definition.matching {
-        let before = s.model.state_before(feature.id);
-        let state = crate::doc::state_in_frame(&s.doc, &before, feature.component)?;
-        definition = matching.recompute(&definition, &state, 0.01)?.0;
-    }
-    if let Some(profile) = &definition.profile {
-        let before = s.model.state_before(feature.id);
-        let state = crate::doc::state_in_frame(&s.doc, &before, feature.component)?;
-        let (profile, cage) = profile.recompute(&definition, &state)?;
-        definition.profile = Some(Box::new(profile));
-        definition.cage = cage;
-    }
+    let saved = definition.clone();
+    let association = (|| -> Result<()> {
+        if let Some(matching) = &definition.matching {
+            let before = s.model.state_before(feature.id);
+            let state = crate::doc::state_in_frame(&s.doc, &before, feature.component)?;
+            definition = matching.recompute(&definition, &state, 0.01)?.0;
+        }
+        if let Some(profile) = &definition.profile {
+            let before = s.model.state_before(feature.id);
+            let state = crate::doc::state_in_frame(&s.doc, &before, feature.component)?;
+            let (profile, cage) = profile.recompute(&definition, &state)?;
+            definition.profile = Some(Box::new(profile));
+            definition.cage = cage;
+        }
+        Ok(())
+    })();
+    let repair_error = match association {
+        Ok(()) if retained => return Err(EngineError::Other("the Form support currently resolves; use normal Edit Form".into())),
+        Ok(()) => None,
+        Err(error) if retained => {
+            definition = saved;
+            Some(error.to_string().chars().take(4096).collect::<String>())
+        }
+        Err(error) => return Err(error),
+    };
     let authoring_component = feature.component;
     let authoring_path = if s.active_component == authoring_component { s.active_occurrence_path.clone() } else { None };
     let frame = if s.active_component == authoring_component { s.active_component_frame() } else { s.doc.component_transform(authoring_component) };
     definition.placement = crate::doc::forms::Placement::from_matrix(&crate::doc::mat_mul(&frame, &definition.placement.matrix()))?;
     if let Some(matching) = &mut definition.matching {
-        matching.source.transform_picks(&frame);
+        matching.transform_picks(&frame);
     }
     if let Some(profile) = &mut definition.profile {
-        profile.source.transform_picks(&frame);
+        profile.transform_picks(&frame);
     }
     if let Some(pipe) = &mut definition.pipe {
         pipe.source.transform_picks(&frame);
     }
     let mut form = crate::forms_prototype::Form::from_definition(definition, levels, Some(feature.id))?;
+    form.repair = repair_error.clone();
     form.pipe_segments = pipe_segments;
     form.authoring_component = authoring_component;
     form.authoring_path = authoring_path;
-    let reply = form.inspect();
+    let reply = if let Some(error) = repair_error { json!({"feature":args.feature,"error":error,"form":form.inspect()}) } else { form.inspect() };
     s.forms_prototype = Some(form);
     Ok(reply)
 }
@@ -900,12 +1089,18 @@ fn quality(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(f.inspect())
 }
 fn undo(s: &mut Session, _: &Value) -> Result<Value> {
-    let f = form(s)?;
+    let f = raw_form(s)?;
+    if f.tool_original.is_some() {
+        return Err(EngineError::Other("apply or cancel the active Form tool first".into()));
+    }
     f.history(false)?;
     Ok(f.inspect())
 }
 fn redo(s: &mut Session, _: &Value) -> Result<Value> {
-    let f = form(s)?;
+    let f = raw_form(s)?;
+    if f.tool_original.is_some() {
+        return Err(EngineError::Other("apply or cancel the active Form tool first".into()));
+    }
     f.history(true)?;
     Ok(f.inspect())
 }
@@ -920,6 +1115,7 @@ fn close(s: &mut Session, _: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Vec3;
 
     fn sculpted_dimension_fixture(levels: usize) -> Session {
         let mut session = Session::default();
@@ -1280,6 +1476,522 @@ mod tests {
         let form = s.forms_prototype.as_ref().unwrap();
         assert!(form.control_positions()[4].dist(Vec3::new(83.0, 22.0, 4.0)) < 1e-6);
         assert!(form.profile.as_ref().unwrap().boundary().iter().all(|&i| (form.control_positions()[i].z - 3.0).abs() < 1e-6));
+    }
+    fn retained_support_fixture(surface: bool) -> (Session, u64, usize) {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"corner":[-2,-3,-1],"length":4,"width":6,"height":1,"body_name":"Support","operation":"new"})).unwrap();
+        let body = s.model.state().body("Support").unwrap().body.clone();
+        let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|plane| plane.normal().z > 0.99)).unwrap();
+        if surface {
+            s.execute("form.surface", &json!({"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":false})).unwrap();
+            let points = &s.forms_prototype.as_ref().unwrap().cage.points;
+            let a = points[5] + solidcore_record::Vec3::new(0.0, 0.0, 0.4);
+            let b = points[6] + solidcore_record::Vec3::new(0.0, 0.0, 0.15);
+            s.execute("form.prototype.set_vertices", &json!({"vertices":[5,6],"positions":[[a.x,a.y,a.z],[b.x,b.y,b.z]]})).unwrap();
+        } else {
+            s.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[4,6,1],"segments":[2,2,1],"levels":1})).unwrap();
+            let center = s.forms_prototype.as_ref().unwrap().cage.points.iter().position(|p| p.x.abs() < 1e-8 && p.y.abs() < 1e-8).unwrap();
+            s.execute("form.prototype.set_vertices", &json!({"vertices":[center],"positions":[[0,0,2]]})).unwrap();
+            let edge = opening(&s.forms_prototype.as_ref().unwrap().cage);
+            s.execute("form.prototype.match", &json!({"body":"Support","face":top,"edge":edge,"order":0,"tolerance":0.01})).unwrap();
+        }
+        let feature = s.execute("form.prototype.commit", &json!({"name":"Retained","tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+        assert!(s.execute("form.repair", &json!({"feature":feature})).is_err(), "healthy support uses ordinary Edit");
+        assert!(s.forms_prototype.is_none());
+        let crate::doc::FeatureKind::Form { definition, .. } = &mut s.doc_mut().feature_mut(feature).unwrap().kind else { panic!("Form fixture") };
+        let definition = definition.as_mut();
+        let source = if surface { &mut definition.profile.as_mut().unwrap().source } else { &mut definition.matching.as_mut().unwrap().source };
+        let crate::doc::forms::SupportRef::Face { body, .. } = source else { panic!("face support") };
+        *body = "Missing retained support".into();
+        s.refresh();
+        assert!(s.model.result(feature).unwrap().error.is_some());
+        (s, feature, top)
+    }
+    fn saved_form_source(s: &Session, id: u64) -> crate::doc::forms::Definition {
+        let crate::doc::FeatureKind::Form { definition, .. } = &s.doc.feature(id).unwrap().kind else { panic!("Form fixture") };
+        definition.as_ref().clone()
+    }
+    #[test]
+    fn genuine_suppressed_support_reattachment_finishes_with_new_face_names_and_kept_consumers() {
+        for surface in [false, true] {
+            let mut s = Session::default();
+            let request = |name| json!({"corner":[-2,-3,-1],"length":4,"width":6,"height":1,"body_name":name,"operation":"new"});
+            let lost = s.execute("solid.box", &request("LostSupport")).unwrap()["feature"].as_u64().unwrap();
+            let replacement = s.execute("solid.box", &request("RepairSupport")).unwrap()["feature"].as_u64().unwrap();
+            let body = s.model.state().body("LostSupport").unwrap().body.clone();
+            let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+            if surface {
+                s.execute("form.surface", &json!({"body":"LostSupport","face":top,"segments":[3,2],"partition":false})).unwrap();
+                let points = &s.forms_prototype.as_ref().unwrap().cage.points;
+                let a = points[5] + Vec3::new(0.03, -0.04, 0.4);
+                let b = points[6] + Vec3::new(-0.02, 0.01, 0.15);
+                s.execute("form.prototype.set_vertices", &json!({"vertices":[5,6],"positions":[[a.x,a.y,a.z],[b.x,b.y,b.z]]})).unwrap();
+            } else {
+                s.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[4,6,1],"segments":[2,2,1],"levels":1})).unwrap();
+                let center = s.forms_prototype.as_ref().unwrap().cage.points.iter().position(|p| p.x.abs() + p.y.abs() < 1e-8).unwrap();
+                s.execute("form.prototype.set_vertices", &json!({"vertices":[center],"positions":[[0,0,2]]})).unwrap();
+                let edge = opening(&s.forms_prototype.as_ref().unwrap().cage);
+                s.execute("form.prototype.match", &json!({"body":"LostSupport","face":top,"edge":edge,"order":0})).unwrap();
+            }
+            let id = s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+            let source = saved_form_source(&s, id);
+            let names_before = s.doc.feature(id).unwrap().face_names.clone();
+            assert!(names_before.iter().any(|n| n.starts_with(&format!("F{lost}:"))));
+            // Retain an actual healthy incoming whole-body consumer, without
+            // undoing it before Finish. Its identity and source body must survive.
+            let child = s.execute("solid.move", &json!({"bodies":["RepairSupport"],"translate":[0,0,0.5]})).unwrap()["feature"].as_u64().unwrap();
+            let child_before = s.doc.feature(child).unwrap().clone();
+            assert!(s.model.result(child).unwrap().error.is_none());
+            let logical_face = {
+                let state = s.model.state_before(child);
+                state
+                    .bodies
+                    .iter()
+                    .find_map(|body| {
+                        let names = crate::doc::naming::face_names(body);
+                        let index = names.iter().position(|name| name.starts_with(&format!("F{id}:")))?;
+                        let at = crate::doc::naming::face_spot(body, index)?.point;
+                        Some(crate::doc::construct::GeoRef::Face { at, name: Some(names[index].clone()) })
+                    })
+                    .unwrap()
+            };
+            let logical_pick = logical_face.picked_point(&s.model.state_before(child)).unwrap();
+            s.execute("timeline.suppress", &json!({"feature":lost,"suppressed":true})).unwrap();
+            assert!(s.model.result(id).unwrap().error.is_some());
+            assert!(s.model.result(child).unwrap().error.is_none());
+            assert_eq!(saved_form_source(&s, id), source);
+            let document = serde_json::to_value(s.doc.as_ref()).unwrap();
+            assert!(s.execute("form.edit", &json!({"feature":id})).is_err());
+            s.execute("form.repair", &json!({"feature":id})).unwrap();
+            s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+            let preview = if surface {
+                json!({"surface":{"body":"RepairSupport","face":top,"segments":[3,2],"partition":false,"reattach":{"swap":false,"reverse_u":false,"reverse_v":false}}})
+            } else {
+                json!({"matching":{"body":"RepairSupport","face":top,"edge":opening(&source.cage),"order":0}})
+            };
+            s.execute("form.prototype.tool.preview", &preview).unwrap();
+            s.execute("form.prototype.tool.apply", &json!({})).unwrap();
+            let repaired = s.forms_prototype.as_ref().unwrap().definition();
+            s.execute("form.prototype.undo", &json!({})).unwrap();
+            assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), source);
+            assert!(s.forms_prototype.as_ref().unwrap().repair.is_some());
+            s.execute("form.prototype.redo", &json!({})).unwrap();
+            assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), document);
+            s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap();
+            assert!(s.model.result(id).unwrap().error.is_none());
+            assert!(s.model.result(child).unwrap().error.is_none());
+            assert_eq!(s.doc.feature(child), Some(&child_before));
+            let feature = s.doc.feature(id).unwrap();
+            assert_eq!(feature.face_names.len(), names_before.len());
+            assert!(feature.face_names.iter().all(|name| name.starts_with(&format!("F{replacement}:"))), "{:?}", feature.face_names);
+            assert!(logical_face.picked_point(&s.model.state_before(child)).unwrap().dist(logical_pick) < 1e-7);
+            assert_eq!(form_support(&saved_form_source(&s, id)).unwrap().body().as_ref(), "RepairSupport");
+            if surface {
+                // Surface replaces its selected source and retains that body's
+                // ownership; it does not retarget the suppressed body's identity.
+                assert!(s.model.state().body("LostSupport").is_none());
+                assert_eq!(s.model.state().body("RepairSupport").unwrap().feature, replacement);
+            }
+            s.execute("edit.undo", &json!({})).unwrap();
+            assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), document);
+            assert_eq!(s.doc.feature(id).unwrap().face_names, names_before);
+            s.execute("edit.redo", &json!({})).unwrap();
+            let encoded = serde_json::to_vec(s.doc.as_ref()).unwrap();
+            let document: crate::doc::Document = serde_json::from_slice(&encoded).unwrap();
+            let mut reopened = Session { doc: std::sync::Arc::new(document), ..Default::default() };
+            reopened.refresh();
+            assert!(reopened.model.result(id).unwrap().error.is_none());
+            assert!(reopened.model.result(child).unwrap().error.is_none());
+            assert_eq!(reopened.doc.feature(child), Some(&child_before));
+            reopened.execute("form.edit", &json!({"feature":id})).unwrap();
+            assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), repaired);
+        }
+    }
+    #[test]
+    fn reattachment_refuses_a_newly_broken_selected_source_face_consumer_atomically() {
+        let mut s = Session::default();
+        let request = |name| json!({"corner":[-2,-3,-1],"length":4,"width":6,"height":1,"body_name":name,"operation":"new"});
+        let lost = s.execute("solid.box", &request("LostSupport")).unwrap()["feature"].as_u64().unwrap();
+        let replacement = s.execute("solid.box", &request("RepairSupport")).unwrap()["feature"].as_u64().unwrap();
+        let body = s.model.state().body("LostSupport").unwrap().body.clone();
+        let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        s.execute("form.surface", &json!({"body":"LostSupport","face":top,"segments":[3,2],"partition":false})).unwrap();
+        let points = &s.forms_prototype.as_ref().unwrap().cage.points;
+        let a = points[5] + Vec3::new(0.03, -0.04, 0.4);
+        let b = points[6] + Vec3::new(-0.02, 0.01, 0.15);
+        s.execute("form.prototype.set_vertices", &json!({"vertices":[5,6],"positions":[[a.x,a.y,a.z],[b.x,b.y,b.z]]})).unwrap();
+        let id = s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+        let state = s.model.state();
+        let selected = crate::doc::forms::SupportRef::face(state.body("RepairSupport").unwrap(), top).unwrap();
+        let crate::doc::forms::SupportRef::Face { name, pick, .. } = selected else { panic!("face") };
+        assert!(name.starts_with(&format!("F{replacement}:")));
+        // This is a genuine, initially supported analytic-face consumer. A
+        // curved NURBS cap cannot silently become its analytic plane/cylinder.
+        let consumer = s
+            .execute(
+                "construct.axis.normal_to_face",
+                &json!({
+                    "face":{"type":"face","at":[pick.x,pick.y,pick.z],"name":name},
+                    "point":{"point":[pick.x,pick.y,pick.z]},"name":"Replacement plane normal"
+                }),
+            )
+            .unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        assert!(s.model.result(consumer).unwrap().error.is_none());
+        s.execute("timeline.suppress", &json!({"feature":lost,"suppressed":true})).unwrap();
+        assert!(s.model.result(id).unwrap().error.is_some());
+        assert!(s.model.result(consumer).unwrap().error.is_none());
+        s.execute("form.repair", &json!({"feature":id})).unwrap();
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        s.execute("form.prototype.tool.preview", &json!({"surface":{"body":"RepairSupport","face":top,"segments":[3,2],"partition":false,"reattach":{"swap":false,"reverse_u":false,"reverse_v":false}}})).unwrap();
+        s.execute("form.prototype.tool.apply", &json!({})).unwrap();
+        let document = serde_json::to_value(s.doc.as_ref()).unwrap();
+        let draft = s.forms_prototype.as_ref().unwrap().definition();
+        let error = s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap_err().to_string();
+        assert!(error.contains("reattaching the Form would break"), "{error}");
+        assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), document);
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), draft);
+        assert!(s.model.result(consumer).unwrap().error.is_none());
+        s.execute("form.prototype.close", &json!({})).unwrap();
+        assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), document);
+    }
+    #[test]
+    fn a_moved_legacy_support_certificate_keeps_existing_named_faces_on_noop_finish() {
+        let mut s = Session::default();
+        let base = s.execute("solid.box", &json!({"length":12,"width":8,"height":2,"body_name":"Support","operation":"new"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        let body = s.model.state().body("Support").unwrap().body.clone();
+        let top = (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        let movement = s.execute("solid.move", &json!({"bodies":["Support"],"translate":[0,0,0]})).unwrap()["feature"].as_u64().unwrap();
+        s.execute("form.surface", &json!({"body":"Support","face":top,"segments":[3,2]})).unwrap();
+        let points = &s.forms_prototype.as_ref().unwrap().cage.points;
+        let a = points[5] + Vec3::new(0.03, -0.04, 0.4);
+        let b = points[6] + Vec3::new(-0.02, 0.01, 0.15);
+        s.execute("form.prototype.set_vertices", &json!({"vertices":[5,6],"positions":[[a.x,a.y,a.z],[b.x,b.y,b.z]]})).unwrap();
+        let id = s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
+        // A source-only old-format record has no chart certificate yet. Its
+        // existing face references remain authoritative as the source moves.
+        let crate::doc::FeatureKind::Form { definition, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind else { panic!("Form") };
+        definition.profile.as_mut().unwrap().chart = None;
+        s.refresh();
+        let legacy = s.doc.feature(id).unwrap().kind.clone();
+        s.execute("form.edit", &json!({"feature":id})).unwrap();
+        let mut upgraded = legacy.clone();
+        let crate::doc::FeatureKind::Form { definition, .. } = &mut upgraded else { panic!("Form") };
+        **definition = s.forms_prototype.as_ref().unwrap().definition();
+        assert!(definition.profile.as_ref().unwrap().chart.is_some());
+        assert!(!form_attachment_changed(&legacy, &upgraded));
+        for hint in upgraded.face_points_mut() {
+            *hint += Vec3::new(7.0, -4.0, 9.0);
+        }
+        assert!(!form_attachment_changed(&legacy, &upgraded), "lookup hints do not change named support identity");
+        s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap();
+        let names = s.doc.feature(id).unwrap().face_names.clone();
+        s.execute(
+            "timeline.redefine",
+            &json!({"feature":base,"command":"solid.box","params":{"length":12,"width":8,"height":3,"body_name":"Support","operation":"new"}}),
+        )
+        .unwrap();
+        s.execute(
+            "timeline.redefine",
+            &json!({"feature":movement,"command":"solid.move","params":{"bodies":["Support"],"translate":[7,-4,9],"axis":[1,0,0],"angle":90}}),
+        )
+        .unwrap();
+        assert!(s.model.result(id).unwrap().error.is_none());
+        let old = s.doc.feature(id).unwrap().kind.clone();
+        s.execute("form.edit", &json!({"feature":id})).unwrap();
+        let edited = s.forms_prototype.as_ref().unwrap().definition();
+        let crate::doc::FeatureKind::Form { definition, .. } = &old else { panic!("Form") };
+        let mut changed = old.clone();
+        let crate::doc::FeatureKind::Form { definition: changed_definition, .. } = &mut changed else { panic!("Form") };
+        **changed_definition = edited;
+        assert!(!form_attachment_changed(&old, &changed));
+        assert_eq!(form_support(definition).unwrap().body().as_ref(), "Support");
+        s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap();
+        assert!(s.model.result(id).unwrap().error.is_none());
+        assert_eq!(s.doc.feature(id).unwrap().face_names, names);
+        // Coincident picks do not make different named bodies or faces the same
+        // attachment; test the semantic trigger independently of numeric picks.
+        let mut changed = s.doc.feature(id).unwrap().kind.clone();
+        let crate::doc::FeatureKind::Form { definition, .. } = &mut changed else { panic!("Form") };
+        let crate::doc::forms::SupportRef::Face { name, .. } = &mut definition.profile.as_mut().unwrap().source else { panic!("face") };
+        name.push_str("-different-face");
+        assert!(form_attachment_changed(&s.doc.feature(id).unwrap().kind, &changed));
+    }
+    #[test]
+    fn retained_support_repair_is_explicit_cancelable_and_recoverable_without_document_mutation() {
+        for surface in [false, true] {
+            let (mut s, feature, _) = retained_support_fixture(surface);
+            let document = serde_json::to_value(s.doc.as_ref()).unwrap();
+            let source = saved_form_source(&s, feature);
+            assert!(s.execute("form.edit", &json!({"feature":feature})).is_err());
+            assert!(s.forms_prototype.is_none());
+            let opened = s.execute("form.repair", &json!({"feature":feature})).unwrap();
+            assert!(!opened["error"].as_str().unwrap().is_empty());
+            let form = s.forms_prototype.as_ref().unwrap();
+            assert_eq!(form.definition(), source);
+            let marker = form.repair.clone();
+            assert!(s.execute("form.edit", &json!({"feature":feature})).is_err());
+            assert!(s.execute("form.prototype.commit", &json!({})).is_err());
+            assert!(s.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[0,0,9]]})).is_err());
+            assert!(s.execute("form.prototype.create", &json!({})).is_err());
+            s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+            assert!(s.execute("form.prototype.tool.apply", &json!({})).is_err());
+            assert!(s.execute("form.prototype.tool.preview", &json!({"project":{"tool":"flatten","vertices":[0,1,2]}})).is_err());
+            let encoded = crate::forms_prototype::draft::Draft::capture(s.forms_prototype.as_ref().unwrap(), false).encode().unwrap();
+            let (recovered, dirty) = crate::forms_prototype::draft::Draft::restore(&s, &encoded).unwrap();
+            assert!(!dirty);
+            assert_eq!(recovered.definition(), source);
+            assert_eq!(recovered.repair, marker);
+            assert!(!recovered.has_tool_preview());
+            let mut recovered_session = s.scratch();
+            recovered_session.forms_prototype = Some(recovered);
+            assert!(recovered_session.execute("form.prototype.commit", &json!({})).is_err());
+            s.execute("form.prototype.tool.cancel", &json!({})).unwrap();
+            assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), source);
+            assert_eq!(s.forms_prototype.as_ref().unwrap().repair, marker);
+            s.execute("form.prototype.close", &json!({})).unwrap();
+            assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), document);
+        }
+    }
+    #[test]
+    fn retained_match_reattaches_transactionally_and_persists_after_apply_undo_redo_and_finish() {
+        let (mut s, feature, top) = retained_support_fixture(false);
+        let saved = saved_form_source(&s, feature);
+        let document = serde_json::to_value(s.doc.as_ref()).unwrap();
+        s.execute("form.repair", &json!({"feature":feature})).unwrap();
+        let edge = opening(&saved.cage);
+        let preview = json!({"matching":{"body":"Support","face":top,"edge":edge,"order":0,"tolerance":0.01}});
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        s.execute("form.prototype.tool.preview", &preview).unwrap();
+        assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), document);
+        // Autosave retains the accepted unresolved source, never a staged replacement.
+        let draft = crate::forms_prototype::draft::Draft::capture(s.forms_prototype.as_ref().unwrap(), false).encode().unwrap();
+        let (recovered, _) = crate::forms_prototype::draft::Draft::restore(&s, &draft).unwrap();
+        assert_eq!(recovered.definition(), saved);
+        assert!(recovered.repair.is_some());
+        s.execute("form.prototype.tool.cancel", &json!({})).unwrap();
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), saved);
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        s.execute("form.prototype.tool.preview", &preview).unwrap();
+        s.execute("form.prototype.tool.apply", &json!({})).unwrap();
+        let repaired = s.forms_prototype.as_ref().unwrap().definition();
+        assert!(s.forms_prototype.as_ref().unwrap().repair.is_none());
+        assert_ne!(repaired.matching, saved.matching);
+        s.execute("form.prototype.undo", &json!({})).unwrap();
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), saved);
+        assert!(s.forms_prototype.as_ref().unwrap().repair.is_some());
+        assert!(s.execute("form.prototype.commit", &json!({})).is_err());
+        s.execute("form.prototype.redo", &json!({})).unwrap();
+        assert!(s.forms_prototype.as_ref().unwrap().repair.is_none());
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), repaired);
+        s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap();
+        assert!(s.model.result(feature).unwrap().error.is_none());
+        let encoded = serde_json::to_vec(s.doc.as_ref()).unwrap();
+        let document: crate::doc::Document = serde_json::from_slice(&encoded).unwrap();
+        let mut reopened = Session { doc: std::sync::Arc::new(document), ..Default::default() };
+        reopened.refresh();
+        reopened.execute("form.edit", &json!({"feature":feature})).unwrap();
+        assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), repaired);
+    }
+    #[test]
+    fn retained_reattachment_preview_rejects_changed_upstream_source_until_requalified() {
+        let (mut s, feature, top) = retained_support_fixture(true);
+        s.execute("form.repair", &json!({"feature":feature})).unwrap();
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        let preview = json!({"surface":{"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":false,"reattach":{"swap":false,"reverse_u":false,"reverse_v":false}}});
+        s.execute("form.prototype.tool.preview", &preview).unwrap();
+        let candidate = s.forms_prototype.as_ref().unwrap().definition();
+        let crate::doc::FeatureKind::Box { height, .. } = &mut s.doc_mut().features[0].kind else { panic!("Box") };
+        *height = "2 mm".into();
+        s.refresh();
+        assert!(s.execute("form.prototype.tool.apply", &json!({})).is_err());
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), candidate);
+        assert!(s.forms_prototype.as_ref().unwrap().repair.is_some());
+        s.execute("form.prototype.tool.preview", &preview).unwrap();
+        s.execute("form.prototype.tool.apply", &json!({})).unwrap();
+        let repaired = s.forms_prototype.as_ref().unwrap();
+        assert!(repaired.repair.is_none());
+        assert!(repaired.profile.as_ref().unwrap().rest.iter().all(|p| (p.z - 1.0).abs() < 1e-9));
+        for (index, height) in [(5, 0.4), (6, 0.15)] {
+            assert!((repaired.cage.points[index].z - 1.0 - height).abs() < 1e-9);
+        }
+    }
+    #[test]
+    fn retained_surface_all_eight_explicit_mappings_preserve_sculpt_frames_and_cad_cell_identity() {
+        use solidcore_record::Vec3;
+        let (mut template, feature, top) = retained_support_fixture(true);
+        // Two independent, asymmetric three-dimensional sculpt vectors on an
+        // unequal grid. These are retained source data, not a geometric oracle.
+        let crate::doc::FeatureKind::Form { definition, .. } = &mut template.doc_mut().feature_mut(feature).unwrap().kind else { panic!("Form") };
+        let source = definition.as_mut();
+        source.profile.as_mut().unwrap().partition = true;
+        source.cage.points[5] += Vec3::new(0.03, -0.04, 0.0);
+        source.cage.points[6] += Vec3::new(-0.02, 0.01, 0.0);
+        template.refresh();
+        let retained = saved_form_source(&template, feature);
+        let original_document = serde_json::to_value(template.doc.as_ref()).unwrap();
+        let old = retained.profile.as_ref().unwrap();
+        let old_u = (old.rest[1] - old.rest[0]).normalized().unwrap();
+        let old_v = (old.rest[4] - old.rest[0]).normalized().unwrap();
+        let old_n = old_u.cross(old_v).normalized().unwrap();
+        for bits in 0..8 {
+            let swap = bits & 4 != 0;
+            let reverse_u = bits & 1 != 0;
+            let reverse_v = bits & 2 != 0;
+            let mut s = template.scratch();
+            s.execute("form.repair", &json!({"feature":feature})).unwrap();
+            assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), retained);
+            s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+            s.execute("form.prototype.tool.preview",&json!({"surface":{"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":true,"reattach":{"swap":swap,"reverse_u":reverse_u,"reverse_v":reverse_v}}})).unwrap_or_else(|e|panic!("mapping {bits}: {e}"));
+            let repaired = s.forms_prototype.as_ref().unwrap().definition();
+            let profile = repaired.profile.as_ref().unwrap();
+            assert_eq!(repaired.cage.faces, retained.cage.faces, "logical face IDs/winding stay retained");
+            assert_eq!(profile.segments, [3, 2]);
+            let state = match_state(&s).unwrap();
+            let support = state.body("Support").unwrap();
+            let face = crate::kernel::face_geometry(&support.body, top).unwrap();
+            let span = crate::kernel::face_parameter_span(&support.body, top).unwrap();
+            let eval = |u: f64, v: f64| face.surface.eval(span[0][0] + u * (span[0][1] - span[0][0]), span[1][0] + v * (span[1][1] - span[1][0])).0;
+            // Native planar derivatives establish the expected physical frame
+            // independently of Profile's finite-difference grid_frame helper.
+            let native_u = (eval(1.0, 0.0) - eval(0.0, 0.0)).normalized().unwrap() * if reverse_u { -1.0 } else { 1.0 };
+            let native_v = (eval(0.0, 1.0) - eval(0.0, 0.0)).normalized().unwrap() * if reverse_v { -1.0 } else { 1.0 };
+            let (new_u, new_v) = if swap { (native_v, native_u) } else { (native_u, native_v) };
+            let new_n = new_u.cross(new_v).normalized().unwrap();
+            let parity = if swap ^ reverse_u ^ reverse_v { -1.0 } else { 1.0 };
+            assert!((new_n.dot(old_n) - parity).abs() < 1e-9, "mapping {bits} has a known handedness");
+            let boundary = old.boundary();
+            for j in 0..=2 {
+                for i in 0..=3 {
+                    let logical = [i as f64 / 3.0, j as f64 / 2.0];
+                    let mut uv = if swap { [logical[1], logical[0]] } else { logical };
+                    if reverse_u {
+                        uv[0] = 1.0 - uv[0];
+                    }
+                    if reverse_v {
+                        uv[1] = 1.0 - uv[1];
+                    }
+                    let index = j * 4 + i;
+                    let rest = eval(uv[0], uv[1]);
+                    assert!(profile.rest[index].dist(rest) < 1e-9, "mapping {bits}, guide {index} native correspondence");
+                    let delta = retained.cage.points[index] - old.rest[index];
+                    let expected = if boundary.contains(&index) {
+                        rest
+                    } else {
+                        rest + new_u * delta.dot(old_u) + new_v * delta.dot(old_v) + new_n * delta.dot(old_n)
+                    };
+                    assert!(repaired.cage.points[index].dist(expected) < 1e-9, "mapping {bits}, guide {index} physical sculpt vector");
+                    assert!(((repaired.cage.points[index] - rest).len() - delta.len()).abs() < 1e-9);
+                }
+            }
+            let fit = profile.fit(&state, &repaired.cage, &repaired.placement, 0.01).unwrap_or_else(|e| panic!("mapping {bits} fit: {e}"));
+            assert!(fit.report.gap <= 0.01 && fit.report.point_gap <= 0.01);
+            assert!(
+                !fit.solid.is_surface() && fit.solid.shell_count() == 1 && fit.solid.validity().is_empty(),
+                "mapping {bits} must sew as one valid solid"
+            );
+            let roots = fit.patch_roots.as_ref().unwrap_or_else(|| panic!("mapping {bits} lost a qualified rectangular CAD grid"));
+            let mut sorted = roots.clone();
+            sorted.sort_unstable();
+            assert_eq!(sorted, (0..6).collect::<Vec<_>>(), "mapping {bits} retains all six logical CAD cells");
+            for (native, &logical) in roots.iter().enumerate() {
+                let geometry = crate::kernel::face_geometry(&fit.patch, native).unwrap();
+                let corners: Vec<_> = geometry.loops.iter().flatten().map(|edge| edge.at(0.0).unwrap().0).collect();
+                for &vertex in &retained.cage.faces[logical] {
+                    let expected = repaired.placement.point(repaired.cage.points[vertex]);
+                    assert!(
+                        corners.iter().any(|point| point.dist(expected) <= 0.01),
+                        "mapping {bits}, native cell {native} incorrectly names logical cell {logical}"
+                    );
+                }
+            }
+            assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), original_document, "preview must not rewrite accepted source");
+            s.execute("form.prototype.tool.apply", &json!({})).unwrap();
+            s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap_or_else(|e| panic!("mapping {bits} Finish: {e}"));
+            assert!(s.model.result(feature).unwrap().error.is_none());
+            let document: crate::doc::Document = serde_json::from_value(serde_json::to_value(s.doc.as_ref()).unwrap()).unwrap();
+            let mut reopened = Session { doc: std::sync::Arc::new(document), ..Default::default() };
+            reopened.refresh();
+            reopened.execute("form.edit", &json!({"feature":feature})).unwrap_or_else(|e| panic!("mapping {bits} source-only reopen: {e}"));
+            assert_eq!(
+                reopened.forms_prototype.as_ref().unwrap().definition(),
+                repaired,
+                "mapping {bits} must reopen without rotating, resetting or inverting saved source"
+            );
+            assert_eq!(saved_form_source(&template, feature), retained);
+            assert_eq!(serde_json::to_value(template.doc.as_ref()).unwrap(), original_document);
+        }
+    }
+    #[test]
+    fn retained_surface_uses_explicit_fixed_density_mapping_and_preserves_both_sculpt_offsets() {
+        use solidcore_record::Vec3;
+        let (mut s, feature, top) = retained_support_fixture(true);
+        let saved = saved_form_source(&s, feature);
+        let old_profile = saved.profile.as_ref().unwrap();
+        s.execute("form.repair", &json!({"feature":feature})).unwrap();
+        assert!(
+            s.execute(
+                "form.surface",
+                &json!({"body":"Support","face":top,"segments":[3,2],"reattach":{"swap":false,"reverse_u":false,"reverse_v":false}})
+            )
+            .is_err()
+        );
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        assert!(s.execute("form.prototype.tool.preview", &json!({"surface":{"body":"Support","face":top,"segments":[3,2]}})).is_err());
+        assert!(
+            s.execute(
+                "form.prototype.tool.preview",
+                &json!({"surface":{"body":"Support","face":top,"segments":[2,2],"reattach":{"swap":false,"reverse_u":false,"reverse_v":false}}})
+            )
+            .is_err()
+        );
+        let preview = json!({"surface":{"body":"Support","face":top,"segments":[3,2],"continuity":0,"partition":false,"reattach":{"swap":true,"reverse_u":true,"reverse_v":false}}});
+        s.execute("form.prototype.tool.preview", &preview).unwrap();
+        let current = s.forms_prototype.as_ref().unwrap();
+        let profile = current.profile.as_ref().unwrap();
+        assert_eq!(current.cage.faces, saved.cage.faces);
+        assert_eq!(profile.segments, [3, 2]);
+        // Independently evaluate the explicitly requested swapped/reversed native chart.
+        let source_state = match_state(&s).unwrap();
+        let source = source_state.body("Support").unwrap();
+        let geometry = crate::kernel::face_geometry(&source.body, top).unwrap();
+        let span = crate::kernel::face_parameter_span(&source.body, top).unwrap();
+        for j in 0..=2 {
+            for i in 0..=3 {
+                let uv = [1.0 - j as f64 / 2.0, i as f64 / 3.0];
+                let expected =
+                    geometry.surface.eval(span[0][0] + uv[0] * (span[0][1] - span[0][0]), span[1][0] + uv[1] * (span[1][1] - span[1][0])).0;
+                assert!(profile.rest[j * 4 + i].dist(expected) < 1e-9);
+            }
+        }
+        for (index, height) in [(5, 0.4), (6, 0.15)] {
+            let before = saved.cage.points[index] - old_profile.rest[index];
+            let after = current.cage.points[index] - profile.rest[index];
+            assert!((before.len() - height).abs() < 1e-9);
+            assert!((after.len() - height).abs() < 1e-9, "sculpt length must survive explicit reattachment");
+            assert!(after.dot(Vec3::Z) > 0.0, "this orientation keeps the top face normal");
+        }
+        let repaired = current.definition();
+        s.execute("form.prototype.tool.cancel", &json!({})).unwrap();
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), saved);
+        s.execute("form.prototype.tool.begin", &json!({})).unwrap();
+        s.execute("form.prototype.tool.preview", &preview).unwrap();
+        s.execute("form.prototype.tool.apply", &json!({})).unwrap();
+        s.execute("form.prototype.undo", &json!({})).unwrap();
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), saved);
+        assert!(s.forms_prototype.as_ref().unwrap().repair.is_some());
+        s.execute("form.prototype.redo", &json!({})).unwrap();
+        assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), repaired);
+        s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap();
+        assert!(s.model.result(feature).unwrap().error.is_none());
+        let document: crate::doc::Document = serde_json::from_value(serde_json::to_value(s.doc.as_ref()).unwrap()).unwrap();
+        let mut reopened = Session { doc: std::sync::Arc::new(document), ..Default::default() };
+        reopened.refresh();
+        reopened.execute("form.edit", &json!({"feature":feature})).unwrap();
+        assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), repaired);
     }
     #[test]
     fn form_surface_guides_keep_the_rim_preview_cancel_and_saved_editing() {

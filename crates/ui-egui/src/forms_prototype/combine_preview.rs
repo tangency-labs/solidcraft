@@ -142,6 +142,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_enclosed_cutting_forms_handles_remain_editable_behind_its_combined_preview() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.session.execute("solid.box", &json!({"corner":[-10,-10,-10],"length":20,"width":20,"height":20,"body_name":"Base"})).unwrap();
+        app.session.execute("form.prototype.create", &json!({"size":8,"segments":[1,1,1],"levels":2})).unwrap();
+        app.session.execute("form.prototype.finish_options", &json!({"operation":"cut","tolerance":"0.05 mm"})).unwrap();
+        controls::load(&mut app);
+        app.cam.target = Vec3::ZERO;
+        app.cam.distance = 60.0;
+        app.cam.fov = 0.0;
+        let projection = crate::viewport::projection(&app, egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0)));
+        let (id, point) = app
+            .session
+            .forms_prototype
+            .as_ref()
+            .unwrap()
+            .surface
+            .vertices
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|&(_, point)| surface::visible(&app, &projection, point))
+            .unwrap();
+        let definition = app.session.forms_prototype.as_ref().unwrap().definition();
+        let document = app.session.doc.clone();
+        let params = json!({"operation":"cut","tolerance":0.05,"targets":["Base"]});
+        let preview = compute(app.session.scratch(), &params).unwrap();
+        assert_eq!(preview.replaced, BTreeSet::from(["Base".into()]));
+        assert_eq!(preview.entries.len(), 1);
+        let screen = projection.to_screen(point).unwrap();
+        let (origin, direction) = projection.ray(screen);
+        let depth = (point - origin).dot(direction);
+        let replacement_hit = preview.entries[0].mesh.raycast(origin, direction).unwrap().0;
+        let scale = origin.x.abs().max(origin.y.abs()).max(origin.z.abs()).max(depth.abs()).max(replacement_hit.abs()).max(1.0);
+        let roundoff = 64.0 * f64::EPSILON * scale;
+        assert!(
+            depth - replacement_hit > 2.0 && depth - replacement_hit > 1_000_000.0 * roundoff,
+            "the actual opaque Boolean result is genuinely ahead of this authored cutter handle, not a coincident own-skin hit"
+        );
+        let base = app.session.world_state().unwrap().body("Base").unwrap().mesh();
+        app.forms_prototype.context.entries =
+            vec![context::Entry { name: Some("Base".into()), index: Some(solidcraft_engine::geom::MeshIndex::new(&base)), mesh: base, color: None }];
+        assert!(
+            context::occludes(&app, origin, direction, depth),
+            "the ordinary opaque Base would block this handle without the Boolean editing exception"
+        );
+        app.forms_prototype.combination.ready = Some((key(&app).unwrap(), Ok(preview)));
+        assert!(ready(&app).is_some());
+        assert_eq!(context::render_entries(&app).count(), 1, "render only the replacement Base, not the old source body");
+        assert!(!context::occludes(&app, origin, direction, depth), "the combined result includes the authored cutter and is not unrelated context");
+        assert!(surface::visible(&app, &projection, point));
+        assert_eq!(surface::nearest_with(&app, &projection, screen, Pick::Vertex), Some(Element::Vertex(id)));
+        let ctx = egui::Context::default();
+        let _ = crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(projection.rect), ..Default::default() }, |ui| {
+            surface::overlay(&mut app, ui, &projection)
+        });
+        assert!(app.forms_prototype.projected.iter().any(|&(vertex, _)| vertex == id));
+        assert!(Arc::ptr_eq(&document, &app.session.doc));
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), definition);
+    }
+    #[test]
     fn combined_preview_matches_finish_and_preserves_the_editing_session() {
         let mut session = Session::default();
         session.execute("solid.box", &json!({"corner":[-0.5,-0.5,-0.5],"length":1,"width":1,"height":1,"body_name":"Base"})).unwrap();

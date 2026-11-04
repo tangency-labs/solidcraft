@@ -10,6 +10,107 @@ pub(super) struct Partition {
     pub body: kernel::Body,
     pub roots: Vec<usize>,
 }
+/// The displayed skin and its editable guides share the native edge nodes.
+/// Legacy single-face sources keep their authored CAD topology: cells used here
+/// only constrain their display tessellation. Unsupported trims retain the
+/// existing bounded-chart display; this does not repartition their bounding box.
+pub(super) fn display_mesh(
+    patch: &kernel::Body,
+    roots: Option<&[usize]>,
+    profile: &Profile,
+    cage: &Cage,
+    placement: &Placement,
+    tolerance: f64,
+    mesh: solidcraft_geom::Mesh,
+) -> Result<(solidcraft_geom::Mesh, Option<Vec<Vec<Vec3>>>)> {
+    let (mut mesh, roots) = if let Some(roots) = roots {
+        (mesh, roots.to_vec())
+    } else {
+        if patch.face_count() != 1 {
+            return Ok((mesh, None));
+        }
+        let mut display = profile.clone();
+        display.partition = true;
+        let Ok(Some(cells)) = build(patch, &display, cage, placement, tolerance) else {
+            return Ok((mesh, None));
+        };
+        (cells.body.mesh(&kernel::MeshTolerance::chord(tolerance.min(0.05)))?, cells.roots)
+    };
+    let edges = cage.edges().map_err(|e| invalid(e.to_string()))?;
+    if mesh.edges.len() != edges.len() || mesh.edge_faces.len() != mesh.edges.len() {
+        return Err(invalid("Surface display cells lost their logical guide edges"));
+    }
+    let native_owners = mesh
+        .edge_faces
+        .iter()
+        .map(|faces| {
+            faces
+                .iter()
+                .map(|&face| roots.get(face as usize).copied().ok_or_else(|| invalid("Surface display edge lost its cell owner")))
+                .collect::<Result<BTreeSet<_>>>()
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // The constructor projects the authored guides onto this common support.
+    // Certify those fitted endpoints, rather than using the user's fit tolerance
+    // as an identity radius (it may exceed a small cell's entire width).
+    let support = kernel::face_geometry(patch, 0)?;
+    let domain = solidcraft_geom::tess::uv::domain(&support.surface);
+    let endpoints = cage
+        .points
+        .iter()
+        .map(|&point| {
+            let uv = support.parameters(placement.point(point), None, tolerance)?;
+            let (point, du, dv) = support.surface.derivs(uv[0], uv[1]).ok_or_else(|| invalid("Surface display lost its fitted guide endpoint"))?;
+            let parameter_scale = [0, 1].map(|d| domain.range[d].map_or(uv[d].abs(), |(a, b)| a.abs().max(b.abs()).max(b - a)).max(uv[d].abs()));
+            let roundoff = 1024.0 * f64::EPSILON * (point.len() + du.len() * parameter_scale[0] + dv.len() * parameter_scale[1]);
+            Ok((point, roundoff))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut guides = Vec::with_capacity(edges.len());
+    let mut smooth = Vec::with_capacity(edges.len());
+    let mut sharp = Vec::with_capacity(edges.len());
+    let mut used = BTreeSet::new();
+    for &[a, b] in &edges {
+        let owners: BTreeSet<_> = cage
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, face)| face.iter().zip(face.iter().cycle().skip(1)).take(face.len()).any(|(&i, &j)| [i.min(j), i.max(j)] == [a, b]))
+            .map(|(id, _)| id)
+            .collect();
+        let &(start, start_roundoff) = endpoints.get(a).ok_or_else(|| invalid("Surface display lost a guide endpoint"))?;
+        let &(end, end_roundoff) = endpoints.get(b).ok_or_else(|| invalid("Surface display lost a guide endpoint"))?;
+        let roundoff = start_roundoff.max(end_roundoff);
+        let candidates: Vec<_> = mesh
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(id, _)| native_owners.get(*id).is_some_and(|native| *native == owners))
+            .filter_map(|(id, curve)| {
+                let (first, last) = (*curve.first()?, *curve.last()?);
+                let forward = first.dist(start) <= roundoff && last.dist(end) <= roundoff;
+                let reverse = first.dist(end) <= roundoff && last.dist(start) <= roundoff;
+                (curve.len() >= 2 && forward != reverse).then_some((id, reverse))
+            })
+            .collect();
+        let [(id, reverse)] = candidates.as_slice() else {
+            return Err(invalid("Surface display guide does not have one exact cell-edge identity"));
+        };
+        if !used.insert(*id) {
+            return Err(invalid("Surface display reused one native edge for distinct guides"));
+        }
+        let mut curve = mesh.edges.get(*id).ok_or_else(|| invalid("Surface display lost its native guide edge"))?.clone();
+        if *reverse {
+            curve.reverse();
+        }
+        guides.push(curve);
+        smooth.push(mesh.smooth_edges.get(*id).copied().unwrap_or(false));
+        sharp.push(mesh.sharp_edges.get(*id).copied().unwrap_or(false));
+    }
+    mesh.smooth_edges = smooth;
+    mesh.sharp_edges = sharp;
+    Ok((mesh, Some(guides)))
+}
 pub(super) fn build(patch: &kernel::Body, profile: &Profile, cage: &Cage, placement: &Placement, tolerance: f64) -> Result<Option<Partition>> {
     if !profile.partition || cage.faces.len() < 2 {
         return Ok(None);

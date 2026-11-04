@@ -68,6 +68,7 @@ pub const DOCUMENTED: &[&str] = &[
     "form.blend.import",
     "form.pipe",
     "form.prototype.create",
+    "form.repair",
     "form.surface",
     "frame.member",
     "inspect.accessibility",

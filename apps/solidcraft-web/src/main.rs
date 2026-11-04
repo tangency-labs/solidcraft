@@ -300,7 +300,7 @@ mod web {
     /// One open design followed for its kept copy: its revision, when that last changed, and since
     /// when its copy has lacked a change (`None`: current, or being written).
     struct Track {
-        revision: u64,
+        revision: files::KeptRevision,
         last_change: f64,
         first_unwritten: Option<f64>,
     }
@@ -553,12 +553,13 @@ mod web {
                 for s in solidcraft_ui_egui::documents::open_sessions(app).into_iter().filter(|s| s.is_dirty()) {
                     let id = keep::entry_id(&page, s.uid);
                     wanted.insert(s.uid);
-                    let t = keep_track.entry(s.uid).or_insert(Track { revision: s.revision, last_change: time, first_unwritten: None });
-                    if t.revision != s.revision {
-                        t.revision = s.revision;
+                    let revision = (s.revision, solidcraft_engine::recovery::form_revision(s));
+                    let t = keep_track.entry(s.uid).or_insert(Track { revision, last_change: time, first_unwritten: None });
+                    if t.revision != revision {
+                        t.revision = revision;
                         t.last_change = time;
                     }
-                    if files.kept.borrow().get(&id).copied().flatten() == Some(s.revision) {
+                    if files.kept.borrow().get(&id).copied().flatten() == Some(revision) {
                         t.first_unwritten = None;
                         continue;
                     }
@@ -575,10 +576,10 @@ mod web {
                         continue;
                     }
                     if now || keep::due(time, first, t.last_change) {
-                        match solidcraft_engine::io::write_design_container(&s.design()) {
+                        match solidcraft_engine::recovery::capture_bytes(s) {
                             Ok(bytes) => {
                                 let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
-                                files::write_kept(files, &entry, bytes, s.revision);
+                                files::write_kept(files, &entry, bytes, revision);
                                 t.first_unwritten = None;
                             }
                             Err(e) => {
@@ -653,22 +654,23 @@ mod web {
         fn keep_answer(&mut self, entry: &keep::Entry, answer: keep::Answer) {
             let Some(plan) = keep::plan(answer, entry, self.saved_exists(entry)) else { return };
             if plan.open_copy {
-                let copy = match files::prepare_kept(&entry.id, entry.path.as_deref()) {
-                    Ok(copy) => copy,
+                if self.app.file_picker_busy() {
+                    return;
+                }
+                if !solidcraft_ui_egui::documents::active_is_blank(&self.app) && self.app.docs.count() >= solidcraft_ui_egui::documents::MAX_OPEN {
+                    self.app.set_status("close a design before recovering another", true);
+                    return;
+                }
+                let session = match files::recovered_kept(&entry.id, entry.path.as_deref()) {
+                    Ok(session) => session,
                     Err(error) => {
                         self.app.set_status(error, true);
                         return;
                     }
                 };
-                self.app.open_path(&copy);
-                if self.app.session.path.as_deref() != Some(copy.as_str()) {
-                    // Not opened (the status says why): it stays offered.
-                    return;
-                }
-                // It is its own design again (saving goes to its file), with its changes unsaved.
-                self.app.session.path = entry.path.clone();
-                self.app.session.doc_mut().name = entry.name.clone();
-                self.app.session.mark_unsaved();
+                // Recovery retains the original path and the base document's dirty state.
+                // Cancel can still leave a saved base clean when only the Form was unfinished.
+                solidcraft_ui_egui::documents::adopt(&mut self.app, session);
                 self.app.home.open = false;
             }
             if let Some(path) = &plan.open_saved {

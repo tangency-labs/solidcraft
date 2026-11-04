@@ -251,10 +251,10 @@ impl crate::Feature {
                     pipe.source.remap_names(ids, bodies);
                 }
                 if let Some(profile) = &mut definition.profile {
-                    profile.source.remap_names(ids, bodies);
+                    profile.remap_names(ids, bodies);
                 }
                 if let Some(matching) = &mut definition.matching {
-                    matching.source.remap_names(ids, bodies);
+                    matching.remap_names(ids, bodies);
                 }
             }
             K::Sketch { plane, sketch } => {

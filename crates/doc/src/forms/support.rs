@@ -12,6 +12,10 @@ use solidcraft_geom::{
     tess::SurfaceJet,
 };
 
+#[path = "support_binding.rs"]
+mod binding;
+pub use binding::BoundaryBinding;
+
 /// A normalized parameter on one exact support edge. Unlike a whole-wire
 /// arc-length fraction, this stays on the same corner when a face changes aspect.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -36,6 +40,7 @@ pub struct BoundarySupport {
     face: Option<kernel::FaceGeometry>,
     plane: Option<Plane>,
     curves: Vec<kernel::CurveGeometry>,
+    indices: Vec<usize>,
     samples: Vec<Sample>,
     length: f64,
     corners: Vec<(f64, Vec3)>,
@@ -47,7 +52,10 @@ impl BoundarySupport {
     pub fn from_face(body: &kernel::Body, face: usize) -> Result<Self> {
         let geometry = kernel::face_geometry(body, face)?;
         let curves = geometry.loops.get(geometry.outer).cloned().ok_or_else(|| invalid("Match support has no outer boundary"))?;
-        Self::new(curves, Some(geometry))
+        let boundaries = kernel::face_boundaries(body, face)?;
+        let indices =
+            boundaries.get(geometry.outer).ok_or_else(|| invalid("Match support has no outer edge identities"))?.iter().map(|e| e.edge).collect();
+        Self::new(curves, Some(geometry), indices)
     }
     pub fn from_adjacent_faces(body: &kernel::Body, face: usize) -> Result<Self> {
         let mut support = Self::from_face(body, face)?;
@@ -86,14 +94,15 @@ impl BoundarySupport {
         if edges.is_empty() || edges.len() > 256 || unique.len() != edges.len() {
             return Err(invalid("Match requires 1..256 distinct wire edges"));
         }
-        let mut remaining = kernel::edge_geometry(body, edges)?;
-        let first = remaining.first().cloned().ok_or_else(|| invalid("empty Match wire"))?;
+        let mut remaining: Vec<_> = kernel::edge_geometry(body, edges)?.into_iter().zip(edges.iter().copied()).collect();
+        let (first, first_index) = remaining.first().cloned().ok_or_else(|| invalid("empty Match wire"))?;
         remaining.remove(0);
         let mut ordered = vec![first];
+        let mut indices = vec![first_index];
         while !remaining.is_empty() {
             let point = ordered.last().and_then(|c| c.at(1.0)).map(|p| p.0).ok_or_else(|| invalid("invalid Match wire endpoint"))?;
             let mut candidates = Vec::new();
-            for (i, curve) in remaining.iter().enumerate() {
+            for (i, (curve, _)) in remaining.iter().enumerate() {
                 if curve.at(0.0).is_some_and(|p| p.0.dist(point) < 1e-7) {
                     candidates.push((i, false));
                 } else if curve.at(1.0).is_some_and(|p| p.0.dist(point) < 1e-7) {
@@ -103,16 +112,17 @@ impl BoundarySupport {
             let [(index, reverse)] = candidates.as_slice() else {
                 return Err(invalid("Match edges must form one connected, unbranched wire"));
             };
-            let mut curve = remaining.remove(*index);
+            let (mut curve, edge_index) = remaining.remove(*index);
             if *reverse {
                 curve.range.swap(0, 1);
             }
             ordered.push(curve);
+            indices.push(edge_index);
         }
-        Self::new(ordered, None)
+        Self::new(ordered, None, indices)
     }
-    fn new(curves: Vec<kernel::CurveGeometry>, face: Option<kernel::FaceGeometry>) -> Result<Self> {
-        if curves.is_empty() || curves.len() > 1024 {
+    fn new(curves: Vec<kernel::CurveGeometry>, face: Option<kernel::FaceGeometry>, indices: Vec<usize>) -> Result<Self> {
+        if curves.is_empty() || curves.len() > 1024 || curves.len() != indices.len() {
             return Err(invalid("Match boundary curve budget exceeded"));
         }
         for (curve, next) in curves.iter().zip(curves.iter().cycle().skip(1)) {
@@ -158,7 +168,103 @@ impl BoundarySupport {
                 corners.push(((arc / length).rem_euclid(1.0), point));
             }
         }
-        Ok(Self { face, plane, curves, samples, length, corners, adjacent: Vec::new() })
+        Ok(Self { face, plane, curves, indices, samples, length, corners, adjacent: Vec::new() })
+    }
+    pub fn curve_count(&self) -> usize {
+        self.curves.len()
+    }
+    pub(super) fn original_parameter(&self, coordinate: &BoundaryCoordinate) -> Result<(usize, f64)> {
+        if !coordinate.fraction.is_finite() || !(0.0..=1.0).contains(&coordinate.fraction) {
+            return Err(invalid("invalid exact support coordinate"));
+        }
+        let index = *self.indices.get(coordinate.curve).ok_or_else(|| invalid("missing original support edge"))?;
+        let curve = self.curves.get(coordinate.curve).ok_or_else(|| invalid("missing original support curve"))?;
+        Ok((index, curve.range[0] * (1.0 - coordinate.fraction) + curve.range[1] * coordinate.fraction))
+    }
+    pub(super) fn original_coordinate(&self, edge: usize, parameter: f64) -> Result<BoundaryCoordinate> {
+        let index = self.indices.iter().position(|&index| index == edge).ok_or_else(|| invalid("edge does not belong to the original support"))?;
+        let curve = self.curves.get(index).ok_or_else(|| invalid("missing original support curve"))?;
+        let fraction = (parameter - curve.range[0]) / (curve.range[1] - curve.range[0]);
+        if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+            return Err(invalid("parameter is outside its original support edge"));
+        }
+        Ok(BoundaryCoordinate { curve: index, fraction })
+    }
+    pub(super) fn corner_fractions(&self) -> impl Iterator<Item = f64> + '_ {
+        self.corners.iter().map(|&(fraction, _)| fraction)
+    }
+    pub fn at_coordinate(&self, coordinate: &BoundaryCoordinate) -> Result<(Vec3, Vec3)> {
+        if !coordinate.fraction.is_finite() || !(0.0..=1.0).contains(&coordinate.fraction) {
+            return Err(invalid("invalid exact support coordinate"));
+        }
+        self.curves.get(coordinate.curve).and_then(|curve| curve.at(coordinate.fraction)).ok_or_else(|| invalid("missing exact support coordinate"))
+    }
+    fn reordered(&self, order: &[(usize, bool)]) -> Result<Self> {
+        let ids: std::collections::BTreeSet<_> = order.iter().map(|(index, _)| *index).collect();
+        if order.len() != self.curves.len() || ids.len() != order.len() || ids.iter().any(|&index| index >= order.len()) {
+            return Err(invalid("support binding is not a complete curve permutation"));
+        }
+        let curves = order
+            .iter()
+            .map(|&(index, reverse)| {
+                let mut curve = self.curves[index].clone();
+                if reverse {
+                    curve.range.swap(0, 1);
+                }
+                curve
+            })
+            .collect();
+        let indices = order.iter().map(|&(index, _)| self.indices[index]).collect();
+        let mut out = Self::new(curves, self.face.clone(), indices)?;
+        if !self.adjacent.is_empty() {
+            out.adjacent = order
+                .iter()
+                .map(|&(index, _)| self.adjacent.get(index).cloned().ok_or_else(|| invalid("missing bound neighboring face")))
+                .collect::<Result<_>>()?;
+            let mut hints = vec![None; out.curves.len()];
+            for sample in &mut out.samples {
+                let face = out.adjacent.get(sample.curve).ok_or_else(|| invalid("missing bound neighboring surface"))?;
+                let hint = hints.get_mut(sample.curve).ok_or_else(|| invalid("invalid bound neighboring sample"))?;
+                let uv = face.parameters(sample.point, *hint, 1e-7)?;
+                sample.neighbor_uv = Some(uv);
+                *hint = Some(uv);
+            }
+        }
+        Ok(out)
+    }
+    pub(crate) fn recover_legacy(&self, coordinates: &[BoundaryCoordinate], points: &[Vec3], tolerance: f64) -> Result<Self> {
+        if coordinates.len() != points.len() || !(4..=64).contains(&points.len()) || !tolerance.is_finite() || !(1e-6..=1.0).contains(&tolerance) {
+            return Err(invalid("legacy Match requires bounded saved boundary constraints"));
+        }
+        let n = self.curves.len();
+        let mut winner = None;
+        for reverse in [false, true] {
+            for seam in 0..n {
+                let mut fits = true;
+                for (coordinate, &point) in coordinates.iter().zip(points) {
+                    if coordinate.curve >= n {
+                        return Err(invalid("legacy Match curve count changed"));
+                    }
+                    let curve = if reverse { (seam + n - coordinate.curve) % n } else { (seam + coordinate.curve) % n };
+                    let fraction = if reverse { 1.0 - coordinate.fraction } else { coordinate.fraction };
+                    let target = self.at_coordinate(&BoundaryCoordinate { curve, fraction })?.0;
+                    if !point.is_finite() || target.dist(point) > tolerance {
+                        fits = false;
+                        break;
+                    }
+                }
+                if fits {
+                    let order: Vec<_> = (0..n).map(|i| (if reverse { (seam + n - i) % n } else { (seam + i) % n }, reverse)).collect();
+                    if winner.is_some() {
+                        return Err(invalid("legacy Match support orientation is ambiguous; reattach the support"));
+                    }
+                    winner = Some(order);
+                }
+            }
+        }
+        self.reordered(
+            &winner.ok_or_else(|| invalid("legacy Match support changed before its curve identities were retained; reattach the support"))?,
+        )
     }
     pub fn supports_curvature(&self) -> bool {
         self.face.is_some() || self.plane.is_some()
@@ -211,7 +317,7 @@ impl BoundarySupport {
             .and_then(|c| c.at(a.fraction + (b.fraction - a.fraction) * t))
             .ok_or_else(|| invalid("support parameter is not evaluable"))
     }
-    fn fraction_near(&self, point: Vec3) -> Result<f64> {
+    pub(super) fn fraction_near(&self, point: Vec3) -> Result<f64> {
         self.samples
             .windows(2)
             .filter_map(|p| {
