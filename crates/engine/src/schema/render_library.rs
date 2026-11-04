@@ -2,8 +2,8 @@
 //! `cmd/render/library.rs` (#11443). `render.library.describe`, `.targets` and `.preview` read
 //! these same parameter types, so the contract is exactly what they take. `render.library.list`
 //! keeps the two readers it has: the physical profiles' takes `availability: null`, the other
-//! catalogs' doesn't, and its contract takes what either takes. Like the handlers, a contract
-//! refuses unknown keys.
+//! catalogs' doesn't. Its type takes what either takes, and its schema says which `kind` takes
+//! which (`availability_by_kind`). Like the handlers, a contract refuses unknown keys.
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ const KINDS: &[&str] = &[
 /// file or rendered.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(transform = availability_by_kind)]
 pub struct LibraryListParams {
     /// The catalog. Default: surfaces.
     #[serde(default = "surfaces")]
@@ -43,8 +44,8 @@ pub struct LibraryListParams {
     #[serde(default)]
     pub query: String,
     /// Which resources: `all`, `usable` (the app can use them now), `specification` (described,
-    /// not usable) or `blocked`. Physical profiles take only `all` and `usable`, or `null`.
-    /// Default: all.
+    /// not usable) or `blocked`. Physical profiles take only `all`, `usable` or `null`; the other
+    /// catalogs don't take `null`. Default: all.
     #[serde(default)]
     #[schemars(schema_with = "availability_schema")]
     pub availability: Option<String>,
@@ -72,6 +73,22 @@ fn list_kind_schema(_: &mut SchemaGenerator) -> Schema {
 
 fn availability_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": ["string", "null"], "enum": ["all", "usable", "specification", "blocked", null]})
+}
+
+/// Which `availability` each of `render.library.list`'s readers takes, by `kind`: the physical
+/// profiles' takes `all`, `usable` or `null`; every other catalog's (an absent `kind` is
+/// `surfaces`) takes the four filters but not `null`. Only the schema says this. The type leaves
+/// the refusal to the readers, which check the query and the page first, so a call with more
+/// than one mistake keeps the handler's first message.
+fn availability_by_kind(schema: &mut Schema) {
+    let others: Vec<&str> = KINDS.iter().copied().filter(|kind| *kind != "physical_profiles").collect();
+    schema.insert(
+        "anyOf".into(),
+        serde_json::json!([
+            {"required": ["kind"], "properties": {"kind": {"enum": ["physical_profiles"]}, "availability": {"enum": ["all", "usable", null]}}},
+            {"properties": {"kind": {"enum": others}, "availability": {"enum": ["all", "usable", "specification", "blocked"]}}}
+        ]),
+    );
 }
 
 /// Describe one resource of a catalog of the built-in render library: the resource as its

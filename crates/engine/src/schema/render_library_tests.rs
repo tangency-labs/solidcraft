@@ -16,6 +16,30 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<LibraryPreviewParams>(), &["id"]);
 }
 
+/// The list's schema takes an `availability` exactly when the reader for its `kind` does: the
+/// physical profiles' takes `null` but not `specification` or `blocked`, the others' the reverse.
+#[test]
+fn the_list_schema_takes_each_readers_availability() {
+    let schema = input_schema_for::<LibraryListParams>();
+    let schema = schema.as_value();
+    let calls = [
+        json!({}),
+        json!({"availability": "blocked"}),
+        json!({"availability": null}),
+        json!({"kind": "hdr", "availability": "specification"}),
+        json!({"kind": "hdr", "availability": null}),
+        json!({"kind": "physical_profiles"}),
+        json!({"kind": "physical_profiles", "availability": "usable"}),
+        json!({"kind": "physical_profiles", "availability": null}),
+        json!({"kind": "physical_profiles", "availability": "blocked"}),
+        json!({"kind": "physical_profiles", "availability": "specification"}),
+    ];
+    for p in calls {
+        let handled = Session::default().execute("render.library.list", &p).is_ok();
+        assert_eq!(conforms(schema, schema, &p), handled, "{p}");
+    }
+}
+
 #[test]
 fn strict_keeps_todays_errors() {
     let long = "x".repeat(257);
