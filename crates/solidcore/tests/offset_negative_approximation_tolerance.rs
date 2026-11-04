@@ -1,8 +1,9 @@
 //! The offset at the edge of what the model resolves. The nightly fuzz of
 //! `offset.offset_executive_p2`: fuzz00175 (a member distance of `1e-300`, which both
 //! kernels spent tens of seconds subdividing toward, HANG-53) is refused before anything
-//! is built, naming the distance and the bound. fuzz00087: the temporary B-rep's
-//! tolerance passes through C++'s `SmZoneTol3d` conversion, which takes fabs; and
+//! is built, naming the distance and the bound. fuzz00087: refused by its distance; with
+//! a resolvable one, its approximation tolerance -1e-300 is refused too (WR-749: its
+//! magnitude would be the temporary B-rep's tolerance, below the effective zero); and
 //! fuzz00035 / fuzz00108 / fuzz00117: `SetTolerance` turns that magnitude, when zero,
 //! into `SM_ZONE_TOL_3D` times the empty B-rep's box size (1).
 #![allow(clippy::unwrap_used, clippy::panic)]
@@ -91,7 +92,7 @@ fn a_member_distance_just_above_the_brep_tolerance_builds() {
 }
 
 #[test]
-fn fuzz00087_temporary_brep_tolerance_is_positive() {
+fn fuzz00087_is_refused_by_its_distance_then_by_its_approximation_tolerance() {
     let mut kernel = Kernel::default();
     let mut original = create_cylinder(&mut kernel, Point3::new(1.0, -2.0, 0.5), 3.0, 5.0).unwrap();
     // fuzz00087 as found (a B-rep tolerance of 1e300) offsets by less than the tolerance
@@ -102,22 +103,26 @@ fn fuzz00087_temporary_brep_tolerance_is_positive() {
         OffsetFailure::DistanceUnresolved { distance, resolution }
             if distance == 0.5 && resolution == 1e300
     ));
-    // the approximation tolerance's magnitude still reaches the temporary B-rep
+    // with a resolvable distance, the approximation tolerance's magnitude, 1e-300, would
+    // be the temporary B-rep's tolerance: one no B-rep can hold (WR-749), refused by name
     original.set_tolerance(0.25);
     let mut notifications = Notifications::new(&mut original);
     let mut executive = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.5, -1e-300);
     executive.set_inset(true);
     executive.set_extend_convex_edges(true);
     executive.set_merge_results(false);
-    let result = executive
+    let error = executive
         .do_solid_offset(
             &mut kernel,
             Some(&mut original),
             SolidOffsetOptions::default(),
             &mut notifications.context(),
         )
-        .unwrap();
-    assert_eq!(result.tolerance(), 1e-300);
+        .unwrap_err();
+    assert_eq!(
+        refusal(&error),
+        OffsetFailure::ToleranceUnresolved { tolerance: -1e-300 }
+    );
     assert_eq!(executive.approximation_tol_3d(), -1e-300);
 }
 

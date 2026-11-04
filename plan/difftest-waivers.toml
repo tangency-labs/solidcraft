@@ -95,3 +95,15 @@ reason = "old corner code deleted, #2400: the blend corner is the default; 6 pas
 unit = "topology.brep_planar_section"
 check = "ratchet"
 reason = "old corner code deleted, #2400: the blend corner is the default; 12 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "tiny_tolerance_sheet_exact_boundary"
+reason = "#2393, WR-749 (confirmed): parked as cpp_defect, the C++ shells a sheet of tolerance 1e-15 into a result of tolerance 1e-15, below SM_EFF_ZERO; solidcore refuses it by name (OffsetFailure::ToleranceUnresolved)"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "tiny_tolerance_sheet_above_boundary"
+reason = "#2393, WR-749 (confirmed): as tiny_tolerance_sheet_exact_boundary"

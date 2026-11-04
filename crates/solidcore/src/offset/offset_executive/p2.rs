@@ -52,7 +52,9 @@
 //! There is no new recursion; all owned loops are bounded by existing arena/relation lengths.
 //! Not upstream: the static offset, solid offset and extended offset refuse, before
 //! anything is built, an offset distance below the input's B-rep tolerance
-//! (`check_resolvable`; HANG-53).
+//! (`check_resolvable`; HANG-53), and a nonzero approximation tolerance (for the static
+//! offset and the API offsets, the source's B-rep tolerance) at or below `SM_EFF_ZERO`,
+//! which upstream sets as the offset B-rep's tolerance (WR-749, UB-291, #2393).
 //!
 //! Cancellation: the solid, extended and shell paths poll the kernel's cancel token (#2136, #2372) per face, edge use, vertex and stitch pass; the static offset's status collapse passes `Cancelled` through, and the shell and offset APIs return `Cancelled`, not `Ok`, under a fired token.
 
@@ -1187,9 +1189,18 @@ impl OffsetExecutive {
     /// upstream spends tens of seconds subdividing its offset surfaces toward a distance
     /// of `1e-300`.
     ///
+    /// Then refuses a tolerance no B-rep can hold for the offset B-rep: the approximation
+    /// tolerance's magnitude (`allocate_offset_brep` sets it, as upstream's
+    /// `SetTolerance(GetThisApproxTol3d())`) when nonzero but at or below `SM_EFF_ZERO`.
+    /// `ValidatePointers` test 0 needs a tolerance above it, and double arithmetic leaves
+    /// edges and vertices farther than that from their faces. Upstream builds on it
+    /// (WR-749): an invalid body, or SIGSEGV when the face build then fails (UB-291,
+    /// #2393). An exact zero still takes the automatic tolerance.
+    ///
     /// # Errors
     ///
-    /// [`OffsetFailure::DistanceUnresolved`] naming the distance and the tolerance, of
+    /// [`OffsetFailure::DistanceUnresolved`] naming the distance and the tolerance, or
+    /// [`OffsetFailure::ToleranceUnresolved`] naming the approximation tolerance, both of
     /// kind [`crate::error::ErrorKind::InvalidInput`].
     fn check_resolvable(&self, operation: &'static str, original: &Brep) -> Result<()> {
         let distance = self.offset_distance();
@@ -1203,6 +1214,13 @@ impl OffsetExecutive {
                 },
             )
             .into_error());
+        }
+        let tolerance = self.approximation_tol_3d();
+        if tolerance != 0.0 && tolerance.abs() <= crate::math::EFF_ZERO {
+            return Err(
+                Failure::new(operation, OffsetFailure::ToleranceUnresolved { tolerance })
+                    .into_error(),
+            );
         }
         Ok(())
     }

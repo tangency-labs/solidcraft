@@ -9,3 +9,31 @@ case = "issue2174_cap_two_rim_edges_api_shell_out"
 libc = "glibc"
 cpp_defect = "UB-241"
 why = "C++ heap-layout dependent (UB-241 use-after-free in GlueCoincidentBrepVertices): crashes in one run and finishes in another; the Rust output is the same in every run (tests/issue_2174_cap_outward_ub_241.rs)"
+
+# #2393, nightly fuzz00167 (2026-11-04): the extended offset of a sphere with approximation
+# tolerance -1e-300. The C++ crashes (UB-291: SIGSEGV in ReplaceSurface on a half-built
+# face; when run, the crash trap makes it a rejected case). The expected Rust result is the
+# refusal OffsetFailure::ToleranceUnresolved { tolerance: -1e-300 } (WR-749).
+# Parked, not passed: this case is not run in the gate.
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "fuzz00167"
+cpp_defect = "UB-291"
+why = "C++ SIGSEGV (UB-291: BuildOffsetOfFaceuse ignores a failed face build, ReplaceSurface dereferences its null owner face); Rust refuses the approximation tolerance -1e-300 by name, ToleranceUnresolved (WR-749; tests/issue_2393_extended_offset_tiny_approx_tol.rs)"
+
+# Static shells of a plane sheet whose own tolerance is 1e-15: upstream passes the source's
+# tolerance as the approximation tolerance and sets it on the offset B-rep (WR-749, gdb:
+# SetTolerance(1e-15)), so its result's tolerance is below SM_EFF_ZERO. Since #2393 the
+# Rust side refuses it by name (ToleranceUnresolved, status 1007). The `below_boundary` case
+# still passes: upstream refuses it first. Parked, not passed: not run in the gate.
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "tiny_tolerance_sheet_exact_boundary"
+cpp_defect = "WR-749"
+why = "C++ shells a sheet of tolerance 1e-15 into a result of tolerance 1e-15 (below SM_EFF_ZERO, WR-749); Rust refuses the effectively zero offset tolerance by name (ToleranceUnresolved)"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "tiny_tolerance_sheet_above_boundary"
+cpp_defect = "WR-749"
+why = "C++ shells a sheet of tolerance 1e-15 into a result of tolerance 1e-15 (below SM_EFF_ZERO, WR-749); Rust refuses the effectively zero offset tolerance by name (ToleranceUnresolved)"
