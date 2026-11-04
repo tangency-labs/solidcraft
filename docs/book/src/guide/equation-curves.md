@@ -137,11 +137,18 @@ in it; change them and click **OK**.
   `2 * pi` (6.28) along x, not every 360.
 - **The circle has a gap.** End must be a whole turn: `2 * pi`, or `360 deg`.
 - **A rule is rejected.** Use `*` for multiply (`2 * t`, not `2t`), and close every bracket.
-- **"Can't be shown to stay within the tolerance near …".** The rule jumps there (`floor`,
-  `round`, `sign`, `mod`, or `tan` at a quarter turn), and a smooth curve can't follow a jump.
-  Narrow the range to one side of it, or use a rule without the jump.
-- **"Even 500 points don't keep the spline within the tolerance".** The rule bends faster than 500
-  points can follow, such as a very fine wave. Raise the tolerance or narrow the range.
+- **"Can't be shown to stay within the tolerance near …".** The curve can't be proven there. Most
+  often the rule jumps there (`floor`, `round`, `sign`, `mod`, or `tan` at a quarter turn), even
+  exactly at an end of the range, and a smooth curve can't follow a jump. A `sin` or `cos` of a
+  number above about 4 million (2²²) can't be proven either. Narrow the range to one side of the
+  jump, or use a rule without it.
+- **"Even 500 points don't keep the spline within the tolerance".** A point of the rule is proven
+  further off than the tolerance: the rule bends faster than 500 points can follow, such as a very
+  fine wave. Raise the tolerance or narrow the range.
+- **"Even 500 points can't be shown to keep the spline within the tolerance".** The curve may be
+  close enough or may not, but neither can be proven: a wave so fine that the spline through 500
+  points crisscrosses it, say, or one with so many wiggles that the proof runs out of work. Raise
+  the tolerance or narrow the range.
 
 ## For scripts and agents
 
@@ -149,8 +156,10 @@ The commands are `sketch.equation_curve` and `sketch.equation_curve.edit` (see t
 [command reference](../reference/commands.md)). The curve is a fit point spline through points
 worked out from the rules, as many as keep it within the **Tolerance** (0.01 mm unless you set
 another), up to 500. That is proven all along the curve, not checked at a few places between the
-points, and the reply's `deviation` is the bound. Its points are fixed, so other curves can start
-at its ends. When a parameter a rule uses changes, the points follow; if the new values make the
-curve bend more than its points can follow within the Tolerance, the sketch says so, and editing
-the curve fits it again. The pictures on this page come from the scripts in
+points, and the reply's `deviation` is the bound: making or editing a curve accepts only points
+proven within the Tolerance, and refuses when that can't be proven. Its points are fixed, so other
+curves can start at its ends. When a parameter a rule uses changes, the points follow, as many as
+before; the sketch reports an error only when the new values put the curve proven further than
+the Tolerance from its points (a wave made finer, say), not when it merely can't be proven, and
+editing the curve fits it again. The pictures on this page come from the scripts in
 `docs/book/scripts/equation-*.json`.

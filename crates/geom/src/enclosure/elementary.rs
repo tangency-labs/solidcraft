@@ -200,8 +200,10 @@ fn atan_at(x: f64) -> Proven<Interval> {
     finite(if x < 0.0 { -t } else { t })
 }
 
-/// The range of a function increasing on `x`, from its enclosures at the ends.
+/// The range of a function increasing on `x`, from its enclosures at the ends. An unbounded `x` is
+/// refused: the ends' helpers take finite numbers only.
 fn rising(x: Interval, f: impl Fn(f64) -> Proven<Interval>) -> Proven<Interval> {
+    let x = finite(x)?;
     let (a, b) = if x.lo == x.hi {
         let a = f(x.lo)?;
         (a, a)
@@ -211,8 +213,9 @@ fn rising(x: Interval, f: impl Fn(f64) -> Proven<Interval>) -> Proven<Interval> 
     finite(Interval { lo: a.lo, hi: b.hi })
 }
 
-/// The range of a function decreasing on `x`.
+/// The range of a function decreasing on `x`; an unbounded `x` is refused.
 fn falling(x: Interval, f: impl Fn(f64) -> Proven<Interval>) -> Proven<Interval> {
+    let x = finite(x)?;
     let (a, b) = (f(x.lo)?, f(x.hi)?);
     finite(Interval { lo: b.lo, hi: a.hi })
 }
