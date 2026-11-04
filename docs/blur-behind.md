@@ -511,11 +511,11 @@ manager's isolated app when a fresh session policy is needed.
 For raw/newer warnings, the extended existing `prefs_theme_files` scenario saves
 blur through `ui.prefs`, reimports that theme without the declaration, dismisses
 the now-unknown-entry notice, checks that raw JSON and API notices persist, and
-reintroduces the definition to restore the saved value. It also imports `requires:2`
+reintroduces the definition to restore the saved value. It also imports `requires:3`
 and dismisses its warning without adding a controls header. The unit test additionally
 loads malformed raw JSON, changes it to ensure reappearance, and bounds dismissal
 storage. For a manager screenshot, import a copy of the fixture with name `Future
-blur review`, `requires:2`, then open Interface; retain the original file for reimport
+blur review`, `requires:3`, then open Interface; retain the original file for reimport
 after upgrading, as its unsupported tables are discarded.
 
 All nine new unit tests match the **`blur_`** filter, in the existing area modules:

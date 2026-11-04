@@ -7376,7 +7376,7 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_some(), "changed raw value must reappear");
         h.call(
             "ui.prefs",
-            json!({"theme_import":{"format":"solidcraft-theme/1","name":"Future blur","base":"dark","requires":2,
+            json!({"theme_import":{"format":"solidcraft-theme/1","name":"Future blur","base":"dark","requires":crate::theme_files::REQUIREMENTS_LEVEL + 1,
             "options":[{"id":"blur","type":"range","default":18}]}}),
         );
         h.frames(2);
@@ -7386,7 +7386,7 @@ mod tests {
         h.frames(2);
         assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_none());
         assert!(active_theme_file(&h.app).unwrap().options.is_empty(), "unsupported tables were discarded, never auto-restored");
-        h.app.preferences.custom_themes.iter_mut().find(|f| f.id == "future-blur").unwrap().requires = 3;
+        h.app.preferences.custom_themes.iter_mut().find(|f| f.id == "future-blur").unwrap().requires = crate::theme_files::REQUIREMENTS_LEVEL + 2;
         h.frames(2);
         assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_some());
         for identity in 0..80 {
