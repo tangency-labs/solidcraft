@@ -139,7 +139,7 @@ install() {
     # Keep the recovery copy and its work directory for a person to inspect.
     keep_tmp=1
     warn "publish failed and rollback failed; previous reports are kept in $backup"
-    return 1
+    exit 1
   fi
 
   echo "fetch-reports: $n reports -> ${dest#"$root"/} ($why)"

@@ -300,6 +300,37 @@ class FetchReportsTest(unittest.TestCase):
         self.assertTrue(backup.is_dir())
         self.assertEqual((backup / "old.json").read_text(), "old")
 
+    def test_failed_rollback_stops_before_next_candidate_or_history(self):
+        self.write_files(self.dest, {"hist.json": "history"})
+        self.git("add", "reports/difftest/hist.json")
+        self.git("-c", "user.name=Fetch test", "-c", "user.email=fetch@example.invalid",
+                 "commit", "--quiet", "-m", "historical reports")
+        target = self.root / "install"
+        self.write_files(target, {"old.json": "old", "times.tsv": "old times\n"})
+        self.stage("101", {"a-new.json": "new", "z-fail.json": "fail",
+                           "times.tsv": "new times\n"})
+        self.stage("202", {"second.json": "second"})
+
+        result = self.run_script(dest=target, FAKE_GH_RUNS="101,202",
+                                 FAKE_MV_FAIL_SUBSTRING="z-fail.json",
+                                 FAKE_MV_FAIL_BACKUP="1")
+
+        self.assertIn("simulated publish failure", result.stderr)
+        self.assertIn("simulated rollback failure", result.stderr)
+        match = re.search(r"kept in ([^\n]+)", result.stderr)
+        self.assertIsNotNone(match, result.stderr)
+        backup = Path(match.group(1))
+        self.assertTrue(backup.is_dir())
+        self.assertEqual((backup / "old.json").read_text(), "old")
+        self.assertEqual((backup / "times.tsv").read_text(), "old times\n")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        log = (self.root / "gh.log").read_text()
+        self.assertIn("run\tdownload\t101", log)
+        self.assertNotIn("run\tdownload\t202", log)
+        self.assertFalse((target / "second.json").exists())
+        self.assertFalse((target / "hist.json").exists())
+        self.assertNotIn("committed in", result.stdout)
+
     def test_missing_times_keeps_the_previous_times_and_extra_files(self):
         self.write_files(self.dest, {"old.json": "old", "times.tsv": "old\n",
                                      "notes.txt": "keep"})
@@ -345,6 +376,19 @@ class FetchReportsTest(unittest.TestCase):
         log = (self.root / "gh.log").read_text()
         self.assertIn("run\tdownload\t101", log)
         self.assertIn("run\tdownload\t202", log)
+
+    def test_candidate_retry_after_successful_rollback(self):
+        self.write_files(self.dest, {"old.json": "old"})
+        self.stage("101", {"z-fail.json": "first"})
+        self.stage("202", {"second.json": "second"})
+
+        result = self.run_script(FAKE_GH_RUNS="101,202",
+                                 FAKE_MV_FAIL_SUBSTRING="z-fail.json")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("previous reports restored", result.stderr)
+        self.assertEqual((self.dest / "second.json").read_text(), "second")
+        self.assertIn("run\tdownload\t202", (self.root / "gh.log").read_text())
 
     def test_candidate_retry_after_an_empty_artifact(self):
         self.write_files(self.dest, {"old.json": "old"})
