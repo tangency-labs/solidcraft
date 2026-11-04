@@ -16,10 +16,9 @@
 //!   it takes the disc's cone face over the bar's and the two are one face; the vertex
 //!   V = (40, 10 tan 5, 10) where the front top edge meets the concave arc has three edges.
 //!
-//! Two more cases of 3ae7bfa fail today and are held as known-failing tests named for their
-//! defect (#2497): the oblique wall that should stay ruled is refused, and a seam cut at a
-//! span end of the cone does not keep its exact pcurve. Each is turned round when its defect
-//! is fixed.
+//! Two more cases of 3ae7bfa (#2497): a draft that leans off its profile's plane builds, its
+//! arc's wall the ruled B-spline on its oblique cone; and with `keep_exact_pcurves` a seam
+//! that crosses a span end of its cone keeps its pcurve as built, cut at the crossing.
 //!
 //! Volumes in closed form (the capi test's): each wall leans in by t tan 5 at height t, so
 //! the bar's section at height t is the rectangle x in [d, 40], y in [d, 16 - d] and the half
@@ -45,10 +44,11 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3, Vec3};
+use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::query::api_queries::{get_edges, get_faces};
-use solidcore::surface::surface::SurfaceKind;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::sweep::api_brep::{
-    create_taper_extrude_with_corner, OffsetCornerType, TaperCornerRefusal, TaperExtrude,
+    create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
 };
 use solidcore::topology::brep::p1::vertices;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -289,39 +289,117 @@ fn without_the_cover_the_cone_walls_stay_two_faces() {
     check(&mut k, &mut b);
 }
 
-/// Known failing (#2497): a wall whose height is not along its arc's axis is refused
-/// instead of staying the ruled B-spline.
+/// `int_0^1 g`, composite Simpson over 2000 panels (to rounding for the smooth integrands
+/// here).
+fn simpson(g: impl Fn(f64) -> f64) -> f64 {
+    let n = 2000;
+    let dx = 1.0 / f64::from(n);
+    let mut sum = g(0.0) + g(1.0);
+    for i in 1..n {
+        sum += if i % 2 == 1 { 4.0 } else { 2.0 } * g(f64::from(i) * dx);
+    }
+    sum * dx / 3.0
+}
+
+/// The points of an 11 x 11 grid of `s`'s natural domain.
+fn grid(k: &Kernel, s: &Surface) -> Vec<Point3> {
+    let dom = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut out = Vec::new();
+    for i in 0..=10 {
+        for j in 0..=10 {
+            let u = dom.u_min() + (dom.u_max() - dom.u_min()) * f64::from(i) / 10.0;
+            let v = dom.v_min() + (dom.v_max() - dom.v_min()) * f64::from(j) / 10.0;
+            out.push(s.evaluate_point(k, Point2::new(u, v)).unwrap());
+        }
+    }
+    out
+}
+
+/// #2497: a draft that leans off its profile's plane builds, its arc's wall the B-spline
+/// ruled on its oblique cone.
 ///
-/// The profile is a half disc R 8 about the origin in the plane tilted 5 degrees about x
-/// (e1 = x, e2 = (0, cos 5, sin 5)), its chord along e2, so every offset stays in that
-/// plane. `taper.rs` snaps the computed normal to Z (|n.z| > 0.98) while the arc's axis
-/// stays the plane's normal, so `draft_cone` finds no cone and the wall is ruled. The
-/// draft is refused at the arc's end, 8 e2, because the seam there does not lie on both
-/// walls (`taper_walls.rs`, "the seam must lie on both walls").
-///
-/// Right would be the solid with a ruled B-spline wall (no cone face) of volume
-/// `10 cos 5 int_0^1 A(f) df`, `A = rho^2 acos(e / rho) - e sqrt(rho^2 - e^2)`,
-/// `rho = 8 - e`, `e = 10 f tan 5 cos 5`: 832.00089957862 (Simpson's rule). When the draft
-/// builds, this test becomes that check.
+/// The profile is a half disc R 8 about the origin O in the plane tilted 5 degrees about x
+/// (e1 = x, e2 = (0, cos 5, sin 5), normal m = e1 x e2), its chord along e2, drafted 5
+/// degrees over 10. `CreateTaperExtrude` snaps the computed normal to Z (|n.z| > 0.98), so
+/// the height h = 10 Z leans off m. The section at the fraction f of the height lies in
+/// the plane parallel to the profile's through f h, offset inward in it by f e,
+/// e = 10 tan 5 cos 5 (the offset's part in the plane): the circle about f h of radius
+/// 8 - f e and the chord f e along e1. The arc's wall is the oblique circular cone through
+/// those circles, apex A = (8 / e) h, every point on the ruling from A to the profile's
+/// circle; no cone of revolution (no `SmCone` face). The caps are the planes f = 0, f = 1,
+/// the chord's wall the plane of the chords. The volume is `(h . m) int_0^1 S(f) df`, S the
+/// circular segment `rho^2 acos(c / rho) - c sqrt(rho^2 - c^2)`, rho = 8 - f e, c = f e
+/// (832.0008995786...); the B-rep's is 1.3e-10 over it, as the same half disc drafted
+/// upright is today (2.1e-10). Before, the walls took Z for the plane's normal, so the seam
+/// at 8 e2 left its walls and the draft was refused (`NotExact`).
 #[test]
-fn an_oblique_drafted_wall_is_refused_today() {
+fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     let a = 5.0_f64.to_radians();
     let e2 = Vec3::new(0.0, a.cos(), a.sin());
+    let m = Vec3::X.cross(e2);
     let o = Point3::new(0.0, 0.0, 0.0);
     let mut k = Kernel::default();
     let cs = [
         arc_in(&k, o, 8.0, -e2, Vec3::X, 180.0),
         line(o + 8.0 * e2, o - 8.0 * e2),
     ];
-    let TaperExtrude::Refused(r) = draft(&mut k, &cs, 5.0) else {
-        panic!("the oblique draft builds now: turn this test into the volume check");
+    let TaperExtrude::Solid(mut b) = draft(&mut k, &cs, 5.0) else {
+        panic!("the oblique draft is refused");
     };
-    assert_eq!(r.reason, TaperCornerRefusal::NotExact);
-    assert!(
-        r.corner.distance(o + 8.0 * e2) < 1e-9,
-        "refused at {:?}",
-        r.corner
-    );
+    assert_eq!(counts(&b), (4, 6, 4));
+    assert!(cone_faces(&k, &b).is_empty());
+    let h = Vec3::new(0.0, 0.0, 10.0);
+    let e = 10.0 * tan5() * a.cos();
+    let apex = o + (8.0 / e) * h;
+    // each face's surface: a cap, the chord's wall or the arc's wall
+    let (mut caps, mut chord, mut cone) = (0, 0, 0);
+    for f in get_faces(&b).unwrap() {
+        let s = face::surface(&b, f).unwrap().unwrap();
+        let pts = grid(&k, &s);
+        // the fraction of the height, and the point less its height (in the profile's plane)
+        let at = |q: Point3| {
+            let t = (q - o).dot(m) / h.dot(m);
+            (t, q - t * h)
+        };
+        let off = |g: &dyn Fn(f64, Point3) -> f64| {
+            pts.iter()
+                .map(|&q| {
+                    let (t, p) = at(q);
+                    g(t, p).abs()
+                })
+                .fold(0.0, f64::max)
+        };
+        let cap = off(&|t, _| t).min(off(&|t, _| t - 1.0));
+        let plane = off(&|t, p| (p - o).dot(Vec3::X) - t * e);
+        if cap < 1e-12 {
+            caps += 1;
+        } else if plane < 1e-12 {
+            chord += 1;
+        } else {
+            // the distance from the ruling from the apex to the profile's circle in the
+            // point's direction in the profile's plane
+            let on_cone = pts
+                .iter()
+                .map(|&q| {
+                    let (_, p) = at(q);
+                    let base = o + 8.0 * (p - o).unitize().unwrap();
+                    let dir = (apex - base).unitize().unwrap();
+                    ((q - base) - (q - base).dot(dir) * dir).length()
+                })
+                .fold(0.0, f64::max);
+            assert!(on_cone < 1e-12, "off the oblique cone by {on_cone:e}");
+            cone += 1;
+        }
+    }
+    assert_eq!((caps, chord, cone), (2, 1, 1));
+    check(&mut k, &mut b);
+    let segment = |f: f64| {
+        let (rho, c) = (8.0 - f * e, f * e);
+        rho * rho * (c / rho).acos() - c * (rho * rho - c * c).sqrt()
+    };
+    let want = h.dot(m) * simpson(segment);
+    let v = volume(&k, &mut b, 1e-10);
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v} want {want}");
 }
 
 /// The largest distance, over 65 points of each edge, between an edge and its stored
@@ -368,31 +446,102 @@ fn segment_240(deg: f64) -> (Kernel, Brep) {
     (k, b)
 }
 
-/// Known failing (#2497): a seam that crosses a span end of the drafted cone does not keep
-/// its exact pcurve in the B-rep.
+/// #2497: with `keep_exact_pcurves`, a seam that crosses a span end of its drafted cone
+/// keeps its pcurve as built, cut at the crossing.
 ///
-/// Drafted 30 degrees, the 240 degree segment's cone has 3 spans with ends near -11.4 and
-/// 71.4 degrees, and its corners move to -7.2 and 67.2 degrees, so both seams cross a span
-/// end. The solid builds (4 faces, edges on the cone to 5e-15), but the seams' pcurves
-/// stored on the cone face are cubic re-projections (knots every 1/16), 3.17e-6 off their
-/// edges, not the quartics cut at the span end that the construction built. The same
-/// profile drafted 20 degrees, where no seam crosses, keeps them to 4.5e-14.
-///
-/// Right would be the cut pcurves kept as built, on their edges to about 1e-13 as at 20
-/// degrees. When they are, this test becomes that check.
+/// The 240 degree segment drafted `deg` degrees: the arc's wall is the cone about Z of
+/// semi-angle `deg` narrowing up, apex (0, 0, 8 / tan deg), radius 8 - z tan deg. Drafted
+/// 30 degrees its corners move to -7.2 and 67.2 degrees, past the ends of the cone's
+/// middle span, so each seam crosses a span end: its pcurve is the rational quartic of
+/// each span, joined C0 at the crossing, one interior knot, where the lifted point lies on
+/// the span end (a knot of the cone's v), and on its edge to rounding. Drafted 20 degrees
+/// no seam crosses (no interior knot), and the volume is the closed form
+/// `10 int_0^1 S(f) df`, S the major segment `rho^2 acos(-c / rho) + c sqrt(rho^2 - c^2)`,
+/// rho = 8 - f e, c = 4 - f e, e = 10 tan deg (900.37531668103...). (At 30 degrees the
+/// top cap's arc trim is a projection, a cubic fit, and the volume is 5.3e-6 short.)
+/// Before, the cone was padded past its face (5% of
+/// the seams' reach and 1e-3), so `SmBrep::ShrinkGeometry` trimmed it to the face where
+/// that was more than a thousandth of the face's size (30 degrees), removing every trim
+/// curve and projecting the edges again: cubic fits 3.17e-6 off their edges.
 #[test]
-fn a_seam_cut_at_a_span_end_loses_its_exact_pcurve_today() {
-    let (mut k, mut b) = segment_240(20.0);
-    let kept = cone_pcurve_gap(&k, &b);
-    assert!(kept < 1e-12, "no crossing: pcurves off by {kept:e}");
-    check(&mut k, &mut b);
-
-    let (mut k, mut b) = segment_240(30.0);
-    assert_eq!(counts(&b), (4, 6, 4));
-    check(&mut k, &mut b);
-    let lost = cone_pcurve_gap(&k, &b);
-    assert!(
-        lost > 1e-6,
-        "the cut pcurves are kept now (off by {lost:e}): turn this test into that check"
-    );
+fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
+    for (deg, cuts) in [(20.0_f64, 0), (30.0, 1)] {
+        let (mut k, mut b) = segment_240(deg);
+        assert_eq!(counts(&b), (4, 6, 4), "{deg}");
+        check(&mut k, &mut b);
+        let tan = deg.to_radians().tan();
+        let cone = get_faces(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    face::surface(&b, f).unwrap().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .unwrap();
+        let s = face::surface(&b, cone).unwrap().unwrap();
+        let SurfaceKind::Cone(c) = s.kind() else {
+            unreachable!()
+        };
+        assert!(
+            (c.semi_angle_deg() + deg).abs() < 1e-12,
+            "semi-angle {}",
+            c.semi_angle_deg()
+        );
+        let apex = c.apex(&k).unwrap().point;
+        assert!(
+            apex.distance(Point3::new(0.0, 0.0, 8.0 / tan)) < 1e-12,
+            "apex {apex:?}"
+        );
+        let off = grid(&k, &s)
+            .into_iter()
+            .map(|q| (q.x.hypot(q.y) - (8.0 - q.z * tan)).abs())
+            .fold(0.0, f64::max);
+        assert!(off < 1e-12, "{deg}: off the cone by {off:e}");
+        let gap = cone_pcurve_gap(&k, &b);
+        assert!(gap < 1e-12, "{deg}: pcurves off their edges by {gap:e}");
+        // the seams' pcurves (the quartics): cut on a span end of the cone, an interior knot
+        // of its angle's direction (the other, along the height, has none)
+        let inner_knots = |dir| {
+            let (knots, _) = s.knots_with_nurb(&k, dir, None).unwrap();
+            knots[1..knots.len() - 1].to_vec()
+        };
+        let span_ends = [inner_knots(SurfParamType::U), inner_knots(SurfParamType::V)];
+        let fu = face::p2::upward_faceuse(&b, cone).unwrap().unwrap();
+        let mut seams = 0;
+        for eu in faceuse_edgeuses(&b, fu, false, None).unwrap() {
+            let pc = uv_trim_curve(&b, eu).unwrap().0.cloned().unwrap();
+            if pc.degree().unwrap() != 4 {
+                continue;
+            }
+            seams += 1;
+            let (knots, _) = pc.knots(&k, None).unwrap();
+            let inner = &knots[1..knots.len() - 1];
+            assert_eq!(inner.len(), cuts, "{deg}: knots {knots:?}");
+            for &t in inner {
+                let uv = pc.evaluate_point(&k, t).unwrap();
+                let to_end = span_ends[0]
+                    .iter()
+                    .map(|ku| (ku - uv.x).abs())
+                    .chain(span_ends[1].iter().map(|kv| (kv - uv.y).abs()))
+                    .fold(f64::INFINITY, f64::min);
+                assert!(
+                    to_end < 1e-12,
+                    "{deg}: cut at {uv:?}, span ends {span_ends:?}"
+                );
+            }
+        }
+        assert_eq!(seams, 2, "{deg}");
+        if cuts == 0 {
+            let e = 10.0 * tan;
+            let want = 10.0
+                * simpson(|f| {
+                    let (rho, c) = (8.0 - f * e, 4.0 - f * e);
+                    rho * rho * (-c / rho).acos() + c * (rho * rho - c * c).sqrt()
+                });
+            let v = volume(&k, &mut b, 1e-10);
+            assert!((v - want).abs() <= 1e-11 * want, "volume {v} want {want}");
+        }
+    }
 }
