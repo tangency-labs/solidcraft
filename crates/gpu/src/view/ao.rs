@@ -51,7 +51,15 @@ impl GroundAo {
     /// Two triangles (168 bytes), extended to cover an optional preview without moving the
     /// existing ground height. Invalid preview bounds are ignored.
     pub fn vertices(&self, preview: Option<solidcraft_geom::Aabb3>) -> Vec<u8> {
+        self.vertices_with_radius(preview, self.radius)
+    }
+
+    /// Cover the preview plus the current frame's sampling margin. Invalid radii draw nothing.
+    pub fn vertices_with_radius(&self, preview: Option<solidcraft_geom::Aabb3>, radius: f32) -> Vec<u8> {
         use solidcore_record::Vec3;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Vec::new();
+        }
         let cam = solidcraft_render::Camera { up: self.up, ..Default::default() };
         let mut coverage = self.bounds;
         if let Some(bb) = preview.filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite()) {
@@ -63,7 +71,7 @@ impl GroundAo {
                 )));
             }
         }
-        let margin = f64::from(self.radius) * 2.0;
+        let margin = f64::from(radius) * 2.0;
         let points = [
             Vec3::new(coverage.min.x - margin, coverage.min.y - margin, self.height),
             Vec3::new(coverage.max.x + margin, coverage.min.y - margin, self.height),
@@ -355,7 +363,27 @@ fn target_size(enabled: bool, pixels: [f32; 2], device_limit: u32) -> [u32; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::target_size;
+    use super::{GroundAo, target_size};
+
+    #[test]
+    fn a_growing_preview_keeps_the_current_sampling_margin_at_the_fixed_ground_height() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::Aabb3;
+        let bounds = Aabb3 { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
+        let ground = GroundAo::new(bounds, -0.014, solidcraft_render::UpAxis::Z, 1.0).unwrap();
+        let preview = Aabb3 { min: Vec3::new(100.0, 200.0, -40.0), max: Vec3::new(103.0, 204.0, -28.0) };
+        let mut drawn = Aabb3::EMPTY;
+        for vertex in ground.vertices_with_radius(Some(preview), 10.0).as_chunks::<{ crate::view::TRI_SIZE }>().0 {
+            let read = |i| f64::from(f32::from_le_bytes(vertex[i..i + 4].try_into().unwrap()));
+            drawn.add(Vec3::new(read(0), read(4), read(8)));
+        }
+        assert_eq!((drawn.min.x, drawn.min.y, drawn.max.x, drawn.max.y), (-20.0, -20.0, 123.0, 224.0));
+        assert!((drawn.min.z + 0.014).abs() < 1e-6 && (drawn.max.z + 0.014).abs() < 1e-6);
+        assert_eq!(ground.vertices(Some(preview)), ground.vertices_with_radius(Some(preview), 1.0));
+        for radius in [f32::NAN, f32::INFINITY, -1.0, 0.0] {
+            assert!(ground.vertices_with_radius(Some(preview), radius).is_empty());
+        }
+    }
     #[test]
     fn depth_map_is_bounded_and_released_when_disabled() {
         assert_eq!(target_size(true, [6000.0, 3000.0], 8192), [2048, 1024]);
