@@ -2150,6 +2150,25 @@ fn several_saved_sections_open_the_same_in_either_mode() {
     }
 }
 
+/// A design that opens still opens after a new section: one with the second to last id takes the
+/// last id and reopens, and one with the last id refuses a new section instead of reusing an id.
+#[test]
+fn a_new_section_after_the_highest_id_keeps_the_design_openable() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let mut v: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["section_analyses"] = json!({"items": [{"id": u64::MAX - 1, "name": "Edge", "plane": {"type": "origin", "name": "XY"}}]});
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let id = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 5}))["id"].as_u64().unwrap();
+    assert_eq!(id, u64::MAX);
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).expect("the saved design opens again");
+    assert_eq!(reopened.section_analyses, s.doc.section_analyses);
+    let before = (s.undo.len(), s.doc.section_analyses.clone());
+    assert!(s.execute("inspect.section", &json!({"plane": "YZ"})).is_err(), "no id is left");
+    assert_eq!((s.undo.len(), s.doc.section_analyses.clone()), before, "nothing overwritten");
+    assert!(solidcraft_doc::Document::from_json(&s.doc.to_json()).is_ok());
+}
+
 /// Sections are saved with the design: names, planes, distances, flip, hatch, which one is shown
 /// and the folder's eye come back when it opens; a design without them opens without them.
 #[test]

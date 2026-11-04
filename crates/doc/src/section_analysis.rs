@@ -48,23 +48,24 @@ impl SectionAnalyses {
         self.items.iter_mut().find(|s| s.id == id)
     }
 
-    /// Refuse what no command makes: more than `MAX_SECTIONS` sections, an id twice (only the
-    /// first would ever be found), or `u64::MAX` (`next_id` would hand it out again, and the next
-    /// new section would overwrite that one). A design file is untrusted input.
+    /// Refuse what no command makes: more than `MAX_SECTIONS` sections, or an id twice (only the
+    /// first would ever be found). A design file is untrusted input. No id value is refused:
+    /// `next_id` never hands out one in use, so whatever opens still opens after a new section.
     pub fn validate(&self) -> Result<(), String> {
         if self.items.len() > MAX_SECTIONS {
             return Err(format!("more than {MAX_SECTIONS} section analyses"));
         }
         let mut seen = std::collections::BTreeSet::new();
-        match self.items.iter().find(|s| s.id == u64::MAX || !seen.insert(s.id)) {
+        match self.items.iter().find(|s| !seen.insert(s.id)) {
             Some(s) => Err(format!("invalid section analysis id {}", s.id)),
             None => Ok(()),
         }
     }
 
-    /// An id no section has.
-    pub fn next_id(&self) -> u64 {
-        self.items.iter().map(|s| s.id).max().unwrap_or(0).saturating_add(1)
+    /// An id no section has, one above the highest; none once a section has `u64::MAX` (a new
+    /// section is then refused rather than given an id already in use).
+    pub fn next_id(&self) -> Option<u64> {
+        self.items.iter().map(|s| s.id).max().unwrap_or(0).checked_add(1)
     }
 
     /// The first `name(n)` no section has, counting from one more than there are sections, as
@@ -169,11 +170,11 @@ mod tests {
             });
         }
         assert_eq!(all.free_name(name), "Section 4");
-        assert_eq!(all.next_id(), 3);
+        assert_eq!(all.next_id(), Some(3));
     }
 
-    /// A hand-made design with too many sections, an id twice, or the last id is refused as it
-    /// opens: the next new section would otherwise overwrite one already there.
+    /// A hand-made design with too many sections or an id twice is refused as it opens: only the
+    /// first of two would ever be found. The last id opens, and has no next one.
     #[test]
     fn a_design_with_unusable_section_ids_is_refused() {
         let section = |id: u64| serde_json::json!({"id": id, "name": format!("Section {id}"), "plane": {"type": "origin", "name": "XY"}});
@@ -183,8 +184,10 @@ mod tests {
             crate::Document::from_json(&v.to_string())
         };
         let ok = open(vec![section(1), section(2)]).expect("distinct ids open");
-        assert_eq!(ok.section_analyses.next_id(), 3);
-        for items in [vec![section(u64::MAX)], vec![section(4), section(4)], (1..=MAX_SECTIONS as u64 + 1).map(section).collect()] {
+        assert_eq!(ok.section_analyses.next_id(), Some(3));
+        let last = open(vec![section(u64::MAX - 1), section(u64::MAX)]).expect("the last id opens");
+        assert_eq!(last.section_analyses.next_id(), None);
+        for items in [vec![section(4), section(4)], (1..=MAX_SECTIONS as u64 + 1).map(section).collect()] {
             let err = open(items).expect_err("refused").to_string();
             assert!(err.contains("damaged design") && err.contains("section analys"), "{err}");
         }

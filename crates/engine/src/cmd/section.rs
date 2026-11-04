@@ -421,7 +421,10 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         (None, Some(x)) => x.name.clone(),
         (None, None) => all.free_name(english_name),
     };
-    let id = own.unwrap_or_else(|| all.next_id());
+    let id = match own {
+        Some(id) => id,
+        None => all.next_id().ok_or_else(|| bad(cmd, "no section analysis id is left"))?,
+    };
     let flip = bool_(p, "flip").unwrap_or(false);
     let sec = SectionAnalysis { id, name, plane, offset, flip, hatch: bool_(p, "hatch").unwrap_or(true) };
     checked_cut(s, &sec, cmd)?;
