@@ -2051,7 +2051,9 @@ pub fn origin_drawn(s: &Session, name: &str) -> bool {
         return true;
     }
     let Some(occ) = s.doc.occurrences.iter().find(|x| x.id == o.origin.occurrence) else { return false };
-    let path = s.doc.first_path(occ.component);
+    // The origin's own placement, not its component's first one (copies hide separately).
+    let mut path = s.doc.first_path(occ.parent);
+    path.push(occ.id);
     s.occurrence_visible(&path) && !s.folder_hidden(&format!("{}/joints", Session::folder_scope(&path)))
 }
 

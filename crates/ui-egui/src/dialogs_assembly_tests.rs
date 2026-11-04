@@ -898,6 +898,18 @@ fn joint_origin_triads_follow_occurrence_visibility() {
     app.session.visibility.hidden_folders.clear();
     app.session.visibility.hidden_folders.push("c0/joints".into());
     assert!(!origin_drawn(&app.session, "Top of B"), "the design's hidden Joints folder");
+    app.session.visibility.hidden_folders.clear();
+    // On a copy, the triad follows that copy, not the component's first placement.
+    app.session.execute("occurrence.copy", &json!({"component": "B", "translate": [0, 40, 0]})).unwrap();
+    app.session.execute("joint.origin", &json!({"name": "Top of copy", "face": [40, 50, 10]})).unwrap();
+    let copy = app.session.doc.occurrences.iter().find(|o| o.component == app.session.doc.find_component("B").unwrap() && o.id != b).unwrap().id;
+    assert_eq!(app.session.doc.assembly.origins.iter().find(|o| o.name == "Top of copy").unwrap().origin.occurrence, copy);
+    app.session.execute("browser.visibility", &json!({"paths": [[b]], "visible": false})).unwrap();
+    assert!(origin_drawn(&app.session, "Top of copy"), "hiding the first placement hides the copy's triad");
+    app.session.execute("browser.visibility", &json!({"paths": [[b]], "visible": true})).unwrap();
+    app.session.execute("browser.visibility", &json!({"paths": [[copy]], "visible": false})).unwrap();
+    assert!(!origin_drawn(&app.session, "Top of copy"), "a hidden copy still draws its origin triad");
+    assert!(origin_drawn(&app.session, "Top of B"));
 }
 
 /// Edit Feature on a moved component: the dialog shows the feature's picks where the
