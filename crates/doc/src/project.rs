@@ -232,9 +232,10 @@ fn resolve_uncached(
             // Where the bodies, faces or other sketches' curves meet, as the edges SMLib's imprint
             // of one by the other makes: each its exact record curve, its points at the display
             // tolerance.
-            for e in crate::project3d::meeting(st, a, b)? {
-                wires.push(e.points);
-                exact.push(vec![WireCurve { curve: e.curve, interval: e.interval }]);
+            // The pieces share the imprint's vertices, so their ends meet to well within 1e-4 mm.
+            for (pts, curves) in crate::project3d::join_meeting(crate::project3d::meeting(st, a, b)?, 1e-4) {
+                wires.push(pts);
+                exact.push(curves);
             }
             Vec::new()
         }

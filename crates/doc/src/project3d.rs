@@ -4,27 +4,58 @@
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::LinkSource;
+use solidcraft_sketch::{LinkSource, WireCurve};
 
 use crate::eval::ModelState;
 
-/// The body of a body or face reference, and the face (its index in the body's face order) for a
-/// face reference: the face nearest its point, on the named body or else the nearest body.
-fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<usize>)> {
+/// The body of a body or face reference and, for a face reference, the faces (indices in the
+/// body's face order) of the smooth surface nearest its point, on the named body or else the
+/// nearest body ([`smooth_patch`]), so a spline wall of one face per span meets as a whole (#9009).
+fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<Vec<usize>>)> {
     match src {
         LinkSource::Body { body } => Some((st.body(body)?, None)),
         LinkSource::Face { body, at } => {
             let b = st.body(body).or_else(|| st.bodies.iter().min_by(|x, y| dist_to(&x.mesh(), *at).total_cmp(&dist_to(&y.mesh(), *at))))?;
-            let (f, _, _) = crate::project::nearest_face(&b.mesh(), *at)?;
-            Some((b, usize::try_from(f).ok()))
+            let m = b.mesh();
+            let (f, _, _) = crate::project::nearest_face(&m, *at)?;
+            Some((b, Some(smooth_patch(&m, usize::try_from(f).ok()?))))
         }
         _ => None,
     }
 }
 
-/// One side of an intersection curve: a body (or one face of it), or a curve of another sketch.
+/// The faces one smooth surface with `face` makes, sorted: joined across seams and across the
+/// smooth joins the shaded view hides, never across a crease. Wider than
+/// [`Mesh::surface_patch`], which keeps smooth-joined faces apart: a fit-point spline's wall is one
+/// face per span, joined smoothly, and a pick on any span means the whole wall.
+fn smooth_patch(m: &Mesh, face: usize) -> Vec<usize> {
+    let joins = |ei: usize| {
+        let flag = |v: &Vec<bool>| v.get(ei).copied().unwrap_or(false);
+        (flag(&m.seams) || flag(&m.smooth_edges)) && !flag(&m.sharp_edges)
+    };
+    let mut edges_of: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for (ei, fs) in m.edge_faces.iter().enumerate().filter(|(ei, _)| joins(*ei)) {
+        for f in fs {
+            edges_of.entry(*f as usize).or_default().push(ei);
+        }
+    }
+    let mut patch = std::collections::BTreeSet::from([face]);
+    let mut todo = vec![face];
+    while let Some(f) = todo.pop() {
+        for ei in edges_of.get(&f).into_iter().flatten() {
+            for next in m.edge_faces.get(*ei).into_iter().flatten().map(|x| *x as usize) {
+                if patch.insert(next) {
+                    todo.push(next);
+                }
+            }
+        }
+    }
+    patch.into_iter().collect()
+}
+
+/// One side of an intersection curve: a body (or a face patch of it), or a curve of another sketch.
 enum Side<'a> {
-    Part(&'a crate::ModelBody, Option<usize>),
+    Part(&'a crate::ModelBody, Option<Vec<usize>>),
     Curve { plane: Plane, segs: Vec<Seg2>, pts: Vec<Vec3> },
 }
 
@@ -37,7 +68,7 @@ fn side_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<Side<'a>> {
     let ci = ss.sketch.curve_index(curve)?;
     let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
     let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
-    (!segs.is_empty() && pts.len() >= 2).then(|| Side::Curve { plane: ss.plane.clone(), segs, pts })
+    (!segs.is_empty() && pts.len() >= 2).then_some(Side::Curve { plane: ss.plane, segs, pts })
 }
 
 /// Bounds of a point set; `None` when empty or not finite.
@@ -78,11 +109,11 @@ pub(crate) fn meeting(st: &ModelState, a: &LinkSource, b: &LinkSource) -> crate:
             ((-reach, reach), (-reach, reach))
         }
         (Side::Curve { plane, .. }, Side::Part(mb, _)) => {
-            let m = mb.mesh().bounds();
+            let m = mb.body.exact_bounds()?;
             (span_over(plane, unit(plane, a)?, m.min, m.max), (0.0, 0.0))
         }
         (Side::Part(mb, _), Side::Curve { plane, .. }) => {
-            let m = mb.mesh().bounds();
+            let m = mb.body.exact_bounds()?;
             ((0.0, 0.0), span_over(plane, unit(plane, b)?, m.min, m.max))
         }
         (Side::Part(..), Side::Part(..)) => ((0.0, 0.0), (0.0, 0.0)),
@@ -96,15 +127,96 @@ pub(crate) fn meeting(st: &ModelState, a: &LinkSource, b: &LinkSource) -> crate:
     let (ka, kb) = (sheet(&sa, ra)?, sheet(&sb, rb)?);
     let (Some((ba, fa)), Some((bb, fb))) = (body_of(&sa, ka.as_ref()), body_of(&sb, kb.as_ref())) else { return Err(lost(a)) };
     let chord = (ba.size().max(bb.size()) * 1e-3).max(1e-3);
-    Ok(crate::kernel::meeting_edges(ba, fa.as_ref().map(std::slice::from_ref), bb, fb.as_ref().map(std::slice::from_ref), chord)?)
+    Ok(crate::kernel::meeting_edges(ba, fa, bb, fb, chord)?)
 }
 
-/// The kernel body a side is intersected as: its model body (and face), or the curve's `sheet`.
-fn body_of<'b>(side: &'b Side<'b>, sheet: Option<&'b crate::kernel::Body>) -> Option<(&'b crate::kernel::Body, Option<usize>)> {
+/// The kernel body a side is intersected as: its model body (and face patch), or the curve's `sheet`.
+fn body_of<'b>(side: &'b Side<'b>, sheet: Option<&'b crate::kernel::Body>) -> Option<(&'b crate::kernel::Body, Option<&'b [usize]>)> {
     match side {
-        Side::Part(mb, f) => Some((&mb.body, *f)),
+        Side::Part(mb, f) => Some((&mb.body, f.as_deref())),
         Side::Curve { .. } => sheet.map(|k| (k, None)),
     }
+}
+
+/// The meeting edges as whole curves: edges whose ends meet (within `tol`) joined end to end, each
+/// curve its points and its exact pieces in order along them. The imprint splits a crossing at
+/// every face boundary of either side, so one crossing of two spline walls comes as one edge per
+/// span; it is one curve.
+pub(crate) fn join_meeting(edges: Vec<crate::kernel::MeetingEdge>, tol: f64) -> Vec<(Vec<Vec3>, Vec<WireCurve>)> {
+    let mut left: Vec<(Vec<Vec3>, Vec<WireCurve>)> =
+        edges.into_iter().filter(|e| !e.points.is_empty()).map(|e| (e.points, vec![WireCurve { curve: e.curve, interval: e.interval }])).collect();
+    let flip = |(mut p, c): (Vec<Vec3>, Vec<WireCurve>)| {
+        p.reverse();
+        (p, c.iter().rev().map(reversed).collect::<Vec<_>>())
+    };
+    let mut out = Vec::new();
+    while let Some(mut cur) = left.pop() {
+        while let (Some(cs), Some(ce)) = (cur.0.first().copied(), cur.0.last().copied()) {
+            if cur.0.len() > 2 && cs.dist(ce) < tol {
+                break;
+            }
+            let ends = |w: &(Vec<Vec3>, Vec<WireCurve>)| w.0.first().copied().zip(w.0.last().copied());
+            let Some(i) = left.iter().position(|w| ends(w).is_some_and(|(s, e)| [s, e].iter().any(|q| q.dist(ce) < tol || q.dist(cs) < tol))) else {
+                break;
+            };
+            let next = left.swap_remove(i);
+            let Some((s, e)) = ends(&next) else { break };
+            // Append after the end or prepend before the start, turning `next` to run on.
+            let (mut head, tail) = if s.dist(ce) < tol {
+                (cur, next)
+            } else if e.dist(ce) < tol {
+                (cur, flip(next))
+            } else if e.dist(cs) < tol {
+                (next, cur)
+            } else {
+                (flip(next), cur)
+            };
+            head.0.extend(tail.0.into_iter().skip(1));
+            head.1.extend(tail.1);
+            cur = head;
+        }
+        out.push(cur);
+    }
+    out
+}
+
+/// `w` run the other way: the same points, its parameter reversed (record curves have no
+/// direction flag, so the curve itself is rewritten).
+fn reversed(w: &WireCurve) -> WireCurve {
+    use solidcore_record::brep::Curve;
+    let [t0, t1] = w.interval;
+    let mirror = |knots: &[f64]| {
+        let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
+        (knots.iter().rev().map(|k| a + b - k).collect::<Vec<_>>(), a + b)
+    };
+    let (curve, interval) = match &w.curve {
+        Curve::Line { start, end } => (Curve::Line { start: *end, end: *start }, [1.0 - t1, 1.0 - t0]),
+        Curve::Circle { frame, radius } => (Curve::Circle { frame: flipped(frame), radius: *radius }, [-t1, -t0]),
+        Curve::Ellipse { frame, radii } => (Curve::Ellipse { frame: flipped(frame), radii: *radii }, [-t1, -t0]),
+        Curve::Polyline { points } => {
+            let n = points.len().saturating_sub(1) as f64;
+            (Curve::Polyline { points: points.iter().rev().copied().collect() }, [n - t1, n - t0])
+        }
+        Curve::Spline { knots, points } => {
+            let (k, s) = mirror(knots);
+            (Curve::Spline { knots: k, points: points.iter().rev().copied().collect() }, [s - t1, s - t0])
+        }
+        Curve::RationalSpline { knots, homogeneous } => {
+            let (k, s) = mirror(knots);
+            (Curve::RationalSpline { knots: k, homogeneous: homogeneous.iter().rev().copied().collect() }, [s - t1, s - t0])
+        }
+        Curve::SurfaceIntersection { surfaces, leader, tolerance } => {
+            let r = reversed(&WireCurve { curve: (**leader).clone(), interval: w.interval });
+            (Curve::SurfaceIntersection { surfaces: surfaces.clone(), leader: Box::new(r.curve), tolerance: *tolerance }, r.interval)
+        }
+    };
+    WireCurve { curve, interval }
+}
+
+/// `f` with its y axis turned over, so a circle or ellipse on it runs the other way.
+fn flipped(f: &solidcore_record::brep::Frame) -> solidcore_record::brep::Frame {
+    let [x, y, z] = f.y_axis;
+    solidcore_record::brep::Frame { origin: f.origin, x_axis: f.x_axis, y_axis: [-x, -y, -z] }
 }
 
 fn dist_to(m: &Mesh, p: Vec3) -> f64 {

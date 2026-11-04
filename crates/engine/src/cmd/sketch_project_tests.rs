@@ -542,7 +542,6 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
     let wall = st.body("Wall").unwrap();
     let m = wall.mesh();
     assert!(wall.body.face_count() > 1, "premise of #9009: one face per spline span");
-    assert_eq!(m.surface_patch(m.tri_face[0] as usize).len(), wall.body.face_count(), "premise: the spans are one surface patch (hidden seams)");
     // A pick on the middle span, away from the joins at x = 9.5 and x = 30.5.
     let pick =
         *m.positions.iter().min_by(|a, b| ((a.x - 20.).abs() + (a.z - 10.).abs()).total_cmp(&((b.x - 20.).abs() + (b.z - 10.).abs()))).unwrap();
@@ -589,7 +588,7 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
 /// helper surfaces; a curve also meets a face, and parallel sketches are refused.
 #[test]
 fn intersection_curve_of_two_sketch_curves() {
-    use solidcraft_geom::{Vec2, Vec3};
+    use solidcore_record::{Vec2, Vec3};
 
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
