@@ -479,8 +479,8 @@ impl SurfaceEval {
         super::collapse::check(uv, reach)?;
         let v = uv[1];
         let (g, unit, circle) = (
-            super::collapse::gamma,
-            super::collapse::UNIT,
+            crate::nurbs::math::gamma,
+            crate::nurbs::math::UNIT,
             super::collapse::circle,
         );
         // The circle along u of radius `r`, rounded within `err`; v moves the point along a

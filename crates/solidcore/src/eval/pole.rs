@@ -36,7 +36,7 @@ const MAX_ORDER: usize = MAX_PARTIAL_ORDER - 1;
 /// The rounding of a coefficient against its terms' magnitudes: the binomial sums, the powers,
 /// the cross products and the sum over the terms, generously.
 fn cancellation() -> f64 {
-    super::collapse::gamma(64)
+    crate::nurbs::math::gamma(64)
 }
 
 /// A certified bound on the rounding of each partial (`[i][j]` for `∂_u^i ∂_v^j S`), as

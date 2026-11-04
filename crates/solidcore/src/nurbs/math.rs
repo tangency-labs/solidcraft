@@ -134,13 +134,17 @@ pub const ZERO_COEFFICIENT_TOL: f64 = 1.0e-12;
 /// `NL_MTOL`: model-space tolerance (default for [`CPoint::approx_eq`]).
 pub const MODEL_TOL: f64 = 1.0e-07;
 
-/// `gamma_n = n u / (1 - n u)`, `u` the unit roundoff: the relative error bound of a chain
+/// The unit roundoff of `f64`, `u = 2^-53` (half [`f64::EPSILON`]), for rounding to nearest.
+/// Not upstream: shared by the kernel's certified bounds and [`gamma`].
+pub const UNIT: f64 = f64::EPSILON * 0.5;
+
+/// `gamma_n = n u / (1 - n u)`, `u = UNIT`: the relative error bound of a chain
 /// of `n` rounded floating operations (Higham, the standard model). Not upstream: the one
 /// copy every certified bound in the kernel uses.
 #[must_use]
 pub fn gamma(n: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)]
-    let nu = n as f64 * f64::EPSILON / 2.0;
+    let nu = n as f64 * UNIT;
     nu / (1.0 - nu)
 }
 
@@ -2206,6 +2210,27 @@ pub fn realloc_2d<T: Copy + Default>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounding_bounds_keep_the_previous_bits() {
+        assert_eq!(UNIT.to_bits(), (f64::EPSILON / 2.0).to_bits());
+        assert_eq!(UNIT.to_bits(), (f64::EPSILON * 0.5).to_bits());
+        // Both former expressions scale the converted usize exactly by powers of two:
+        // neither overflows nor enters the subnormal range, even at usize::MAX.
+        // Cover small counts and neighbours of every power of two, including the
+        // gamma denominator's zero at 2^53 on 64-bit targets.
+        let powers = (0..usize::BITS).flat_map(|bit| {
+            let n = 1usize << bit;
+            [n - 1, n, n + 1]
+        });
+        for n in (0..=4096).chain(powers).chain([usize::MAX]) {
+            let old_nurbs_nu = n as f64 * f64::EPSILON / 2.0;
+            let old_collapse_nu = n as f64 * (f64::EPSILON * 0.5);
+            let bits = gamma(n).to_bits();
+            assert_eq!(bits, (old_nurbs_nu / (1.0 - old_nurbs_nu)).to_bits());
+            assert_eq!(bits, (old_collapse_nu / (1.0 - old_collapse_nu)).to_bits());
+        }
+    }
 
     fn full(rows: &[&[f64]]) -> RealMatrix {
         let n = rows.len() - 1;

@@ -221,7 +221,7 @@ fn the_certified_bound_covers_a_weight_near_zero_the_model_did_not() {
         .iter()
         .map(|h| (Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3]) - at).len())
         .fold(0.0, f64::max);
-    let model = |i: i32, j: i32| crate::eval::collapse::gamma(1024) * size * 4f64.powi(i + j);
+    let model = |i: i32, j: i32| crate::nurbs::math::gamma(1024) * size * 4f64.powi(i + j);
     let mut beyond = 0;
     for i in 0..=MAX_PARTIAL_ORDER {
         for j in 0..=MAX_PARTIAL_ORDER - i {

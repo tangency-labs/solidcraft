@@ -16,8 +16,8 @@
 //!   the surface has no point), and conversely `C ≡ c` gives `Σ N_j (x_j − c w_j) = 0`, so
 //!   `x_j = c w_j` by the basis's linear independence. This holds at any degree.
 //! - Each `Q_j` is computed with a certified bound on its rounding from its own column's scale
-//!   (Higham's `γ_n` on de Boor's convex combinations), and each Euclidean point's from its own
-//!   `|w_j|`. A `w_j` not certified non-zero against its rounding is refused.
+//!   (Higham's [`gamma`] with [`UNIT`] on de Boor's convex combinations), and each Euclidean
+//!   point's from its own `|w_j|`. A `w_j` not certified non-zero against its rounding is refused.
 //! - A revolution's iso-line along its angle is the circle of the profile point's distance from
 //!   the axis; along its profile it is the turned profile, decided on the profile's control
 //!   points the same way. The affine map after the turn scales a movement by at most
@@ -55,15 +55,7 @@ use super::spline::{
 use super::vec::VecExt;
 use super::EvalError;
 use crate::math::Vec3;
-
-/// The unit roundoff of `f64`.
-pub(crate) const UNIT: f64 = f64::EPSILON * 0.5;
-
-/// Higham's `γ_n = n u / (1 − n u)`: the relative error bound of `n` rounded operations.
-pub(crate) fn gamma(n: usize) -> f64 {
-    let nu = n as f64 * UNIT;
-    nu / (1.0 - nu)
-}
+use crate::nurbs::math::{gamma, UNIT};
 
 /// The directions a surface is collapsed along at a point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

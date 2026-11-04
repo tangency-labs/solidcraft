@@ -28,10 +28,10 @@
 //! Not upstream. No recursion.
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
-use super::collapse::gamma;
 use super::geometry::{Curve, Surface};
 use super::spline::{basis_check, MAX_EVAL_POINTS};
 use super::EvalError;
+use crate::nurbs::math::gamma;
 
 /// `IsOnSphere`'s relative tolerance (the fork's `kBallPatchRelTol`, bc814a5): a coefficient
 /// is zero to this much of the sphere's size squared, `(R max W)^2`, past its rounding.

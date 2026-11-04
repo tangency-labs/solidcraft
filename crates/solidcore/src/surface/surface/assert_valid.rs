@@ -112,7 +112,6 @@ use crate::curve::curve::p2::TANGENT_FIELD_TYPE;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
 use crate::error::{ignore_status, Result, SolidError};
-use crate::eval::collapse;
 use crate::geom::a_object;
 use crate::geom::assert_array::labels::{
     AXIS2_PLACEMENT_TYPE, B_SPLINE_SURFACE_TYPE, CONE_TYPE, CRV_ON_SURF_TYPE, CYLINDER_TYPE,
@@ -145,6 +144,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::{gamma, UNIT};
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
 use crate::surface::sphere::Sphere;
@@ -1153,7 +1153,8 @@ pub fn grid_has_non_monotonic_points_to_rounding(
 /// a net: within it the step is no step.
 ///
 /// The bound is the one the pole classifier of the layer split certifies, `eval::collapse`
-/// (`crates/solidcore/src/eval/collapse.rs`), whose `u` and `gamma_k` this uses:
+/// (`crates/solidcore/src/eval/collapse.rs`); both use the shared `u` and `gamma_k` from
+/// [`crate::nurbs::math`]:
 /// `Hom::euclid` returns each Euclidean point `P = x / w` with a bound
 /// `e = (sqrt(3) ex + |P| ew) / (|w| - ew) + 2 u |P|` on its rounding, from the error
 /// `(ex, ew)` of the homogeneous point it comes from, and a step is zero when
@@ -1165,7 +1166,7 @@ pub fn grid_has_non_monotonic_points_to_rounding(
 /// (a sphere's pole rows carry `w = sqrt(2) / 2`).
 fn step_within_rounding(p0: Point3, p1: Point3) -> f64 {
     let (l0, l1) = (p0.length(), p1.length());
-    2.0 * collapse::UNIT * (l0 + l1) + collapse::gamma(3) * (l0 + l1)
+    2.0 * UNIT * (l0 + l1) + gamma(3) * (l0 + l1)
 }
 
 /// How the monotonicity pass recognises a step too short to carry a direction, and what
