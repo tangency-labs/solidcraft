@@ -227,8 +227,8 @@ fn edge_polygon_takes_a_typed_side_length_and_side_count() {
     assert!(sides.iter().all(|l| (l - 12.0).abs() < 1e-6), "{sides:?}");
     // The first side runs from the first click towards the cursor.
     let CurveKind::Line { a, b } = sketch.curves[0].kind else { panic!("expected the first side") };
-    assert!(sketch.points[a].pos.dist(solidcraft_engine::geom::Vec2::new(0.0, 0.0)) < 1e-6);
-    assert!(sketch.points[b].pos.dist(solidcraft_engine::geom::Vec2::new(12.0, 0.0)) < 1e-6);
+    assert!(sketch.points[a].pos.dist(solidcore_record::Vec2::new(0.0, 0.0)) < 1e-6);
+    assert!(sketch.points[b].pos.dist(solidcore_record::Vec2::new(12.0, 0.0)) < 1e-6);
 }
 
 #[test]
