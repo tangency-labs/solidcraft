@@ -220,6 +220,32 @@ fn details_that_do_not_fit_on_paper_are_refused() {
     }
 }
 
+#[test]
+fn minimum_window_size_is_independent_of_paper_position() {
+    let parent = parent();
+    for position in [Vec2::ZERO, Vec2::new(100.0, 100.0), Vec2::new(3000.0, -3000.0)] {
+        for size in [MIN_WINDOW_MM, MIN_WINDOW_MM.next_down()] {
+            let circle = Boundary::circle(Vec2::ZERO, size * 0.5).unwrap();
+            let rectangle = Boundary::rectangle(Vec2::ZERO, Vec2::new(size, size)).unwrap();
+            for boundary in [circle, rectangle] {
+                let detail = Detail::new(&parent, boundary, scale(1.0, 1.0), position);
+                assert_eq!(detail.is_ok(), size == MIN_WINDOW_MM, "{boundary:?} at {position:?}: {detail:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_rectangle_whose_parent_outline_collapses_is_refused() {
+    let x = 1e12_f64.next_down();
+    let parent = ViewFrame::new(NamedView::Front.basis(), scale(1.0, 100000.0), Vec2::new(x, 0.0), Vec2::new(500.0, 100.0)).unwrap();
+    let a = Vec2::new(x, 0.0);
+    let b = Vec2::new(1e12, 1.0);
+    assert_eq!(parent.paper_map().apply(a).x, parent.paper_map().apply(b).x);
+    let boundary = Boundary::rectangle(a, b).unwrap();
+    assert!(Detail::new(&parent, boundary, scale(1000.0, 1.0), Vec2::ZERO).is_err());
+}
+
 /// The anchor sits `gap` outside the outline, along the asked direction from its centre.
 #[test]
 fn label_anchors_sit_outside_the_outline() {

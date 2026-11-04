@@ -79,12 +79,10 @@ impl Shape {
         })
     }
 
-    /// Whether the whole shape is finite, at least `min_across` wide and high, and lies on paper
-    /// (every point at most [`MAX_SIDE_MM`] from the sheet's origin either way).
-    fn on_paper(&self, min_across: f64) -> bool {
+    /// Whether the mapped bounds have positive area and lie within the paper coordinate limits.
+    fn on_paper(&self) -> bool {
         let b = self.bounds();
-        let size = b.size();
-        [b.min.x, b.min.y, b.max.x, b.max.y].into_iter().all(is_paper_coordinate) && size.x >= min_across && size.y >= min_across
+        [b.min.x, b.min.y, b.max.x, b.max.y].into_iter().all(is_paper_coordinate) && b.min.x < b.max.x && b.min.y < b.max.y
     }
 }
 
@@ -151,8 +149,17 @@ impl Detail {
         let message = "a view's map keeps paper x and y";
         let outline = boundary.shape.mapped(&parent.paper_map()).ok_or(Invalid(message))?;
         let window = boundary.shape.mapped(&frame.paper_map()).ok_or(Invalid(message))?;
-        require(outline.on_paper(0.0), "a detail's outline lies within 5000 mm of the sheet's origin on its parent")?;
-        require(window.on_paper(MIN_WINDOW_MM), "a detail is at least 0.01 mm across and lies within 5000 mm of the sheet's origin")?;
+        require(outline.on_paper(), "a detail's outline has positive size and lies within 5000 mm of the sheet's origin on its parent")?;
+        // Check the size before paper translation so rounding at the placed corners cannot
+        // change whether a detail meets the minimum.
+        let window_size = match boundary.shape {
+            Shape::Circle { radius, .. } => Vec2::new(radius, radius) * 2.0,
+            Shape::Rectangle(bounds) => bounds.size(),
+        } * scale.factor();
+        require(
+            window_size.x >= MIN_WINDOW_MM && window_size.y >= MIN_WINDOW_MM && window.on_paper(),
+            "a detail is at least 0.01 mm across and lies within 5000 mm of the sheet's origin",
+        )?;
         Ok(Detail { boundary, outline, window, frame })
     }
 
