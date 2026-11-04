@@ -28,7 +28,7 @@ pub(super) static SPEC: Spec = Spec {
     move_to,
     click: Some(|app, d, key| crate::hole_place::remove_place(d, &app.session, key)),
     footprint,
-    freedom: |_, d, key| crate::hole_refs::freedom(d, key),
+    freedom: |app, d, key| crate::hole_refs::freedom(&app.session, d, key),
     turn: None,
 };
 
@@ -56,7 +56,7 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
     let s = &app.session;
     let Some(to) = face_pick(d, s, hits) else { return false };
-    match crate::hole_refs::freedom(d, key) {
+    match crate::hole_refs::freedom(s, d, key) {
         Freedom::Plane => crate::hole_place::move_place(d, s, key, to),
         Freedom::Line(_) => match to {
             Sel::Face { point, .. } => crate::hole_refs::drag_to(s, d, key, point),
