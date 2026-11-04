@@ -3780,8 +3780,8 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
         let mut s = new_sketch();
         run(&mut s, "sketch.insert_svg", json!({"text": svg}));
         let sources = sketch(&s).curves.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
-        // Four curves as written; the one with the zero-length handle comes in as several that
-        // have a direction at that end, which a sketch spline needs (Insert SVG).
+        // Five curves as written; the one with the zero-length handle comes in as several that
+        // have a direction at that end, which a sketch spline needs (Insert SVG), so more than five.
         assert!(sources.len() > 5, "{sources:?}");
         // Picking every curve of the chain makes one offset, not one per curve.
         let out = run(&mut s, "sketch.offset", json!({"curves": sources, "distance": distance}));

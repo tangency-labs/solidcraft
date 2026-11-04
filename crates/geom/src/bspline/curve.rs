@@ -34,9 +34,10 @@ use solidcore_record::Vec3;
 pub const MIN_CONIC_RHO_GAP: f64 = 1e-9;
 /// Furthest a control point may be from the origin along any axis (mm).
 const MAX_COORDINATE: f64 = 1e12;
-/// Least distance between neighbouring control points of a [`Fit`], as the sketch's own spline
-/// tool asks of the points it is given: nearer, a point repeats, which at an end leaves the curve
-/// no direction there (a zero-length handle), and the solid kernel refuses to build on it.
+/// Least distance between neighbouring control points of a sketch spline, as the sketch's own
+/// spline tool asks of the points it is given: nearer, a point repeats, which at an end leaves the
+/// curve no direction there (a zero-length handle), and the solid kernel refuses to build on it.
+/// The gap [`follow`] keeps for curves at the sketch's size; one drawn at another is scaled to it.
 pub const MIN_CONTROL_GAP: f64 = 1e-9;
 
 /// A rational B-spline curve of `degree` with `knots` and homogeneous control points, checked when
@@ -225,14 +226,18 @@ impl<T> Certified<T> {
 /// proven ([`Certified`]): the piece itself as a polynomial Bézier when it is one (up to its
 /// parametrisation) and its degree is at most `max_degree`; a quadratic one as a conic; otherwise
 /// cubics matching the ends of parts of it and their tangents, a part halved until its bound is
-/// within the tolerance. No fit repeats a control point ([`MIN_CONTROL_GAP`]): a piece that does
-/// (an end with no direction, as a zero-length handle leaves) is followed by cubics whose handles
-/// point the way the piece leaves that end. Refused, with how close it came, when that would take
-/// more than `max_fits` curves, or the intervals can't prove it (a tolerance below the piece's
-/// rounding).
-pub fn follow(piece: &CurvePiece, tolerance: f64, max_degree: usize, max_fits: usize) -> SplineResult<Vec<Certified<Fit>>> {
+/// within the tolerance. No fit repeats a control point, two neighbours nearer than `gap` (the
+/// piece's units: [`MIN_CONTROL_GAP`] divided by the scale the curves are drawn at): a piece that
+/// does (an end with no direction, as a zero-length handle leaves) is followed by cubics whose
+/// handles point the way the piece leaves that end. Refused, with how close it came, when that
+/// would take more than `max_fits` curves, or the intervals can't prove it (a tolerance below the
+/// piece's rounding).
+pub fn follow(piece: &CurvePiece, tolerance: f64, gap: f64, max_degree: usize, max_fits: usize) -> SplineResult<Vec<Certified<Fit>>> {
     if !(tolerance.is_finite() && tolerance > 0.0) {
         return invalid("the tolerance must be a positive number");
+    }
+    if !(gap.is_finite() && gap > 0.0) {
+        return invalid("the gap between control points must be a positive number");
     }
     // Every piece takes at least one curve; past this, curves made plus parts pending never
     // exceed the room (a split is checked before it adds one).
@@ -245,7 +250,7 @@ pub fn follow(piece: &CurvePiece, tolerance: f64, max_degree: usize, max_fits: u
     let whole = |value: Fit, bound: f64| vec![Certified { value, bound, along: [0.0, 1.0] }];
     let (Some(first), Some(last)) = (mids.first(), mids.last()) else { return invalid("a curve piece has no points") };
     let n = mids.len() - 1;
-    if (1..=max_degree).contains(&n) && !repeats(&pts) {
+    if (1..=max_degree).contains(&n) && !repeats(&pts, gap) {
         // Weights 1, c, c², … with c from the end weights' ratio, so the parametrisations meet.
         let c = (last.w / first.w).powf(1.0 / n as f64);
         let c = Interval::point(if c.is_finite() && c > 0.0 { c } else { 1.0 });
@@ -275,7 +280,7 @@ pub fn follow(piece: &CurvePiece, tolerance: f64, max_degree: usize, max_fits: u
             }
         }
     }
-    cubics(&piece.exact, tolerance, max_fits)
+    cubics(&piece.exact, tolerance, gap, max_fits)
 }
 
 /// Points `pts` with the weights `w`, as homogeneous intervals.
@@ -286,15 +291,15 @@ fn weighted(pts: &[Vec3], w: &[Interval]) -> Vec<HInterval> {
         .collect()
 }
 
-/// Whether two neighbouring points of `pts` are closer than [`MIN_CONTROL_GAP`], and not all of
-/// them are (a curve smaller than that is a point, whatever its points: it is kept as it is).
-fn repeats(pts: &[Vec3]) -> bool {
-    pts.windows(2).any(|w| w[0].dist(w[1]) < MIN_CONTROL_GAP) && !pts.iter().all(|p| p.dist(pts[0]) < MIN_CONTROL_GAP)
+/// Whether two neighbouring points of `pts` are closer than `gap`, and not all of them are (a
+/// curve smaller than that is a point, whatever its points: it is kept as it is).
+fn repeats(pts: &[Vec3], gap: f64) -> bool {
+    pts.windows(2).any(|w| w[0].dist(w[1]) < gap) && !pts.iter().all(|p| p.dist(pts[0]) < gap)
 }
 
 /// Cubic Hermite curves that follow the enclosed Bézier `exact`, halving a part until its bound is
-/// within `tolerance` ([`follow`]).
-fn cubics(exact: &[HInterval], tolerance: f64, max_fits: usize) -> SplineResult<Vec<Certified<Fit>>> {
+/// within `tolerance`, no two neighbouring points nearer than `gap` ([`follow`]).
+fn cubics(exact: &[HInterval], tolerance: f64, gap: f64, max_fits: usize) -> SplineResult<Vec<Certified<Fit>>> {
     let half = Interval::point(0.5);
     let ones = [Interval::point(1.0); 4];
     let mut out = Vec::new();
@@ -303,7 +308,7 @@ fn cubics(exact: &[HInterval], tolerance: f64, max_fits: usize) -> SplineResult<
     while let Some((part, along)) = parts.pop() {
         mids.clear();
         mids.extend(part.iter().map(|h| h.mid()));
-        let (ctrl, run) = hermite(&mids)?;
+        let (ctrl, run) = hermite(&mids, gap)?;
         // Traced as `run` goes, the cubic is still every one of its points, so a bound between the
         // part and it bounds the distance from each point of either to the other.
         let traced = match run {
@@ -312,7 +317,7 @@ fn cubics(exact: &[HInterval], tolerance: f64, max_fits: usize) -> SplineResult<
         };
         let bound = error_bound(&part, &traced)?;
         // A cubic with a repeated point (a part too small for its handles) is split, as one too far.
-        if bound <= tolerance && !repeats(&ctrl) {
+        if bound <= tolerance && !repeats(&ctrl, gap) {
             out.push(Certified { value: Fit::Bezier(ctrl.to_vec()), bound, along });
             continue;
         }
@@ -354,7 +359,7 @@ const STOPS_AT_BOTH: &[f64] = &[0.0, 0.0, 1.0, 1.0];
 /// The cubic with the ends of the Bézier `q` and its tangents there (cubic Hermite): a rational
 /// Bézier's derivative at its start is `n·(w₁/w₀)·(p₁ − p₀)`, and alike at its end; traced evenly.
 ///
-/// Where the derivative leaves a handle shorter than [`MIN_CONTROL_GAP`] (the end has no
+/// Where the derivative leaves a handle shorter than `gap` (the end has no
 /// direction: `p₁` on `p₀`, as a zero-length handle in a drawing leaves it), the curve arrives
 /// there with no speed and turns ever more sharply into it. A cubic that follows it as closely in
 /// the same parameter would have to turn as sharply. Instead the cubic is traced as a `ψ` that
@@ -363,7 +368,7 @@ const STOPS_AT_BOTH: &[f64] = &[0.0, 0.0, 1.0, 1.0];
 /// long, so the cubic bends gently where the part bends sharply, within its bound of it. The other
 /// end's handle matches its derivative through `ψ` likewise. Any cubic would do: the bound is
 /// computed for the one made.
-fn hermite(q: &[HPoint]) -> SplineResult<([Vec3; 4], Run)> {
+fn hermite(q: &[HPoint], gap: f64) -> SplineResult<([Vec3; 4], Run)> {
     let n = q.len().saturating_sub(1);
     let at = |i: usize| q.get(i).and_then(|h| h.project().map(|p| (p, h.w)));
     let (Some((p0, w0)), Some((p1, w1)), Some((pm, wm)), Some((pn, wn))) = (at(0), at(1), at(n.saturating_sub(1)), at(n)) else {
@@ -374,16 +379,16 @@ fn hermite(q: &[HPoint]) -> SplineResult<([Vec3; 4], Run)> {
     // The derivatives at the ends, into the curve.
     let (d0, d1) = ((p1 - p0) * (nf * w1 / w0), (pm - pn) * (nf * wm / wn));
     // An end stops where its handle would have no length and the part is long enough for one.
-    let stops = |d: Vec3| n >= 2 && d.len() / 3.0 < MIN_CONTROL_GAP && chord / 3.0 >= MIN_CONTROL_GAP;
+    let stops = |d: Vec3| n >= 2 && d.len() / 3.0 < gap && chord / 3.0 >= gap;
     // A stopped end's handle, for `ψ` with `bend = ψ''` there: the second derivative into the curve
     // over three times `bend`; where that has no length either, a third of the chord along the
     // first of the points that leaves the end.
     let stopped = |from: Vec3, w: f64, next: usize, others: &mut dyn Iterator<Item = usize>, bend: f64| -> Vec3 {
         let second = at(next).map_or(Vec3::ZERO, |(p, wn2)| (p - from) * (nf * (nf - 1.0) * wn2 / w));
-        if second.len() / (3.0 * bend) >= MIN_CONTROL_GAP {
+        if second.len() / (3.0 * bend) >= gap {
             return second / (3.0 * bend);
         }
-        let away = others.filter_map(|i| at(i).map(|(p, _)| p - from)).find(|v| v.len() >= MIN_CONTROL_GAP);
+        let away = others.filter_map(|i| at(i).map(|(p, _)| p - from)).find(|v| v.len() >= gap);
         away.and_then(Vec3::normalized).map_or(Vec3::ZERO, |u| u * (chord / 3.0))
     };
     let (h0, h1, run) = match (stops(d0), stops(d1)) {
@@ -800,7 +805,7 @@ mod tests {
             // bound checked both ways on a tenth of the curves (it is slow in double-double).
             let Some(piece) = pieces.first() else { continue };
             for (tolerance, room) in [(1e-6 * scale, 4096), (1e-13 * scale, 64)] {
-                match follow(piece, tolerance, solidcore_record::MAX_BEZIER_DEGREE, room) {
+                match follow(piece, tolerance, MIN_CONTROL_GAP, solidcore_record::MAX_BEZIER_DEGREE, room) {
                     Ok(fits) => {
                         assert_follows(&def, piece, &fits, tolerance, if i % 10 == 0 { 3 } else { 0 });
                         certified += 1;
@@ -916,14 +921,14 @@ mod tests {
         {
             let (curve, def) = cartesian(knots.len() - pts.len() - 1, knots, pts, w);
             let piece = &curve.pieces().unwrap()[0];
-            let fits = follow(piece, 1e-9, 9, 100).unwrap();
+            let fits = follow(piece, 1e-9, MIN_CONTROL_GAP, 9, 100).unwrap();
             assert!(matches!(&fits[..], [c] if *c.value() == Fit::Bezier(pts.to_vec()) && c.bound() < 1e-12), "{w:?}: {fits:?}");
             assert_follows(&def, piece, &fits, 1e-9, 1);
         }
         let five = plain(&[(0.0, 0.0), (5.0, 30.0), (20.0, -10.0), (30.0, 40.0), (40.0, 30.0), (50.0, 0.0)]);
         let (curve, def) = cartesian(5, &[0.0; 6].into_iter().chain([1.0; 6]).collect::<Vec<_>>(), &five, None);
         let piece = &curve.pieces().unwrap()[0];
-        let fits = follow(piece, 1e-6, 3, 1000).unwrap();
+        let fits = follow(piece, 1e-6, MIN_CONTROL_GAP, 3, 1000).unwrap();
         assert!(fits.len() > 1 && fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if p.len() == 4)), "{fits:?}");
         assert_follows(&def, piece, &fits, 1e-6, 3);
     }
@@ -939,7 +944,7 @@ mod tests {
         for w in [[1.0, h, 1.0], [2.0, 3.0 * h, 4.5]] {
             let (curve, def) = cartesian(2, &knots, &pts, Some(&w));
             let piece = &curve.pieces().unwrap()[0];
-            let fits = follow(piece, 1e-9, 9, 100).unwrap();
+            let fits = follow(piece, 1e-9, MIN_CONTROL_GAP, 9, 100).unwrap();
             let [c] = &fits[..] else { panic!("{fits:?}") };
             assert!(matches!(c.value(), Fit::Conic { .. }) && c.bound() < 1e-12, "{w:?}: {c:?}");
             assert_follows(&def, piece, &fits, 1e-9, 1);
@@ -948,12 +953,12 @@ mod tests {
         // would pass.
         let (curve, def) = cartesian(2, &knots, &pts, Some(&[1.0, 2e9, 1.0]));
         let piece = &curve.pieces().unwrap()[0];
-        let fits = follow(piece, 1e-3, 9, 1000).unwrap();
+        let fits = follow(piece, 1e-3, MIN_CONTROL_GAP, 9, 1000).unwrap();
         assert!(fits.iter().all(|c| !matches!(c.value(), Fit::Conic { .. })), "{fits:?}");
         assert_follows(&def, piece, &fits, 1e-3, 3);
         let (curve, def) = cartesian(2, &knots, &plain(&[(0.0, 0.0), (30.0, 0.0), (10.0, 0.0)]), Some(&[1.0, 3.0, 1.0]));
         let piece = &curve.pieces().unwrap()[0];
-        let fits = follow(piece, 1e-6, 9, 1000).unwrap();
+        let fits = follow(piece, 1e-6, MIN_CONTROL_GAP, 9, 1000).unwrap();
         assert!(fits.iter().all(|c| !matches!(c.value(), Fit::Conic { .. })), "{fits:?}");
         assert_follows(&def, piece, &fits, 1e-6, 3);
     }
@@ -965,7 +970,7 @@ mod tests {
         let (curve, def) = cartesian(3, &knots, &pts, Some(&[1.0, 3.0, 0.5, 1.0]));
         let piece = &curve.pieces().unwrap()[0];
         for tolerance in [1e-1, 1e-3, 1e-6] {
-            let fits = follow(piece, tolerance, 9, 10_000).unwrap();
+            let fits = follow(piece, tolerance, MIN_CONTROL_GAP, 9, 10_000).unwrap();
             assert_follows(&def, piece, &fits, tolerance, 3);
             // Each halving gains about 16x, so a tolerance a thousand times tighter takes about
             // six times the cubics, not a thousand.
@@ -974,8 +979,8 @@ mod tests {
         // Room for one curve is enough for a piece one curve follows; none is refused.
         let (plain, _) = cartesian(3, &knots, &pts, None);
         let piece = &plain.pieces().unwrap()[0];
-        assert_eq!(follow(piece, 1e-9, 9, 1).unwrap().len(), 1);
-        assert!(matches!(follow(piece, 1e-9, 9, 0), Err(SplineError::TooLarge(_))));
+        assert_eq!(follow(piece, 1e-9, MIN_CONTROL_GAP, 9, 1).unwrap().len(), 1);
+        assert!(matches!(follow(piece, 1e-9, MIN_CONTROL_GAP, 9, 0), Err(SplineError::TooLarge(_))));
     }
 
     #[test]
@@ -983,14 +988,15 @@ mod tests {
         let pts = plain(&[(0.0, 0.0), (0.0, 1e5), (1e5, 3e4), (2e4, 0.0)]);
         let (curve, def) = cartesian(3, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], &pts, Some(&[1.0, 1e4, 1e-4, 1.0]));
         let piece = &curve.pieces().unwrap()[0];
-        // Too few curves allowed; a tolerance below rounding; no tolerance at all.
-        assert!(matches!(follow(piece, 1e-3, 9, 8), Err(SplineError::TooLarge(_))));
-        assert!(follow(piece, 1e-30, 9, usize::MAX).is_err());
+        // Too few curves allowed; a tolerance below rounding; no tolerance or gap at all.
+        assert!(matches!(follow(piece, 1e-3, MIN_CONTROL_GAP, 9, 8), Err(SplineError::TooLarge(_))));
+        assert!(follow(piece, 1e-30, MIN_CONTROL_GAP, 9, usize::MAX).is_err());
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert!(follow(piece, bad, 9, 100).is_err(), "{bad}");
+            assert!(follow(piece, bad, MIN_CONTROL_GAP, 9, 100).is_err(), "{bad}");
+            assert!(follow(piece, 1e-3, bad, 9, 100).is_err(), "{bad}");
         }
         // Given room, the same 100 m curve with weights 10⁸ apart does come within 0.001 mm, proven.
-        let fits = follow(piece, 1e-3, 9, 100_000).unwrap();
+        let fits = follow(piece, 1e-3, MIN_CONTROL_GAP, 9, 100_000).unwrap();
         assert_follows(&def, piece, &fits, 1e-3, 3);
     }
 
@@ -1002,8 +1008,8 @@ mod tests {
         let pts: Vec<Vec3> = plain(&[(0.0, 0.0), (5.0, 30.0), (40.0, 30.0), (50.0, 0.0)]).into_iter().map(|p| p * s).collect();
         let (curve, def) = cartesian(3, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], &pts, Some(&[1.0, 3.0, 0.5, 1.0]));
         let piece = &curve.pieces().unwrap()[0];
-        assert!(follow(piece, 1e-250, 9, 1000).is_err());
-        let fits = follow(piece, 1e-3 * s, 9, 10_000).unwrap();
+        assert!(follow(piece, 1e-250, MIN_CONTROL_GAP, 9, 1000).is_err());
+        let fits = follow(piece, 1e-3 * s, MIN_CONTROL_GAP, 9, 10_000).unwrap();
         assert!(fits.iter().all(|c| c.bound() > 0.0));
         assert_follows(&def, piece, &fits, 1e-3 * s, 3);
     }
@@ -1017,14 +1023,15 @@ mod tests {
         let (curve, def) = cartesian(3, &[a, a, a, a, b, b, b, b], &pts, Some(&[1.0, 3.0, 0.5, 1.0]));
         let piece = &curve.pieces().unwrap()[0];
         assert_eq!(piece.span(), [a, b]);
-        let fits = follow(piece, 1e-3, 9, 1000).unwrap();
+        let fits = follow(piece, 1e-3, MIN_CONTROL_GAP, 9, 1000).unwrap();
         assert_follows(&def, piece, &fits, 1e-3, 3);
     }
 
     /// A cubic whose handle at an end has no length (`C4,31 8,20 8,20` in an SVG path, both ends,
     /// or a rational one) is followed by cubics with no repeated point, within the tolerance,
-    /// proven; so is each handle shortened towards none. At a stalled end the cubic leaves the way
-    /// the curve does.
+    /// proven; so is each handle shortened towards none, and one longer than the sketch's gap but
+    /// shorter than a larger gap asked for (a drawing scaled down to the sketch). At a stalled end
+    /// the cubic leaves the way the curve does.
     #[test]
     fn an_end_with_no_direction_is_followed_by_curves_that_have_one() {
         let cubic = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
@@ -1034,8 +1041,8 @@ mod tests {
         for (pts, w, tolerance) in [(&svg, None, 5e-4), (&svg, None, 1e-6), (&both, None, 5e-4), (&start, Some(&[1.0, 2.0, 0.5, 1.0][..]), 5e-4)] {
             let (curve, def) = cartesian(3, &cubic, pts, w);
             let piece = &curve.pieces().unwrap()[0];
-            let fits = follow(piece, tolerance, 9, 4096).unwrap();
-            assert!(fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if !repeats(p))), "{pts:?}: {fits:?}");
+            let fits = follow(piece, tolerance, MIN_CONTROL_GAP, 9, 4096).unwrap();
+            assert!(fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if !repeats(p, MIN_CONTROL_GAP))), "{pts:?}: {fits:?}");
             assert!(fits.len() < 100, "{pts:?} at {tolerance}: {} cubics", fits.len());
             assert_follows(&def, piece, &fits, tolerance, 3);
             let leaves = |f: &Certified<Fit>, end: bool| match f.value() {
@@ -1051,12 +1058,13 @@ mod tests {
                 assert!(!stalled || (way.cross(along).len() <= 1e-6 * way.len() * along.len() && way.dot(along) > 0.0), "{pts:?}: {way:?}");
             }
         }
-        for gap in [1e-3, 1e-8, 1e-10] {
+        for (gap, keep) in [(1e-3, MIN_CONTROL_GAP), (1e-8, MIN_CONTROL_GAP), (1e-10, MIN_CONTROL_GAP), (3e-8, 1e-7)] {
             let pts = plain(&[(5.0, -35.0), (4.0, -31.0), (8.0, -20.0 - gap), (8.0, -20.0)]);
             let (curve, def) = cartesian(3, &cubic, &pts, None);
             let piece = &curve.pieces().unwrap()[0];
-            let fits = follow(piece, 5e-4, 9, 4096).unwrap();
-            assert!(fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if !repeats(p))), "{gap}: {fits:?}");
+            let fits = follow(piece, 5e-4, keep, 9, 4096).unwrap();
+            let apart = |p: &[Vec3]| p.windows(2).all(|w| w[0].dist(w[1]) >= keep);
+            assert!(fits.iter().all(|c| matches!(c.value(), Fit::Bezier(p) if apart(p))), "{gap}: {fits:?}");
             assert_follows(&def, piece, &fits, 5e-4, 3);
         }
     }

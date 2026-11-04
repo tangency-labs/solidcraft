@@ -74,6 +74,9 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             cur = seg.end();
         }
     }
+    // A cubic whose handle has no length (a vertex with no tangent, a span too short) has an end
+    // with no direction, which a sketch spline can't have: it comes in as curves that follow it.
+    let (geom, _, _) = super::sketch_import::split_nurbs(geom, super::sketch_import::DEFAULT_FIT_TOLERANCE / 2.0, 1.0).map_err(|e| bad(cmd, e))?;
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("{} sketch", canvas.name));
     let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), canvas.plane.clone(), None)?;
     let id = r.get("sketch").and_then(Value::as_u64);
