@@ -293,7 +293,9 @@ sheet_perforate
     Diameter = perforate.diameter (Length)
     Pitch = perforate.pitch (Length)
     Margin = perforate.margin (Length)
-  expressions: perforate.diameter, perforate.pitch, perforate.margin
+    Slot length = perforate.length (Length)
+    Row pitch = perforate.row_pitch (Length)
+  expressions: perforate.diameter, perforate.pitch, perforate.margin, perforate.length, perforate.row_pitch
 sheet_fold
   inputs:
     Angle = fold.angle (Angle)

@@ -322,7 +322,7 @@ index) and, for the bends, a linetype that the file defines.
 | `BEND_UP`, `BEND_DOWN` | 1 red, 5 blue | `DASHED` | the bend centre lines, by direction |
 | `BEND_NOTES` | 8 grey | continuous | the note beside each bend line, only with `"bend_notes": true` |
 | `POCKET_…` | 3 green | continuous | pockets, a layer for each depth (see below) |
-| `PERFORATION` | 3 green | continuous | the holes of a perforation field |
+| `PERFORATION` | 3 green | continuous | the holes of a perforation field: a round hole a `CIRCLE`, a hexagon its six `LINE`s, a slot two `LINE`s and two `ARC`s |
 
 `OUTLINE`, `CUT`, `BEND_UP` and `BEND_DOWN` are always in the layer table, the others when the
 sheet has something for them. The inner contours (`CUT`, `TEXT`) are written before the outline,

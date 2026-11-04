@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use super::{
     ConvertParams, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FoldParams, FoldPoints, FoldPosition, HeightFromParam,
-    HemParams, PerforateParams, PerforationPattern, ReliefShapeParam, SheetPoints, ThenSteps, UnfoldParams,
+    HemParams, PerforateParams, PerforationPattern, PerforationShapeParam, ReliefShapeParam, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -64,7 +64,10 @@ fn schemas_and_the_key_check_agree() {
             "type",
         ]),
     );
-    assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
+    assert_keys(
+        input_schema_for::<PerforateParams>(),
+        &keys(&["body", "diameter", "length", "margin", "pattern", "pitch", "profiles", "row_pitch", "shape", "sketch"]),
+    );
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
     assert_keys(input_schema_for::<FoldParams>(), &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch"]));
     assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));
@@ -167,6 +170,11 @@ fn the_value_types_match_the_readers() {
         (json!(null), false),
     ] {
         assert_eq!(takes::<PerforationPattern>(&v), ok, "{v}");
+    }
+    for (v, ok) in
+        [(json!("round"), true), (json!("hex"), true), (json!("slot"), true), (json!("Hex"), false), (json!("square"), false), (json!(null), false)]
+    {
+        assert_eq!(takes::<PerforationShapeParam>(&v), ok, "{v}");
     }
     let words = |accepted: &[&str], refused: &[Value], read: &dyn Fn(Value) -> bool| {
         for w in accepted {

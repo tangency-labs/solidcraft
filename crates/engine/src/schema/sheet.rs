@@ -335,6 +335,27 @@ impl JsonSchema for PerforationPattern {
     }
 }
 
+/// A perforation's `shape` (read by `sheet::perforation_shape`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PerforationShapeParam(pub String);
+
+impl<'de> Deserialize<'de> for PerforationShapeParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let t = v.as_str().unwrap_or_default();
+        crate::cmd::perforation_shape(t).map(|t| PerforationShapeParam(t.to_string())).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for PerforationShapeParam {
+    fn schema_name() -> Cow<'static, str> {
+        "PerforationShape".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "round, hex (a honeycomb on the staggered pattern) or slot, lower case.", "enum": ["round", "hex", "slot"]})
+    }
+}
+
 /// Add a sheet metal flange: a base flange from sketch profiles, a contour flange along an open
 /// chain of sketch lines, or edge flanges on a sheet's edges. Thickness, K-factor, bend radius
 /// and reliefs come from the sheet metal rule (`sheet.manage_rules`), so those keys are refused;
@@ -417,15 +438,15 @@ pub struct FlangeParams {
     pub common: FeatureCommon,
 }
 
-/// Add a field of round perforations over a whole flat sheet, or inside a sketch's outline: holes
-/// in the flat pattern, the DXF (layer PERFORATION) and the measured volume, not cut into the
-/// solid. `participants` changes nothing.
+/// Add a field of perforations (round, hexagonal or slotted) over a whole flat sheet, or inside a
+/// sketch's outline: holes in the flat pattern, the DXF (layer PERFORATION) and the measured
+/// volume, not cut into the solid. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PerforateParams {
-    /// The holes' diameter, more than 0.
+    /// The holes' diameter, more than 0: a hexagon's across its flats, a slot's width.
     pub diameter: LengthExpr,
-    /// The distance between hole centres, more than the diameter.
+    /// The distance between hole centres along a row, more than the diameter (a slot's length).
     pub pitch: LengthExpr,
     /// How far the holes stay clear of the sheet's edges, cut-outs and bends, and of the outline,
     /// at least 0. Default: the diameter.
@@ -434,6 +455,17 @@ pub struct PerforateParams {
     /// How the holes are laid out. Default: staggered.
     #[serde(default)]
     pub pattern: Option<PerforationPattern>,
+    /// The holes' shape. Default: round.
+    #[serde(default)]
+    pub shape: Option<PerforationShapeParam>,
+    /// A slot's length overall, along the rows, more than the diameter. Only with `shape: slot`,
+    /// which needs it.
+    #[serde(default)]
+    pub length: Option<LengthExpr>,
+    /// The distance between rows, more than 0. Default: the pitch's 60° rows (staggered) or the
+    /// pitch (square).
+    #[serde(default)]
+    pub row_pitch: Option<LengthExpr>,
     /// The sheet metal body. Default: the newest sheet.
     #[serde(default)]
     pub body: Option<String>,

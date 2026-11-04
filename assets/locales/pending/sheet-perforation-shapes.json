@@ -1,0 +1,58 @@
+{
+  "en": {
+    "ui.perforate_hex": "Hexagon",
+    "ui.perforate_length": "Slot length",
+    "ui.perforate_round": "Round",
+    "ui.perforate_row_pitch": "Row pitch",
+    "ui.perforate_row_pitch_default": "from the pitch",
+    "ui.perforate_slot": "Slot"
+  },
+  "ar": {
+    "ui.perforate_hex": "سداسي",
+    "ui.perforate_length": "طول الشق",
+    "ui.perforate_round": "دائري",
+    "ui.perforate_row_pitch": "خطوة الصفوف",
+    "ui.perforate_row_pitch_default": "من الخطوة",
+    "ui.perforate_slot": "شق"
+  },
+  "de": {
+    "ui.perforate_hex": "Sechseck",
+    "ui.perforate_length": "Langlochlänge",
+    "ui.perforate_round": "Rund",
+    "ui.perforate_row_pitch": "Reihenabstand",
+    "ui.perforate_row_pitch_default": "aus der Teilung",
+    "ui.perforate_slot": "Langloch"
+  },
+  "he": {
+    "ui.perforate_hex": "משושה",
+    "ui.perforate_length": "אורך החריץ",
+    "ui.perforate_round": "עגול",
+    "ui.perforate_row_pitch": "פסיעת שורות",
+    "ui.perforate_row_pitch_default": "לפי הפסיעה",
+    "ui.perforate_slot": "חריץ"
+  },
+  "ja": {
+    "ui.perforate_hex": "六角形",
+    "ui.perforate_length": "長穴の長さ",
+    "ui.perforate_round": "丸穴",
+    "ui.perforate_row_pitch": "行ピッチ",
+    "ui.perforate_row_pitch_default": "ピッチから",
+    "ui.perforate_slot": "長穴"
+  },
+  "vi": {
+    "ui.perforate_hex": "Lục giác",
+    "ui.perforate_length": "Chiều dài rãnh",
+    "ui.perforate_round": "Tròn",
+    "ui.perforate_row_pitch": "Bước hàng",
+    "ui.perforate_row_pitch_default": "theo bước lỗ",
+    "ui.perforate_slot": "Rãnh"
+  },
+  "zh": {
+    "ui.perforate_hex": "六边形",
+    "ui.perforate_length": "长圆孔长度",
+    "ui.perforate_round": "圆孔",
+    "ui.perforate_row_pitch": "行距",
+    "ui.perforate_row_pitch_default": "由孔距确定",
+    "ui.perforate_slot": "长圆孔"
+  }
+}
