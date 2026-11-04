@@ -25,3 +25,27 @@ unit = "topology.brep_local_operation"
 check = "ratchet"
 case = "nurb_fillet_face5_same"
 reason = "ND-493 C++ clock-seeded rand() (srand(time(NULL)) in GetPointsInFace via IsInnerShell in the merge stitch): intermittent on main CI at c47d6d3b5 and 7ca6ce7a9; Rust deterministic; parked"
+
+[[waiver]]
+unit = "curve.curve_p3"
+check = "ratchet"
+case = "circle_pc_extrema"
+reason = "#2639, WR-740 (confirmed): parked as cpp_defect, the C++ returns its 0.05 C.C limit as F prime at a circle centre where the true F prime is 0"
+
+[[waiver]]
+unit = "heal.face_props"
+check = "ratchet"
+case = "gen0010"
+reason = "#2639, WR-740 (confirmed): parked as cpp_defect, the C++ finds no closest point on a seam circle from about 1 off its axis, so it misses the V seam"
+
+[[waiver]]
+unit = "blend.fillet_executive_p3"
+check = "ratchet"
+case = "big-rad-filleted_box-r2.0-top-edges"
+reason = "#2639, WR-739 (confirmed): parked as cpp_defect, the C++ rounds the top loop r 2 over R1 vertical rounds into self-crossing spindle-torus corner faces; solidcore refuses it naming 1"
+
+[[waiver]]
+unit = "blend.fillet_executive_p3"
+check = "ratchet"
+case = "big-rad-filleted_box-r3.0-top-edges"
+reason = "#2639, WR-739 (confirmed): as r2.0, r 3"

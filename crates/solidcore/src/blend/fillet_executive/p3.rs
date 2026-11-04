@@ -186,6 +186,17 @@ pub enum NoRoomReason {
     /// ball at an end of the edge, so no round ends there (not the fork's, #2401;
     /// `fixes.fillet_gn_section_generator`).
     OffsetCollapses,
+    /// A rail of a constant ball's round or chamfer along an arc would have its ends
+    /// within the part's resolution of each other (two vertex tolerances) without closing
+    /// to a point: a chamfer just short of the corner rounds it runs round, its corner
+    /// arcs on the bottom face shorter than the part resolves (not the fork's, #2546,
+    /// WR-739).
+    RailBelowResolution,
+    /// A rail of a constant ball's round or chamfer along an arc would lie on the far side
+    /// of the arc's axis from the edge: its section runs through the axis (a chamfer wider
+    /// than the round it runs round). The size at which the rail closes to a point on the
+    /// axis builds (not the fork's, #2546, WR-739).
+    RailPastAxis,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
@@ -2147,6 +2158,20 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         radius: Option<f64>,
     ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>>;
 
+    /// Not the fork's (#2546): for a constant ball, its rail whose ends lie within the
+    /// part's resolution of each other without closing to a point
+    /// (`blend::fillet_exact::rail_below_resolution`); `None` otherwise, for a solver
+    /// that rolls no constant ball, and from the adapter over [`ExecutiveAccess`], which
+    /// holds no solver geometry.
+    ///
+    /// # Errors
+    /// The judging's own errors.
+    fn creation_rail_below_resolution(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+    ) -> Result<Option<crate::blend::fillet_exact::RailBelowResolution>>;
+
     /// `SmFilletSolver::BandsMeetAt` (the fork's, a3d6d81) over the executive's pairs of
     /// `solvers` sharing a face, in its loop order (`a`, `b`, then each's face index): the
     /// radius where their bands meet, with the first solver's edge, for each pair that
@@ -2259,6 +2284,15 @@ where
         _radius: Option<f64>,
     ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>> {
         Err(invalid("the ball's zone needs a live fillet session"))
+    }
+
+    fn creation_rail_below_resolution(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+    ) -> Result<Option<crate::blend::fillet_exact::RailBelowResolution>> {
+        // the adapter over ExecutiveAccess holds no solver geometry: no rail to judge
+        Ok(None)
     }
 
     fn creation_circle_tops(&mut self, _k: &mut Kernel, _solver: O) -> Result<Vec<(f64, O)>> {
@@ -3714,6 +3748,58 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Err(failure())
     }
 
+    /// Not the fork's (#2546, WR-739):
+    /// before the corners look for the rails' ends, a constant ball's round or chamfer
+    /// whose rail would have its ends within the part's resolution of each other, without
+    /// closing to a point, is refused with [`FilletErrorType::NoRoom`]
+    /// ([`NoRoomReason::RailBelowResolution`]), naming the largest size whose rails the
+    /// part resolves (open) and the size at which the rail closes to a point
+    /// ([`crate::blend::fillet_exact::rail_below_resolution`]). A rail on the far side of
+    /// the axis is refused whatever its length ([`NoRoomReason::RailPastAxis`]), naming the
+    /// size at which it closes to a point, on the edge's side. The least fit of the refused
+    /// solvers is named.
+    fn refuse_rails_below_resolution(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<()> {
+        let mut worst: Option<(crate::blend::fillet_exact::RailBelowResolution, O)> = None;
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            index += 1;
+            if let Some(rail) = access.creation_rail_below_resolution(k, solver)? {
+                if worst.is_none_or(|(w, _)| rail.fit < w.fit) {
+                    worst = Some((rail, solver));
+                }
+            }
+        }
+        let Some((rail, solver)) = worst else {
+            return Ok(());
+        };
+        let g = |x: f64| c_general(x, 0, 7);
+        let edge = access.creation_solver_fit(solver)?.map(|fit| fit.edge);
+        self.note_fit_radius(rail.fit, edge, FitKind::Radius);
+        if rail.past_axis {
+            return self.record_no_room(
+                NoRoomReason::RailPastAxis,
+                &format!(
+                    "Fillet Error: a rail of the blend would lie on the far side of its arc's axis, its section through the axis: the blend is wider than the face it rolls on allows. A size of at most {} keeps the rail on the edge's side, closing it to a point at that size",
+                    g(rail.point_size)
+                ),
+            );
+        }
+        self.record_no_room(
+            NoRoomReason::RailBelowResolution,
+            &format!(
+                "Fillet Error: a rail of the blend would be an arc whose ends are {} apart, within the part's resolution {}: they would be one vertex. The part resolves the rail below {}, and at exactly {} it closes to a point",
+                g(rail.chord),
+                g(rail.resolution),
+                g(rail.fit),
+                g(rail.point_size)
+            ),
+        )
+    }
+
     /// Not the fork's (#2401): after the ball's regularity, a constant ball whose offset of
     /// a face collapses (the face as wide as the ball) has its centre fixed, and builds only
     /// as the zone it sweeps, which must end in a section of the ball at each end of the
@@ -3872,6 +3958,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 self.refuse_polygons_taken_whole(k, access)?;
             }
         }
+
+        // Not the fork's (#2546, WR-739): a rail whose ends would be one vertex, or that
+        // lies past its arc's axis
+        self.refuse_rails_below_resolution(k, access)?;
 
         self.create_corner_vertices(k, access)?;
         self.adjust_corner_topology(k, access)?;

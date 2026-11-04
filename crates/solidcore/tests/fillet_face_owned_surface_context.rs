@@ -4,8 +4,10 @@
 //! at hand.
 //!
 //! - `SmFilletEdge::CalcCrossSection` on the original face: `sm_CreateUVCurve`'s point
-//!   drops classify on the face (`pFace->PointClassify`), difftest
-//!   `big-rad-filleted_box-r2.0-top-edges` (`prog_test` `smFilletTest.cpp:1176`).
+//!   drops classify on the face (`pFace->PointClassify`), the top edges of
+//!   `filleted_box.smb` (`prog_test` `smFilletTest.cpp:1176`, difftest
+//!   `big-rad-filleted_box-r*-top-edges`). Its vertical edges are rounded R1: a round of
+//!   the top loop up to 1 builds, a larger one is refused (#2546, WR-739).
 //! - `SmFilletEdge::CalcFilletIntSideFace` against the side face's surface:
 //!   `sm_SrfSrfIntersection`'s general intersector makes the face's trimmed cache,
 //!   difftest `stubs4-shell_fillet2-e1-r0.5`.
@@ -20,8 +22,10 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::blend::fillet_executive::NoRoomReason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::topology::brep::{p1, p10::TopologyEnv, p7};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::Brep;
@@ -54,6 +58,15 @@ fn key_of(e: EntityRef) -> ObjectRef {
 /// it. `None` without the upstream tree (CI's test job has none; the difftest job runs
 /// the same cases through `blend.fillet_executive_p3`).
 fn round(file: &str, r: f64, edges: &[usize]) -> Option<(Result<(), SolidError>, usize)> {
+    round_body(file, r, edges).map(|(result, faces, _)| (result, faces))
+}
+
+/// [`round`] with the volume the round removes (`None` when it fails).
+fn round_body(
+    file: &str,
+    r: f64,
+    edges: &[usize],
+) -> Option<(Result<(), SolidError>, usize, Option<f64>)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles")
         .join(file);
@@ -74,23 +87,67 @@ fn round(file: &str, r: f64, edges: &[usize]) -> Option<(Result<(), SolidError>,
     };
     p7::read_from_file(&mut k, &mut body, bytes, FileType::Ascii, false, &mut env).unwrap();
     body.use_arena_naming().unwrap();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let before = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
     let all = p1::edges(&body, None).unwrap();
     let selected: Vec<_> = edges.iter().map(|&i| all[i]).collect();
     let result = fillet_edges(&mut k, &mut body, &selected, r, 1, 1, 1.0);
-    Some((result, p1::faces(&body, None).unwrap().len()))
+    let removed = result
+        .is_ok()
+        .then(|| before - brep_volume(&k, &mut body, 1e-6, &attrs).unwrap());
+    Some((result, p1::faces(&body, None).unwrap().len(), removed))
+}
+
+/// The top loop of `filleted_box.smb` (a 10 cube whose vertical edges are rounded R1):
+/// four straight edges of length 8 and four R1 arcs.
+const TOP_LOOP: [usize; 8] = [3, 6, 9, 12, 15, 17, 20, 23];
+
+/// The volume a round of radius `r <= 1` takes off the top loop: on each straight edge the
+/// section `r^2 (1 - pi/4)` along 8, on each arc that section turned a quarter about the
+/// R1 axis at its centroid's radius `1 - r (10 - 3 pi) / (12 - 3 pi)` (Pappus).
+fn top_loop_removed(r: f64) -> f64 {
+    use std::f64::consts::PI;
+    let section = r * r * (1.0 - PI / 4.0);
+    let centroid = 1.0 - r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    4.0 * 8.0 * section + 4.0 * (PI / 2.0) * section * centroid
 }
 
 #[test]
 fn cross_section_on_the_original_face_drops_points_with_the_face() {
-    let Some((result, faces)) = round(
-        "Fillet/filleted_box.smb",
-        2.0,
-        &[3, 6, 9, 12, 15, 17, 20, 23],
-    ) else {
-        return;
-    };
-    result.unwrap();
-    assert_eq!(faces, 18);
+    for r in [0.5, 0.9, 1.0] {
+        let Some((result, faces, removed)) = round_body("Fillet/filleted_box.smb", r, &TOP_LOOP)
+        else {
+            return;
+        };
+        result.unwrap();
+        assert_eq!(faces, 18, "r {r}");
+        let want = top_loop_removed(r);
+        let removed = removed.unwrap();
+        assert!((removed - want).abs() < 1e-6, "r {r}: {removed} vs {want}");
+    }
+}
+
+/// #2546 (WR-739): a round of the top loop wider than the R1 rounds puts its rail on the
+/// top face past each round's axis (radius 1 - r < 0): its section turned about the axis
+/// would be a spindle torus through its own axis. Refused, naming 1. Upstream and the
+/// port before built an 18-face body whose corner faces cross themselves (the difftest's
+/// `big-rad-filleted_box-r2.0-top-edges` and `-r3.0-`, parked on WR-739).
+#[test]
+fn a_round_wider_than_the_r1_rounds_is_refused_naming_1() {
+    for r in [1.01, 2.0, 3.0] {
+        let Some((result, _, _)) = round_body("Fillet/filleted_box.smb", r, &TOP_LOOP) else {
+            return;
+        };
+        let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
+            panic!("r {r}: {result:?}");
+        };
+        assert_eq!(reason, Some(NoRoomReason::RailPastAxis), "r {r}");
+        assert!((fit.size - 1.0).abs() < 1e-12, "r {r}: {}", fit.size);
+    }
 }
 
 #[test]

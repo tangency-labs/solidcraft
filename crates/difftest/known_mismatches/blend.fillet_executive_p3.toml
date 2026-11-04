@@ -1,0 +1,14 @@
+# blend.fillet_executive_p3: cases where the pinned C++ is verified wrong and solidcore is right
+# (#2546; plan/upstream-issues/WR-739 and WR-740). Parked, not passed.
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "big-rad-filleted_box-r2.0-top-edges"
+cpp_defect = "WR-739"
+why = "C++ rounds the top loop r 2 over R1 vertical rounds into 18 faces whose corner faces are spindle tori through their own axes (rail radius 1 - r < 0); solidcore refuses it naming 1 (RailPastAxis; tests/fillet_face_owned_surface_context.rs)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "big-rad-filleted_box-r3.0-top-edges"
+cpp_defect = "WR-739"
+why = "as r2.0, r 3: C++ builds self-crossing corner faces; solidcore refuses it naming 1 (RailPastAxis)"

@@ -1045,13 +1045,26 @@ mod ball_fit_tests {
 
     #[test]
     fn a_ball_that_does_not_fit_is_no_room_before_the_corners() {
+        // without the ball-fit rule: a ball of 3.1 between the R5 and R3 rounds fails in
+        // the corners; one of 7 is refused before them (#2546, WR-739), its rail on the
+        // plane x = 60 past the R5 round's axis (radius 5 - 7 < 0), naming 5
+        let (code, result) = corner_round(3.1, false);
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream { code: 1001, .. })
+        ));
+        assert_ne!(code, NO_ROOM, "r3.1: the corners fail on their own");
+        let (code, result) = corner_round(7.0, false);
+        let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
+            panic!("r7: {result:?}");
+        };
+        assert_eq!(
+            reason,
+            Some(crate::blend::fillet_executive::NoRoomReason::RailPastAxis)
+        );
+        assert!((fit.size - 5.0).abs() < 1e-12, "r7: {}", fit.size);
+        assert_eq!(code, NO_ROOM);
         for radius in [3.1, 7.0] {
-            let (code, result) = corner_round(radius, false);
-            assert!(matches!(
-                result,
-                Err(SolidError::Upstream { code: 1001, .. })
-            ));
-            assert_ne!(code, NO_ROOM, "r{radius}: the corners fail on their own");
             let (code, result) = corner_round(radius, true);
             assert!(matches!(
                 result,

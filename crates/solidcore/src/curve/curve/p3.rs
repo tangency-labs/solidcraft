@@ -902,11 +902,35 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
         // limited so that it cannot change the sign of the step. [B52]
         let lim_2d_deriv = 0.95; // Smaller values can slow down convergence.
 
-        if v_dot_2nd < -tan_dot_tan * lim_2d_deriv {
-            v_dot_2nd = -tan_dot_tan * lim_2d_deriv;
-        }
-
-        out.f_prime = tan_dot_tan + v_dot_2nd;
+        // Not upstream (WR-740, #2546): upstream holds F' at 0.05 C'.C' wherever the second
+        // order term is below -0.95 C'.C'. Near a centre of curvature the true F' is
+        // C'.C' (rho / R) for a point rho from the centre of a circle of radius R, so every
+        // step there was (rho / R) / 0.05 of Newton's and the solve ran out of iterations
+        // from within about R / 100 of the centre: no closest point on an arc from near its
+        // centre. When minimising, where the full F' is positive (a minimum's side of the
+        // centre of curvature) and the gap is within the limit's own angle of the normal
+        // (|cos(gap, C')| below 0.05), F' is the full one, bounded below by
+        // |cos(gap, C')| C'.C' so that a step never moves the foot along the curve farther
+        // than the gap is long. Everywhere else it is upstream's: near the answer the step
+        // is Newton's, far from it (where a full step would overshoot) upstream's damping.
+        let full = tan_dot_tan + v_dot_2nd;
+        let limit = 1.0 - lim_2d_deriv;
+        let cos_sq = if v_dot_v > 0.0 {
+            (v_dot_tan * v_dot_tan) / (v_dot_v * tan_dot_tan)
+        } else {
+            0.0
+        };
+        out.f_prime = if self.solver_operation == SolverOperation::Minimize
+            && full > 0.0
+            && cos_sq < limit * limit
+        {
+            full.max(cos_sq.sqrt() * tan_dot_tan)
+        } else {
+            if v_dot_2nd < -tan_dot_tan * lim_2d_deriv {
+                v_dot_2nd = -tan_dot_tan * lim_2d_deriv;
+            }
+            tan_dot_tan + v_dot_2nd
+        };
 
         // Set sign of 1st Derive for maximize
         if self.solver_operation == SolverOperation::Maximize {
@@ -2535,6 +2559,66 @@ mod tests {
             )
             .unwrap();
         assert!(!found);
+    }
+
+    /// The quarter circle of radius 5 about the origin from (5, 0) to (0, 5), as the
+    /// rational quadratic B-spline a round's edge is.
+    fn quarter_circle() -> Curve {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let pw = vec![
+            CPoint::new(5.0, 0.0, 0.0, 1.0),
+            CPoint::new(5.0 * w, 5.0 * w, 0.0, w),
+            CPoint::new(0.0, 5.0, 0.0, 1.0),
+        ];
+        let nurb = NurbCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+    }
+
+    /// #2546 (WR-740): the closest point of an arc to a point `rho` from its centre is the
+    /// arc's point at the point's angle, `5 - rho` away. Newton's derivative there is
+    /// `C'.C' rho / 5`; upstream's limit holds it at `0.05 C'.C'` and the solve runs out of
+    /// iterations, from within about R / 100 of the centre. Here it is Newton's, and the
+    /// point is found down to rho = 1e-6.
+    #[test]
+    fn issue_2546_closest_point_from_near_an_arcs_centre() {
+        let c = quarter_circle();
+        let ivl = c.natural_interval();
+        let angle = 30f64.to_radians();
+        for rho in [1e-2, 1e-4, 1e-6] {
+            let p = Vec3::new(rho * angle.cos(), rho * angle.sin(), 0.0);
+            {
+                let k = Kernel::default();
+                let (found, sol): (bool, Solution<()>) = c
+                    .local_point_solve(
+                        &k,
+                        &ivl,
+                        SolverOperation::Minimize,
+                        p,
+                        &PointSolveOptions::default(),
+                        0.05,
+                    )
+                    .unwrap();
+                assert!(found, "rho {rho}");
+                let q = c.evaluate_point(&k, sol.start.parameters[0]).unwrap();
+                let at = q.y.atan2(q.x);
+                // the solve stops where the gap is square to the tangent within EFF_ZERO,
+                // an angle of (rho / R) (at - angle) there: the point is as ill-conditioned
+                // as R / rho, its distance not
+                assert!(
+                    (at - angle).abs() * rho <= EFF_ZERO * 5.0,
+                    "rho {rho}: angle {at}"
+                );
+                let want = 5.0 - rho;
+                assert!(
+                    (sol.start.solution_value - want).abs() < 1e-12,
+                    "rho {rho}: {} vs {want}",
+                    sol.start.solution_value
+                );
+            }
+        }
     }
 
     #[test]

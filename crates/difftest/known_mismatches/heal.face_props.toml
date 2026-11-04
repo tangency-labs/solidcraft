@@ -1,0 +1,8 @@
+# heal.face_props: cases where the pinned C++ is verified wrong and solidcore is right
+# (#2546; plan/upstream-issues/WR-739 and WR-740). Parked, not passed.
+
+[[mismatch]]
+unit = "heal.face_props"
+case = "gen0010"
+cpp_defect = "WR-740"
+why = "the V seam circle (R 692.585) of a surface of revolution, the loop vertices about 1 from its axis: C++ finds none of their closest points on it (WR-740), so its seam classification reports the missing seam in U only; solidcore finds each at the closed-form distance and reports Both"

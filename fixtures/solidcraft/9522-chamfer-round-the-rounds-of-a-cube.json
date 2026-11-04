@@ -279,7 +279,7 @@
   },
   {
    "name": "chamfer_4_99_just_short_of_the_rounds",
-   "note": "Chamfer 4.99 on the bottom loop: the cones meet the bottom face in arcs of radius 0.01, their apexes 0.01 mm below it. On SolidCraft 0.29.0 (truck) this builds, with four cone faces.",
+   "note": "Chamfer 4.99 on the bottom loop: the cones meet the bottom face in arcs of radius 0.01, their apexes 0.01 mm below it. On SolidCraft 0.29.0 (truck) this builds, with four cone faces. Here it failed with a bare status 1001 (tangency-labs/solidcore#2546): the corners' search for where the rails meet the rounds' seams starts from the closest point of the arc to the ball's centre, 0.01 from the arc's centre, which the point/curve Newton step did not find within about R / 100 of an arc's centre; the step is now Newton's there (WR-740).",
    "fixes": [
     "fillet_chamfer_cone_on_arc"
    ],
@@ -382,6 +382,226 @@
      "value": 25099.176499509394,
      "tol": 1.900823500490605,
      "formula": "(30*30 - (4 - pi)*5^2)*30 (the cube less the four R5 rounds of its vertical edges) - 4*10*4.99^2 - pi*4.99^2*(5 - 4.99/3) (the chamfer along the bottom loop, by the coarea formula: int_0^4.99 (4.99 - s)*(80 + 2*pi*(5 - s)) ds, the perimeter of the bottom face's inward offset by s times the chamfer's height 4.99 - s there; on the four arcs these are Pappus's cone sections, the triangle of legs 4.99 with its centroid 5 - 4.99/3 from the rounds' axes) (tol: 0.1 % of the rounds and the chamfer)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_4_9999_within_the_resolution_is_refused",
+   "note": "Chamfer 4.9999 on the bottom loop: the bottom face's corner arcs (the cones' rails there) would have radius 0.0001, their ends 1.414e-4 apart, within the part's resolution (two of the blend's approximation tolerances, 2 x 1.6e-4): their end vertices would be one. Refused before the corners (WR-739, tangency-labs/solidcore#2546), naming the largest size whose arcs the part resolves, 5 - 2 x 1.6e-4 / sqrt(2), and that exactly 5 builds; it failed with a bare 1001.",
+   "fixes": [
+    "fillet_chamfer_cone_on_arc"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rounded",
+     "edges": [
+      [
+       -13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       -15.0,
+       0.0,
+       0.0
+      ],
+      [
+       -13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       15.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       15.0,
+       0.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       -15.0,
+       0.0
+      ]
+     ],
+     "distance": 4.9999
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 4.99977372583002,
+      "tol": 1e-09,
+      "source": "5 - 2 tol / sqrt(2): the corner arcs' ends, sqrt(2) (5 - d) apart, at the resolution 2 tol, tol = 1.6e-4 the blend's approximation tolerance (tangency-labs/solidcore#2546)"
+     }
+    }
+   }
+  },
+  {
+   "name": "chamfer_4_999999_within_the_resolution_is_refused",
+   "note": "Chamfer 4.999999 on the bottom loop: the corner arcs would have radius 1e-6. Refused as chamfer_4_9999_within_the_resolution_is_refused, naming the same limit.",
+   "fixes": [
+    "fillet_chamfer_cone_on_arc"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      -15.0,
+      -15.0,
+      0.0
+     ],
+     "size": [
+      30.0,
+      30.0,
+      30.0
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "cube",
+     "edges": [
+      [
+       -15.0,
+       -15.0,
+       15.0
+      ],
+      [
+       -15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       15.0,
+       15.0
+      ],
+      [
+       15.0,
+       -15.0,
+       15.0
+      ]
+     ],
+     "radius": 5.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rounded",
+     "edges": [
+      [
+       -13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       -15.0,
+       0.0,
+       0.0
+      ],
+      [
+       -13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       15.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       13.535533905932738,
+       0.0
+      ],
+      [
+       15.0,
+       0.0,
+       0.0
+      ],
+      [
+       13.535533905932738,
+       -13.535533905932738,
+       0.0
+      ],
+      [
+       0.0,
+       -15.0,
+       0.0
+      ]
+     ],
+     "distance": 4.999999
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 4.99977372583002,
+      "tol": 1e-09,
+      "source": "5 - 2 tol / sqrt(2): the corner arcs' ends, sqrt(2) (5 - d) apart, at the resolution 2 tol, tol = 1.6e-4 the blend's approximation tolerance (tangency-labs/solidcore#2546)"
+     }
     }
    }
   },

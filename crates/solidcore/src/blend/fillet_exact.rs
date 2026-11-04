@@ -2033,6 +2033,237 @@ pub fn ball_zone_open_at_an_end(
     Ok(None)
 }
 
+/// A rail of a constant ball's round or chamfer whose ends lie within the part's
+/// resolution of each other ([`rail_below_resolution`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RailBelowResolution {
+    /// The distance between the rail's ends.
+    pub chord: f64,
+    /// The resolution: two of the blend's vertex tolerances (its approximation tolerance),
+    /// within which the rail's two end vertices would be one.
+    pub resolution: f64,
+    /// The largest ball radius on this side of the collapse whose rail is longer than the
+    /// resolution (an open bound).
+    pub fit: f64,
+    /// The ball radius at which the rail closes to a point on the axis (the cone's apex
+    /// on it: no rail to resolve).
+    pub point_size: f64,
+    /// The rail lies on the far side of the axis from the edge (its section runs through
+    /// the axis): refused whatever its length, `fit` is then `point_size`.
+    pub past_axis: bool,
+}
+
+/// A coaxial quadric's trace in the meridian half-plane of `axis` through the edge, as a
+/// line `(point, unit direction)` in `(r, h)`: `r` the signed distance from the axis
+/// along `radial`, `h` along the axis from `axis_point`. A plane square to the axis, a
+/// cylinder or its axis, and a cone are lines there; a sphere, a torus or a plane at an
+/// angle to the axis have none (`None`). `radius` is the cylinder's signed radius (an
+/// offset taken through the axis stays on its far side, as `r < 0`).
+fn meridian_line(
+    q: &BlendQuadric,
+    radius: f64,
+    axis_point: Point3,
+    axis: Vec3,
+    ang_tol: f64,
+) -> Option<([f64; 2], [f64; 2])> {
+    match q.kind {
+        QuadricKind::Plane => {
+            if q.dir.cross(axis).length() > ang_tol {
+                return None;
+            }
+            Some(([0.0, (q.point - axis_point).dot(axis)], [1.0, 0.0]))
+        }
+        QuadricKind::Cylinder | QuadricKind::Line => Some(([radius, 0.0], [0.0, 1.0])),
+        QuadricKind::Cone => {
+            let s = if q.dir.dot(axis) < 0.0 { -1.0 } else { 1.0 };
+            Some((
+                [0.0, (q.point - axis_point).dot(axis)],
+                [q.angle.sin(), s * q.angle.cos()],
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Where two meridian lines meet (`None` when parallel).
+fn meet(a: ([f64; 2], [f64; 2]), b: ([f64; 2], [f64; 2])) -> Option<[f64; 2]> {
+    let ([px, py], [dx, dy]) = a;
+    let ([qx, qy], [ex, ey]) = b;
+    let cross = dx * ey - dy * ex;
+    if cross.abs() <= EFF_ZERO {
+        return None;
+    }
+    let s = ((qx - px) * ey - (qy - py) * ex) / cross;
+    Some([px + s * dx, py + s * dy])
+}
+
+/// The foot of `m` on a meridian line (its direction a unit vector).
+fn foot_on(line: ([f64; 2], [f64; 2]), m: [f64; 2]) -> [f64; 2] {
+    let ([px, py], [dx, dy]) = line;
+    let s = (m[0] - px) * dx + (m[1] - py) * dy;
+    [px + s * dx, py + s * dy]
+}
+
+/// Not the fork's (#2546, WR-739): a
+/// constant ball's round or chamfer along an arc whose faces are coaxial quadrics that
+/// trace lines in the meridian half-plane (a plane square to the axis, a cylinder, a
+/// cone) has its spine on a circle about the axis, and each rail is the circle of the
+/// ball's contact with a face: an arc similar to the edge, of radius `r_i` where the
+/// edge's is `R_e`, so its ends are `C_e |r_i| / R_e` apart for the edge's chord `C_e`.
+/// The rail whose ends come within the resolution (two of the solver's approximation
+/// tolerances, `2 tol`: its two end vertices would be one) without closing to a point
+/// cannot be represented: it is reported with the size that builds. The spine point is
+/// where the faces' offsets by the ball meet in that half-plane, and the rail point its
+/// foot on the face, in closed form; each moves linearly with the ball's radius `t`, so
+/// `r_i(t) = R_e + t (r_i - R_e) / d` for the solver's radius `d`, and the rail closes
+/// to a point at `t0 = -R_e / g` (`g` that slope) and leaves the resolution at
+/// `r_i(t) = 2 tol R_e / C_e`. A rail at a point to rounding (`|r_i| <= EFF_ZERO (1 +
+/// R_e)`: the ball's centre on the axis, a chamfer as wide as the round it runs round)
+/// is not refused: it builds as the cone's apex. A rail on the far side of the axis from
+/// the edge (`r_i < 0`: the ball's section runs through the axis, a chamfer wider than the
+/// round it runs round) is no blend of the edge whatever its length: it is reported
+/// `past_axis`, with `t0` as its fit, the largest size that keeps the rail on the edge's
+/// side.
+/// `None` for a closed edge, faces of other kinds or placements, and rails on the edge's
+/// side longer than the resolution.
+///
+/// # Errors
+///
+/// Those of the drops and the evaluations; `SM_ERR_NULL_POINTER` for a solver without
+/// its edge use, offset surfaces or edge curve.
+pub fn rail_below_resolution(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+) -> Result<Option<RailBelowResolution>> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::edge;
+    let eu0 = ops
+        .solver()
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    if edge::is_closed(b, e)? {
+        return Ok(None);
+    }
+    let curve = edge::evaluation_curve(b, e)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .clone();
+    let ivl = edge::interval(b, e)?;
+    let tol = b.tolerance();
+    let resolution = 2.0 * ops.solver().approx_tol_3d;
+    let start = curve.evaluate_point(k, ivl.min())?;
+    let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    let end = curve.evaluate_point(k, ivl.max())?;
+
+    // each face's quadric there, and its signed offset by the ball
+    let mut faces = [BlendQuadric::default(); 2];
+    let mut offs = [0.0; 2];
+    for i in 0..2 {
+        let (face, p, n, uv) = {
+            let off = ops
+                .solver()
+                .surface(i)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let base = off.surface.base_surface();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let dropped =
+                base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let uv = dropped.result_uv;
+            let face = BlendQuadric::from_surface(k, base, uv, tol)?;
+            if face.kind == QuadricKind::None {
+                return Ok(None);
+            }
+            let (p, n) = point_and_normal(k, base, uv)?;
+            (face, p, n, uv)
+        };
+        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
+        if let (Some(f), Some(o)) = (faces.get_mut(i), offs.get_mut(i)) {
+            *f = face;
+            *o = (q - p).dot(n);
+        }
+    }
+    let [fa, fb] = faces;
+    let [oa, ob] = offs;
+    let d = oa.abs();
+    if d <= tol {
+        return Ok(None);
+    }
+
+    // the common axis, and the meridian half-plane through the edge's middle
+    let reach = tol
+        .max(d)
+        .max(mid.distance(fa.point))
+        .max(mid.distance(fb.point));
+    let Some((axis_point, axis)) = coaxial(&fa, &fb, tol, reach) else {
+        return Ok(None);
+    };
+    let ang_tol = tol / reach.max(tol);
+    let edge_radius = across(mid - axis_point, axis).length();
+    let edge_chord = across(end - start, axis).length();
+    if edge_radius <= tol || edge_chord <= tol {
+        return Ok(None);
+    }
+    let lines = |q: &BlendQuadric, off: f64| {
+        let moved = if q.kind == QuadricKind::Cylinder {
+            let mut m = *q;
+            m.radius = q.radius + q.side * off;
+            m
+        } else {
+            q.offset(off, 0.0)
+        };
+        meridian_line(&moved, moved.radius, axis_point, axis, ang_tol)
+    };
+    let (Some(face_a), Some(face_b), Some(off_a), Some(off_b)) = (
+        lines(&fa, 0.0),
+        lines(&fb, 0.0),
+        lines(&fa, oa),
+        lines(&fb, ob),
+    ) else {
+        return Ok(None);
+    };
+    let Some(centre) = meet(off_a, off_b) else {
+        return Ok(None);
+    };
+
+    let point_zero = EFF_ZERO * (1.0 + edge_radius);
+    let mut worst: Option<RailBelowResolution> = None;
+    for face in [face_a, face_b] {
+        let r = foot_on(face, centre)[0];
+        let chord = edge_chord * r.abs() / edge_radius;
+        let past_axis = r < 0.0;
+        if r.abs() <= point_zero || (!past_axis && chord > resolution) {
+            continue;
+        }
+        let slope = (r - edge_radius) / d;
+        if slope.abs() <= EFF_ZERO {
+            continue;
+        }
+        let point_size = -edge_radius / slope;
+        // on the edge's side: where the rail's ends come to the resolution, short of t0
+        let fit = if past_axis {
+            point_size
+        } else {
+            (resolution * edge_radius / edge_chord - edge_radius) / slope
+        };
+        let rail = RailBelowResolution {
+            chord,
+            resolution,
+            fit: fit.max(0.0),
+            point_size,
+            past_axis,
+        };
+        if worst.is_none_or(|w| rail.fit < w.fit) {
+            worst = Some(rail);
+        }
+    }
+    Ok(worst)
+}
+
 /// Whether the end of `e` at `at` (within `tol`) is a vertex one of `joined` also ends at:
 /// the chain runs on there into another blended edge's round.
 fn end_runs_on(b: &Brep, e: EdgeId, at: Point3, tol: f64, joined: &[EdgeId]) -> Result<bool> {
