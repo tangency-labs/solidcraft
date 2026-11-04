@@ -20,7 +20,7 @@ fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
     h.app.viewport.select_other.popup = Some(super::Popup {
         at: egui::pos2(500.0, 300.0),
         rows: vec![super::Row {
-            hit: crate::viewport::Hit::Face { body: "Body1".into(), index: 0, point: solidcraft_engine::geom::Vec3::ZERO },
+            hit: crate::viewport::Hit::Face { body: "Body1".into(), index: 0, point: solidcore_record::Vec3::ZERO },
             sel: Sel::Body { name: "Body1".into() },
             label: "Body1".into(),
             icon: "body",
