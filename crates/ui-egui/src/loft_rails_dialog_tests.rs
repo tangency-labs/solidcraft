@@ -254,3 +254,28 @@ fn loft_profiles_picked_together_in_one_sketch_are_one_section() {
     assert_eq!(commands[0].1["params"]["sections"], expected);
     ok(&mut h);
 }
+
+/// A section that is every profile of its sketch stays "all" through an unchanged edit, now that
+/// the edit's picks of it make one section again (#11720): "all" keeps a letter's counter a hole,
+/// which the profiles' indices would fill.
+#[test]
+fn an_unchanged_loft_edit_keeps_a_section_of_all_profiles() {
+    let mut h = Harness::new();
+    let split = [("sketch.rectangle.two_point", json!({"p0": [-20, -20], "p1": [20, 20]})), ("sketch.line", json!({"points": [[0, -20], [0, 20]]}))];
+    let low = sketch_at(&mut h, "Low", 0, &split);
+    let high = sketch_at(&mut h, "High", 30, &[("sketch.circle.center", json!({"center": [0, 0], "radius": 10}))]);
+    h.app.run("solid.loft", json!({"sections": [{"sketch": low, "profiles": "all"}, {"sketch": high, "profiles": [0]}]})).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let sections = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { sections, .. } => sections.iter().map(|s| s.profiles.clone()).collect::<Vec<_>>(),
+        k => panic!("{k:?}"),
+    };
+    let stored = sections(&h);
+    assert_eq!(stored[0], solidcraft_engine::doc::ProfileSel::All);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["params"]["sections"], json!([{"sketch": low, "profiles": "all"}, {"sketch": high, "profiles": [0]}]));
+    ok(&mut h);
+    assert_eq!(sections(&h), stored);
+}

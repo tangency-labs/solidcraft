@@ -4675,6 +4675,23 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                     params["profiles"] = json!("all");
                 }
             }
+            // A Loft section that was every profile of its sketch stays "all" while the picks are
+            // unchanged: "all" keeps text counters as holes, which its indices would fill.
+            if let FeatureKind::Loft { sections, .. } = &feature.kind
+                && !d.profile_selection_changed
+                && let Some(edited) = params.get_mut("sections").and_then(Value::as_array_mut)
+                && edited.len() == sections.len()
+            {
+                let world = crate::open_meshing::session_world(&app.session);
+                for (sec, out) in sections.iter().zip(edited.iter_mut()) {
+                    let Some(ss) = world.sketch(sec.sketch.0).filter(|_| sec.profiles == ProfileSel::All && sec.point.is_none()) else { continue };
+                    let all: Vec<Value> = (0..ss.profiles.len()).map(|i| json!(i)).collect();
+                    if out.get("sketch").and_then(Value::as_u64) == Some(sec.sketch.0) && out.get("profiles").and_then(Value::as_array) == Some(&all)
+                    {
+                        out["profiles"] = json!("all");
+                    }
+                }
+            }
         }
         return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
     }
