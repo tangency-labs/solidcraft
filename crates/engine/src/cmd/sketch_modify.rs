@@ -9,7 +9,7 @@ use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::ProfileSel;
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, Wire, WireSpace, intersections, intersections_within};
 
-use super::sketch::{add_c, coincident_points, edit, ids_of, line_or_axis_ref, solve_current};
+use super::sketch::{add_c, coincident_points, dof_now, edit, ids_of, line_or_axis_ref, solve_current};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
@@ -555,27 +555,13 @@ fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, 
     Ok(released)
 }
 
-/// Whether the lines with ends `(p, q)` and `(r, t)` are the diagonals of a parallelogram the
-/// sketch holds (four sides, each opposite pair held parallel, horizontal or vertical), so they
-/// bisect each other whatever is dragged: a center rectangle's diagonals.
-fn diagonals_bisect(sk: &Sketch, (p, q): (usize, usize), (r, t): (usize, usize)) -> bool {
-    if p == q || r == t || [r, t].contains(&p) || [r, t].contains(&q) {
-        return false;
-    }
-    let side =
-        |x: usize, y: usize| sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Line { a, b } if (a == x && b == y) || (a == y && b == x)));
-    let held = |l: usize, kind: fn(&ConstraintKind, usize) -> bool| sk.constraints.iter().any(|c| !c.driven && kind(&c.kind, l));
-    let parallel = |l: usize, m: usize| {
-        sk.constraints.iter().any(|c| !c.driven && matches!(c.kind, ConstraintKind::Parallel { a, b } if (a == l && b == m) || (a == m && b == l)))
-            || (held(l, |k, l| matches!(k, ConstraintKind::Horizontal { l: h } if *h == l))
-                && held(m, |k, l| matches!(k, ConstraintKind::Horizontal { l: h } if *h == l)))
-            || (held(l, |k, l| matches!(k, ConstraintKind::Vertical { l: v } if *v == l))
-                && held(m, |k, l| matches!(k, ConstraintKind::Vertical { l: v } if *v == l)))
-    };
-    match (side(p, r), side(r, q), side(q, t), side(t, p)) {
-        (Some(a), Some(b), Some(c), Some(d)) => parallel(a, c) && parallel(b, d),
-        _ => false,
-    }
+/// Whether the sketch already holds point `m` at the middle of line `l`, though no constraint says
+/// so: adding that Midpoint takes away no degree of freedom from the `base` the sketch has (a
+/// center rectangle's centre, held on one diagonal, is the other's middle too because the
+/// diagonals bisect each other).
+fn middle_implied(sk: &Sketch, base: usize, m: usize, l: usize) -> bool {
+    let mut with = sk.clone();
+    add_c(&mut with, ConstraintKind::Midpoint { p: m, l }).is_ok() && dof_now(&with) == base
 }
 
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
@@ -630,11 +616,8 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
             _ => None,
         })
         .collect();
-    // The trimmed line's ends before the split, for `diagonals_bisect`.
-    let ends = sk.curves.get(ci).and_then(|c| match c.kind {
-        CurveKind::Line { a, b } => Some((a, b)),
-        _ => None,
-    });
+    // The sketch as it was, for `middle_implied`: only needed when a midpoint can be cut.
+    let before = (!midpoints.is_empty()).then(|| (sk.clone(), dof_now(sk)));
     release_extent(sk, ci);
     let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
@@ -662,13 +645,17 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         } else if let Some(m) = midpoints.iter().copied().find(|m| near(sk, *m)) {
             // The trimmed line's middle: it moves to the cutter's middle when the sketch makes it
             // that too (a center rectangle's diagonals bisect each other), else it stays on the
-            // cutter. A cutter whose middle only happens to be there gets no hold it never had.
+            // cutter. A cutter whose middle is there only by chance gets no hold it never had.
             welds.push((*pi, m));
-            let cutter_ends = sk.curves.get(cutter).and_then(|c| match c.kind {
-                CurveKind::Line { a, b } => Some((a, b)),
+            let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
+                Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
                 _ => None,
-            });
-            if ends.zip(cutter_ends).is_some_and(|(e, f)| diagonals_bisect(sk, e, f)) {
+            };
+            let implied = match &before {
+                Some((was, base)) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, *base, m, cutter),
+                _ => false,
+            };
+            if implied {
                 add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
             } else {
                 pin(sk, m, cutter)?;

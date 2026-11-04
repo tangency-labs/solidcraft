@@ -477,6 +477,27 @@ fn trimming_the_start_half_of_a_center_rectangle_diagonal_keeps_its_parallel_dis
     assert!((after - d).abs() < 1e-9, "{after} != {d}");
 }
 
+/// A center rectangle whose bottom is held square to a side instead of horizontal keeps one
+/// centre after a trim: what makes its diagonals bisect each other is the solver's to say, not
+/// which constraints hold the sides.
+#[test]
+fn trimming_a_diagonal_of_a_center_rectangle_held_by_other_constraints_keeps_one_centre() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
+    let sk = sketch(&s);
+    let bottom = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Horizontal { l: 0 })).map(|c| c.id.clone()).unwrap();
+    run(&mut s, "sketch.delete", json!({"entities": [bottom]}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": "l1", "b": "l2"}));
+    let dof = run(&mut s, "sketch.inspect", json!({}))["dof"].clone();
+    let diagonal = sketch(&s).curves.iter().find(|c| c.construction).map(|c| c.id.clone()).unwrap();
+    run(&mut s, "sketch.trim", json!({"curve": diagonal, "at": [7.5, 4.25]}));
+    let sk = sketch(&s);
+    let at_centre = sk.points.iter().filter(|p| p.pos.dist(Vec2::new(3.0, 2.0)) < 1e-7).count();
+    assert_eq!(at_centre, 1, "{at_centre} points at the centre");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(si["dof"], dof, "the trim frees the centre: {si}");
+}
+
 /// A line's held midpoint trimmed at a crossing line that only happens to have its middle there
 /// ends the kept half on that point and keeps it on the crossing line, without tying the crossing
 /// line's middle to it: nothing held that middle before.
