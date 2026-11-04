@@ -388,6 +388,15 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.shell_one_construction = true;
+    f.offset_extends_ball_patches_as_themselves = true;
+    f.approximate_surface_checks_every_row = true;
+    f.topological_vertex_has_only_edge_uses = true;
+    f.planar_section_face_tolerance = true;
+    f.face_swap_uv_transposes_trims = true;
+    f.closed_smooth_pole_tangent_limit = true;
+    f.fillet_round_ends_on_outline = true;
+    f.fillet_setback_beside_curved_faces = true;
+    f.fillet_chamfer_corner = true;
     f
 }
 
