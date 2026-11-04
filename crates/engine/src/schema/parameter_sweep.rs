@@ -21,7 +21,7 @@ pub const MAX_VALUES: usize = 200;
 pub struct ParameterSweepParams {
     /// The parameter, by name, as `parameters.list` lists it.
     #[serde(default, deserialize_with = "parameter_name")]
-    #[schemars(required)]
+    #[schemars(required, transform = drop_default)]
     pub parameter: Option<String>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SweepValues")]
@@ -38,6 +38,11 @@ pub struct ParameterSweepParams {
     #[serde(default, deserialize_with = "steps")]
     #[schemars(schema_with = "steps_schema")]
     pub steps: Option<f64>,
+}
+
+/// `serde(default)` makes schemars publish `"default": null` on a required string; drop it.
+fn drop_default(schema: &mut Schema) {
+    schema.remove("default");
 }
 
 /// The parameter's name, with the handler's message for anything that isn't text.
