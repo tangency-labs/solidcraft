@@ -1,0 +1,10 @@
+{
+  "ar": { "ui.heading_press_pull": "ضغط وسحب" },
+  "de": { "ui.heading_press_pull": "DRÜCKEN/ZIEHEN" },
+  "en": { "ui.heading_press_pull": "PRESS PULL" },
+  "he": { "ui.heading_press_pull": "דחיפה/משיכה" },
+  "ja": { "ui.heading_press_pull": "プレス プル" },
+  "ko": { "ui.heading_press_pull": "밀기/당기기" },
+  "vi": { "ui.heading_press_pull": "KÉO/ĐẨY" },
+  "zh": { "ui.heading_press_pull": "按压拖动" }
+}

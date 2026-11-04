@@ -1,0 +1,10 @@
+[
+  {"note": "#11705: the Q shortcut is Press Pull, so the dialog it opens is titled PRESS PULL, not EXTRUDE; a plain Extrude (E) still says EXTRUDE."},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}},
+  {"key": "Q"},
+  {"expect": {"shown": "PRESS PULL", "not_shown": "EXTRUDE", "errors": 0}},
+  {"key": "Escape"},
+  {"expect": {"dialog": null, "errors": 0}},
+  {"key": "E"},
+  {"expect": {"shown": "EXTRUDE", "not_shown": "PRESS PULL", "errors": 0}}
+]
