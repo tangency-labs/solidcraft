@@ -2838,6 +2838,12 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         let e = req_expr(cmd, p, k)?;
         Ok(e)
     };
+    // Given but unreadable (`true`, a list, an empty text): refused, never a plain counterbore.
+    let bridge = match (expr(p, "bridge"), p.get("bridge")) {
+        (Some(b), _) => Some(b),
+        (None, None | Some(Value::Null)) => None,
+        (None, v) => return Err(bad(cmd, format!("`bridge` {}", expr_problem(v)))),
+    };
     let kind = match str_(p, "type").unwrap_or("simple") {
         "simple" => match expr(p, "tip_angle") {
             Some(t) if depth.is_some() => solidcraft_doc::HoleKind::Drilled { tip_angle: t },
@@ -2848,7 +2854,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             cb_diameter: get("cb_diameter")?,
             cb_depth: get("cb_depth")?,
             tip_angle: expr(p, "tip_angle"),
-            bridge: expr(p, "bridge"),
+            bridge: bridge.clone(),
         },
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
@@ -2857,8 +2863,8 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
-    match (&kind, expr(p, "bridge")) {
-        (solidcraft_doc::HoleKind::Counterbore { .. }, Some(b)) => check_expr(s, &b, Kind::Length, cmd, "bridge")?,
+    match (&kind, &bridge) {
+        (solidcraft_doc::HoleKind::Counterbore { .. }, Some(b)) => check_expr(s, b, Kind::Length, cmd, "bridge")?,
         (_, Some(_)) => return Err(bad(cmd, "`bridge` needs `type: counterbore`")),
         _ => {}
     }

@@ -962,7 +962,8 @@ fn bridged_counterbore_layers_along_x_save_and_refuse_bad_values() {
     let mut plain = block();
     p.as_object_mut().unwrap().remove("bridge");
     run(&mut plain, "solid.hole", p.clone()).unwrap();
-    assert!(!plain.doc.to_json().contains("bridge"));
+    // The key, quoted: `format_pending` names `bridged-counterbore` in every design.
+    assert!(!plain.doc.to_json().contains("\"bridge\""));
     assert!(solid_at(&plain, Vec3::new(22.9, 17.9, 16.7)));
     // Refused: a layer that is not a positive length, layers that don't fit in the hole, and a
     // bridge on a hole that has no counterbore.
@@ -980,6 +981,24 @@ fn bridged_counterbore_layers_along_x_save_and_refuse_bad_values() {
     p["depth"] = json!(3.3);
     assert!(refusal(&p).contains("must fit in the hole"), "too shallow: {}", refusal(&p));
     p.as_object_mut().unwrap().remove("depth");
+    // Through all, the layers must end inside the 20 mm block, short of its far face.
+    p["cb_depth"] = json!(19.7);
+    assert!(refusal(&p).contains("must fit in the hole"), "past the exit face: {}", refusal(&p));
+    p["cb_depth"] = json!(19.5);
+    assert_eq!(refusal(&p), "", "0.1 mm short of the exit face fits");
+    p["cb_depth"] = json!(3);
+    // A counterbore too narrow for the slot's clearance (a plain one that wide is fine).
+    p["cb_diameter"] = json!(6.02);
+    assert!(refusal(&p).contains("wider than the hole"), "too narrow: {}", refusal(&p));
+    p["cb_diameter"] = json!(12);
+    // Given but not a length expression: refused, never a plain counterbore. Null leaves it out.
+    for bad in [json!(true), json!([]), json!("")] {
+        p["bridge"] = bad.clone();
+        assert!(refusal(&p).contains("`bridge`"), "bridge {bad}: {}", refusal(&p));
+    }
+    p["bridge"] = Value::Null;
+    assert_eq!(refusal(&p), "", "a null bridge is left out");
+    p["bridge"] = json!("0.2 mm");
     p["type"] = json!("countersink");
     p["cs_diameter"] = json!(12);
     assert!(refusal(&p).contains("counterbore"), "countersink: {}", refusal(&p));
