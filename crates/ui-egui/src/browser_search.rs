@@ -321,7 +321,9 @@ pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
     // This frame's typing and kind.
     refresh(app);
     let Some(hits) = app.tree.search.hits() else { return };
-    let (total, hide, more) = (hits.total(), hits.shows_bodies(), hits.search.incomplete);
+    let (total, listed, more) = (hits.total(), hits.search.found.len(), hits.search.incomplete);
+    // Hide others would hide matches the list left out.
+    let hide = hits.shows_bodies() && hits.search.complete();
     crate::scenario::publish_rect("browser:search:bar", ui.max_rect());
     ui.spacing_mut().item_spacing = vec2(t.space_4, t.space_4);
     if total == 0 {
@@ -335,7 +337,8 @@ pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         crate::ui_kit::text(ui, &count, crate::ui_kit::Text::Note("browser_search_count"));
-        let label = solidcraft_ui_text::format("ui.browser_select_all", &[("count", &total.to_string())]);
+        // What it selects: the listed matches.
+        let label = solidcraft_ui_text::format("ui.browser_select_all", &[("count", &listed.to_string())]);
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small);
         crate::scenario::publish_handle("browser:search:select-all", r.rect.center());
         crate::scenario::publish_rect("browser:search:select-all", r.rect);
@@ -381,7 +384,7 @@ pub(crate) fn select_found(app: &mut SolveApp) {
 /// Hide others: only the bodies the search found, and the bodies of the placements it found,
 /// stay shown (the browser's Isolate, on what was found).
 pub(crate) fn hide_others(app: &mut SolveApp) {
-    let Some(hits) = app.tree.search.hits() else { return };
+    let Some(hits) = app.tree.search.hits().filter(|h| h.search.complete()) else { return };
     let mut keep: Vec<String> = Vec::new();
     for f in &hits.search.found {
         match (&f.kind, &f.item) {

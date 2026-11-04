@@ -249,10 +249,13 @@ fn listing_and_placements_are_capped_and_counted() {
     let capped = find_within(&s, Some(&pattern("m20")), &[], 3, usize::MAX);
     assert_eq!((capped.found.len(), capped.total, capped.incomplete), (3, 7, false));
     assert_eq!(capped.found, find(&s, Some(&pattern("m20")), &[]).found[..3]);
+    // Hide others in the browser needs every match listed.
+    assert!(!capped.complete() && find(&s, Some(&pattern("m20")), &[]).complete());
     // Out of placements to look through: the search says it may have missed some.
     let short = find_within(&s, Some(&pattern("m20")), &[], usize::MAX, 2);
     assert!(short.incomplete);
     assert!(short.total < 7);
+    assert!(!short.complete());
     assert!(!find_within(&s, Some(&pattern("m20")), &[], usize::MAX, 9).incomplete);
 }
 
@@ -322,4 +325,22 @@ fn a_body_removed_later_is_not_found_while_a_sketch_is_edited() {
     assert!(s.model.state().body("Gone block").is_some() && s.body_removed_later("Gone block"));
     let found = find(&s, Some(&pattern("block")), &[Kind::Body]).found;
     assert_eq!(found.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Kept block"]);
+}
+
+/// With the timeline rolled back, the features after the marker are not in the browser's folders,
+/// so the search doesn't find them either.
+#[test]
+fn a_feature_after_the_history_marker_is_not_found() {
+    let mut s = Session::default();
+    for name in ["Early sketch", "Late sketch"] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Late plane"}));
+    assert_eq!(names(&s, "late", &[]).len(), 2);
+    run(&mut s, "timeline.roll_to", json!({"feature": "Early sketch"}));
+    let found = names(&s, "sketch", &[]);
+    assert_eq!(found.iter().map(|(_, name, _)| name.as_str()).collect::<Vec<_>>(), ["Early sketch"]);
+    assert!(names(&s, "late", &[]).is_empty());
 }
