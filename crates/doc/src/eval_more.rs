@@ -1398,6 +1398,83 @@ pub(super) fn surface_prism_cut(
     Ok(handled)
 }
 
+/// An untapered extrude join one sheet thick in the plane of a flat panel of a sheet made from
+/// surfaces (#6748), folded or flat, that touches that panel's material and no other piece of
+/// the sheet: its footprint becomes part of the panel's outline, so the flat, its DXF and a
+/// refold keep it, and it follows its sketch as a cut there does. The sheets' bodies it joined;
+/// none, and nothing changed, for any other join, which the generic path takes.
+pub(super) fn surface_sheet_join(f: &Feature, st: &mut ModelState, targets: &[String], constructor: Option<&ExtrudeConstructor>) -> Result<Vec<String>> {
+    let FeatureKind::Extrude { sketch, profiles, extent, .. } = &f.kind else { return Ok(Vec::new()) };
+    if extent.taper.is_some() {
+        return Ok(Vec::new());
+    }
+    let Some(c) = constructor else { return Ok(Vec::new()) };
+    let Some(ss) = st.sketch(sketch.0) else { return Ok(Vec::new()) };
+    if c.plane != ss.plane {
+        return Ok(Vec::new());
+    }
+    let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
+    let plane = ss.plane;
+    let n = plane.normal();
+    let (lo, hi) = (c.interval.0.min(c.interval.1), c.interval.0.max(c.interval.1));
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    for (i, sk) in st.surface_sheets.iter().enumerate() {
+        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
+            continue;
+        }
+        let Some((panels, _)) = sk.pieces_in_space() else { continue };
+        let Ok(dev) = solidcraft_develop::develop(&sk.sheet, 0) else { continue };
+        let Ok(pieces) = crate::sheet_surface::pieces(&dev, &mut sheet::FlatWork::new()) else { continue };
+        let t = sk.thickness;
+        let tol = 1e-7;
+        for (p, frame, own) in &panels {
+            if frame.z.cross(n).len() > 1e-9 {
+                continue;
+            }
+            // One sheet thick, through the panel's own slab.
+            let s0 = (frame.shift - plane.origin).dot(n);
+            let s1 = s0 + t * frame.z.dot(n);
+            if (lo - s0.min(s1)).abs() > tol || (hi - s0.max(s1)).abs() > tol {
+                continue;
+            }
+            let inv = frame.inverse();
+            let chart = |q: Vec2| {
+                let w = inv.point(plane.to_world(q));
+                Vec2::new(w.x, w.y)
+            };
+            let mapped: Vec<Region2> = regions.iter().map(|r| crate::sheet_surface_convert::rigid_region(r, chart)).collect();
+            // It touches the panel's material (one piece with it) and no other piece in the flat.
+            let Ok(joined) = kernel::planar_regions_boolean(std::slice::from_ref(own), &mapped, kernel::BoolOp::Union, 1e-7) else { continue };
+            if joined.len() != 1 {
+                continue;
+            }
+            let Some(Some(at)) = dev.placements.get(*p) else { continue };
+            let flat: Vec<Region2> = mapped.iter().map(|r| at.region(r)).collect();
+            let others: Vec<Region2> = pieces
+                .iter()
+                .filter(|(k, _)| !matches!(k, crate::sheet_surface::Piece::Panel(q) if q == p))
+                .map(|(_, r)| r.clone())
+                .collect();
+            let overlap = kernel::planar_regions_boolean(&flat, &others, kernel::BoolOp::Intersect, 1e-7).map(|r| r.iter().map(Region2::area).sum::<f64>());
+            if !overlap.is_ok_and(|a| a <= 1e-9) {
+                return Ok(Vec::new());
+            }
+            let mut out = sk.clone();
+            let Some(panel) = out.sheet.panels.get_mut(*p) else { return Ok(Vec::new()) };
+            let grown = kernel::planar_regions_boolean(std::slice::from_ref(&panel.region), &mapped, kernel::BoolOp::Union, 1e-7)?;
+            let Ok([one]) = <[Region2; 1]>::try_from(grown) else { return Ok(Vec::new()) };
+            panel.region = one;
+            let body = out.body.clone();
+            if let Some(slot) = st.surface_sheets.get_mut(i) {
+                *slot = out;
+            }
+            rebuild_surface_sheet(st, i)?;
+            return Ok(vec![body]);
+        }
+    }
+    Ok(Vec::new())
+}
+
 /// The letters `f` cut, where it is an extrude cut from a sketch with text: the sketch's plane
 /// and the regions of the cut that are letters, with their counters.
 pub(super) fn cut_letters(st: &ModelState, f: &Feature) -> Option<(Plane, Vec<Region2>)> {

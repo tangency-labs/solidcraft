@@ -6960,6 +6960,13 @@ fn eval_feature(
                     return apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled);
                 }
             }
+            // A join one sheet thick in the plane of a flat panel of a sheet made from surfaces
+            // becomes part of that panel.
+            if *operation == Operation::Join && to_body.is_none() && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
+                if !more::surface_sheet_join(f, st, &crate::plain(targets), constructor.as_ref())?.is_empty() {
+                    return Ok(());
+                }
+            }
             // A join one sheet thick in the plane of a panel becomes part of that panel. A Join to an
             // object (#6424) is left to the generic path below, which joins the object as well.
             if *operation == Operation::Join && to_body.is_none() && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
