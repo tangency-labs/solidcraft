@@ -1961,6 +1961,23 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         expected.marker = source.doc.marker;
+        // Rolling the marker solves the joints again and stores where that puts each occurrence.
+        if expected.occurrences.len() == source.doc.occurrences.len() {
+            for (e, s) in expected.occurrences.iter_mut().zip(&source.doc.occurrences) {
+                if e.id == s.id {
+                    e.transform = s.transform;
+                }
+            }
+        }
+        // ...and works out each coupled joint's ratio and lift from the faces at that marker.
+        if expected.assembly.links.len() == source.doc.assembly.links.len() {
+            for (e, s) in expected.assembly.links.iter_mut().zip(&source.doc.assembly.links) {
+                if (e.a, e.ia, e.b, e.ib) == (s.a, s.ia, s.b, s.ib) {
+                    e.ratio = s.ratio;
+                    e.lift = s.lift.clone();
+                }
+            }
+        }
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
