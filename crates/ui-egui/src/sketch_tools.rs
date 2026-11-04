@@ -1678,10 +1678,9 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
         }
         if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
             && !c.driven
+            && !midpoints.insert(p)
         {
-            if !midpoints.insert(p) {
-                return false;
-            }
+            return false;
         }
         !(matches!(
             c.kind,
