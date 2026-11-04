@@ -839,8 +839,13 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness)).collect();
     let roll_lines: Vec<Value> =
         sk.roll_lines.iter().map(|l| json!({"panel": l.panel, "line": l.kind.name(), "start": pt(&l.start), "end": pt(&l.end)})).collect();
+    let roll_table: Vec<Value> = sk
+        .roll_infos()
+        .iter()
+        .map(|r| json!({"roll": r.index, "panel": r.panel, "radius": r.radius, "angle_deg": r.angle_deg, "length": r.length, "width": r.width}))
+        .collect();
     json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
-        "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "unfolded": sk.unfolded,
+        "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
         "perforations": [], "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch})
 }
 

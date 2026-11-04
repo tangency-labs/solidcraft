@@ -514,6 +514,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                             );
                         });
                     }
+                    // Rolls (#6748), each as a bend has its row: how far it turns, its inside
+                    // radius (a cone's runs along it), and how wide it lies in the flat.
+                    let rolls = v["roll_table"].as_array().cloned().unwrap_or_default();
+                    if !rolls.is_empty() {
+                        form_row(ui, "Rolls", |ui| {
+                            ui.label(format!("{}", rolls.len()));
+                        });
+                    }
+                    for r in rolls.iter().take(50) {
+                        form_row(ui, &format!("  Roll {}", r["roll"].as_u64().unwrap_or(0)), |ui| {
+                            let radius = r["radius"].as_f64().map(|x| format!("  R{}", crate::prefs::show_mm(app, x, 1))).unwrap_or_default();
+                            ui.label(format!(
+                                "{:.1}°{radius}  {} x {}",
+                                r["angle_deg"].as_f64().unwrap_or(0.0),
+                                crate::prefs::show_mm(app, r["width"].as_f64().unwrap_or(0.0), 1),
+                                crate::prefs::show_mm(app, r["length"].as_f64().unwrap_or(0.0), 1)
+                            ));
+                        });
+                    }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, crate::i18n::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
                             *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));

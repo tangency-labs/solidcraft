@@ -215,6 +215,11 @@ fn a_rolls_flat_has_lines_where_it_starts_and_ends_and_halfway_between() {
     let (a, m, b) = (line("start"), line("middle"), line("end"));
     let wide = PI * (48.0 + 0.44 * T);
     assert!((a.dist(b) - wide).abs() < 1e-6 && (a.dist(m) - wide / 2.0).abs() < 1e-6, "{a:?} {m:?} {b:?}");
+    // Its row in the report, as a bend has one: inside radius, turn, width and length.
+    let row = &flat["roll_table"][0];
+    let near = |k: &str, v: f64| row[k].as_f64().is_some_and(|x| (x - v).abs() < 1e-6);
+    assert!(flat["roll_table"].as_array().map(Vec::len) == Some(1) && near("radius", 48.0) && near("angle_deg", 180.0), "{flat}");
+    assert!(near("width", wide) && near("length", 40.0), "{flat}");
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
     assert_eq!(
         dxf.matches(

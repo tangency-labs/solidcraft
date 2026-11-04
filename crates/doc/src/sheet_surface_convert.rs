@@ -2018,6 +2018,19 @@ pub struct RollLine {
     pub end: Vec2,
 }
 
+/// A roll of a sheet's flat, as a bend has its row: its number among the rolls, its panel, its
+/// inside radius (none for a cone, whose radius runs along it), how far it turns (degrees), its
+/// length along its rulings and how wide it lies in the flat.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RollInfo {
+    pub index: usize,
+    pub panel: usize,
+    pub radius: Option<f64>,
+    pub angle_deg: f64,
+    pub length: f64,
+    pub width: f64,
+}
+
 /// Which of a roll's lines a [`RollLine`] is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2080,6 +2093,30 @@ impl SurfaceSheet {
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         Ok((sheet, c.solid()?))
+    }
+
+    /// Each roll of the flat (see [`RollInfo`]), from its lines: its length is its middle line's
+    /// reach, its width how far its start and end lines lie apart.
+    pub fn roll_infos(&self) -> Vec<RollInfo> {
+        let t = self.sheet.thickness;
+        let mut out = Vec::new();
+        for (i, p) in self.sheet.panels.iter().enumerate() {
+            let radius = match p.surface {
+                Surface::Cylinder { radius, material_inward } => Some(if material_inward { radius - t } else { radius }),
+                Surface::Cone { .. } => None,
+                Surface::Plane | Surface::Spline(_) => continue,
+            };
+            let lines = |kind: RollEdge| self.roll_lines.iter().filter(move |l| l.panel == i && l.kind == kind);
+            let Some(d) = lines(RollEdge::Middle).next().and_then(|l| (l.end - l.start).normalized()) else { continue };
+            let along: Vec<f64> = lines(RollEdge::Middle).flat_map(|l| [l.start.dot(d), l.end.dot(d)]).collect();
+            let length = along.iter().copied().fold(f64::NEG_INFINITY, f64::max) - along.iter().copied().fold(f64::INFINITY, f64::min);
+            let across = |kind: RollEdge| lines(kind).next().map(|l| l.start.lerp(l.end, 0.5).dot(d.perp()));
+            let (Some(a), Some(b)) = (across(RollEdge::Start), across(RollEdge::End)) else { continue };
+            let pts = p.region.outer.polyline(1e-3);
+            let (lo, hi) = (&pts).into_iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q.y), h.max(q.y)));
+            out.push(RollInfo { index: out.len() + 1, panel: i, radius, angle_deg: (hi - lo).to_degrees(), length, width: (a - b).abs() });
+        }
+        out
     }
 
     /// The sheet as the body it was converted from has it, `own` thick and its modelled bends
