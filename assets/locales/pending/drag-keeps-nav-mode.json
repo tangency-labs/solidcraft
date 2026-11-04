@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "nav.drag_keeps_mode.help": "يستمر السحب بالزر الأوسط أو الأيمن في التدوير أو التحريك أو التكبير كما بدأ حتى تحرير الزر، مهما ضُغطت المفاتيح أو حُرّرت في أثناء ذلك. عند الإيقاف: تقرر المفاتيح المضغوطة في كل لحظة من السحب.",
+    "nav.drag_keeps_mode.label": "يحتفظ السحب بطريقة التنقل التي بدأ بها"
+  },
+  "de": {
+    "nav.drag_keeps_mode.help": "Ein Ziehen mit der mittleren oder rechten Taste dreht, verschiebt oder zoomt weiter wie begonnen, bis die Taste losgelassen wird, egal welche Tasten dabei gedrückt oder losgelassen werden. Aus: Die gehaltenen Tasten entscheiden in jedem Moment des Ziehens.",
+    "nav.drag_keeps_mode.label": "Ziehen behält die Navigation bei, mit der es begann"
+  },
+  "en": {
+    "nav.drag_keeps_mode.help": "A middle or right drag goes on orbiting, panning or zooming as it began until the button is released, whatever keys are pressed or let go meanwhile. Off: the keys held decide at every moment of the drag.",
+    "nav.drag_keeps_mode.label": "A drag keeps the navigation it started with"
+  },
+  "he": {
+    "nav.drag_keeps_mode.help": "גרירה בכפתור האמצעי או הימני ממשיכה לסובב, להזיז או לשנות זום כפי שהתחילה עד שמשחררים את הכפתור, בלי קשר למקשים שנלחצים או משתחררים בינתיים. כבוי: המקשים הלחוצים קובעים בכל רגע של הגרירה.",
+    "nav.drag_keeps_mode.label": "גרירה שומרת על הניווט שבו התחילה"
+  },
+  "ja": {
+    "nav.drag_keeps_mode.help": "中ボタンまたは右ボタンのドラッグは、途中でキーを押したり離したりしても、ボタンを離すまで開始時の回転・パン・ズームを続けます。オフにすると、ドラッグ中の各時点で押しているキーによって決まります。",
+    "nav.drag_keeps_mode.label": "ドラッグは開始時のナビゲーションを維持"
+  },
+  "ko": {
+    "nav.drag_keeps_mode.help": "가운데 또는 오른쪽 버튼 드래그는 도중에 키를 누르거나 떼어도 버튼을 놓을 때까지 시작할 때의 회전, 이동 또는 확대/축소를 계속합니다. 끄면 드래그하는 동안 누르고 있는 키가 매 순간 결정합니다.",
+    "nav.drag_keeps_mode.label": "드래그는 시작할 때의 탐색 방식을 유지"
+  },
+  "vi": {
+    "nav.drag_keeps_mode.help": "Kéo bằng nút giữa hoặc nút phải sẽ tiếp tục xoay, di chuyển hoặc thu phóng như lúc bắt đầu cho đến khi nhả nút, dù trong lúc đó có nhấn hay nhả phím nào. Tắt: các phím đang giữ quyết định ở mọi thời điểm của thao tác kéo.",
+    "nav.drag_keeps_mode.label": "Thao tác kéo giữ nguyên kiểu điều hướng lúc bắt đầu"
+  },
+  "zh": {
+    "nav.drag_keeps_mode.help": "中键或右键拖动会保持开始时的旋转、平移或缩放，直到松开按键，期间按下或松开任何键都不会改变。关闭后：拖动的每一刻都由当时按住的键决定。",
+    "nav.drag_keeps_mode.label": "拖动保持开始时的导航方式"
+  }
+}
