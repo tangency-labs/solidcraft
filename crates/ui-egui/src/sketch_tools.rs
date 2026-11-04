@@ -485,6 +485,10 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
 /// Curvature combs (`Session::comb`): teeth and the envelope through their tips.
 fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(shown) = &app.session.comb else { return };
+    // The teeth are the design's: not while a value is typed and the sketch is drawn at it.
+    if crate::dim_view::preview_world(app).is_some() {
+        return;
+    }
     let tk = crate::theme::Tokens::get();
     for comb in &shown.teeth {
         let mut tips: Vec<Pos2> = Vec::new();

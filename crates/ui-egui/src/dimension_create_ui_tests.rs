@@ -2027,3 +2027,22 @@ fn a_typed_value_hides_the_pointer_readout() {
     assert!(crate::scenario::rect_of("viewport:readout").is_none(), "no readout while the value is typed");
     crate::dim_view::cancel();
 }
+
+/// A curvature comb's teeth are the design's: while a value is typed they are not drawn.
+#[test]
+fn a_typed_value_hides_the_curvature_combs() {
+    let mut h = sketch_with(&[("sketch.circle.center", json!({"center":[20,10],"radius":5}))], [20., 10.]);
+    let id = solved(&h).curves[0].id.clone();
+    h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
+    h.frames(1);
+    assert!(comb_drawn(&h), "the comb is drawn");
+    h.step(&json!({"click":{"world":[25,10,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "8");
+    h.frames(1);
+    assert!(!comb_drawn(&h), "no comb of the design while the value is typed");
+    crate::dim_view::cancel();
+}
