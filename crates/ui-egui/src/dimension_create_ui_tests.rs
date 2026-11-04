@@ -1175,6 +1175,21 @@ fn a_typed_value_does_not_light_the_design_s_profile_under_the_pointer() {
     crate::dim_view::cancel();
 }
 
+/// A selected profile is not lit where the design has it while a value is typed either.
+#[test]
+fn a_typed_value_does_not_light_a_selected_design_profile() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    keys(&mut h, "60");
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    assert!(crate::dim_view::preview_solve(&h.app).is_some(), "the value is still typed");
+    assert!(crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "no profile lit while the value is typed");
+    crate::dim_view::cancel();
+    assert!(!crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "lit once the value is let go");
+}
+
 /// While a value is typed the sketch's curves are sampled before its profiles: a sketch whose
 /// profiles would use up the sampling budget still has its curves drawn (its fills go first).
 #[test]

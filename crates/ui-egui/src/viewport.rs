@@ -4263,7 +4263,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     }
                 }
             }
-            Sel::Profile { sketch, index } => profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),
+            // Not while a dimension's value is typed: the design's profile would show over the
+            // sketch drawn at it (as for the hovered one below).
+            Sel::Profile { sketch, index } if crate::dim_view::preview_solve(app).is_none() => {
+                profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge)
+            }
             // A 3D sketch curve, in the sketch it names, or whichever sketch has it.
             Sel::SketchCurve { id, sketch } if st.sketches.iter().any(|ss| ss.sketch.wire_index(id).is_some()) => {
                 let sel_edge = feedback.color(c4(t.sel_edge));
