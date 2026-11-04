@@ -1175,6 +1175,23 @@ fn a_typed_value_does_not_light_the_design_s_profile_under_the_pointer() {
     crate::dim_view::cancel();
 }
 
+/// Until a value is typed the sketch is drawn as the design has it, so a picked dimension's
+/// value box alone does not put the view in the typed preview: the profile under the pointer
+/// stays lit. The first key does.
+#[test]
+fn a_dimension_only_picked_keeps_the_design_view_until_a_value_is_typed() {
+    let mut h = sketch_with(&[("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]}))], [20., 10.]);
+    h.step(&json!({"click":{"world":[20,0,0]}})).unwrap();
+    assert_live(&h);
+    assert!(crate::dim_view::preview_solve(&h.app).is_none(), "nothing typed yet: no preview");
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.viewport.hover = Some(crate::viewport::Hit::Profile { sketch, index: 0 });
+    assert!(!crate::viewport::build_highlight(&h.app).merged().trans.is_empty(), "the profile is lit while only picked");
+    keys(&mut h, "6");
+    assert!(crate::dim_view::preview_solve(&h.app).is_some(), "a key starts the preview");
+    crate::dim_view::cancel();
+}
+
 /// A selected profile is not lit where the design has it while a value is typed either.
 #[test]
 fn a_typed_value_does_not_light_a_selected_design_profile() {

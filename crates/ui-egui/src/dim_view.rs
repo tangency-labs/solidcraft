@@ -65,6 +65,9 @@ struct Edit {
     /// or a reference, or pressed into the field. Until then every frame starts with the whole
     /// value selected, so the first key replaces it whatever else moved the caret (#11204).
     owned: bool,
+    /// A value was typed, completed or given a reference: until then the draft is the design as
+    /// it is, and the view is not put in its preview (see [`preview_world`]).
+    typed: bool,
     /// Where the box sat last frame: a press only takes the value over once the box stayed put
     /// under it, so the click that placed or pinned the value does not.
     shown: Option<Pos2>,
@@ -233,6 +236,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -272,6 +276,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             live,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -515,6 +520,7 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: Some(d.sketch),
@@ -616,6 +622,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -978,6 +985,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             live: None,
             selection: None,
             owned: false,
+            typed: false,
             shown: None,
             picked: None,
             sketch: None,
@@ -1005,6 +1013,7 @@ fn is_plain_value(text: &str) -> bool {
 ///
 /// The cursor ends just after the name and the field keeps the keyboard.
 fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
+    edit.typed = true;
     let id = egui::Id::new("sc_dim_edit");
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     let len = edit.expr.chars().count();
@@ -1153,6 +1162,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     live.typed |= r.changed() || completed;
                 }
                 e.owned |= r.changed() || completed;
+                e.typed |= r.changed() || completed;
                 // Solved now, so the next frame draws the sketch at the new value from its start.
                 if (r.changed() || completed)
                     && let Some(draft) = e.draft.as_mut()
@@ -1242,7 +1252,7 @@ fn clear_picks(app: &mut SolveApp) {
 /// While a new dimension's value is typed: the design solved with that value (the last value
 /// that solved), so the open sketch is drawn as Enter would leave it. None otherwise.
 pub fn preview_world(app: &SolveApp) -> Option<Arc<solidcraft_engine::doc::ModelState>> {
-    EDIT.with(|e| e.try_borrow().ok()?.as_ref()?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.preview.clone()))
+    EDIT.with(|e| e.try_borrow().ok()?.as_ref().filter(|e| e.typed)?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.preview.clone()))
 }
 
 /// A number for a new solve, never one an earlier solve had: a preview's address can be an earlier
@@ -1256,7 +1266,7 @@ fn next_solve() -> u64 {
 
 /// Which solve [`preview_world`] is, while there is one.
 pub fn preview_solve(app: &SolveApp) -> Option<u64> {
-    EDIT.with(|e| e.try_borrow().ok()?.as_ref()?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.solve))
+    EDIT.with(|e| e.try_borrow().ok()?.as_ref().filter(|e| e.typed)?.draft.as_ref().filter(|d| !d.driven && d.valid(app)).map(|d| d.solve))
 }
 
 /// Is the inline editor open (it has the keyboard)?
