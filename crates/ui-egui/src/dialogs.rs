@@ -2631,6 +2631,12 @@ fn title(k: &Kind) -> &'static str {
     }
 }
 
+/// The dialog's title: an extrude opened by Press Pull (the Q shortcut) says PRESS PULL, not
+/// EXTRUDE (#11705).
+fn title_of(d: &Dialog) -> &'static str {
+    if d.press_pull && matches!(d.kind, Kind::Extrude { .. }) { "PRESS PULL" } else { title(&d.kind) }
+}
+
 fn hint(inp: &SelInput) -> &'static str {
     let a = inp.accept;
     if a & PROFILES != 0 {
@@ -3831,7 +3837,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut value_fields = Vec::new();
     let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
 
-    let raw_title = title(&d.kind);
+    let raw_title = title_of(&d);
     let heading = if d.editing.is_some() { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
@@ -3866,7 +3872,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     );
     let grow_key = egui::Id::unique(("sc_dialog_label_grow", raw_title));
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
-    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
+    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
@@ -3888,7 +3894,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
-        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title(&d.kind))), "delete", &heading)
+        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title_of(&d))), "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
             .detail(&detail)
@@ -4991,7 +4997,7 @@ pub(crate) fn feature_frame(s: &Session, component: u64) -> solidcraft_engine::d
 
 /// The feature dialog's current operation name for a reviewed issue draft.
 pub(crate) fn report_title(d: &Dialog) -> String {
-    title(&d.kind).to_string()
+    title_of(d).to_string()
 }
 
 /// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.

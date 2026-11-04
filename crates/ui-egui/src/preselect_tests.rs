@@ -932,6 +932,40 @@ fn press_pull_then_curved_face_offsets_it() {
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
 }
 
+/// The dialog the Q shortcut opens says PRESS PULL, not EXTRUDE (#11705), with a planar face
+/// picked first or nothing at all; a plain Extrude still says EXTRUDE.
+#[test]
+fn press_pull_dialog_is_titled_press_pull() {
+    let mut app = boxed();
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let d = start(&mut app, vec![top], "solid.press_pull");
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "PRESS PULL");
+
+    let mut app = boxed();
+    app.start("solid.press_pull");
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "PRESS PULL");
+
+    let mut app = boxed();
+    app.start("solid.extrude");
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(!d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "EXTRUDE");
+
+    // The heading drawn in the window says it too (its accessibility label is the title).
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"start": "solid.press_pull"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("PRESS PULL").is_some(), "the drawn heading is PRESS PULL");
+    assert!(h.widget("EXTRUDE").is_none(), "not EXTRUDE");
+}
+
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
 /// command does, rather than an Offset Face that refuses it (#1932): picked first, or picked
 /// with Press Pull already open.
