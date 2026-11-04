@@ -2010,6 +2010,11 @@ pub struct SurfaceSheet {
     /// they were (see `sheet_surface_cuts`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loose: Vec<crate::Loose>,
+    /// The feature that changed the body in a way the sheet can't hold (a fillet, a join into a
+    /// bend), while the body keeps that change: its flat exports are refused until a sheet metal
+    /// feature builds the body from the sheet again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub altered_by: Option<String>,
     /// Holes drilled along its flat panels into their rims (#560), each in its panel's frame
     /// (`base` and `axis` in the chart, `base.z` its depth into the material): cut where the
     /// panel lies, folded or flat.
@@ -2128,6 +2133,7 @@ impl SurfaceSheet {
             loose: Vec::new(),
             labels: Vec::new(),
             bores: Vec::new(),
+            altered_by: None,
             perforations: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
@@ -2260,6 +2266,7 @@ impl SurfaceSheet {
             loose: Vec::new(),
             labels: Vec::new(),
             bores: Vec::new(),
+            altered_by: None,
             perforations: Vec::new(),
         };
         let solid = sheet.build()?;
@@ -2271,6 +2278,18 @@ impl SurfaceSheet {
     /// cut-outs (see [`crate::sheet::perforation_grid`]).
     pub fn perforation_holes(&self, p: &crate::sheet::SheetPerforation) -> Vec<Vec2> {
         crate::sheet::perforation_grid(&self.regions, &[], p)
+    }
+
+    /// Whether the flat describes the body: refused while a feature the sheet can't hold changed
+    /// it (see `altered_by`).
+    pub fn flat_matches_body(&self) -> Result<()> {
+        match &self.altered_by {
+            None => Ok(()),
+            Some(feature) => Err(DocError::Invalid(format!(
+                "not supported yet: the flat pattern of `{}` can't include {feature}, which changed the body after its sheet metal features, so the flat pattern, DXF and bend table would not match the part; remove or suppress {feature}, or make that shape with sheet metal features",
+                self.body
+            ))),
+        }
     }
 
     /// Open area of all perforation fields (mm²): what they take out of the sheet's faces.

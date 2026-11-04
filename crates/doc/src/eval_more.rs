@@ -1542,50 +1542,71 @@ pub(super) fn surface_sheet_join(f: &Feature, st: &mut ModelState, targets: &[St
         let Ok(pieces) = crate::sheet_surface::pieces(&dev, &mut sheet::FlatWork::new()) else { continue };
         let t = sk.thickness;
         let tol = 1e-7;
-        for (p, frame, own) in &panels {
-            if frame.z.cross(n).len() > 1e-9 {
-                continue;
+        // Each region into the one panel it is one sheet thick in, touches and joins, apart from
+        // every other piece in the flat.
+        let mut out = sk.clone();
+        let mut placed = 0usize;
+        for region in &regions {
+            let mut found = None;
+            for (p, frame, own) in &panels {
+                if frame.z.cross(n).len() > 1e-9 {
+                    continue;
+                }
+                let s0 = (frame.shift - plane.origin).dot(n);
+                let s1 = s0 + t * frame.z.dot(n);
+                if (lo - s0.min(s1)).abs() > tol || (hi - s0.max(s1)).abs() > tol {
+                    continue;
+                }
+                let inv = frame.inverse();
+                let chart = |q: Vec2| {
+                    let w = inv.point(plane.to_world(q));
+                    Vec2::new(w.x, w.y)
+                };
+                let mapped = crate::sheet_surface_convert::rigid_region(region, chart);
+                let Ok(joined) = kernel::planar_regions_boolean(std::slice::from_ref(own), std::slice::from_ref(&mapped), kernel::BoolOp::Union, 1e-7) else { continue };
+                if joined.len() != 1 {
+                    continue;
+                }
+                let Some(Some(at)) = dev.placements.get(*p) else { continue };
+                let flat = at.region(&mapped);
+                let others: Vec<Region2> =
+                    pieces.iter().filter(|(k, _)| !matches!(k, crate::sheet_surface::Piece::Panel(q) if q == p)).map(|(_, r)| r.clone()).collect();
+                let overlap =
+                    kernel::planar_regions_boolean(std::slice::from_ref(&flat), &others, kernel::BoolOp::Intersect, 1e-7).map(|r| r.iter().map(Region2::area).sum::<f64>());
+                if !overlap.is_ok_and(|a| a <= 1e-9) {
+                    return Ok(Vec::new());
+                }
+                found = Some((*p, mapped));
+                break;
             }
-            // One sheet thick, through the panel's own slab.
-            let s0 = (frame.shift - plane.origin).dot(n);
-            let s1 = s0 + t * frame.z.dot(n);
-            if (lo - s0.min(s1)).abs() > tol || (hi - s0.max(s1)).abs() > tol {
-                continue;
-            }
-            let inv = frame.inverse();
-            let chart = |q: Vec2| {
-                let w = inv.point(plane.to_world(q));
-                Vec2::new(w.x, w.y)
-            };
-            let mapped: Vec<Region2> = regions.iter().map(|r| crate::sheet_surface_convert::rigid_region(r, chart)).collect();
-            // It touches the panel's material (one piece with it) and no other piece in the flat.
-            let Ok(joined) = kernel::planar_regions_boolean(std::slice::from_ref(own), &mapped, kernel::BoolOp::Union, 1e-7) else { continue };
-            if joined.len() != 1 {
-                continue;
-            }
-            let Some(Some(at)) = dev.placements.get(*p) else { continue };
-            let flat: Vec<Region2> = mapped.iter().map(|r| at.region(r)).collect();
-            let others: Vec<Region2> = pieces
-                .iter()
-                .filter(|(k, _)| !matches!(k, crate::sheet_surface::Piece::Panel(q) if q == p))
-                .map(|(_, r)| r.clone())
-                .collect();
-            let overlap = kernel::planar_regions_boolean(&flat, &others, kernel::BoolOp::Intersect, 1e-7).map(|r| r.iter().map(Region2::area).sum::<f64>());
-            if !overlap.is_ok_and(|a| a <= 1e-9) {
-                return Ok(Vec::new());
-            }
-            let mut out = sk.clone();
-            let Some(panel) = out.sheet.panels.get_mut(*p) else { return Ok(Vec::new()) };
-            let grown = kernel::planar_regions_boolean(std::slice::from_ref(&panel.region), &mapped, kernel::BoolOp::Union, 1e-7)?;
+            let Some((p, mapped)) = found else { break };
+            let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
+            let grown = kernel::planar_regions_boolean(std::slice::from_ref(&panel.region), std::slice::from_ref(&mapped), kernel::BoolOp::Union, 1e-7)?;
             let Ok([one]) = <[Region2; 1]>::try_from(grown) else { return Ok(Vec::new()) };
             panel.region = one;
-            let body = out.body.clone();
-            if let Some(slot) = st.surface_sheets.get_mut(i) {
-                *slot = out;
-            }
-            rebuild_surface_sheet(st, i)?;
-            return Ok(vec![body]);
+            placed += 1;
         }
+        if placed == 0 {
+            continue;
+        }
+        if placed < regions.len() {
+            return Ok(Vec::new());
+        }
+        // The flat grows by what was joined, or the sheet can't hold it (a tab beside a bend
+        // that its zone's trim would take back).
+        let area = |rs: &[Region2]| rs.iter().map(Region2::area).sum::<f64>();
+        let mut built = out.clone();
+        built.build()?;
+        let added = regions.iter().map(Region2::area).sum::<f64>();
+        if ((area(&built.regions) - area(&sk.regions)) - added).abs() > 1e-6 * added.max(1.0) {
+            return Ok(Vec::new());
+        }
+        let body = out.body.clone();
+        if let Some(slot) = st.surface_sheets.get_mut(i) {
+            *slot = out;
+        }
+        rebuild_surface_sheet(st, i)?;
+        return Ok(vec![body]);
     }
     Ok(Vec::new())
 }

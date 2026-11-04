@@ -2753,7 +2753,38 @@ fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> St
 fn absorb_sheet_cuts(before: &ModelState, after: &mut ModelState, f: &Feature, validation: kernel::Validation, warning: &mut Option<String>) -> Result<()> {
     let weigh = validation == kernel::Validation::EachStep;
     let letters = more::cut_letters(after, f);
-    for (i, mut sk, built, note) in crate::sheet_surface_cuts::absorb(before, after, f, weigh)? {
+    // A cut the sheet can't hold is refused; any other change (a fillet, a join, a mirror into
+    // it) stays on the body, and marks the sheet (see `SurfaceSheet::altered_by`).
+    let cuts = match &f.kind {
+        FeatureKind::Hole { .. } => true,
+        FeatureKind::Extrude { operation, .. }
+        | FeatureKind::Revolve { operation, .. }
+        | FeatureKind::Loft { operation, .. }
+        | FeatureKind::Sweep { operation, .. }
+        | FeatureKind::Pipe { operation, .. }
+        | FeatureKind::Coil { operation, .. } => matches!(operation, Operation::Cut | Operation::Intersect),
+        _ => false,
+    };
+    // What isn't a cut is always weighed: material the sheet doesn't show (a join into a bend)
+    // is caught there.
+    for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts)? {
+        let (mut sk, built, note) = match absorbed {
+            crate::sheet_surface_cuts::Absorbed::Read(sk, built, note) => (sk, built, note),
+            crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
+            crate::sheet_surface_cuts::Absorbed::Refused(_) => {
+                if let Some(sk) = after.surface_sheets.get_mut(i).filter(|sk| sk.altered_by.is_none()) {
+                    sk.altered_by = Some(f.name.clone());
+                    append_warning(
+                        warning,
+                        format!(
+                            "`{}` is sheet metal: its flat pattern, DXF and bend table can't include this change yet and are refused; a later sheet metal feature rebuilds the body without it",
+                            sk.body
+                        ),
+                    );
+                }
+                continue;
+            }
+        };
         if let Some(note) = note {
             append_warning(warning, note);
         }
@@ -2789,6 +2820,14 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
             | FeatureKind::Thread { modeled: false, .. }
     ) {
         return;
+    }
+    for sk in after.surface_sheets.iter_mut() {
+        let Some(old) = before.surface_sheets.iter().find(|s| s.body == sk.body) else { continue };
+        if old.altered_by.is_some() && (f.kind.is_sheet() || old.sheet != sk.sheet) {
+            if let Some(lost) = sk.altered_by.take() {
+                append_warning(warning, format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sk.body));
+            }
+        }
     }
     let ModelState { sheets, bodies, .. } = after;
     for sh in sheets.iter_mut() {

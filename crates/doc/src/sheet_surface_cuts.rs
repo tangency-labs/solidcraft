@@ -238,7 +238,14 @@ pub(crate) fn lift(base: &Rigid3, r: &Rigid2) -> Rigid3 {
 /// the sheet (see the module docs): the sheet's index, the sheet, and its body built again.
 /// Features that are sheet metal build their sheets themselves, and moves leave a sheet as it is.
 /// Checking each step (`weigh`), each body built again is weighed against the body cut.
-pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh: bool) -> Result<Vec<(usize, SurfaceSheet, Body, Option<String>)>> {
+/// What [`absorb`] made of a sheet: the sheet read with its body built again and the cut's note,
+/// or why the sheet can't hold the change.
+pub(crate) enum Absorbed {
+    Read(SurfaceSheet, Body, Option<String>),
+    Refused(String),
+}
+
+pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh: bool) -> Result<Vec<(usize, Absorbed)>> {
     if f.kind.is_sheet()
         || matches!(
             f.kind,
@@ -264,9 +271,18 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
             continue;
         }
         let (was, now) = (was.body.clone(), now.body.clone());
-        let (cut, built) = cut(&sk, &was, &now, weigh).map_err(|e| DocError::Invalid(format!("`{}`: what {} cut {e}", sk.body, f.name)))?;
-        let note = parted_note(&cut, sk.loose.len());
-        out.push((i, cut, built, note));
+        // A sheet's body that keeps a change the sheet can't hold has drifted from the sheet:
+        // what later features change of it stays on it.
+        if sk.altered_by.is_some() {
+            continue;
+        }
+        match cut(&sk, &was, &now, weigh) {
+            Ok((cut, built)) => {
+                let note = parted_note(&cut, sk.loose.len());
+                out.push((i, Absorbed::Read(cut, built, note)));
+            }
+            Err(e) => out.push((i, Absorbed::Refused(format!("`{}`: what {} cut {e}", sk.body, f.name)))),
+        }
     }
     Ok(out)
 }

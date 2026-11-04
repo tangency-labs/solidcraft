@@ -973,6 +973,7 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(converted) = surfaces_of(s, p) {
+        converted.flat_matches_body()?;
         return Ok(surface_flat_json(&converted));
     }
     let sh = sheet_of(s, p, "sheet.flat_pattern")?;
@@ -1322,6 +1323,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
             made.push((sh.body.clone(), flat_dxf(sh, &options)?, sh.bends().len()));
         }
         for sk in &st.surface_sheets {
+            sk.flat_matches_body()?;
             made.push((sk.body.clone(), surface_dxf(s, sk, &options)?, sk.bends.len()));
         }
         let paths = path.map(|path| body_paths(path, &made.iter().map(|(body, ..)| body.clone()).collect::<Vec<_>>()));
@@ -1337,6 +1339,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"files": files}));
     }
     if let Some(sk) = surfaces_of(s, p) {
+        sk.flat_matches_body()?;
         let text = surface_dxf(s, &sk, &options)?;
         if let Some(path) = path {
             solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -1361,6 +1364,7 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`format` must be csv or json"));
     }
     let (body, rule, t, k, bends, table) = match surfaces_of(s, p) {
+        Some(sk) if sk.flat_matches_body().is_err() => return Err(sk.flat_matches_body().unwrap_err().into()),
         Some(sk) => (sk.body.clone(), sk.rule.clone(), sk.thickness, sk.k_factor, sk.shown().bend_infos(), surface_flat_json(&sk)),
         None => {
             let sh = sheet_of(s, p, cmd)?;
