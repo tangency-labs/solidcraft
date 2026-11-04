@@ -1,0 +1,8 @@
+{
+  "en": { "render.error_product_placement": "invalid product placement" },
+  "ar": { "render.error_product_placement": "موضع منتج غير صالح" },
+  "he": { "render.error_product_placement": "מיקום מוצר לא תקין" },
+  "ja": { "render.error_product_placement": "製品の配置が無効です" },
+  "vi": { "render.error_product_placement": "vị trí đặt sản phẩm không hợp lệ" },
+  "zh": { "render.error_product_placement": "产品放置无效" }
+}
