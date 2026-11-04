@@ -1,7 +1,7 @@
 {
   "ar": {
     "sketch.error.closed_curve_two_crossings": "a closed curve needs two crossings to trim",
-    "sketch.error.nothing_to_break": "nothing to break at there",
+    "sketch.error.nothing_to_break": "nothing to break here",
     "sketch.error.offset_fillet_chamfer": "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first",
     "sketch.error.offset_trim": "`{id}` is an offset, and its ends follow its source curves: edit the source curves instead, or break the offset association first",
     "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
@@ -57,7 +57,7 @@
   },
   "en": {
     "sketch.error.closed_curve_two_crossings": "a closed curve needs two crossings to trim",
-    "sketch.error.nothing_to_break": "nothing to break at there",
+    "sketch.error.nothing_to_break": "nothing to break here",
     "sketch.error.offset_fillet_chamfer": "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first",
     "sketch.error.offset_trim": "`{id}` is an offset, and its ends follow its source curves: edit the source curves instead, or break the offset association first",
     "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
@@ -113,7 +113,7 @@
   },
   "he": {
     "sketch.error.closed_curve_two_crossings": "a closed curve needs two crossings to trim",
-    "sketch.error.nothing_to_break": "nothing to break at there",
+    "sketch.error.nothing_to_break": "nothing to break here",
     "sketch.error.offset_fillet_chamfer": "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first",
     "sketch.error.offset_trim": "`{id}` is an offset, and its ends follow its source curves: edit the source curves instead, or break the offset association first",
     "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
@@ -141,7 +141,7 @@
   },
   "ja": {
     "sketch.error.closed_curve_two_crossings": "a closed curve needs two crossings to trim",
-    "sketch.error.nothing_to_break": "nothing to break at there",
+    "sketch.error.nothing_to_break": "nothing to break here",
     "sketch.error.offset_fillet_chamfer": "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first",
     "sketch.error.offset_trim": "`{id}` is an offset, and its ends follow its source curves: edit the source curves instead, or break the offset association first",
     "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
@@ -169,7 +169,7 @@
   },
   "vi": {
     "sketch.error.closed_curve_two_crossings": "a closed curve needs two crossings to trim",
-    "sketch.error.nothing_to_break": "nothing to break at there",
+    "sketch.error.nothing_to_break": "nothing to break here",
     "sketch.error.offset_fillet_chamfer": "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first",
     "sketch.error.offset_trim": "`{id}` is an offset, and its ends follow its source curves: edit the source curves instead, or break the offset association first",
     "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
@@ -197,7 +197,7 @@
   },
   "zh": {
     "sketch.error.closed_curve_two_crossings": "a closed curve needs two crossings to trim",
-    "sketch.error.nothing_to_break": "nothing to break at there",
+    "sketch.error.nothing_to_break": "nothing to break here",
     "sketch.error.offset_fillet_chamfer": "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first",
     "sketch.error.offset_trim": "`{id}` is an offset, and its ends follow its source curves: edit the source curves instead, or break the offset association first",
     "sketch.hint.arc.center_point": "Arc: click centre and start, go round either way and click the end, or type a signed sweep",
