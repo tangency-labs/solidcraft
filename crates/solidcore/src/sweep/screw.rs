@@ -1,6 +1,8 @@
 //! Screw sweeps: a profile carried by a screw motion about an axis (a thread's groove, a
 //! coil), each wall its profile curve turned exactly and lifted within a tolerance of
-//! its true screw surface, capped at both ends.
+//! its true screw surface, capped at both ends. Each B-spline wall keeps that screw
+//! surface as its definition, the wall its certified net (#2572,
+//! [`crate::surface::procedural_sweep::ProceduralSweep`]).
 //!
 //! Source: the SolidCraft fork's C API, `capi/src/smlib_sweeps.cpp` of
 //! tangency-labs/smlib at `83748ba` (Apache-2.0), commits `d6d44b4` (the screw sweep),
@@ -41,6 +43,10 @@
 //! - **Faces.** Faces are made under arena notification identities and stitched under
 //!   them, as the kernel's own primitives are; the result's cached topology is
 //!   refreshed ([`Brep::refresh_cached_topology`]).
+//! - **Definitions (#2572, not the fork's).** Each B-spline wall's surface carries its
+//!   definition, the profile curve under the screw motion over the wall's stations, and
+//!   the wall's certified distance from it. The wall itself is built as before; an exact
+//!   cylinder (a profile line along the axis) and the caps keep none.
 
 // The fork's range tests are NaN-safe negations (`!(x > y)`); kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -58,6 +64,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::cone::Cone;
+use crate::surface::procedural_sweep::{ProceduralSweep, RadialLaw, ScrewMotion};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p8::{self, FaceBuildEnv};
 use crate::topology::{Brep, FaceId};
@@ -805,6 +812,15 @@ fn sweep(
         }
         pieces.push(Stations::new(b0, b1, n as usize));
     }
+    // The walls' definition: the motion, and each profile curve as the NURBS its wall
+    // runs on across.
+    let law = if m.offsets.is_empty() {
+        None
+    } else {
+        Some(RadialLaw::new(m.e, m.angles.clone(), m.offsets.clone())?)
+    };
+    let motion = ScrewMotion::new(m.o, m.k, m.pitch, law)?;
+    let curves = profile.iter().map(bspline_of).collect::<Result<Vec<_>>>()?;
     let mut brep = crate::topology::brep::p3::new_brep(
         k,
         crate::geom::tol::USE_DEFAULT,
@@ -814,16 +830,23 @@ fn sweep(
         let (Some(&t0), Some(&t1)) = (st.t.first(), st.t.last()) else {
             return Err(SolidError::sm_err(OP));
         };
-        for ((wall, curve), &r) in walls.iter().zip(profile).zip(&radius) {
+        for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
                 cylinder_piece(k, &mut brep, m, ends.start, ends.end, r + m.offset(t0), st)?;
                 continue;
             }
-            let surface = screw_wall(m, wall, st)?;
-            let domain: Extent2d = surface.natural_uv_domain();
+            let net = screw_wall(m, wall, st)?;
+            let domain: Extent2d = net.natural_uv_domain();
+            let mut surface = Surface::from(net);
+            surface.set_sweep_definition(ProceduralSweep::create(
+                nurbs,
+                motion.clone(),
+                &st.t,
+                st.half,
+            )?);
             with_face_env(k, &mut brep, |k, brep, fenv| {
-                p8::create_face_from_surface(k, brep, Some(Surface::from(surface)), &domain, fenv)
+                p8::create_face_from_surface(k, brep, Some(surface), &domain, fenv)
             })?;
         }
     }

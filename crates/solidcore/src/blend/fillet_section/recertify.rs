@@ -157,7 +157,7 @@ const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
 
 /// `gamma_k = k u / (1 - k u)`: the relative error bound of k floating operations in a
 /// chain (Higham, the standard model).
-fn gamma(k: usize) -> f64 {
+pub(crate) fn gamma(k: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)]
     let ku = k as f64 * UNIT_ROUNDOFF;
     ku / (1.0 - ku)

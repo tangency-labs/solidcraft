@@ -294,6 +294,7 @@ use crate::surface::procedural_blend::exact::ExactRound;
 use crate::surface::procedural_blend::{
     BlendRef, KeptDefinition, NetScope, ProceduralBlend, PROCEDURAL_BLEND_TYPE,
 };
+use crate::surface::procedural_sweep::{DefinitionRef, ProceduralSweep, SweepRef};
 use crate::surface::sphere::Sphere;
 use crate::surface::srf_in_volume::SrfInVolume;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
@@ -1180,12 +1181,39 @@ impl Surface {
             Some(KeptDefinition::Corner(corner)) => {
                 return Some(BlendRef::Corner { corner, net: self })
             }
-            None => {}
+            Some(KeptDefinition::Sweep(_)) | None => {}
         }
         match self.kind() {
             SurfaceKind::ProceduralBlend(p) => Some(BlendRef::Procedural(p)),
             _ => None,
         }
+    }
+
+    /// The swept wall this surface is by its definition (#2572): a B-spline net carrying a
+    /// [`ProceduralSweep`]; `None` for any other surface.
+    #[must_use]
+    pub fn procedural_sweep(&self) -> Option<SweepRef<'_>> {
+        match (self.definition.as_deref(), self.kind()) {
+            (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) => {
+                Some(SweepRef { sweep, net })
+            }
+            _ => None,
+        }
+    }
+
+    /// The definition this surface is the net of, whatever made it (#2572): a blend's
+    /// ([`Surface::procedural_blend`]) or a sweep's ([`Surface::procedural_sweep`]).
+    #[must_use]
+    pub fn procedural_definition(&self) -> Option<DefinitionRef<'_>> {
+        if let Some(blend) = self.procedural_blend() {
+            return Some(DefinitionRef::Blend(blend));
+        }
+        self.procedural_sweep().map(DefinitionRef::Sweep)
+    }
+
+    /// Keeps `sweep` as the definition of this surface, its net (#2572).
+    pub(crate) fn set_sweep_definition(&mut self, sweep: ProceduralSweep) {
+        self.definition = Some(Box::new(KeptDefinition::Sweep(sweep)));
     }
 
     /// Keeps `round` as the definition of this surface, its exact net (#2485); `None`
@@ -1194,13 +1222,13 @@ impl Surface {
         self.definition = round.map(|r| Box::new(KeptDefinition::Round(r)));
     }
 
-    /// The exact round this surface keeps as its definition (#2485), to carry an edit of
-    /// the net's parametrisation into its leader map; `None` for any other surface.
-    fn exact_round_mut(&mut self) -> Option<&mut ExactRound> {
-        match self.definition.as_deref_mut() {
-            Some(KeptDefinition::Round(round)) => Some(round),
-            _ => None,
-        }
+    /// The definition this surface keeps that reads it through a map of its parameters
+    /// (an exact round's leader map #2485, a sweep's #2572), to carry an edit of the net's
+    /// parametrisation into it; `None` for any other surface.
+    fn kept_map_mut(&mut self) -> Option<&mut KeptDefinition> {
+        self.definition
+            .as_deref_mut()
+            .filter(|kept| kept.has_parameter_map())
     }
 
     /// Keeps `corner` as the definition of this surface, a blend corner's face (#2488).
@@ -1209,8 +1237,14 @@ impl Surface {
     }
 
     /// This surface's definition carried onto `piece`, a piece, extension or copy of it
-    /// (#2485, #2488).
+    /// (#2485, #2488). A sweep's (#2572) is read point for point on its B-spline net: a
+    /// piece of another kind keeps none.
     fn carry_definition(&self, mut piece: Self) -> Self {
+        let sweep = matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(_)));
+        if sweep && !matches!(piece.kind(), SurfaceKind::BSpline(_)) {
+            piece.definition = None;
+            return piece;
+        }
         piece.definition.clone_from(&self.definition);
         piece
     }
@@ -3073,10 +3107,11 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn reverse(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
-        // (#2485) an exact round's leader map follows the net's reversal, w = lo + hi - w'
-        let before = self.exact_map_domain(k)?;
+        // (#2485, #2572) an exact round's leader map and a sweep's map follow the net's
+        // reversal, w = lo + hi - w'
+        let before = self.kept_map_domain(k)?;
         self.reverse_kind(k, param)?;
-        if let (Some(round), Some(d)) = (self.exact_round_mut(), before) {
+        if let (Some(round), Some(d)) = (self.kept_map_mut(), before) {
             for (u, ivl) in [(true, d.u_interval()), (false, d.v_interval())] {
                 if (param == SurfParamType::U) == u || param == SurfParamType::Both {
                     round.reparametrize_map(u, ivl.min() + ivl.max(), -1.0);
@@ -3086,10 +3121,14 @@ impl Surface {
         Ok(())
     }
 
-    /// The natural domain an exact round's leader map is read against, before an edit of
-    /// the parametrisation (`None` for a surface that is no exact round).
-    fn exact_map_domain(&self, k: &Kernel) -> Result<Option<Extent2d>> {
-        if !matches!(self.definition.as_deref(), Some(KeptDefinition::Round(_))) {
+    /// The natural domain a kept definition's map is read against, before an edit of the
+    /// parametrisation (`None` for a surface that keeps none, [`Surface::kept_map_mut`]).
+    fn kept_map_domain(&self, k: &Kernel) -> Result<Option<Extent2d>> {
+        if !self
+            .definition
+            .as_deref()
+            .is_some_and(KeptDefinition::has_parameter_map)
+        {
             return Ok(None);
         }
         self.natural_uv_domain_with_nurb(k).map(Some)
@@ -3163,10 +3202,10 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn reparameterize(&mut self, k: &Kernel, new_domain: &Extent2d) -> Result<()> {
-        // (#2485) an exact round's leader map follows the net's affine reparametrisation
-        let before = self.exact_map_domain(k)?;
+        // (#2485, #2572) a kept map follows the net's affine reparametrisation
+        let before = self.kept_map_domain(k)?;
         self.reparameterize_kind(k, new_domain)?;
-        if let (Some(round), Some(d)) = (self.exact_round_mut(), before) {
+        if let (Some(round), Some(d)) = (self.kept_map_mut(), before) {
             for (u, old, new) in [
                 (true, d.u_interval(), new_domain.u_interval()),
                 (false, d.v_interval(), new_domain.v_interval()),
@@ -3231,9 +3270,9 @@ impl Surface {
         notify: &mut SurfaceEditNotify<'_>,
     ) -> Result<()> {
         self.swap_uv_kind_notifying(k, notify)?;
-        // (#2485) an exact round's leader map follows the swap
-        if let Some(round) = self.exact_round_mut() {
-            round.swap_map();
+        // (#2485, #2572) a kept map follows the swap
+        if let Some(kept) = self.kept_map_mut() {
+            kept.swap_map();
         }
         Ok(())
     }
@@ -3404,18 +3443,26 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         // (#2485, #2488) a definition moves with its net; one that cannot move so (a scale
-        // that is not uniform) refuses before the net moves
+        // that is not uniform) refuses before the net moves. A sweep's (#2572) that cannot
+        // follow the motion is left behind: the net moves as it did without it.
         let moved = match self.definition.as_deref() {
+            Some(kept) if !kept.follows(scale) => Some(None),
             Some(kept) => {
                 let mut moved = kept.clone();
                 moved.transform(k, rotate_n_move, scale, depth)?;
-                Some(Box::new(moved))
+                Some(Some(Box::new(moved)))
             }
             None => None,
         };
         self.transform_kind_at_depth(k, rotate_n_move, scale, depth)?;
-        if moved.is_some() {
+        if let Some(moved) = moved {
             self.definition = moved;
+        }
+        // a sweep's bound takes in the rounding of moving its net, as a blend's does
+        if let (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) =
+            (self.definition.as_deref_mut(), &self.kind)
+        {
+            sweep.add_motion_rounding(net)?;
         }
         Ok(())
     }
