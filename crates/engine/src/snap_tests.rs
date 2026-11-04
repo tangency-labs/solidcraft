@@ -252,3 +252,19 @@ fn a_round_faces_end_centres_point_out_of_their_ends() {
     assert!(normal_at(0.0).is_some_and(|n| n.dist(-Vec3::Z) < 1e-9), "the bottom end, out of the plate's bottom: {got:?}");
     assert!(normal_at(10.0).is_some_and(|n| n.dist(Vec3::Z) < 1e-9), "the top end, out of its top: {got:?}");
 }
+
+#[test]
+fn a_hole_centred_on_its_face_is_both_the_faces_centre_and_the_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 12, "base": [30, 20, -1], "operation": "cut"}));
+    let top = face(&s, |p| (p.z - 10.0).abs() < 1e-9);
+    let got = snap_points_from(&s, &top);
+    let at = Vec3::new(30.0, 20.0, 10.0);
+    let here: Vec<_> = got.iter().filter(|(p, _)| p.at.dist(at) < 0.02).collect();
+    assert_eq!(here.iter().map(|(p, _)| p.kind).collect::<Vec<_>>(), [SnapKind::FaceCentre, SnapKind::Centre], "{got:?}");
+    // Only the hole's centre keeps its rim: a point on the circle of radius 4 about it.
+    assert!(here[0].1.edge.is_none(), "{:?}", here[0]);
+    let rim = here[1].1.edge.unwrap();
+    assert!((rim.dist(at) - 4.0).abs() < 1e-9 && (rim.z - 10.0).abs() < 1e-9, "{rim:?}");
+}

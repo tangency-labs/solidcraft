@@ -55,7 +55,8 @@ pub struct SnapSource {
     /// A point on the face that offered the point: where the face was picked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub face: Option<Vec3>,
-    /// The flat face's outward unit normal (out of the material).
+    /// Which way the point's face looks, as a unit vector out of the material: a flat face's
+    /// outward normal, or for a cylinder's or cone's end centre the axis pointing out of that end.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normal: Option<Vec3>,
     /// A point inside the edge the point belongs to: the edge a corner starts, the straight edge a
@@ -64,7 +65,7 @@ pub struct SnapSource {
     pub edge: Option<Vec3>,
 }
 
-/// Points closer than this (relative to the item's size) are one snap point.
+/// Points of one kind closer than this (relative to the item's size) are one snap point.
 const SAME: f64 = 1e-6;
 
 /// The most edges of one face whose points a flat face offers: a face with more (an imported
@@ -97,7 +98,9 @@ pub fn snap_points_from(s: &Session, sel: &Sel) -> Vec<(SnapPoint, SnapSource)> 
     let mut out: Vec<(SnapPoint, SnapSource)> = Vec::new();
     for (at, kind, from) in found {
         let tol = SAME * (1.0 + at.len());
-        if at.is_finite() && !out.iter().any(|(p, _)| p.at.dist(at) <= tol) {
+        // Only points of one kind are one point: a hole centred on its face is both the face's
+        // centre and the hole's, and only the hole's keeps its rim.
+        if at.is_finite() && !out.iter().any(|(p, _)| p.kind == kind && p.at.dist(at) <= tol) {
             out.push((SnapPoint { at, kind, body: body.clone() }, from));
         }
     }
