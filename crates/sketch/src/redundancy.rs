@@ -91,6 +91,7 @@ pub(super) fn dependent_blocks(
     x: &mut [f64],
     support: Option<usize>,
 ) -> (Vec<bool>, Vec<usize>) {
+    solidcraft_work::record(solidcraft_work::Counter::SketchAnalyses, 1);
     #[cfg(feature = "solver-profiling")]
     let _timer = {
         profiling::count(|c| c.redundancy_checks += 1);

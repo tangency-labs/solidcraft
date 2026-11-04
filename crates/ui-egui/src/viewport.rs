@@ -1353,7 +1353,9 @@ fn build_block(draws: &[BodyDraw], shaded: bool, build: &impl Fn(&BodyDraw, &mut
             face_classes: d.face_classes.clone(),
         })
         .collect();
-    CachedBlock { bytes: builder.freeze(), meshes: draws.iter().map(|d| d.mesh.clone()).collect(), ranges }
+    let bytes = builder.freeze();
+    solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, bytes.vertices.len() as u64);
+    CachedBlock { bytes, meshes: draws.iter().map(|d| d.mesh.clone()).collect(), ranges }
 }
 
 /// Keep a block's vertex, line and hidden artifacts and regenerate only the class runs (an
@@ -1509,6 +1511,7 @@ fn shared_mesh(
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
+    solidcraft_work::record(solidcraft_work::Counter::ModelSceneBuilds, 1);
     let tk = Tokens::get();
     let s = &app.session;
     // Bodies where their occurrences place them.
@@ -1909,6 +1912,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let lift = ss.plane.normal() * 0.01;
         let profiles = if app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
         let profile_fill = sc.color(c4(tk.profile_fill));
+        let before = sc.trans.len();
         for (index, _) in profiles.iter().enumerate() {
             let display = crate::sketch_display::profile_region(app, sid, index, &ss.plane, proj);
             for tri in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
@@ -1917,6 +1921,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                 }
             }
         }
+        solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, sc.trans.len().saturating_sub(before) as u64);
         // Construction curves are dashed, centerlines dash-dot (lengths follow the grid).
         // When enabled, a finished sketch's own curves sit on a wider halo (#4862) to read on a
         // shaded face. Projected (reference) curves get none: they trace the face's own edges.
@@ -3535,6 +3540,7 @@ fn face_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, face: usize, 
 /// Emit a set of faces in one mesh pass. Whole-body feedback must not scan every triangle
 /// again for each face of a detailed imported part.
 fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4], lit: bool, takes: impl Fn(u32) -> bool) {
+    let before = sc.tris.len();
     let col = sc.color(col);
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         if !takes(*f) {
@@ -3547,6 +3553,7 @@ fn mesh_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, col: [u8; 4],
             }
         }
     }
+    solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, sc.tris.len().saturating_sub(before) as u64);
 }
 
 /// How much wider a sketch curve's halo is than the curve (#4862): a 1 px rim each side.
@@ -3643,11 +3650,13 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
     // In the translucent pass (after the grid and edges) so it covers them.
     let proj = display_proj(app);
     let display = crate::sketch_display::profile_region(app, sketch, index, &plane, &proj);
+    let before = sc.trans.len();
     for [a, b, c] in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut 65_536)) {
         sc.trans_tri(w(a), [0.0; 3], col);
         sc.trans_tri(w(b), [0.0; 3], col);
         sc.trans_tri(w(c), [0.0; 3], col);
     }
+    solidcraft_work::record(solidcraft_work::Counter::DisplayTriangleBytes, sc.trans.len().saturating_sub(before) as u64);
     for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
         for part in crate::sketch_display::boundary_parts(lp, &plane, &proj, app.viewport.pixels_per_point()) {
             for pair in part.windows(2) {
@@ -3663,6 +3672,7 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
 /// through bodies), else it is depth-tested like the rest of the scene.
 fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through: bool) {
     let col = sc.color(c4(fill));
+    let before = sc.xray.len().saturating_add(sc.guide_trans.len());
     for i in [0, 1, 2, 0, 2, 3] {
         if let Some(p) = q.get(i) {
             if through {
@@ -3672,6 +3682,10 @@ fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through:
             }
         }
     }
+    solidcraft_work::record(
+        solidcraft_work::Counter::DisplayTriangleBytes,
+        sc.xray.len().saturating_add(sc.guide_trans.len()).saturating_sub(before) as u64,
+    );
     for i in 0..4 {
         let (a, b) = (q[i].to_f32(), q[(i + 1) % 4].to_f32());
         reference_line(sc, a, b, c4(edge), 1.2, through);
@@ -7143,6 +7157,67 @@ pub fn look_at_selection(app: &mut SolveApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reference_plane_highlights_count_triangle_bytes_in_both_depth_modes() {
+        use solidcraft_work::{Counter, capture};
+        let points = [Vec3::ZERO, Vec3::X, Vec3::X + Vec3::Y, Vec3::Y];
+        for through in [false, true] {
+            let mut scene = GpuScene::default();
+            quad(&mut scene, &points, Color32::WHITE, Color32::BLACK, through);
+            let ((), work) = capture(|| quad(&mut scene, &points, Color32::WHITE, Color32::BLACK, through));
+            assert!(work.complete(), "{work:?}");
+            assert_eq!(work.get(Counter::DisplayTriangleBytes), (6 * crate::gpu::TRI_SIZE) as u64, "{work:?}");
+            assert_eq!(scene.xray.len() + scene.guide_trans.len(), 12 * crate::gpu::TRI_SIZE);
+        }
+    }
+
+    #[test]
+    fn warmed_camera_frame_reuses_geometry_and_packed_model_triangles() {
+        use solidcraft_work::{Counter, capture};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_grid = false;
+        h.app.ui.ground_shadow = false;
+        h.app.ui.visual_style = 1;
+        h.app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.app.run("solid.box", json!({"body_name":"Part","length":2,"width":3,"height":4})).unwrap();
+        let world = h.app.session.world_state().unwrap();
+        for body in &world.bodies {
+            let _ = body.mesh();
+            let _ = body.plan_mesh();
+        }
+        let ((), cold) = capture(|| h.frame());
+        assert!(cold.complete(), "{cold:?}");
+        assert!(cold.get(Counter::ModelSceneBuilds) > 0, "missing frame accounting: {cold:?}");
+        assert!(cold.get(Counter::DisplayTriangleBytes) > 0, "missing display accounting: {cold:?}");
+        h.frame();
+        let ((), warm) = capture(|| {
+            h.app.cam.yaw += 0.05;
+            h.frame();
+        });
+        assert!(warm.complete(), "{warm:?}");
+        for (counter, value) in warm.iter() {
+            assert_eq!(value, 0, "{counter:?}: {warm:?}");
+        }
+        assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state().unwrap()));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[5,6]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.session.selection = vec![Sel::Profile { sketch, index: 0 }];
+        h.frames(2);
+        let ((), selected) = capture(|| {
+            h.app.cam.yaw += 0.05;
+            h.frame();
+        });
+        assert!(selected.complete(), "{selected:?}");
+        assert!(selected.get(Counter::DisplayTriangleBytes) > 0, "selected profile triangles must be counted: {selected:?}");
+        for (counter, value) in selected.iter().filter(|(counter, _)| *counter != Counter::DisplayTriangleBytes) {
+            assert_eq!(value, 0, "{counter:?}: {selected:?}");
+        }
+    }
     use crate::navigation::*;
 
     #[test]

@@ -21,6 +21,11 @@ solver-profiling = ["solidcraft-sketch/solver-profiling"]
 # build can be profiled; it records only once switched on (SOLIDCRAFT_PROFILE=1, the CLI's
 # --profile, the app's preference, diagnostics.profile).
 profile = ["solidcraft-profile/enabled"]
+work-profiling = ["solidcraft-work/capture"]
+
+[[example]]
+name = "work_profile"
+required-features = ["work-profiling"]
 
 [[example]]
 name = "sketch_analysis_bench"
@@ -37,6 +42,7 @@ required-features = ["solver-profiling"]
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-work = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
@@ -56,6 +62,7 @@ web-time = { workspace = true }
 
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
+solidcraft-work = { workspace = true, features = ["capture"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.

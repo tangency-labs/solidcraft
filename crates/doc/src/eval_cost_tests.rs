@@ -92,9 +92,16 @@ fn searched(f: impl FnOnce()) -> usize {
 
 /// The work `f` does on this thread.
 fn counted(f: impl FnOnce()) -> Counts {
-    COUNTS.with(|c| c.set(Counts::default()));
-    f();
-    COUNTS.with(Cell::get)
+    use solidcraft_work::{Counter, capture};
+    COUNTS.set(Counts::default());
+    let ((), work) = capture(f);
+    assert!(work.complete(), "{work:?}");
+    Counts {
+        moved: work.get(Counter::BodyTransforms).try_into().unwrap(),
+        digested: work.get(Counter::ImportDigests).try_into().unwrap(),
+        joint_faces: work.get(Counter::JointFaceMeasurements).try_into().unwrap(),
+        ..COUNTS.get()
+    }
 }
 
 #[test]
@@ -241,6 +248,92 @@ fn line_sketch(plane: PlaneRef, to: Vec2) -> FeatureKind {
     let b = sk.add_point(to, None).unwrap();
     sk.add_line_pts(a, b, None).unwrap();
     FeatureKind::Sketch { plane, sketch: sk }
+}
+
+#[test]
+fn work_reports_cover_reused_evaluations_and_bound_fingerprint_work() {
+    use solidcraft_work::{Counter, capture};
+
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    let (_, cold) = capture(|| model.evaluate(&doc));
+    assert!(cold.complete(), "{cold:?}");
+    assert_eq!(cold.get(Counter::ModelEvaluations), 1, "missing evaluation accounting: {cold:?}");
+    assert_eq!(cold.get(Counter::FeatureEvaluations), doc.features.len() as u64, "{cold:?}");
+    assert!(cold.get(Counter::ImportedBytesHashed) > 0, "cold imports must be observed: {cold:?}");
+    assert!(cold.get(Counter::FeatureFingerprints) > 0, "missing fingerprint accounting: {cold:?}");
+    assert!(cold.get(Counter::FeatureJsonBytes) > 0, "missing serialization accounting: {cold:?}");
+    assert!(cold.get(Counter::FingerprintBytesHashed) > 0, "missing hash-byte accounting: {cold:?}");
+    let retained = model.state();
+
+    let (_, warm) = capture(|| model.evaluate(&doc));
+    assert!(warm.complete(), "{warm:?}");
+    assert_eq!(warm.get(Counter::ModelEvaluations), 1, "{warm:?}");
+    assert_eq!(warm.get(Counter::FeatureEvaluations), 0, "{warm:?}");
+    assert_eq!(warm.get(Counter::ImportedBytesHashed), 0, "{warm:?}");
+    // Reuse may avoid this work altogether; the budget must permit improvements, while
+    // rejecting repeated visits or serialization that produces only discarded definitions.
+    assert!(warm.get(Counter::FeatureFingerprints) <= doc.features.len() as u64, "{warm:?}");
+    assert!(warm.get(Counter::FingerprintBytesHashed) <= cold.get(Counter::FingerprintBytesHashed), "{warm:?}");
+    assert!(warm.get(Counter::FingerprintBytesHashed) >= warm.get(Counter::FeatureJsonBytes), "{warm:?}");
+    assert_eq!(model.last_recomputed, 0);
+    assert!(Arc::ptr_eq(&retained, &model.state()));
+}
+
+#[test]
+fn work_reports_observe_cold_reference_meshes_and_preserve_warm_identity() {
+    use solidcraft_work::{Counter, capture};
+
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.bodies.first().unwrap();
+    let (first, cold) = capture(|| body.mesh());
+    assert!(cold.complete(), "{cold:?}");
+    assert_eq!(cold.get(Counter::ReferenceMeshBuilds), 1, "{cold:?}");
+    let (again, warm) = capture(|| body.mesh());
+    assert!(warm.complete(), "{warm:?}");
+    assert_eq!(warm.get(Counter::ReferenceMeshBuilds), 0, "{warm:?}");
+    assert!(Arc::ptr_eq(&first, &again));
+    assert!(!first.triangles.is_empty());
+}
+
+#[test]
+fn work_reports_include_joined_mesh_preparation_workers() {
+    use solidcraft_work::{Counter, capture};
+
+    // Exercise joined preparation workers with distinct cold definitions.
+    let mut state = ModelState::default();
+    for i in 0..17 {
+        let body = kernel::box_solid(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0)).unwrap();
+        state.bodies.push(ModelBody::new(format!("Part {i}"), body, i));
+    }
+    let ((), cold) = capture(|| {
+        state.warm_meshes(|| true);
+        state.warm_display();
+        for body in &state.bodies {
+            assert!(!body.plan_mesh().unwrap().triangles.is_empty());
+        }
+    });
+    assert!(cold.complete(), "{cold:?}");
+    for counter in [Counter::ReferenceMeshBuilds, Counter::DisplayPlanBuilds, Counter::DisplayMeshBuilds] {
+        assert_eq!(cold.get(counter), state.bodies.len() as u64, "{counter:?}: {cold:?}");
+    }
+    let first = state.bodies.first().unwrap().mesh();
+    let ((), warm) = capture(|| {
+        state.warm_meshes(|| true);
+        state.warm_display();
+        for body in &state.bodies {
+            let _ = body.plan_mesh();
+        }
+    });
+    assert!(warm.complete(), "{warm:?}");
+    for counter in [Counter::ReferenceMeshBuilds, Counter::DisplayPlanBuilds, Counter::DisplayMeshBuilds] {
+        assert_eq!(warm.get(counter), 0, "{counter:?}: {warm:?}");
+    }
+    assert!(Arc::ptr_eq(&first, &state.bodies.first().unwrap().mesh()));
+    assert!(!first.triangles.is_empty());
 }
 
 #[test]
@@ -1636,4 +1729,52 @@ fn tools_are_apart_only_when_they_neither_meet_nor_nest() {
     assert!(!super::tools_clearly_apart(&[tube.clone(), rod(0.0, 0.0, 4.5)]));
     // A rod in the tube's bore, clear of its wall, is apart from it.
     assert!(super::tools_clearly_apart(&[tube, rod(0.0, 0.0, 3.0)]));
+}
+
+#[test]
+fn joined_world_placements_report_every_transformed_body() {
+    use solidcraft_work::{Counter, capture};
+    let mut doc = Document::new("joined placement accounting");
+    let component = doc.add_component(Some("Parts"), 0).unwrap();
+    for i in 0..33 {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(f64::from(i) * 3.0, 0.0, 0.0)),
+                    length: "1".into(),
+                    width: "1".into(),
+                    height: "1".into(),
+                    operation: Operation::NewBody,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = component;
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    assert_eq!(state.bodies.len(), 33);
+    let mut placed = crate::eval::PlacedBodies::default();
+    for shift in [2.0, 5.0] {
+        place(&mut doc, component, rigid(Vec3::new(shift, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        let (world, work) = capture(|| crate::eval::world_state_reusing(&doc, &state, &mut placed));
+        let world = world.unwrap();
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(Counter::BodyTransforms), 33, "every joined worker belongs to the operation: {work:?}");
+        assert_eq!(world.bodies.len(), state.bodies.len());
+        for (source, moved) in state.bodies.iter().zip(&world.bodies) {
+            let expected = source.body.outline_bounds();
+            let actual = moved.body.outline_bounds();
+            assert!((actual.min - expected.min - Vec3::new(shift, 0.0, 0.0)).len() < 1e-9);
+            assert!((actual.max - expected.max - Vec3::new(shift, 0.0, 0.0)).len() < 1e-9);
+        }
+        let (warm, work) = capture(|| crate::eval::world_state_reusing(&doc, &state, &mut placed));
+        let warm = warm.unwrap();
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(Counter::BodyTransforms), 0, "ready placements must be reused: {work:?}");
+        for (before, after) in world.bodies.iter().zip(&warm.bodies) {
+            assert!(before.body.same(&after.body));
+        }
+    }
 }

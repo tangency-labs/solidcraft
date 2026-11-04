@@ -20,10 +20,12 @@ required-features = ["solver-profiling"]
 solidcore-record = { workspace = true }
 harfrust = "0.12"
 solidcraft-geom = { workspace = true }
+solidcraft-work = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
 unicode-bidi = "0.3"
 
 [dev-dependencies]
+solidcraft-work = { workspace = true, features = ["capture"] }
 serde_json = { workspace = true }

@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-work = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
@@ -49,6 +50,7 @@ winreg = "0.56"
 
 [dev-dependencies]
 solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
+solidcraft-work = { workspace = true, features = ["capture"] }
 # Parse the source guard structurally, including code after inline test modules.
 syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
