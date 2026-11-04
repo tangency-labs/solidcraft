@@ -20,6 +20,8 @@ appearance.paste                  appearance only: colours and textures
 appearance.pick_up                appearance only: colours and textures
 appearance.replace                appearance only: colours and textures
 assembly.bom                      a bill of materials report
+assembly.bom.item.set             the bill of materials: its tests in crates/engine/src/cmd/bom_tests.rs
+assembly.bom.renumber             the bill of materials: its tests in crates/engine/src/cmd/bom_tests.rs
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -67,6 +69,43 @@ document.metadata                 document metadata and revisions
 document.metadata.remove          document metadata and revisions
 document.metadata.set             document metadata and revisions
 document.revision                 document metadata and revisions
+drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.delete                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.dimension.add             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.dimension.edit            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.dimension.inspect         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.export                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.image.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.inspect                   a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.list                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.open                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.properties                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.properties.remove         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.properties.set            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.revision.add              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.revision.delete           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.revision.edit             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.scene                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.set                       a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.sheet.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.sheet.delete              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.sheet.reorder             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.sheet.set                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.status                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.template.apply            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.template.list             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.template.save             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.base                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.copy_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.move_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.projected            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.snapshot             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 edit.checkpoint                   undo, redo and checkpoints: an earlier state restored, no new geometry
 edit.redo                         undo, redo and checkpoints: an earlier state restored, no new geometry
 edit.repeat                       repeats the last command, whose own case grades it
@@ -114,6 +153,7 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+occurrence.bom_type               the bill of materials: its tests in crates/engine/src/cmd/bom_tests.rs
 panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
 panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
 panel.collapse                    application panel layout; no geometry (engine/UI/MCP tests)
