@@ -1022,6 +1022,7 @@ pub fn open_for(app: &mut SolveApp, id: &str) {
     app.keymap.read_only = false;
     app.keymap.filter = id.to_string();
     app.keymap.capturing = Some(id.to_string());
+    app.keymap.slot = 0;
     app.keymap.conflict = None;
     app.keymap.message = None;
 }
