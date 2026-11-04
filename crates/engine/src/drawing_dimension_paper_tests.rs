@@ -256,6 +256,9 @@ fn a_cylinder_is_dimensioned_across_its_silhouettes() {
     let two = [[0.0, 20.0], [40.0, 20.0], [0.0, 12.0], [40.0, 12.0]];
     let tips = parts(&drawn(between(), 10.0, &two, "8.00", "1:1")).1;
     assert!(close((tips[0].y - tips[1].y).abs(), 8.0), "{tips:?}");
+    let faces = DimensionKind::Faces { a: face(), b: face(), direction: LinearDirection::Aligned };
+    let tips = parts(&drawn(faces, 10.0, &two, "8.00", "1:1")).1;
+    assert!(close((tips[0].y - tips[1].y).abs(), 8.0), "{tips:?}");
 }
 
 /// What isn't found has no lines; a kind with the wrong number of points never lays out.

@@ -79,7 +79,9 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2]) -> Option<Vec
         }
         (DimensionKind::Chain { direction, .. }, points) => chain(points, *direction, offset, resolved),
         (DimensionKind::Cylinder { .. }, &[a0, a1, b0, b1]) => across([a0, a1], [b0, b1], LinearDirection::Aligned, offset, place, half),
-        (DimensionKind::Silhouettes { direction, .. }, &[a0, a1, b0, b1]) => across([a0, a1], [b0, b1], *direction, offset, place, half),
+        (DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. }, &[a0, a1, b0, b1]) => {
+            across([a0, a1], [b0, b1], *direction, offset, place, half)
+        }
         _ => None,
     }
 }
@@ -118,7 +120,7 @@ fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Re
     Some(points.iter().zip(points.iter().skip(1)).enumerate().map(member).collect())
 }
 
-/// A line between two silhouettes, each from one end to the other, at the ends on the side `offset`
+/// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`
 /// is on, so a positive one clears what it measures. `Aligned` runs straight across them.
 fn across(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, offset: f64, place: &TextPlace, half: Vec2) -> Option<Vec<Piece>> {
     let [a0, a1] = a;

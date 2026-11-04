@@ -20,6 +20,8 @@
 //! - **Silhouettes** (W20b): between a silhouette of one cylinder and a silhouette of another, each
 //!   named by its face and by whether it is the one nearer the other cylinder or the one farther,
 //!   as the view shows them ([`Silhouette`]). Two silhouettes of one cylinder are its diameter.
+//! - **Faces**: between two flat, parallel faces the view sees edge-on, which a fillet that takes
+//!   their corners leaves measured.
 //!
 //! A reference names its body, the feature that made the body (so a suppressed feature can be told
 //! from a deleted one) and its occurrence path (so a part placed twice has a dimension on each copy).
@@ -42,7 +44,8 @@
 //! its name, or the one edge between the faces it names, never the piece nearest an old pick; a
 //! corner where all its named edges meet, never the nearer of two; a centre the centre of its one
 //! named edge, which must be a circle or an arc; a cylinder the faces its named face is now, all
-//! on one cylinder, with the silhouettes it measures on them. What it can't decide it says
+//! on one cylinder, with the silhouettes it measures on them; a flat face the faces its named face
+//! is now, all on one oriented plane and not split on purpose. What it can't decide it says
 //! ([`Status`]), and it never chooses. [`Document::edge_reference`],
 //! [`Document::corner_reference`] and [`Document::face_reference`] turn what a command picks (a
 //! point, or an edge's or a face's index) into those names, and refuse a pick that doesn't name
@@ -68,6 +71,7 @@ use solidcraft_kernel::{FaceSurface, face_surface};
 use crate::appearance::face_index_at;
 use crate::name_lookup::{BodyEdges, EdgeMatch, face_has_name, faces_with_stem};
 use crate::naming::{face_name_exact, face_names};
+use crate::persistent_name::{EdgeName, FaceName, FeatureId};
 use crate::{
     DocError, Document, MAX_PLACEMENT_DEPTH, Mat, Model, ModelBody, ModelState, Result, apply_point, apply_vector, ids, map_plane, mat_inverse,
 };
@@ -162,6 +166,8 @@ pub enum DimensionKind {
     /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
     /// shows them.
     Silhouettes { a: Silhouette, b: Silhouette, direction: LinearDirection },
+    /// The distance between two flat, parallel faces, on a view that sees both edge-on.
+    Faces { a: ModelFace, b: ModelFace, direction: LinearDirection },
 }
 
 /// One of a cylinder's two silhouettes on a view: the cylinder by a face of it, and the side by
@@ -296,6 +302,11 @@ impl Drawing {
                 check_face(&b.face)?;
                 check_direction(*direction, Reading::Projected)?;
             }
+            DimensionKind::Faces { a, b, direction } => {
+                check_face(a)?;
+                check_face(b)?;
+                check_direction(*direction, Reading::Projected)?;
+            }
         }
         let off_paper = || format!("its offset and its text's place are at most {MAX_SIDE_MM} mm on paper");
         let text = match d.text {
@@ -411,8 +422,10 @@ pub enum Status {
     /// A name finds several things, and none is chosen: at most [`MAX_CANDIDATES`] of them, in
     /// the model's order.
     Ambiguous(Vec<Candidate>),
-    /// The feature that made its body is suppressed or rolled back.
+    /// A feature it depends on is suppressed or rolled back.
     Suppressed,
+    /// A feature it depends on failed: why. It comes back when that feature works again.
+    Failed(String),
     /// What it measures is gone: why.
     Lost(String),
     /// Found, but the view can't measure it so: why (such as an angle to a line the view sees
@@ -614,6 +627,25 @@ impl OnCylinder {
     }
 }
 
+/// A flat face as the model has it now ([`Lookup::on_plane`]), in the design's frame: a point on it,
+/// its normal, and the corners of its triangles.
+struct OnPlane {
+    origin: Vec3,
+    normal: Vec3,
+    corners: Vec<[Vec3; 3]>,
+    exact: bool,
+}
+
+impl OnPlane {
+    /// The face's two ends as the view through `basis` sees it, edge-on: a line on paper.
+    fn ends(&self, basis: &Plane) -> Option<[Vec3; 2]> {
+        let across = basis.normal().cross(self.normal);
+        let order = |p: &&Vec3, q: &&Vec3| p.dot(across).total_cmp(&q.dot(across));
+        let points = || self.corners.iter().flatten();
+        Some([*points().min_by(order)?, *points().max_by(order)?])
+    }
+}
+
 /// What a dimension measures, found and measured: a chain's overall, and its members.
 struct Found {
     measured: Measured,
@@ -631,6 +663,26 @@ pub(super) struct Edges {
     pub(super) exact: bool,
     body: usize,
     frame: Mat,
+}
+
+/// The features that made the faces an edge's name says it separates.
+fn edge_makers(name: &str) -> Vec<FeatureId> {
+    EdgeName::parse(name).map_or_else(|_| Vec::new(), |edge| edge.faces.iter().filter_map(FaceName::feature).collect())
+}
+
+/// The feature that made the face a name says: none for a name without history.
+fn face_maker(name: &str) -> Option<FeatureId> {
+    FaceName::parse(name).ok()?.feature()
+}
+
+/// How a reference stands when what it names isn't found, by the features that made it: suppressed
+/// or rolled back, failed, or else lost, and why.
+fn gone(model: &Model, makers: &[FeatureId], lost: String) -> Status {
+    let results = || model.results.iter().filter(|r| makers.iter().any(|m| m.0 == r.id));
+    if results().any(|r| r.skipped) {
+        return Status::Suppressed;
+    }
+    results().find_map(|r| r.error.clone()).map_or(Status::Lost(lost), Status::Failed)
 }
 
 impl<'a> Lookup<'a> {
@@ -710,6 +762,7 @@ impl<'a> Lookup<'a> {
             }
             DimensionKind::Cylinder { face } => self.cylinder(face, basis),
             DimensionKind::Silhouettes { a, b, direction } => self.silhouettes(a, b, *direction, basis),
+            DimensionKind::Faces { a, b, direction } => self.faces(a, b, *direction, basis),
         }
     }
 
@@ -718,15 +771,9 @@ impl<'a> Lookup<'a> {
     fn body(&self, body: &str, feature: u64, path: &[u64]) -> std::result::Result<(usize, Mat), Status> {
         let found = self.state.bodies.iter().enumerate().find(|(_, b)| b.name == body && b.feature == feature && !b.body.is_mesh());
         let Some((i, b)) = found else {
-            if self.model.results.iter().any(|r| r.id == feature && r.skipped) {
-                return Err(Status::Suppressed);
-            }
             let remade = self.state.bodies.iter().any(|b| b.name == body);
-            return Err(Status::Lost(if remade {
-                format!("body `{body}` is made by another feature now")
-            } else {
-                format!("body `{body}` no longer exists")
-            }));
+            let why = if remade { format!("body `{body}` is made by another feature now") } else { format!("body `{body}` no longer exists") };
+            return Err(gone(self.model, &[FeatureId(feature)], why));
         };
         let frame = self.doc.body_frame_at(b, path).map_err(|_| Status::Lost("the occurrence its body is placed through no longer exists".into()))?;
         Ok((i, frame))
@@ -746,7 +793,7 @@ impl<'a> Lookup<'a> {
         let (indices, named) = match names.matching(&edge.name) {
             Some(EdgeMatch::Edge(e)) => (vec![e], true),
             Some(EdgeMatch::Pieces(pieces)) => (pieces, false),
-            None => return Err(Status::Lost(format!("edge `{}` no longer exists", edge.name))),
+            None => return Err(gone(self.model, &edge_makers(&edge.name), format!("edge `{}` no longer exists", edge.name))),
         };
         let whole = named || indices.len() == 1;
         let exact = named && indices.iter().all(|e| names.verified(*e));
@@ -814,7 +861,7 @@ impl<'a> Lookup<'a> {
             let (indices, whole) = match names.matching(name) {
                 Some(EdgeMatch::Edge(e)) => (vec![e], true),
                 Some(EdgeMatch::Pieces(pieces)) => (pieces, false),
-                None => return Err(Status::Lost(format!("edge `{name}` no longer exists"))),
+                None => return Err(gone(self.model, &edge_makers(name), format!("edge `{name}` no longer exists"))),
             };
             exact &= whole && indices.iter().all(|e| names.verified(*e));
             let lines = indices.iter().filter_map(|e| names.mesh.edges.get(*e));
@@ -846,17 +893,18 @@ impl<'a> Lookup<'a> {
         let (i, frame) = self.body(&face.body, face.origin_feature, &face.path)?;
         let state = Arc::clone(&self.state);
         let b = state.bodies.get(i).ok_or_else(|| Status::Lost("its body no longer exists".into()))?;
-        let named: Vec<usize> = (0..b.body.face_count()).filter(|f| face_has_name(b, *f, &face.name)).collect();
-        let (found, exact) = match named.as_slice() {
-            [f] => (named.clone(), face_name_exact(b, *f)),
-            [] => (faces_with_stem(b, &face.name), false),
-            _ => (named.clone(), false),
-        };
-        let candidates = || found.iter().take(MAX_CANDIDATES).map(|f| Candidate::Face { body: face.body.clone(), index: *f }).collect();
+        let (found, exact) = faces_named(b, &face.name);
+        let candidates = || face_candidates(b, &found);
         let cylinders = self.cylinders.entry(i).or_insert_with(|| cylinders_of(b));
         let on = |f: &usize| cylinders.get(*f).copied().flatten();
         let first = match found.first() {
-            None => return Err(Status::Lost(format!("face `{}` no longer exists", face.name))),
+            None => {
+                return Err(gone(
+                    self.model,
+                    &face_maker(&face.name).into_iter().collect::<Vec<_>>(),
+                    format!("face `{}` no longer exists", face.name),
+                ));
+            }
             Some(f) => on(f).ok_or_else(|| Status::Unmeasurable(format!("face `{}` isn't a cylinder", face.name)))?,
         };
         let tol = cylinder_tolerance(b);
@@ -900,6 +948,53 @@ impl<'a> Lookup<'a> {
         let points = [on_a.ends(way_a), on_b.ends(way_b)].concat();
         Ok(Found { measured, members: Vec::new(), points, exact: on_a.exact && on_b.exact })
     }
+
+    /// The flat face `face` names, or the pieces it was cut into, all on one oriented plane. A face
+    /// split on purpose (Split Face) is separate faces, so its pieces are listed and none is chosen.
+    fn on_plane(&mut self, face: &ModelFace) -> std::result::Result<OnPlane, Status> {
+        let (i, frame) = self.body(&face.body, face.origin_feature, &face.path)?;
+        let state = Arc::clone(&self.state);
+        let b = state.bodies.get(i).ok_or_else(|| Status::Lost("its body no longer exists".into()))?;
+        let (found, exact) = faces_named(b, &face.name);
+        let makers: Vec<FeatureId> = face_maker(&face.name).into_iter().collect();
+        let first = found.first().ok_or_else(|| gone(self.model, &makers, format!("face `{}` no longer exists", face.name)))?;
+        let plane = b.body.planar_face(*first).ok_or_else(|| Status::Unmeasurable(format!("face `{}` isn't flat", face.name)))?;
+        if self.doc.coplanar_pieces(b, &found, |_| true).is_err() {
+            return Err(Status::Ambiguous(face_candidates(b, &found)));
+        }
+        let normal = apply_vector(&frame, plane.normal()).normalized().ok_or_else(|| Status::Lost("its occurrence flattens it".into()))?;
+        Ok(OnPlane { origin: apply_point(&frame, plane.origin), normal, corners: face_corners(b, &frame, &found), exact })
+    }
+
+    /// The distance between flat faces `a` and `b` on the view through `basis`. Its points are each
+    /// face's ends on the view, `a`'s first.
+    fn faces(&mut self, a: &ModelFace, b: &ModelFace, direction: LinearDirection, basis: &Plane) -> std::result::Result<Found, Status> {
+        let (on_a, on_b) = (self.on_plane(a)?, self.on_plane(b)?);
+        let between = drawing_measure::between_faces(basis, (on_a.origin, on_a.normal), (on_b.origin, on_b.normal), direction);
+        let measured = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
+        let ends = |on: &OnPlane, face: &ModelFace| on.ends(basis).ok_or_else(|| Status::Unmeasurable(format!("face `{}` has no mesh", face.name)));
+        let points = [ends(&on_a, a)?, ends(&on_b, b)?].concat();
+        Ok(Found { measured, members: Vec::new(), points, exact: on_a.exact && on_b.exact })
+    }
+}
+
+/// The faces of `b` that `name` finds: the ones with that name, else the pieces of it; and whether
+/// it found one face by exact history.
+fn faces_named(b: &ModelBody, name: &str) -> (Vec<usize>, bool) {
+    let named: Vec<usize> = (0..b.body.face_count()).filter(|f| face_has_name(b, *f, name)).collect();
+    match named.as_slice() {
+        [f] => {
+            let exact = face_name_exact(b, *f);
+            (named, exact)
+        }
+        [] => (faces_with_stem(b, name), false),
+        _ => (named, false),
+    }
+}
+
+/// `faces` of `b`, as candidates.
+fn face_candidates(b: &ModelBody, faces: &[usize]) -> Vec<Candidate> {
+    faces.iter().take(MAX_CANDIDATES).map(|f| Candidate::Face { body: b.name.clone(), index: *f }).collect()
 }
 
 /// The cylinder each face of `b` lies on, by face; `None` for a face of another surface.

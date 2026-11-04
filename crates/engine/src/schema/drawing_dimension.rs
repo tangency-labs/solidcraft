@@ -263,6 +263,15 @@ pub enum KindParam {
         #[schemars(with = "Value")]
         direction: Option<LinearDirection>,
     },
+    /// The distance between two flat, parallel faces, on a view that sees both edge-on.
+    Faces {
+        a: FaceParam,
+        b: FaceParam,
+        /// As a linear dimension's; `aligned` (the default) is square to the faces.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
     /// The distances from each point to the next, in order along one line as the view shows them.
     Chain {
         /// 3 to 64 corners.
@@ -390,9 +399,9 @@ pub struct DimensionResult {
     pub view: String,
     /// The record, as the drawing saves it.
     pub record: Value,
-    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `lost` or `unmeasurable`.
+    /// `ok`, `overridden`, `ambiguous`, `suppressed`, `failed`, `lost` or `unmeasurable`.
     pub status: String,
-    /// Why it is lost or unmeasurable.
+    /// Why it failed, is lost or is unmeasurable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
     /// What it reads: model millimetres, or degrees for an angle; a chain's overall.
