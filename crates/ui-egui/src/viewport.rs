@@ -4743,6 +4743,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     list_hover(app);
     let painter = ui.painter_at(rect);
     crate::gpu::paint_background(&painter, rect, &t);
+    crate::gpu::paint_background_picture(app, &painter, rect);
 
     // ---- model ----
     crate::frame_watch::step(app, "viewport before the model");

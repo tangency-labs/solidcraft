@@ -88,6 +88,20 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // A picture of the user's behind the model.
+                let label = app.tr("prefs.background_image");
+                ui_kit::row(ui, label, |ui| {
+                    if ui_kit::button(ui, app.tr("prefs.background_choose"), ui_kit::Button::Normal).clicked() {
+                        app.pick_open_for(&["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"], |app, path| {
+                            if let Some(path) = path {
+                                app.preferences.background_image = path;
+                            }
+                        });
+                    }
+                    if !app.preferences.background_image.is_empty() && ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
+                        app.preferences.background_image.clear();
+                    }
+                });
                 // The logo in the theme's own logo colours or in its accent.
                 let label = app.tr("prefs.logo");
                 ui_kit::row(ui, label, |ui| {
