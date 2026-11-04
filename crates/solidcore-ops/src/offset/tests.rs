@@ -333,3 +333,313 @@ fn an_inside_out_body_is_refused() {
     assert_eq!(offset_faces(&b, &o, &[0], -2.0), Err(Error::Argument));
     assert_eq!(b.to_smb(false).unwrap(), before);
 }
+
+/// Drafts against closed forms (SolidCraft's `draft_*` cases, on record face indices), the oblique
+/// neutral plane's, and the refusals.
+mod drafts {
+    use super::{all_fixes, block, face, order, rel, top, volume, ABC};
+    use crate::offset::{draft, mark_moved, moved_faces};
+    use crate::{make_box, make_cone, make_cylinder, Error, Order};
+    use solidcore::geom::attribute::{ids, Attribute, Behavior};
+    use solidcore::EntityRef;
+    use std::f64::consts::PI;
+
+    const Z: [f64; 3] = [0.0, 0.0, 1.0];
+
+    // The closed forms' angles and tangents as numbers (ops computes no trigonometry, its
+    // tests included): each the double nearest its expression.
+    /// 5 degrees, radians.
+    const FIVE: f64 = 0.087_266_462_599_716_47;
+    /// tan 5 degrees.
+    const TAN_FIVE: f64 = 0.087_488_663_525_924_01;
+    /// 10 degrees, radians.
+    const TEN: f64 = 0.174_532_925_199_432_95;
+    /// tan 10 degrees.
+    const TAN_TEN: f64 = 0.176_326_980_708_464_98;
+    /// tan 0.1.
+    const TAN_TENTH: f64 = 0.100_334_672_085_450_55;
+    /// tan(phi), sin(phi) = sin(5 degrees) / 0.8: the turn about a hinge at sin(alpha) = 0.8
+    /// to the pull that leaves a face at 5 degrees to it.
+    const TAN_OBLIQUE: f64 = 0.109_597_020_255_368_76;
+    /// tan(atan(-0.1) - 5 degrees).
+    const TAN_CONE: f64 = -0.189_143_454_329_318_9;
+
+    fn five() -> f64 {
+        FIVE
+    }
+
+    /// The record index (through `o`) of the block's side flat at `x = at` (`axis` 0) or
+    /// `y = at` (1).
+    fn side(b: &crate::Body, o: &Order, axis: usize, at: f64) -> usize {
+        face(b, o, |bx| {
+            let c = |p: solidcore::Vec3| [p.x, p.y][axis];
+            (c(bx.min()) - at).abs() < 1e-9 && (c(bx.max()) - at).abs() < 1e-9
+        })
+    }
+
+    /// The record index (through `o`) of the face of `b` that is no plane: its tight box is
+    /// not flat on any axis.
+    fn curved(b: &crate::Body, o: &Order) -> usize {
+        face(b, o, |bx| {
+            let (lo, hi) = (bx.min(), bx.max());
+            hi.x - lo.x > 1e-6 && hi.y - lo.y > 1e-6 && hi.z - lo.z > 1e-6
+        })
+    }
+
+    /// The four sides drafted 5 degrees about the bottom, pulled up, leaning in: the section
+    /// at height z is (a - 2 z s)(b - 2 z s), s = tan 5 degrees, so
+    /// V = abh - (a + b) h^2 s + (4/3) h^3 s^2.
+    #[test]
+    fn the_sides_of_a_block() {
+        all_fixes();
+        let b = block();
+        let o = order(&b);
+        let sides = [
+            side(&b, &o, 0, 0.0),
+            side(&b, &o, 0, 30.0),
+            side(&b, &o, 1, 0.0),
+            side(&b, &o, 1, 20.0),
+        ];
+        draft(&b, &o, &sides, [0.0; 3], Z, Z, five()).unwrap();
+        let (a, w, h, s) = (30.0, 20.0, 10.0, TAN_FIVE);
+        let v = a * w * h - (a + w) * h * h * s + 4.0 / 3.0 * h * h * h * s * s;
+        assert!(rel(volume(&b), v) < 1e-9, "{} {v}", volume(&b));
+        assert_eq!(b.counts().unwrap()[0], 6);
+    }
+
+    /// The front (y = 0) alone: a wedge of a h^2 tan(5 degrees) / 2 comes off; a negative angle
+    /// puts it on; hinged at the top, leaning in going up, the face leans out below the hinge
+    /// and the wedge goes on.
+    #[test]
+    fn one_side_in_out_and_hinged_at_the_top() {
+        all_fixes();
+        let wedge = 30.0 * 100.0 * TAN_FIVE / 2.0;
+        for (origin, angle, v) in [
+            ([0.0; 3], five(), ABC - wedge),
+            ([0.0; 3], -five(), ABC + wedge),
+            ([0.0, 0.0, 10.0], five(), ABC + wedge),
+        ] {
+            let b = block();
+            let o = order(&b);
+            draft(&b, &o, &[side(&b, &o, 1, 0.0)], origin, Z, Z, angle).unwrap();
+            assert!(
+                rel(volume(&b), v) < 1e-9,
+                "{origin:?} {angle}: {}",
+                volume(&b)
+            );
+        }
+    }
+
+    /// The rig's two drafts (booleans/cov-draft-two-adjacent-faces-meet-at-a-corner, and the
+    /// draft step of fillets/4989-chamfer-top-edge-of-drafted-face): the 40 x 30 x 20 block's
+    /// front, and its front and right, drafted 10 degrees about its base. The section at height
+    /// z is (40 - z t)(30 - z t), t = tan 10 degrees, for both, (40)(30 - z t) for the front;
+    /// six faces either way.
+    #[test]
+    fn the_rigs_drafts() {
+        all_fixes();
+        let (ten, t) = (TEN, TAN_TEN);
+        let both = 24000.0 - 70.0 * t * 200.0 + t * t * 8000.0 / 3.0;
+        let front = 24000.0 - 0.5 * 20.0 * (20.0 * t) * 40.0;
+        for (right, v) in [(true, both), (false, front)] {
+            let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+            let o = order(&b);
+            let mut faces = vec![side(&b, &o, 1, 0.0)];
+            if right {
+                faces.push(side(&b, &o, 0, 40.0));
+            }
+            draft(&b, &o, &faces, [0.0; 3], Z, Z, ten).unwrap();
+            let got = volume(&b);
+            println!("rig draft (right {right}): volume {got:.17e}, closed form {v:.17e}");
+            assert!(rel(got, v) < 1e-12, "{got} {v}");
+            assert_eq!(b.counts().unwrap()[0], 6);
+        }
+    }
+
+    /// The neutral plane oblique to the pull, normal N = (0, 0.6, 0.8) through the origin: the
+    /// side x = 30 turns about the line where it meets it (x = 30, 0.6 y + 0.8 z = 0), which is
+    /// at sin(alpha) = 0.8 to the pull, by phi with sin(phi) = sin(5 degrees) / 0.8, so that it
+    /// ends at exactly 5 degrees to the pull: the plane x = 30 - tan(phi) (0.6 y + 0.8 z), so
+    /// what comes off is tan(phi) times the integral of 0.6 y + 0.8 z over the side,
+    /// 1200 + 800.
+    #[test]
+    fn an_oblique_neutral_plane_hinges_on_its_trace() {
+        all_fixes();
+        let b = block();
+        let o = order(&b);
+        draft(
+            &b,
+            &o,
+            &[side(&b, &o, 0, 30.0)],
+            [0.0; 3],
+            [0.0, 0.6, 0.8],
+            Z,
+            five(),
+        )
+        .unwrap();
+        let v = ABC - 2000.0 * TAN_OBLIQUE;
+        assert!(rel(volume(&b), v) < 1e-9, "{} {v}", volume(&b));
+        // a draft steeper than the hinge allows (sin 10 degrees > 0.141) is a typed refusal
+        let b = block();
+        let o = order(&b);
+        assert!(matches!(
+            draft(
+                &b,
+                &o,
+                &[side(&b, &o, 0, 30.0)],
+                [0.0; 3],
+                [0.0, 0.99, 0.141],
+                Z,
+                TEN
+            ),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    /// A cylinder along the pull, R 5, h 10, drafted 0.1 about its bottom, leaning in: the
+    /// frustum of radii R and R - h tan 0.1.
+    #[test]
+    fn a_cylinder_drafts_to_a_frustum() {
+        all_fixes();
+        let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+        let o = order(&c);
+        draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, 0.1).unwrap();
+        let (big, h) = (5.0, 10.0);
+        let small = big - h * TAN_TENTH;
+        let v = PI * h * (big * big + big * small + small * small) / 3.0;
+        assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
+    }
+
+    /// A cone r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base turns
+    /// its generators 5 degrees more: r 10 + 20 tan(atan(-0.1) - 5 degrees) at the top.
+    #[test]
+    fn a_cone_about_the_pull_turns_its_generators() {
+        all_fixes();
+        let c = make_cone([0.0; 3], 10.0, 8.0, 20.0).unwrap();
+        let o = order(&c);
+        draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, five()).unwrap();
+        let (big, h) = (10.0, 20.0);
+        let small = big + h * TAN_CONE;
+        let v = PI * h * (big * big + big * small + small * small) / 3.0;
+        assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
+    }
+
+    /// Refused before the kernel or by its draft, the body as it came in: no neutral normal, no
+    /// angle, a right angle, an origin not finite or past 1e9, no faces, an index past the faces
+    /// or twice, the pull in the neutral plane (Argument); the top across the pull (Unsupported).
+    #[test]
+    fn hostile_drafts_are_refused() {
+        all_fixes();
+        let b = block();
+        let o = order(&b);
+        let before = b.to_smb(false).unwrap();
+        let t = top(&b, &o);
+        let s = side(&b, &o, 1, 0.0);
+        for (faces, at, n, p, angle) in [
+            (vec![s], [0.0; 3], [0.0; 3], Z, 0.1),
+            (vec![s], [0.0; 3], Z, [0.0; 3], 0.1),
+            (vec![s], [0.0; 3], Z, Z, 0.0),
+            (vec![s], [0.0; 3], Z, Z, f64::NAN),
+            (vec![s], [0.0; 3], Z, Z, PI / 2.0),
+            (vec![s], [0.0; 3], Z, Z, -1.569_796_326_794_896_6),
+            (vec![s], [f64::NAN; 3], Z, Z, 0.1),
+            (vec![s], [0.0, 2e9, 0.0], Z, Z, 0.1),
+            (vec![], [0.0; 3], Z, Z, 0.1),
+            (vec![6], [0.0; 3], Z, Z, 0.1),
+            (vec![s, s], [0.0; 3], Z, Z, 0.1),
+            (vec![s], [0.0; 3], [1.0, 0.0, 0.0], Z, 0.1),
+        ] {
+            assert_eq!(
+                draft(&b, &o, &faces, at, n, p, angle),
+                Err(Error::Argument),
+                "{faces:?} {at:?} {n:?} {p:?} {angle}"
+            );
+        }
+        assert!(matches!(
+            draft(&b, &o, &[t], [0.0; 3], Z, Z, 0.1),
+            Err(Error::Unsupported(_))
+        ));
+        assert_eq!(b.to_smb(false).unwrap(), before);
+        // just under the largest angle passes the argument check
+        let other = block();
+        assert_ne!(
+            draft(
+                &other,
+                &order(&other),
+                &[s],
+                [0.0; 3],
+                Z,
+                Z,
+                1.569_796_326_794_896
+            ),
+            Err(Error::Argument)
+        );
+    }
+
+    /// A body facing in is no solid to draft: refused, as it came in.
+    #[test]
+    fn an_inside_out_body_is_not_drafted() {
+        all_fixes();
+        let b = make_box([0.0; 3], [20.0, 20.0, 20.0]).unwrap();
+        {
+            let mut br = b.lock();
+            for f in br.face_list().to_vec() {
+                solidcore::topology::face::p1::flip_face_orientation(&mut br, f).unwrap();
+            }
+        }
+        let o = order(&b);
+        let before = b.to_smb(false).unwrap();
+        assert_eq!(
+            draft(&b, &o, &[0], [0.0; 3], Z, Z, 0.1),
+            Err(Error::Argument)
+        );
+        assert_eq!(b.to_smb(false).unwrap(), before);
+    }
+
+    /// The moved marks live inside the call: a face marked reads as moved once and the mark is
+    /// gone; an unmarked body reads as not moved (the draft's `NoEffect`); a drafted body keeps
+    /// no draft mark, and a mark the body already carried (the kernel's `ids::MARK`) stays.
+    #[test]
+    fn the_moved_marks_live_inside_the_call() {
+        all_fixes();
+        let b = block();
+        {
+            let mut br = b.lock();
+            assert!(!moved_faces(&mut br).unwrap(), "no face marked");
+            let f = br.face_list()[0];
+            mark_moved(&mut br, &[f]).unwrap();
+            assert!(moved_faces(&mut br).unwrap(), "a face marked");
+            assert!(!moved_faces(&mut br).unwrap(), "the mark removed");
+        }
+        let marks = |b: &crate::Body| -> Vec<Option<i64>> {
+            let br = b.lock();
+            br.face_list()
+                .iter()
+                .flat_map(|&f| {
+                    br.entity_attributes(EntityRef::Face(f))
+                        .into_iter()
+                        .filter(|(_, a)| [ids::MARK, ids::DRAFT_MOVED].contains(&a.attribute_id()))
+                        .map(|(_, a)| a.long_value())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        let o = order(&b);
+        let s = side(&b, &o, 1, 0.0);
+        {
+            let mut br = b.lock();
+            let f = o.faces[s];
+            br.add_attribute(
+                EntityRef::Face(f),
+                Attribute::long(ids::MARK, 7, Behavior::Copy),
+            )
+            .unwrap();
+        }
+        draft(&b, &o, &[s], [0.0; 3], Z, Z, five()).unwrap();
+        assert_eq!(marks(&b), vec![Some(7)]);
+        let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+        let o = order(&c);
+        draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, 0.1).unwrap();
+        assert!(marks(&c).is_empty());
+    }
+}

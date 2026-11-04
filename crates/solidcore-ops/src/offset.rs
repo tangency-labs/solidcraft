@@ -11,19 +11,24 @@
 //! - [`thicken`]: a sheet thickened, or moved back by half first.
 //! - [`offset_sheet`]: every face of a sheet moved onto its surface's offset
 //!   (`SmApiOffsetBrepFull`).
+//! - [`draft`]: the faces named turned about their line or circle on a neutral plane
+//!   ([`solidcore::offset::draft::draft_surface`]), the faces around them extended or trimmed to
+//!   meet them (`SmBrep::LocalOperation`).
 //!
 //! Each changes the body it is given, as the kernel does; a refused or failed one leaves it as
 //! it came in ([`crate::session`]'s edit wrapper).
 
 use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
+use solidcore::geom::attribute::{ids, Attribute, Behavior};
+use solidcore::offset::draft::{draft_surface, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p2::{
-    offset_brep_simple, shell_brep_simple, OffsetOptions, ShellOptions,
+    local_operation_simple, offset_brep_simple, shell_brep_simple, OffsetOptions, ShellOptions,
 };
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::topology::brep::p2::is_manifold_solid;
-use solidcore::{Brep, FaceId, Kernel, SolidError};
+use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
@@ -261,6 +266,141 @@ pub fn offset_sheet(body: &Body, distance: f64) -> Result<()> {
             Ok(made) => replace(k, b, made, expect),
             Err(e) => Ok(Err(status(e))),
         }
+    })?
+}
+
+/// The largest draft angle a draft takes, radians, not included (SolidCraft's: a turn short of
+/// square to the pull, where a face's line on the neutral plane would carry it off to infinity).
+const MAX_DRAFT_ANGLE: f64 = 1.569_796_326_794_896_6;
+
+/// The farthest a neutral plane's origin may lie from the origin along each axis.
+const MAX_NEUTRAL_ORIGIN: f64 = 1e9;
+
+/// Marks each face of `picked` as moved, with the kernel's draft mark ([`ids::DRAFT_MOVED`]): the
+/// mark rides on the face, copied to what the kernel's local operation makes of it
+/// (`Behavior::Copy`), so a face the operation keeps or replaces still carries it. A merge keeping an unpicked face over a picked one hands that
+/// survivor the mark, as SolidCraft's marks do.
+fn mark_moved(b: &mut Brep, picked: &[FaceId]) -> solidcore::Result<()> {
+    for &f in picked {
+        b.add_attribute(
+            EntityRef::Face(f),
+            Attribute::long(ids::DRAFT_MOVED, 0, Behavior::Copy),
+        )?;
+    }
+    Ok(())
+}
+
+/// Whether any face of `b` carries the draft's mark; every such mark removed, so none
+/// outlives the call.
+fn moved_faces(b: &mut Brep) -> solidcore::Result<bool> {
+    let mut moved = false;
+    for f in b.face_list().to_vec() {
+        let e = EntityRef::Face(f);
+        let marks: Vec<_> = b
+            .entity_attributes(e)
+            .into_iter()
+            .filter(|(_, a)| a.attribute_id() == ids::DRAFT_MOVED)
+            .map(|(h, _)| h)
+            .collect();
+        moved = moved || !marks.is_empty();
+        for h in marks {
+            b.remove_attribute(e, h)?;
+        }
+    }
+    Ok(moved)
+}
+
+/// A face the kernel cannot draft, as the operation's error: a pull in the neutral plane is
+/// the draft's own argument ([`Error::Argument`]); any other refusal names what the face is
+/// ([`Error::Unsupported`]).
+fn refused(r: DraftRefusal) -> Error {
+    Error::Unsupported(match r {
+        DraftRefusal::PullInNeutralPlane => return Error::Argument,
+        DraftRefusal::NotPlaneOrCone => "a drafted face is neither a plane nor a cone or cylinder",
+        DraftRefusal::PlaneAcrossPull => "a drafted plane is not parallel to the pull",
+        DraftRefusal::PlaneParallelToNeutral => {
+            "a drafted plane is parallel, or too near parallel, to the neutral plane: it has no \
+             line on it to turn about"
+        }
+        DraftRefusal::HingeAlongPull => "a drafted plane meets the neutral plane along the pull",
+        DraftRefusal::AngleBeyondHinge => {
+            "a drafted plane's line on the neutral plane is too near the pull for the draft angle"
+        }
+        DraftRefusal::AxisNotAlongPull => "a drafted cone or cylinder's axis is not along the pull",
+        DraftRefusal::AxisInNeutralPlane => {
+            "a drafted cone or cylinder's axis lies in the neutral plane"
+        }
+        DraftRefusal::SenseNotProved => {
+            "whether a drafted cone or cylinder faces away from its axis is not proved"
+        }
+        DraftRefusal::ConeCloses => "a drafted cone would close within the face",
+    })
+}
+
+/// The faces of the solid `body` with record indices `faces` (through `order`, its record's
+/// [`Order`]) drafted by `angle` radians about the neutral plane through `neutral_origin` with
+/// normal `neutral_normal`, so that they lean in going along `pull` (a negative angle leans
+/// them out): a plane parallel to the pull turns about the line where it meets the neutral
+/// plane, a cone or cylinder about the pull about its circle on it ([`draft_surface`]), and the
+/// faces around them are extended or trimmed to meet them.
+///
+/// # Errors
+/// [`Error::Argument`] for a neutral normal or pull not finite or not longer than 1e-12 (the
+/// kernel's [`Draft::new`]), an angle zero, not finite or not below 1.5697963267948966 across, a
+/// neutral origin past 1e9 on an axis, no faces, an index past the faces, repeated or naming a
+/// face the body does not have, a body that is not a valid solid facing out, or a pull in the
+/// neutral plane for a plane face;
+/// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
+/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face; the kernel's
+/// other errors; those of [`finish`].
+pub fn draft(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+    neutral_origin: [f64; 3],
+    neutral_normal: [f64; 3],
+    pull: [f64; 3],
+    angle: f64,
+) -> Result<()> {
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let Ok(the_draft) = Draft::new(v(neutral_origin), v(neutral_normal), v(pull), angle) else {
+        return Err(Error::Argument);
+    };
+    if faces.is_empty()
+        || angle == 0.0
+        || angle.abs().partial_cmp(&MAX_DRAFT_ANGLE) != Some(std::cmp::Ordering::Less)
+        || !neutral_origin.iter().all(|x| x.abs() <= MAX_NEUTRAL_ORIGIN)
+    {
+        return Err(Error::Argument);
+    }
+    with_body("Draft", body, |k, b| {
+        let picked = match faces_of(b, order, faces) {
+            Ok(f) => f,
+            Err(e) => return Ok(Err(e)),
+        };
+        let expect = Expect::of(k, b)?;
+        if !expect.solid() {
+            return Ok(Err(Error::Argument));
+        }
+        let mut surfaces = Vec::new();
+        for &f in &picked {
+            match draft_surface(k, b, f, &the_draft) {
+                Ok(Ok(s)) => surfaces.push(s),
+                Ok(Err(r)) => return Ok(Err(refused(r))),
+                Err(e) => return Ok(Err(kernel_status(e))),
+            }
+        }
+        // the marks live for this call only: put on the picked faces, read and removed once the
+        // kernel has moved them (a refused call puts the body back as it came in, unmarked)
+        mark_moved(b, &picked)?;
+        if let Err(e) = local_operation_simple(k, b, &picked, surfaces) {
+            return Ok(Err(status(e)));
+        }
+        if !moved_faces(b)? {
+            return Ok(Err(Error::NoEffect));
+        }
+        let drafted = std::mem::take(b);
+        replace(k, b, drafted, expect)
     })?
 }
 

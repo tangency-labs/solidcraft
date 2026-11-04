@@ -16,11 +16,11 @@ use super::corner::{CornerDefinition, SetbackFill};
 use super::exact::{ExactClass, ExactRound};
 use super::record::{
     BezierCurveRecord, BlendDefinitionRecord, ChamferRecord, ChamferSizeRecord, ClassInputsRecord,
-    CornerRecord, EndCornerRecord, ExactClassRecord, ExactNetKindRecord, ExactNetRecord,
-    ExactRoundRecord, LeaderMapRecord, MixedCornerRecord, MixedSideRecord, NurbsCurveRecord,
-    NurbsSurfaceRecord, ParameterMapRecord, PlaneRecord, ProceduralBlendRecord, QuadricKindRecord,
-    QuadricRecord, RadiusRecord, SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord,
-    SupportRecord, SweptCornerRecord,
+    CornerRecord, DraftRecord, EndCornerRecord, ExactClassRecord, ExactNetKindRecord,
+    ExactNetRecord, ExactRoundRecord, LeaderMapRecord, MixedCornerRecord, MixedSideRecord,
+    NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord, PlaneRecord, ProceduralBlendRecord,
+    QuadricKindRecord, QuadricRecord, RadiusRecord, SetbackCornerRecord, SetbackRoundRecord,
+    SupportKindRecord, SupportRecord, SweptCornerRecord,
 };
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
 use crate::blend::blend_corner::mixed::algebra::{Crv, Side};
@@ -940,4 +940,74 @@ fn side_of(r: &MixedSideRecord) -> Side {
         t: bezier_of(&r.t),
         has_t: r.has_t,
     }
+}
+
+const OP_DRAFT_TO: &str = "surface::procedural_blend::convert::draft_to_record";
+
+/// The record of a drafted face's surface (`offset::draft`): its definition and its net (its
+/// analytic kind's label and its NURBS form), every number as the kernel stores it.
+///
+/// # Errors
+///
+/// `InvalidInput` for a surface that is not a drafted face's; those of the forms.
+pub fn draft_to_record(k: &Kernel, surface: &Surface) -> Result<DraftRecord> {
+    let Some(BlendRef::Draft { draft, net }) = surface.procedural_blend() else {
+        return Err(SolidError::invalid_input(
+            OP_DRAFT_TO,
+            "the surface is not a drafted face's",
+        ));
+    };
+    let xyz = |p: Point3| [p.x, p.y, p.z];
+    let d = draft.draft();
+    Ok(DraftRecord {
+        source: support_record(k, draft.source(), 1)?,
+        outward: draft.outward(),
+        neutral_origin: xyz(d.neutral_origin()),
+        neutral_normal: xyz(d.neutral_normal()),
+        pull: xyz(d.pull()),
+        angle: d.angle(),
+        net: support_record(k, net, 1)?,
+    })
+}
+
+/// The drafted face's surface a record holds, its definition kept on it, not yet
+/// re-certified: [`draft_rebuild`] does that.
+///
+/// # Errors
+///
+/// `InvalidInput` for a record its structural check refuses ([`DraftRecord::validate`]) or
+/// a form not of its label's kind; those of making the surfaces.
+pub fn draft_from_record(k: &Kernel, rec: &DraftRecord) -> Result<Surface> {
+    rec.validate().map_err(|e| {
+        SolidError::invalid_input(
+            "surface::procedural_blend::convert::draft_from_record",
+            e.reason,
+        )
+    })?;
+    let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
+    let draft = crate::offset::draft::Draft::from_parts(
+        p(rec.neutral_origin),
+        p(rec.neutral_normal),
+        p(rec.pull),
+        rec.angle,
+    )?;
+    let source = corner_surface_of(k, &rec.source)?;
+    let definition = crate::offset::draft::DraftDefinition::create(k, &source, rec.outward, draft)?;
+    let mut net = corner_surface_of(k, &rec.net)?;
+    net.set_draft_definition(definition);
+    Ok(net)
+}
+
+/// [`draft_from_record`] and the net re-certified against the definition
+/// ([`crate::offset::draft::DraftDefinition::recertify`]), refused unless it is.
+///
+/// # Errors
+///
+/// Those of [`draft_from_record`] and of the re-certification.
+pub fn draft_rebuild(k: &Kernel, rec: &DraftRecord) -> Result<Surface> {
+    let net = draft_from_record(k, rec)?;
+    if let Some(d) = net.procedural_blend() {
+        d.recertify(k)?;
+    }
+    Ok(net)
 }

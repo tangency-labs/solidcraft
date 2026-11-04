@@ -2597,8 +2597,9 @@ impl Surface {
                     )?)
                 }
                 // a blend corner's face (#2488): no offset is built from a corner's
-                // definition, so the face offsets as its net does, keeping none
-                BlendRef::Corner { .. } => None,
+                // definition, so the face offsets as its net does, keeping none; a drafted
+                // face's net is its plane or cone, which offsets exactly as itself
+                BlendRef::Corner { .. } | BlendRef::Draft { .. } => None,
             };
             match made {
                 Some(BlendOffset::Round(s)) => return Ok(Some(*s)),

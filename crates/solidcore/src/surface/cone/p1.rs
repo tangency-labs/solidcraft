@@ -1021,6 +1021,13 @@ impl Cone {
         self.base_radius + deg2rad(self.semi_angle_deg).tan() * height
     }
 
+    /// Not upstream: the tangent of the semi-angle, the radius's slope along the axis as
+    /// [`Self::radius`] takes it (the stored angle's, not a difference of two radii).
+    #[must_use]
+    pub(crate) fn tan_semi_angle(&self) -> f64 {
+        deg2rad(self.semi_angle_deg).tan()
+    }
+
     /// The radius at the bottom of the STEP domain (`GetBotRadius`; `SmCylinder`'s
     /// `GetRadius()`).
     #[must_use]

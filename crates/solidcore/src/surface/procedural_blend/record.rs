@@ -926,3 +926,63 @@ impl CornerRecord {
         }
     }
 }
+
+/// A drafted face's surface (`offset::draft`): the face's surface before the draft, the
+/// sense of its outer faceuse and the draft, its net the drafted plane or cone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DraftRecord {
+    /// The face's surface before the draft: its label and NURBS form.
+    pub source: SupportRecord,
+    /// Whether the face's outer faceuse runs with the surface's normal.
+    pub outward: bool,
+    /// The neutral plane's origin.
+    pub neutral_origin: [f64; 3],
+    /// The neutral plane's unit normal.
+    pub neutral_normal: [f64; 3],
+    /// The unit pull.
+    pub pull: [f64; 3],
+    /// The draft angle, radians.
+    pub angle: f64,
+    /// The net, the drafted plane or cone: its label and NURBS form.
+    pub net: SupportRecord,
+}
+
+impl DraftRecord {
+    /// The structural check: the two surfaces NURBS forms with a plane, cylinder or cone
+    /// label (the net a plane or a cone), every number finite.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        corner_surface(&self.source, "source")?;
+        corner_surface(&self.net, "net")?;
+        let kind = |s: &SupportRecord| match s {
+            SupportRecord::Nurbs { kind, .. } => Some(*kind),
+            SupportRecord::Blend(_) => None,
+        };
+        let (Some(source), Some(net)) = (kind(&self.source), kind(&self.net)) else {
+            return Err(refuse("source", "a draft's surfaces are NURBS forms"));
+        };
+        let drafted = matches!(
+            (source, net),
+            (SupportKindRecord::Plane, SupportKindRecord::Plane)
+                | (
+                    SupportKindRecord::Cylinder | SupportKindRecord::Cone,
+                    SupportKindRecord::Cone
+                )
+        );
+        if !drafted {
+            return Err(refuse(
+                "net",
+                "a drafted plane is a plane, a drafted cone a cone",
+            ));
+        }
+        if !points_finite(&[self.neutral_origin, self.neutral_normal, self.pull])
+            || !self.angle.is_finite()
+        {
+            return Err(refuse("draft", "a draft's numbers are finite"));
+        }
+        Ok(())
+    }
+}

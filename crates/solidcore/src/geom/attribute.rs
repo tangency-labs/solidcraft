@@ -171,6 +171,12 @@ pub mod ids {
     /// ([`crate::blend::definition_check::BlendFaceKind`]); set and removed by the session
     /// only while [`crate::kernel::Kernel::blend_face_log`] is on.
     pub const FILLET_BLEND_FACE: u64 = 134;
+    /// Not upstream: a face a draft moves ([`crate::offset::draft`]), marked on the picked
+    /// faces before the local operation that moves them and read and removed after it, within
+    /// one draft call, so that a draft that moved no face is told from one that did. Its own
+    /// id: the attribute carried to a replacement face is an entity's first of its id, so a
+    /// mark sharing an id with one the face already carries would not travel.
+    pub const DRAFT_MOVED: u64 = 136;
     /// `SM_AI_METRIC_BASE`: first of the ids used by metric attributes (150-199).
     pub const METRIC_BASE: u64 = 150;
     /// `SM_AI_MASS_PROPERTIES`.

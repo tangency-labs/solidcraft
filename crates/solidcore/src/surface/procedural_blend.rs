@@ -1445,11 +1445,18 @@ pub enum BlendRef<'a> {
         /// The surface, its net.
         net: &'a Surface,
     },
+    /// A drafted face's surface ([`crate::offset::draft`]) and its definition.
+    Draft {
+        /// The definition.
+        draft: &'a crate::offset::draft::DraftDefinition,
+        /// The surface, its net.
+        net: &'a Surface,
+    },
 }
 
 /// The definition a surface keeps beside its kind ([`Surface::procedural_blend`],
 /// [`Surface::procedural_sweep`]): a round of an exact class (#2485), a blend corner's face
-/// (#2488) or a screw-swept wall (#2572).
+/// (#2488), a screw-swept wall (#2572) or a drafted face's.
 #[derive(Debug, Clone)]
 pub enum KeptDefinition {
     /// An exact round's.
@@ -1458,28 +1465,31 @@ pub enum KeptDefinition {
     Corner(corner::CornerDefinition),
     /// A swept wall's.
     Sweep(crate::surface::procedural_sweep::ProceduralSweep),
+    /// A drafted face's ([`crate::offset::draft`]).
+    Draft(crate::offset::draft::DraftDefinition),
 }
 
 impl KeptDefinition {
     /// Whether the definition follows a motion of its net by `scale`: a sweep's only
     /// under a uniform one ([`crate::surface::procedural_sweep::ProceduralSweep::follows`]);
-    /// a round's and a corner's always (their own transforms refuse what they cannot
-    /// follow).
+    /// a round's, a corner's and a drafted face's always (their own transforms refuse what
+    /// they cannot follow: a draft, a scale that is not uniform).
     #[must_use]
     pub fn follows(&self, scale: Option<Vec3>) -> bool {
         match self {
             Self::Sweep(_) => crate::surface::procedural_sweep::ProceduralSweep::follows(scale),
-            Self::Round(_) | Self::Corner(_) => true,
+            Self::Round(_) | Self::Corner(_) | Self::Draft(_) => true,
         }
     }
 
     /// Moves the definition with its net ([`exact::ExactRound::transform`],
     /// [`corner::CornerDefinition::transform`],
-    /// [`crate::surface::procedural_sweep::ProceduralSweep::transform`]).
+    /// [`crate::surface::procedural_sweep::ProceduralSweep::transform`],
+    /// [`crate::offset::draft::DraftDefinition::transform`]).
     ///
     /// # Errors
     ///
-    /// Those of the three motions.
+    /// Those of the four motions.
     pub fn transform(
         &mut self,
         k: &Kernel,
@@ -1491,12 +1501,14 @@ impl KeptDefinition {
             Self::Round(r) => r.transform(k, rotate_n_move, scale, depth),
             Self::Corner(c) => c.transform(k, rotate_n_move, scale, depth),
             Self::Sweep(s) => s.transform(rotate_n_move, scale),
+            Self::Draft(d) => d.transform(k, rotate_n_move, scale, depth),
         }
     }
 
     /// Whether the definition is read through a map of the net's parameters, which the
     /// net's reversals, reparametrisations and swaps move: an exact round's leader map, a
-    /// sweep's map. A corner's definition is a set's and has none.
+    /// sweep's map. A corner's definition is a set's, and a drafted face's is in model space
+    /// (its net is the drafted plane or cone itself): neither has one.
     #[must_use]
     pub const fn has_parameter_map(&self) -> bool {
         matches!(self, Self::Round(_) | Self::Sweep(_))
@@ -1508,7 +1520,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.reparametrize_map(u, alpha, beta),
             Self::Sweep(s) => s.reparametrize_map(u, alpha, beta),
-            Self::Corner(_) => {}
+            Self::Corner(_) | Self::Draft(_) => {}
         }
     }
 
@@ -1517,7 +1529,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.swap_map(),
             Self::Sweep(s) => s.swap_map(),
-            Self::Corner(_) => {}
+            Self::Corner(_) | Self::Draft(_) => {}
         }
     }
 }
@@ -1528,7 +1540,7 @@ impl<'a> BlendRef<'a> {
     pub fn net(&self) -> BlendNet<'a> {
         match *self {
             Self::Procedural(p) => BlendNet::Approx(&p.net),
-            Self::Exact { net, .. } => BlendNet::Exact(net),
+            Self::Exact { net, .. } | Self::Draft { net, .. } => BlendNet::Exact(net),
             Self::Corner { corner, net } => match (corner.is_exact(), net.kind()) {
                 (false, SurfaceKind::BSpline(b)) => BlendNet::Approx(b),
                 _ => BlendNet::Exact(net),
@@ -1543,6 +1555,7 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(p) => p.def.bound,
             Self::Exact { round, .. } => round.bound(),
             Self::Corner { corner, .. } => corner.bound(),
+            Self::Draft { draft, .. } => draft.bound(),
         }
     }
 
@@ -1553,6 +1566,8 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(p) => p.def.order,
             Self::Exact { round, .. } => round.order(),
             Self::Corner { corner, .. } => corner.order(),
+            // (a drafted face meets its neighbours where they are cut to it)
+            Self::Draft { .. } => 0,
         }
     }
 
@@ -1563,6 +1578,7 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(p) => p.support(i),
             Self::Exact { round, .. } => round.support(i),
             Self::Corner { corner, .. } => corner.support(i),
+            Self::Draft { draft, .. } => (i == 0).then(|| draft.source()),
         }
     }
 
@@ -1571,7 +1587,7 @@ impl<'a> BlendRef<'a> {
     pub const fn exact(&self) -> Option<&'a exact::ExactRound> {
         match *self {
             Self::Exact { round, .. } => Some(round),
-            Self::Procedural(_) | Self::Corner { .. } => None,
+            Self::Procedural(_) | Self::Corner { .. } | Self::Draft { .. } => None,
         }
     }
 
@@ -1580,7 +1596,16 @@ impl<'a> BlendRef<'a> {
     pub const fn corner(&self) -> Option<&'a corner::CornerDefinition> {
         match *self {
             Self::Corner { corner, .. } => Some(corner),
-            Self::Procedural(_) | Self::Exact { .. } => None,
+            Self::Procedural(_) | Self::Exact { .. } | Self::Draft { .. } => None,
+        }
+    }
+
+    /// The drafted face's definition, for a drafted face.
+    #[must_use]
+    pub const fn draft(&self) -> Option<&'a crate::offset::draft::DraftDefinition> {
+        match *self {
+            Self::Draft { draft, .. } => Some(draft),
+            Self::Procedural(_) | Self::Exact { .. } | Self::Corner { .. } => None,
         }
     }
 
@@ -1595,6 +1620,7 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(p) => p.recertify(k),
             Self::Exact { round, net } => round.recertify(k, net),
             Self::Corner { corner, net } => corner.recertify(k, net),
+            Self::Draft { draft, net } => draft.recertify(k, net),
         }
     }
 }

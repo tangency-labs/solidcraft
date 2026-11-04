@@ -796,6 +796,7 @@ pub(crate) fn check_geometry_nesting(
                             CornerDefinition::Setback(_) => {}
                         },
                         KeptDefinition::Sweep(_) => {}
+                        KeptDefinition::Draft(draft) => push(Geometry::Surface(&draft.source)),
                     }
                 }
                 match &surface.kind {
@@ -1233,6 +1234,9 @@ impl Surface {
             Some(KeptDefinition::Corner(corner)) => {
                 return Some(BlendRef::Corner { corner, net: self })
             }
+            Some(KeptDefinition::Draft(draft)) => {
+                return Some(BlendRef::Draft { draft, net: self })
+            }
             Some(KeptDefinition::Sweep(_)) | None => {}
         }
         match self.kind() {
@@ -1286,6 +1290,17 @@ impl Surface {
     /// Keeps `corner` as the definition of this surface, a blend corner's face (#2488).
     pub(crate) fn set_corner_definition(&mut self, corner: CornerDefinition) {
         self.definition = Some(Box::new(KeptDefinition::Corner(corner)));
+    }
+
+    /// Keeps `draft` as the definition of this surface, a drafted face's
+    /// ([`crate::offset::draft`]).
+    pub(crate) fn set_draft_definition(&mut self, draft: crate::offset::draft::DraftDefinition) {
+        self.definition = Some(Box::new(KeptDefinition::Draft(draft)));
+    }
+
+    /// Drops any definition this surface keeps.
+    pub(crate) fn clear_definition(&mut self) {
+        self.definition = None;
     }
 
     /// This surface's definition carried onto `piece`, a piece, extension or copy of it

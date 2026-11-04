@@ -46,7 +46,7 @@ pub use error::{Error, FitKind, Result, RoomReason};
 pub use measure::{
     point_distance, Distance, EdgePoint, GapSample, MassPropertiesEstimate, Normal, PointClass,
 };
-pub use offset::{offset_faces, offset_sheet, shell, thicken};
+pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
 
 #[cfg(test)]
