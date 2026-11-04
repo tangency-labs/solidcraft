@@ -1384,6 +1384,14 @@ preference_settings! {
     /// Every component placement in the browser starts open, as before #9274, instead of closed
     /// until the user opens it. Off by default.
     browser_components_open: bool = false, PAGE_LAYOUT;
+    /// Folders in the Browser start closed, and placements too whatever "Components start open"
+    /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
+    /// Browser, which opens just the rows down to its body and closes again the ones the last find
+    /// opened. A body picked in the 3D view leaves the Browser as it is, and only the body Find in
+    /// Browser found has the rows above it marked, so a large assembly's placements are not named
+    /// again after each edit. Off by default: folders start open, placements as "Components start
+    /// open" says, and a pick in the 3D view opens the Browser down to its body (#3005), as before.
+    browser_rows_start_closed: bool = false, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -6111,6 +6119,7 @@ mod tests {
             ("status_bar", json!(true), PAGE_LAYOUT),
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
+            ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),
