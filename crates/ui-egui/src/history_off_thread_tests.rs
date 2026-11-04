@@ -644,6 +644,51 @@ fn an_agent_design_change_computes_off_the_window_thread() {
     assert!((v - (12500.0 - holes)).abs() < 1.0, "{v}");
 }
 
+/// A continuous member keeps the worker's sweep instead of computing it again on the window thread.
+#[test]
+fn an_agent_continuous_frame_member_reuses_the_worker_result() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Chassis"})).unwrap();
+    let mut lines = Vec::new();
+    for (command, params) in [
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [100.0 / 2f64.sqrt(), 100.0 / 2f64.sqrt()], "end": [0, 100]})),
+        ("sketch.line", json!({"points": [[0, 100], [-300, 100]]})),
+    ] {
+        let result = h.app.run(command, params).unwrap();
+        lines.extend(result["created"]["curves"].as_array().unwrap().iter().cloned());
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let member = ask(
+        &tx,
+        "engine.execute",
+        json!({"command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": lines, "continuous": true,
+            "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}, "body_name": "Hoop"
+        }}),
+    );
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true), "the window answers meanwhile");
+    if h.app.agent_computing().is_some() {
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    }
+    let reply = reply_to(&mut h, &member);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(h.app.session.doc.features.len(), before.features.len() + 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.model.last_recomputed, 0, "the window reuses the computed member");
+    assert_eq!(h.app.session.model.state().bodies.len(), 1);
+    assert_eq!(h.app.session.model.state().bodies[0].name, "Hoop");
+}
+
 /// A person's edit while the agent's command computes goes first; the agent's command is
 /// computed again for the design as it is and lands after it, never in between.
 #[test]
