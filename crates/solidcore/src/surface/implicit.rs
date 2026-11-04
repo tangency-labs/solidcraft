@@ -1059,7 +1059,7 @@ impl AnalyticSupport {
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
-                on_axis_from(&mut c.rev, placement);
+                on_axis_from(&mut c.rev, placement)?;
                 c.base_radius = radius;
                 c.rev.base = form.copy();
             }
@@ -1071,7 +1071,7 @@ impl AnalyticSupport {
                     semi_angle_deg,
                 },
             ) => {
-                on_axis_from(&mut c.rev, placement);
+                on_axis_from(&mut c.rev, placement)?;
                 c.base_radius = base_radius;
                 c.semi_angle_deg = semi_angle_deg;
                 c.rev.base = form.copy();
@@ -1110,14 +1110,33 @@ impl AnalyticSupport {
 /// form from the face's own bottom); the point at each parameter is then unchanged, which
 /// [`evaluates_as`] proves. A placement off the axis or turned about it is not the form's
 /// parametrisation, and is refused there.
+///
+/// The generator line's parameters are the heights too, so it moves with them: its STEP
+/// interval stays the surface's v interval, as the kernel's check requires
+/// (`SmSurfOfRevolution::Test` #2, `SmCone::Test` #1), and its points stay where they are.
 fn on_axis_from(
     rev: &mut crate::surface::surf_of_revolution::SurfOfRevolution,
     placement: Axis2Placement,
-) {
+) -> Result<()> {
+    use crate::curve::curve::CurveKind;
     let h = (rev.position.origin() - placement.origin()).dot(placement.z_axis());
     let d = rev.anal_uv_domain;
     rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), d.v_min() + h, d.u_max(), d.v_max() + h);
     rev.position = placement;
+    match rev
+        .gen_curve
+        .as_mut()
+        .map(crate::curve::curve::Curve::kind_mut)
+    {
+        Some(CurveKind::Line(line)) => {
+            line.shift_step_parameter(h);
+            Ok(())
+        }
+        _ => Err(SolidError::invalid_input(
+            OP_BUILD,
+            "a recognised cylinder or cone has no generator line",
+        )),
+    }
 }
 
 /// The cylinder, cone, sphere or torus of kind `kind` the kernel recognises in `form`

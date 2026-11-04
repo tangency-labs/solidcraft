@@ -588,6 +588,17 @@ impl Line {
         self.anal_domain = domain;
     }
 
+    /// The same line on its STEP parameters moved by `h`: its analytic domain's ends moved
+    /// by `h` and its point by `-h` steps along it, so that the point at each NURB parameter
+    /// is unchanged (to the rounding of `P - h s V`) and the NURB is kept. Not upstream: a
+    /// surface of revolution whose heights are measured from another origin on its axis moves
+    /// its generator's parameters with its own (`implicit::on_axis_from`).
+    pub(crate) fn shift_step_parameter(&mut self, h: f64) {
+        self.point -= h * self.vector * self.scale;
+        self.anal_domain =
+            Extent1d::from_min_max(self.anal_domain.min() + h, self.anal_domain.max() + h);
+    }
+
     /// `TRUE` (`IsAnalytic`).
     #[must_use]
     pub const fn is_analytic(&self) -> bool {

@@ -388,3 +388,76 @@ fn degenerate_cone_and_torus_faces_go_round_with_their_label() {
         assert_eq!(record_face(&k, &back.surface, &back.uv_domain).unwrap(), r);
     }
 }
+
+/// The kernel's own check of a face surface, at every level: the failed reports as
+/// `(reporting type, test number, message)`.
+fn check_failures(k: &Kernel, s: &Surface) -> Vec<(i64, u64, String)> {
+    use crate::geom::assert_array::{AssertArray, ObjectKey};
+    let mut failed = Vec::new();
+    for level in [0, 1, 2, crate::surface::surface::assert_valid::LEVEL_GIVEN] {
+        let mut list = AssertArray::new();
+        s.assert_valid(k, Some(&mut list), level, ObjectKey(1))
+            .unwrap();
+        failed.extend(list.reports().iter().filter(|r| !r.ok).map(|r| {
+            (
+                r.reporting_type,
+                r.test_index,
+                r.message.as_deref().unwrap_or_default().to_string(),
+            )
+        }));
+    }
+    failed
+}
+
+/// A round read back from its record (ladder/09 005, a shelled box's r5 rounds): its
+/// cylinder label's frame starts on the axis away from where its form's height does, so
+/// the cylinder moves its heights by that offset, and its generator line moves with them.
+/// The kernel's check passes (`SmSurfOfRevolution::Test` #2 and `SmCone::Test` #1 compare
+/// the generator's interval with the surface's), for a cylinder and a cone, either way
+/// along the axis.
+#[test]
+fn a_label_with_its_origin_elsewhere_on_the_axis_passes_the_kernels_check() {
+    let k = k();
+    for h in [-10.0, 7.5] {
+        let at = |z: f64| Frame {
+            origin: [0.0, 0.0, z],
+            ..frame()
+        };
+        let labels = [
+            (
+                Record::Cylinder {
+                    frame: frame(),
+                    radius: 5.0,
+                },
+                Record::Cylinder {
+                    frame: at(h),
+                    radius: 5.0,
+                },
+            ),
+            (
+                Record::Cone {
+                    frame: frame(),
+                    radius_at_origin: 5.0,
+                    half_angle: 0.25,
+                },
+                Record::Cone {
+                    frame: at(h),
+                    radius_at_origin: 5.0 + h * 0.25_f64.tan(),
+                    half_angle: 0.25,
+                },
+            ),
+        ];
+        for (label, moved) in labels {
+            let (net, d) = form::surface(&label, [[0.0, 0.5 * PI], [2.0, 6.0]]).unwrap();
+            let f = face_surface(&k, &moved, Some(&net), d).unwrap();
+            assert!(
+                matches!(f.surface.kind(), SurfaceKind::Cone(_)),
+                "{h} {:?}",
+                f.surface.kind()
+            );
+            assert_eq!(check_failures(&k, &f.surface), vec![], "{h} {moved:?}");
+            let r = record_face(&k, &f.surface, &f.uv_domain).unwrap();
+            assert_eq!(r.nurbs.as_ref(), Some(&net));
+        }
+    }
+}
