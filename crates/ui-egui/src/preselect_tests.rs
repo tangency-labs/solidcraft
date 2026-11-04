@@ -2847,6 +2847,41 @@ fn offset_plane_through_a_picked_vertex() {
     assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
 }
 
+#[test]
+fn offset_plane_picks_a_3d_spline_tip_and_keeps_its_reference() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    let wire = h.app.run("sketch.spline3d", json!({"points":[[10,10,0],[30,25,10],[50,40,30]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.set_origin_shown(false);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.app.start("construct.plane.offset");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.active = 1;
+    }
+    h.frames(2);
+    let [x, y] = h.at(&json!({"world":[50,40,30]})).unwrap();
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let hits = crate::viewport::pick(&h.app, &proj, egui::pos2(x as f32, y as f32));
+    let hit = hits.iter().find(|hit| matches!(hit, crate::viewport::Hit::SketchPoint3d { .. })).expect("pickable 3D tip");
+    let picked = h.app.dialog.as_ref().unwrap().candidate(&h.app.session, hit).expect("accepted point reference");
+    assert_eq!(picked, Sel::SketchPoint { id: format!("{sketch}:{wire}:2") });
+    h.app.dialog.as_mut().unwrap().inputs[1].items = vec![picked];
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["through"], json!({"sketch":sketch,"point":format!("{wire}:2")}));
+    axis_point_evidence(&mut h, "3d-node-offset-plane-dialog");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let (feature, _, plane) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().unwrap();
+    assert!((plane.origin.z - 30.0).abs() < 1e-9);
+    let reopened = crate::dialogs::for_feature(&h.app, feature, None).unwrap();
+    assert_eq!(reopened.inputs[1].items, vec![Sel::SketchPoint { id: format!("{sketch}:{wire}:2") }]);
+}
+
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
 /// and redraws it when the angle changes (it used to show only the picked plane and the label).
 #[test]

@@ -1018,7 +1018,11 @@ impl Lit {
         let hovered = match &app.viewport.hover {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
             Some(
-                Hit::SketchPoint { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchCurve { sketch, .. } | Hit::Profile { sketch, .. },
+                Hit::SketchPoint { sketch, .. }
+                | Hit::SketchPoint3d { sketch, .. }
+                | Hit::SketchMidpoint { sketch, .. }
+                | Hit::SketchCurve { sketch, .. }
+                | Hit::Profile { sketch, .. },
             ) => Some(Thing::Sketch(*sketch)),
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),

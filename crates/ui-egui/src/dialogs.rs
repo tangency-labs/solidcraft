@@ -1552,6 +1552,7 @@ impl Dialog {
         let near: Vec<Vec3> = hits
             .iter()
             .filter_map(|h| match h {
+                Hit::SketchPoint3d { at, .. } => Some(*at),
                 Hit::SketchPoint { sketch, at, .. } => st.sketch(*sketch).map(|ss| ss.plane.to_world(*at)),
                 Hit::Edge { body, index, .. } => edge_circle_in(&st, body, *index).map(|(c, ..)| c),
                 _ => None,
@@ -1579,6 +1580,11 @@ impl Dialog {
                 Hit::Face { body, .. } => occurrence_path_of_body(s, body).map(|path| Sel::Occurrence { path }),
                 _ => None,
             };
+        }
+        if snaps_to_points(inp.accept)
+            && let Hit::SketchPoint3d { at, .. } = h
+        {
+            return snap?.place_at(*at);
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {

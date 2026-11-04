@@ -10,7 +10,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec3};
 use solidcraft_kernel::{self as kernel, FaceSurface};
 
 use crate::eval::{ModelBody, ModelState};
@@ -52,7 +52,7 @@ pub enum GeoRef {
     Axis { name: crate::FeatureName },
     /// A construction point feature, by name.
     ConstructPoint { name: crate::FeatureName },
-    /// A sketch point (by sketch feature id and point id).
+    /// A sketch point (by sketch feature id and point id), or a drawn wire node as `wire:index`.
     SketchPoint { sketch: u64, point: String },
     /// A sketch curve (by sketch feature id and curve id).
     SketchCurve { sketch: u64, curve: String },
@@ -269,11 +269,6 @@ fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
         .then_some((centre, unit, r))
 }
 
-fn sketch_world(ctx: &Ctx, sketch: u64, q: Vec2) -> Result<Vec3> {
-    let ss = ctx.st.sketch(sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-    Ok(ss.plane.to_world(q))
-}
-
 fn sketch_curve_points(ctx: &Ctx, sketch: u64, curve: &str) -> Result<Vec<Vec3>> {
     let ss = ctx.st.sketch(sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
     if let Some(wire) = ss.sketch.wires.iter().find(|wire| wire.id == curve) {
@@ -319,15 +314,24 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
             _ => Err(bad(format!("`{name}` is not a point"))),
         },
         GeoRef::SketchPoint { sketch, point } => {
-            let ss = ctx.st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-            let q =
-                ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i)).ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))?;
-            sketch_world(ctx, *sketch, q)
+            sketch_point_position(ctx.st, *sketch, point).ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))
         }
         // A round edge or face: its centre.
         GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
         _ => Err(bad("pick a point, vertex or sketch point")),
     }
+}
+
+/// Resolve a planar point or a drawn 3D wire's `wire:index` node in the evaluated state's frame.
+/// Wire coordinates have already been placed; applying the sketch plane again would move them twice.
+pub fn sketch_point_position(st: &ModelState, sketch: u64, point: &str) -> Option<Vec3> {
+    let ss = st.sketch(sketch)?;
+    if let Some(p) = ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i)) {
+        return Some(ss.plane.to_world(p));
+    }
+    let (wire, index) = point.rsplit_once(':')?;
+    let index = index.parse::<usize>().ok()?;
+    ss.sketch.wires.get(ss.sketch.wire_index(wire)?)?.fit.get(index).copied()
 }
 
 /// An edge or face of the model as a line: along a straight edge, through the centre of a
