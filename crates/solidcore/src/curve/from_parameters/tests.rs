@@ -360,3 +360,129 @@ fn a_trim_goes_back_onto_its_edges_record_interval() {
         c
     );
 }
+
+/// The unit circle about the origin of `frame([0, 0, 0])`, as the rational form of
+/// `((1 - s²), 2 s, 0) / (1 + s²)` with `s(t) = (t - a)²` over [0, 1]: degree 4 in t, its
+/// Bernstein coefficients from the power ones. `s` runs back from `a²` to 0 on [0, a]
+/// and out to `(1 - a)²` after: the form turns clockwise, then anticlockwise.
+fn backtracking_form(a: f64) -> Record {
+    // power coefficients of s = t² - 2a t + a²
+    let s = [a * a, -2.0 * a, 1.0];
+    let mul = |p: &[f64], q: &[f64]| {
+        let mut r = vec![0.0; p.len() + q.len() - 1];
+        for (i, x) in p.iter().enumerate() {
+            for (j, y) in q.iter().enumerate() {
+                r[i + j] += x * y;
+            }
+        }
+        r
+    };
+    let s2 = mul(&s, &s);
+    let pad = |p: &[f64]| {
+        (0..5)
+            .map(|i| p.get(i).copied().unwrap_or(0.0))
+            .collect::<Vec<_>>()
+    };
+    let one = pad(&[1.0]);
+    let (s2, s1) = (pad(&s2), pad(&s));
+    let xh: Vec<f64> = one.iter().zip(&s2).map(|(o, q)| o - q).collect();
+    let yh: Vec<f64> = s1.iter().map(|v| 2.0 * v).collect();
+    let wh: Vec<f64> = one.iter().zip(&s2).map(|(o, q)| o + q).collect();
+    // power to Bernstein of degree 4: b_i = sum_{j<=i} C(i, j) / C(4, j) a_j
+    let c = |n: usize, k: usize| -> f64 {
+        (0..k).fold(1.0, |r, i| r * (n - i) as f64 / (i + 1) as f64)
+    };
+    let bern = |p: &[f64]| -> Vec<f64> {
+        (0..5)
+            .map(|i| (0..=i).map(|j| c(i, j) / c(4, j) * p[j]).sum())
+            .collect()
+    };
+    let (bx, by, bw) = (bern(&xh), bern(&yh), bern(&wh));
+    Record::RationalSpline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        homogeneous: (0..5).map(|i| [bx[i], by[i], 0.0, bw[i]]).collect(),
+    }
+}
+
+/// The unit circle about the origin as `arcs` rational quadratic arcs of `deg` degrees each
+/// from the x axis, on the knots `breaks` (`arcs + 1` of them).
+fn arcs_form(deg: f64, breaks: &[f64]) -> Record {
+    let arcs = breaks.len() - 1;
+    let half = (deg / 2.0).to_radians();
+    let w = half.cos();
+    let mut h = Vec::new();
+    for i in 0..arcs {
+        let t0 = (deg * i as f64).to_radians();
+        if i == 0 {
+            h.push([t0.cos(), t0.sin(), 0.0, 1.0]);
+        }
+        h.push([(t0 + half).cos(), (t0 + half).sin(), 0.0, w]);
+        let t1 = t0 + 2.0 * half;
+        h.push([t1.cos(), t1.sin(), 0.0, 1.0]);
+    }
+    let mut knots = vec![breaks[0]; 3];
+    for b in &breaks[1..arcs] {
+        knots.extend([*b, *b]);
+    }
+    knots.extend([breaks[arcs]; 3]);
+    Record::RationalSpline {
+        knots,
+        homogeneous: h,
+    }
+}
+
+fn unit_circle() -> Record {
+    Record::Circle {
+        frame: frame([0.0, 0.0, 0.0]),
+        radius: 1.0,
+    }
+}
+
+/// B1: a form that turns back between two of sixteen even samples of its parameter (on
+/// [0, 0.02], where every sample after the first is further round) is refused: its angular
+/// speed's Bernstein coefficients are proved negative on a piece, not sampled. Its point set is
+/// on the circle, so only the sense check can refuse it.
+#[test]
+fn a_form_that_turns_back_between_samples_is_refused() {
+    let k = k();
+    let form = backtracking_form(0.02);
+    let Record::RationalSpline { knots, homogeneous } = &form else {
+        unreachable!()
+    };
+    let nurbs = spline(knots, homogeneous, 3, OP).unwrap();
+    let (o, x, y) = axes(&frame([0.0, 0.0, 0.0])).unwrap();
+    assert!(curve_on_quadrics(&nurbs, &quadrics(o, x, y, 1.0, 1.0, true)).unwrap());
+    let err = conic_on_form(&k, &unit_circle(), &form).unwrap_err();
+    assert!(err.to_string().contains("anticlockwise"), "{err}");
+}
+
+/// B1: a form that runs 400° round (five 80° arcs, each step of sixteen less than half a
+/// turn) is refused, not read as a 40° arc.
+#[test]
+fn a_form_past_a_whole_turn_is_refused() {
+    let k = k();
+    let form = arcs_form(80.0, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+    let err = conic_on_form(&k, &unit_circle(), &form).unwrap_err();
+    assert!(err.to_string().contains("anticlockwise"), "{err}");
+    // three of them, 240°, go
+    let c = conic_on_form(&k, &unit_circle(), &arcs_form(80.0, &[0.0, 1.0, 2.0, 3.0])).unwrap();
+    let crate::curve::curve::CurveKind::Ellipse(e) = c.kind() else {
+        panic!("not a conic")
+    };
+    let d = e.step_interval();
+    assert!((d.max() - d.min() - 240.0).abs() < 1e-9, "{d:?}");
+}
+
+/// B1: a closed form on strongly uneven knots (three quarters on [0, 0.03], the last on
+/// [0.03, 1]: one sixteenth of the parameter spans 270°) is the whole turn, not refused.
+#[test]
+fn an_unevenly_parameterised_closed_form_is_the_whole_turn() {
+    let k = k();
+    let form = arcs_form(90.0, &[0.0, 0.01, 0.02, 0.03, 1.0]);
+    let c = conic_on_form(&k, &unit_circle(), &form).unwrap();
+    let crate::curve::curve::CurveKind::Ellipse(e) = c.kind() else {
+        panic!("not a conic")
+    };
+    let d = e.step_interval();
+    assert_eq!(d.max() - d.min(), 360.0, "{d:?}");
+}

@@ -430,6 +430,187 @@ pub fn curve_on_quadrics(curve: &BSplineCurve, q: &[QuadricEquation; 2]) -> Resu
     spine_on_offsets(curve, q)
 }
 
+/// How many halvings [`conic_turn`] makes of one Bézier segment before it gives up: a
+/// segment whose angular speed it cannot prove positive after this many is refused.
+const TURN_DEPTH: usize = 24;
+
+/// The angle, degrees, that the rational curve `curve` turns about the conic of centre `o`,
+/// unit axes `x`, `y` and radii `rx`, `ry` (its angle `atan2((P - o).y / ry, (P - o).x / rx)`),
+/// certified anticlockwise, or `None` where it cannot be: for a curve proved on the conic
+/// ([`curve_on_quadrics`]), the sweep of its parameter over the conic.
+///
+/// On each Bézier segment, homogeneous `(Xh, Yh, W)` in the conic's scaled frame, the sign
+/// of the angular speed is that of `N = Xh Yh' - Yh Xh'` (the weight's terms cancel:
+/// `dθ/dt = N / (Xh² + Yh²)`), a polynomial in Bernstein form whose coefficients are
+/// computed with their rounding bound (`gamma_K` times their absolute terms). The segment
+/// turns strictly anticlockwise when every coefficient is above its bound (the first and
+/// last may be zero to rounding: a speed vanishing at a segment's end). Where the
+/// coefficients do not decide, the segment is halved (de Casteljau), at most
+/// [`TURN_DEPTH`] times; one coefficient below minus its bound everywhere is a turn back,
+/// refused at once. A segment so proved and whose control points (all weights positive)
+/// lie in the open half plane its chord's bisector faces turns less than half a turn, so
+/// its angle is exactly that between its end points, and the total is the sum of these.
+/// Nothing is sampled.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub fn conic_turn(
+    curve: &BSplineCurve,
+    o: Vec3,
+    x: Vec3,
+    y: Vec3,
+    rx: f64,
+    ry: f64,
+) -> Result<Option<f64>> {
+    let (segs, first) = curve_segments(curve)?;
+    // the move from the curve's first point to the conic's centre, and its size
+    let shift = first - o;
+    let mut total = 0.0_f64;
+    for seg in segs {
+        let mut todo = vec![(seg, 0_usize)];
+        while let Some((piece, depth)) = todo.pop() {
+            match piece_turn(&piece, shift, x, y, rx, ry) {
+                Turn::Anticlockwise(deg) => total += deg,
+                Turn::Back => return Ok(None),
+                Turn::Undecided => {
+                    if depth >= TURN_DEPTH {
+                        return Ok(None);
+                    }
+                    todo.push((sub_segment(&piece, 0.0, 0.5), depth + 1));
+                    todo.push((sub_segment(&piece, 0.5, 1.0), depth + 1));
+                }
+            }
+        }
+    }
+    Ok(Some(total))
+}
+
+/// What [`piece_turn`] proves of one Bézier piece.
+enum Turn {
+    /// It turns anticlockwise by this many degrees, less than half a turn.
+    Anticlockwise(f64),
+    /// It turns back somewhere, or a weight is not positive.
+    Back,
+    /// Its coefficients do not decide.
+    Undecided,
+}
+
+/// The derivative of a Bernstein polynomial of degree `p >= 1` in one variable, degree
+/// `p - 1`, and of its absolute terms `a` (`p (|c_{i+1}| + |c_i|)`).
+fn derivative(c: &[f64], a: &[f64]) -> (BPoly, BPoly) {
+    let p = c.len().saturating_sub(1);
+    #[allow(clippy::cast_precision_loss)]
+    let pf = p as f64;
+    let step = |v: &[f64], absolute: bool| -> Vec<f64> {
+        v.iter()
+            .zip(v.iter().skip(1))
+            .map(|(l, r)| {
+                if absolute {
+                    pf * (l.abs() + r.abs())
+                } else {
+                    pf * (r - l)
+                }
+            })
+            .collect()
+    };
+    let q = p.saturating_sub(1);
+    (
+        BPoly {
+            p: q,
+            q: 0,
+            c: step(c, false),
+        },
+        BPoly {
+            p: q,
+            q: 0,
+            c: step(a, true),
+        },
+    )
+}
+
+/// [`conic_turn`] on one Bézier piece `(Y, W)` (about the curve's first point, `shift` from
+/// it to the conic's centre).
+fn piece_turn(piece: &CurveSegment, shift: Vec3, x: Vec3, y: Vec3, rx: f64, ry: f64) -> Turn {
+    let (ys, w) = piece;
+    if w.p == 0 || !w.c.iter().all(|wi| *wi > 0.0) {
+        return Turn::Back;
+    }
+    // Xh = (Y + shift W) . x / rx, Yh likewise, and their absolute terms
+    let n = w.c.len();
+    let at = |axis: Vec3, r: f64, absolute: bool| -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                let yi = Vec3::new(
+                    ys[0].c.get(i).copied().unwrap_or(0.0),
+                    ys[1].c.get(i).copied().unwrap_or(0.0),
+                    ys[2].c.get(i).copied().unwrap_or(0.0),
+                );
+                let wi = w.c.get(i).copied().unwrap_or(0.0);
+                if absolute {
+                    let a = Vec3::new(axis.x.abs(), axis.y.abs(), axis.z.abs());
+                    let ya = Vec3::new(yi.x.abs(), yi.y.abs(), yi.z.abs());
+                    let sa = Vec3::new(shift.x.abs(), shift.y.abs(), shift.z.abs());
+                    (ya + sa * wi).dot(a) / r
+                } else {
+                    (yi + shift * wi).dot(axis) / r
+                }
+            })
+            .collect()
+    };
+    let (xh, yh) = (at(x, rx, false), at(y, ry, false));
+    let (xa, ya) = (at(x, rx, true), at(y, ry, true));
+    let p = w.p;
+    let poly = |c: Vec<f64>| BPoly { p, q: 0, c };
+    let (dx, dxa) = derivative(&xh, &xa);
+    let (dy, dya) = derivative(&yh, &ya);
+    let num = poly(xh.clone())
+        .mul(&dy)
+        .combine(1.0, &poly(yh.clone()).mul(&dx), -1.0);
+    let size = poly(xa.clone())
+        .mul(&dya)
+        .combine(1.0, &poly(ya.clone()).mul(&dxa), 1.0);
+    let k = 16 * (2 * p + 2) + 32;
+    let bound = |i: usize| gamma(k) * size.c.get(i).copied().unwrap_or(0.0);
+    let last = num.c.len().saturating_sub(1);
+    let mut decided = true;
+    for (i, c) in num.c.iter().enumerate() {
+        let b = bound(i);
+        let end = i == 0 || i == last;
+        let positive = if end { *c >= -b } else { *c > b };
+        if !positive {
+            decided = false;
+        }
+    }
+    if num.c.iter().enumerate().all(|(i, c)| *c < -bound(i)) {
+        return Turn::Back;
+    }
+    if !decided {
+        return Turn::Undecided;
+    }
+    // the half plane the chord's bisector m faces: every control point, (Xh, Yh) / W with
+    // W > 0, strictly in it, so the piece turns less than half a turn
+    let (Some(&w0), Some(&w1)) = (w.c.first(), w.c.last()) else {
+        return Turn::Undecided;
+    };
+    let (Some(&x0), Some(&y0), Some(&x1), Some(&y1)) =
+        (xh.first(), yh.first(), xh.last(), yh.last())
+    else {
+        return Turn::Undecided;
+    };
+    let (sx, sy, ex, ey) = (x0 / w0, y0 / w0, x1 / w1, y1 / w1);
+    let (mx, my) = (sx + ex, sy + ey);
+    let inside = xh
+        .iter()
+        .zip(&yh)
+        .zip(xa.iter().zip(&ya))
+        .all(|((cx, cy), (ax, ay))| mx * cx + my * cy > gamma(k) * (mx.abs() * ax + my.abs() * ay));
+    if !inside {
+        return Turn::Undecided;
+    }
+    Turn::Anticlockwise((sx * ey - sy * ex).atan2(sx * ex + sy * ey).to_degrees())
+}
+
 /// How a net's parameter runs along its spine (#2485): the spine's parameter is
 /// `a + b w`, `w` the net's u, or its v when `along_v`. Built as the identity in u; the
 /// net's reversals, reparametrisations and swaps move it as they move the net.

@@ -40,7 +40,7 @@ use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
-use crate::surface::implicit::{curve_on_quadrics, QuadricEquation};
+use crate::surface::implicit::{conic_turn, curve_on_quadrics, QuadricEquation};
 
 const OP: &str = "curve::from_parameters::from_parameters";
 const OP_TRIM: &str = "curve::from_parameters::uv_trim";
@@ -143,13 +143,15 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
 /// parameter the edge's interval and trims are in): the conic of the record's numbers
 /// (`conic`), keeping `form` as its NURBS, over the form's interval. The form must lie on the
-/// record's conic (proved, [`curve_on_quadrics`]) and run once round it anticlockwise about the
-/// frame's z; the kernel's conic is over the angles of the form's ends.
+/// record's conic (proved, [`curve_on_quadrics`]) and turn anticlockwise about the frame's z,
+/// at most once round (certified per Bézier segment, [`conic_turn`]); the kernel's conic is
+/// over the angles from the form's start through the angle it turns.
 ///
 /// # Errors
 ///
 /// `InvalidInput` where `conic` is no circle or ellipse, `form` no spline, the form is not
-/// proved on the conic, or it does not run anticlockwise; those of the constructors.
+/// proved on the conic, or it is not proved to turn anticlockwise at most once round; those
+/// of the constructors.
 pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let (frame, rx, ry, circle) = match conic {
@@ -172,8 +174,9 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     if !curve_on_quadrics(&nurbs, &quadrics(o, x, y, rx, ry, circle))? {
         return Err(bad("a conic's NURBS form is off the record's conic"));
     }
-    let domain = form_angles(&nurbs, o, x, y, rx, ry)
-        .ok_or_else(|| bad("a conic's NURBS form does not run anticlockwise round it"))?;
+    let domain = form_angles(&nurbs, o, x, y, rx, ry)?.ok_or_else(|| {
+        bad("a conic's NURBS form does not run anticlockwise round it at most once")
+    })?;
     let opts = EllipseOptions {
         dim: 3,
         nurb: Some(&nurbs),
@@ -553,8 +556,14 @@ fn quadrics(o: Point3, x: Vec3, y: Vec3, rx: f64, ry: f64, circle: bool) -> [Qua
 }
 
 /// The angles, degrees, of a conic's NURBS form from its start to its end about the frame's z
-/// (`ConicDomainOfNurbs`): the angle at sixteen even steps of the form's parameter must turn
-/// anticlockwise at each; a closed form is the whole turn. `None` where it turns back.
+/// (`ConicDomainOfNurbs`): its start's angle and the angle it turns, certified anticlockwise
+/// segment by segment from its Bernstein coefficients ([`conic_turn`]). A form turning back
+/// anywhere, or more than a whole turn (past [`QUARTER_SNAP_DEG`]), is `None`; a form turning
+/// a whole turn to that snap is the whole turn.
+///
+/// # Errors
+///
+/// Those of [`conic_turn`] and of evaluating the form's start.
 fn form_angles(
     nurbs: &BSplineCurve,
     o: Point3,
@@ -562,42 +571,23 @@ fn form_angles(
     y: Vec3,
     rx: f64,
     ry: f64,
-) -> Option<Extent1d> {
-    let ivl = nurbs.natural_interval();
-    let angle = |t: f64| -> Option<f64> {
-        let d = nurbs.evaluate_point(t).ok()? - o;
-        Some((d.dot(y) / ry).atan2(d.dot(x) / rx).to_degrees())
+) -> Result<Option<Extent1d>> {
+    let d = nurbs.evaluate_point(nurbs.natural_interval().min())? - o;
+    let a0 = (d.dot(y) / ry).atan2(d.dot(x) / rx).to_degrees();
+    let Some(mut sweep) = conic_turn(nurbs, o, x, y, rx, ry)? else {
+        return Ok(None);
     };
-    let n = 16;
-    let (mut a0, mut prev) = (0.0, 0.0);
-    for step in 0..=n {
-        let a = angle(ivl.min() + (ivl.max() - ivl.min()) * f64::from(step) / f64::from(n))?;
-        if step == 0 {
-            a0 = a;
-        } else if !(ieee_remainder(a - prev, 360.0) > 0.0) {
-            return None;
-        }
-        prev = a;
-    }
-    let mut sweep = (prev - a0 + 720.0).rem_euclid(360.0);
-    if sweep <= QUARTER_SNAP_DEG {
+    if (sweep - 360.0).abs() <= QUARTER_SNAP_DEG {
         sweep = 360.0;
     }
-    if a0 + sweep > 360.0 {
-        Some(Extent1d::from_raw(a0 - 360.0, a0 - 360.0 + sweep))
+    if !(sweep > 0.0 && sweep <= 360.0) {
+        return Ok(None);
+    }
+    Ok(Some(if a0 + sweep > 360.0 {
+        Extent1d::from_raw(a0 - 360.0, a0 - 360.0 + sweep)
     } else {
-        Some(Extent1d::from_raw(a0, a0 + sweep))
-    }
-}
-
-/// `std::remainder`: `x - n y` with `n` the integer nearest `x / y`, ties to even.
-fn ieee_remainder(x: f64, y: f64) -> f64 {
-    let q = x / y;
-    let mut n = q.round();
-    if (q - q.trunc()).abs() == 0.5 && n.rem_euclid(2.0) != 0.0 {
-        n -= q.signum();
-    }
-    x - n * y
+        Extent1d::from_raw(a0, a0 + sweep)
+    }))
 }
 
 /// Radians to the kernel's degrees, snapped onto a quarter turn within [`QUARTER_SNAP_DEG`].
