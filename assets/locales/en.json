@@ -1406,6 +1406,7 @@
   "dialog.selected_count": "↖ {count} selected",
   "dialog.selection_constraint": "Constraint {id}",
   "dialog.selection_external_curve": "{sketch} · curve {id}",
+  "dialog.selection_external_point": "{point} · {sketch}",
   "dialog.selection_guidance": "Select an input to change it. Click selected objects to remove them; Ctrl/Cmd-click also toggles them. Review the preview, then press OK.",
   "dialog.selection_midpoint": "Midpoint · {id}",
   "dialog.selection_profile": "{sketch} · profile {number}",

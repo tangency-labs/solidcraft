@@ -1406,6 +1406,7 @@
   "dialog.selected_count": "↖ {count} đã chọn",
   "dialog.selection_constraint": "Ràng buộc {id}",
   "dialog.selection_external_curve": "{sketch} · đường cong {id}",
+  "dialog.selection_external_point": "{point} · {sketch}",
   "dialog.selection_guidance": "Chọn một mục đầu vào để thay đổi. Nhấp vào đối tượng đã chọn để bỏ chọn; Ctrl/Cmd-nhấp để bật/tắt chọn. Xem trước kết quả, sau đó nhấn OK.",
   "dialog.selection_midpoint": "Trung điểm · {id}",
   "dialog.selection_profile": "{sketch} · biên dạng {number}",

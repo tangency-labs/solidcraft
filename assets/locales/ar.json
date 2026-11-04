@@ -1406,6 +1406,7 @@
   "dialog.selected_count": "↖ {count} محدد",
   "dialog.selection_constraint": "قيد {id}",
   "dialog.selection_external_curve": "{sketch} · منحنى {id}",
+  "dialog.selection_external_point": "{point} · {sketch}",
   "dialog.selection_guidance": "حدد مُدخلًا لتغييره. انقر على العناصر المحددة لإزالتها؛ Ctrl/Cmd مع النقر يبدّل تحديدها أيضًا. راجع المعاينة ثم اضغط موافق.",
   "dialog.selection_midpoint": "نقطة المنتصف · {id}",
   "dialog.selection_profile": "{sketch} · مقطع {number}",

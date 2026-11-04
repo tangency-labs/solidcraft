@@ -1406,6 +1406,7 @@
   "dialog.selected_count": "↖ {count} נבחרו",
   "dialog.selection_constraint": "אילוץ {id}",
   "dialog.selection_external_curve": "{sketch} · עקומה {id}",
+  "dialog.selection_external_point": "{point} · {sketch}",
   "dialog.selection_guidance": "יש לבחור קלט כדי לשנות אותו. לחיצה על אובייקט שנבחר מסירה אותו; גם Ctrl/Cmd+לחיצה מחליפה את מצבו. לאחר בדיקת התצוגה המקדימה יש ללחוץ על אישור.",
   "dialog.selection_midpoint": "נקודת אמצע · {id}",
   "dialog.selection_profile": "{sketch} · פרופיל {number}",

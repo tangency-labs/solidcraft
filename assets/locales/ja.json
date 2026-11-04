@@ -1406,6 +1406,7 @@
   "dialog.selected_count": "↖ {count} 個選択中",
   "dialog.selection_constraint": "拘束 {id}",
   "dialog.selection_external_curve": "{sketch} · 曲線 {id}",
+  "dialog.selection_external_point": "{point} · {sketch}",
   "dialog.selection_guidance": "入力欄を選んで変更します。選択済みのオブジェクトをクリックすると解除できます。Ctrl/Cmd を押しながらクリックしても切り替えられます。プレビューを確認してから OK を押してください。",
   "dialog.selection_midpoint": "中点 · {id}",
   "dialog.selection_profile": "{sketch} · プロファイル {number}",

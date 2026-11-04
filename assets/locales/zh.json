@@ -1406,6 +1406,7 @@
   "dialog.selected_count": "↖ 已选择 {count} 个",
   "dialog.selection_constraint": "约束 {id}",
   "dialog.selection_external_curve": "{sketch} · 曲线 {id}",
+  "dialog.selection_external_point": "{point} · {sketch}",
   "dialog.selection_guidance": "选择输入项进行修改。点击已选对象可取消选择；按住 Ctrl/Cmd 点击也可切换选择。检查预览后，再按“确定”。",
   "dialog.selection_midpoint": "中点 · {id}",
   "dialog.selection_profile": "{sketch} · 轮廓 {number}",
