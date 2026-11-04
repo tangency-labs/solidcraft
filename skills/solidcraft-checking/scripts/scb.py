@@ -77,7 +77,7 @@ class Script:
         self._sketch(sketch, offset)
         self.cmd("sketch.polygon.circumscribed", center=list(at), radius=approx / 2, sides=6, angle=0)
         self.cmd("sketch.dimension", entities=["c1"], type="diameter", value=across_flats)
-        # Equal sides tangent to the circle still let the corners alternate in and out
+        # Record an explicit regular-polygon constraint in the generated script.
         self.cmd("sketch.constraint.polygon", lines=["l1", "l2", "l3", "l4", "l5", "l6"])
         self.cmd("sketch.constraint.horizontal_vertical", line="l3", mode="vertical")
         self.place("c1.center", at, x, y)
