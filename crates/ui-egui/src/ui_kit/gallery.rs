@@ -3061,7 +3061,7 @@ fn preset_card_help_icon_and_carousel_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
-    // The next arrow moves the window by one and stays inert at the end.
+    // The next arrow moves the window by a page and stays inert at the end.
     let mut first = vec![];
     let mut at = None;
     for pass in 0..6 {
