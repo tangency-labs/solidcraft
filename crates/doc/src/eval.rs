@@ -4537,8 +4537,8 @@ fn with_references(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature,
     for r in references {
         distances.push(Document::eval_in(vals, &r.distance, Kind::Length)?);
     }
-    let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(i, r)| (r.edge.0, f.edge_names.get(i).map(String::as_str))).collect();
-    let frame = crate::hole_reference::reference_frame(st, at, dir, &edges, false)?;
+    let inputs = crate::hole_reference::inputs_of(st, references, &f.edge_names)?;
+    let frame = crate::hole_reference::reference_frame_of(st, at, dir, &inputs, false)?;
     let centre = frame.place(at, &distances)?;
     if on_face && !crate::hole_reference::on_reference_face(st, &frame, centre) {
         return Err(DocError::Invalid("the reference distances put the hole's centre off its face".into()));

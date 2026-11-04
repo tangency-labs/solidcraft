@@ -93,6 +93,50 @@ fn a_reference_edge_is_found_on_its_own_part_when_another_part_touches_the_hole(
 }
 
 #[test]
+fn a_hole_can_measure_from_a_plane_or_an_axis() {
+    let mut s = plate();
+    run(&mut s, "parameters.add", json!({"name": "off", "expression": "20 mm"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "off", "name": "Mid"}));
+    // 8 mm from the plane x = 20, on the side the hole was picked (x = 30): the hole goes to x = 28.
+    run(&mut s, "solid.hole", referenced(json!([{"plane": "Mid", "distance": 8}])));
+    let (position, refs) = hole(&s);
+    assert!(position.dist(Vec3::new(28.0, 25.0, 10.0)) < 1e-6, "the hole is placed at (28, 25), not {position:?}");
+    assert_eq!(refs.len(), 1);
+    bore_at(&s, 28.0, 25.0, 10.0);
+    // The plane moves with its parameter and the hole with it, also after a save and reopen.
+    run(&mut s, "parameters.change", json!({"name": "off", "expression": "25 mm"}));
+    bore_at(&s, 33.0, 25.0, 10.0);
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    t.refresh();
+    bore_at(&t, 33.0, 25.0, 10.0);
+    assert_eq!(hole(&t).1, hole(&s).1);
+    // An origin axis measures along the face: the Y axis lies along the edge x = 0 of the top.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.hole", referenced(json!([{"axis": "Y", "distance": 6}, {"edge": [25, 0, 10], "distance": 12}])));
+    let (position, _) = hole(&s);
+    assert!(position.dist(Vec3::new(6.0, 12.0, 10.0)) < 1e-6, "the hole is placed at (6, 12), not {position:?}");
+    bore_at(&s, 6.0, 12.0, 10.0);
+}
+
+#[test]
+fn a_reference_plane_square_to_the_face_or_two_parallel_references_are_refused() {
+    let mut s = plate();
+    let before = s.doc.features.len();
+    for (refs, why) in [
+        (json!([{"plane": "XY", "distance": 5}]), "parallel to the face"),
+        (json!([{"axis": "Z", "distance": 5}]), "square to the face"),
+        (json!([{"plane": "YZ", "distance": 5}, {"edge": [0, 20, 10], "distance": 5}]), "parallel"),
+        (json!([{"plane": "Nope", "distance": 5}]), "Nope"),
+        (json!([{"plane": "YZ", "axis": "X", "distance": 5}]), "one of"),
+    ] {
+        let err = s.execute("solid.hole", &referenced(refs)).unwrap_err().to_string();
+        assert!(err.contains(why), "{why}: {err}");
+    }
+    assert_eq!(s.doc.features.len(), before, "a refused hole adds nothing");
+}
+
+#[test]
 fn a_hole_follows_its_edges_when_the_box_grows() {
     let mut s = plate();
     // From the far edges: 10 mm from x = len, 12 mm from y = wid.
