@@ -78,15 +78,16 @@ fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
     }
 }
 
-/// The hole's mouth on the face: the counterbore's or countersink's diameter, else the bore's.
+/// The hole's mouth on the face: the counterbore's or countersink's diameter, else the bore's (a
+/// tapped hole's tap drill).
 fn footprint(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Vec3> {
-    let Kind::Hole { diameter, kind, cb_diameter, cs_diameter, .. } = &d.kind else { return Vec::new() };
+    let Kind::Hole { diameter, kind, cb_diameter, cs_diameter, opts, .. } = &d.kind else { return Vec::new() };
     let mouth = match kind {
-        1 => cb_diameter,
-        2 => cs_diameter,
-        _ => diameter,
+        1 => len(app, cb_diameter),
+        2 => len(app, cs_diameter),
+        _ => crate::dialogs_hole::bore_diameter(diameter, opts, &|e, k| app.session.doc.eval(e, k).ok()).unwrap_or(0.0),
     };
-    circle(base, n, len(app, mouth) * 0.5)
+    circle(base, n, mouth * 0.5)
 }
 
 #[cfg(test)]

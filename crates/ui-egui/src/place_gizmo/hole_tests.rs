@@ -479,4 +479,10 @@ fn the_dragged_footprint_is_the_holes_mouth() {
     assert!((radius(&h) - 4.0).abs() < 1e-9, "a counterbore: its diameter");
     set(&mut h, 2);
     assert!((radius(&h) - 6.0).abs() < 1e-9, "a countersink: its diameter");
+    // A tapped hole has no Diameter field (the thread sets it): the bore is the tap drill.
+    set(&mut h, 0);
+    if let Some(crate::dialogs::Kind::Hole { opts, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        (opts.tapped, opts.thread, opts.drill) = (true, "M5".into(), None);
+    }
+    assert!((radius(&h) - 2.1).abs() < 1e-9, "a tapped M5: its 4.2 mm tap drill, got {}", radius(&h));
 }
