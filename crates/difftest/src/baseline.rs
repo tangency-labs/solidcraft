@@ -397,9 +397,78 @@ pub fn validate_selected_baselines(dir: &Path, units: &[String]) -> Result<(), H
 
 /// Ratchet violations of `res` against `base` (empty: no regression).
 ///
+/// The baseline passes a unit may reclassify, and to what: the cases whose own record
+/// names them.
+///
+/// Marking a passing case never waives it on its own. A case may move from `pass` to
+/// `cpp_defect` when the upstream-issue record the entry cites names that very case
+/// (base record or addendum), and to `known_mismatch` when the `plan/findings/` record
+/// its `why` cites does — the deliberately replaced construction's own measurement. So
+/// the same change that lists a case also carries its numbers
+/// (`crates/difftest/README.md`, Regression gate). Every other outcome change out of
+/// `pass` stays a regression, and a case whose record does not reach it stays one too.
+#[derive(Debug, Default, Clone)]
+pub struct EvidencedPasses {
+    cpp_defect: BTreeSet<String>,
+    known_mismatch: BTreeSet<String>,
+}
+
+impl EvidencedPasses {
+    /// The cases of `unit` whose record names them, by the outcome it evidences. A
+    /// record that cannot be read evidences nothing, so the ratchet keeps its say.
+    #[must_use]
+    pub fn load(root: &Path, unit: &str) -> Self {
+        let Ok(entries) = crate::known::for_unit(root, unit) else {
+            return Self::default();
+        };
+        let mut defects: BTreeMap<String, String> = BTreeMap::new();
+        let mut out = Self::default();
+        for e in entries {
+            if let Some(id) = e.cpp_defect.as_deref() {
+                let text = defects.entry(id.to_string()).or_insert_with(|| {
+                    crate::known::cpp_defect_records(root, id).unwrap_or_default()
+                });
+                if crate::known::names_case(text, &e.case) {
+                    out.cpp_defect.insert(e.case);
+                }
+            } else {
+                let text = crate::known::findings_records(root, &e.why);
+                if crate::known::names_case(&text, &e.case) {
+                    out.known_mismatch.insert(e.case);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `case` may move from a baseline `pass` to `outcome`.
+    #[must_use]
+    pub fn allows(&self, case: &str, outcome: &str) -> bool {
+        match outcome {
+            "cpp_defect" => self.cpp_defect.contains(case),
+            "known_mismatch" => self.known_mismatch.contains(case),
+            _ => false,
+        }
+    }
+}
+
+/// What the ratchet says about a baseline pass that is now listed without its own
+/// evidence, or that changed to an outcome evidence never covers.
+fn listed_without_evidence(case: &str, outcome: &str) -> String {
+    match outcome {
+        "cpp_defect" => format!(
+            "case `{case}` passed in the baseline, now cpp_defect, and its record does not name it"
+        ),
+        "known_mismatch" => format!(
+            "case `{case}` passed in the baseline, now known_mismatch, and no finding names it"
+        ),
+        other => format!("case `{case}` passed in the baseline, now {other}"),
+    }
+}
+
 /// A formerly passing case that now fails already fails the unit. Known mismatch
 /// outcomes and previously exercised numerical coverage are also ratcheted.
-pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
+pub fn ratchet(base: &Baseline, res: &UnitResult, evidenced: &EvidencedPasses) -> Vec<Violation> {
     let now: BTreeMap<&str, &crate::runner::CaseResult> =
         res.cases.iter().map(|c| (c.name.as_str(), c)).collect();
     let same_seeds = base.seeds == u64::try_from(res.seeds).ok();
@@ -454,14 +523,10 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
             if o == CaseOutcome::Fail {
                 continue;
             }
-            push(
-                &b.name,
-                format!(
-                    "case `{}` passed in the baseline, now {}",
-                    b.name,
-                    o.as_str()
-                ),
-            );
+            if evidenced.allows(&b.name, o.as_str()) {
+                continue; // its record carries the measured evidence for this case
+            }
+            push(&b.name, listed_without_evidence(&b.name, o.as_str()));
             continue;
         }
         if b.compared_values && !c.compared_values() && o != CaseOutcome::Parked {
@@ -501,7 +566,11 @@ fn listed_kind(outcome: &str) -> &'static str {
 /// Ratchet violations of a completed report `now` against the earlier report `base`
 /// (`--compare-reports`). The same rules as [`ratchet`], applied to two parsed reports
 /// instead of a live [`UnitResult`]: the sweep ran elsewhere and only its reports remain.
-pub fn ratchet_reports(base: &Baseline, now: &Baseline) -> Vec<Violation> {
+pub fn ratchet_reports(
+    base: &Baseline,
+    now: &Baseline,
+    evidenced: &EvidencedPasses,
+) -> Vec<Violation> {
     let current: BTreeMap<&str, &BaselineCase> =
         now.cases.iter().map(|c| (c.name.as_str(), c)).collect();
     let mut out = Vec::new();
@@ -546,13 +615,10 @@ pub fn ratchet_reports(base: &Baseline, now: &Baseline) -> Vec<Violation> {
             if c.outcome == "fail" {
                 continue; // already fails the unit in the sweep
             }
-            push(
-                &b.name,
-                format!(
-                    "case `{}` passed in the baseline, now {}",
-                    b.name, c.outcome
-                ),
-            );
+            if evidenced.allows(&b.name, &c.outcome) {
+                continue; // its record carries the measured evidence for this case
+            }
+            push(&b.name, listed_without_evidence(&b.name, &c.outcome));
             continue;
         }
         if b.compared_values && !c.compared_values && c.outcome != "parked" {
@@ -712,6 +778,30 @@ impl Waivers {
 mod tests {
     use super::*;
     use crate::case::CaseSource;
+
+    /// The ratchet without any evidenced case: what every test below but the
+    /// `cpp_defect` ones expects, and what a unit with no `cpp_defect` entry gets.
+    fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
+        super::ratchet(base, res, &EvidencedPasses::default())
+    }
+
+    /// As [`ratchet`], for the report-to-report comparison.
+    fn ratchet_reports(base: &Baseline, now: &Baseline) -> Vec<Violation> {
+        super::ratchet_reports(base, now, &EvidencedPasses::default())
+    }
+
+    /// An [`EvidencedPasses`] whose records name exactly `defects` for `cpp_defect`
+    /// and `findings` for `known_mismatch`.
+    fn evidenced(defects: &[&str], findings: &[&str]) -> EvidencedPasses {
+        let mut e = EvidencedPasses::default();
+        for c in defects {
+            e.cpp_defect.insert((*c).to_string());
+        }
+        for c in findings {
+            e.known_mismatch.insert((*c).to_string());
+        }
+        e
+    }
     use crate::compare::CaseDiff;
     use crate::output::Deferred;
     use crate::runner::CaseResult;
@@ -731,6 +821,61 @@ mod tests {
             status: Some("green".into()),
             seeds: Some(seeds),
             cases,
+        }
+    }
+
+    /// A baseline pass may be listed when its own record names the case, and may not
+    /// when it does not. The upstream-issue record evidences `cpp_defect`, the finding
+    /// evidences `known_mismatch`, and neither stands in for the other.
+    #[test]
+    fn a_baseline_pass_is_listed_only_with_evidence_for_that_case() {
+        let b = base(&[("p", "pass", true, false)]);
+
+        for (outcome, defects, findings, naming) in [
+            (
+                "cpp_defect",
+                &["p"][..],
+                &[][..],
+                "its record does not name it",
+            ),
+            ("known_mismatch", &[][..], &["p"][..], "no finding names it"),
+        ] {
+            let now = unit(vec![case("p", outcome, 1)]);
+            assert!(
+                super::ratchet(&b, &now, &evidenced(defects, findings)).is_empty(),
+                "{outcome} was not let through on its own evidence"
+            );
+
+            // the other record's evidence does not stand in for it
+            let v = super::ratchet(&b, &now, &evidenced(findings, defects));
+            assert_eq!(v.len(), 1, "{outcome} slipped through on the wrong record");
+            assert!(v[0].detail.contains(naming), "{}", v[0].detail);
+
+            // nor does evidence for a different case
+            let v = super::ratchet(&b, &now, &evidenced(&["other"], &["other"]));
+            assert_eq!(v.len(), 1, "{outcome} slipped through on another case");
+
+            // the same, report to report
+            let rb = report(16, vec![bcase("p", "pass", true)]);
+            let rn = report(16, vec![bcase("p", outcome, false)]);
+            assert!(super::ratchet_reports(&rb, &rn, &evidenced(defects, findings)).is_empty());
+            let v = super::ratchet_reports(&rb, &rn, &evidenced(&[], &[]));
+            assert_eq!(v.len(), 1);
+            assert!(v[0].detail.contains(naming), "{}", v[0].detail);
+        }
+    }
+
+    /// Evidence does not let through the outcomes no record can evidence.
+    #[test]
+    fn evidence_does_not_waive_the_other_outcomes() {
+        let b = base(&[("p", "pass", true, false)]);
+        for outcome in ["parked", "deferred"] {
+            let v = super::ratchet(
+                &b,
+                &unit(vec![case("p", outcome, 1)]),
+                &evidenced(&["p"], &["p"]),
+            );
+            assert_eq!(v.len(), 1, "{outcome} slipped through");
         }
     }
 

@@ -365,8 +365,11 @@ restricts an entry to a C++ reference on glibc; elsewhere the case must pass.
 
 An entry may add `cpp_defect = "<id>"` only when the C++ reference itself is verified
 wrong and the Rust result is the correct one: `<id>` (`UB-`/`WR-`/`ND-`/`HANG-<n>`)
-must name exactly one `plan/upstream-issues/<id>--<slug>.md` with `- **Confirmed:**
-yes` (checked when the list is loaded; a bad id fails the unit). Such a case is
+must name exactly one `plan/upstream-issues/<id>--<slug>.md`, confirmed by a
+`- **Confirmed:** yes` line in that record **or in one of its
+`<id>--addendum-<date>-<slug>.md` files** (checked when the list is loaded; a bad id
+fails the unit). A merged record is never edited (`AGENTS.md` section 4b), so a defect
+that is confirmed only later carries its confirmation in an addendum. Such a case is
 **parked**: the gate does not run it, it counts neither as a pass nor as a failure,
 and it does not keep the unit from `green`. It is reported with outcome `parked` and
 its issue id (`cases_parked`, ` parked=N` on the summary line, a `parked <case> (<id>)`
@@ -401,8 +404,28 @@ must remain passing, including against `known_mismatch`; cases that compared
 float/integer/topology values must keep value coverage. Deferred, failing and
 known-mismatch, `cpp_defect` and parked cases cannot disappear. Each must remain one
 of those three (adding or dropping the `cpp_defect` marker) or become a genuine pass;
-it cannot become deferred, rejected or failing. A baseline pass may not become
-`known_mismatch`, `cpp_defect` or parked, so marking a passing case never waives it.
+it cannot become deferred, rejected or failing. A baseline pass may not become parked,
+so marking a passing case never waives it.
+
+**A baseline pass may be listed, but only with its own evidence.** A change that makes
+solidcore more correct moves cases that passed before, and hiding them is not an option
+(`AGENTS.md` section 4b). Two moves are allowed, each only when the record the entry
+cites **names that case**:
+
+- to `cpp_defect`, when the C++ is wrong for the case and the upstream-issue record
+  names it, in the base record or in an addendum: what the C++ answers, what solidcore
+  answers and why solidcore's answer is the right one;
+- to `known_mismatch`, when the construction was deliberately replaced or deleted in the
+  same change and the `plan/findings/<slug>.md` record the `why` cites names it — in
+  that record or in one of its `--addendum-` files — with the value that moves and how
+  the old path's result was reproduced.
+
+A record that only describes the change in general lists nothing, so nothing is waived
+cheaply, and a case the evidence does not reach stays a regression and keeps the sweep
+red until it is measured. The ratchet reports such a case as `passed in the baseline,
+now cpp_defect, and its record does not name it` or `... now known_mismatch, and no
+finding names it`. Parked and the other outcomes are unchanged: no evidence lets a
+baseline pass become `parked`, `deferred` or `rejected`.
 Every retained case that compared values must keep value coverage, except a case that
 is now parked (it is not run). Rejected fixture constructors may be
 removed; new passing cases and genuine fixes are allowed. Changed seeds and

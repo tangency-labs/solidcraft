@@ -126,7 +126,10 @@ pub const UPSTREAM_ISSUES_DIR: &str = "plan/upstream-issues";
 
 /// Checks that `id` names exactly one confirmed upstream issue under
 /// `<root>/plan/upstream-issues/`: a file `<id>--<slug>.md` (not an addendum) whose
-/// heading is `#### <id>.` and that has a `- **Confirmed:** yes` line.
+/// heading is `#### <id>. `, confirmed by a `- **Confirmed:** yes` line in that file or
+/// in one of its `<id>--addendum-<date>-<slug>.md` files. A merged record is never
+/// edited (`AGENTS.md` section 4b), so a defect confirmed after its record was written
+/// carries the confirmation in an addendum.
 pub fn check_cpp_defect(root: &Path, id: &str) -> Result<(), String> {
     let well_formed = id.split_once('-').is_some_and(|(series, num)| {
         ["UB", "WR", "ND", "HANG"].contains(&series)
@@ -142,6 +145,7 @@ pub fn check_cpp_defect(root: &Path, id: &str) -> Result<(), String> {
     let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let prefix = format!("{id}--");
     let mut found = Vec::new();
+    let mut addenda = Vec::new();
     for e in entries {
         let name = e
             .map_err(|e| format!("{}: {e}", dir.display()))?
@@ -151,11 +155,16 @@ pub fn check_cpp_defect(root: &Path, id: &str) -> Result<(), String> {
         let markdown = Path::new(&name)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-        if name.starts_with(&prefix) && markdown && !name.contains("--addendum-") {
-            found.push(name);
+        if name.starts_with(&prefix) && markdown {
+            if name.contains("--addendum-") {
+                addenda.push(name);
+            } else {
+                found.push(name);
+            }
         }
     }
     found.sort();
+    addenda.sort();
     let [name] = found.as_slice() else {
         return Err(format!(
             "cpp_defect `{id}`: expected one {UPSTREAM_ISSUES_DIR}/{id}--<slug>.md, found {}",
@@ -169,16 +178,140 @@ pub fn check_cpp_defect(root: &Path, id: &str) -> Result<(), String> {
             "cpp_defect `{id}`: {UPSTREAM_ISSUES_DIR}/{name} does not start with `#### {id}. `"
         ));
     }
-    let confirmed = text.lines().any(|l| {
+    if confirms(&text) {
+        return Ok(());
+    }
+    for a in &addenda {
+        let p = dir.join(a);
+        let t = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        if confirms(&t) {
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "cpp_defect `{id}`: {UPSTREAM_ISSUES_DIR}/{name} is not confirmed \
+         (`- **Confirmed:** yes`), and neither are its {} addenda",
+        addenda.len()
+    ))
+}
+
+/// Whether a record's text carries `- **Confirmed:** yes`.
+fn confirms(text: &str) -> bool {
+    text.lines().any(|l| {
         l.strip_prefix("- **Confirmed:**")
             .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("yes"))
-    });
-    if !confirmed {
-        return Err(format!(
-            "cpp_defect `{id}`: {UPSTREAM_ISSUES_DIR}/{name} is not confirmed (`- **Confirmed:** yes`)"
-        ));
+    })
+}
+
+/// The text of every record for `id` under `<root>/plan/upstream-issues/`, base and
+/// addenda, joined. Used to see whether a record carries evidence for a named case.
+pub fn cpp_defect_records(root: &Path, id: &str) -> Result<String, String> {
+    let dir = root.join(UPSTREAM_ISSUES_DIR);
+    let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let prefix = format!("{id}--");
+    let mut names = Vec::new();
+    for e in entries {
+        let name = e
+            .map_err(|e| format!("{}: {e}", dir.display()))?
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let markdown = Path::new(&name)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        if name.starts_with(&prefix) && markdown {
+            names.push(name);
+        }
     }
-    Ok(())
+    names.sort();
+    let mut text = String::new();
+    for n in names {
+        let p = dir.join(&n);
+        text.push_str(&std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?);
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+/// The directory of finding records, relative to the repository root.
+pub const FINDINGS_DIR: &str = "plan/findings";
+
+/// The `plan/findings/<slug>.md` records a `why` cites, in the order they appear.
+///
+/// An ordinary known mismatch has no `cpp_defect` id; what it does carry is its finding,
+/// named in the entry's prose. That record is where a deliberately replaced construction
+/// states each case's measured change.
+#[must_use]
+pub fn findings_cited(why: &str) -> Vec<String> {
+    const NEEDLE: &str = "plan/findings/";
+    const EXT: &str = ".md";
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = why;
+    while let Some(i) = rest.find(NEEDLE) {
+        let tail = &rest[i + NEEDLE.len()..];
+        let Some(e) = tail.find(EXT) else {
+            break;
+        };
+        let slug = &tail[..e + EXT.len()];
+        if !slug.contains('/') && !out.iter().any(|o| o == slug) {
+            out.push(slug.to_string());
+        }
+        rest = &tail[e + EXT.len()..];
+    }
+    out
+}
+
+/// The text of the finding records a `why` cites, joined. Missing files contribute
+/// nothing, so a citation that does not resolve evidences nothing.
+#[must_use]
+pub fn findings_records(root: &Path, why: &str) -> String {
+    let dir = root.join(FINDINGS_DIR);
+    let mut text = String::new();
+    for name in findings_cited(why) {
+        if let Ok(t) = std::fs::read_to_string(dir.join(&name)) {
+            text.push_str(&t);
+            text.push('\n');
+        }
+        // A finding is not edited either: an update is
+        // `<name without .md>--addendum-<date>-<slug>.md` (plan/findings/README.md), and
+        // a case measured there counts like one measured in the record itself.
+        let Some(stem) = name.strip_suffix(".md") else {
+            continue;
+        };
+        let prefix = format!("{stem}--addendum-");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut addenda: Vec<String> = entries
+            .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+            .filter(|n| {
+                n.starts_with(&prefix)
+                    && Path::new(n)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+            })
+            .collect();
+        addenda.sort();
+        for a in addenda {
+            if let Ok(t) = std::fs::read_to_string(dir.join(a)) {
+                text.push_str(&t);
+                text.push('\n');
+            }
+        }
+    }
+    text
+}
+
+/// Whether `text` names `case` as a whole word, so `gen052` does not match `gen0528`.
+#[must_use]
+pub fn names_case(text: &str, case: &str) -> bool {
+    if case.is_empty() {
+        return false;
+    }
+    let boundary = |c: Option<char>| !c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+    text.match_indices(case).any(|(i, _)| {
+        boundary(text[..i].chars().next_back()) && boundary(text[i + case.len()..].chars().next())
+    })
 }
 
 /// The entries of `unit` from `<root>/crates/difftest/known_mismatches/<unit>.toml`
@@ -253,6 +386,142 @@ mod tests {
             cfg!(all(target_os = "linux", target_env = "gnu"))
         );
         assert!(entry("libc = \"musl\"\n").is_err());
+    }
+
+    /// A merged record is never edited, so a defect confirmed later carries its
+    /// confirmation in an addendum; the id check has to read it there.
+    #[test]
+    fn an_addendum_can_carry_the_confirmation() {
+        let dir = std::env::temp_dir().join(format!("difftest-addendum-{}", std::process::id()));
+        let issues = dir.join(UPSTREAM_ISSUES_DIR);
+        std::fs::create_dir_all(&issues).unwrap();
+        std::fs::write(
+            issues.join("WR-100--base.md"),
+            "#### WR-100. t
+- **Confirmed:** no (no C++ run here)
+",
+        )
+        .unwrap();
+        // unconfirmed base alone: not usable
+        assert!(check_cpp_defect(&dir, "WR-100").is_err());
+
+        std::fs::write(
+            issues.join("WR-100--addendum-2026-11-04-measured.md"),
+            "Updates: WR-100
+- **Confirmed:** yes, on the difftest's own C++ reference
+",
+        )
+        .unwrap();
+        check_cpp_defect(&dir, "WR-100").unwrap();
+
+        // an addendum that confirms nothing leaves it unusable
+        std::fs::write(
+            issues.join("WR-101--base.md"),
+            "#### WR-101. t
+- **Confirmed:** no
+",
+        )
+        .unwrap();
+        std::fs::write(
+            issues.join("WR-101--addendum-2026-11-04-x.md"),
+            "Updates: WR-101
+nothing confirmed here
+",
+        )
+        .unwrap();
+        let e = check_cpp_defect(&dir, "WR-101").unwrap_err();
+        assert!(e.contains("addenda"), "{e}");
+
+        // the base record must still exist and carry the heading
+        std::fs::write(
+            issues.join("WR-102--addendum-2026-11-04-only.md"),
+            "Updates: WR-102
+- **Confirmed:** yes
+",
+        )
+        .unwrap();
+        assert!(check_cpp_defect(&dir, "WR-102").is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `why` cites its finding by path; that is where an ordinary known mismatch
+    /// keeps its evidence, since it has no upstream-issue id.
+    #[test]
+    fn findings_cited_reads_the_paths_out_of_a_why() {
+        assert_eq!(
+            findings_cited("C++ succeeds, Rust refuses (plan/findings/blend.corner--one-path.md)"),
+            vec!["blend.corner--one-path.md"]
+        );
+        // several, in order, without repeats
+        assert_eq!(
+            findings_cited(
+                "see plan/findings/a.md and plan/findings/b.md, again plan/findings/a.md"
+            ),
+            vec!["a.md", "b.md"]
+        );
+        // nothing to cite
+        assert!(findings_cited("no record named here").is_empty());
+        assert!(findings_cited("plan/findings/").is_empty());
+        // a nested path is not a record name
+        assert!(findings_cited("plan/findings/sub/dir.md").is_empty());
+    }
+
+    /// A finding is not edited either, so a case measured in its addendum counts like
+    /// one measured in the record itself.
+    #[test]
+    fn a_findings_addendum_carries_evidence_too() {
+        let dir = std::env::temp_dir().join(format!("difftest-findings-{}", std::process::id()));
+        let findings = dir.join(FINDINGS_DIR);
+        std::fs::create_dir_all(&findings).unwrap();
+        let why = "replaced (plan/findings/blend.corner--one-path.md)";
+        std::fs::write(
+            findings.join("blend.corner--one-path.md"),
+            "the old corner is gone; cases follow in an addendum
+",
+        )
+        .unwrap();
+        assert!(!names_case(&findings_records(&dir, why), "gen0042"));
+
+        std::fs::write(
+            findings.join("blend.corner--one-path--addendum-2026-11-04-cases.md"),
+            "Updates: plan/findings/blend.corner--one-path.md
+| gen0042 | 1.5 | 1.25 |
+",
+        )
+        .unwrap();
+        assert!(names_case(&findings_records(&dir, why), "gen0042"));
+        // a case no record reaches is still unevidenced
+        assert!(!names_case(&findings_records(&dir, why), "gen0043"));
+        // an addendum of a record that was never cited does not count
+        std::fs::write(
+            findings.join("other--addendum-2026-11-04-x.md"),
+            "| gen0044 |
+",
+        )
+        .unwrap();
+        assert!(!names_case(&findings_records(&dir, why), "gen0044"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The evidence check matches a case as a whole word, so a shorter name does not
+    /// ride on a longer one.
+    #[test]
+    fn names_case_matches_whole_words() {
+        let text = "the cases gen0528, ovf0160 and ovf0276 are measured";
+        assert!(names_case(text, "gen0528"));
+        assert!(names_case(text, "ovf0160"));
+        assert!(!names_case(text, "gen052"));
+        assert!(!names_case(text, "gen05281"));
+        assert!(!names_case(text, "gen0812"));
+        assert!(!names_case(text, ""));
+        assert!(names_case(
+            "case `bad_first_eval_no_interval`:",
+            "bad_first_eval_no_interval"
+        ));
+        assert!(!names_case(
+            "bad_first_eval_no_interval_2",
+            "bad_first_eval_no_interval"
+        ));
     }
 
     #[test]

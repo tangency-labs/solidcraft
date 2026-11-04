@@ -570,7 +570,11 @@ fn main() -> ExitCode {
             let mut violations: Vec<Violation> = baseline::value_share(&res).into_iter().collect();
             if let (Some(dir), None) = (&args.baseline, &args.filter) {
                 match baseline::load_baseline(dir, id) {
-                    Ok(Some(b)) => violations.extend(baseline::ratchet(&b, &res)),
+                    Ok(Some(b)) => violations.extend(baseline::ratchet(
+                        &b,
+                        &res,
+                        &baseline::EvidencedPasses::load(&root, id),
+                    )),
                     Ok(None) => println!("  baseline: no earlier report (new unit)"),
                     Err(e) => {
                         eprintln!("difftest: {e}");
@@ -661,6 +665,7 @@ fn compare_reports_main(args: &Args, current: &Path, waivers: &Waivers) -> ExitC
         eprintln!("difftest: {e}");
         ExitCode::from(2)
     };
+    let root = repo_root();
     let base_units = match baseline::baseline_units(base_dir) {
         Ok(u) => u,
         Err(e) => return setup(e),
@@ -695,7 +700,8 @@ fn compare_reports_main(args: &Args, current: &Path, waivers: &Waivers) -> ExitC
             (Err(e), _) | (_, Err(e)) => return setup(e),
             (_, Ok(None)) => return setup(difftest::HarnessError::new("report disappeared")),
         };
-        let violations = baseline::ratchet_reports(&b, &n);
+        let violations =
+            baseline::ratchet_reports(&b, &n, &baseline::EvidencedPasses::load(&root, unit));
         if violations.is_empty() {
             println!("OK {unit} ({} baseline cases retained)", b.cases.len());
         } else {

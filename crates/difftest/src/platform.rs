@@ -127,7 +127,12 @@ mod tests {
                     compared_values: true,
                 }],
             };
-            assert!(!crate::baseline::ratchet(&baseline, &r).is_empty());
+            assert!(!crate::baseline::ratchet(
+                &baseline,
+                &r,
+                &crate::baseline::EvidencedPasses::default()
+            )
+            .is_empty());
         }
     }
 
