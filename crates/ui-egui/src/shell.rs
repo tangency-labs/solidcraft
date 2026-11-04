@@ -115,6 +115,10 @@ pub(crate) struct State {
     pub left_space: Option<Rect>,
     /// The left column an open dialog holds this frame (`dialog_column`).
     pub dialog_column: Option<Rect>,
+    /// The design tree over the view while a dialog holds the left column (`dialog_tree`), and
+    /// whether it is open (folded otherwise; each dialog starts with it folded).
+    pub dialog_tree: Option<Rect>,
+    pub dialog_tree_open: bool,
     /// The status bar along the window's bottom edge, while it is shown (#7243).
     pub status_bar: Option<Rect>,
 }
@@ -174,6 +178,7 @@ fn occluding_rects(app: &SolveApp, fitting: bool) -> Vec<Rect> {
     rects.extend(app.viewport.palette_rect.filter(|_| app.session.active_sketch.is_some()));
     rects.extend(app.viewport.dialog_rect.filter(|_| app.dialog.is_some() || app.tree.redefine.is_some()));
     rects.extend(crate::view_confirm::rect(app));
+    rects.extend(app.shell.dialog_tree.filter(|_| app.dialog.is_some()));
     rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
