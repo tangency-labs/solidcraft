@@ -56,7 +56,11 @@ fn mesh_conversion_is_parametric_undoable_and_editable_after_cold_reopen() {
     run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm","name":"Reconstructed prism"}));
     let check = |s: &Session| {
         let feature = s.doc.features.iter().find(|f| matches!(&f.kind, FeatureKind::MeshConvert { .. })).unwrap();
-        assert_eq!(serde_json::to_value(feature).unwrap()["source_bound_names"], json!(true), "new conversions persist source-bound names");
+        assert_eq!(
+            serde_json::to_value(feature).unwrap()["reconstruction"],
+            json!("analytic_v1"),
+            "new conversions persist their analytic reconstruction version"
+        );
         let state = s.model.state();
         let body = &state.body("Mesh").unwrap().body;
         assert!(!body.is_mesh());

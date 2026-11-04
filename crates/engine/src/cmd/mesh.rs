@@ -1,8 +1,8 @@
 //! Parametric reconstruction of imported mechanical mesh bodies.
 
 use serde_json::Value;
-use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
+use solidcraft_doc::{FeatureKind, MeshReconstruction};
 
 use super::{
     CommandSpec,
@@ -51,7 +51,7 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     // Conversion edits the component definition, independent of its occurrence placement.
     let active_component = std::mem::replace(&mut s.active_component, owner);
     let active_occurrence_path = s.active_occurrence_path.take();
-    let result = add_feature(s, p, FeatureKind::MeshConvert { body: body.into(), tolerance, source_bound_names: true });
+    let result = add_feature(s, p, FeatureKind::MeshConvert { body: body.into(), tolerance, reconstruction: MeshReconstruction::AnalyticV1 });
     s.active_component = active_component;
     s.active_occurrence_path = active_occurrence_path;
     result

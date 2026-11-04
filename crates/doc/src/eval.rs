@@ -7984,21 +7984,25 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::MeshConvert { body, tolerance, source_bound_names } => {
+        FeatureKind::MeshConvert { body, tolerance, reconstruction } => {
             let tolerance = val(vals, tolerance, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             if doc.model_body_component(source) != f.component {
                 return Err(DocError::Invalid("activate the mesh body's component before converting it".into()));
             }
-            let converted = kernel::convert_prismatic_mesh(&source.body, tolerance)?;
+            let converted = match reconstruction {
+                crate::MeshReconstruction::LegacyPrism => kernel::convert_legacy_prismatic_mesh(&source.body, tolerance),
+                crate::MeshReconstruction::AnalyticV1 => kernel::convert_prismatic_mesh(&source.body, tolerance),
+            }?;
             let converted = converted.with_color(source.body.color());
-            let result = if *source_bound_names {
-                let (positions, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
-                let converted = crate::lineage::reconstructed_tool(converted, positions, triangles, tolerance);
-                ModelBody::traced_new(source.name.clone(), converted, f.id)
-            } else {
-                ModelBody::new(source.name.clone(), converted, f.id)
+            let result = match reconstruction {
+                crate::MeshReconstruction::LegacyPrism => ModelBody::new(source.name.clone(), converted, f.id),
+                crate::MeshReconstruction::AnalyticV1 => {
+                    let (positions, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+                    let converted = crate::lineage::reconstructed_tool(converted, positions, triangles, tolerance);
+                    ModelBody::traced_new(source.name.clone(), converted, f.id)
+                }
             };
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;

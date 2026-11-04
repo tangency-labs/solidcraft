@@ -9,6 +9,7 @@ use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use crate::{Body, KernelError, Result};
 
 mod curves;
+mod legacy;
 mod parts;
 
 const MAX_TRIANGLES: usize = 50_000;
@@ -28,6 +29,11 @@ fn over_budget(triangles: usize) -> KernelError {
     invalid(&format!(
         "the mesh has {triangles} triangles, more than the {MAX_TRIANGLES} conversion can take; only closed constant-section parts and certified combinations joined at planar shoulders can be converted, so a freeform mesh is refused at any size"
     ))
+}
+
+/// Replay the original constant-section algorithm so saved polygon walls and references do not change.
+pub fn convert_legacy_prismatic_mesh(body: &Body, tolerance: f64) -> Result<Body> {
+    legacy::convert_prismatic_mesh(body, tolerance)
 }
 
 /// Reconstruct straight-extrusion parts and their planar shoulders as analytic planes and, where certified

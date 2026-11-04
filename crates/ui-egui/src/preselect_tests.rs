@@ -2991,13 +2991,24 @@ fn failed_convert_mesh_submissions_keep_the_dialog_and_original_mesh() {
     doc.features.last_mut().unwrap().body_names = vec!["Mesh".into()];
     let mut h = crate::scenario::Harness::new();
     h.app.session = Session::new(doc);
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
     let before = h.app.session.doc.to_json();
     h.app.start("mesh.convert");
     h.frames(1);
     for _ in 0..3 {
+        let (finish, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
         h.step(&json!({"key":"Enter"})).unwrap();
-        h.frames(2);
+        assert!(h.app.applying.is_some(), "each retry dispatches to the worker");
+        assert_eq!(h.app.session.doc.to_json(), before, "the pending worker leaves the imported design alone");
+        finish.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while h.app.applying.is_some() && std::time::Instant::now() < deadline {
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(h.app.applying.is_none(), "the failed worker finishes before checking its dialog error");
         let dialog = h.app.dialog.as_ref().expect("failed conversion stays open");
         assert!(dialog.error.as_ref().is_some_and(|e| e.contains("mesh conversion")), "{:?}", dialog.error);
         assert_eq!(h.app.session.doc.to_json(), before);
