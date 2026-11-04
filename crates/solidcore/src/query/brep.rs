@@ -58,6 +58,10 @@
 //!   single-region classification without boundary intersections skips it, as upstream).
 //!   A caller keeps one query while
 //!   the B-rep is not edited and makes a fresh one after an edit (upstream revalidates).
+//!   The query also keeps the face surface caches its boundary solves and ray fires
+//!   make, for its next solve, as upstream keeps each on its surface: each face's
+//!   cache is built once per query, not once per solve. They serve a solve only in the
+//!   kernel and editing state they were made in.
 //!   [`BrepQuery::of_brep`] and [`BrepClassifier::of_brep`] resolve a lone B-rep's
 //!   identities from its [`Brep::naming`] scheme and proven owner keys
 //!   ([`BrepIdentity::default`] assumes [`arena_identity`]). Face boundary solves prepare
@@ -541,6 +545,9 @@ const CLASSIFY_RAYS: [(Vec3, Vec3); 3] = [
 pub struct BrepQuery<'a> {
     identity: ProvenBrepIdentity<'a>,
     cache: OnceCell<BrepCache>,
+    /// The face surface caches the classification solves made, kept for the next solve
+    /// as upstream keeps them on the surfaces (`smsurf_GetSurfaceCache`).
+    face_caches: ray::KeptFaceCaches,
 }
 
 impl core::fmt::Debug for BrepQuery<'_> {
@@ -588,6 +595,7 @@ impl<'a> BrepQuery<'a> {
         Self {
             identity,
             cache: OnceCell::new(),
+            face_caches: ray::KeptFaceCaches::new(),
         }
     }
 
@@ -605,6 +613,7 @@ impl<'a> BrepQuery<'a> {
         Self {
             identity: ProvenBrepIdentity::plain(identity),
             cache: OnceCell::from(cache),
+            face_caches: ray::KeptFaceCaches::new(),
         }
     }
 
@@ -750,7 +759,15 @@ impl<'a> BrepQuery<'a> {
             } else {
                 let b = target.mutable()?;
                 let cache = self.cache(k, b)?;
-                solve_mutable_brep_point(k, b, &identity, cache, point, options)?
+                ray::solve_mutable_brep_point_kept(
+                    k,
+                    b,
+                    &identity,
+                    cache,
+                    &self.face_caches,
+                    point,
+                    options,
+                )?
             };
 
             // when the point is on a Brep Face
@@ -783,21 +800,29 @@ impl<'a> BrepQuery<'a> {
         // Now do a ray fire to determine which region this lies in. Fire extra rays
         // only if the first rays fail: `Some(region)` on success (the region may be
         // none), `None` on failure.
-        // (the solve of each ray fire builds the cache when needed)
+        // (the solve of each ray fire builds the cache when needed; the face caches its
+        // solves make are kept for the next, `bp2::ray_fire` on them)
         let mut fire = |direction: Vec3| -> Result<Option<Option<RegionId>>> {
             let b = target.mutable()?;
             let fired = self.cache(k, b).and_then(|cache| {
-                bp2::ray_fire(
+                bp2::ray_fire_with_solver(
                     k,
                     b,
-                    brep_id,
-                    cache,
-                    keys,
-                    owner_of,
                     point,
                     direction,
                     point_zone_tol_3d,
                     None,
+                    |b, point, options| {
+                        ray::solve_mutable_brep_point_kept(
+                            k,
+                            b,
+                            &identity,
+                            cache,
+                            &self.face_caches,
+                            point,
+                            options,
+                        )
+                    },
                 )
             });
             Ok(native_failure(fired)?.map(|r| r.region))
@@ -1424,6 +1449,77 @@ mod tests {
             .unwrap();
         assert_eq!(inside.object(), solid);
         assert!(trim_count(&b) > 0, "the trims are made on the box itself");
+    }
+
+    /// A query keeps the face caches its ray solves build (upstream keeps them on the
+    /// surfaces): a face's cache is built once however many points it classifies, and
+    /// the classifications equal those of a fresh query per point (#2494).
+    #[test]
+    fn classifications_build_each_face_cache_once() {
+        let mut k = Kernel::default();
+        let mut cylinder = || {
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0)
+                .unwrap()
+        };
+        let (mut kept_brep, mut fresh_brep) = (cylinder(), cylinder());
+        let points = [
+            Point3::new(1.0, 1.0, 5.0),
+            Point3::new(-2.0, 1.0, 15.0),
+            Point3::new(0.5, -3.0, 10.0),
+            Point3::new(10.0, 0.0, 10.0),
+            Point3::new(0.0, 0.0, 30.0),
+        ];
+        let faces = kept_brep.faces().ids().count();
+
+        let query = BrepQuery::of_brep(&kept_brep);
+        let mut kept = Vec::new();
+        for p in points {
+            for boundary in [false, true] {
+                let pc = query.point_3d_classify(&k, &mut kept_brep, p, 1e-6, boundary);
+                kept.push(format!("{pc:?}"));
+            }
+        }
+        let builds = query.face_caches.builds();
+        assert!(builds > 0, "the ray fires reach a face cache");
+        assert!(builds <= faces, "{builds} builds for {faces} faces");
+
+        let mut fresh = Vec::new();
+        let mut fresh_builds = 0;
+        for p in points {
+            for boundary in [false, true] {
+                let query = BrepQuery::of_brep(&fresh_brep);
+                let pc = query.point_3d_classify(&k, &mut fresh_brep, p, 1e-6, boundary);
+                fresh.push(format!("{pc:?}"));
+                fresh_builds += query.face_caches.builds();
+            }
+        }
+        assert_eq!(kept, fresh);
+        assert!(
+            fresh_builds > builds,
+            "{fresh_builds} fresh vs {builds} kept"
+        );
+        // what the solves may make on the B-rep: tolerances and UV trim curves
+        let made = |b: &Brep| {
+            let tolerances: Vec<_> = b
+                .edges()
+                .iter()
+                .map(|(_, e)| e.tolerance.to_bits())
+                .chain(b.vertices().iter().map(|(_, v)| v.tolerance.to_bits()))
+                .collect();
+            (tolerances, trim_count(b))
+        };
+        assert_eq!(made(&kept_brep), made(&fresh_brep));
+
+        // the same points again: every cache is kept
+        for p in points {
+            let _ = query.point_3d_classify(&k, &mut kept_brep, p, 1e-6, false);
+        }
+        assert_eq!(query.face_caches.builds(), builds);
+
+        // another kernel state (a tolerance) builds them again
+        k.tolerances.approx_tol_3d *= 2.0;
+        let _ = query.point_3d_classify(&k, &mut kept_brep, points[0], 1e-6, false);
+        assert!(query.face_caches.builds() > builds);
     }
 
     #[test]

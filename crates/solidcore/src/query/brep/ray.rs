@@ -19,7 +19,9 @@
 //! trims then); so is one meeting a face whose loops are open mid-edit.
 
 mod live;
-pub(crate) use live::{solve_mutable_brep_point, solve_mutable_ray};
+pub(crate) use live::{
+    solve_mutable_brep_point, solve_mutable_brep_point_kept, solve_mutable_ray, KeptFaceCaches,
+};
 pub use live::{
     BrepFaceServices, CurveFaceObject, CurveFaceServices, FaceCaches, LiveBrepObjects, SideObject,
     SidedFaceServices,

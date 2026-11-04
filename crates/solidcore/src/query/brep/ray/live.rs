@@ -6,6 +6,7 @@
 //! |------|----------|
 //! | `solve_mutable_ray` | `SmShell::RayFire`'s `ShapePointSolve` |
 //! | `solve_mutable_brep_point` | `SmBrep::RayFire`'s `BrepPointSolve` |
+//! | `solve_mutable_brep_point_kept`, `KeptFaceCaches` | the same, finding the face surface caches earlier ray fires made (`smsurf_GetSurfaceCache`) |
 //! | [`LiveBrepObjects`] | Geometry pointers and live topology reads during the solve |
 //! | [`BrepFaceServices`], [`FaceCaches`], [`SidedFaceServices`], [`SideObject`] | `smsurf_GetSurfaceCache` / `SmFace::PointClassify` of face surfaces on mutable B-reps |
 //! | [`CurveFaceServices`], [`CurveFaceObject`] | the same for a free curve's solve against a face's surface |
@@ -17,7 +18,7 @@
 //! A checked, operation-local `RefCell` lends the original B-rep to lazy face queries;
 //! topology remains in its typed arenas. No B-rep copy or restarted solve is used.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeMap;
 
 use super::{cache_handle, face_surface_cache, prepare_surface_cache};
@@ -72,6 +73,123 @@ pub(crate) fn solve_mutable_brep_point(
     TopologySolver::brep_point_solve(k, &objects, Some(CacheObject::Brep), point, options)
 }
 
+/// [`solve_mutable_brep_point`] with the face caches `kept` holds from the earlier
+/// solves of the same B-rep (made in the same kernel and editing state), which it
+/// keeps for the next: upstream's `smsurf_GetSurfaceCache` finds a face surface's
+/// cache made by an earlier ray fire, so each face's cache is made once.
+pub(crate) fn solve_mutable_brep_point_kept(
+    k: &Kernel,
+    brep: &mut Brep,
+    identity: &BrepIdentity<'_>,
+    cache: &BrepCache,
+    kept: &KeptFaceCaches,
+    point: Point3,
+    options: TopologySolveOptions<'_>,
+) -> Result<SolutionArray<CacheObject>> {
+    let key = FaceCacheKey::of(k, brep);
+    let caches = kept.take(&key);
+    let built_before: Vec<FaceId> = built_faces(&caches).collect();
+    let objects = LiveBrepObjects::with_face_caches(brep, identity, Some(cache), caches);
+    let solved =
+        TopologySolver::brep_point_solve(k, &objects, Some(CacheObject::Brep), point, options);
+    let caches = objects.into_face_caches();
+    let built = built_faces(&caches)
+        .filter(|f| !built_before.contains(f))
+        .count();
+    kept.put(&key, caches, built);
+    solved
+}
+
+/// The faces of `caches` whose cache has its tree (made by a solve's `GetTree`).
+fn built_faces(caches: &FaceCaches) -> impl Iterator<Item = FaceId> + '_ {
+    caches
+        .iter()
+        .filter(|(_, cache)| cache.tree().is_some())
+        .map(|(&face, _)| face)
+}
+
+/// What a face cache's build reads besides the B-rep's geometry and topology (not
+/// upstream): the kernel's tolerances, its context scalars and fixes, and whether
+/// the B-rep is being edited. Kept face caches serve a later solve only under an
+/// equal key (the scalars bit for bit), so a solve gets the cache a build in its own
+/// state would have made first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FaceCacheKey {
+    tolerances: crate::kernel::Tolerances,
+    context_bits: [u64; 3],
+    doing_boolean: bool,
+    fixes: crate::kernel::UpstreamFixes,
+    editing_enabled: bool,
+}
+
+impl FaceCacheKey {
+    fn of(k: &Kernel, b: &Brep) -> Self {
+        let c = &k.context;
+        Self {
+            tolerances: k.tolerances,
+            context_bits: [
+                c.this_zone_tol_3d().to_bits(),
+                c.stored_model_size_estimate().to_bits(),
+                c.stored_large_small_size_ratio().to_bits(),
+            ],
+            doing_boolean: c.doing_boolean(),
+            fixes: k.fixes,
+            editing_enabled: b.editing_enabled(),
+        }
+    }
+}
+
+/// The face caches the ray solves of one B-rep keep from one solve to the next
+/// (upstream keeps each face surface's trimmed cache on the surface,
+/// `SmCacheMgrTSrf::CacheMakeOrValidate`, until the face is edited). Held by the
+/// operation that owns the B-rep's queries ([`crate::query::brep::BrepQuery`]), which
+/// is made again after the B-rep is edited; never global. A solve takes the caches
+/// and hands them back, so a solve nested in another (on the same holder) starts
+/// without them, as before.
+pub(crate) struct KeptFaceCaches {
+    kept: Cell<Option<(FaceCacheKey, FaceCaches)>>,
+    /// How many face cache trees the solves built (a measure only; no result reads it).
+    builds: Cell<usize>,
+}
+
+impl core::fmt::Debug for KeptFaceCaches {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("KeptFaceCaches")
+            .field("builds", &self.builds.get())
+            .finish_non_exhaustive()
+    }
+}
+
+impl KeptFaceCaches {
+    /// None kept yet.
+    pub(crate) const fn new() -> Self {
+        Self {
+            kept: Cell::new(None),
+            builds: Cell::new(0),
+        }
+    }
+
+    /// The kept caches when they were made under `key`, else none.
+    fn take(&self, key: &FaceCacheKey) -> FaceCaches {
+        match self.kept.take() {
+            Some((kept_key, caches)) if kept_key == *key => caches,
+            _ => FaceCaches::new(),
+        }
+    }
+
+    /// Keeps `caches`, made under `key`, of which `built` built their tree.
+    fn put(&self, key: &FaceCacheKey, caches: FaceCaches, built: usize) {
+        self.kept.set(Some((*key, caches)));
+        self.builds.set(self.builds.get().saturating_add(built));
+    }
+
+    /// How many face cache trees the solves built.
+    #[cfg(test)]
+    pub(crate) fn builds(&self) -> usize {
+        self.builds.get()
+    }
+}
+
 impl<'a, 'i> LiveBrepObjects<'a, 'i> {
     /// The topology solver's view of `brep` for one solve: the geometry as exact
     /// evaluation copies, each made when the solve first reads it, the topology read
@@ -88,6 +206,22 @@ impl<'a, 'i> LiveBrepObjects<'a, 'i> {
         identity: &'a BrepIdentity<'i>,
         cache: Option<&'a BrepCache>,
     ) -> Result<Self> {
+        Ok(Self::with_face_caches(
+            brep,
+            identity,
+            cache,
+            FaceCaches::new(),
+        ))
+    }
+
+    /// [`LiveBrepObjects::new`] with the face caches earlier solves of the same
+    /// unchanged B-rep made ([`BrepFaceServices::with_caches`]).
+    fn with_face_caches(
+        brep: &'a mut Brep,
+        identity: &'a BrepIdentity<'i>,
+        cache: Option<&'a BrepCache>,
+        face_caches: FaceCaches,
+    ) -> Self {
         let mut curves: Vec<_> = std::iter::repeat_with(|| None)
             .take(brep.edges().slot_count())
             .collect();
@@ -104,13 +238,18 @@ impl<'a, 'i> LiveBrepObjects<'a, 'i> {
                 *slot = Some(OnceCell::new());
             }
         }
-        Ok(Self {
-            faces: BrepFaceServices::new(brep),
+        Self {
+            faces: BrepFaceServices::with_caches(brep, face_caches),
             identity,
             cache,
             curves,
             surfaces,
-        })
+        }
+    }
+
+    /// The face caches made so far, for [`LiveBrepObjects::with_face_caches`].
+    fn into_face_caches(self) -> FaceCaches {
+        self.faces.into_caches()
     }
 }
 
