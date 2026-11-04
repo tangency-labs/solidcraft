@@ -1,0 +1,17 @@
+{
+  "en": {
+    "cmd.view.render_live": "Pause or Resume Live Render"
+  },
+  "de": {
+    "cmd.view.render_live": "Live-Rendering pausieren oder fortsetzen"
+  },
+  "ja": {
+    "cmd.view.render_live": "ライブレンダーを一時停止・再開"
+  },
+  "ko": {
+    "cmd.view.render_live": "실시간 렌더링 일시 중지 또는 재개"
+  },
+  "zh": {
+    "cmd.view.render_live": "暂停或继续实时渲染"
+  }
+}

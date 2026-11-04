@@ -1,0 +1,24 @@
+{
+  "en": {
+    "prefs.render_legacy_image_defaults": "Use previous Render image defaults",
+    "prefs.render_legacy_image_defaults_help": "Keep the previous manual image workflow: start new setups with CPU raster, keep fixed sampling when choosing CPU ray tracing, and open rendered images explicitly. Saved setups are unchanged."
+  },
+  "de": {
+    "prefs.render_legacy_image_defaults": "Bisherige Render-Bildvorgaben verwenden",
+    "prefs.render_legacy_image_defaults_help": "Den bisherigen manuellen Bildablauf beibehalten: neue Setups mit CPU-Raster beginnen, bei CPU-Raytracing feste Abtastung verwenden und gerenderte Bilder ausdrücklich öffnen. Gespeicherte Setups bleiben unverändert."
+  },
+  "ja": {
+    "prefs.render_legacy_image_defaults": "以前のレンダー画像の既定値を使用",
+    "prefs.render_legacy_image_defaults_help": "以前の手動の画像ワークフローを使用します。新しいセットアップはCPUラスタで開始し、CPUレイトレーシングでは固定サンプリングを維持し、レンダリング画像は明示的に開きます。保存済みのセットアップは変更しません。"
+  },
+  "ko": {
+    "prefs.render_legacy_image_defaults": "이전 렌더 이미지 기본값 사용",
+    "prefs.render_legacy_image_defaults_help": "이전의 수동 이미지 작업 방식을 유지합니다. 새 설정은 CPU 래스터로 시작하고 CPU 광선 추적에서는 고정 샘플링을 유지하며 렌더링 이미지는 직접 엽니다. 저장된 설정은 변경하지 않습니다.",
+    "render.method_raster": "CPU 래스터 (도식)",
+    "render.result_provisional": "임시 이미지"
+  },
+  "zh": {
+    "prefs.render_legacy_image_defaults": "使用以前的渲染图像默认值",
+    "prefs.render_legacy_image_defaults_help": "保留以前的手动图像流程：新设置使用 CPU 光栅渲染，CPU 光线追踪保留固定采样，并手动打开渲染图像。已保存的设置保持不变。"
+  }
+}

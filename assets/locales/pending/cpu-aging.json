@@ -1,0 +1,29 @@
+{
+  "ar": {
+    "render.aging_raytrace_help": "يُطبّق التعتيق في تتبع الأشعة على المعالج وتتبع المسارات على المعالج الرسومي. يبقى التصيير النقطي تخطيطياً."
+  },
+  "de": {
+    "render.aging_raytrace_help": "Alterung wird beim CPU-Raytracing und GPU-Pathtracing angewendet. Raster bleibt eine schematische Darstellung."
+  },
+  "en": {
+    "render.aging_raytrace_help": "Aging is applied by CPU ray tracing and GPU path tracing. Raster keeps schematic rendering."
+  },
+  "en-GB": {
+    "render.aging_raytrace_help": "Ageing is applied by CPU ray tracing and GPU path tracing. Raster keeps schematic rendering."
+  },
+  "he": {
+    "render.aging_raytrace_help": "התיישנות מוחלת במעקב קרניים במעבד ובמעקב מסלולים במעבד הגרפי. רינדור רסטר נשאר סכמטי."
+  },
+  "ja": {
+    "render.aging_raytrace_help": "エイジングはCPUレイトレーシングとGPUパストレーシングで適用されます。ラスタは模式的な描画を維持します。"
+  },
+  "ko": {
+    "render.aging_raytrace_help": "에이징은 CPU 광선 추적과 GPU 경로 추적에 적용됩니다. 래스터는 도식적인 렌더링을 유지합니다."
+  },
+  "vi": {
+    "render.aging_raytrace_help": "Hiệu ứng lão hoá được áp dụng khi dò tia bằng CPU và dò đường đi bằng GPU. Kết xuất raster giữ kiểu sơ đồ."
+  },
+  "zh": {
+    "render.aging_raytrace_help": "老化效果适用于CPU光线追踪和GPU路径追踪。光栅保持示意渲染。"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "ar": {
+    "cmd.render.coat.bind": "حفظ الطلاء الشفاف",
+    "cmd.render.coat.unbind": "إزالة الطلاء الشفاف",
+    "render.coat_discard": "تجاهل تعديل الطلاء",
+    "render.coat_pending_edit": "لم يُحفظ تعديل الطلاء هذا. احفظه مع اللقطة أو تجاهل التعديل.",
+    "render.coat_remove": "إزالة الطلاء المحفوظ",
+    "render.coat_remove_note": "يزيل طلاء هذا الهدف من اللقطة. تبقى الهندسة والمظاهر والمواد الفيزيائية دون تغيير.",
+    "render.coat_remove_title": "إزالة الطلاء الشفاف المحفوظ؟",
+    "render.coat_revalidate_saved": "تغيّر الطلاء المحفوظ. تجاهل هذا التعديل وأعد فتح الهدف قبل تعديله مجددًا.",
+    "render.coat_save": "حفظ الطلاء مع اللقطة",
+    "render.coat_saved_help": "يضيف الطلاء الشفاف طبقة لامعة إلى الأسطح المعتمة. احفظه مع اللقطة. لا يمكن استخدام الزجاج على الهدف نفسه، ولا تجاوزات الانعكاس المخصص والتباين الاتجاهي على CPU."
+  },
+  "de": {
+    "cmd.render.coat.bind": "Klarlack speichern",
+    "cmd.render.coat.unbind": "Klarlack entfernen",
+    "render.coat_discard": "Klarlackänderung verwerfen",
+    "render.coat_pending_edit": "Diese Klarlackänderung ist ungespeichert. Mit der Aufnahme speichern oder verwerfen.",
+    "render.coat_remove": "Gespeicherten Klarlack entfernen",
+    "render.coat_remove_note": "Entfernt den Klarlack dieses Ziels aus der Aufnahme. Geometrie, Aussehen und physikalische Materialien bleiben unverändert.",
+    "render.coat_remove_title": "Gespeicherten Klarlack entfernen?",
+    "render.coat_revalidate_saved": "Der gespeicherte Klarlack wurde geändert. Diese Änderung verwerfen und das Ziel vor der nächsten Bearbeitung erneut öffnen.",
+    "render.coat_save": "Klarlack in Aufnahme speichern",
+    "render.coat_saved_help": "Klarlack fügt undurchsichtigen Flächen eine glänzende Schicht hinzu. Mit der Aufnahme speichern. Glas kann nicht dasselbe Ziel verwenden. Auf der CPU dürfen auch benutzerdefinierte Reflexions- und Anisotropieüberschreibungen dieses Ziel nicht verwenden."
+  },
+  "en": {
+    "cmd.render.coat.bind": "Save Clear Coat",
+    "cmd.render.coat.unbind": "Remove Clear Coat",
+    "render.coat_discard": "Discard coat edit",
+    "render.coat_pending_edit": "This coat edit is unsaved. Save it with the shot or discard it.",
+    "render.coat_remove": "Remove saved coat",
+    "render.coat_remove_note": "Removes this target’s coat from the shot. Geometry, appearances and physical materials stay unchanged.",
+    "render.coat_remove_title": "Remove saved clear coat?",
+    "render.coat_revalidate_saved": "The saved coat changed. Discard this edit and reopen the target before editing it again.",
+    "render.coat_save": "Save coat to shot",
+    "render.coat_saved_help": "Clear coat adds a glossy layer to opaque surfaces. Save it with the shot. Glass cannot share this target. CPU custom reflection and anisotropy overrides cannot share it either."
+  },
+  "he": {
+    "cmd.render.coat.bind": "שמירת ציפוי שקוף",
+    "cmd.render.coat.unbind": "הסרת ציפוי שקוף",
+    "render.coat_discard": "ביטול עריכת הציפוי",
+    "render.coat_pending_edit": "שינוי הציפוי הזה לא נשמר. יש לשמור אותו עם התצלום או לבטל את השינוי.",
+    "render.coat_remove": "הסרת ציפוי שמור",
+    "render.coat_remove_note": "מסיר את הציפוי של היעד הזה מהתצלום. הגאומטריה, המראה והחומרים הפיזיקליים אינם משתנים.",
+    "render.coat_remove_title": "להסיר את הציפוי השקוף השמור?",
+    "render.coat_revalidate_saved": "הציפוי השמור השתנה. יש לבטל את העריכה הזו ולפתוח מחדש את היעד לפני עריכה נוספת.",
+    "render.coat_save": "שמירת הציפוי בתצלום",
+    "render.coat_saved_help": "ציפוי שקוף מוסיף שכבה מבריקה למשטחים אטומים. יש לשמור אותו עם התצלום. זכוכית אינה יכולה להשתמש באותו יעד, וגם לא דריסות של השתקפות מותאמת אישית ואנאיזוטרופיה ב־CPU."
+  },
+  "ja": {
+    "cmd.render.coat.bind": "クリアコートを保存",
+    "cmd.render.coat.unbind": "クリアコートを削除",
+    "render.coat_discard": "コートの編集を破棄",
+    "render.coat_pending_edit": "クリアコートの変更は未保存です。ショットに保存するか破棄してください。",
+    "render.coat_remove": "保存済みコートを削除",
+    "render.coat_remove_note": "この対象のコートをショットから削除します。形状、外観、物理材料は変更されません。",
+    "render.coat_remove_title": "保存済みクリアコートを削除しますか？",
+    "render.coat_revalidate_saved": "保存済みコートが変更されています。この編集を破棄し、対象を開き直してから編集してください。",
+    "render.coat_save": "コートをショットに保存",
+    "render.coat_saved_help": "クリアコートは不透明な表面に光沢のある層を追加します。ショットに保存してください。同じ対象にガラスは使用できません。CPUのカスタム反射や異方性の上書きも、この対象と併用できません。"
+  },
+  "ko": {
+    "cmd.render.coat.bind": "클리어 코트 저장",
+    "cmd.render.coat.unbind": "클리어 코트 제거",
+    "render.coat_discard": "코트 편집 버리기",
+    "render.coat_pending_edit": "이 코트 편집은 저장되지 않았습니다. 샷에 저장하거나 편집을 버리세요.",
+    "render.coat_remove": "저장된 코트 제거",
+    "render.coat_remove_note": "이 대상의 코트를 샷에서 제거합니다. 형상, 외관 및 물리 재료는 변경되지 않습니다.",
+    "render.coat_remove_title": "저장된 클리어 코트를 제거할까요?",
+    "render.coat_revalidate_saved": "저장된 코트가 변경되었습니다. 이 편집을 버리고 대상을 다시 연 뒤 편집하세요.",
+    "render.coat_save": "샷에 코트 저장",
+    "render.coat_saved_help": "클리어 코트는 불투명 표면에 광택 층을 추가합니다. 샷에 저장하세요. 같은 대상에 유리를 사용할 수 없습니다. CPU 사용자 지정 반사 또는 이방성 재정의도 이 대상을 함께 사용할 수 없습니다."
+  },
+  "vi": {
+    "cmd.render.coat.bind": "Lưu lớp phủ bóng",
+    "cmd.render.coat.unbind": "Xóa lớp phủ bóng",
+    "render.coat_discard": "Hủy chỉnh sửa lớp phủ",
+    "render.coat_pending_edit": "Chỉnh sửa lớp phủ này chưa được lưu. Hãy lưu cùng cảnh chụp hoặc hủy chỉnh sửa.",
+    "render.coat_remove": "Xóa lớp phủ đã lưu",
+    "render.coat_remove_note": "Xóa lớp phủ của đích này khỏi cảnh chụp. Hình học, diện mạo và vật liệu vật lý không thay đổi.",
+    "render.coat_remove_title": "Xóa lớp phủ bóng đã lưu?",
+    "render.coat_revalidate_saved": "Lớp phủ đã lưu đã thay đổi. Hãy hủy chỉnh sửa này và mở lại đích trước khi sửa tiếp.",
+    "render.coat_save": "Lưu lớp phủ vào cảnh chụp",
+    "render.coat_saved_help": "Lớp phủ bóng thêm một lớp sáng bóng lên bề mặt đục. Hãy lưu cùng cảnh chụp. Kính không thể dùng chung đích này. Ghi đè phản xạ tùy chỉnh và tính dị hướng CPU cũng không thể dùng chung đích."
+  },
+  "zh": {
+    "cmd.render.coat.bind": "保存清漆",
+    "cmd.render.coat.unbind": "移除清漆",
+    "render.coat_discard": "放弃清漆编辑",
+    "render.coat_pending_edit": "清漆编辑尚未保存。请保存到镜头或放弃编辑。",
+    "render.coat_remove": "移除已保存清漆",
+    "render.coat_remove_note": "从镜头中移除此目标的清漆。几何、外观和物理材料保持不变。",
+    "render.coat_remove_title": "移除已保存的清漆？",
+    "render.coat_revalidate_saved": "已保存的清漆发生了变化。请放弃此编辑，重新打开目标后再编辑。",
+    "render.coat_save": "将清漆保存到镜头",
+    "render.coat_saved_help": "清漆为不透明表面添加光泽层。请随镜头保存。同一目标不能使用玻璃，也不能使用CPU自定义反射或各向异性覆盖。"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "en": {
+    "render.batch_owner_limit": "At most 32 document shot queues can be retained. Finish or cancel an existing queue first.",
+    "render.batch_preparing": "Preparing next shot",
+    "render.batch_waiting_worker": "Waiting for render preparation",
+    "render.preparation_cancelled": "Render preparation cancelled",
+    "render.preparation_checking": "Checking render",
+    "render.preparation_retirement_failed": "Render preparation cleanup failed. This window cannot prepare another image.",
+    "render.preparation_retiring": "Finishing render preparation",
+    "render.preparation_unavailable": "Render preparation unavailable"
+  },
+  "de": {
+    "render.batch_owner_limit": "Es können höchstens 32 Dokument-Bildfolgen vorgehalten werden. Schließen Sie zuerst eine vorhandene Folge ab oder brechen Sie sie ab.",
+    "render.batch_preparing": "Nächste Aufnahme wird vorbereitet",
+    "render.batch_waiting_worker": "Warten auf die Rendering-Vorbereitung",
+    "render.preparation_cancelled": "Rendering-Vorbereitung abgebrochen",
+    "render.preparation_checking": "Rendering wird geprüft",
+    "render.preparation_retirement_failed": "Die Bereinigung der Rendering-Vorbereitung ist fehlgeschlagen. Dieses Fenster kann kein weiteres Bild vorbereiten.",
+    "render.preparation_retiring": "Rendering-Vorbereitung wird abgeschlossen",
+    "render.preparation_unavailable": "Rendering-Vorbereitung nicht verfügbar"
+  },
+  "ja": {
+    "render.batch_owner_limit": "保持できるドキュメントのショットキューは最大32個です。既存のキューを完了するかキャンセルしてください。",
+    "render.batch_preparing": "次のショットを準備中",
+    "render.batch_waiting_worker": "レンダリングの準備待ち",
+    "render.preparation_cancelled": "レンダリングの準備をキャンセルしました",
+    "render.preparation_checking": "レンダリングを確認中",
+    "render.preparation_retirement_failed": "レンダリング準備の後処理に失敗しました。このウィンドウでは別の画像を準備できません。",
+    "render.preparation_retiring": "レンダリングの準備を終了中",
+    "render.preparation_unavailable": "レンダリングの準備を利用できません"
+  },
+  "ko": {
+    "render.batch_owner_limit": "문서 샷 대기열은 최대 32개까지 유지할 수 있습니다. 기존 대기열을 완료하거나 취소하세요.",
+    "render.batch_preparing": "다음 샷 준비 중",
+    "render.batch_waiting_worker": "렌더링 준비 대기 중",
+    "render.preparation_cancelled": "렌더링 준비가 취소되었습니다",
+    "render.preparation_checking": "렌더링 확인 중",
+    "render.preparation_retirement_failed": "렌더링 준비 정리에 실패했습니다. 이 창에서는 다른 이미지를 준비할 수 없습니다.",
+    "render.preparation_retiring": "렌더링 준비 마무리 중",
+    "render.preparation_unavailable": "렌더링 준비를 사용할 수 없음"
+  },
+  "zh": {
+    "render.batch_owner_limit": "最多可保留32个文档的镜头队列。请先完成或取消现有队列。",
+    "render.batch_preparing": "正在准备下一个镜头",
+    "render.batch_waiting_worker": "等待渲染准备",
+    "render.preparation_cancelled": "渲染准备已取消",
+    "render.preparation_checking": "正在检查渲染",
+    "render.preparation_retirement_failed": "渲染准备清理失败。此窗口无法再准备其他图像。",
+    "render.preparation_retiring": "正在完成渲染准备",
+    "render.preparation_unavailable": "渲染准备不可用"
+  },
+  "ar": {
+    "render.batch_owner_limit": "يمكن الاحتفاظ بقوائم لقطات 32 مستندًا كحد أقصى. أكمل قائمة موجودة أو ألغها أولًا.",
+    "render.batch_preparing": "جارٍ إعداد اللقطة التالية",
+    "render.batch_waiting_worker": "في انتظار إعداد التصيير",
+    "render.preparation_cancelled": "أُلغي إعداد التصيير",
+    "render.preparation_checking": "جارٍ التحقق من التصيير",
+    "render.preparation_retirement_failed": "تعذّر تنظيف موارد إعداد التصيير. لا يمكن لهذه النافذة إعداد صورة أخرى.",
+    "render.preparation_retiring": "جارٍ إنهاء إعداد التصيير",
+    "render.preparation_unavailable": "إعداد التصيير غير متاح"
+  },
+  "he": {
+    "render.batch_owner_limit": "ניתן לשמור תורי צילומים של 32 מסמכים לכל היותר. יש להשלים או לבטל תור קיים תחילה.",
+    "render.batch_preparing": "מכין את הצילום הבא",
+    "render.batch_waiting_worker": "ממתין להכנת הרינדור",
+    "render.preparation_cancelled": "הכנת הרינדור בוטלה",
+    "render.preparation_checking": "בודק רינדור",
+    "render.preparation_retirement_failed": "ניקוי משאבי הכנת הרינדור נכשל. לא ניתן להכין תמונה נוספת בחלון זה.",
+    "render.preparation_retiring": "מסיים את הכנת הרינדור",
+    "render.preparation_unavailable": "הכנת הרינדור אינה זמינה"
+  },
+  "vi": {
+    "render.batch_owner_limit": "Chỉ có thể giữ hàng đợi cảnh của tối đa 32 tài liệu. Hãy hoàn tất hoặc hủy một hàng đợi hiện có trước.",
+    "render.batch_preparing": "Đang chuẩn bị cảnh tiếp theo",
+    "render.batch_waiting_worker": "Đang chờ chuẩn bị kết xuất",
+    "render.preparation_cancelled": "Đã hủy chuẩn bị kết xuất",
+    "render.preparation_checking": "Đang kiểm tra kết xuất",
+    "render.preparation_retirement_failed": "Không thể giải phóng tài nguyên chuẩn bị kết xuất. Cửa sổ này không thể chuẩn bị ảnh khác.",
+    "render.preparation_retiring": "Đang hoàn tất chuẩn bị kết xuất",
+    "render.preparation_unavailable": "Không thể chuẩn bị kết xuất"
+  }
+}

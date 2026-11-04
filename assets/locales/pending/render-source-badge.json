@@ -1,0 +1,32 @@
+{
+  "en": {
+    "render.live.source_current": "{method} · Live",
+    "render.live.source_outdated": "{method} · Previous image",
+    "render.live.source_outdated_help": "Shows the last captured image while live rendering updates or is unavailable. It may differ from the current scene or image settings.",
+    "render.live.source_settings_help": "Open Output to edit the renderer and image settings."
+  },
+  "de": {
+    "render.live.source_current": "{method} · Live",
+    "render.live.source_outdated": "{method} · Vorheriges Bild",
+    "render.live.source_outdated_help": "Zeigt das zuletzt aufgenommene Bild, während das Live-Rendering aktualisiert wird oder nicht verfügbar ist. Es kann von der aktuellen Szene oder den Bildeinstellungen abweichen.",
+    "render.live.source_settings_help": "Ausgabe öffnen, um Renderer und Bildeinstellungen zu bearbeiten."
+  },
+  "ja": {
+    "render.live.source_current": "{method} · ライブ",
+    "render.live.source_outdated": "{method} · 前の画像",
+    "render.live.source_outdated_help": "ライブレンダリングの更新中や利用できない間は、最後に取得した画像を表示します。現在のシーンや画像設定とは異なる場合があります。",
+    "render.live.source_settings_help": "出力を開いてレンダラーと画像設定を編集します。"
+  },
+  "ko": {
+    "render.live.source_current": "{method} · 라이브",
+    "render.live.source_outdated": "{method} · 이전 이미지",
+    "render.live.source_outdated_help": "라이브 렌더링이 업데이트 중이거나 사용할 수 없는 동안 마지막으로 캡처한 이미지를 표시합니다. 현재 장면 또는 이미지 설정과 다를 수 있습니다.",
+    "render.live.source_settings_help": "출력을 열어 렌더러와 이미지 설정을 편집합니다."
+  },
+  "zh": {
+    "render.live.source_current": "{method} · 实时",
+    "render.live.source_outdated": "{method} · 上一幅图像",
+    "render.live.source_outdated_help": "实时渲染更新或不可用时显示上次捕获的图像。它可能与当前场景或图像设置不同。",
+    "render.live.source_settings_help": "打开输出以编辑渲染器和图像设置。"
+  }
+}

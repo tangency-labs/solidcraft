@@ -10,7 +10,21 @@ fn independent_pilots_never_enter_the_final_master_and_admission_counts_auxiliar
     let req = request(16);
     let old = admission(&source, &req, fixed).unwrap();
     let new = admission(&source, &req, adaptive).unwrap();
-    assert_eq!(new.estimated_total_bytes - old.estimated_total_bytes, 16 * 16 * 32);
+    assert_eq!(new.estimated_total_bytes - old.estimated_total_bytes, 16 * 16 * 48);
+    let old_filtered = admission(&source, &req, JobOptions { denoise: true, ..fixed }).unwrap();
+    let new_filtered = admission(&source, &req, JobOptions { denoise: true, ..adaptive }).unwrap();
+    assert_eq!(
+        new_filtered.pixel_scratch_bytes - old_filtered.pixel_scratch_bytes,
+        16 * 16 * 64,
+        "the normalized denoiser input has its own prepaid float4 plane"
+    );
+    // The sphere's geometry preparation can dominate both peak estimates, hiding
+    // a larger pixel stage beneath that already prepaid peak. With no geometry,
+    // pixel storage determines the peak and must include the normalized plane too.
+    let empty = ProductScene { meshes: Vec::new(), bounds: solidcraft_geom::Aabb3::EMPTY };
+    let old_pixel_peak = admission(&empty, &req, JobOptions { denoise: true, ..fixed }).unwrap();
+    let new_pixel_peak = admission(&empty, &req, JobOptions { denoise: true, ..adaptive }).unwrap();
+    assert_eq!(new_pixel_peak.estimated_total_bytes - old_pixel_peak.estimated_total_bytes, 16 * 16 * 64);
     let (a, exr_a) = complete_linear_fixture(executor.context.clone(), fixed);
     let (b, exr_b) = complete_linear_fixture(executor.context.clone(), adaptive);
     assert_eq!(a, b, "fixed production budget must retain the old production sample stream");
@@ -123,4 +137,147 @@ fn adaptive_report_refuses_retired_device_before_readback() {
     executor.context.healthy.store(false, Ordering::Release);
     let error = adaptive::report(&task).unwrap_err();
     assert_eq!(error.code, ErrorCode::HostUnavailable);
+}
+
+#[test]
+fn adaptive_preview_divides_only_unfinished_production_and_rejects_invalid_budgets() {
+    let options = JobOptions {
+        samples: 64,
+        adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+        ..Default::default()
+    };
+    for completed in 1..=16 {
+        assert_eq!(adaptive::preview_divisor(&options, completed, None).unwrap(), 1.0);
+    }
+    for count in [16, 32, 64] {
+        let budget = (count as f32).to_le_bytes();
+        for production in 1..=64 {
+            let actual = adaptive::preview_divisor(&options, 16 + production, Some(&budget)).unwrap();
+            assert_eq!(actual, if production < count { production as f32 } else { 1.0 });
+        }
+    }
+    for count in [f32::NAN, f32::INFINITY, 0.0, 15.0, 16.5, 65.0] {
+        assert!(adaptive::preview_divisor(&options, 17, Some(&count.to_le_bytes())).is_err());
+    }
+    assert!(adaptive::preview_divisor(&options, 17, None).is_err());
+    assert!(adaptive::preview_divisor(&options, 0, None).is_err());
+    assert!(adaptive::preview_divisor(&options, 81, Some(&16.0f32.to_le_bytes())).is_err());
+    let shader = include_str!("adaptive_preview.wgsl");
+    let module = naga::front::wgsl::parse_str(shader).unwrap_or_else(|error| panic!("{}", error.emit_to_string(shader)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+}
+
+#[test]
+fn actual_adaptive_pilot_and_production_readback_never_mutates_accumulation() {
+    let Some(executor) = executor() else { return };
+    let options = JobOptions {
+        samples: 32,
+        adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+        ..Default::default()
+    };
+    let mut task =
+        Task::new(executor.context.clone(), ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY }, request(3), options, CancelToken::default())
+            .unwrap();
+    task.environment = 1.0;
+    task.studio = 0.0;
+    for ordinal in 1..=options.preview_target().unwrap() {
+        task.complete_sample().unwrap();
+        let before = task.read_linear().unwrap();
+        let preview = task.read_checkpoint().unwrap();
+        assert_eq!(
+            preview,
+            vec![[1.0, 1.0, 1.0, 0.0]; 9],
+            "pilot means and stopped production means have the same physical normalization at iteration {ordinal}"
+        );
+        assert_eq!(task.read_linear().unwrap(), before, "preview readback cannot write the accumulation");
+    }
+}
+
+type AdaptiveOutputs = (Vec<(u32, Vec<u8>)>, Vec<u8>, Option<Vec<u8>>);
+fn adaptive_output(context: Arc<Context>, options: JobOptions, preview: bool) -> AdaptiveOutputs {
+    let mut task = Task::new(context, sphere_grid(white(), 8, 16), request(8), options, CancelToken::default()).unwrap();
+    task.preview_enabled = preview;
+    let mut images = Vec::new();
+    for _ in 0..200_000 {
+        let poll = task.step(4096).unwrap();
+        if let Some(image) = task.take_preview() {
+            assert!(task.take_linear_exr().is_none(), "pilot/production preview never exposes an export master");
+            images.push((image.samples_per_pixel, image.png));
+        }
+        if let TaskPoll::Complete(png) = poll {
+            return (images, png, task.take_linear_exr());
+        }
+    }
+    panic!("adaptive presentation must complete within bounded test work");
+}
+
+#[test]
+fn every_adaptive_prefix_is_displayed_and_preview_work_keeps_final_png_exr_identical_with_denoise() {
+    let Some(executor) = executor() else { return };
+    for denoise in [false, true] {
+        let options = JobOptions {
+            samples: 32,
+            max_depth: 3,
+            seed: 47,
+            linear_exr: true,
+            denoise,
+            adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+            finishing: solidcraft_render::job::finishing::Finishing {
+                rgb_gain: [1.2, 0.9, 1.1],
+                contrast: 1.1,
+                bloom: Some(solidcraft_render::job::bloom::Bloom { strength: 0.2, threshold: 0.1, radius: 1 }),
+                photographic: solidcraft_render::job::photographic::Photographic { grain: 0.01, seed: 17, ..Default::default() },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let baseline = adaptive_output(executor.context.clone(), options, false);
+        let shown = adaptive_output(executor.context.clone(), options, true);
+        assert_eq!(
+            shown.0.iter().map(|image| image.0).collect::<Vec<_>>(),
+            (1..options.preview_target().unwrap()).collect::<Vec<_>>(),
+            "every complete pilot and production iteration is a real image"
+        );
+        assert_eq!(shown.1, baseline.1, "display readbacks, normalization, effects and denoise cannot change final PNG bytes");
+        assert_eq!(shown.2, baseline.2, "raw final EXR must be byte-identical with preview work enabled");
+        assert!(shown.2.is_some());
+        for production in [16, 31] {
+            let prefix = adaptive_output(executor.context.clone(), JobOptions { samples: production, ..options }, false);
+            let provisional = &shown.0.iter().find(|image| image.0 == 16 + production).unwrap().1;
+            let a = image::load_from_memory(provisional).unwrap().into_rgba8();
+            let b = image::load_from_memory(&prefix.1).unwrap().into_rgba8();
+            // In-place GPU final division and the display-only copy may differ by one
+            // display rounding unit; both represent this exact production prefix.
+            assert!(
+                a.as_raw().iter().zip(b.as_raw()).all(|(a, b)| a.abs_diff(*b) <= 1),
+                "the normalized production prefix must match a standalone capped final, denoise={denoise}, production={production}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cancellation_during_adaptive_preview_encoding_cannot_publish_a_preview_or_master() {
+    let Some(executor) = executor() else { return };
+    let options = JobOptions {
+        samples: 16,
+        denoise: true,
+        linear_exr: true,
+        adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+        ..Default::default()
+    };
+    let cancel = CancelToken::default();
+    let mut task = Task::new(executor.context.clone(), sphere_grid(white(), 8, 16), request(4), options, cancel.clone()).unwrap();
+    task.preview_enabled = true;
+    for _ in 0..100_000 {
+        task.step(1).unwrap();
+        if task.encoding_preview && task.png.is_some() {
+            break;
+        }
+    }
+    assert!(task.encoding_preview && task.png.is_some());
+    cancel.cancel();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::Cancelled);
+    assert!(task.take_preview().is_none());
+    assert!(task.take_linear_exr().is_none());
 }

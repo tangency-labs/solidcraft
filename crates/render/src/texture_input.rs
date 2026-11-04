@@ -110,6 +110,9 @@ impl TextureSource {
     }
     pub fn new(bytes: Vec<u8>, role: MapRole) -> Result<Self> {
         let format = admitted_format(&bytes, bytes.capacity())?;
+        if format == ImageFormat::Png {
+            png_metadata::validate(&bytes)?;
+        }
         let (width, height) = guarded(|| {
             let mut decoder = reader(&bytes, format).into_decoder().map_err(|e| invalid(e.to_string()))?;
             if !matches!(decoder.color_type(), image::ColorType::L8 | image::ColorType::La8 | image::ColorType::Rgb8 | image::ColorType::Rgba8) {

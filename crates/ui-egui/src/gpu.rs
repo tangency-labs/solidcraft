@@ -15,6 +15,8 @@ pub use solidcraft_gpu::view::{
 
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
+/// A transparent, depth-correct selection/hover layer over live product pixels.
+pub(crate) struct ProductHighlightCallback(pub Frame);
 
 /// The viewport callback composites transparently onto this egui GPU mesh. Both its clear
 /// surface and gradient therefore use the same published/animated tokens as the panels; no
@@ -267,6 +269,31 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         let Some(res) = resources.get::<Renderer>() else { return };
         let vp = info.viewport_in_pixels();
         res.paint(&self.0, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
+    }
+}
+
+impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(renderer) = resources.get_mut::<Renderer>() {
+            renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+        }
+        Vec::new()
+    }
+    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
+        let Some(renderer) = resources.get::<Renderer>() else { return };
+        let viewport = info.viewport_in_pixels();
+        renderer.paint_product_highlights(
+            &self.0,
+            pass,
+            [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32],
+        );
     }
 }
 

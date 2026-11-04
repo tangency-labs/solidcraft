@@ -297,8 +297,8 @@ Approved by the owner. Each changes something the earlier design said, or a defa
 
 **Path tracing  (GPU)**
 
-- Samples per pixel (1–4096, powers of two) · maximum path depth · random seed
-- Reduce noise in the finished image (denoise)
+- Samples per pixel (1–4096, exact counts; legacy edits round to powers of two) · maximum path depth · random seed
+- Reduce noise in progressive images and the final result (denoise)
 
 **Adaptive  (GPU)**
 

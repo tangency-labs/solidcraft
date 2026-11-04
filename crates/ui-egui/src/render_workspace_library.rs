@@ -634,7 +634,8 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     catalog_search(app, ui, &mut view, "render.stage_panels.search_studios");
-    let reason = if view.light_scope == 3 { Some(app.tr("render.library_specification_only").to_string()) } else { light_reason(app, &view.kind) };
+    let reason =
+        if view.light_scope == 3 { Some(app.tr("render.library_specification_only").to_string()) } else { selected_light_reason(app, &view) };
     let layout = ui_kit::CatalogLayout::new(ui, "render:light:catalog", 0);
     layout.body(ui, |ui| {
         let identities: Vec<_> = view.entries.iter().map(|e| format!("render:light:{}", e["id"].as_str().unwrap_or(""))).collect();
@@ -780,14 +781,46 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     restore_view(app, view);
 }
-fn light_reason(app: &SolveApp, kind: &str) -> Option<String> {
-    if matches!(kind, "native_scenes" | "rigs") && app.render_workspace.view.method != ImageMethod::GpuRaytrace {
-        return Some(app.tr("render.stage_panels.gpu_required").into());
-    }
+fn light_reason(app: &SolveApp, _kind: &str) -> Option<String> {
     if app.render_workspace.view.method == ImageMethod::Raster {
         return Some(app.tr("render.environment_tiles_require_raytrace").into());
     }
     patch(app).err()
+}
+
+/// Catalogue availability only; the typed engine projection remains authoritative.
+fn selected_light_reason(app: &SolveApp, view: &View) -> Option<String> {
+    if let Some(reason) = light_reason(app, &view.kind) {
+        return Some(reason);
+    }
+    if app.render_workspace.view.method == ImageMethod::CpuRaytrace && view.kind == "rigs" {
+        let maximum = view
+            .details
+            .as_ref()
+            .and_then(|detail| detail["resource"]["lights"].as_array())
+            .into_iter()
+            .flatten()
+            .filter(|light| light["type"] == "rectangular_area")
+            .filter_map(|light| light["emission"]["rgb"].as_array())
+            .flatten()
+            .filter_map(Value::as_f64)
+            .fold(0.0, f64::max);
+        if maximum > 64.0 {
+            return Some(crate::i18n::format("render.cpu_studio_radiance_limit", &[("radiance", &maximum.to_string())]));
+        }
+    }
+    None
+}
+
+/// The button uses the same portable numerical validator as saving. Stable
+/// identities distinguish an unrelated optical body from this map target.
+fn cpu_maps_supported(app: &SolveApp, view: &View) -> bool {
+    let Some(target) = view.target.as_ref().and_then(|target| target.stable_target.as_ref()) else { return false };
+    let Ok(setup) = setups::snapshot(app) else { return false };
+    let Some(solidcraft_engine::doc::render_settings::RenderJob::CpuRaytrace { options, .. }) = &setup.job else { return false };
+    (setup.optics.is_empty() || options.path.is_some())
+        && !setup.optics.iter().any(|optical| &optical.target == target)
+        && options.validate_surface_maps(setup.exposure_ev).is_ok()
 }
 
 fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: &str) {
@@ -843,6 +876,8 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
         .is_some_and(|detail| matches!(detail["projection"]["status"].as_str(), Some("implemented_pending_batch_validation" | "native_appearance")));
     let enabled = supported && current_target(app, view);
     let gpu = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
+    let cpu = app.render_workspace.view.method == ImageMethod::CpuRaytrace;
+    let cpu_maps = cpu && cpu_maps_supported(app, view);
     let mut requested = None;
     ui.horizontal(|ui| {
         if ui_kit::button(ui, app.tr("render.stage_panels.use_uniform"), ui_kit::Button::Enabled(enabled)).clicked() {
@@ -853,13 +888,16 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
         }
     });
     let raytrace = app.render_workspace.view.method != ImageMethod::Raster;
-    if ui_kit::button(ui, app.tr("render.stage_panels.save_maps"), ui_kit::Button::Enabled(enabled && raytrace && patch(app).is_ok())).clicked() {
+    let save =
+        ui_kit::button(ui, app.tr("render.stage_panels.save_maps"), ui_kit::Button::Enabled(enabled && (gpu || cpu_maps) && patch(app).is_ok()));
+    crate::scenario::publish_target("render:surface:save-maps", save.rect);
+    if save.clicked() {
         requested = Some(2);
     }
     if !raytrace {
         ui_kit::text(ui, app.tr("render.surface_import.raytrace_required"), ui_kit::Text::Note("surface:gpu:reason"));
-    } else if !gpu {
-        ui_kit::text(ui, app.tr("render.surface_import.saved_cpu"), ui_kit::Text::Note("surface:cpu:reason"));
+    } else if cpu {
+        ui_kit::text(ui, app.tr("render.cpu_maps_saved_help"), ui_kit::Text::Note("render.cpu_maps_saved_help"));
     }
     if !supported {
         ui_kit::text(ui, app.tr("render.library_specification_only"), ui_kit::Text::Note("surface:reference:reason"));
@@ -881,9 +919,15 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
                 let surface = json!({"id":id,"body_index":target.ordinal,"body_name":target.name,"scale":view.mapping_scale,"plane":plane,"rotation_rad":rotation_rad});
                 let plan = app.run("render.library.surface.prepare", surface.clone())?;
                 let action = if mode == 2 {
+                    let mut set = patch(app)?;
+                    if cpu && let Some(fields) = set.as_object_mut() {
+                        // Binding maps saves full visible numerical/job intent, but
+                        // camera navigation remains an explicit shot-camera action.
+                        fields.remove("camera");
+                    }
                     review::Apply::Command {
                         id: "render.library.surface.bind".into(),
-                        params: json!({"name":app.render_workspace.view.name,"set":patch(app)?,"surface":surface,"replace":true}),
+                        params: json!({"name":app.render_workspace.view.name,"set":set,"surface":surface,"replace":true}),
                     }
                 } else {
                     review::Apply::Maps { id: id.into(), target, plane: plane.into(), scale: view.mapping_scale, rotation_rad }
@@ -1491,7 +1535,7 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
         "physical_profiles" => physical_controls(app, ui, view, id, &detail),
         "surfaces" | "selene_appearances" => surface_controls(app, ui, view, id),
         "hdr" | "rigs" => {
-            let reason = light_reason(app, &view.kind);
+            let reason = selected_light_reason(app, view);
             if let Some(reason) = &reason {
                 ui_kit::text(ui, reason, ui_kit::Text::Note("render:light:reason"));
             }
@@ -1827,6 +1871,385 @@ mod studio_browser_tests {
         assert!(!h.app.file_picker_busy());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cpu_path_surface_pointer_save_accepts_an_unrelated_glass_target_and_preserves_targeted_aging_without_paint_writes() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1440,"height":3000}));
+        h.app.preferences.render_legacy_image_defaults = false;
+        for (name, corner) in [("Glass", [0, 0, 0]), ("Panel", [20, 0, 0])] {
+            h.app.run("solid.box", json!({"body_name":name,"length":10,"width":10,"height":5,"corner":corner,"operation":"new"})).unwrap();
+        }
+        let targets = materials::read_targets(&mut h.app).unwrap();
+        let glass = targets.iter().find(|target| target.name == "Glass").unwrap().clone();
+        let panel = targets.iter().find(|target| target.name == "Panel").unwrap().clone();
+        h.app
+            .run(
+                "render.settings.set",
+                json!({"name":"Studio","set":{"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{
+                    "progressive":{"samples_per_pixel":4,"seed":9},"path":{"max_depth":4},
+                    "aging":[{"kind":"dust","target":panel.stable_target}]
+                }}}}),
+            )
+            .unwrap();
+        h.app
+            .run(
+                "render.optics.bind",
+                json!({"name":"Studio","body_index":glass.ordinal,"body_name":glass.name,"expected_revision":h.app.session.revision,
+            "optics":{"ior":1.5,"boundary":"closed_mesh"}}),
+            )
+            .unwrap();
+        h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Glass".into()}]})).unwrap();
+        super::super::enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        let before = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let camera = before.render.setups["Studio"].camera;
+        // Surface source controls live in the explicit Surfaces/References
+        // catalog mode; merely changing a captured resource does not navigate UI.
+        h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.render_workspace.view.library.look_tab, 1);
+        let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
+        choose(&mut h.app, &mut view, "surfaces", "SURF-001").unwrap();
+        refresh_targets(&mut h.app, &mut view).unwrap();
+        view.target = view.targets.iter().find(|target| target.name == "Glass").cloned();
+        assert!(view.target.as_ref().unwrap().stable_target.is_some());
+        assert!(!cpu_maps_supported(&h.app, &view), "a map cannot share the Glass target");
+        h.app.render_workspace.view.library = view;
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
+        assert!(h.app.render_workspace.view.library.review.is_none(), "the actual same-target button stays disabled");
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        let model = h.app.session.model.state();
+        h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Panel".into()}]})).unwrap();
+        let selected = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        assert_eq!(selected, (history.0 + 1, history.1, history.2), "explicit selection advances only the transient display revision");
+        assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Body { name: "Panel".into() }]);
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
+        h.frames(4);
+        assert!(cpu_maps_supported(&h.app, &h.app.render_workspace.view.library));
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc), "selection, hydration and repeated paint cannot save a binding");
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()), "target hydration and repeated paint cannot replace geometry");
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), selected);
+        h.frames(4);
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), selected);
+        assert!(h.app.render_workspace.view.job.is_none());
+        h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
+        assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review");
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        assert_eq!(h.app.session.undo.len(), history.1 + 1);
+        let saved = h.app.session.doc.clone();
+        let setup = &saved.render.setups["Studio"];
+        assert_eq!(setup.surfaces.len(), 1);
+        assert_eq!(setup.surfaces.iter().next().unwrap().target, panel.stable_target.unwrap());
+        assert_eq!(setup.optics, before.render.setups["Studio"].optics);
+        assert_eq!(setup.job, before.render.setups["Studio"].job, "targeted aging and all visible numerical intent survive map binding");
+        assert_eq!(setup.camera, camera, "map editing cannot silently save viewport navigation");
+        assert_eq!(saved.features, before.features);
+        assert_eq!(saved.materials, before.materials);
+        assert_eq!(saved.appearances, before.appearances);
+        assert!(h.app.render_workspace.view.job.is_none());
+        assert_eq!(solidcraft_engine::doc::Document::from_json(&saved.to_json()).unwrap(), *saved);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, before);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, saved);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cpu_saved_builtin_maps_use_real_review_pointer_save_undo_reopen_and_native_render() {
+        use solidcraft_engine::doc::render_settings::{RenderJob, RenderSetup};
+        use solidcraft_engine::render::job::{CpuHost, Integrator, Phase};
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1440,"height":3000}));
+        let host = CpuHost::for_platform().unwrap();
+        let available = host.descriptor_for(Integrator::Raytrace).is_ok();
+        h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+        h.app.preferences.render_legacy_image_defaults = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":5,"body_name":"Sample"})).unwrap();
+        h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Sample".into()}]})).unwrap();
+        super::super::enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+        h.app.render_workspace.view.draft.width = 8;
+        h.app.render_workspace.view.draft.height = 8;
+        h.app.render_workspace.view.studio.linear_exr = true;
+        h.frames(4);
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let old_camera = h.app.session.doc.render.setups.get("Studio").map_or(RenderSetup::default().camera, |s| s.camera);
+        // Surface source controls live in the explicit Surfaces/References
+        // catalog mode; merely changing a captured resource does not navigate UI.
+        h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.render_workspace.view.library.look_tab, 1);
+        let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
+        choose(&mut h.app, &mut view, "surfaces", "SURF-001").unwrap();
+        refresh_targets(&mut h.app, &mut view).unwrap();
+        view.target = view.targets.iter().find(|target| target.name == "Sample").cloned();
+        assert!(current_target(&h.app, &view));
+        h.app.render_workspace.view.library = view;
+        h.frames(4);
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert!(h.app.render_workspace.view.job.is_none());
+        h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
+        assert!(h.app.render_workspace.view.library.review.is_some());
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        let saved = h.app.session.doc.clone();
+        let setup = &saved.render.setups["Studio"];
+        assert_eq!(setup.surfaces.len(), 1);
+        assert_eq!(setup.camera, old_camera, "binding maps cannot silently save viewport navigation");
+        assert!(
+            matches!(&setup.job,Some(RenderJob::CpuRaytrace{options,..})if options.progressive.is_some()&&options.output.as_ref().is_some_and(|o|o.linear_exr))
+        );
+        assert_eq!(saved.features, before.features);
+        assert_eq!(saved.materials, before.materials);
+        assert_eq!(saved.appearances, before.appearances);
+        assert!(h.app.render_workspace.view.job.is_none());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, before);
+        h.app.run("edit.redo", json!({})).unwrap();
+        super::super::setups::load(&mut h.app);
+        assert_eq!(h.app.session.doc, saved);
+        let reopened = solidcraft_engine::doc::Document::from_json(&saved.to_json()).unwrap();
+        h.app.session = solidcraft_engine::Session::new(reopened);
+        h.app.session.set_render_job_host(Some(host)).unwrap();
+        super::super::reset_document(&mut h.app);
+        h.app.render_workspace.view.live_paused = true;
+        h.app.render_workspace.view.name = "Studio".into();
+        super::super::setups::load(&mut h.app);
+        super::super::enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        h.frames(4);
+        assert_eq!(h.app.render_workspace.view.draft.surfaces, setup.surfaces);
+        let doc = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let request = super::super::image_request(&h.app).unwrap();
+        if available {
+            let checked = h.app.session.execute("render.preflight", &request).unwrap();
+            assert_eq!(checked["textures"]["bodies"], 1);
+            h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
+            let handle = h.app.session.render_job_handle(h.app.render_workspace.view.job.unwrap()).unwrap();
+            let status = handle.wait_timeout(std::time::Duration::from_secs(60)).unwrap();
+            assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+            let frame = handle.frame().unwrap().unwrap();
+            assert!(frame.linear_exr().is_some());
+            assert!(!frame.png().is_empty());
+        } else {
+            assert!(h.app.session.execute("render.preflight", &request).is_err(), "offline drafts cannot falsely claim a CPU producer");
+        }
+        assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cpu_native_studio_review_pointer_preserves_camera_and_cold_capture_for_hdr_and_area_rigs() {
+        use solidcraft_engine::doc::render_settings::{RenderJob, RenderSetup};
+        use solidcraft_engine::render::job::{CpuHost, Integrator, Phase};
+        for id in ["NATIVE-STUDIO-001", "NATIVE-STUDIO-004"] {
+            let mut h = Harness::new();
+            let host = CpuHost::for_platform().unwrap();
+            let available = host.descriptor_for(Integrator::Raytrace).is_ok();
+            h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+            h.app.run("solid.box", json!({"length":20,"width":15,"height":10,"body_name":"Sample"})).unwrap();
+            let saved_camera =
+                solidcraft_engine::render::Camera { distance: 60.0, target: solidcore_record::Vec3::new(10.0, 7.5, 5.0), ..Default::default() };
+            h.app.run("render.settings.set",json!({"name":"Studio","set":{"width":8,"height":8,"camera":saved_camera,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":2,"seed":47},"area_samples":4,"seed":731,"output":{"linear_exr":true}}}}})).unwrap();
+            super::super::enter(&mut h.app, true).unwrap();
+            h.app.render_workspace.view.live_paused = true;
+            h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();
+            h.frames(4);
+            h.app.cam.distance += 7.0;
+            let old_camera = h.app.session.doc.render.setups["Studio"].camera;
+            let navigation = h.app.cam;
+            let before = h.app.session.doc.clone();
+            let undo = h.app.session.undo.len();
+            assert!(light_reason(&h.app, "native_scenes").is_none());
+            let mut view = View::default();
+            choose(&mut h.app, &mut view, "native_scenes", id).unwrap();
+            review::light(&mut h.app, &view, id).unwrap();
+            h.frames(2);
+            assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert!(h.app.render_workspace.view.job.is_none());
+            h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+            h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+            assert!(h.app.render_workspace.view.library.review.is_none());
+            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.cam, navigation);
+            let saved = h.app.session.doc.clone();
+            let setup = &saved.render.setups["Studio"];
+            assert_eq!(setup.camera, old_camera);
+            assert_eq!(setup.width, 8);
+            assert_eq!(setup.height, 8);
+            let Some(RenderJob::CpuRaytrace { options, .. }) = &setup.job else { panic!("CPU method lost") };
+            assert_eq!((options.progressive.unwrap().samples_per_pixel, options.progressive.unwrap().seed), (2, 47));
+            assert_eq!((options.area_samples, options.seed), (Some(4), Some(731)));
+            assert!(options.output.as_ref().unwrap().linear_exr);
+            assert!(options.hdr.is_some());
+            assert_eq!(options.area_lights.as_ref().unwrap().len(), if id.ends_with("004") { 3 } else { 0 });
+            assert_eq!(saved.features, before.features);
+            assert_eq!(saved.materials, before.materials);
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.doc, before);
+            h.app.run("edit.redo", json!({})).unwrap();
+            assert_eq!(h.app.session.doc, saved);
+            let reopened = solidcraft_engine::doc::Document::from_json(&saved.to_json()).unwrap();
+            h.app.session = solidcraft_engine::Session::new(reopened);
+            h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+            super::super::reset_document(&mut h.app);
+            h.app.render_workspace.view.name = "Studio".into();
+            super::super::setups::load(&mut h.app);
+            super::super::enter(&mut h.app, true).unwrap();
+            h.app.render_workspace.view.live_paused = true;
+            h.frames(4);
+            let doc = h.app.session.doc.clone();
+            let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+            let request = super::super::image_request(&h.app).unwrap();
+            let captured: RenderSetup = serde_json::from_value(request["settings"].clone()).unwrap();
+            assert_eq!(captured.job, setup.job);
+            assert_eq!(captured.stage, setup.stage);
+            assert_eq!(captured.camera, setup.camera);
+            if available {
+                h.app.session.execute("render.preflight", &request).unwrap();
+                h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
+                let handle = h.app.session.render_job_handle(h.app.render_workspace.view.job.unwrap()).unwrap();
+                let status = handle.wait_timeout(std::time::Duration::from_secs(60)).unwrap();
+                assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+                assert_eq!(status.resolved.executor.as_str(), "cpu-raytrace");
+                let frame = handle.frame().unwrap().unwrap();
+                assert!(frame.png().starts_with(b"\x89PNG\r\n\x1a\n"));
+                assert!(frame.linear_exr().unwrap().starts_with(&[0x76, 0x2f, 0x31, 0x01]));
+            } else {
+                assert!(h.app.session.execute("render.preflight", &request).is_err());
+            }
+            assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        }
+    }
+
+    #[test]
+    fn cpu_sun_rig_review_requires_explicit_adoption_pointer_and_preserves_authored_budget() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1440,"height":1600}));
+        h.app.run("render.settings.set",json!({"name":"Studio","set":{"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"primary_samples":4,"shadows":false,"area_samples":64,"seed":731}}}})).unwrap();
+        super::super::enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        super::super::setups::load(&mut h.app);
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let camera = h.app.cam;
+        let mut view = View::default();
+        choose(&mut h.app, &mut view, "rigs", "RIG-020").unwrap();
+        let source = &view.details.as_ref().unwrap()["resource"]["lights"][0];
+        assert_eq!(source["type"], "uniform_distant_disk");
+        let expected_sun = solidcraft_engine::render::job::Sun {
+            direction: std::array::from_fn(|i| -source["incoming_photon_direction"][i].as_f64().unwrap()),
+            angular_radius_rad: source["angular_diameter_rad"].as_f64().unwrap() * 0.5,
+            radiance: serde_json::from_value(source["emission"]["rgb"].clone()).unwrap(),
+        };
+        assert_eq!(expected_sun.radiance, [14721.3402896; 3], "the authored finite Sun is above the unrelated rectangle limit");
+        expected_sun.validate().unwrap();
+        assert!(selected_light_reason(&h.app, &view).is_none(), "a valid Sun keeps its own shared radiance domain");
+        review::light(&mut h.app, &view, "RIG-020").unwrap();
+        h.frames(3);
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(0.0));
+        h.step(&json!({"click":{"handle":"render:review:enable-indirect"}})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0));
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.cam, camera);
+        let job = h.app.render_workspace.view.raytrace.clone();
+        assert_eq!(job.path.unwrap().max_depth, 8);
+        assert_eq!(job.progressive.unwrap().samples_per_pixel, 16);
+        assert_eq!(job.primary_samples, 1);
+        assert!(job.shadows);
+        assert_eq!((job.area_samples, job.seed), (Some(64), Some(731)), "explicit GI adoption preserves authored unrelated sampling fields");
+        assert_eq!(job.sun.as_deref(), Some(&expected_sun), "review applies the exact Sun radiance/direction/radius without clamping or splitting");
+        let Some(solidcraft_engine::doc::render_settings::RenderJob::CpuRaytrace { options, .. }) = &h.app.session.doc.render.setups["Studio"].job
+        else {
+            panic!("CPU method lost");
+        };
+        assert_eq!(options.sun, Some(expected_sun));
+        assert!(options.area_lights.as_ref().unwrap().is_empty(), "a finite Sun is not reinterpreted as rectangle intensity");
+        assert!(h.app.render_workspace.view.studio.sun_enabled);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc, before);
+        super::super::setups::load(&mut h.app);
+        h.app.render_workspace.view.draft.width = 2048;
+        h.app.render_workspace.view.draft.height = 2048;
+        // The fixed Compact image is valid; prospective progressive16 adoption
+        // crosses its pixel limit. The refusal offers Studio, never adopts it.
+        use solidcraft_engine::render::job::{CpuBudget, CpuProgressiveOptions};
+        let sampling = CpuProgressiveOptions::default();
+        assert_eq!(sampling.samples_per_pixel, 16);
+        let sampling = Some(sampling);
+        assert!(CpuBudget::Compact.validate_image(2048, 2048, None).is_ok());
+        assert_eq!(CpuBudget::Compact.limits().max_progressive_pixels, 1_048_576);
+        assert!(CpuBudget::Compact.validate_image(2048, 2048, sampling).is_err());
+        assert!(CpuBudget::Studio.validate_image(2048, 2048, sampling).is_ok());
+        let draft = super::super::setups::draft(&h.app).unwrap();
+        let options = h.app.render_workspace.view.raytrace.clone();
+        assert_eq!(options.budget, CpuBudget::Compact);
+        assert!(options.path.is_none() && options.progressive.is_none());
+        let model = h.app.session.model.state();
+        let state = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let error = review::light(&mut h.app, &view, "RIG-020").unwrap_err();
+        assert!(error.contains("render output 2048 × 2048 exceeds the image limits"), "{error}");
+        assert!(error.contains("1048576 pixels in all"), "{error}");
+        assert!(error.contains("largest image at this aspect is 1024 × 1024"), "{error}");
+        assert!(error.contains("choose the Studio CPU resource profile, or a smaller size"), "{error}");
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), state);
+        assert!(Arc::ptr_eq(&h.app.session.model.state(), &model), "refusal must retain the exact evaluated model");
+        assert_eq!(super::super::setups::draft(&h.app).unwrap(), draft);
+        assert_eq!(h.app.render_workspace.view.raytrace, options);
+        assert_eq!(h.app.cam, camera);
+        assert!(h.app.render_workspace.view.library.review.is_none());
+    }
+
+    #[test]
+    fn cpu_authored_rig_over_domain_is_visible_and_cannot_open_an_apply_review() {
+        let mut h = Harness::new();
+        h.app.run("render.settings.set", json!({"name":"Studio","set":{"job":{"method":"cpu_raytrace","options":{}}}})).unwrap();
+        super::super::enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        let mut view = View::default();
+        choose(&mut h.app, &mut view, "rigs", "RIG-006").unwrap();
+        view.light_scope = 1;
+        assert!(selected_light_reason(&h.app, &view).unwrap().contains("994.052329239"));
+        h.app.render_workspace.view.library = view;
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"render:light:review"}})).unwrap();
+        assert!(h.app.render_workspace.view.library.review.is_none());
+        assert!(h.app.render_workspace.view.job.is_none());
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+
     #[test]
     fn appearance_cards_select_inspect_switch_layout_and_keep_explicit_apply() {
         let mut h = Harness::new();
@@ -2010,6 +2433,7 @@ mod studio_browser_tests {
         h.app.run("solid.box", json!({"length":20,"width":15,"height":10,"body_name":"Sample"})).unwrap();
         super::super::enter(&mut h.app, true).unwrap();
         let unchanged = h.app.session.doc.to_json();
+        super::super::select_image_method(&mut h.app, ImageMethod::Raster);
         assert!(light_reason(&h.app, "native_scenes").is_some());
         super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
         h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();

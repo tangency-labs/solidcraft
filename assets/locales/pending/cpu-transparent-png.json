@@ -1,0 +1,17 @@
+{
+  "en": {
+    "render.cpu_transparent_help": "Transparent PNG removes the background and keeps edge coverage. Body and face opacity must stay at 100%."
+  },
+  "de": {
+    "render.cpu_transparent_help": "Transparentes PNG entfernt den Hintergrund und erhält die Kantenabdeckung. Körper- und Flächendeckkraft müssen 100 % bleiben."
+  },
+  "ja": {
+    "render.cpu_transparent_help": "透明PNGは背景を除き、輪郭の被覆率を保持します。ボディと面の不透明度は100%にしてください。"
+  },
+  "ko": {
+    "render.cpu_transparent_help": "투명 PNG는 배경을 제거하고 가장자리 커버리지를 유지합니다. 바디와 면의 불투명도는 100%여야 합니다."
+  },
+  "zh": {
+    "render.cpu_transparent_help": "透明PNG移除背景并保留边缘覆盖率。实体和面的不透明度必须保持100%。"
+  }
+}

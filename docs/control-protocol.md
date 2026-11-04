@@ -983,6 +983,25 @@ Other `ui.prefs` parameters:
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
 
+`ui.inspect.render.live` reads automatic image feedback without launching or pumping
+work. It includes enabled/paused, pending/running, capture generation, isolated job,
+completed passes, target, sequence, current/stale image and error. These job
+identities belong to the live scratch session and cannot be exported or selected as
+completed results through the original document session. `view.render_live {paused:
+true|false}` pauses/resumes feedback through the registered command; its headless
+form validates and echoes the request without changing a document.
+
+GPU adaptive checkpoints include optional `preview.adaptive` metadata in
+`render.status` and `ui.inspect.render.live.adaptive`: `stage` is `pilot` or
+`production`, `completed` and `target` count that phase's iterations, and
+`pilot_samples`, `minimum_production_samples`, `maximum_production_samples` retain
+the captured allocation bounds. The compatibility field `samples_per_pixel` is an
+absolute completed pilot-plus-production iteration when this metadata is present;
+it represents uniform SPP only when `adaptive` is absent. The checkpoint target is
+the validated pilot count plus maximum production count. Pilot images never enter
+the final image or raw master, and production iteration counts are not uniform
+per-pixel sample counts.
+
 ### Sketch alignment guides
 
 `ui.prefs {sketch_tracking_guides: true}` enables temporary horizontal and vertical dotted

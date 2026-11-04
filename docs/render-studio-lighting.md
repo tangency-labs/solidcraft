@@ -67,3 +67,58 @@ MIS estimates with a white furnace, validate bounded requests, and check that
 preflight leaves the document unchanged. GPU tests require an actual supported
 adapter when SOLIDCRAFT_REQUIRE_GPU is set; no visual milestone is implied by these
 numerical tests.
+
+## Hard directional sources
+
+The optional `lighting.directional_lights` array retains up to eight sources:
+`{"direction":[0,0,1],"color":[1,0.5,0.25],"intensity":2}`. Direction points toward
+the source, is finite/nonzero, and each component is within +/-1e9. Linear RGB is
+0..1 and relative incident intensity is0..64, matching CPU directional intent.
+The optional finite Sun and this list share an eight-source total. The finite Sun
+keeps its angular-radius, radiance and continuous-MIS contract. Hard sources use
+delta next-event samples with MIS weight one and consume no random numbers; they
+are not enlarged disks. Existing rectangle, environment and Sun sample ordering
+is unchanged. Surface/transmissive and external-medium visibility are shared with
+the existing source loop, with no extra inlined BVH call site or storage binding.
+
+Omitting `lighting` leaves the exact implicit three-source path. An omitted or
+empty directional list adds no source or RNG consumption. Materializing the
+implicit studio into explicit hard directions preserves those three values.
+Zero-intensity/black sources remain authored but perform no sampling/visibility.
+Point/spot lights and mesh emission remain unsupported by this GPU consumer.
+
+The fixed uniform grows by256 bytes, prepaid as device+host upload storage. Its
+final `studio_weights.w` lane stays positive zero, preserving the portable
+geometry arithmetic ABI. Nondefault captured options live in one exact-capacity
+fallible allocation with a retained lease under the existing request/job/host
+caps. Structural defaults allocate no options slot; authored `Some` values are
+never collapsed merely because they look like an identity at runtime.
+
+
+## Point and Spot sources
+
+`lighting.punctual_lights` is an optional bounded array of eight combined Point
+and Spot sources, separate from the eight directional and four area slots.
+Positions are world millimetres, RGB is linear, intensity0..64 is defined at the
+explicit reference distance0.001..1e6mm. Minimum distance0.001..reference is an
+omission boundary, not a brightness clamp. Spot emitted axes point FROM the
+source; half cones retain exact authored radians. Smoothstep is in cosine space.
+GPU feathers with cosine gaps below1/1024 explicitly refuse before source I/O;
+CPU retains its wider existing f64 cone domain.
+
+Each delta source is evaluated once at every admitted opaque or external-volume
+vertex, including the final allowed bounce, with MIS weight1 and no random
+numbers. Physical hit-to-source deltas use camera-relative high/low source and
+hit positions. The robust shadow connection is re-aimed separately, excludes the
+source endpoint, respects opaque blockers and existing thin/solid transmission,
+and applies finite external-volume Beer attenuation. This does not broaden the
+existing glass/SSS/volume compatibility policies or add refracted caustic NEE.
+
+The additional fixed uniform is640bytes, charged for both device and host
+upload. Three64-bit omission counters append24bytes to the existing failure
+storage and readback, prepaid twice. Full nondefault `JobOptions` remains charged
+by its exact retained slot size. No image plane, extra storage binding, cap raise
+or new light-selection RNG dimension is introduced. Default/absent-list numerical
+streams are protected by retained zero-source/mixed-family regressions, but
+cross-platform byte identity, device validation and native usability still need
+execution on this staged candidate.

@@ -12,7 +12,7 @@ SolidCraft embeds its translations and works offline. The long form is `docs/loc
 2. Use `app.tr("ui.some_id")` for static messages and `Locale::format` for whole sentences with named placeholders. Translate the whole sentence, punctuation included, so a translator can reorder arguments. Use stable ids directly for new messages, not the English-label adapter (`app.tr_label`), which exists for older tables.
 3. Command labels live under `cmd.<command id>`; `cargo xtask i18n --add-missing` writes the ones that are missing into `en.json`.
 4. Add the UK spelling to `assets/locales/en-GB.json` when the US spelling differs (Centre, Colour, Licence, ...). That file holds only the differing messages.
-5. A new label needs `en`, `ja`, `zh`, `de` and `ko`. The other catalogs are partial and fall back to English; `cargo xtask i18n` reports their gaps without failing, and `every_complete_catalog_carries_every_english_message` fails a missing `ja` or `zh` entry.
+5. New labels need `en`, `ar`, `he`, `ja`, `vi` and `zh`, plus `de` and `ko` under existing policy. Arabic, Hebrew, Japanese, Vietnamese and Chinese are complete: every English key needs a translation. Other catalogs fall back to English. `cargo xtask i18n` reports gaps; the complete-catalog test rejects them.
 6. Run `cargo xtask lists --fix` before committing, then `cargo xtask i18n`.
 
 ## Sorted catalogs

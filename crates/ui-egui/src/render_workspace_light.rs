@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{CpuJob, GpuJob, RenderJob, RenderSetup, SkyEnvironment};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::job::{AreaLights, StudioLighting};
-use solidcraft_engine::schema::render_lights::{Geometry, Light, Visibility};
+use solidcraft_engine::schema::render_lights::{Geometry, Light, LightIdRemap, Visibility};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct View {
@@ -15,6 +15,26 @@ pub(super) struct View {
     aim: Option<[f64; 3]>,
     draft: Option<Draft>,
     review: Option<Review>,
+    source: Option<Source>,
+    numeric_history: Option<NumericHistory>,
+}
+
+#[derive(Clone, Debug)]
+struct Source {
+    settings: std::sync::Weak<solidcraft_engine::doc::render_settings::RenderSettings>,
+    method: ImageMethod,
+}
+#[derive(Clone, Debug)]
+struct NumericHistory {
+    before: std::sync::Weak<solidcraft_engine::doc::render_settings::RenderSettings>,
+    after: std::sync::Weak<solidcraft_engine::doc::render_settings::RenderSettings>,
+}
+impl NumericHistory {
+    fn connects(&self, a: &Source, b: &Source) -> bool {
+        a.method == b.method
+            && ((self.before.ptr_eq(&a.settings) && self.after.ptr_eq(&b.settings))
+                || (self.after.ptr_eq(&a.settings) && self.before.ptr_eq(&b.settings)))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +67,9 @@ struct Draft {
     reference: f64,
     minimum: f64,
     aim: [f64; 3],
+    emitted_axis: [f64; 3],
+    inner_angle: f64,
+    outer_angle: f64,
 }
 
 /// Lighting-only read snapshot also works with unsaved HDR paths and temporary bindings.
@@ -55,19 +78,28 @@ fn settings(app: &SolveApp) -> Result<RenderSetup, String> {
     let job = match view.method {
         ImageMethod::Raster => RenderJob::Raster { transparent_background: false },
         ImageMethod::CpuRaytrace => RenderJob::CpuRaytrace {
-            options: CpuJob {
+            transparent_background: false,
+            options: Box::new(CpuJob {
+                budget: view.raytrace.budget,
+                sun: view.studio.sun_enabled.then_some(view.studio.sun),
+                path: view.raytrace.path,
+                progressive: view.raytrace.progressive,
+                primary_samples: view.raytrace.primary_samples,
+                shadows: view.raytrace.shadows,
                 lights: view.raytrace.lights.clone(),
                 preset: view.raytrace.preset,
                 punctual_lights: view.raytrace.punctual_lights.clone(),
                 area_lights: view.raytrace.area_lights.clone(),
                 ..Default::default()
-            },
+            }),
         },
         ImageMethod::GpuRaytrace => RenderJob::GpuPath {
             transparent_background: false,
             options: Box::new(GpuJob {
                 lighting: if view.studio.lighting_enabled {
                     Some(StudioLighting {
+                        punctual_lights: view.studio.punctual_lights,
+                        directional_lights: view.studio.directional_lights,
                         sun: view.studio.sun_enabled.then_some(view.studio.sun),
                         environment: view.studio.ambient,
                         area_lights: AreaLights::new(&view.studio.area_lights).map_err(|e| e.to_string())?,
@@ -85,7 +117,107 @@ fn settings(app: &SolveApp) -> Result<RenderSetup, String> {
             }),
         },
     };
-    Ok(RenderSetup { camera: app.cam, job: Some(job), ..Default::default() })
+    Ok(RenderSetup { camera: app.cam, width: 1, height: 1, job: Some(job), ..Default::default() })
+}
+
+/// Copy the common analytic rig without inventing a backend's implicit studio.
+/// This is a pure prospective conversion; the caller publishes only after full validation.
+pub(super) fn celestial_method(app: &SolveApp, next: &mut super::ViewState, method: ImageMethod) -> Result<(), String> {
+    let sources = rows(app)?;
+    let mut setup = RenderSetup {
+        camera: app.cam,
+        width: 1,
+        height: 1,
+        job: Some(match method {
+            ImageMethod::CpuRaytrace => RenderJob::CpuRaytrace {
+                transparent_background: false,
+                options: Box::new(CpuJob {
+                    budget: next.raytrace.budget,
+                    sun: next.studio.sun_enabled.then_some(next.studio.sun),
+                    path: next.raytrace.path,
+                    progressive: next.raytrace.progressive,
+                    primary_samples: next.raytrace.primary_samples,
+                    shadows: next.raytrace.shadows,
+                    ..Default::default()
+                }),
+            },
+            ImageMethod::GpuRaytrace => RenderJob::GpuPath {
+                transparent_background: false,
+                options: Box::new(GpuJob {
+                    lighting: Some(StudioLighting { sun: next.studio.sun_enabled.then_some(next.studio.sun), ..Default::default() }),
+                    ..Default::default()
+                }),
+            },
+            ImageMethod::Raster => return Ok(()),
+        }),
+        ..Default::default()
+    };
+    solidcraft_engine::render_lights::write(&mut setup, &sources)?;
+    let converted = solidcraft_engine::render_lights::inspect(&setup)?;
+    if sources.len() != converted.len()
+        || sources.iter().any(|source| {
+            !converted.iter().any(|target| {
+                source.id == target.id
+                    && source.geometry.kind() == target.geometry.kind()
+                    && matches!(source.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. })
+                        == matches!(target.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. })
+            })
+        })
+    {
+        return Err(app.tr("render.cpu_celestial_switch").into());
+    }
+    match setup.job {
+        Some(RenderJob::CpuRaytrace { options, .. }) => {
+            next.raytrace.sun = options.sun.map(Box::new);
+            next.studio.sun_enabled = options.sun.is_some();
+            if let Some(sun) = options.sun {
+                next.studio.sun = sun;
+            }
+            next.raytrace.preset = options.preset;
+            next.raytrace.lights = options.lights;
+            next.raytrace.punctual_lights = options.punctual_lights;
+            next.raytrace.area_lights = options.area_lights;
+        }
+        Some(RenderJob::GpuPath { options, .. }) => {
+            if let Some(lighting) = options.lighting {
+                next.studio.lighting_enabled = true;
+                next.studio.directional_lights = lighting.directional_lights;
+                next.studio.punctual_lights = lighting.punctual_lights;
+                next.studio.area_lights = lighting.area_lights.iter().copied().collect();
+                next.studio.sun_enabled = lighting.sun.is_some();
+                if let Some(sun) = lighting.sun {
+                    next.studio.sun = sun;
+                }
+            }
+        }
+        _ => return Err(app.tr("render.cpu_celestial_switch").into()),
+    }
+    Ok(())
+}
+
+/// The caller has just executed celestial_method's address-preserving conversion.
+/// Preserve transient visibility only when its prior Arc/method source is proven;
+/// equal row values or counts alone never establish identity.
+pub(super) fn celestial_method_applied(
+    app: &mut SolveApp,
+    before: &std::sync::Weak<solidcraft_engine::doc::render_settings::RenderSettings>,
+    method: ImageMethod,
+) {
+    let valid = app.render_workspace.view.lights.scope == app.render_workspace.view.name
+        && app.render_workspace.view.lights.source.as_ref().is_some_and(|source| source.method == method && source.settings.ptr_eq(before));
+    let source = Source { settings: std::sync::Arc::downgrade(&app.session.doc.render), method: app.render_workspace.view.method };
+    let scope = app.render_workspace.view.name.clone();
+    let view = &mut app.render_workspace.view.lights;
+    view.scope = scope;
+    view.source = Some(source);
+    view.numeric_history = None;
+    view.draft = None;
+    if !valid {
+        view.visibility = Visibility::default();
+        if matches!(app.render_workspace.view.selection, RenderSelection::Light(_)) {
+            app.render_workspace.view.selection = RenderSelection::Nothing;
+        }
+    }
 }
 
 pub(super) fn rows(app: &SolveApp) -> Result<Vec<Light>, String> {
@@ -94,6 +226,43 @@ pub(super) fn rows(app: &SolveApp) -> Result<Vec<Light>, String> {
 
 pub(super) fn name(app: &SolveApp, light: &Light) -> String {
     if light.number <= 3 { app.tr(&light.name_key).into() } else { crate::i18n::format(&light.name_key, &[("number", &light.number.to_string())]) }
+}
+
+/// A known volume-only/transport adoption preserves the analytic rig's addresses.
+/// Equal values alone are insufficient: prove both the cached pre-command Arc
+/// and its saved rows, then retain only this one exact Undo/Redo edge.
+pub(super) fn volume_edited(
+    app: &mut SolveApp,
+    before: &std::sync::Weak<solidcraft_engine::doc::render_settings::RenderSettings>,
+    method: ImageMethod,
+    draft: &RenderSetup,
+    rig: &[Light],
+) {
+    let valid = app.render_workspace.view.method == method
+        && app.render_workspace.view.lights.scope == app.render_workspace.view.name
+        && app.render_workspace.view.lights.source.as_ref().is_some_and(|source| source.method == method && source.settings.ptr_eq(before))
+        && before
+            .upgrade()
+            .and_then(|settings| {
+                // A first numerical edit creates the setup from this exact
+                // controller draft; no unknown source replacement is inferred.
+                let setup = settings.setups.get(&app.render_workspace.view.name).unwrap_or(draft);
+                solidcraft_engine::render_lights::inspect(setup).ok()
+            })
+            .as_deref()
+            == Some(rig)
+        && rows(app).ok().as_deref() == Some(rig);
+    if !valid {
+        loaded(app);
+        return;
+    }
+    let after = std::sync::Arc::downgrade(&app.session.doc.render);
+    let view = &mut app.render_workspace.view.lights;
+    if !before.ptr_eq(&after) {
+        view.numeric_history = Some(NumericHistory { before: before.clone(), after: after.clone() });
+    }
+    view.source = Some(Source { settings: after, method });
+    view.draft = None;
 }
 
 pub(crate) fn validate_visibility(app: &SolveApp, params: &Value) -> Result<(), String> {
@@ -120,8 +289,26 @@ pub(crate) fn apply_visibility(app: &mut SolveApp, command: &str, reply: &Value)
 }
 
 pub(super) fn loaded(app: &mut SolveApp) {
-    if app.render_workspace.view.lights.scope != app.render_workspace.view.name {
+    let scope_changed = app.render_workspace.view.lights.scope != app.render_workspace.view.name;
+    if scope_changed {
         app.render_workspace.view.lights = View { scope: app.render_workspace.view.name.clone(), ..Default::default() };
+    }
+    let source = Source { settings: std::sync::Arc::downgrade(&app.session.doc.render), method: app.render_workspace.view.method };
+    let view = &mut app.render_workspace.view.lights;
+    let unknown = scope_changed
+        || view.source.as_ref().is_some_and(|previous| {
+            !(previous.method == source.method && previous.settings.ptr_eq(&source.settings))
+                && !view.numeric_history.as_ref().is_some_and(|proof| proof.connects(previous, &source))
+        });
+    view.source = Some(source);
+    if unknown {
+        // Undo/Redo, checkpoint and arbitrary replacements do not carry an edit
+        // identity map. Never infer identity from equal kind/count/value lists.
+        view.visibility = Visibility::default();
+        view.draft = None;
+        if matches!(app.render_workspace.view.selection, RenderSelection::Light(_)) {
+            app.render_workspace.view.selection = RenderSelection::Nothing;
+        }
     }
     if let Ok(lights) = rows(app) {
         let view = &mut app.render_workspace.view.lights;
@@ -133,20 +320,73 @@ pub(super) fn loaded(app: &mut SolveApp) {
 }
 
 /// Runs after successful command dispatch, including programmatic control-channel edits.
-pub(crate) fn edited(app: &mut SolveApp, params: &Value, reply: &Value) {
+pub(crate) fn edited(app: &mut SolveApp, command: &str, params: &Value, reply: &Value) {
     let Some(name) = reply.get("name").and_then(Value::as_str) else { return };
     if name != app.render_workspace.view.name {
         return;
     }
-    let visibility = app.render_workspace.view.lights.visibility.clone();
+    let before = rows(app).unwrap_or_default();
+    let remap = reply
+        .get("id_remap")
+        .filter(|value| value.as_array().is_some_and(|array| array.len() <= 20))
+        .and_then(|value| serde_json::from_value::<Vec<LightIdRemap>>(value.clone()).ok())
+        .unwrap_or_default();
+    let remap_id = |id: &str| {
+        remap.iter().find(|entry| entry.before.id == id && before.iter().any(|light| light == &entry.before)).map(|entry| entry.after_id.clone())
+    };
+    // One bounded provenance proof keeps the latest verified numerical edit's
+    // Undo/Redo on the same source. It is not an independent history journal.
+    // The saved source must match the actual pre-edit draft, not merely its shape.
+    let history = (|| {
+        if command != "render.lights.set" || remap.len() != before.len() {
+            return None;
+        }
+        let previous = app.session.undo.last()?;
+        if previous.label != solidcraft_engine::find_command(command)?.label {
+            return None;
+        }
+        let saved = previous.doc.render.setups.get(name)?;
+        if solidcraft_engine::render_lights::inspect(saved).ok()? != before {
+            return None;
+        }
+        let cached = app.render_workspace.view.lights.source.as_ref()?;
+        let source = std::sync::Arc::downgrade(&previous.doc.render);
+        if !cached.settings.ptr_eq(&source) {
+            return None;
+        }
+        let after = solidcraft_engine::render_lights::inspect(app.session.doc.render.setups.get(name)?).ok()?;
+        let kind = |light: &Light| (light.geometry.kind(), matches!(light.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. }));
+        if before.iter().any(|light| {
+            !remap.iter().any(|entry| {
+                entry.before == *light && entry.after_id == light.id && after.iter().any(|new| new.id == entry.after_id && kind(new) == kind(light))
+            })
+        }) {
+            return None;
+        }
+        Some(NumericHistory { before: source, after: std::sync::Arc::downgrade(&app.session.doc.render) })
+    })();
+    if let Some(history) = history {
+        app.render_workspace.view.lights.numeric_history = Some(history);
+    }
+    let previous = &app.render_workspace.view.lights.visibility;
+    let visibility =
+        Visibility { solo: previous.solo.as_deref().and_then(remap_id), muted: previous.muted.iter().filter_map(|id| remap_id(id)).collect() };
+    let selection = match &app.render_workspace.view.selection {
+        RenderSelection::Light(id) => remap_id(id).map_or(RenderSelection::Nothing, RenderSelection::Light),
+        other => other.clone(),
+    };
     setups::load(app);
     app.render_workspace.view.lights.visibility = visibility;
+    // Parameter drafts are keyed by old address/revision. Never hand one to a
+    // different source that now occupies that address after canonicalization.
+    app.render_workspace.view.lights.draft = None;
     loaded(app);
     if let Some(aim) = params.get("set").and_then(|set| set.get("aim_at")) {
         app.render_workspace.view.lights.aim = serde_json::from_value(aim.clone()).ok();
     }
-    app.render_workspace.view.selection =
-        reply.get("id").and_then(Value::as_str).map_or(RenderSelection::Nothing, |id| RenderSelection::Light(id.into()));
+    // Add/set/duplicate select the command's actual result. Removing another
+    // source preserves an unrelated selected source through its explicit map.
+    app.render_workspace.view.selection = reply.get("id").and_then(Value::as_str).map_or(selection, |id| RenderSelection::Light(id.into()));
 }
 
 fn product_centre(app: &SolveApp) -> [f64; 3] {
@@ -234,19 +474,26 @@ pub(crate) fn filter_request(app: &SolveApp, mut request: Value) -> Result<Value
                 .map_err(|e| e.to_string())?;
         let mut lighting = RenderSetup {
             job: Some(RenderJob::CpuRaytrace {
-                options: CpuJob {
+                transparent_background: false,
+                options: Box::new(CpuJob {
+                    sun: options.sun.as_deref().copied(),
+                    path: options.path,
+                    progressive: options.progressive,
+                    primary_samples: options.primary_samples,
+                    shadows: options.shadows,
                     lights: options.lights.clone(),
                     preset: options.preset,
                     punctual_lights: options.punctual_lights.clone(),
                     area_lights: options.area_lights.clone(),
                     ..Default::default()
-                },
+                }),
             }),
             ..Default::default()
         };
         solidcraft_engine::render_lights::filter(&mut lighting, visibility)?;
-        if let Some(RenderJob::CpuRaytrace { options: filtered }) = lighting.job {
+        if let Some(RenderJob::CpuRaytrace { options: filtered, .. }) = lighting.job {
             let mut options = options;
+            options.sun = filtered.sun.map(Box::new);
             options.lights = filtered.lights;
             options.preset = filtered.preset;
             options.punctual_lights = filtered.punctual_lights;
@@ -342,7 +589,6 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
     let gpu = method == ImageMethod::GpuRaytrace;
     let raster = method == ImageMethod::Raster;
     let lights = rows(app).unwrap_or_default();
-    let legacy_gpu = gpu && lights.iter().filter(|l| l.geometry.kind() == "directional").count() > 1;
     if raster {
         note(app, ui, "render.method_limit_raster");
     }
@@ -353,8 +599,7 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
             let mut chosen = usize::from(custom);
             let labels = [app.tr("render.lighting_preset").to_string(), app.tr("render.lighting_custom").to_string()];
             let reason = app.tr("render.lighting_preset_cpu").to_string();
-            let legacy_reason = app.tr("render.light_backend_limit").to_string();
-            let disabled = [(!cpu).then_some(reason.as_str()), legacy_gpu.then_some(legacy_reason.as_str())];
+            let disabled = [(!cpu).then_some(reason.as_str()), None];
             ui.add_enabled_ui(!raster, |ui| {
                 let label = app.tr("render.lighting_source").to_string();
                 ui_kit::row(ui, &label, |ui| {
@@ -413,9 +658,6 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
             if !cpu {
                 note(app, ui, "render.lighting_preset_cpu");
             }
-            if legacy_gpu {
-                note(app, ui, "render.light_backend_limit");
-            }
             // RenderSetup has no saved rig identity. Do not invent a Rig row.
         });
         let title = app.tr("render.lighting_shadows_section").to_string();
@@ -455,16 +697,14 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         let title = app.tr("render.lighting_budget").to_string();
         ui_kit::section(ui, "render:lighting:budget", &title, true, |ui| {
-            for (kind, key, limit) in [
-                ("directional", if gpu { "render.light_type_sun" } else { "render.tree_directional" }, if gpu { 1 } else { 8 }),
-                ("area", "render.light_type_area", 4),
-                ("point", "render.light_type_point", 8),
-            ] {
+            for (kind, key, limit) in
+                [("directional", "render.tree_directional", 8), ("area", "render.light_type_area", 4), ("point", "render.light_type_point", 8)]
+            {
                 let count = lights
                     .iter()
                     .filter(|l| if kind == "point" { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind })
                     .count();
-                let unsupported = raster || (gpu && kind == "point");
+                let unsupported = raster;
                 let label = app.tr(key).to_string();
                 ui.add_enabled_ui(!unsupported, |ui| {
                     ui_kit::row(ui, &label, |ui| {
@@ -492,9 +732,6 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                     })
                 });
-                if gpu && kind == "point" {
-                    note(app, ui, "render.light_gpu_punctual");
-                }
             }
             note(app, ui, "render.lighting_budget_help");
             add_menu(app, ui);
@@ -506,41 +743,57 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     let gpu = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
     let raster = app.render_workspace.view.method == ImageMethod::Raster;
     let lights = rows(app).unwrap_or_default();
-    let legacy = gpu && lights.iter().filter(|l| l.geometry.kind() == "directional").count() > 1;
     let label = app.tr("render.tree_add_light").to_string();
-    ui.add_enabled_ui(!raster && !legacy, |ui| {
+    ui.add_enabled_ui(!raster, |ui| {
         ui_kit::dropdown_menu(ui, "render:lighting:add", &label, |ui| {
             for (kind, key, cap) in [
                 ("area", "render.light_type_area", 4),
                 ("point", "render.light_type_point", 8),
-                ("directional", if gpu { "render.light_type_sun" } else { "render.tree_directional" }, if gpu { 1 } else { 8 }),
+                ("spot", "render.light_type_spot", 8),
+                ("directional", "render.tree_directional", 8),
             ] {
                 let count = lights
                     .iter()
-                    .filter(|l| if kind == "point" { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind })
+                    .filter(
+                        |l| if matches!(kind, "point" | "spot") { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind },
+                    )
                     .count();
-                let enabled = count < cap && !(gpu && kind == "point");
+                let enabled = count < cap;
                 let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr(key), false)).inner;
+                crate::scenario::publish_target(&format!("render:lighting:add:{kind}"), response.rect);
+                if response.on_hover_text(app.tr("render.lighting_budget_help")).clicked() {
+                    dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
+                    ui.close();
+                }
+            }
+            {
+                let compatible = gpu || app.render_workspace.view.raytrace.path.is_some();
+                let directional = lights.iter().filter(|l| l.geometry.kind() == "directional").count();
+                let finite = lights.iter().any(|l| matches!(l.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. }));
+                let response = ui
+                    .add_enabled_ui(compatible && !finite && directional < 8, |ui| {
+                        ui_kit::list_picker(ui, "sun", app.tr("render.light_type_sun"), false)
+                    })
+                    .inner;
+                crate::scenario::publish_target("render:lighting:add:sun", response.rect);
                 if response
-                    .backing_on_hover_text(app.tr(if gpu && kind == "point" { "render.light_gpu_punctual" } else { "render.lighting_budget_help" }))
+                    .backing_on_hover_text(app.tr(if compatible { "render.directional_sun_limit" } else { "render.cpu_celestial_path_required" }))
                     .clicked()
                 {
-                    dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
+                    let softness = (0.02 - 0.001) / (std::f64::consts::FRAC_PI_2 - 0.001);
+                    dispatch(app, "render.lights.add", None, Some(json!({"kind":"directional","softness":softness})));
                     ui.close();
                 }
             }
         });
     });
-    if legacy {
-        note(app, ui, "render.light_backend_limit");
-    }
 }
 
 fn review_preset(app: &mut SolveApp, preset: solidcraft_engine::render::job::LightingPreset) {
     match setups::snapshot(app) {
         Ok(mut setup) => {
             let source = setup.clone();
-            if let Some(RenderJob::CpuRaytrace { options }) = &mut setup.job {
+            if let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job {
                 options.lights = None;
                 options.preset = Some(preset);
                 app.render_workspace.view.lights.review = Some(Review {
@@ -558,19 +811,16 @@ fn review_preset(app: &mut SolveApp, preset: solidcraft_engine::render::job::Lig
 }
 
 fn save_lighting(app: &mut SolveApp, setup: RenderSetup) -> Result<(), String> {
-    let selection = app.render_workspace.view.selection.clone();
-    let visibility = app.render_workspace.view.lights.visibility.clone();
     app.run("render.settings.set", json!({"name":app.render_workspace.view.name,"set":setup}))?;
+    // Full settings replacement has no source map. Respect loaded()'s proven-
+    // provenance policy instead of restoring visibility by reused ordinal IDs.
     setups::load(app);
-    app.render_workspace.view.selection = selection;
-    app.render_workspace.view.lights.visibility = visibility;
-    loaded(app);
     Ok(())
 }
 fn update_cpu(app: &mut SolveApp, update: impl FnOnce(&mut CpuJob)) {
     let result = (|| {
         let mut setup = setups::snapshot(app)?;
-        if let Some(RenderJob::CpuRaytrace { options }) = &mut setup.job {
+        if let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job {
             update(options);
         }
         save_lighting(app, setup)
@@ -626,14 +876,26 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
     crate::scenario::publish_target("render:light:editor", ui.available_rect_before_wrap());
     let kind = light.geometry.kind();
     let gpu = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
-    let blocked = app.render_workspace.view.method == ImageMethod::Raster
-        || (gpu && lights.iter().filter(|light| light.geometry.kind() == "directional").count() > 1);
-    let maximum_ev = if gpu { if kind == "area" { 1e6_f64.log2() } else { 1e8_f64.log2() } } else { 6.0 };
+    let blocked = app.render_workspace.view.method == ImageMethod::Raster;
+    let finite_sun = matches!(light.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. });
+    let maximum_ev = if gpu && kind == "area" {
+        1e6_f64.log2()
+    } else if finite_sun {
+        1e8_f64.log2()
+    } else {
+        6.0
+    };
     let type_key = match kind {
         "area" => "render.light_type_area",
         "spot" => "render.light_type_spot",
         "point" => "render.light_type_point",
-        _ => "render.light_type_sun",
+        _ => {
+            if finite_sun {
+                "render.light_type_sun"
+            } else {
+                "render.tree_directional"
+            }
+        }
     };
     let aim = app.render_workspace.view.lights.aim.unwrap_or_else(|| product_centre(app));
     let subject_size = subject_size(app);
@@ -645,6 +907,12 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
         | Geometry::Spot { position_mm, reference_distance_mm, minimum_distance_mm, .. } => {
             (position_mm, [0.0; 3], [0.0; 3], [0.0; 3], reference_distance_mm, minimum_distance_mm)
         }
+    };
+    let (emitted_axis, inner_angle, outer_angle) = match light.geometry {
+        Geometry::Spot { emitted_axis, inner_half_angle_radians, outer_half_angle_radians, .. } => {
+            (emitted_axis, inner_half_angle_radians.to_degrees(), outer_half_angle_radians.to_degrees())
+        }
+        _ => ([0.0, 0.0, -1.0], 0.2_f64.to_degrees(), 0.5_f64.to_degrees()),
     };
     let width = length(u);
     let softness = match light.geometry {
@@ -672,31 +940,35 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
             reference,
             minimum,
             aim,
+            emitted_axis,
+            inner_angle,
+            outer_angle,
         });
     ui_kit::scope(ui, |ui| {
         ui_kit::row(ui, &name(app, light), |ui| {
             ui.add_enabled_ui(false, |ui| ui_kit::choice_chip(ui, "render:light:badge", app.tr(type_key), true));
         });
         if blocked {
-            note(app, ui, "render.light_backend_limit");
+            note(app, ui, "render.method_limit_raster");
         }
         ui.add_enabled_ui(!blocked, |ui| {
             let labels = [
                 app.tr("render.light_type_area").to_string(),
                 app.tr("render.light_type_point").to_string(),
-                app.tr("render.light_type_sun").to_string(),
+                app.tr("render.light_type_spot").to_string(),
+                app.tr(if finite_sun { "render.light_type_sun" } else { "render.tree_directional" }).to_string(),
             ];
-            let kinds = ["area", "point", "directional"];
+            let kinds = ["area", "point", "spot", "directional"];
             let mut selected = kinds.iter().position(|value| *value == kind).unwrap_or(1);
-            let reason = app.tr("render.light_gpu_punctual").to_string();
             let budget_reason = app.tr("render.lighting_budget_help").to_string();
             let areas = lights.iter().filter(|l| l.geometry.kind() == "area").count();
             let points = lights.iter().filter(|l| matches!(l.geometry.kind(), "point" | "spot")).count();
             let suns = lights.iter().filter(|l| l.geometry.kind() == "directional").count();
             let disabled = [
                 (kind != "area" && areas >= 4).then_some(budget_reason.as_str()),
-                if gpu { Some(reason.as_str()) } else { (kind != "point" && kind != "spot" && points >= 8).then_some(budget_reason.as_str()) },
-                (kind != "directional" && suns >= if gpu { 1 } else { 8 }).then_some(budget_reason.as_str()),
+                (kind != "point" && kind != "spot" && points >= 8).then_some(budget_reason.as_str()),
+                (kind != "point" && kind != "spot" && points >= 8).then_some(budget_reason.as_str()),
+                (kind != "directional" && suns >= 8).then_some(budget_reason.as_str()),
             ];
             if ui_kit::segmented(
                 ui,
@@ -705,19 +977,13 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 ui_kit::Segments {
                     compact: true,
                     disabled: &disabled,
-                    targets: &["render:light:type:area", "render:light:type:point", "render:light:type:directional"],
+                    targets: &["render:light:type:area", "render:light:type:point", "render:light:type:spot", "render:light:type:directional"],
                     ..Default::default()
                 },
             ) && let Some(chosen) = kinds.get(selected)
                 && *chosen != kind
             {
                 dispatch(app, "render.lights.set", Some(id), Some(json!({"kind":chosen})));
-            }
-            if gpu {
-                note(app, ui, "render.light_gpu_punctual");
-            }
-            if kind == "spot" {
-                note(app, ui, "render.lighting_spot_preserved");
             }
             slider_field(app, ui, id, "render.light_intensity", "intensity_ev", &mut draft.ev, -20.0..=maximum_ev, |v| format!("{v:+.1} EV"), true);
             slider_field(
@@ -732,7 +998,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 true,
             );
             note(app, ui, "render.light_temperature_help");
-            let soft = kind == "area" || (kind == "directional" && gpu);
+            let soft = kind == "area" || finite_sun;
             let sun = kind == "directional";
             // A sun displays its actual angular radius; areas display the size adapter.
             slider_field(
@@ -742,7 +1008,13 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 "render.light_softness",
                 if sun { "angular_radius_deg" } else { "softness" },
                 &mut draft.softness,
-                if sun { 0.001_f64.to_degrees()..=90.0 } else { 0.0..=1.0 },
+                if finite_sun {
+                    0.001_f64.to_degrees()..=90.0
+                } else if sun {
+                    0.0..=90.0
+                } else {
+                    0.0..=1.0
+                },
                 if sun { |v| format!("{v:.2}°") } else { |v| format!("{v:.2}") },
                 soft,
             );
@@ -849,6 +1121,15 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                     vector_field(app, ui, id, "render.lighting_edge_v", "edge_v_mm", &mut draft.v, if gpu { -2e6..=2e6 } else { -1e6..=1e6 }, " mm");
                 });
             }
+            if kind == "spot" {
+                let title = app.tr("render.spot_cone").to_string();
+                ui_kit::section(ui, "render:light:cone", &title, true, |ui| {
+                    vector_field(app, ui, id, "render.spot_axis", "emitted_axis", &mut draft.emitted_axis, -1e9..=1e9, "");
+                    field(app, ui, id, "render.spot_inner", "inner_half_angle_radians", &mut draft.inner_angle, 0.0..=90.0, 0.1, "°", true);
+                    field(app, ui, id, "render.spot_outer", "outer_half_angle_radians", &mut draft.outer_angle, 0.0..=90.0, 0.1, "°", true);
+                    note(app, ui, if gpu { "render.spot_gpu_help" } else { "render.spot_help" });
+                });
+            }
             if matches!(kind, "point" | "spot") {
                 let title = app.tr("render.lighting_falloff").to_string();
                 ui_kit::section(ui, "render:light:falloff", &title, true, |ui| {
@@ -892,21 +1173,15 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 let _ = app.run("render.lights.mute", json!({"id":id,"mute":muted}));
             }
             ui.horizontal(|ui| {
-                let cap = if kind == "area" {
-                    4
-                } else if gpu {
-                    1
-                } else {
-                    8
-                };
+                let cap = if kind == "area" { 4 } else { 8 };
                 let count = lights
                     .iter()
                     .filter(
                         |l| if matches!(kind, "point" | "spot") { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind },
                     )
                     .count();
-                if ui_kit::button(ui, app.tr("render.light_duplicate"), ui_kit::Button::Enabled(!blocked && count < cap))
-                    .backing_on_hover_text(app.tr("render.lighting_budget_help"))
+                if ui_kit::button(ui, app.tr("render.light_duplicate"), ui_kit::Button::Enabled(!blocked && !finite_sun && count < cap))
+                    .backing_on_hover_text(app.tr(if finite_sun { "render.directional_sun_limit" } else { "render.lighting_budget_help" }))
                     .clicked()
                 {
                     dispatch(app, "render.lights.duplicate", Some(id), None);
@@ -974,19 +1249,20 @@ fn vector_field(
     suffix: &str,
 ) {
     let label = app.tr(label).to_string();
-    ui_kit::row(ui, &label, |ui| {
-        let mut changed = false;
-        ui.horizontal(|ui| {
-            for (index, component) in value.iter_mut().enumerate() {
-                let response = ui_kit::number_field(ui, component, range.clone(), 0.1, suffix);
-                crate::scenario::publish_target(&format!("render:light:{key}:{index}"), response.rect);
-                changed |= accepted(&response);
-            }
+    // Each coordinate needs the full control column: three content-sized
+    // DragValues can extend beyond a narrow inspector as their text grows.
+    // Separate axis rows retain the standard parser, focus and accessible label.
+    let mut changed = false;
+    for ((index, component), axis) in value.iter_mut().enumerate().zip(["X", "Y", "Z"]) {
+        ui_kit::row(ui, &format!("{label} {axis}"), |ui| {
+            let response = ui_kit::number_field(ui, component, range.clone(), 0.1, suffix);
+            crate::scenario::publish_target(&format!("render:light:{key}:{index}"), response.rect);
+            changed |= accepted(&response);
         });
-        if changed && value.iter().all(|v| v.is_finite() && range.contains(v)) {
-            dispatch(app, "render.lights.set", Some(id), Some(json!({(key):*value})));
-        }
-    });
+    }
+    if changed && value.iter().all(|v| v.is_finite() && range.contains(v)) {
+        dispatch(app, "render.lights.set", Some(id), Some(json!({(key):*value})));
+    }
 }
 fn accepted(response: &egui::Response) -> bool {
     response.drag_stopped() || (response.changed() && (response.has_focus() || response.lost_focus()))
@@ -1016,9 +1292,20 @@ fn field(
             let response = ui_kit::number_field(ui, value, range.clone(), speed, suffix);
             crate::scenario::publish_target(&format!("render:light:{key}"), response.rect);
             if accepted(&response) && value.is_finite() && range.contains(value) {
-                let patch = if key == "distance_size" { json!({"distance_mm":*value * subject_size(app)}) } else { json!({(key):*value}) };
+                let patch = if key == "distance_size" {
+                    json!({"distance_mm":*value * subject_size(app)})
+                } else if matches!(key, "inner_half_angle_radians" | "outer_half_angle_radians") {
+                    json!({(key):value.to_radians()})
+                } else {
+                    json!({(key):*value})
+                };
                 dispatch(app, "render.lights.set", Some(id), Some(patch));
             }
         })
     });
+}
+
+#[cfg(test)]
+pub(super) fn editor_draft(app: &SolveApp) -> Option<(String, u64, f64, f64)> {
+    app.render_workspace.view.lights.draft.as_ref().map(|draft| (draft.id.clone(), draft.revision, draft.ev, draft.softness))
 }

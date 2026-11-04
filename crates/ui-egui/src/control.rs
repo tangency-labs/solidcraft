@@ -298,12 +298,16 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     if id == "view.pick" {
         return crate::view_pick::pick_command(app, &params);
     }
+    // Placement failure does not establish an empty model. Keep its camera and
+    // let the existing placement diagnostic explain the unavailable world.
+    let had_bodies = app.session.world_state().map_or(true, |world| !world.bodies.is_empty());
     let r = app.run(id, params);
     // Update Links in a part edited in place reads the assembly around it too, as its button does.
     if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
         crate::edit_in_place::refresh(app);
     }
     if r.is_ok()
+        && !had_bodies
         && !matches!(
             id,
             "view.fit"
@@ -2832,6 +2836,72 @@ mod tests {
         assert_eq!(without_timings(&batched["result"]["results"]), without_timings(&json!(one_by_one)), "{batched}");
         assert_eq!(without_timings(&inspect(&mut a)["timeline"]), without_timings(&inspect(&mut b)["timeline"]));
         assert_eq!(a.app.cam, b.app.cam, "the first-body fit must happen as for engine.execute");
+    }
+
+    #[test]
+    fn existing_single_body_control_queries_keep_the_current_camera_and_history() {
+        let mut saved = Session::default();
+        saved.execute("solid.box", &json!({"length":80,"width":50,"height":12,"body_name":"Subject"})).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        crate::documents::open_tab(&mut h.app, Session::opened((*saved.doc).clone(), None)).unwrap();
+        h.call("ui.resize", json!({"width":1440,"height":1000}));
+        h.frames(4);
+        crate::render_workspace::enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.cancel_view_animation();
+        h.app.cam.distance = 321.0;
+        h.app.cam.yaw = 0.3;
+        let camera = h.app.cam;
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+        assert_eq!(h.app.session.undo.len(), 0, "a freshly opened one-body design exercises the old refit heuristic");
+        for command in ["appearance.library", "render.settings.get", "render.scene"] {
+            let reply = h.call("engine.execute", json!({"command":command,"params":{}}));
+            assert_eq!(reply["ok"], true, "{command}: {reply}");
+            h.frames(4);
+            assert_eq!(h.app.cam, camera, "read-only {command} must keep the product framing");
+            assert!(h.app.pending_fit.is_none());
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        }
+        let reply = h.call(
+            "engine.batch",
+            json!({"commands":[
+                {"command":"appearance.library","params":{}}, {"command":"render.scene","params":{}}
+            ]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        h.frames(4);
+        assert_eq!(h.app.cam, camera);
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+    }
+
+    #[test]
+    fn control_first_body_creation_still_fits_but_later_appearance_edits_do_not() {
+        let mut h = crate::scenario::Harness::new();
+        h.frames(4);
+        h.app.cancel_view_animation();
+        h.app.cam.distance = 10_000.0;
+        let (request, _receiver) =
+            ControlRequest::new("engine.execute", json!({"command":"solid.box","params":{"length":80,"width":50,"height":12,"body_name":"Subject"}}));
+        let Outcome::Done(reply) = handle(&mut h.app, &h.ctx, &request) else { panic!("a command reply cannot be a screenshot") };
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(h.app.pending_fit.is_some(), "the first actual body must request the measured fit");
+        h.frames(4);
+        assert!(h.app.pending_fit.is_none());
+        assert!(h.app.cam.distance < 1000.0);
+        h.app.cam.yaw = 0.7;
+        h.app.cam.distance = 321.0;
+        let camera = h.app.cam;
+        let undo = h.app.session.undo.len();
+        let reply = h.call("engine.execute", json!({"command":"appearance.assign","params":{"bodies":["Subject"],"color":"#204080"}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        h.frames(4);
+        assert_eq!(h.app.cam, camera);
+        assert!(h.app.pending_fit.is_none());
+        assert_eq!(h.app.session.undo.len(), undo + 1);
     }
 
     /// A request carrying `allow_paths` (from an MCP server, #205) reaches files only inside
