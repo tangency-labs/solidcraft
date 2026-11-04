@@ -170,6 +170,8 @@ pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: V
         if f == 0.0 || text.is_empty() || solidcraft_engine::doc::expr::is_literal(text) {
             return um(c - f * size);
         }
+        // A bare number in it has the design's unit, as OK reads the size.
+        let text = crate::length_input::expression(&s.doc, text, ValueKind::Length);
         match f {
             1.0 => format!("{} - ({text})", um(c)),
             0.5 => format!("{} - ({text}) / 2", um(c)),
