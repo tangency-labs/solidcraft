@@ -519,7 +519,7 @@ fn a_selected_rectangle_held_at_a_corner_stretches_with_the_pointer() {
         path.extend(steps(a, b, 6));
         press_and_move(&mut h, &path);
         release(&mut h, b);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(sid).expect("the sketch").sketch;
         let far = sk.points.iter().map(|p| p.pos).fold(Vec2::ZERO, |m, p| Vec2::new(m.x.max(p.x), m.y.max(p.y)));
         let want = Vec2::new(30.0, 20.0) + (to - grab);
