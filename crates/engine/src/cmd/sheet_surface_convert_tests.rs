@@ -254,7 +254,7 @@ fn a_ring_through_the_commands_is_refused_and_each_mode_takes_its_own_parameters
         Ok(v) => panic!("a ring of four bends converts: {v}"),
     }
     for bad in [
-        json!({"body": "Tube", "face": [50, 0, 20]}),
+        json!({"body": "Tube", "mode": "convert", "face": [50, 0, 20]}),
         json!({"body": "Tube", "mode": "thicken", "face": [50, 0, 20], "skip": [[50, 0, 20]]}),
         json!({"body": "Tube", "mode": "thicken"}),
         json!({"body": "Tube", "mode": "thicken", "face": [50, 0, 20], "direction": "both"}),

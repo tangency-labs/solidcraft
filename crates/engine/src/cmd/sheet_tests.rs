@@ -61,7 +61,7 @@ fn plain_solid_sheet_operations_explain_how_to_start_sheet_metal() {
         assert_eq!(cmd, command);
         assert_eq!(
             msg,
-            "there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)"
+            "there is no sheet metal body: start one with Flange > Base, or turn a body into sheet metal with Convert to Sheet Metal"
         );
         assert_eq!(s.doc.to_json(), before);
     }

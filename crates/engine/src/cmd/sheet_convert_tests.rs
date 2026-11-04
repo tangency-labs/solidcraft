@@ -411,6 +411,9 @@ fn designs_from_before_bend_edges_open_unchanged() {
     // An older design keeps the numbering of the pieces it was saved with (#3902).
     let mut same = solidcraft_doc::Document::clone(&s.doc);
     same.features.iter_mut().for_each(|f| f.kernel_piece_order = true);
+    // Its rules' hem gaps were inner radii: doubled, they are the same hems (format pending
+    // sheet-hem-gap).
+    same.sheet.rules.iter_mut().for_each(|r| r.hem_gap = format!("2 * ({})", r.hem_gap));
     assert_eq!(doc, same);
     let mut reopened = Session::new(doc);
     assert!(reopened.model.results.iter().all(|x| x.error.is_none()));
