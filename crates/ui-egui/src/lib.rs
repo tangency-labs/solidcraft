@@ -1740,11 +1740,12 @@ impl SolveApp {
             return;
         }
         // A display choice opens its choices, as the navigation bar's menus do: run with no
-        // parameters it could only fail (#8868). The choices menu is not the command's ribbon
+        // parameters it could only fail (#8868); so does the selection filter's mode (#11505). The choices menu is not the command's ribbon
         // place, so the ribbon keeps its tab however the menu was opened (#10540).
         let choice = match id {
             "view.visual_style" => Some(context_menu::Target::VisualStyle),
             "view.tool" => Some(context_menu::Target::ViewTool),
+            "select.filter" => Some(context_menu::Target::SelectionFilter),
             _ => None,
         };
         if let Some(target) = choice {
