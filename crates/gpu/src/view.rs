@@ -2748,27 +2748,29 @@ impl Renderer {
             bind_group_layouts: &[Some(&bgl), Some(&access_bgl), Some(&ao_layout)],
             immediate_size: 0,
         });
-        let ground_ao = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("sc_ground_ao"),
-            layout: Some(&solid_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_tri"),
-                buffers: &[Some(tri_layout())],
-                compilation_options: Default::default(),
-            },
-            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
-            depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
-            multisample: wgpu::MultisampleState { count: t.samples.max(1), ..Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_ground_ao"),
-                targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
-                compilation_options: Default::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let ground_ao = || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("sc_ground_ao"),
+                layout: Some(&solid_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_tri"),
+                    buffers: &[Some(tri_layout())],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                multisample: wgpu::MultisampleState { count: t.samples.max(1), ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_ground_ao"),
+                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         let built = [Some(tri_layout())];
         let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
@@ -3014,6 +3016,7 @@ impl Renderer {
             let cloud_pipes = jobs.spawn(cloud_pipes);
             let image = jobs.spawn(image);
             let ao = jobs.spawn(ao);
+            let ground_ao = jobs.spawn(ground_ao);
             let oit = jobs.spawn(oit);
             let blits = jobs.spawn(blits);
             let resets = jobs.spawn(resets);
@@ -3032,7 +3035,7 @@ impl Renderer {
             let oit = oit.join();
             Renderer {
                 ao: ao.join(),
-                ground_ao,
+                ground_ao: ground_ao.join(),
                 ground_ao_key: None,
                 depth_reset,
                 section_stencil,
