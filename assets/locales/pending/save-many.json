@@ -1,64 +1,80 @@
 {
   "ar": {
+    "document.discard_row": "تجاهل",
     "document.finish_save_prompt": "أكمل الرد على نافذة الحفظ قبل فتح تصميم آخر.",
     "document.not_saved_yet": "لم يُحفظ بعد",
     "document.save_many": "حفظ التغييرات في {n} من التصاميم؟",
+    "document.save_row": "حفظ",
     "document.save_selected": "حفظ المحدد",
     "prefs.save_prompt_one_at_a_time": "السؤال عن كل تصميم غير محفوظ على حدة عند إغلاق عدة تصاميم",
     "prefs.save_prompt_one_at_a_time_help": "عرض نافذة حفظ لكل تصميم غير محفوظ بدلاً من قائمة مجمّعة."
   },
   "de": {
+    "document.discard_row": "Verwerfen",
     "document.finish_save_prompt": "Beantworten Sie die Speicherabfrage, bevor Sie einen weiteren Entwurf öffnen.",
     "document.not_saved_yet": "Noch nicht gespeichert",
     "document.save_many": "Änderungen an {n} Entwürfen speichern?",
+    "document.save_row": "Speichern",
     "document.save_selected": "Auswahl speichern",
     "prefs.save_prompt_one_at_a_time": "Beim Schließen mehrerer Entwürfe für jeden ungespeicherten Entwurf einzeln fragen",
     "prefs.save_prompt_one_at_a_time_help": "Für jeden ungespeicherten Entwurf eine eigene Speicherabfrage statt einer gemeinsamen Liste anzeigen."
   },
   "en": {
+    "document.discard_row": "Discard",
     "document.finish_save_prompt": "Finish answering the save prompt before opening another design.",
     "document.not_saved_yet": "Not saved yet",
     "document.save_many": "Save changes to {n} designs?",
+    "document.save_row": "Save",
     "document.save_selected": "Save Selected",
     "prefs.save_prompt_one_at_a_time": "Ask about each unsaved design separately when closing several",
     "prefs.save_prompt_one_at_a_time_help": "Show one save prompt per unsaved design instead of a combined list."
   },
   "he": {
+    "document.discard_row": "ביטול שינויים",
     "document.finish_save_prompt": "יש לסיים לענות על חלון השמירה לפני פתיחת תכן אחר.",
     "document.not_saved_yet": "עדיין לא נשמר",
     "document.save_many": "לשמור שינויים ב־{n} תכנים?",
+    "document.save_row": "שמירה",
     "document.save_selected": "שמירת הנבחרים",
     "prefs.save_prompt_one_at_a_time": "לשאול על כל תכן שלא נשמר בנפרד בעת סגירת כמה",
     "prefs.save_prompt_one_at_a_time_help": "להציג חלון שמירה נפרד לכל תכן שלא נשמר במקום רשימה משותפת."
   },
   "ja": {
+    "document.discard_row": "破棄",
     "document.finish_save_prompt": "別のデザインを開く前に、保存の確認に回答してください。",
     "document.not_saved_yet": "未保存",
     "document.save_many": "{n} 件のデザインの変更を保存しますか？",
+    "document.save_row": "保存",
     "document.save_selected": "選択項目を保存",
     "prefs.save_prompt_one_at_a_time": "複数を閉じるとき、未保存のデザインごとに確認する",
     "prefs.save_prompt_one_at_a_time_help": "一覧でまとめて確認する代わりに、未保存のデザインごとに保存を確認します。"
   },
   "ko": {
+    "document.discard_row": "버리기",
     "document.finish_save_prompt": "다른 디자인을 열기 전에 저장 여부를 선택하세요.",
     "document.not_saved_yet": "아직 저장하지 않음",
     "document.save_many": "디자인 {n}개의 변경 사항을 저장하시겠습니까?",
+    "document.save_row": "저장",
     "document.save_selected": "선택 항목 저장",
     "prefs.save_prompt_one_at_a_time": "여러 디자인을 닫을 때 저장하지 않은 디자인마다 따로 묻기",
     "prefs.save_prompt_one_at_a_time_help": "통합 목록 대신 저장하지 않은 디자인마다 저장 여부를 묻습니다."
   },
   "vi": {
+    "document.discard_row": "Bỏ thay đổi",
     "document.finish_save_prompt": "Hãy trả lời xong hộp thoại lưu trước khi mở thiết kế khác.",
     "document.not_saved_yet": "Chưa lưu",
     "document.save_many": "Lưu thay đổi cho {n} thiết kế?",
+    "document.save_row": "Lưu",
     "document.save_selected": "Lưu mục đã chọn",
     "prefs.save_prompt_one_at_a_time": "Hỏi riêng từng thiết kế chưa lưu khi đóng nhiều thiết kế",
     "prefs.save_prompt_one_at_a_time_help": "Hiển thị một hộp thoại lưu cho mỗi thiết kế chưa lưu thay vì một danh sách chung."
   },
   "zh": {
+    "document.discard_row": "放弃",
     "document.finish_save_prompt": "请先回答保存提示，再打开其他设计。",
     "document.not_saved_yet": "尚未保存",
     "document.save_many": "保存 {n} 个设计的更改？",
+    "document.save_row": "保存",
     "document.save_selected": "保存所选项",
     "prefs.save_prompt_one_at_a_time": "关闭多个设计时，逐个询问未保存的设计",
     "prefs.save_prompt_one_at_a_time_help": "对每个未保存的设计分别显示保存提示，而不是合并列表。"
