@@ -46,6 +46,7 @@ pub enum Target {
     Workspace(WorkspaceId),
     Instance(InstanceId),
     Section(SectionId),
+    Column(ColumnId),
     NativeHost(HostId),
 }
 impl From<Target> for LayoutTarget {
@@ -54,6 +55,7 @@ impl From<Target> for LayoutTarget {
             Target::Workspace(id) => Self::Workspace(id),
             Target::Instance(id) => Self::Instance(id),
             Target::Section(id) => Self::Section(id),
+            Target::Column(id) => Self::Column(id),
             Target::NativeHost(id) => Self::NativeHost(id),
         }
     }
@@ -95,6 +97,20 @@ pub struct ReturnTo {
     pub size: OuterSize,
     pub collapsed: bool,
     #[serde(default)]
+    pub section: Option<SectionId>,
+    #[serde(default)]
+    pub column: Option<ColumnId>,
+    #[serde(default)]
+    pub column_index: usize,
+    #[serde(default)]
+    pub column_width: Option<f32>,
+    #[serde(default = "default_weight")]
+    pub weight: f32,
+    #[serde(default)]
+    pub preferred_extent: Option<f32>,
+    #[serde(default)]
+    pub extent_priority: u16,
+    #[serde(default)]
     pub join: Option<ReturnJoin>,
 }
 impl From<ReturnTo> for DockReturn {
@@ -104,6 +120,13 @@ impl From<ReturnTo> for DockReturn {
             index: value.index,
             size: value.size.into(),
             collapsed: value.collapsed,
+            section: value.section,
+            column: value.column,
+            column_index: value.column_index,
+            column_width: value.column_width,
+            weight: value.weight,
+            preferred_extent: value.preferred_extent,
+            extent_priority: value.extent_priority,
             join: value.join.map(|join| ReturnTab { section: join.section, index: join.index }),
         }
     }
@@ -129,6 +152,7 @@ impl From<Location> for SectionLocation {
 pub enum Placement {
     NewSection { section: SectionId, index: usize, location: Location, size: OuterSize },
     JoinTab { section: SectionId, index: usize },
+    Relative { section: SectionId, placement: RelativePlacement, new_section: SectionId, new_column: Option<ColumnId>, size: OuterSize },
 }
 impl From<Placement> for Destination {
     fn from(value: Placement) -> Self {
@@ -137,6 +161,9 @@ impl From<Placement> for Destination {
                 Self::NewSection { section, index, location: location.into(), size: size.into() }
             }
             Placement::JoinTab { section, index } => Self::JoinTab { section, index },
+            Placement::Relative { section, placement, new_section, new_column, size } => {
+                Self::Relative { section, placement, new_section, new_column, size: size.into() }
+            }
         }
     }
 }
@@ -167,6 +194,16 @@ pub struct Move {
     pub id: Option<String>,
     pub destination: Placement,
     pub expected_revision: Option<u64>,
+    #[serde(default)]
+    pub activate: bool,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HeaderAction {
+    pub target: Option<Target>,
+    pub id: Option<String>,
+    pub action: ControlId,
+    pub expected_revision: Option<u64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -174,6 +211,10 @@ pub struct Resize {
     pub target: Option<Target>,
     pub id: Option<String>,
     pub size: OuterSize,
+    /// Dock thickness only: Bottom height or side column width. Both size
+    /// components must be valid; the other component is ignored.
+    #[serde(default)]
+    pub thickness_only: bool,
     pub expected_revision: Option<u64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]

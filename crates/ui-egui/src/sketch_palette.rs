@@ -384,7 +384,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         frame,
     )
     .width(width(vp));
+    let mut painted = false;
     let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
                 let status = if !solved || !geometry || remaining == 0 {
@@ -508,7 +510,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     });
-    app.viewport.palette_rect = response.map(|r| r.response.rect.expand(frame.stroke.width));
+    app.viewport.palette_rect =
+        response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect.expand(frame.stroke.width));
     if let Some(rect) = app.viewport.palette_rect {
         crate::scenario::publish_rect("sketch_palette:outer", rect);
     }
@@ -538,6 +541,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.set_status(error, true);
     }
     if look {
+        if app.universal_panel_host_enabled() {
+            app.viewport.host_windows = crate::ui_kit::Container::host_window_regions(ctx);
+            crate::viewport::refresh_layout(app, ctx);
+        }
         crate::dialogs::look_at_sketch_again(app);
     }
     if finish {

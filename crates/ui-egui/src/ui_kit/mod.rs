@@ -27,6 +27,7 @@ mod navigation;
 mod navigation_menu;
 mod navigation_settings;
 pub(crate) mod panel;
+mod panel_host;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -91,6 +92,7 @@ pub(crate) use panel::{
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]
 pub(crate) use panel::{collapsible_header, header};
+pub(crate) use panel_host::*;
 pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
