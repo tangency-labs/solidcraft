@@ -21,6 +21,7 @@ fn top_view() -> Harness {
         distance: 100.0,
         fov: 0.0,
         up: Default::default(),
+        frame: None,
     };
     h
 }
@@ -253,6 +254,7 @@ fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
         distance: 200.0,
         fov: 0.0,
         up: Default::default(),
+        frame: Default::default(),
     };
     // Section XZ at 15 mm: keeps y 0..15, removes y 15..30.
     h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 15, 0], "normal": [0, 1, 0]}}}));

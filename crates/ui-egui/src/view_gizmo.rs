@@ -345,6 +345,18 @@ fn snapshot(name: &str, mesh: &Mesh, colour: Option<[u8; 3]>, faces: &BTreeMap<u
 /// The menu a right-click on the view navigator opens: Axes, Cube and Custom, the current one
 /// marked. Custom opens the Custom View Navigator panel, which sets it on OK.
 pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
+    let mut items = style_items(app);
+    // Set as Front / Top gives the design its own orientation (#6455); Reset Orientation goes
+    // back to the up axis preference.
+    let set = |face: &str, label: &str| act("view.frame", label, "camera").with(json!({"set": face, "camera": app.cam}));
+    let mut set_as = act("ui.setAs", "Set as", "camera");
+    set_as.children = vec![set("front", "Front"), set("top", "Top")];
+    items.push(set_as);
+    items.push(act("view.frame", "Reset Orientation", "rollback").with(json!({"reset": true})).on(app.session.doc.view_frame.is_some()));
+    items
+}
+
+fn style_items(app: &SolveApp) -> Vec<Item> {
     NavigatorStyle::ALL
         .into_iter()
         .map(|style| {
@@ -749,7 +761,8 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Cube", "Custom"], "just the three types");
+            assert_eq!(labels[..3], ["Axes", "Cube", "Custom"], "the three types first");
+            assert_eq!(labels[3..], ["Set as", "Reset Orientation"], "then the design's orientation (#6455)");
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));
