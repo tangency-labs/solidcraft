@@ -168,10 +168,16 @@ impl Interval {
     pub fn mig(self) -> f64 {
         if self.lo <= 0.0 && self.hi >= 0.0 { 0.0 } else { self.lo.abs().min(self.hi.abs()) }
     }
-    /// A number held: the midpoint, correctly rounded, so between the bounds even in the
-    /// subnormal range.
+    /// A finite number held: the midpoint, correctly rounded, so between the bounds even in the
+    /// subnormal range. With an infinite bound, 0 if it is held and otherwise the largest finite
+    /// number on that side, so halves never get a NaN bound.
     pub fn mid(self) -> f64 {
-        f64::midpoint(self.lo, self.hi)
+        match (self.lo.is_finite(), self.hi.is_finite()) {
+            (true, true) => f64::midpoint(self.lo, self.hi),
+            _ if self.contains(0.0) => 0.0,
+            _ if self.lo > 0.0 => self.lo.max(f64::MAX).min(self.hi),
+            _ => self.hi.min(-f64::MAX).max(self.lo),
+        }
     }
     /// Both halves, split at the midpoint.
     pub fn bisect(self) -> (Interval, Interval) {

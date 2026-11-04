@@ -443,7 +443,8 @@ fn two_argument_functions_hold_their_ranges() {
 #[test]
 fn refusals_name_their_reason() {
     let p = |a: f64, b: f64| Interval::new(a, b);
-    let cases: [(&str, Proven<Interval>, Unproven); 16] = [
+    let up = p(1.0, f64::INFINITY);
+    let cases: [(&str, Proven<Interval>, Unproven); 22] = [
         ("sqrt", Real::sqrt(p(-1.0, 1.0)), Unproven::Domain),
         ("ln", Real::ln(p(0.0, 1.0)), Unproven::Domain),
         ("asin", Real::asin(p(0.5, 1.5)), Unproven::Domain),
@@ -460,6 +461,12 @@ fn refusals_name_their_reason() {
         ("tan", Real::tan(p(1.0, 2.0)), Unproven::Jump),
         ("atan2", Real::atan2(p(-1.0, 1.0), p(-2.0, -1.0)), Unproven::Jump),
         ("sin", Real::sin(Interval::point(1e7)), Unproven::Uncertified),
+        ("ln unbounded", Real::ln(up), Unproven::Uncertified),
+        ("log10 unbounded", Real::log10(up), Unproven::Uncertified),
+        ("pow unbounded", Real::pow(up, Interval::point(0.5)), Unproven::Uncertified),
+        ("pow neg unbounded", Real::pow(up, Interval::point(-0.5)), Unproven::Uncertified),
+        ("pow whole unbounded", Real::pow(up, Interval::point(2.0)), Unproven::Uncertified),
+        ("pow varying unbounded", Real::pow(up, p(0.5, 1.5)), Unproven::Uncertified),
     ];
     for (name, got, want) in cases {
         assert_eq!(got, Err(want), "{name}");
@@ -528,6 +535,37 @@ fn derivatives_hold_every_slope() {
     }
 }
 
+/// A square inside a derivative is taken from `|x|`, so a range across zero keeps the derivative
+/// away from zero where it truly is: over [−2, 2], atan' = 1/(1 + x²) is in [1/5, 1], asinh' =
+/// 1/√(1 + x²) in [1/√5, 1], and d atan2(1, x)/dx = −1/(1 + x²) in [−1, −1/5].
+#[test]
+fn derivatives_across_zero_square_the_magnitude() {
+    let x = || Jet::variable(Interval::new(-2.0, 2.0));
+    let cases: [(&str, Proven<Jet<Interval>>, (f64, f64)); 3] = [
+        ("atan", x().and_then(|x| x.atan()), (0.2, 1.0)),
+        ("asinh", x().and_then(|x| x.asinh()), (1.0 / 5f64.sqrt(), 1.0)),
+        ("atan2", x().and_then(|x| Jet::exact(1.0)?.atan2(x)), (-1.0, -0.2)),
+    ];
+    for (name, jet, (lo, hi)) in cases {
+        let d = jet.map(|j| j.d).unwrap_or(Interval::ENTIRE);
+        assert!(d.contains(lo) && d.contains(hi) && d.width() < (hi - lo) * 1.01, "{name}: {d:?}");
+    }
+}
+
+/// An unbounded interval still has a finite number inside to split at, so its halves keep
+/// bounds that are not NaN.
+#[test]
+fn unbounded_intervals_split_at_a_number_they_hold() {
+    for i in [Interval::ENTIRE, Interval::new(1.0, f64::INFINITY), Interval::new(f64::NEG_INFINITY, -1.0)] {
+        let m = i.mid();
+        assert!(m.is_finite() && i.contains(m), "{i:?}: {m}");
+        let (a, b) = i.bisect();
+        assert!(!a.lo.is_nan() && !a.hi.is_nan() && !b.lo.is_nan() && !b.hi.is_nan(), "{i:?}");
+        assert_eq!((a.lo, a.hi, b.lo, b.hi), (i.lo, m, m, i.hi));
+    }
+    assert_eq!(Interval::ENTIRE.mid(), 0.0);
+}
+
 /// `f64` gives the standard library's results and never refuses: code generic over [`Real`]
 /// computes what it did before it was generic.
 #[test]
@@ -541,6 +579,8 @@ fn plain_numbers_are_the_standard_librarys() {
     assert_eq!(Real::sign(Interval::new(0.5, 2.0)), Ok(Interval::ONE));
     assert_eq!(Real::min(2.0f64, 1.0), Ok(1.0));
     assert_eq!(Real::cmp_f64(x, 1.0), Some(Ordering::Less));
+    // A kink in a plain number takes one slope, not a refusal.
+    assert_eq!(Jet::variable(0.0f64).and_then(|x| x.abs()).map(|j| j.d), Ok(1.0));
 }
 
 /// A power whose exponent varies takes the exponent's derivative even where the exponent's value

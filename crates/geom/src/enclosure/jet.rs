@@ -1,9 +1,10 @@
 //! A value with its first derivative, each in a [`Real`]: over an interval, `v` holds the
 //! function's range and `d` its derivative's, by the chain rule on enclosures.
 //!
-//! Where the derivative is unbounded (`√x` at 0, `asin` at ±1) the operation is refused, and
-//! the caller falls back on the value alone. A kink (`abs`, `min`, `max`, `hypot` at 0) is no
-//! obstacle: the derivative's enclosure holds the slopes on both sides.
+//! Where the derivative is unbounded (`√x` at 0, `asin` at ±1) an interval's operation is refused,
+//! and the caller falls back on the value alone; a plain number gives the standard library's
+//! infinity. A kink (`abs`, `min`, `max`, `hypot` at 0) is no obstacle: the derivative's
+//! enclosure holds the slopes on both sides.
 
 use std::cmp::Ordering;
 
@@ -35,6 +36,11 @@ impl<N: Real> Jet<N> {
     /// `(1 − v)(1 + v)`, which keeps its digits near ±1.
     fn one_minus_sq(v: N) -> Proven<N> {
         Self::one()?.sub(v)?.mul(Self::one()?.add(v)?)
+    }
+    /// `v²` through `|v|`, so a range across zero squares to `[0, m²]`, not `[−m², m²]`.
+    fn sq(v: N) -> Proven<N> {
+        let a = v.abs()?;
+        a.mul(a)
     }
     /// Either of two jets, as `min` or `max` picks: the one surely chosen, or both enclosed.
     fn pick(a: Jet<N>, b: Jet<N>, first: Ordering, v: N) -> Proven<Jet<N>> {
@@ -127,7 +133,7 @@ impl<N: Real> Real for Jet<N> {
     }
     fn tan(self) -> Proven<Jet<N>> {
         let t = self.v.tan()?;
-        self.chain(t, Self::one()?.add(t.mul(t)?)?)
+        self.chain(t, Self::one()?.add(Self::sq(t)?)?)
     }
     fn asin(self) -> Proven<Jet<N>> {
         Ok(Jet { v: self.v.asin()?, d: self.d.div(Self::one_minus_sq(self.v)?.sqrt()?)? })
@@ -136,12 +142,12 @@ impl<N: Real> Real for Jet<N> {
         Ok(Jet { v: self.v.acos()?, d: self.d.div(Self::one_minus_sq(self.v)?.sqrt()?)?.neg() })
     }
     fn atan(self) -> Proven<Jet<N>> {
-        Ok(Jet { v: self.v.atan()?, d: self.d.div(Self::one()?.add(self.v.mul(self.v)?)?)? })
+        Ok(Jet { v: self.v.atan()?, d: self.d.div(Self::one()?.add(Self::sq(self.v)?)?)? })
     }
     fn atan2(self, x: Jet<N>) -> Proven<Jet<N>> {
         let y = self;
         let num = x.v.mul(y.d)?.sub(y.v.mul(x.d)?)?;
-        let den = x.v.mul(x.v)?.add(y.v.mul(y.v)?)?;
+        let den = Self::sq(x.v)?.add(Self::sq(y.v)?)?;
         Ok(Jet { v: y.v.atan2(x.v)?, d: num.div(den)? })
     }
     fn sinh(self) -> Proven<Jet<N>> {
@@ -155,7 +161,7 @@ impl<N: Real> Real for Jet<N> {
         self.chain(t, Self::one_minus_sq(t)?)
     }
     fn asinh(self) -> Proven<Jet<N>> {
-        Ok(Jet { v: self.v.asinh()?, d: self.d.div(self.v.mul(self.v)?.add(Self::one()?)?.sqrt()?)? })
+        Ok(Jet { v: self.v.asinh()?, d: self.d.div(Self::sq(self.v)?.add(Self::one()?)?.sqrt()?)? })
     }
     fn acosh(self) -> Proven<Jet<N>> {
         let one = Self::one()?;
@@ -179,7 +185,11 @@ impl<N: Real> Real for Jet<N> {
         match self.v.cmp_f64(0.0) {
             Some(Ordering::Greater) => Ok(Jet { v, d: self.d }),
             Some(Ordering::Less) => Ok(Jet { v, d: self.d.neg() }),
-            _ => Ok(Jet { v, d: self.d.neg().hull(self.d)? }),
+            // At 0 a kink; a plain number has one slope, the right-hand one.
+            _ => match self.d.neg().hull(self.d) {
+                Ok(d) => Ok(Jet { v, d }),
+                Err(_) => Ok(Jet { v, d: self.d }),
+            },
         }
     }
     fn sign(self) -> Proven<Jet<N>> {
