@@ -68,14 +68,14 @@ fn a_port_picked_by_index_stays_a_cut_after_a_width_change() {
     assert!((s.model.state().sketch(port).unwrap().plane.origin.x - 50.).abs() < 1e-6);
     let world = s.world_state().unwrap();
     let mesh = world.body("Enclosure").unwrap().mesh();
-    assert!(!mesh.contains(solidcraft_geom::Vec3::new(49., 0., 12.)));
-    assert!(mesh.contains(solidcraft_geom::Vec3::new(49., 0., 20.)));
+    assert!(!mesh.contains(solidcore_record::Vec3::new(49., 0., 12.)));
+    assert!(mesh.contains(solidcore_record::Vec3::new(49., 0., 20.)));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert!(reopened.model.result(id).unwrap().error.is_none());
     let world = reopened.world_state().unwrap();
     let mesh = world.body("Enclosure").unwrap().mesh();
-    assert!(!mesh.contains(solidcraft_geom::Vec3::new(49., 0., 12.)));
-    assert!(mesh.contains(solidcraft_geom::Vec3::new(49., 0., 20.)));
+    assert!(!mesh.contains(solidcore_record::Vec3::new(49., 0., 12.)));
+    assert!(mesh.contains(solidcore_record::Vec3::new(49., 0., 20.)));
 }
 
 /// A pick the sketch no longer has is an error on the feature, never a different profile.

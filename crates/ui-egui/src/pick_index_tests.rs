@@ -27,7 +27,7 @@ fn indexed_picks_match_the_full_scan() {
         app.ui.perspective = perspective;
         app.cam.yaw = yaw;
         app.cam.pitch = pitch;
-        app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 15.0, 12.0);
+        app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.0);
         app.cam.distance = 110.0;
         let proj = projection(&app, rect);
         for j in 0..48 {
@@ -54,9 +54,9 @@ fn indexed_picks_match_the_full_scan() {
 fn indexes_follow_the_model_state() {
     let mut app = assembly();
     let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0));
-    app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 15.0, 12.0);
+    app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.0);
     let proj = projection(&app, rect);
-    let centre = proj.to_screen(solidcraft_engine::geom::Vec3::new(20.0, 15.0, 10.0)).unwrap();
+    let centre = proj.to_screen(solidcore_record::Vec3::new(20.0, 15.0, 10.0)).unwrap();
     pick(&app, &proj, centre);
     assert!(app.viewport.pick_index.len() >= 1);
     app.session.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [-20, -20, 0], "operation": "new_body"})).unwrap();

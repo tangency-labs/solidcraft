@@ -1,6 +1,6 @@
 use super::*;
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
-use solidcraft_geom::Vec3;
 
 fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();

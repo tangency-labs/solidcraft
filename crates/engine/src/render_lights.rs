@@ -1,7 +1,8 @@
 //! Shared light inspection and numerical adapters; no document or view-state mutation.
 use crate::schema::render_lights::{Geometry, Light};
+use solidcore_record::Vec3;
 use solidcraft_doc::render_settings::{RenderJob, RenderSetup};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_render::job::LightingPreset;
 use solidcraft_render::job::{AreaLight, AreaLights, DirectionalLightOptions, PunctualLightOptions, RectangleLightOptions, SpotConeOptions, Sun};
 

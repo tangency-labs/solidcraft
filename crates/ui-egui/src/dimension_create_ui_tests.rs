@@ -1,6 +1,7 @@
 //! Dimension creation is an editable draft, accepted by the real focused value field.
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 fn line(end: [f64; 2]) -> Harness {
     crate::dim_view::cancel();
@@ -11,7 +12,7 @@ fn line(end: [f64; 2]) -> Harness {
     // Leave room around the measured shape while testing the draft itself. Separate Fit
     // tests exercise measured dock occlusion without changing the picking projection.
     h.app.cam.distance = 80.0;
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(end[0] * 0.5, end[1] * 0.5, 0.0);
+    h.app.cam.target = solidcore_record::Vec3::new(end[0] * 0.5, end[1] * 0.5, 0.0);
     h.settle();
     h
 }
@@ -327,7 +328,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 5., 0.);
+        h.app.cam.target = solidcore_record::Vec3::new(10., 5., 0.);
         h.settle();
         let baseline = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
@@ -346,7 +347,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
 
 #[test]
 fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     crate::dim_view::cancel();
     let mut h = Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
@@ -438,7 +439,7 @@ fn dimension_to_fillet_virtual_sharp_keeps_the_arc_and_fixed_origin() {
     let corner = fillet["virtual_corners"][0].as_str().unwrap().to_string();
     h.call("ui.view", json!({"view":"top"}));
     h.app.cam.distance = 90.;
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(5., 10., 0.);
+    h.app.cam.target = solidcore_record::Vec3::new(5., 10., 0.);
     h.settle();
     let baseline = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
@@ -467,7 +468,7 @@ fn draft_annotation_does_not_move_committed_dimension_hitboxes() {
     let width = h.app.run("sketch.dimension", json!({"entities":["l3"],"value":20})).unwrap()["param"].as_str().unwrap().to_string();
     h.call("ui.view", json!({"view":"top"}));
     h.app.cam.distance = 80.;
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 5., 0.);
+    h.app.cam.target = solidcore_record::Vec3::new(10., 5., 0.);
     h.settle();
     let at = crate::dim_view::text_at(&width).unwrap();
     let drawn = crate::dim_view::drawn();
@@ -522,7 +523,7 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
 #[test]
 fn placing_a_two_point_dimension_picks_horizontal_vertical_or_aligned() {
     // What each placement fixes at 10 mm: the X span, the Y span, or the length.
-    let spans = |a: solidcraft_engine::geom::Vec2, b: solidcraft_engine::geom::Vec2| [(b.x - a.x).abs(), (b.y - a.y).abs(), a.dist(b)];
+    let spans = |a: solidcore_record::Vec2, b: solidcore_record::Vec2| [(b.x - a.x).abs(), (b.y - a.y).abs(), a.dist(b)];
     for (at, measured) in [([6., 25.], 0), ([2., 20.], 0), ([-10., 1.], 1), ([15., 4.], 1), ([10., 4.], 2), ([-6., 22.], 2)] {
         let mut h = line([12., 16.]);
         place(&mut h, &[[0., 0.], [12., 16.]], at);
@@ -662,7 +663,7 @@ fn sketch_with(setup: &[(&str, serde_json::Value)], centre: [f64; 2]) -> Harness
     }
     h.call("ui.view", json!({"view":"top"}));
     h.app.cam.distance = 80.0;
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(centre[0], centre[1], 0.0);
+    h.app.cam.target = solidcore_record::Vec3::new(centre[0], centre[1], 0.0);
     h.settle();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
     h
@@ -864,6 +865,101 @@ fn type_first_keeps_the_place_first_flow() {
     crate::dim_view::cancel();
 }
 
+/// Put the value field's caret at `at` with nothing selected, as the field itself does when it
+/// misses the keyboard for a frame (a WebView2 showed the caret before the value, #11204).
+fn caret_without_the_person(h: &Harness, at: usize) {
+    let id = egui::Id::new("sc_dim_edit");
+    let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+    state.store(&h.ctx, id);
+}
+
+/// A primary click at sketch point `at`, the button held down for `frames` frames.
+fn held_click(h: &mut Harness, at: [f64; 2], frames: usize) {
+    h.step(&json!({"move":{"world":[at[0],at[1],0]}})).unwrap();
+    let [x, y] = h.at(&json!({"world":[at[0],at[1],0]})).unwrap();
+    let pos = egui::pos2(x as f32, y as f32);
+    let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+    h.app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
+    h.frames(frames);
+    h.app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
+    h.settle();
+}
+
+/// The value field's caret and selection end (characters).
+fn caret(h: &Harness) -> Option<(usize, usize)> {
+    egui::TextEdit::load_state(&h.ctx, egui::Id::new("sc_dim_edit"))
+        .and_then(|s| s.cursor.char_range())
+        .map(|r| (r.primary.index.0, r.secondary.index.0))
+}
+
+/// Until the person takes the proposed value over, the first digit they type replaces all of
+/// it (#11204): however long the click that placed it was held, frames later, and whatever moved
+/// the caret without them. Typed without Ctrl+A, as a person does.
+#[test]
+fn typed_digits_replace_the_proposed_value_whatever_moved_the_caret() {
+    for held in [1usize, 4, 12] {
+        let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+        let dims = dimension_count(&h);
+        h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+        assert_live(&h);
+        // A click held `held` frames: what a person's 60 to 150 ms click is at 60 Hz and beyond.
+        held_click(&mut h, [10., -7.], held);
+        assert_eq!(crate::dim_view::live(), None, "held {held}: the text is pinned");
+        h.frames(12);
+        caret_without_the_person(&h, 0);
+        h.frames(2);
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "held {held}");
+        keys(&mut h, "400");
+        assert_eq!(crate::dim_view::draft_preview().map(|d| d.0).as_deref(), Some("400"), "held {held}");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let new = added(&h, dims);
+        assert_eq!(new.len(), 1, "held {held}");
+        assert!((new[0].kind.value().unwrap() - 400.).abs() < 1e-6, "held {held}: {:?}", new[0].kind);
+        crate::dim_view::cancel();
+    }
+}
+
+/// A caret the person put somewhere stays there: Home then 1 writes in front of the value, and a
+/// click into the field types where it landed (#11204).
+#[test]
+fn a_caret_the_person_moved_stays_where_they_put_it() {
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+    let dims = dimension_count(&h);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_live(&h);
+    h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.frames(4);
+    assert_eq!(caret(&h), Some((0, 0)), "Home put the caret before the value");
+    keys(&mut h, "1");
+    h.frames(4);
+    assert_eq!(caret(&h), Some((1, 1)), "the caret stays after what was typed");
+    assert_eq!(crate::dim_view::draft_preview().map(|d| d.0).as_deref(), Some("120 mm"));
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let new = added(&h, dims);
+    assert_eq!(new.len(), 1);
+    assert!((new[0].kind.value().unwrap() - 120.).abs() < 1e-6, "{:?}", new[0].kind);
+    crate::dim_view::cancel();
+
+    // A click into the field puts the caret where it landed: typing goes there.
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
+    h.frames(4);
+    let [x, y] = h.widget("20 mm").expect("the value field");
+    h.step(&json!({"click":[x, y]})).unwrap();
+    h.frames(4);
+    assert!(crate::dim_view::editing(), "a click into the field keeps the value open");
+    let placed = caret(&h);
+    assert!(placed.is_some_and(|(a, b)| a == b), "the click placed a caret: {placed:?}");
+    keys(&mut h, "4");
+    let expr = crate::dim_view::draft_preview().map(|d| d.0).unwrap_or_default();
+    assert!(expr.len() == "20 mm4".len() && expr.contains('4') && expr != "4", "typing went in at the click, not over the value: {expr:?}");
+    crate::dim_view::cancel();
+}
+
 /// Type-first, the text follows the pointer: moving it from inside the box the picks span (the
 /// distance between them) to above or beside it switches to the horizontal or vertical distance and
 /// back. Until something is typed the value follows the dimension, so the preview measures the
@@ -905,7 +1001,7 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
                 let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
                 let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
                 assert!(
-                    a.dist(solidcraft_engine::geom::Vec2::new(0., 0.)) < 1e-6 && b.dist(solidcraft_engine::geom::Vec2::new(end[0], end[1])) < 1e-6,
+                    a.dist(solidcore_record::Vec2::new(0., 0.)) < 1e-6 && b.dist(solidcore_record::Vec2::new(end[0], end[1])) < 1e-6,
                     "{ctx}: the preview moved the points to {a:?} {b:?}"
                 );
             }
@@ -916,7 +1012,7 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
             let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
             let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
             assert!(
-                a.dist(solidcraft_engine::geom::Vec2::new(0., 0.)) < 1e-6 && b.dist(solidcraft_engine::geom::Vec2::new(end[0], end[1])) < 1e-6,
+                a.dist(solidcore_record::Vec2::new(0., 0.)) < 1e-6 && b.dist(solidcore_record::Vec2::new(end[0], end[1])) < 1e-6,
                 "{picks:?} at {commit_at:?}: {a:?} {b:?}"
             );
             let new = added(&h, 0);
@@ -977,7 +1073,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
 
 /// The short sketch edge overlaps a face's automatically projected boundary.
 fn midpoint_face_sketch() -> Harness {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     crate::dim_view::cancel();
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -1228,7 +1324,7 @@ fn shown_dimensions() -> (Harness, u64) {
     h.app.session.visibility.shown_dimensions.push(sketch);
     h.call("ui.view", json!({"view":"top"}));
     h.app.cam.distance = 80.0;
-    h.app.cam.target = solidcraft_engine::geom::Vec3::new(10.0, 5.0, 0.0);
+    h.app.cam.target = solidcore_record::Vec3::new(10.0, 5.0, 0.0);
     h.settle();
     (h, sketch)
 }

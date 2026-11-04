@@ -7,7 +7,9 @@
 //! as the viewport shows the model.
 
 use serde::Serialize;
-use solidcraft_geom::{UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::UnitVec3;
+use solidcraft_geom::prelude::*;
 
 use crate::cmd::Shape;
 use crate::{Sel, Session};

@@ -6,7 +6,9 @@
 //! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
 //! ([`crate::context_menu`]).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
+use solidcraft_engine::geom::prelude::*;
 
 #[path = "browser_cache.rs"]
 mod cache;
@@ -162,7 +164,7 @@ pub struct TreeState {
     history_plane: Option<String>,
     /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
     /// normal), so the eye can bring it back (#822).
-    pub hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
+    pub hidden_section: Option<(solidcore_record::Vec3, solidcore_record::Vec3)>,
     /// What the Section Analysis dialog's OK last made, for Edit to start from.
     pub section_dialog: Option<crate::dialogs::SectionDraft>,
     /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
@@ -247,7 +249,7 @@ pub struct OccMove {
     pub translate: [f64; 3],
     pub angles: [f64; 3],
     /// The occurrence's origin when the move began: what it turns about.
-    pub pivot: Option<solidcraft_engine::geom::Vec3>,
+    pub pivot: Option<solidcore_record::Vec3>,
     /// The values when the current triad drag began.
     drag0: Option<([f64; 3], [f64; 3])>,
 }
@@ -1200,7 +1202,7 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
     crate::scenario::publish_target("browser:header", disclosure);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
-    if response.on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
+    if response.backing_on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
     let galley = ui.painter().layout_no_wrap(crate::i18n::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
@@ -1288,7 +1290,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {
         let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
-        if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+        if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
             if stacked {
                 app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
             } else if vertical {
@@ -1715,7 +1717,7 @@ fn occurrence_rows_inner(
     }
     if let Some(resp) = &r.resp {
         let inherited = if own_visible && !visible { "\nHidden by a parent placement. Show the parent to reveal this instance." } else { "" };
-        resp.clone().on_hover_ui(|ui| {
+        resp.clone().backing_on_hover_ui(|ui| {
             ui.label(&placement.tooltip);
             if !inherited.is_empty() {
                 ui.label(inherited.trim_start());
@@ -1924,7 +1926,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         let sel = match icon {
             "plane" => Some(Sel::Plane { name: k.into() }),
             "axis" => Some(Sel::Axis { name: k.into() }),
-            _ => Some(Sel::Vertex { body: String::new(), point: solidcraft_engine::geom::Vec3::ZERO }),
+            _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
         let r = draw_row(
@@ -2299,7 +2301,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         return;
     }
     let hit = match &x {
-        Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcraft_engine::geom::Vec3::ZERO },
+        Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
         // The origin point goes only into a dialog input that takes it.
@@ -3245,7 +3247,7 @@ pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
 /// The pending move: turned about X, then Y, then Z through the starting origin, then moved.
 pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     use crate::gizmo;
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let a = m.angles.map(f64::to_radians);
     let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
     let (axis, angle) = gizmo::axis_angle(&r);
@@ -3264,7 +3266,7 @@ pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
 /// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
 pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
     let movement = app.tree.occurrence_move.as_ref()?;
-    let center = movement.pivot? + solidcraft_engine::geom::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
+    let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
     Some(crate::gizmo::Triad { center, translate: true, rotate: true })
 }
 
@@ -3301,7 +3303,7 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
 /// viewport like the sketch being edited draws its own (`crate::dim_view`). A double-click on a
 /// value edits it in place without editing the sketch (`crate::dim_view::model_double_click`).
 pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
-    use solidcraft_engine::geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_frame, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
     let Some(rect) = app.viewport.rect else { return };
@@ -3422,11 +3424,11 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
 }
 
 /// Where an occurrence's origin is now (with its pending move).
-pub(crate) fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solidcraft_engine::geom::Vec3> {
+pub(crate) fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solidcore_record::Vec3> {
     let o = app.session.doc.occurrences.iter().find(|o| o.id == occurrence)?;
     let parent = app.session.doc.component_transform(o.parent);
     let own = app.session.pending_moves.get(&occurrence).copied().unwrap_or(o.transform);
-    Some(solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::mat_mul(&parent, &own), solidcraft_engine::geom::Vec3::ZERO))
+    Some(solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::mat_mul(&parent, &own), solidcore_record::Vec3::ZERO))
 }
 
 /// The names the Bodies folder lists at the top level, for tests.

@@ -10,12 +10,13 @@
 //! as it did before. Anything that crosses the component's boundary (a feature outside that uses
 //! its sketches, bodies moved in or out, a joint to one of its subcomponents) is refused.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
-use solidcraft_geom::Vec3;
 
 use super::{absolute, component_key, file_sha256, inherit_properties, resolve, session_bodies, stored};
 use crate::params::{bad, str_};

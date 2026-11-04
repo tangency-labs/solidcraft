@@ -9,5 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }

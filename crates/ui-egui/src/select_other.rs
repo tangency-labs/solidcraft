@@ -21,10 +21,12 @@
 //!
 //! The control channel's `ui.selectOther` opens, describes and picks from the list.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Align2, FontId, Pos2, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
@@ -191,17 +193,17 @@ fn body_of(h: &Hit) -> Option<&str> {
 fn hit_depth(
     st: &solidcraft_engine::doc::ModelState,
     index: &std::collections::HashMap<&str, usize>,
-    o: solidcraft_engine::geom::Vec3,
-    d: solidcraft_engine::geom::Vec3,
+    o: solidcore_record::Vec3,
+    d: solidcore_record::Vec3,
     h: &Hit,
 ) -> Option<f64> {
-    let along = |p: solidcraft_engine::geom::Vec3| Some((p - o).dot(d)).filter(|t| t.is_finite());
+    let along = |p: solidcore_record::Vec3| Some((p - o).dot(d)).filter(|t| t.is_finite());
     match h {
         Hit::Vertex { point, .. } | Hit::Face { point, .. } => along(*point),
         Hit::Edge { body, index: ei, mid, .. } => {
             let under = index.get(body.as_str()).and_then(|i| st.bodies.get(*i)).and_then(|b| {
                 let (m, place) = b.mesh_in_place();
-                let at = |p: solidcraft_engine::geom::Vec3| solidcraft_engine::doc::apply_point(&place, p);
+                let at = |p: solidcore_record::Vec3| solidcraft_engine::doc::apply_point(&place, p);
                 let dd = d.dot(d);
                 m.edges
                     .get(*ei)?
@@ -683,7 +685,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         let elided = galley.elided;
                         let at = pos2(text_rect.left(), r.center().y - galley.size().y / 2.0);
                         ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(at, galley, t.text);
-                        let resp = if elided { resp.on_hover_text(&row.label) } else { resp };
+                        let resp = if elided { resp.backing_on_hover_text(&row.label) } else { resp };
                         if resp.clicked() {
                             picked = Some(i);
                         }

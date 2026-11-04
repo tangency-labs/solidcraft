@@ -7,11 +7,12 @@
 //! renderer that drew it (`gpu`, `gpu-software` or `cpu`); `hardware` and `software` fail with an
 //! error that names the policy.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_render::hatch::Hatch;
 use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
 use wgpu::util::DeviceExt;

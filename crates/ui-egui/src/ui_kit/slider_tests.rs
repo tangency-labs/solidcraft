@@ -3,6 +3,141 @@ use crate::{scenario, theme::Tokens};
 use egui::{Rect, Ui, pos2, vec2};
 
 #[test]
+fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes() {
+    const NOTICE: &str = "A theme option changed. Undo restores the previous value; dismiss keeps the current value and closes this notice.";
+
+    fn frame(ctx: &egui::Context, width: f32, can_undo: bool, events: Vec<egui::Event>) -> (bool, bool) {
+        scenario::clear_handles();
+        let mut clicked = (false, false);
+        crate::test_support::frame(
+            ctx,
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 1600.0))),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                let mut content = Rect::NOTHING;
+                let allocated = ui.allocate_ui_with_layout(vec2(width, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.set_width(width);
+                    content = ui.max_rect().intersect(ui.clip_rect());
+                    ui.set_clip_rect(content);
+                    scope(ui, |ui| {
+                        clicked = theme_option_notice(ui, "guard", NOTICE, can_undo);
+                    });
+                });
+                for (target, present) in [("prefs:theme_notice_undo:guard", can_undo), ("prefs:theme_notice_dismiss:guard", true)] {
+                    let rect = scenario::rect_of(target);
+                    if present {
+                        let rect = rect.expect("notice action");
+                        assert!(content.contains_rect(rect), "{target} clips at width {width}: {rect:?} outside {content:?}");
+                        assert!(allocated.response.rect.contains_rect(rect), "{target} must be inside the allocated notice content");
+                        assert!(rect.is_positive());
+                        assert_eq!(scenario::handle_at(target), Some(rect.center()));
+                    } else {
+                        assert!(rect.is_none(), "Undo must be absent when unavailable");
+                    }
+                }
+            },
+        );
+        clicked
+    }
+
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for language in ["en", "de"] {
+            let _language = crate::i18n::scope(language);
+            let t = Tokens::get();
+            let mut undo_width = 0.0;
+            let mut dismiss_width = 0.0;
+            let mut label_wrap_width = 0.0;
+            test_support::frame(&crate::fonts::test_context(), vec![], |ui| {
+                undo_width = ContentWidth::button(ui, crate::i18n::tr("ui.undo"));
+                dismiss_width = ContentWidth::button(ui, crate::i18n::tr("prefs.theme_notice_dismiss"));
+                label_wrap_width = (ContentWidth::label(ui, crate::i18n::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
+            });
+            let actions_width = undo_width + dismiss_width + t.space_8 * 2.0;
+            let narrow_width = undo_width.max(dismiss_width);
+            for (width, stacked, label_wrap) in
+                [(actions_width + t.form_card_width, false, false), (narrow_width, true, false), (label_wrap_width, true, true)]
+            {
+                for can_undo in [true, false] {
+                    let ctx = crate::fonts::test_context();
+                    assert_eq!(frame(&ctx, width, can_undo, vec![]), (false, false));
+                    let text = scenario::rect_of("dialog:hint:guard").expect("notice text");
+                    let dismiss = scenario::rect_of("prefs:theme_notice_dismiss:guard").expect("Dismiss");
+                    let undo = scenario::rect_of("prefs:theme_notice_undo:guard");
+                    if stacked {
+                        assert!(dismiss.top() >= text.bottom(), "Dismiss must move below the text");
+                        if let Some(undo) = undo {
+                            assert!(undo.top() >= text.bottom(), "Undo must move below the text");
+                            assert!(dismiss.top() >= undo.bottom(), "actions must wrap onto separate rows at width {width}");
+                        }
+                    } else {
+                        assert_eq!(dismiss.top(), text.top(), "wide notices retain the inline layout");
+                        if let Some(undo) = undo {
+                            assert_eq!(undo.top(), text.top());
+                            assert!(dismiss.left() >= undo.right());
+                        }
+                        // The wide notice retains the original action budget and text allocation.
+                        let expected = width - dismiss_width - t.space_8 - if can_undo { undo_width + t.space_8 } else { 0.0 };
+                        assert_eq!(text.width(), expected);
+                    }
+                    if label_wrap {
+                        assert!(dismiss.height() > t.control_height, "an individual long action label must wrap");
+                    }
+                    for (target, expected) in [("prefs:theme_notice_undo:guard", (true, false)), ("prefs:theme_notice_dismiss:guard", (false, true))]
+                    {
+                        if expected.0 && !can_undo {
+                            continue;
+                        }
+                        let at = if expected.0 { undo.expect("Undo").center() } else { dismiss.center() };
+                        assert_eq!(frame(&ctx, width, can_undo, test_support::pointer(at, true)), (false, false), "{target} on press");
+                        assert_eq!(frame(&ctx, width, can_undo, test_support::pointer(at, false)), expected, "{target} on release");
+                        assert_eq!(frame(&ctx, width, can_undo, vec![]), (false, false), "{target} must not repeat");
+                    }
+                }
+            }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn blur_meter_boundaries_and_off_thumb() {
+    for (radius, bars) in [(0.0, 0), (1.0, 1), (8.0, 1), (9.0, 2), (18.0, 3), (33.0, 5), (40.0, 5), (60.0, 5)] {
+        assert_eq!(blur_cost_bars(radius), bars, "{radius}");
+    }
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for radius in [0.0, 18.25] {
+            let ctx = crate::fonts::test_context();
+            let t = Tokens::get();
+            let mut value = radius;
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                scope(ui, |ui| {
+                    slider(ui, &mut value, 0.0..=40.0, Slider { step: Some(1.0), show_value: false, off_endpoint: true, ..Default::default() });
+                });
+            });
+            assert_eq!(value, radius, "drawing cannot round persisted fractional values");
+            let thumb = out
+                .shapes
+                .iter()
+                .rev()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Circle(c) if c.radius == t.space_8 => Some(c),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(thumb.fill, if radius == 0.0 { egui::Color32::TRANSPARENT } else { t.form_primary });
+            assert_eq!(thumb.stroke.color, if radius == 0.0 { t.form_dim } else { t.form_primary });
+        }
+    }
+}
+
+#[test]
 fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
     let previous = crate::theme::is_dark();
     for dark in [false, true] {
@@ -27,6 +162,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
                                         show_value,
                                         integer,
                                         workspace_accent: false,
+                                        off_endpoint: false,
                                     },
                                 );
                             });

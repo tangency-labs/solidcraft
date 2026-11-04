@@ -2,9 +2,6 @@
 # (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
-appearance.assign
-appearance.library
-appearance.list
 body.rename
 browser.collapse_all
 browser.expand_all
@@ -61,7 +58,6 @@ document.inspect
 document.metadata
 document.metadata.remove
 document.metadata.set
-document.units
 engine.commands
 explode.create
 explode.delete
@@ -82,7 +78,6 @@ frame.member
 frame.profile.insert
 frame.profile.list
 frame.profile.properties
-inspect.clearance
 inspect.compare
 inspect.interference
 inspect.measure
@@ -111,8 +106,6 @@ material.delete
 material.edit
 material.inspect
 material.list
-material.properties.directional
-material.properties.validate
 mesh.convert
 motion.delete
 motion.export
@@ -312,7 +305,6 @@ solid.coil
 solid.combine
 solid.draft
 solid.emboss
-solid.fillet
 solid.hole
 solid.loft
 solid.mirror
@@ -337,7 +329,6 @@ surface.extend
 surface.extrude
 surface.fair
 surface.loft
-surface.match
 surface.offset
 surface.patch
 surface.reverse_normal

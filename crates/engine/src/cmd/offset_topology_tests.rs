@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{FeatureKind, ProfileSel};
-use solidcraft_geom::Vec3;
 
 use crate::Session;
 

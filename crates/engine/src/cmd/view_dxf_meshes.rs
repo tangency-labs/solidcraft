@@ -1,13 +1,15 @@
 //! Export-only mesh instances. Keep one geometry buffer per unambiguous definition, while
 //! retaining the current placed body's edge choices (tangent classification can vary after
 //! placement). Never modify the document, fuse parts, or share across separate exports.
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{IDENTITY, Mat, ModelBody, mat_inverse, mat_mul};
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::{KernelError, map_with_local_pools};
 
 use super::{CMD, progress::Stage};

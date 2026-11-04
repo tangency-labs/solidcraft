@@ -1,8 +1,9 @@
 //! #2421: shelling a circular-meridian barrel must retain its curved wall through the rim.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::history::FaceOrigin;
 use solidcraft_kernel::*;
 

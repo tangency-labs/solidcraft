@@ -1,5 +1,6 @@
 //! Stateless camera commands shared by the navigation cube and programmatic callers.
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use solidcraft_render::{Camera, StandardView};
 
 use super::CommandSpec;
@@ -206,14 +207,14 @@ fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     camera_reply(cmd, cam)
 }
 
-fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
+fn normal_target(s: &Session) -> Option<(solidcore_record::Vec3, solidcore_record::Vec3)> {
     let state = s.world_state().ok()?;
     s.selection.iter().find_map(|selection| match selection {
         Sel::Face { body, index, point } if point.is_finite() => {
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcraft_geom::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => solidcore_record::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
         _ => None,
     })
 }
@@ -490,7 +491,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
                 .map(|d| if d == 90.0 { (1.0, 0.0) } else { d.to_radians().sin_cos() })
                 .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
         };
-        let turn = |toward: solidcraft_geom::Vec3| cam.looking_from(b * cos + toward * sin);
+        let turn = |toward: solidcore_record::Vec3| cam.looking_from(b * cos + toward * sin);
         match p.get("action").and_then(Value::as_str) {
             Some("left") => cam = turn(-r),
             Some("right") => cam = turn(r),
@@ -531,7 +532,7 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
             }
             let orbit = |cam: &mut Camera| {
                 if free_orbit {
-                    cam.rotate_in_view(solidcraft_geom::Vec3::new(-delta.y * 0.008, -delta.x * 0.008, 0.0));
+                    cam.rotate_in_view(solidcore_record::Vec3::new(-delta.y * 0.008, -delta.x * 0.008, 0.0));
                 } else {
                     cam.orbit(delta.x, delta.y);
                 }
@@ -582,7 +583,7 @@ pub(crate) fn square_heading(yaw: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_render::UpAxis;
 
     #[test]

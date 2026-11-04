@@ -4,7 +4,7 @@
 //! The walk (`crate::walk`) is behind `transform_geometry`, `face_points`, `profile_sels` and
 //! `point_expr`.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::walk::Walk;
 use crate::{FeatureKind, PointExpr, ProfileSel};

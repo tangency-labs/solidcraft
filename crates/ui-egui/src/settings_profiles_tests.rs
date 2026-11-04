@@ -17,6 +17,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
+    assert_eq!(keys.len(), 98, "page presentation must not alter profile membership");
     for key in [
         "nav",
         "mouse_gestures",
@@ -26,6 +27,8 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "ui_scale",
         "ui_font",
         "navigator_style",
+        "nav_bridge_enabled",
+        "nav_bridge_port",
         "language",
         "suppress_sketch_snap",
     ] {
@@ -35,6 +38,11 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_calibrations",
         "space_mouse_driver",
         "space_mouse_speed",
+        "space_mouse_axis_source",
+        "space_mouse_axis_speed",
+        "space_mouse_reverse",
+        "space_mouse_buttons",
+        "space_mouse_enabled",
         "dark_parts_shading",
         "msaa",
         "window_system",

@@ -308,13 +308,14 @@ pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
     use solidcraft_step::p21;
     use solidcraft_step::write::real;
 
     #[test]
     fn islands_are_solids_of_their_own_not_voids() {
-        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
         let square = |a: f64, b: f64| Loop2::polygon(&[Vec2::new(a, a), Vec2::new(b, a), Vec2::new(b, b), Vec2::new(a, b)]);
         // A plate with a square hole, and an island inside the hole (a letter's counter).
         let plate = Region2 { outer: square(0.0, 30.0), holes: vec![square(10.0, 20.0).reversed()] };
@@ -362,8 +363,8 @@ mod tests {
     #[test]
     fn assembly_names_colours_round_trip() {
         use crate::{box_solid, cylinder, measure, step_import, step_validate};
-        let bx = box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10.0, 20.0, 5.0)).unwrap();
-        let pin = cylinder(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::Z, 2.0, 8.0).unwrap();
+        let bx = box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let pin = cylinder(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 2.0, 8.0).unwrap();
         let rot90 = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [50.0, 0.0, 0.0, 1.0]];
         let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 5.0, 1.0]];
         let products = vec![
@@ -391,7 +392,7 @@ mod tests {
         let m: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap()).collect();
         assert!((m[1].bbox.min.z - 5.0).abs() < 1e-6 && (m[1].bbox.max.z - 13.0).abs() < 1e-6);
         // Rotated 90° about Z and moved 50 along X: centre at (50, 0).
-        assert!(m[2].centroid.dist(solidcraft_geom::Vec3::new(50.0, 0.0, 4.0)) < 1e-3, "{:?}", m[2].centroid);
+        assert!(m[2].centroid.dist(solidcore_record::Vec3::new(50.0, 0.0, 4.0)) < 1e-3, "{:?}", m[2].centroid);
         // Recursion and bad placements are errors.
         let cyc = vec![ExportProduct {
             name: "A".into(),

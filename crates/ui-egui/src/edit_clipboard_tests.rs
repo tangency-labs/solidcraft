@@ -1,8 +1,9 @@
 //! Copy and Paste from the keyboard and the context menu (#1480).
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -368,7 +369,7 @@ fn contribution_occurrence_move_panel_belongs_to_its_document() {
 
 #[test]
 fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
     h.app = contribution_saved_part(&file);
@@ -411,7 +412,8 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
 
 #[test]
 fn contribution_paste_pointer_uses_parent_coordinates_and_safe_fallbacks() {
-    use solidcraft_engine::{doc, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc;
     let mut h = crate::scenario::Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Parent","grounded":false})).unwrap();
     h.app

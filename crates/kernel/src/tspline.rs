@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 use solidcraft_geom::bspline::{BezierPatch, HPoint, NurbsSurface, SplineError, bezier_segment};
 use solidcraft_geom::tspline::TSpline;
 
@@ -144,7 +144,7 @@ fn patch_faces(patches: &[BezierPatch]) -> Result<Parts> {
     }
     let mut bounds = solidcraft_geom::Aabb3::EMPTY;
     for c in &corners {
-        bounds.add(solidcraft_geom::Vec3::new(c[0], c[1], c[2]));
+        bounds.add(solidcore_record::Vec3::new(c[0], c[1], c[2]));
     }
     parts.tolerance = (bounds.diagonal() * 1e-6).max(1e-5);
     parts.vertices = corners.into_iter().map(|point| b::Vertex { point, tolerance: parts.tolerance }).collect();
@@ -156,8 +156,9 @@ fn patch_faces(patches: &[BezierPatch]) -> Result<Parts> {
 
 #[cfg(test)]
 mod tests {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_geom::bspline::NurbsSurface;
+    use solidcraft_geom::prelude::*;
     use solidcraft_geom::tspline::{Cut, TSpline};
 
     use super::tspline_sheet;

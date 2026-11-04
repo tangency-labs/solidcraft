@@ -12,6 +12,7 @@
 //! linked design being read and its rebuild's progress.
 
 use crate::ui_kit::{Container, Surface};
+use solidcraft_engine::geom::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{
     Arc,
@@ -845,8 +846,9 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
 
 #[cfg(not(target_arch = "wasm32"))]
 fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::ColorImage> {
+    use solidcore_record::Vec3;
     use solidcraft_engine::{
-        geom::{Aabb3, Mesh, Vec3},
+        geom::{Aabb3, Mesh},
         render::{Camera, Rgb, Scene, SceneMesh, StandardView},
     };
     let mut scene = Scene::default();
@@ -1225,7 +1227,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
         ui.interact(cover, egui::Id::new("file_loading_block"), egui::Sense::click_and_drag());
-        ui.painter().rect_filled(cover, 0.0, egui::Color32::from_black_alpha(70));
+        let shield = Container::new(ctx, Surface::InputShield);
+        shield.paint_background(ui.painter(), shield.frame(ctx, egui::Color32::from_black_alpha(70), crate::frame::Side::Left), cover);
     });
     // Anchored at its top: the card grows downwards (the saved preview) and Cancel stays put.
     let top = egui::pos2(centre.x, (centre.y - 120.0).max(cover.top() + 8.0));
@@ -1452,11 +1455,11 @@ mod tests {
     fn drawing_insert_and_drop_reuse_the_active_sketch_or_create_xy() {
         let mut h = crate::scenario::Harness::new();
         let dxf = solidcraft_engine::io::write_dxf(&[
-            solidcraft_engine::io::Geom2::Line(solidcraft_engine::geom::Vec2::ZERO, solidcraft_engine::geom::Vec2::new(10.0, 0.0)),
+            solidcraft_engine::io::Geom2::Line(solidcore_record::Vec2::ZERO, solidcore_record::Vec2::new(10.0, 0.0)),
             solidcraft_engine::io::Geom2::Arc {
-                c: solidcraft_engine::geom::Vec2::ZERO,
-                a: solidcraft_engine::geom::Vec2::new(5.0, 0.0),
-                b: solidcraft_engine::geom::Vec2::new(0.0, 5.0),
+                c: solidcore_record::Vec2::ZERO,
+                a: solidcore_record::Vec2::new(5.0, 0.0),
+                b: solidcore_record::Vec2::new(0.0, 5.0),
             },
         ]);
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L10 10"/></svg>"#;
@@ -1478,7 +1481,7 @@ mod tests {
             wait(&mut h);
             assert_eq!(h.app.session.doc.features.len(), 2, "{:?}", h.app.status);
             let id = h.app.session.active_sketch.unwrap();
-            assert_eq!(h.app.session.model.state().sketch(id).unwrap().plane, solidcraft_engine::geom::Plane::XY);
+            assert_eq!(h.app.session.model.state().sketch(id).unwrap().plane, solidcore_record::Plane::XY);
             assert_eq!(h.app.session.doc.sketch(id).unwrap().curves.len(), 2);
             h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
             h.app.fit_view();

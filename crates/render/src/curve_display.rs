@@ -1,6 +1,7 @@
 //! Pixel-bounded display paths. CAD segments remain untouched; positive homogeneous
 //! control hulls bound perspective projection, including looping and rational curves.
-use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::Mat4;
 
@@ -57,7 +58,7 @@ fn mix(a: H, b: H, t: f64) -> H {
 }
 
 /// The most control points of one span: a Bézier of the highest degree.
-const MAX_CONTROLS: usize = solidcraft_geom::MAX_BEZIER_DEGREE + 1;
+const MAX_CONTROLS: usize = solidcore_record::MAX_BEZIER_DEGREE + 1;
 
 /// One span's homogeneous control points, kept inline: the sampler splits and projects
 /// thousands of them per curve and view, and a `Vec` each was most of its allocations.
@@ -141,7 +142,7 @@ fn controls(segment: &Seg2, plane: &Plane) -> Option<(Vec<Hull>, H)> {
         Seg2::Line { a, b } => vec![Hull::new(&[h(a, 1.0), h(b, 1.0)])?],
         Seg2::Cubic { p0, p1, p2, p3 } => vec![Hull::new(&[h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)])?],
         Seg2::Conic { a, apex, b, w } if w > 0.0 => vec![Hull::new(&[h(a, 1.0), h(apex, w), h(b, 1.0)])?],
-        Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
+        Seg2::Bezier { n, p } if (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) => {
             let mut hull = Hull { len: n as usize + 1, p: [[0.0; 4]; MAX_CONTROLS] };
             for (out, p) in hull.p.iter_mut().zip(&p[..=n as usize]) {
                 *out = h(*p, 1.0);

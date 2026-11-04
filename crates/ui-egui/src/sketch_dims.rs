@@ -8,9 +8,10 @@
 use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -648,7 +649,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             ui.ctx(),
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
-                field_frame.fill(fill).show(ui, |ui| {
+                Container::show_backing(ui, field_frame.fill(fill), |ui| {
                     let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.

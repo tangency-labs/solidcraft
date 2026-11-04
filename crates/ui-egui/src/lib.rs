@@ -195,6 +195,7 @@ pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
+pub mod panel_runtime;
 pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
@@ -457,6 +458,8 @@ pub struct Services {
     /// frame, so it only reads a value kept up to date elsewhere. None, or `None` from it: the
     /// window toolkit's theme.
     pub desktop_dark: Option<Box<dyn Fn() -> Option<bool>>>,
+    /// Lazy background observation; `needed` arms polling, the return is cached only.
+    pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
@@ -512,7 +515,10 @@ pub(crate) enum EscapeOwner {
 }
 
 pub struct SolveApp {
+    /// Common panel foundation, internal opt-in; stays on the app across document tabs.
+    pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
     pub blur: blur::State,
+    pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
@@ -599,7 +605,7 @@ pub struct SolveApp {
     pub edit_in_place: edit_in_place::EditInPlace,
     pub(crate) pending_feature_edit: Option<feature_edit::PendingFeatureEdit>,
     /// The feature being reopened from a click and where, until its dialog opens (UI state only).
-    edit_anchor_hint: Option<(u64, solidcraft_engine::geom::Vec3)>,
+    edit_anchor_hint: Option<(u64, solidcore_record::Vec3)>,
     /// The open feature window's check of what its material does (#6901).
     pub op_check: op_auto::OpCheck,
     /// A command recomputing the history (the marker moved, undo) computing off the window
@@ -788,8 +794,10 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let mut app = SolveApp {
+            panel_runtime: None,
             viewport_status: Default::default(),
             blur: Default::default(),
+            blur_session: Default::default(),
             viewport_status_fixture: Default::default(),
             session,
             ui: UiState::default(),
@@ -1166,6 +1174,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if solidcraft_engine::panels::commands::is_command(id) {
+            return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
+        }
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
@@ -1477,6 +1488,8 @@ impl SolveApp {
                     self.applying = None;
                     self.editing_state = None;
                     self.pending_feature_edit = None;
+                    // So does what it had computing: none of it may land in the new design.
+                    self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
                     self.cam = Camera::default();
@@ -1574,6 +1587,12 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
+        if solidcraft_engine::panels::commands::is_command(id) {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
         self.tree.clear_folder_pick();
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
@@ -2098,7 +2117,7 @@ impl SolveApp {
 
     /// [`Self::edit_feature`] opened from a click at `at` on what the feature made: the dialog's
     /// arrow sits by that point (a fillet's or chamfer's edge nearest it).
-    pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcraft_engine::geom::Vec3>) {
+    pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcore_record::Vec3>) {
         use solidcraft_engine::doc::FeatureKind;
         // A non-finite point (over the control channel) keeps the first edge.
         self.edit_anchor_hint = at.filter(|p| p.is_finite()).map(|p| (id, p));
@@ -2537,7 +2556,7 @@ impl SolveApp {
     pub fn fitted(&self, mut cam: Camera) -> Camera {
         let b = viewport::view_bounds(self);
         if b.is_empty() {
-            cam.target = solidcraft_engine::geom::Vec3::ZERO;
+            cam.target = solidcore_record::Vec3::ZERO;
             cam.distance = 150.0;
         } else {
             cam = self.fitted_bounds(cam, &b);
@@ -2575,7 +2594,7 @@ impl SolveApp {
         let radius = (bounds.diagonal() * 0.5).max(0.5);
         // A cube around the sphere, seen square-on from any axis, projects to the sphere's own
         // square, so the layout fit of that cube is the sphere's.
-        let offset = solidcraft_engine::geom::Vec3::new(radius, radius, radius);
+        let offset = solidcore_record::Vec3::new(radius, radius, radius);
         let sphere = solidcraft_engine::geom::Aabb3 { min: centre - offset, max: centre + offset };
         let mut probe = Camera::default();
         probe.set_view(StandardView::Front);
@@ -2818,6 +2837,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        panel_runtime::tick_app(self);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
         let frame_time = ctx.input(|i| i.time);
@@ -2968,6 +2988,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        prefs::prepare_blur(self, ui.ctx());
         let blur_source = !self.home.open && !render_workspace::result_active(self);
         let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);

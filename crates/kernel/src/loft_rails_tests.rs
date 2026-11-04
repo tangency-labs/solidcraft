@@ -5,9 +5,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
 
 use crate::{KernelError, RailFit, loft, loft_sheet_with_rails, loft_with_rails, measure};
 

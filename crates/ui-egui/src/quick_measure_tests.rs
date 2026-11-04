@@ -2,8 +2,9 @@
 //! window thread, shown above History, copied on a click.
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 

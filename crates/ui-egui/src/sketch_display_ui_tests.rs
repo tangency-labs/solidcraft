@@ -3,7 +3,8 @@ use crate::scenario::Harness;
 use crate::sketch_display::{curve_sample, projection_key};
 use crate::viewport::{Hit, Proj, pick, projection};
 use serde_json::json;
-use solidcraft_engine::geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::{SampledPath, SamplingQuality};
 use std::sync::Arc;
 
@@ -162,10 +163,7 @@ fn pixel_adapter_uses_exact_ellipse_periodic_fit_and_control_spline_spans() {
         let state = h.app.session.world_state().unwrap();
         let ss = state.sketch(sid).unwrap();
         let exact = ss.sketch.exact_segs(0).unwrap();
-        assert!(
-            exact.iter().all(|s| !matches!(s, solidcraft_engine::geom::Seg2::Line { .. })),
-            "freeform display must reach the exact span extractor"
-        );
+        assert!(exact.iter().all(|s| !matches!(s, solidcore_record::Seg2::Line { .. })), "freeform display must reach the exact span extractor");
         let proj = projection(&h.app, h.app.viewport.rect.unwrap());
         let path = curve_sample(&h.app, sid, 0, &ss.plane, &proj);
         assert_eq!(path.quality, SamplingQuality::Complete, "{command}");

@@ -10,8 +10,9 @@
 //! without moved components).
 
 use serde_json::{Map, Value};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, map_vector_expr, mat_inverse};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 

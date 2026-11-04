@@ -6,6 +6,7 @@
 //! changes.
 
 use crate::fonts::RichTextExt as _;
+use crate::ui_kit::BackingTooltipExt as _;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -70,7 +71,7 @@ fn spans(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32) {
             for (label, url) in links {
                 // The text above already shows the label; the button says where it goes.
                 let to = format!("↗ {}", host(url));
-                ui.hyperlink_to(RichText::new(to).size(size - (t.font_button - t.font_body)), url).on_hover_text(format!("{label}: {url}"));
+                ui.hyperlink_to(RichText::new(to).size(size - (t.font_button - t.font_body)), url).backing_on_hover_text(format!("{label}: {url}"));
             }
         });
     }
@@ -94,17 +95,21 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                 ui.add(egui::Label::new(RichText::new(markdown::plain(s)).size(size).semibold().color(t.text)).selectable(true).wrap());
             }
             Block::Code { text, .. } => {
-                egui::Frame::NONE.fill(t.field).corner_radius(t.radius_sm).inner_margin(Margin::same(6)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.add(
-                        egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text))
-                            .selectable(true)
-                            .wrap(),
-                    );
-                    if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
-                        ui.ctx().copy_text(text.clone());
-                    }
-                });
+                crate::ui_kit::Container::show_backing(
+                    ui,
+                    egui::Frame::NONE.fill(t.field).corner_radius(t.radius_sm).inner_margin(Margin::same(6)),
+                    |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.add(
+                            egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text))
+                                .selectable(true)
+                                .wrap(),
+                        );
+                        if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
+                            ui.ctx().copy_text(text.clone());
+                        }
+                    },
+                );
             }
             Block::List { ordered, start, items } => {
                 for (i, item) in items.iter().enumerate() {

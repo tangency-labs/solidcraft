@@ -1246,6 +1246,7 @@ fn normalise(d: &mut Document) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_geom::prelude::*;
 
     /// A pending change that records that its step ran, in `trace`.
     fn traced(name: &'static str) -> Part {
@@ -1676,7 +1677,7 @@ mod tests {
     #[test]
     fn version_twenty_three_designs_open_and_an_edge_flange_relief_is_saved_in_twenty_four() {
         let flange = |shape: Option<&str>, size: Option<&str>| crate::FeatureKind::SheetFlange {
-            edges: vec![crate::FlangeEdge::at(solidcraft_geom::Vec3::ZERO)],
+            edges: vec![crate::FlangeEdge::at(solidcore_record::Vec3::ZERO)],
             height: "10 mm".into(),
             angle: "90 deg".into(),
             radius: None,
@@ -1782,7 +1783,7 @@ mod tests {
 
     #[test]
     fn version_nine_wire_spaces_preserve_saved_points_and_explicit_markers() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         use solidcraft_sketch::{LinkKind, LinkSource, Sketch, WireSpace};
         let mut sketch = Sketch::new();
         sketch.add_drawn_wire(&[Vec3::new(12.0, 3.0, 4.0)]).unwrap();
@@ -1896,9 +1897,9 @@ mod tests {
                         through_all: false,
                         taper: Some("0 deg".into()),
                         corner: Default::default(),
-                        to: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0))),
+                        to: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 10.0))),
                         to_offset: Some("offset + 1 mm".into()),
-                        from: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 5.0))),
+                        from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
                     },
                     operation: Operation::NewBody,
@@ -1944,7 +1945,7 @@ mod tests {
 
     #[test]
     fn saved_offset_cannot_alias_and_overwrite_its_source_geometry() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{CurveKind, Sketch};
         let mut sketch = Sketch::new();
         let center = sketch.add_point(Vec2::ZERO, None).unwrap();
@@ -2083,7 +2084,7 @@ mod tests {
 
     #[test]
     fn periodic_file_validation_refuses_damaged_closed_geometry() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{CurveKind, Sketch};
         let mut sketch = Sketch::new();
         let mut pts = Vec::new();
@@ -2233,7 +2234,7 @@ mod tests {
 
     #[test]
     fn version_seven_origin_sketch_keeps_geometry_dimension_ids_and_expressions() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{ConstraintKind, Sketch};
         let mut d = Document::new("legacy origin dimensions");
         d.set_param("reach", "25 mm", Some("mm"), None).unwrap();
@@ -2263,7 +2264,7 @@ mod tests {
 
     #[test]
     fn version_eight_persistent_angle_sweep_and_slot_dimensions_roundtrip() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::{ConstraintKind, Sketch};
         let mut d = Document::new("persistent typed dimensions");
         let heading = d.new_model_param("45 deg", "deg");
@@ -2382,12 +2383,12 @@ mod tests {
         let (values, errors) = migrated.param_values();
         assert!(errors.is_empty());
         let p = migrated.resolve_plane(&values, plane, 0).unwrap();
-        assert_eq!(p.y, solidcraft_geom::Vec3::Z);
-        assert_eq!(p.normal(), -solidcraft_geom::Vec3::Y);
-        assert_eq!(p.origin, solidcraft_geom::Vec3::new(0.0, -7.0, 0.0));
+        assert_eq!(p.y, solidcore_record::Vec3::Z);
+        assert_eq!(p.normal(), -solidcore_record::Vec3::Y);
+        assert_eq!(p.origin, solidcore_record::Vec3::new(0.0, -7.0, 0.0));
         assert_eq!(read(&migrated.to_json()).unwrap(), migrated);
         let fresh = doc.resolve_plane(&values, &crate::PlaneRef::Origin { name: "XZ".into() }, 0).unwrap();
-        assert_eq!(fresh.normal(), solidcraft_geom::Vec3::Y);
+        assert_eq!(fresh.normal(), solidcore_record::Vec3::Y);
     }
 
     #[test]
@@ -2435,7 +2436,7 @@ mod tests {
         let mut sketch = Sketch::new();
         let mut previous = 0;
         while sketch.points.len() < MAX_POINTS {
-            let i = sketch.add_point(solidcraft_geom::Vec2::new(0.001 * sketch.points.len() as f64, 0.0), None).unwrap();
+            let i = sketch.add_point(solidcore_record::Vec2::new(0.001 * sketch.points.len() as f64, 0.0), None).unwrap();
             sketch.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: previous, q: i }, None).unwrap();
             previous = i;
         }
@@ -2547,7 +2548,7 @@ mod tests {
     #[test]
     fn integer_valued_coordinates_are_range_checked_and_large_ids_still_load() {
         let mut sketch = solidcraft_sketch::Sketch::new();
-        sketch.add_point(solidcraft_geom::Vec2::new(40.0, 0.0), None).unwrap();
+        sketch.add_point(solidcore_record::Vec2::new(40.0, 0.0), None).unwrap();
         let mut d = Document::new("range");
         d.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         let last = |v: &Value| v["features"][0]["sketch"]["points"].as_array().map_or(0, |a| a.len() - 1);
@@ -2604,7 +2605,7 @@ mod tests {
             "orientation": {"direction": [0.0, 1.0, 0.0]}, "twist": "90 deg", "scale": "0.5"});
         let k: FeatureKind = serde_json::from_value(new.clone()).unwrap();
         let FeatureKind::SurfaceSweep { orientation, .. } = &k else { panic!("{k:?}") };
-        assert_eq!(*orientation, SweepOrientation::Direction(crate::Dir(solidcraft_geom::Vec3::Y)));
+        assert_eq!(*orientation, SweepOrientation::Direction(crate::Dir(solidcore_record::Vec3::Y)));
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);

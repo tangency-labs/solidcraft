@@ -17,6 +17,7 @@
 //! context menu's "Turn Up Axis" fixes it any time.
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::prefs::StandUpUnknown;
@@ -56,7 +57,7 @@ pub enum Upright {
 /// The flat area of `mesh` facing down Z, facing down Y and facing up Y, looking at no more than
 /// `budget` triangles.
 pub fn flat_areas(mesh: &solidcraft_engine::geom::Mesh, budget: usize) -> [f64; 3] {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     struct Face {
         first: Vec3,
         area: f64,

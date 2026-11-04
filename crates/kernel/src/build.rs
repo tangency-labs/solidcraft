@@ -2,7 +2,8 @@
 //! through SMLib ([`crate::smlib_sweeps`]); a profile face as its schema 4 record
 //! ([`planar_face_record`]).
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;
@@ -50,7 +51,7 @@ fn seg_ok(s: &Seg2) -> bool {
         }
         Seg2::Cubic { p0, p1, p2, p3 } => p0.is_finite() && p1.is_finite() && p2.is_finite() && p3.is_finite(),
         Seg2::Conic { a, apex, b, w } => a.is_finite() && apex.is_finite() && b.is_finite() && w.is_finite() && w > 1e-9,
-        Seg2::Bezier { n, p } => (4..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) && p.iter().all(|q| q.is_finite()),
+        Seg2::Bezier { n, p } => (4..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) && p.iter().all(|q| q.is_finite()),
     }
 }
 
@@ -67,20 +68,32 @@ pub(crate) fn frame_ok(plane: &Plane) -> bool {
 /// Extrude each region from `start` to `end` along the plane normal (offsets in mm, `end > start`).
 pub fn extrude(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "extrude");
-    extrude_with(plane, regions, start, end, false)
+    extrude_with(plane, regions, start, end, None)
 }
 
 /// [`extrude`] with each run of profile lines that continue one another in a straight line (a side
 /// drawn in two pieces, a mirrored half meeting its mirror image) swept into one side face over
-/// all its pieces, rather than coplanar faces with an edge between them (#1788). The side's
+/// all its pieces, rather than coplanar faces with an edge between them (#1788), and each run of
+/// free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve (an
+/// ellipse's four quarters, a spline's spans) swept as that one curve into one wall. The side's
 /// history lists every piece under it. For the Extrude feature; other builders (sheet metal's
 /// flat pattern, tools) keep a face per segment.
-pub fn extrude_whole_sides(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
+pub fn extrude_whole_sides(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_curve: &dyn Fn(&Seg2, &Seg2) -> bool) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "extrude_whole_sides");
-    extrude_with(plane, regions, start, end, true)
+    extrude_with(plane, regions, start, end, Some(one_curve))
 }
 
-fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_sides: bool) -> Result<Vec<Body>> {
+/// The degree of a free-form segment (a conic or a Bézier), none for a line or an arc.
+fn free_form_degree(s: &Seg2) -> Option<u8> {
+    match *s {
+        Seg2::Conic { .. } => Some(2),
+        Seg2::Cubic { .. } => Some(3),
+        Seg2::Bezier { n, .. } => Some(n),
+        Seg2::Line { .. } | Seg2::Arc { .. } => None,
+    }
+}
+
+fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>) -> Result<Vec<Body>> {
     if !frame_ok(plane) {
         return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
     }
@@ -97,8 +110,26 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_
         .map(|r| {
             region_ok(r)?;
             let pieces = oriented(r)?;
-            let numbered = if whole_sides { pieces.map_loops(|l| l.merged_lines(continues_straight)) } else { pieces.clone() };
-            crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&numbered, &pieces), Some(r), lo, hi - lo, 1.0, None)
+            let Some(one_curve) = one_curve else {
+                return crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&pieces, &pieces), Some(r), lo, hi - lo, 1.0, None);
+            };
+            // Pieces of one curve: free-form segments of one degree that the caller says are one
+            // curve. Each loop starts where such a run starts, so no run wraps round its end.
+            let joins = |s: &Seg2, t: &Seg2| free_form_degree(s).is_some_and(|d| free_form_degree(t) == Some(d)) && one_curve(s, t);
+            let numbered = pieces.map_loops(|l| l.merged_lines(continues_straight).starting_a_run(joins));
+            let mut swept = crate::smlib_sweeps::region_pieces(&numbered, &pieces);
+            let mut k = 0;
+            for l in numbered.loops() {
+                for i in 1..l.lp.segs.len() {
+                    if let (Some(s), Some(t)) = (l.lp.segs.get(i - 1), l.lp.segs.get(i))
+                        && let Some(x) = swept.get_mut(k + i)
+                    {
+                        x.joins_previous = joins(s, t);
+                    }
+                }
+                k += l.lp.segs.len();
+            }
+            crate::smlib_sweeps::extrude(plane, &swept, Some(r), lo, hi - lo, 1.0, None)
         })
         .collect()
 }
@@ -494,7 +525,7 @@ fn offset_curve(s: &Seg2, a: Vec2, b: Vec2, d: f64) -> Option<Seg2> {
             q
         }
         Seg2::Bezier { n, p } => {
-            let k = (n as usize).clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE);
+            let k = (n as usize).clamp(1, solidcore_record::MAX_BEZIER_DEGREE);
             let mut q = offset_polygon(p.get(..=k)?, n0, n1, d)?;
             let mut all = p;
             for (dst, src) in all.iter_mut().zip(&q) {
@@ -730,7 +761,7 @@ fn with_end(s: &Seg2, x: Vec2) -> Seg2 {
         Seg2::Conic { a, apex, w, .. } => Seg2::Conic { a, apex, b: x, w },
         Seg2::Bezier { n, p } => {
             let mut q = p;
-            if let Some(last) = q.get_mut((n as usize).clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE)) {
+            if let Some(last) = q.get_mut((n as usize).clamp(1, solidcore_record::MAX_BEZIER_DEGREE)) {
                 *last = x;
             }
             Seg2::Bezier { n, p: q }
@@ -872,8 +903,9 @@ fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64,
 /// counter-clockwise and the holes clockwise, each sketch segment one edge of its exact record
 /// curve ([`crate::point_path::sketch_record_curve`]) with its exact pcurve on the plane. The record
 /// equivalent of a profile face: SMLib takes it with `Brep::from_record`.
-pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom::brep::Brep> {
-    use solidcraft_geom::brep::{self as rec, pcurve};
+pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record::brep::Brep> {
+    use solidcore_record::brep::{self as rec};
+    use solidcraft_geom::brep::pcurve;
     if !frame_ok(plane) {
         return Err(KernelError::Invalid("the face's plane is not finite and orthonormal".into()));
     }
@@ -948,7 +980,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom:
         edges,
         vertices,
     };
-    brep.validate().map_err(|e| KernelError::Failed(format!("profile face: {e}")))?;
+    solidcraft_geom::brep::check::validate(&brep).map_err(|e| KernelError::Failed(format!("profile face: {e}")))?;
     Ok(brep)
 }
 

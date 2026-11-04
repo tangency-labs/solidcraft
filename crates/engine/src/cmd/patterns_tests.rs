@@ -95,9 +95,9 @@ fn rectangular_cut_pattern_counts_only_target_contacts_and_keeps_landing_copies(
     assert_eq!(reply["warning"], "2 of 3 cut copies remove no material");
     let state = s.world_state().unwrap();
     let plate = &state.body("Plate").unwrap().body;
-    assert_eq!(plate.classify_point(solidcraft_geom::Vec3::new(30., 15., 5.)).unwrap(), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(plate.classify_point(solidcore_record::Vec3::new(30., 15., 5.)).unwrap(), solidcraft_kernel::PointClass::Outside);
     assert_eq!(
-        state.body("Neighbor").unwrap().body.classify_point(solidcraft_geom::Vec3::new(50., 15., 5.)).unwrap(),
+        state.body("Neighbor").unwrap().body.classify_point(solidcore_record::Vec3::new(50., 15., 5.)).unwrap(),
         solidcraft_kernel::PointClass::Inside
     );
     assert!(rel(volume(&mut s), 24000.0 - 2.0 * PI * 4.0 * 10.0) < 1e-3);
@@ -105,7 +105,7 @@ fn rectangular_cut_pattern_counts_only_target_contacts_and_keeps_landing_copies(
 
 #[test]
 fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompute() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for flipped in [false, true] {
         let mut s = feature_pattern_plate();
         let before = s.doc.to_json();
@@ -145,7 +145,7 @@ fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompu
 
 #[test]
 fn feature_circular_center_flip_uses_partial_arc_endpoints_and_full_circle_spacing() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     for total in [90.0_f64, 360.0] {
         for flipped in [false, true] {
             let mut s = feature_pattern_plate();
@@ -828,7 +828,7 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
 /// middle; the rib's triangle (8, 5)-(8, 25)-(30, 5) in the XZ plane, 4 thick, is 880 mm³.
 #[test]
 fn patterns_and_mirrors_of_a_rib() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let rib = 0.5 * 22.0 * 20.0 * 4.0;
     let ribbed = || {
         let mut s = Session::default();
@@ -872,7 +872,7 @@ fn patterns_and_mirrors_of_a_rib() {
 /// box with a hole `H` at (−15, −10) and `Pat`, two more holes along x at 10 mm steps.
 #[test]
 fn patterns_and_mirrors_of_patterns_and_mirrors() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let hole = PI * 1.5 * 1.5 * 20.0;
     let design = || {
         let mut s = Session::default();

@@ -40,6 +40,7 @@
 //!
 //! The same files drive the live app over the control channel for screenshots.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -435,7 +436,7 @@ impl Harness {
         for i in 0..240 {
             self.frame();
             let now = basis(&self.app.cam);
-            let ang = |a: solidcraft_engine::geom::Vec3, b: solidcraft_engine::geom::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            let ang = |a: solidcore_record::Vec3, b: solidcore_record::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
             let d = ang(prev.0, now.0).max(ang(prev.2, now.2));
             if d > worst.0 {
                 worst = (d, i);

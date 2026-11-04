@@ -2,7 +2,7 @@ use super::*;
 
 /// A wedge 40 x 20, 15 high, its top front edge along x from 0 to 40.
 fn wedge_body() -> Body {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let outer = Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(40., 0.), Vec2::new(0., 20.)]);
     crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 15.).unwrap().pop().unwrap()
 }

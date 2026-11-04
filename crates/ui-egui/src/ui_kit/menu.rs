@@ -85,7 +85,11 @@ impl Menu {
             } else {
                 submenu
             };
-            submenu.show(ui, &response, content)
+            let slot = super::container::BackingSlot::reserve(ui.ctx(), egui::LayerId::new(egui::Order::Foreground, popup_id));
+            submenu.show(ui, &response, |ui| match slot {
+                Some(slot) => slot.body(ui, content),
+                None => content(ui),
+            })
         } else if beside {
             let open = Self::flyout_open(ui, &response, popup_id);
             let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).open(open).frame(frame);

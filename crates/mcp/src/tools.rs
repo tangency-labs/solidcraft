@@ -514,6 +514,13 @@ fn text_result(v: &Value, is_error: bool) -> Value {
     let mut r = json!({"content": [{"type": "text", "text": text}]});
     if is_error {
         r["isError"] = json!(true);
+        if let Some(reason) = v
+            .as_str()
+            .and_then(solidcraft_engine::panels::commands::structured_error)
+            .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
+        {
+            r["structuredContent"] = json!({"panel_error":reason});
+        }
     }
     r
 }
@@ -1161,12 +1168,36 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>) -> Value {
     }
 }
 
+fn layout_step(step: &Value) -> bool {
+    let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or_default();
+    let command = if command == "execute" {
+        step.get("params").and_then(|params| params.get("command")).and_then(Value::as_str).unwrap_or_default()
+    } else {
+        command
+    };
+    command.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout"))
+}
+
+fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> (Value, bool) {
+    use solidcraft_engine::panels::{commands, error};
+    let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
+    reply["not_run_count"] = json!(count);
+    reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
+    (reply, true)
+}
+
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let Some(steps) = a.get("commands").and_then(Value::as_array) else {
         return (json!("`commands` must be an array of {command, params}"), true);
     };
     if steps.len() > MAX_BATCH {
+        if a.get("rollback").and_then(Value::as_bool).unwrap_or(true) && steps.iter().any(layout_step) {
+            return atomic_layout_refusal(steps.len(), solidcraft_engine::panels::Rule::CollectionLimit, "atomic layout batch step count cap");
+        }
         return (json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
     }
     let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
@@ -1217,6 +1248,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         }
     }
     let steps = &mapped;
+    let atomic_layout = rollback && steps.iter().any(layout_step);
     // A step the batch would refuse at its turn refuses it now, before anything runs (#5853).
     // Only where the commands run in this process: a running app may be another version, with
     // commands this one lacks, and checks the batch against its own registry when it gets it.
@@ -1251,7 +1283,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         o.insert("timings".into(), Value::Bool(true));
         o.insert("profile".into(), Value::Bool(profile));
     }
-    if params.to_string().len() + 64 * 1024 <= solidcraft_engine::MAX_LINE {
+    let fits_transport = params.to_string().len().saturating_add(64 * 1024) <= solidcraft_engine::MAX_LINE;
+    if fits_transport {
         match b.call("engine.batch", params) {
             Ok(mut r) => {
                 if let Some(failed) = r.get_mut("failed")
@@ -1266,6 +1299,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
+            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
             // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
             // the `pending` tool gets its result.
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
@@ -1277,6 +1311,20 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 return (Value::String(msg), true);
             }
         }
+    }
+    // Application layout is outside document checkpoints. Neither an unavailable
+    // batch endpoint nor an oversized transport request authorizes a sequential
+    // emulation of an atomic layout/mixed transaction.
+    if atomic_layout {
+        return atomic_layout_refusal(
+            steps.len(),
+            if fits_transport { solidcraft_engine::panels::Rule::Capability } else { solidcraft_engine::panels::Rule::CollectionLimit },
+            if fits_transport {
+                "authoritative atomic layout batch capability is unavailable"
+            } else {
+                "atomic layout batch exceeds transport size cap"
+            },
+        );
     }
     let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());

@@ -3,12 +3,12 @@
 use crate::{Result, Session, params::bad};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{
     render_resources::HdrId,
     render_settings::{RenderJob, RenderSetup},
     render_surface::{BuiltinSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceBindings},
 };
-use solidcraft_geom::Vec3;
 use solidcraft_render::{ProductScene, job::textures::PlanarFrame};
 use std::{collections::BTreeMap, sync::Arc};
 

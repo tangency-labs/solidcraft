@@ -4095,8 +4095,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-record"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore?rev=f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f#f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -4127,21 +4137,23 @@ dependencies = [
  "ureq",
  "windows-sys 0.61.2",
  "winit",
+ "winreg",
  "x11rb",
  "zbus 5.19.0",
 ]
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "image",
  "log",
  "serde_json",
+ "solidcore-record",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-kernel",
@@ -4150,7 +4162,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4159,12 +4171,13 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "log",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4177,7 +4190,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "image",
  "log",
@@ -4185,6 +4198,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "solidcore-record",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4199,16 +4213,17 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "serde",
  "serde_json",
+ "solidcore-record",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "image",
  "log",
@@ -4217,6 +4232,7 @@ dependencies = [
  "robust",
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-engine",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4228,7 +4244,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -4243,6 +4259,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4256,13 +4273,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "log",
  "proptest",
  "rayon",
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",
@@ -4274,7 +4292,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "image",
  "serde_json",
@@ -4284,7 +4302,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "serde_json",
  "web-time",
@@ -4292,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-render"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "image",
  "moxcms",
@@ -4300,6 +4318,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-geom",
  "web-time",
  "weezl",
@@ -4307,11 +4326,12 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "harfrust",
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-geom",
  "thiserror 2.0.21",
  "ttf-parser",
@@ -4320,38 +4340,40 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "flate2",
  "log",
  "serde_json",
  "solidcore",
+ "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",
 ]
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "solidcraft-step"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
+ "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",
 ]
 
 [[package]]
 name = "solidcraft-testkit"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "arboard",
  "egui",
@@ -4366,6 +4388,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
@@ -4382,7 +4405,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
  "eframe",
  "egui",
@@ -5813,8 +5836,9 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.30.1"
+version = "0.40.0-rc.2"
 dependencies = [
+ "flate2",
  "proc-macro2",
  "quick-xml",
  "serde",

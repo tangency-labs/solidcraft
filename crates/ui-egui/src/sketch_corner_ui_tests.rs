@@ -304,12 +304,11 @@ fn preview_in(h: &mut crate::scenario::Harness) {
 }
 
 fn apply(h: &mut crate::scenario::Harness) {
-    // Lay the window out once before reading its OK handle. An error line that wraps onto a
-    // second row moves the button, and a click on the handle from the frame before then
-    // lands above it and commits nothing.
+    // Preview refusals can reflow the window during hover. The widget path resolves the
+    // button again after hovering, so the click follows its current position.
     h.frames(2);
     preview_in(h);
-    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.step(&json!({"widget":"OK"})).unwrap();
     h.frames(2);
 }
 
@@ -985,7 +984,7 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
         for id in [&line, &spline, &linked, &"side".to_owned()] {
             let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sketch).unwrap().sketch;
-            let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO };
+            let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();
             assert_eq!(offered, !sk.is_spatial_corner_curve(id), "{cmd}: {id}");
             assert_eq!(offered, id == "side", "{cmd}: {id}");

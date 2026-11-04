@@ -55,9 +55,9 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
 mod tests {
     use super::*;
     use crate::Sel;
-    use crate::geom::Vec3;
     use crate::render::*;
     use serde_json::json;
+    use solidcore_record::Vec3;
     use std::sync::Arc;
 
     #[test]

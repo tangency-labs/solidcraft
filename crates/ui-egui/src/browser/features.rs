@@ -351,7 +351,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    response.on_hover_text(crate::i18n::tr("ui.history_marker_tip"))
+    response.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"))
 }
 
 /// Dragging the marker shows where it lands; letting go rolls the history there, through the
@@ -565,7 +565,7 @@ mod tests {
         let model_body = state.body(body).unwrap();
         let names = solidcraft_engine::doc::naming::face_names(model_body);
         let index = names.iter().position(|name| name.starts_with(&format!("F{feature}:"))).unwrap();
-        app.session.selection = vec![Sel::Face { body: body.into(), index, point: solidcraft_engine::geom::Vec3::ZERO }];
+        app.session.selection = vec![Sel::Face { body: body.into(), index, point: solidcore_record::Vec3::ZERO }];
         let item = crate::context_menu::items(app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findTimeline").unwrap();
         assert!(item.enabled);
         crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
@@ -656,7 +656,7 @@ mod tests {
     fn browser_find_from_a_body_or_its_face_reveals_the_body() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
-        for pick in [Sel::Body { name: "Plate".into() }, Sel::Face { body: "Plate".into(), index: 0, point: solidcraft_engine::geom::Vec3::ZERO }] {
+        for pick in [Sel::Body { name: "Plate".into() }, Sel::Face { body: "Plate".into(), index: 0, point: solidcore_record::Vec3::ZERO }] {
             h.app.tree.reveal = None;
             h.app.session.selection = vec![pick.clone()];
             let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
@@ -674,7 +674,7 @@ mod tests {
     }
 
     fn face(body: &str) -> Sel {
-        Sel::Face { body: body.into(), index: 0, point: solidcraft_engine::geom::Vec3::ZERO }
+        Sel::Face { body: body.into(), index: 0, point: solidcore_record::Vec3::ZERO }
     }
 
     #[test]
@@ -803,7 +803,7 @@ mod tests {
         let state = h.app.session.world_state().unwrap();
         let owner = state.body(&name).unwrap().feature;
         assert_ne!(owner, base);
-        h.app.session.selection = vec![Sel::Face { body: name, index: 0, point: solidcraft_engine::geom::Vec3::ZERO }];
+        h.app.session.selection = vec![Sel::Face { body: name, index: 0, point: solidcore_record::Vec3::ZERO }];
         for id in ["ui.findTimeline", "ui.editFeature"] {
             let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == id).unwrap();
             assert!(!item.enabled || item.params.as_ref().unwrap()["feature"] == json!(owner), "{id}: {item:?}");

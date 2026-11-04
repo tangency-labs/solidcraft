@@ -163,6 +163,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_engine::geom::prelude::*;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 

@@ -4,8 +4,9 @@
 //! every other edge kept by a point at its middle).
 use super::Body;
 use crate::{KernelError, Result, guard};
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{self, eval::CurveEval};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self};
+use solidcraft_geom::brep::eval::CurveEval;
 use std::sync::Arc;
 
 /// Points along a record edge (ends and three inside).

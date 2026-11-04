@@ -20,11 +20,12 @@ mod sheets;
 mod split;
 pub mod ssi;
 pub mod sweeps;
+pub mod trace;
 pub mod trim;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties, PointClass};
-pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS};
+pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS, Turn};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +61,11 @@ pub enum Error {
     Unsupported,
     /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
     CornerUnsupported,
+    /// A swept turn ([`Turn::Swept`]) solidcore does not build at the corner `at`: `room` where
+    /// no radius builds it (a sharp concave side edge between the rounds, solidcore's `NoRoom`),
+    /// else not supported there (`CornerUnsupported`: unequal or variable rounds, a corner of
+    /// four edges, a curved, drafted or tangent side edge); `why` is solidcore's reason.
+    TurnRefused { room: bool, why: String, at: Option<[f64; 3]> },
     /// SMLib does not set back the corner of corner point `corner`: SMLib sets back a corner
     /// only where every edge meeting it is blended and they are all convex or all concave.
     CornerRefused { corner: usize },
@@ -191,6 +197,13 @@ impl std::fmt::Display for Error {
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
             Error::CornerUnsupported => write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends"),
+            Error::TurnRefused { why, at, .. } => {
+                write!(f, "the swept corner is not built")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ": {why}")
+            }
             Error::CornerRefused { corner } => write!(
                 f,
                 "not supported yet: SMLib does not set back corner {}: it sets back a corner only where every edge meeting it is blended, all convex or all concave",
@@ -250,6 +263,8 @@ pub fn crash_test() -> Result<()> {
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,
+    /// The body's number in a trace ([`trace`]).
+    id: u64,
 }
 
 impl std::fmt::Debug for Brep {
@@ -261,7 +276,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body }
+        Brep { body, id: trace::next_id() }
     }
 
     /// solidcore's body.
@@ -271,7 +286,9 @@ impl Brep {
 
     /// An axis-aligned box from its lower corner, with positive edge lengths (mm).
     pub fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Brep> {
-        core::make_box(origin, size).map(Brep::made_core)
+        let r = core::make_box(origin, size).map(Brep::made_core);
+        trace::made("make_box", &[], &r, || serde_json::json!({"origin": origin, "size": size}));
+        r
     }
 
     /// Reads a native SMLib `.smb` file.
@@ -286,7 +303,9 @@ impl Brep {
 
     /// A deep copy.
     pub fn try_clone(&self) -> Result<Brep> {
-        core::transform::copy(self.core()).map(Brep::made_core)
+        let r = core::transform::copy(self.core()).map(Brep::made_core);
+        trace::made("copy", &[self], &r, || serde_json::json!({}));
+        r
     }
 
     /// This body moved by the affine `matrix` (column-major: columns 0–2 the images of x, y and
@@ -294,7 +313,9 @@ impl Brep {
     /// mirror it, a non-uniform scale or a shear turns its geometry into NURBS, tolerances scale
     /// with it.
     pub fn transformed(&self, matrix: &[[f64; 4]; 4]) -> Result<Brep> {
-        core::transform::transform(self.core(), matrix).map(Brep::made_core)
+        let r = core::transform::transform(self.core(), matrix).map(Brep::made_core);
+        trace::made("transform", &[self], &r, || serde_json::json!({"matrix": matrix}));
+        r
     }
 
     /// The enclosed volume (mm³) at `relative_accuracy` (SMLib clamps it to [1e-8, 1e-1]).

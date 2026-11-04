@@ -12,13 +12,15 @@
 //! `pixels_per_point`, offset by the viewport rect); `model` pixels are pixels of a
 //! `ui.render` of the same size, so an agent can render, look, and pick without a window.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{apply_point, is_identity};
-use solidcraft_engine::geom::{Mesh, Vec3};
+use solidcraft_engine::geom::Mesh;
 
 use crate::SolveApp;
 

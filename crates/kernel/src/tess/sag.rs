@@ -7,9 +7,10 @@
 //! conforming. Sides on the face's boundary are never split: they are the edges' own nodes,
 //! which the neighbouring face shares.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::tess::EvalSurface;
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit

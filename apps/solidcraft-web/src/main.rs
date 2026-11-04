@@ -9,6 +9,8 @@
 #[cfg(target_arch = "wasm32")]
 mod api;
 #[cfg(any(target_arch = "wasm32", test))]
+mod channel;
+#[cfg(any(target_arch = "wasm32", test))]
 mod disk;
 #[cfg(target_arch = "wasm32")]
 mod easyprint;
@@ -152,8 +154,15 @@ impl PrefsWriter {
 /// tab of the page when one tab writes). Other keys, and settings taken away (clearing the site's
 /// data), leave this tab's settings as they are.
 #[cfg(any(target_arch = "wasm32", test))]
-fn settings_written(key: Option<&str>, value: Option<String>) -> Option<String> {
-    value.filter(|_| key == Some(solidcraft_ui_egui::prefs::STORAGE_KEY))
+fn settings_written(own_key: &str, key: Option<&str>, value: Option<String>) -> Option<String> {
+    // Tabs of another channel write to the same storage, under their own key.
+    value.filter(|_| key == Some(own_key))
+}
+
+/// The settings key of `channel` (see [`channel`]).
+#[cfg(target_arch = "wasm32")]
+fn prefs_key() -> String {
+    channel::key(solidcraft_ui_egui::prefs::STORAGE_KEY)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -162,6 +171,7 @@ mod web {
 
     use solidcraft_engine::Session;
     use solidcraft_engine::io::vfs;
+    use solidcraft_ui_egui::ui_kit::BackingTooltipExt as _;
     use solidcraft_ui_egui::{Services, SolveApp, ui_kit};
     use wasm_bindgen::JsCast as _;
 
@@ -262,7 +272,7 @@ mod web {
     fn hear_settings_from_other_tabs(window: &web_sys::Window, ctx: &egui::Context, inbox: PrefsInbox) {
         let ctx = ctx.clone();
         let on_storage = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::StorageEvent)>::new(move |e: web_sys::StorageEvent| {
-            if let Some(prefs) = crate::settings_written(e.key().as_deref(), e.new_value()) {
+            if let Some(prefs) = crate::settings_written(&crate::prefs_key(), e.key().as_deref(), e.new_value()) {
                 inbox.set(Some(prefs));
                 ctx.request_repaint();
             }
@@ -334,8 +344,7 @@ mod web {
             }
             let prefs = self.persisted_prefs();
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
-            let stored =
-                web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(solidcraft_ui_egui::prefs::STORAGE_KEY, &prefs));
+            let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
                 log::warn!("settings: the browser's storage did not take them; they are saved again later");
                 self.prefs_writer = crate::PrefsWriter::default();
@@ -492,7 +501,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -546,7 +555,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -556,7 +565,7 @@ mod web {
                                             self.rename_focus = true;
                                         }
                                         if ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small)
-                                            .on_hover_text("A copy in a file you choose; the stored design stays here")
+                                            .backing_on_hover_text("A copy in a file you choose; the stored design stays here")
                                             .clicked()
                                         {
                                             act = Some(("save_copy", e.name.clone()));
@@ -834,14 +843,15 @@ mod web {
             self.store_prefs(&ctx);
         }
         fn persist_egui_memory(&self) -> bool {
-            self.launch.persists()
+            // eframe keeps this under one fixed key: only stable uses it, so a pre-release never rewrites it.
+            self.launch.persists() && crate::channel::current().is_empty()
         }
         fn save(&mut self, storage: &mut dyn eframe::Storage) {
             if !self.launch.persists() {
                 return;
             }
             let prefs = self.persisted_prefs();
-            storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs);
+            storage.set_string(&crate::prefs_key(), prefs);
         }
     }
 
@@ -851,7 +861,7 @@ mod web {
 
     /// Where `?webgl` is remembered. The installed app starts from its manifest's start URL, which
     /// has no query, so the choice has to outlive the page it was made on.
-    const WEBGL_KEY: &str = "solidcraft.webgl";
+    const WEBGL_KEY: &str = "solidcraft.webgl"; // stored under crate::channel::key
 
     /// Render with WebGL2: asked for now (`?webgl`, remembered) or before (until `?webgpu`).
     fn webgl() -> bool {
@@ -859,17 +869,17 @@ mod web {
         let q = query();
         if crate::query_flag(&q, "webgl") {
             if let Some(s) = &storage {
-                let _ = s.set_item(WEBGL_KEY, "1");
+                let _ = s.set_item(&crate::channel::key(WEBGL_KEY), "1");
             }
             return true;
         }
         if crate::query_flag(&q, "webgpu") {
             if let Some(s) = &storage {
-                let _ = s.remove_item(WEBGL_KEY);
+                let _ = s.remove_item(&crate::channel::key(WEBGL_KEY));
             }
             return false;
         }
-        storage.and_then(|s| s.get_item(WEBGL_KEY).ok().flatten()).is_some()
+        storage.and_then(|s| s.get_item(&crate::channel::key(WEBGL_KEY)).ok().flatten()).is_some()
     }
 
     /// Fetch font bytes asynchronously through the browser.
@@ -968,7 +978,7 @@ mod web {
                         if launch.persists() {
                             hear_settings_from_other_tabs(&window, &cc.egui_ctx, other_tab_prefs.clone());
                         }
-                        if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
+                        if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
@@ -1173,9 +1183,10 @@ mod tests {
     #[test]
     fn only_settings_another_tab_wrote_are_loaded() {
         let key = solidcraft_ui_egui::prefs::STORAGE_KEY;
-        assert_eq!(settings_written(Some(key), Some("{}".into())).as_deref(), Some("{}"));
-        assert_eq!(settings_written(Some("solidcraft.webgl"), Some("1".into())), None);
-        assert_eq!(settings_written(Some(key), None), None, "removed settings leave this tab's");
-        assert_eq!(settings_written(None, None), None, "clearing all storage leaves this tab's settings");
+        assert_eq!(settings_written(key, Some(key), Some("{}".into())).as_deref(), Some("{}"));
+        assert_eq!(settings_written(key, Some("solidcraft.webgl"), Some("1".into())), None);
+        assert_eq!(settings_written(key, Some(key), None), None, "removed settings leave this tab's");
+        assert_eq!(settings_written(key, None, None), None, "clearing all storage leaves this tab's settings");
+        assert_eq!(settings_written(key, Some("rc:solidcraft.prefs"), Some("{}".into())), None, "another channel's settings are not loaded");
     }
 }

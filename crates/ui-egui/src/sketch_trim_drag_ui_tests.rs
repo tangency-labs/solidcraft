@@ -3,7 +3,8 @@
 //! the one piece under it.
 
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::Shape;
 
 use crate::scenario::Harness;

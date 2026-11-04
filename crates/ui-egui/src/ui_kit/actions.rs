@@ -1,5 +1,6 @@
 //! Actions elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::metrics::*;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
 
@@ -167,7 +168,7 @@ fn icon_button_presentation(
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
     pointer_on_hover(ui, &response);
-    response.on_hover_text(crate::i18n::tr_label(label))
+    response.backing_on_hover_text(crate::i18n::tr_label(label))
 }
 
 /// Plain secondary text action, sharing the kit's normal hit height and typography.
@@ -511,7 +512,7 @@ fn button_row_surface<const N: usize>(ui: &mut Ui, key: &str, states: [bool; N],
                 pointer_on_hover(ui, &response);
                 crate::scenario::publish_target(&format!("{key}:{}", button.key), rect);
                 if let Some(value) = clicked.get_mut(index) {
-                    *value = response.on_hover_text(label).clicked();
+                    *value = response.backing_on_hover_text(label).clicked();
                 }
             }
         });
@@ -700,7 +701,7 @@ pub(crate) fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: b
         .inner;
     publish_button(ui, &response, glyph);
     pointer_on_hover(ui, &response);
-    response.on_hover_text(crate::i18n::tr_label(tooltip))
+    response.backing_on_hover_text(crate::i18n::tr_label(tooltip))
 }
 
 /// Secondary action with an existing icon, optionally using the danger ink. Keeps button handles.
@@ -711,13 +712,13 @@ pub(crate) fn icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: b
 /// Icon-only action with an accessible name and tooltip, using the shared action
 /// geometry, enabled state and optional danger ink. Tokens: icon-label action tokens.
 pub(crate) fn icon_action(ui: &mut Ui, label: &str, icon: &str, enabled: bool, danger: bool) -> Response {
-    let response = icon_label_button(ui, "", icon, enabled, danger).on_hover_text(label);
+    let response = icon_label_button(ui, "", icon, enabled, danger).backing_on_hover_text(label);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
     response
 }
 
 /// Compact stage actions share the icon-label button's frame, typography and hit target.
-pub(super) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary: bool) -> f32 {
+pub(crate) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary: bool) -> f32 {
     let t = Tokens::get();
     let font = if primary { crate::fonts::semibold(t.font_button) } else { egui::FontId::proportional(t.font_label) };
     ui.painter().layout_no_wrap(label.into(), font, t.form_ink).size().x.ceil()
@@ -766,7 +767,7 @@ pub(crate) fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::Stage
                 clicked = Some(index);
             }
             if let Some(reason) = action.reason {
-                response.on_disabled_hover_text(reason);
+                response.backing_on_disabled_hover_text(reason);
             }
         }
         clicked
