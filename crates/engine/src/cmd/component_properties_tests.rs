@@ -132,6 +132,10 @@ fn perforated_sheet_properties_include_holes_and_their_off_centre_volume_moment(
     let inspected = run(&mut s, "document.inspect", json!({"measure": true}));
     close(&inspected["bodies"][0]["volume_mm3"], volume);
     close(&inspected["bodies"][0]["area_mm2"], area);
+    for key in ["faces", "edges", "vertices"] {
+        assert_eq!(inspected["bodies"][0][key], inspected["bodies"][0]["kernel"][key], "document.inspect retains kernel {key}");
+    }
+    assert!(inspected["bodies"][0].get("sheet_metal").is_none());
     let picked = run(&mut s, "inspect.measure", json!({"items": [{"type": "body", "name": "Panel"}]}));
     close(&picked["items"][0]["volume_mm3"], volume);
     assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));

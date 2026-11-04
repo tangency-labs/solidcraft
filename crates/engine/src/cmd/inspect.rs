@@ -154,7 +154,7 @@ fn measure_sheet_json(b: &solidcraft_doc::ModelBody, definitions: Option<&solidc
     match measure_body(b, definitions) {
         Ok(m) => {
             let closed = encloses_volume(&b.body);
-            let mut out = json!({
+            json!({
                 "name": b.name,
                 "closed": closed,
                 "volume_mm3": closed.then_some(m.volume),
@@ -168,16 +168,7 @@ fn measure_sheet_json(b: &solidcraft_doc::ModelBody, definitions: Option<&solidc
                 "kernel": {"faces": m.faces, "edges": m.edges, "vertices": m.vertices, "shells": m.shells},
                 "measured_by": m.measured_by,
                 "notes": m.notes,
-            });
-            if let Some(sheet) = definitions.and_then(|state| state.sheets.iter().find(|sheet| sheet.body == b.definition_name())) {
-                // Keep the bends' visible boundaries instead of merging coplanar faces.
-                let (df, de, dv) = sheet.round_hole_correction();
-                for (key, delta) in [("faces", df), ("edges", de), ("vertices", dv)] {
-                    out[key] = json!(out["kernel"][key].as_i64().unwrap_or(0) + delta);
-                }
-                out["sheet_metal"] = json!(true);
-            }
-            out
+            })
         }
         Err(e) => json!({"name": b.name, "error": e.to_string()}),
     }
@@ -214,6 +205,14 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             let rho = s.doc.density(source);
             b["density_g_cm3"] = json!(rho);
             b["mass_g"] = json!(v * rho / 1000.0);
+        }
+        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
+        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
+            let (df, de, dv) = sheet.round_hole_correction();
+            for (key, delta) in [("faces", df), ("edges", de), ("vertices", dv)] {
+                b[key] = json!(b["kernel"][key].as_i64().unwrap_or(0) + delta);
+            }
+            b["sheet_metal"] = json!(true);
         }
     }
     let skipped = bodies.iter().filter(|b| b["closed"] == false).count();
