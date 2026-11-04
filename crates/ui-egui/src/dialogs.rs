@@ -3255,8 +3255,12 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         // A command that is not available in this context ("`sketch.project` is not available
         // right now: no sketch is being edited") is guidance too: the context went away, not the
         // design, so there is nothing to report (#10181).
+        // A pick or drag that a hole's reference edge cannot follow is refused with what to do
+        // instead: guidance as well.
         let rect = if missing_pick(&error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick")).rect
+        } else if error == crate::hole_place::HELD_OFF_ITS_LINE {
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("held_off_its_line")).rect
         } else if context_refusal(app, d, &error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("context")).rect
         } else {
