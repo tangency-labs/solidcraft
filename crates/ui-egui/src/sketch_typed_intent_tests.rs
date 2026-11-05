@@ -197,6 +197,40 @@ fn polygon_radius_is_persistent_and_fractional_sides_are_rejected() {
     assert_eq!(sketch.curves.iter().filter(|c| !c.construction).count(), 5);
 }
 
+/// "By side" offers the side length and the number of sides, as the other polygon modes do
+/// (#11271): the typed length becomes a dimension of the first side.
+#[test]
+fn edge_polygon_takes_a_typed_side_length_and_side_count() {
+    let mut h = start("sketch.polygon.edge");
+    let labels: Vec<_> = h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect();
+    assert_eq!(labels, ["Length", "Sides"]);
+    type_value(&mut h, "12");
+    h.step(&json!({"key":"Tab"})).unwrap();
+    type_value(&mut h, "5");
+    let undo = h.app.session.undo.len();
+    enter(&mut h);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(constraints(&h).iter().any(|c| matches!(c, ConstraintKind::Length { value, .. } if (*value - 12.0).abs() < 1e-7)));
+    // The design's own state: this sketch is in no component, so it matches the world view.
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let sides: Vec<f64> = sketch
+        .curves
+        .iter()
+        .filter(|c| !c.construction)
+        .filter_map(|c| match c.kind {
+            CurveKind::Line { a, b } => Some(sketch.points[a].pos.dist(sketch.points[b].pos)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 5);
+    assert!(sides.iter().all(|l| (l - 12.0).abs() < 1e-6), "{sides:?}");
+    // The first side runs from the first click towards the cursor.
+    let CurveKind::Line { a, b } = sketch.curves[0].kind else { panic!("expected the first side") };
+    assert!(sketch.points[a].pos.dist(solidcore_record::Vec2::new(0.0, 0.0)) < 1e-6);
+    assert!(sketch.points[b].pos.dist(solidcore_record::Vec2::new(12.0, 0.0)) < 1e-6);
+}
+
 #[test]
 fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     let mut h = start("sketch.line");

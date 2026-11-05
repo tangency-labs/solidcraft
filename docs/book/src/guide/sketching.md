@@ -166,7 +166,9 @@ zero-based index. For example:
 
 Polygon tools show their edge outline while positioning the second point, so the orientation
 can be checked before placement. Inscribed and circumscribed polygons retain their support
-circle and update the outline when the inline **Sides** value changes.
+circle and update the outline when the inline **Sides** value changes. A polygon drawn **By side**
+has a **Length** box for the side from the first click and the same **Sides** box; a typed length
+becomes a dimension of that side, and the other sides stay equal to it.
 
 **Text** is set in the built-in font (Liberation Sans) unless it is given another: `sketch.text` and
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
