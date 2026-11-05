@@ -280,14 +280,21 @@ mod tests {
     /// (vendor/wgpu-hal), they shared one FXC blob whose reference count is not thread-safe, and
     /// the test process died of heap corruption or an access violation: in 6 of 9 runs of 5,000
     /// builds on an NVIDIA GPU, and in 2 of 4 runs of 2,000 builds on WARP. 300 builds catch that
-    /// in only some runs; for a longer run on Windows:
-    /// `WGPU_BACKEND=dx12 SOLIDCRAFT_PIPELINE_BUILDS=5000 cargo test -p solidcraft-gpu the_viewports_pipelines`.
-    /// Other backends have no such cache and compile every build, so they build twice.
+    /// in only some runs; for a longer run, in PowerShell on Windows (FXC named, since DXC builds
+    /// on one thread):
+    /// `$env:WGPU_BACKEND='dx12'; $env:WGPU_DX12_COMPILER='fxc'; $env:SOLIDCRAFT_PIPELINE_BUILDS='5000'`,
+    /// then `cargo test -p solidcraft-gpu the_viewports_pipelines`.
+    /// Other backends have no such cache and compile every build, so they build twice. Only a
+    /// missing adapter skips the test, and not with `SOLIDCRAFT_REQUIRE_GPU` (the Windows CI job).
     #[test]
     fn the_viewports_pipelines_build_again_and_again_on_several_threads() {
-        let Ok((adapter, device, _)) = crate::open_headless() else {
-            solidcraft_geom::note!("skipped: no GPU adapter");
-            return;
+        let (adapter, device, _) = match crate::open_headless() {
+            Ok(d) => d,
+            Err(e @ crate::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+                solidcraft_geom::note!("skipped: {e}");
+                return;
+            }
+            Err(e) => panic!("the pipeline builds need a GPU: {e}"),
         };
         let d3d12 = adapter.get_info().backend == wgpu::Backend::Dx12;
         let builds = std::env::var("SOLIDCRAFT_PIPELINE_BUILDS").ok().and_then(|n| n.parse().ok()).unwrap_or(if d3d12 { 300 } else { 2 });
