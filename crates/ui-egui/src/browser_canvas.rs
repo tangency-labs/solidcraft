@@ -453,13 +453,20 @@ mod tests {
         let flip_h_screen = handles.iter().find(|(k, _)| *k == 4).unwrap().1;
         assert!(!h.app.session.doc.canvases[0].flip);
         assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), true, true));
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), false, false));
         assert!(h.app.session.doc.canvases[0].flip, "horizontal flip handle must toggle flip to true");
 
-        // Click again to flip back
+        // Recompute handles after flip and click again to flip back
+        let c = h.app.session.doc.canvases[0].clone();
+        let handles = super::edit_handles(&c, &plane, &proj);
+        let flip_h_screen = handles.iter().find(|(k, _)| *k == 4).unwrap().1;
         assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), true, true));
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), false, false));
         assert!(!h.app.session.doc.canvases[0].flip, "second horizontal flip click must toggle flip back to false");
 
         // 3. Click Flip Vertical button (kind 5): toggles flip and adds 180 degrees
+        let c = h.app.session.doc.canvases[0].clone();
+        let handles = super::edit_handles(&c, &plane, &proj);
         let flip_v_screen = handles.iter().find(|(k, _)| *k == 5).unwrap().1;
         let orig_angle = h.app.session.doc.canvases[0].angle;
         assert!(super::drag(&mut h.app, &proj, Some(flip_v_screen), true, true));
