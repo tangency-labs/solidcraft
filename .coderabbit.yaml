@@ -8,6 +8,8 @@ reviews:
   suggested_labels: false
   suggested_reviewers: false
   in_progress_fortune: false
+  path_filters:
+    - "!vendor/**"
   auto_review:
     # Review when a PR is opened or marked ready, or on `@coderabbitai review`; not on every push.
     drafts: false
