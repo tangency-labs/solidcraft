@@ -256,8 +256,30 @@ impl SurfaceSheet {
         if by.abs() <= 1e-9 {
             return Ok(());
         }
-        let out = Vec2::new(d.y, -d.x);
+        let (p, q) = self.moved_ends(i, (a, b, d), by);
         let panel = self.sheet.panels.get(i).ok_or_else(|| DocError::Invalid("panel".into()))?;
+        let strip = if by > 0.0 { [a, b, q, p] } else { [p, q, b, a] };
+        let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
+        let op = if by > 0.0 { BoolOp::Union } else { BoolOp::Cut };
+        let mut out =
+            crate::sheet_surface::boolean_past_holes(std::slice::from_ref(&panel.region), &[strip], op, &mut crate::sheet::FlatWork::new())?;
+        if out.len() != 1 {
+            return err("the flange's bend would cut its panel apart");
+        }
+        if let (Some(r), Some(panel)) = (out.pop(), self.sheet.panels.get_mut(i)) {
+            panel.region = r;
+        }
+        Ok(())
+    }
+
+    /// Where the ends of the edge `a`–`b` of panel `i` land with the edge moved `by` mm outward
+    /// (inward where negative): at each end the line of the outline beside the edge is followed
+    /// to the edge's new line; where that line is round, or runs nearly along the edge, the end
+    /// moves square to it.
+    fn moved_ends(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64) -> (Vec2, Vec2) {
+        let out = Vec2::new(d.y, -d.x);
+        let square = (a + out * by, b + out * by);
+        let Some(panel) = self.sheet.panels.get(i) else { return square };
         let segs = &panel.region.outer.segs;
         let n = segs.len();
         let k = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9));
@@ -272,22 +294,10 @@ impl SurfaceSheet {
             }
             at + w * (by / across)
         };
-        let (p, q) = match k {
+        match k {
             Some(k) => (follow(segs.get((k + n - 1) % n), a), follow(segs.get((k + 1) % n), b)),
-            None => (a + out * by, b + out * by),
-        };
-        let strip = if by > 0.0 { [a, b, q, p] } else { [p, q, b, a] };
-        let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
-        let op = if by > 0.0 { BoolOp::Union } else { BoolOp::Cut };
-        let mut out =
-            crate::sheet_surface::boolean_past_holes(std::slice::from_ref(&panel.region), &[strip], op, &mut crate::sheet::FlatWork::new())?;
-        if out.len() != 1 {
-            return err("the flange's bend would cut its panel apart");
+            None => square,
         }
-        if let (Some(r), Some(panel)) = (out.pop(), self.sheet.panels.get_mut(i)) {
-            panel.region = r;
-        }
-        Ok(())
     }
 
     /// A new flat panel `len` along and `depth` deep, joined to a free edge by `bend` with its
@@ -370,14 +380,19 @@ impl SurfaceSheet {
             return err(format!("the flange height{datum} must be at least {:.3} mm for this bend", from.before_leg(angle, radius, t)));
         }
         let by = sharp - start;
+        // The anchor runs where the edge's neighbours meet its line moved to the sharp (on a
+        // slanted edge, not square across from its ends).
+        let (from, to) = self.moved_ends(edge.panel, (a, b, d), by);
         // A sharp inside the edge by no more than the thickness needs no cut: the bend's band runs
         // a thickness past its anchor and takes that strip, leaving the panel's other edges (and
         // the rips along them) as they are.
         if by > 0.0 || by < -t - 1e-9 {
             self.move_edge(edge.panel, (a, b, d), by)?;
         }
-        let out = Vec2::new(d.y, -d.x);
-        let len = a.dist(b);
+        let len = (to - from).dot(d);
+        if !(len > 1e-9) {
+            return err("the edge's neighbours leave its flange no length at its bend");
+        }
         let bend = Bend {
             angle,
             radius,
@@ -388,7 +403,7 @@ impl SurfaceSheet {
             tails: (Tail::Keep, Tail::Keep),
             relief: (Relief::None, Relief::None),
         };
-        self.add_panel("flange", &edge, a + out * by, d, len, leg.max(0.0) + sharp, bend);
+        self.add_panel("flange", &edge, from, d, len, leg.max(0.0) + sharp, bend);
         let joint = self.sheet.joints.len() - 1;
         self.close_corners(joint)?;
         Ok(joint)
@@ -692,15 +707,26 @@ impl SurfaceSheet {
         let side = |q: Vec2| q.dot(n) - s0;
         let tol = (ba.max(t) * 1e-6).max(1e-9);
         for joint in &mut self.sheet.joints {
-            for an in [&mut joint.a, &mut joint.b] {
+            // Where each anchor's edge ends: a bend's runs its length, a rip's along its edge.
+            let ends = |an: &Anchor, edge: Option<&Vec2>| match (&joint.kind, edge) {
+                (JointKind::Bend(b), _) => an.origin + an.dir * b.length,
+                (JointKind::Rip(_), Some(e)) => *e,
+                _ => an.origin,
+            };
+            let rip_ends = match &joint.kind {
+                JointKind::Rip(r) => (r.edges.0.last().copied(), r.edges.1.last().copied()),
+                _ => (None, None),
+            };
+            let (end_a, end_b) = (ends(&joint.a, rip_ends.0.as_ref()), ends(&joint.b, rip_ends.1.as_ref()));
+            for (an, end) in [(&mut joint.a, end_a), (&mut joint.b, end_b)] {
                 if an.panel != i {
                     continue;
                 }
-                let s = side(an.origin);
-                if s >= ba - tol {
+                let (s, e) = (side(an.origin), side(end));
+                if s.min(e) >= ba - tol {
                     an.panel = piece_at(an.origin);
-                } else if s > tol {
-                    return err("the fold's bend zone reaches another joint of its panel: not supported yet");
+                } else if s.max(e) > tol {
+                    return err("the fold's bend zone reaches or crosses another joint of its panel: not supported yet");
                 }
             }
         }
@@ -730,6 +756,25 @@ impl SurfaceSheet {
                 l.panel = piece_at(l.region.outer.segs.first().map(|g| g.start()).unwrap_or_default());
             } else if !s.iter().all(|x| *x <= tol) {
                 return err("the fold's bend zone runs through a loose piece of the sheet: not supported yet");
+            }
+        }
+        // What each new zone lacks of the panel along its length (a cut-out the line runs through)
+        // is cut from it too: the zone is the panel's own material, the flat as drawn. What lies
+        // past its ends (beside a tab, past a slanted end) is no part of it.
+        for (bend, start, _, _) in &bends {
+            let (lo, hi) = (*start, start + bend.length);
+            let strip = Loop2::polygon(&[n * s0 + u * lo, n * s0 + u * hi, n * (s0 + ba) + u * hi, n * (s0 + ba) + u * lo]).ccw();
+            let lacks = solidcraft_kernel::planar_regions_boolean(
+                &[Region2 { outer: strip, holes: Vec::new() }],
+                std::slice::from_ref(&region),
+                BoolOp::Cut,
+                1e-9,
+            )?;
+            for gap in lacks {
+                let (a, b) = span(&gap);
+                if gap.area() > tol * tol && a > lo + tol && b < hi - tol {
+                    self.sheet.cuts.push(Cut { panel: i, region: gap });
+                }
             }
         }
         self.sheet.panels[i].region = stays;
