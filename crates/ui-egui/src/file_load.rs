@@ -393,8 +393,9 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     if cfg!(target_arch = "wasm32") || !matches!(req.method.as_str(), "engine.execute" | "command") {
         return Some(req);
     }
-    let command = req.params.get("command").or(req.params.get("id")).and_then(Value::as_str);
-    let kind = match command {
+    // In any spelling the engine takes: another would run on the window thread.
+    let command = req.params.get("command").or(req.params.get("id")).and_then(Value::as_str).and_then(solidcraft_engine::find_command);
+    let kind = match command.map(|spec| spec.id) {
         Some("doc.open") => Kind::Open,
         Some("file.insert_step" | "file.insert_mesh" | "pointcloud.insert") => Kind::Insert,
         Some("file.export_view_dxf") => Kind::ExportDxf,
@@ -1080,6 +1081,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 let r = Ok(made.result);
                 app.finish_command(id, &r);
+                // The reload is its own undo step: the open card folds only what comes after it.
+                if request.kind == Kind::ReloadCloud
+                    && let Some(panel) = app.tree.cloud_panel.as_mut()
+                {
+                    panel.depth = app.session.undo.len();
+                }
                 let language = crate::i18n::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
                 // A design it could not read is said as when that was all it was asked.

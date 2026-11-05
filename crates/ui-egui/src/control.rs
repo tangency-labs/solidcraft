@@ -385,7 +385,7 @@ pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
     }
-    let (i, c) = steps.iter().enumerate().find_map(|(i, step)| command(step).filter(|c| LOADS_A_FILE.contains(c)).map(|c| (i, c)))?;
+    let (i, c) = steps.iter().enumerate().find_map(|(i, step)| LOADS_A_FILE.into_iter().find(|id| is_command(command(step), id)).map(|c| (i, c)))?;
     Some(format!("engine.batch unavailable: step {i} ({c}) loads a file"))
 }
 
@@ -2788,6 +2788,9 @@ mod tests {
         assert_eq!(v["error"], "engine.batch unavailable: step 1 (doc.open) loads a file", "{v}");
         assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(0), "nothing may run before the refusal");
         let v = batch(&mut h, json!({"commands": [{"command": "pointcloud.reload", "params": {"cloud": 1}}]}));
+        assert_eq!(v["error"], "engine.batch unavailable: step 0 (pointcloud.reload) loads a file", "{v}");
+        // In any spelling the engine takes.
+        let v = batch(&mut h, json!({"commands": [{"command": "POINTCLOUD.RELOAD", "params": {"cloud": 1}}]}));
         assert_eq!(v["error"], "engine.batch unavailable: step 0 (pointcloud.reload) loads a file", "{v}");
     }
 

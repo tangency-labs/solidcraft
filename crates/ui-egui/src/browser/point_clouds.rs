@@ -44,6 +44,9 @@ pub struct CloudPanel {
 #[derive(Clone, Debug)]
 pub struct Play {
     pub filter: usize,
+    /// The property of that filter: filters are told by place, and a place changes hands when a
+    /// filter before it goes.
+    property: String,
     part: Part,
     /// When it last moved, and where it is exactly.
     at: f64,
@@ -65,14 +68,14 @@ fn colour_key(cloud: u64) -> String {
 
 impl Play {
     /// Start playing `part` of `range` within `span`, from the start again when it is at the end.
-    fn new(filter: usize, part: Part, [lo, hi]: [f64; 2], span: [f64; 2], at: f64) -> Play {
+    fn new(filter: usize, property: String, part: Part, [lo, hi]: [f64; 2], span: [f64; 2], at: f64) -> Play {
         let exact = match part {
             Part::High if hi >= span[1] => [lo, lo],
             Part::Band if hi >= span[1] => [span[0], span[0] + hi - lo],
             Part::Low if lo >= hi => [span[0], hi],
             _ => [lo, hi],
         };
-        Play { filter, part, at, exact, now: exact }
+        Play { filter, property, part, at, exact, now: exact }
     }
     /// Move on to time `now` at `speed` units a second; whether it reached the end.
     fn step(&mut self, now: f64, speed: f64, span: [f64; 2], integer: bool) -> bool {
@@ -270,6 +273,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     // A playing filter moves on; at the end of its span it stops, and is written once.
     let mut stop_play = false;
+    // A filter gone from under it (a reload, an agent's edit, an undo) ends the play, unwritten,
+    // or its range would land on the filter that took its place.
+    m.play.take_if(|p| c.filters.get(p.filter).is_none_or(|f| f.property != p.property));
     if let Some(p) = m.play.as_mut()
         && let Some(span) = c.filters.get(p.filter).and_then(|f| c.span(&f.property))
     {
@@ -503,7 +509,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                             changed = true;
                         }
                         let part = range_track::last_part(ui.ctx(), &filter_key(c.id, k));
-                        m.play = Some(Play::new(k, part, range, span, now));
+                        m.play = Some(Play::new(k, f.property.clone(), part, range, span, now));
                     }
                 }
             }
@@ -617,6 +623,32 @@ mod tests {
         let path = dir.join("layers.ply");
         std::fs::write(&path, ply).unwrap();
         path
+    }
+
+    /// Filters are told by place: one gone from under a play moves the next into its place, which
+    /// must not take the play's range, on screen or written when the play ends.
+    #[test]
+    fn a_filter_gone_from_under_a_play_ends_the_play() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let dir = std::env::temp_dir().join(format!("solidcraft-browser-play-gone-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = layered_segments(&dir);
+        let id = h.app.run("pointcloud.insert", json!({"path": path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
+        let layer = json!({"property": "layer", "range": [0.0, 2.0]});
+        h.app.run("pointcloud.edit", json!({"cloud": id, "filters": [{"property": "t", "range": [2.0, 5.0]}, layer]})).unwrap();
+        let mut card = super::CloudPanel::new(&h.app, id);
+        card.play = Some(super::Play::new(0, "t".into(), super::Part::High, [2.0, 5.0], [0.0, 10.0], 0.0));
+        h.app.tree.cloud_panel = Some(card);
+        h.frames(2);
+        assert!(h.app.tree.cloud_panel.as_ref().unwrap().play.is_some(), "it plays while its filter is there");
+
+        h.app.run("pointcloud.edit", json!({"cloud": id, "filters": [layer]})).unwrap();
+        h.frames(2);
+        let card = h.app.tree.cloud_panel.as_ref().unwrap();
+        assert!(card.play.is_none() && card.playing(id, 0).is_none(), "the layer filter took its place");
+        assert_eq!(h.app.session.doc.point_clouds[0].filters[0].range(), Some([0.0, 2.0]));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

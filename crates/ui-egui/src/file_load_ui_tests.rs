@@ -316,6 +316,8 @@ fn reloading_a_point_cloud_runs_off_the_window_thread() {
     until_idle(&mut h);
     assert_eq!(points(&h.app), 3);
     assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Reload Point Cloud done"));
+    // The open card folds its edits from here on, so an edit does not take the reload with it.
+    assert_eq!(h.app.tree.cloud_panel.as_ref().map(|p| p.depth), Some(h.app.session.undo.len()));
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(points(&h.app), 2);
 
