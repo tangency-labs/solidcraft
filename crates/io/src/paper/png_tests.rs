@@ -539,3 +539,88 @@ fn a_line_in_a_gap_draws_nothing_and_too_many_dashes_are_refused() {
     sheet.points = MAX_POINTS - 3;
     assert!(sheet.dash(&line(100.0), &pattern(&[1, 1], 0)).unwrap_err().to_string().contains("points"));
 }
+
+fn physical_ink_runs(image: &Image, y: usize) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for x in 0..=image.info.width as usize {
+        let dark = x < image.info.width as usize && image.at(x, y)[0] < 128;
+        match (dark, start) {
+            (true, None) => start = Some(x),
+            (false, Some(s)) => {
+                runs.push((s, x));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    runs
+}
+
+/// One prepared paper scene, not three model exports: a 40 mm model line already
+/// placed at 1:2, 1:1 and 2:1 is 20, 40 and 80 mm on paper, while its authored
+/// 0.4 mm pen stays 0.4 mm. Both real writers read that same prepared value.
+#[test]
+fn one_prepared_scene_keeps_paper_lengths_and_fixed_pens_in_svg_and_png() {
+    let sheet = scene(
+        p(120.0, 80.0),
+        [0.5, 1.0, 2.0]
+            .into_iter()
+            .zip([15.0, 40.0, 65.0])
+            .map(|(scale, y)| Item::Stroke { path: vec![line(p(10.0, y), p(10.0 + 40.0 * scale, y))], closed: false, width_mm: 0.4, pattern: None })
+            .collect(),
+    );
+    let prepared = sheet.prepare().unwrap();
+    let (svg, svg_report) = crate::paper::paper_svg(&prepared, &NoPictures, 300.0).unwrap();
+    let xml = std::str::from_utf8(&svg).unwrap();
+    assert!(xml.contains("width=\"120mm\" height=\"80mm\" viewBox=\"0 0 120 80\""));
+    assert_eq!(xml.matches("stroke-width=\"0.4\"").count(), 3);
+    for path in ["M10 65L30 65", "M10 40L50 40", "M10 15L90 15"] {
+        assert!(xml.contains(path), "paper coordinates in SVG: {path}: {xml}");
+    }
+    assert_eq!(crate::paper::paper_svg(&prepared, &NoPictures, 300.0).unwrap(), (svg, svg_report), "the same prepared SVG repeats byte for byte");
+    for (dpi, per_mm) in [(254.0, 10usize), (508.0, 20)] {
+        let options = PngOptions { dpi, colour: PngColour::Grey };
+        let mut first = Vec::new();
+        let mut again = Vec::new();
+        let report = paper_png(&prepared, options, &NoPictures, &mut first).unwrap();
+        let repeated = paper_png(&prepared, options, &NoPictures, &mut again).unwrap();
+        assert_eq!(first, again, "{dpi}: repeat bytes");
+        assert_eq!(report, repeated, "{dpi}: repeat report");
+        let image = read(&first);
+        assert_eq!((image.info.width, image.info.height), (120 * per_mm as u32, 80 * per_mm as u32));
+        let physical = image.info.pixel_dims.unwrap();
+        assert_eq!((physical.xppu, physical.yppu, physical.unit), (per_mm as u32 * 1000, per_mm as u32 * 1000, png::Unit::Meter));
+        for (y, length) in [(15usize, 20usize), (40, 40), (65, 80)] {
+            let row = (80 - y) * per_mm;
+            let start = 10 * per_mm;
+            let end = (10 + length) * per_mm;
+            assert_eq!(physical_ink_runs(&image, row), [(start, end)], "{dpi}: {length} mm paper length, independent of the fixed pen");
+            let pen: Vec<_> = (row - per_mm..row + per_mm).filter(|r| image.at((start + end) / 2, *r)[0] < 128).collect();
+            assert_eq!(pen, (row - per_mm / 5..row + per_mm / 5).collect::<Vec<_>>(), "{dpi}: every scale uses the same 0.4 mm pen");
+            assert_eq!(image.at(start - 1, row), [255]);
+            assert_eq!(image.at(end, row), [255], "butt ends do not extend paper length");
+        }
+    }
+}
+
+/// The outward pixel grid's partial last row must not change the paper origin:
+/// SVG's y flip and PNG's top-origin rows agree on a sheet 100.8 pixels high at 254 dpi.
+#[test]
+fn svg_and_png_share_the_paper_origin_on_a_fractional_pixel_sheet() {
+    let sheet =
+        scene(p(40.0, 10.08), vec![Item::Stroke { path: vec![line(p(15.0, 2.08), p(15.0, 8.08))], closed: false, width_mm: 0.4, pattern: None }]);
+    let prepared = sheet.prepare().unwrap();
+    let (svg, _) = crate::paper::paper_svg(&prepared, &NoPictures, 300.0).unwrap();
+    let xml = std::str::from_utf8(&svg).unwrap();
+    assert!(xml.contains("height=\"10.08mm\"") && xml.contains("M15 8L15 2"), "{xml}");
+    let mut png = Vec::new();
+    let report = paper_png(&prepared, AT_254, &NoPictures, &mut png).unwrap();
+    let image = read(&png);
+    assert_eq!(report.pixels, [400, 101]);
+    let ink_rows: Vec<_> = (0..101).filter(|row| image.at(150, *row)[0] < 128).collect();
+    assert_eq!(ink_rows, (20..80).collect::<Vec<_>>(), "6 mm at 10 px/mm, anchored at the physical top edge rather than the rounded image bottom");
+    assert_eq!(physical_ink_runs(&image, 50), [(148, 152)], "the 0.4 mm pen is four pixels wide");
+    assert_eq!(image.at(150, 19), [255]);
+    assert_eq!(image.at(150, 80), [255]);
+}
