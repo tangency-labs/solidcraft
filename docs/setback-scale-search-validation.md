@@ -306,6 +306,13 @@ are retained as local validation artifacts. The final Rust comparisons are
 `rust-refreshed-exact-comparison.log` and
 `rust-refreshed-native-comparison.log`.
 
+The review follow-up shares affine piece preparation between the dense, streamed
+and curved callers while keeping row construction independent. Its 13 focused
+convexity tests (including an analytical substitution test), clippy and wasm
+checks pass. All 11 regular curved integration cases pass; the two slow growth
+cases remain ignored. The 13-case executive remains exactly identical to the
+previously validated implementation and passes the same strict native comparison.
+
 ### CI permission boundary
 
 At the resumed verification's pre-push head `ed7a76660`,

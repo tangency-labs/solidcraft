@@ -71,9 +71,9 @@
 
 use super::certify::{
     affine_fundamentals, affine_net, fundamentals, minor_without, t_axpy, t_det3, t_du, t_dv,
-    t_make, t_mul_fast, t_nonneg, t_pieces, t_scale, AffinePatch,
+    t_make, t_mul_fast, t_nonneg, t_scale, AffinePatch,
 };
-use super::convexity::{SectorRows, GRAPH_DIRECTIONS, GRAPH_LEVELS};
+use super::convexity::{sector_pieces, SectorPieces, SectorRows};
 use super::graph::{fill_from, GRAPH_DEPTH, P2};
 use super::qp::{dual_qp_source, QpOutcome, QpStats};
 use super::spring::spring_curve;
@@ -2010,53 +2010,20 @@ pub(super) fn graph_g1_curved(
         }
         let mut rows = SectorRows::new(free);
         for (p, patch) in patches.iter().enumerate() {
-            let mut theta: Vec<f64> = (0..GRAPH_DIRECTIONS)
-                .map(|k| PI * k as f64 / GRAPH_DIRECTIONS as f64)
-                .collect();
-            let kp = el(&kernel, p)?;
-            if kp >= 0.0 {
-                theta.push(kp);
-            }
-            theta.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-            theta.push(el(&theta, 0)? + PI);
-            let q0p = el_ref(&q0s, p)?;
-            let qjp = el_ref(&qjs, p)?;
-            let (mut big_p, mut big_q) = (0, 0);
-            for t in q0p {
-                big_p = smax_usize(big_p, t.p);
-                big_q = smax_usize(big_q, t.q);
-            }
-            let mut pc0: Vec<Vec<Tensor>> = vec![Vec::new(); 3];
-            let mut pcf: Vec<Vec<Tensor>> = vec![Vec::new(); 3 * free];
-            let mut scale = 0.0;
-            for k in 0..3 {
-                let q0k = el_ref(q0p, k)?;
-                let mut s0 = super::tensor_elevate(q0k, big_p, big_q)?;
-                let mut sf = vec![t_make(big_p, big_q); free];
-                let qjk = el_ref(qjp, k)?;
-                for (t, &u) in patch.index.iter().enumerate() {
-                    let sj = super::tensor_elevate(el_ref(qjk, t)?, big_p, big_q)?;
-                    scale = smax(scale, t_scale(&sj));
-                    let ypu = el(&yp, u)?;
-                    for (s0i, &sji) in s0.c.iter_mut().zip(&sj.c) {
-                        *s0i += ypu * sji;
-                    }
-                    for (f, sff) in sf.iter_mut().enumerate() {
-                        let z = el(el_ref(&zn, f)?, u)?;
-                        if z == 0.0 {
-                            continue;
-                        }
-                        for (sfi, &sji) in sff.c.iter_mut().zip(&sj.c) {
-                            *sfi += z * sji;
-                        }
-                    }
-                }
-                scale = smax(scale, t_scale(q0k));
-                *el_mut(&mut pc0, k)? = t_pieces(&s0, GRAPH_LEVELS)?;
-                for (f, sff) in sf.iter().enumerate() {
-                    *el_mut(&mut pcf, k * free + f)? = t_pieces(sff, GRAPH_LEVELS)?;
-                }
-            }
+            let SectorPieces {
+                theta,
+                scale,
+                pc0,
+                pcf,
+            } = sector_pieces(
+                &patch.index,
+                el_ref(&q0s, p)?,
+                el_ref(&qjs, p)?,
+                el(&kernel, p)?,
+                &yp,
+                &zn,
+                free,
+            )?;
             let sp = el(&signs, p)?;
             rows.add_patch(&theta, sp, scale, 1.0e-12 * strict.factor * scale, pc0, pcf)?;
         }

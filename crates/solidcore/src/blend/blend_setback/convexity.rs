@@ -353,6 +353,87 @@ impl QpRows for SectorRows {
     }
 }
 
+/// Common affine curvature preparation, before independent dense or streamed row assembly.
+pub(super) struct SectorPieces {
+    /// Sorted half-turn fan, including its closing direction.
+    pub theta: Vec<f64>,
+    /// Largest coefficient magnitude before the particular/free substitution.
+    pub scale: f64,
+    /// Curvature components at the particular solution, split into pieces.
+    pub pc0: Vec<Vec<Tensor>>,
+    /// Curvature components per free direction, in component-major order.
+    pub pcf: Vec<Vec<Tensor>>,
+}
+
+/// Elevate curvature components, substitute the affine solution and split into pieces.
+/// Signs and inward margins belong to the caller; the curved fill supplies its own
+/// curvature components without changing its strict margin or row assembly.
+pub(super) fn sector_pieces(
+    indices: &[usize],
+    q0p: &[Tensor],
+    qjp: &[Vec<Tensor>],
+    kp: f64,
+    yp: &[f64],
+    zn: &[Vec<f64>],
+    free: usize,
+) -> Result<SectorPieces> {
+    let mut theta: Vec<f64> = (0..GRAPH_DIRECTIONS)
+        .map(|k| PI * k as f64 / GRAPH_DIRECTIONS as f64)
+        .collect();
+    if kp >= 0.0 {
+        theta.push(kp);
+    }
+    theta.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    theta.push(el(&theta, 0)? + PI);
+    let (mut big_p, mut big_q) = (0, 0);
+    for t in q0p {
+        big_p = if big_p > t.p { big_p } else { t.p };
+        big_q = if big_q > t.q { big_q } else { t.q };
+    }
+    let mut pc0: Vec<Vec<Tensor>> = vec![Vec::new(); 3];
+    let components = free.checked_mul(3).ok_or_else(sm_err)?;
+    let mut pcf: Vec<Vec<Tensor>> = vec![Vec::new(); components];
+    let mut scale = 0.0;
+    for k in 0..3 {
+        let q0k = el_ref(q0p, k)?;
+        let mut s0 = tensor_elevate(q0k, big_p, big_q)?;
+        let mut sf = vec![t_make(big_p, big_q); free];
+        let qjk = el_ref(qjp, k)?;
+        for (t, &u) in indices.iter().enumerate() {
+            let sj = tensor_elevate(el_ref(qjk, t)?, big_p, big_q)?;
+            scale = smax(scale, t_scale(&sj));
+            let ypu = el(yp, u)?;
+            for (s0i, &sji) in s0.c.iter_mut().zip(&sj.c) {
+                *s0i += ypu * sji;
+            }
+            for (f, sff) in sf.iter_mut().enumerate() {
+                let z = el(el_ref(zn, f)?, u)?;
+                if z == 0.0 {
+                    continue;
+                }
+                for (sfi, &sji) in sff.c.iter_mut().zip(&sj.c) {
+                    *sfi += z * sji;
+                }
+            }
+        }
+        scale = smax(scale, t_scale(q0k));
+        *el_mut(&mut pc0, k)? = t_pieces(&s0, GRAPH_LEVELS)?;
+        for (f, sff) in sf.iter().enumerate() {
+            let component = k
+                .checked_mul(free)
+                .and_then(|v| v.checked_add(f))
+                .ok_or_else(sm_err)?;
+            *el_mut(&mut pcf, component)? = t_pieces(sff, GRAPH_LEVELS)?;
+        }
+    }
+    Ok(SectorPieces {
+        theta,
+        scale,
+        pc0,
+        pcf,
+    })
+}
+
 /// Prepare the planar fill's affine pieces for lazy sector-row generation.
 pub(super) fn sector_rows(
     patches: &[AffinePatch],
@@ -364,58 +445,20 @@ pub(super) fn sector_rows(
 ) -> Result<SectorRows> {
     let mut rows = SectorRows::new(free);
     for (p, patch) in patches.iter().enumerate() {
-        let mut theta: Vec<f64> = (0..GRAPH_DIRECTIONS)
-            .map(|k| PI * k as f64 / GRAPH_DIRECTIONS as f64)
-            .collect();
-        let kp = el(kernel, p)?;
-        if kp >= 0.0 {
-            theta.push(kp);
-        }
-        theta.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-        theta.push(el(&theta, 0)? + PI);
-        let q0p = &el_ref(curvatures, p)?.q0;
-        let qjp = &el_ref(curvatures, p)?.qj;
-        let (mut big_p, mut big_q) = (0, 0);
-        for t in q0p {
-            big_p = if big_p > t.p { big_p } else { t.p };
-            big_q = if big_q > t.q { big_q } else { t.q };
-        }
-        let mut pc0: Vec<Vec<Tensor>> = vec![Vec::new(); 3];
-        let components = free.checked_mul(3).ok_or_else(sm_err)?;
-        let mut pcf: Vec<Vec<Tensor>> = vec![Vec::new(); components];
-        let mut scale = 0.0;
-        for k in 0..3 {
-            let q0k = el_ref(q0p, k)?;
-            let mut s0 = tensor_elevate(q0k, big_p, big_q)?;
-            let mut sf = vec![t_make(big_p, big_q); free];
-            let qjk = el_ref(qjp, k)?;
-            for (t, &u) in patch.index.iter().enumerate() {
-                let sj = tensor_elevate(el_ref(qjk, t)?, big_p, big_q)?;
-                scale = smax(scale, t_scale(&sj));
-                let ypu = el(yp, u)?;
-                for (s0i, &sji) in s0.c.iter_mut().zip(&sj.c) {
-                    *s0i += ypu * sji;
-                }
-                for (f, sff) in sf.iter_mut().enumerate() {
-                    let z = el(el_ref(zn, f)?, u)?;
-                    if z == 0.0 {
-                        continue;
-                    }
-                    for (sfi, &sji) in sff.c.iter_mut().zip(&sj.c) {
-                        *sfi += z * sji;
-                    }
-                }
-            }
-            scale = smax(scale, t_scale(q0k));
-            *el_mut(&mut pc0, k)? = t_pieces(&s0, GRAPH_LEVELS)?;
-            for (f, sff) in sf.iter().enumerate() {
-                let component = k
-                    .checked_mul(free)
-                    .and_then(|v| v.checked_add(f))
-                    .ok_or_else(sm_err)?;
-                *el_mut(&mut pcf, component)? = t_pieces(sff, GRAPH_LEVELS)?;
-            }
-        }
+        let SectorPieces {
+            theta,
+            scale,
+            pc0,
+            pcf,
+        } = sector_pieces(
+            &patch.index,
+            &el_ref(curvatures, p)?.q0,
+            &el_ref(curvatures, p)?.qj,
+            el(kernel, p)?,
+            yp,
+            zn,
+            free,
+        )?;
         rows.add_patch(
             &theta,
             el_ref(curvatures, p)?.side,
@@ -442,55 +485,20 @@ pub(super) fn sector_conditions(
     let mut cm: Vec<f64> = Vec::new();
     let mut bv: Vec<f64> = Vec::new();
     for (p, patch) in patches.iter().enumerate() {
-        let mut theta: Vec<f64> = (0..GRAPH_DIRECTIONS)
-            .map(|k| PI * k as f64 / GRAPH_DIRECTIONS as f64)
-            .collect();
-        let kp = el(kernel, p)?;
-        if kp >= 0.0 {
-            theta.push(kp);
-        }
-        theta.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-        theta.push(el(&theta, 0)? + PI);
-        let q0p = &el_ref(curvatures, p)?.q0;
-        let qjp = &el_ref(curvatures, p)?.qj;
-        let (mut big_p, mut big_q) = (0, 0);
-        for t in q0p {
-            big_p = if big_p > t.p { big_p } else { t.p };
-            big_q = if big_q > t.q { big_q } else { t.q };
-        }
-        // l, m, n over t: at t = 0 (y = yp) and per free direction, at common degrees, in
-        // pieces
-        let mut pc0: Vec<Vec<Tensor>> = vec![Vec::new(); 3];
-        let mut pcf: Vec<Vec<Tensor>> = vec![Vec::new(); 3 * free];
-        let mut scale = 0.0;
-        for k in 0..3 {
-            let q0k = el_ref(q0p, k)?;
-            let mut s0 = tensor_elevate(q0k, big_p, big_q)?;
-            let mut sf = vec![t_make(big_p, big_q); free];
-            let qjk = el_ref(qjp, k)?;
-            for (t, &u) in patch.index.iter().enumerate() {
-                let sj = tensor_elevate(el_ref(qjk, t)?, big_p, big_q)?;
-                scale = smax(scale, t_scale(&sj));
-                let ypu = el(yp, u)?;
-                for (s0i, &sji) in s0.c.iter_mut().zip(&sj.c) {
-                    *s0i += ypu * sji;
-                }
-                for (f, sff) in sf.iter_mut().enumerate() {
-                    let z = el(el_ref(zn, f)?, u)?;
-                    if z == 0.0 {
-                        continue;
-                    }
-                    for (sfi, &sji) in sff.c.iter_mut().zip(&sj.c) {
-                        *sfi += z * sji;
-                    }
-                }
-            }
-            scale = smax(scale, t_scale(q0k));
-            *el_mut(&mut pc0, k)? = t_pieces(&s0, GRAPH_LEVELS)?;
-            for (f, sff) in sf.iter().enumerate() {
-                *el_mut(&mut pcf, k * free + f)? = t_pieces(sff, GRAPH_LEVELS)?;
-            }
-        }
+        let SectorPieces {
+            theta,
+            scale,
+            pc0,
+            pcf,
+        } = sector_pieces(
+            &patch.index,
+            &el_ref(curvatures, p)?.q0,
+            &el_ref(curvatures, p)?.qj,
+            el(kernel, p)?,
+            yp,
+            zn,
+            free,
+        )?;
         let sp = el_ref(curvatures, p)?.side;
         let mut row_t = vec![0.0; free];
         let pc00 = el_ref(&pc0, 0)?;
@@ -539,6 +547,49 @@ pub(super) fn sector_conditions(
 mod tests {
     use super::*;
     use crate::blend::blend_setback::{Net, Tensor};
+
+    #[test]
+    fn sector_piece_substitution_preserves_components_and_free_directions() {
+        // Constant polynomials with different degrees make elevation/splitting
+        // independently checkable; reordered indices exercise the affine mapping.
+        let constant = |p, q, value| Tensor {
+            p,
+            q,
+            c: vec![value; (p + 1) * (q + 1)],
+        };
+        let q0 = [
+            constant(1, 0, 1.0),
+            constant(0, 2, -2.0),
+            constant(0, 0, 4.0),
+        ];
+        let qj = [
+            vec![constant(0, 0, 2.0), constant(1, 0, 5.0)],
+            vec![constant(0, 1, -3.0), constant(0, 0, 4.0)],
+            vec![constant(0, 0, 7.0), constant(0, 2, -6.0)],
+        ];
+        let pieces = sector_pieces(
+            &[2, 0],
+            &q0,
+            &qj,
+            0.0,
+            &[0.25, 99.0, -0.5],
+            &[vec![2.0, 0.0, -1.0], vec![-3.0, 0.0, 0.0]],
+            2,
+        )
+        .unwrap();
+        assert_eq!(pieces.scale, 7.0);
+        assert_eq!(pieces.theta.len(), GRAPH_DIRECTIONS + 2);
+        assert_eq!(&pieces.theta[..2], &[0.0, 0.0]);
+        assert_eq!(pieces.theta.last(), Some(&PI));
+        let expected = [1.25, 0.5, -1.0, 8.0, -15.0, 11.0, -12.0, -19.0, 18.0];
+        for (component, value) in pieces.pc0.iter().chain(&pieces.pcf).zip(expected) {
+            assert_eq!(component.len(), 4);
+            for piece in component {
+                assert_eq!((piece.p, piece.q), (1, 2));
+                assert!(piece.c.iter().all(|&c| c == value));
+            }
+        }
+    }
 
     /// A planar degree (2, 2) net over the unit square, moved along z by one unknown times
     /// the bump `u^2 + v^2` (Bernstein coefficients `b_i + b_j`, `b = (0, 0, 1)`).
