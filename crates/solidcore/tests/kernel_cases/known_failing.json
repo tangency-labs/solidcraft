@@ -75,11 +75,6 @@
     "reason": "fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib"
   },
   {
-    "case": "fillets/cov-junction-boss-tilt-40-root-round",
-    "issue": "to file",
-    "reason": "fillet status 1001 on a cylinder tilted 40 degrees into the plate, as on SMLib"
-  },
-  {
     "case": "fillets/cov-junction-tee-equal-round",
     "issue": "to file",
     "reason": "the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)"
