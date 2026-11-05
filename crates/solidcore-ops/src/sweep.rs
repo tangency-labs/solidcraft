@@ -153,6 +153,64 @@ pub enum Curve {
     },
 }
 
+impl Curve {
+    /// A planar profile segment placed on `plane` as a sweep curve: a line, or
+    /// an arc about the plane's normal. The cubic, conic and spline profile
+    /// segment forms have no [`Curve`] form yet.
+    #[must_use]
+    pub fn from_seg2(
+        segment: &solidcore_record::Seg2,
+        plane: &solidcore_record::Plane,
+    ) -> Option<Curve> {
+        let world = |p: solidcore_record::Vec2| {
+            [
+                plane.origin.x + plane.x.x * p.x + plane.y.x * p.y,
+                plane.origin.y + plane.x.y * p.x + plane.y.y * p.y,
+                plane.origin.z + plane.x.z * p.x + plane.y.z * p.y,
+            ]
+        };
+        match *segment {
+            solidcore_record::Seg2::Line { a, b } => Some(Curve::Line {
+                start: world(a),
+                end: world(b),
+            }),
+            solidcore_record::Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
+                let x = plane.x;
+                let y = plane.y;
+                let normal = [
+                    x.y * y.z - x.z * y.y,
+                    x.z * y.x - x.x * y.z,
+                    x.x * y.y - x.y * y.x,
+                ];
+                let axis = if sweep < 0.0 {
+                    [-normal[0], -normal[1], -normal[2]]
+                } else {
+                    normal
+                };
+                let (start, end) = if sweep < 0.0 {
+                    (-start, -start - sweep)
+                } else {
+                    (start, start + sweep)
+                };
+                (sweep != 0.0).then(|| Curve::Arc {
+                    center: world(center),
+                    axis,
+                    reference: [plane.x.x, plane.x.y, plane.x.z],
+                    radius,
+                    start,
+                    end,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// How a drafted [`extrude`] closes the gap its offset opens at a sharp corner of the profile.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DraftCorner {
@@ -1246,4 +1304,87 @@ pub fn face_section(
             Ok(out)
         })
     })?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore_record::profile::Seg2;
+
+    fn square(half: f64) -> Vec<Seg2> {
+        let p = [
+            solidcore_record::Vec2::new(-half, -half),
+            solidcore_record::Vec2::new(half, -half),
+            solidcore_record::Vec2::new(half, half),
+            solidcore_record::Vec2::new(-half, half),
+        ];
+        (0..4)
+            .map(|i| Seg2::Line {
+                a: p[i],
+                b: p[(i + 1) % 4],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_profile_line_and_arc_place_on_the_plane() {
+        let line = Curve::from_seg2(
+            &Seg2::Line {
+                a: solidcore_record::Vec2::new(0.0, 0.0),
+                b: solidcore_record::Vec2::new(2.0, 0.0),
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .expect("line");
+        assert!(matches!(
+            line,
+            Curve::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [2.0, 0.0, 0.0]
+            }
+        ));
+
+        let arc = Curve::from_seg2(
+            &Seg2::Arc {
+                center: solidcore_record::Vec2::new(0.0, 0.0),
+                radius: 1.0,
+                start: 0.0,
+                sweep: std::f64::consts::FRAC_PI_2,
+            },
+            &solidcore_record::Plane::XY,
+        )
+        .expect("arc");
+        let Curve::Arc {
+            axis, start, end, ..
+        } = arc
+        else {
+            panic!("arc");
+        };
+        assert_eq!(axis, [0.0, 0.0, 1.0]);
+        assert!((end - start - std::f64::consts::FRAC_PI_2).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn two_profile_sections_loft_to_a_closed_box() {
+        let lower: Vec<Curve> = square(2.0)
+            .iter()
+            .map(|s| Curve::from_seg2(s, &solidcore_record::Plane::XY).expect("lower"))
+            .collect();
+        let upper: Vec<Curve> = square(2.0)
+            .iter()
+            .map(|s| {
+                Curve::from_seg2(
+                    s,
+                    &solidcore_record::Plane {
+                        origin: solidcore_record::Vec3::new(0.0, 0.0, 6.0),
+                        ..solidcore_record::Plane::XY
+                    },
+                )
+                .expect("upper")
+            })
+            .collect();
+        let body = loft(&[lower, upper], 1, true).expect("loft");
+        assert_eq!(body.counts().expect("counts"), [6, 12, 8]);
+        assert!((body.volume(1.0e-3).expect("volume") - 96.0).abs() < 1.0e-6);
+    }
 }
