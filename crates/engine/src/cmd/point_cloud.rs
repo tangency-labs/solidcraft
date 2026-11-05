@@ -339,6 +339,8 @@ fn reload_limit(c: &PointCloud) -> usize {
 
 /// Read the cloud's file again where it was read from, keeping its name, placement, units and
 /// how it is shown.
+/// The path comes from the design, which may be someone else's, so it is a design path: one on
+/// another computer is refused from its text until the user allows that server.
 fn reload(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "pointcloud.reload";
     let i = find(s, p, cmd)?;
@@ -349,7 +351,8 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
     let path = c.source.clone();
     let scale = unit_scale(&c.units).unwrap_or(1.0);
     let max_points = reload_limit(&c);
-    let bytes = solidcraft_io::vfs::read(&path, solidcraft_io::MAX_POINT_CLOUD_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = solidcraft_io::vfs::read_design_path(&path, s.path.as_deref(), solidcraft_io::MAX_POINT_CLOUD_BYTES)
+        .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let read = solidcraft_io::read_point_cloud(&bytes, &path, scale, max_points).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     c.origin = read.origin;
     c.points = Points::new(read.points.into());
@@ -577,6 +580,34 @@ mod tests {
         let (before, undo) = (s.doc.point_clouds.clone(), s.undo.len());
         assert!(s.execute("pointcloud.reload", &json!({"cloud": id})).is_err());
         assert_eq!((&s.doc.point_clouds, s.undo.len()), (&before, undo));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// A design may come from anyone, and on Windows only asking about `\\\\host\\share\\x` connects
+    /// to that computer with the user's sign-in: the path is refused from its text, with no file
+    /// call, until the server is allowed.
+    #[test]
+    fn a_reload_reaches_no_network_location_until_its_server_is_allowed() {
+        use solidcraft_io::vfs::{allowing_hosts, file_calls};
+        let d = dir("reload-network");
+        let path = d.join("scan.ply");
+        layered(&path, 3, false);
+        let mut s = Session::default();
+        let id = s.execute("pointcloud.insert", &json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+        for (crafted, says) in [(r"\\evil.example\share\scan.ply", "evil.example"), (r"\\.\pipe\scan.ply", "device")] {
+            s.doc_mut().point_clouds[0].source = crafted.into();
+            let (before, undo, calls) = (s.doc.point_clouds.clone(), s.undo.len(), file_calls());
+            let e = s.execute("pointcloud.reload", &json!({"cloud": id})).unwrap_err().to_string();
+            assert!(e.contains(says), "{e}");
+            assert_eq!(file_calls(), calls, "{crafted}: nothing was asked of the disk or the network");
+            assert_eq!((&s.doc.point_clouds, s.undo.len()), (&before, undo));
+        }
+        // Allowed, the read goes ahead (and fails here only because no such server answers).
+        s.doc_mut().point_clouds[0].source = r"\\evil.example\share\scan.ply".into();
+        let calls = file_calls();
+        let allowed = allowing_hosts(&["evil.example".to_string()], || s.execute("pointcloud.reload", &json!({"cloud": id})));
+        assert!(allowed.is_err());
+        assert!(file_calls() > calls, "an allowed server is read");
         let _ = std::fs::remove_dir_all(d);
     }
 

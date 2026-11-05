@@ -30,7 +30,9 @@ the file still has. Colouring by a property the file no longer has goes back to 
 colours. A cloud that was thinned stays thinned to as many points; any other is read as a new
 insert would be, so a file that grew comes in whole. The file is read beside the window, with
 progress and Cancel. A cloud opened from a design saved before it remembered its file cannot be
-reloaded.
+reloaded. A file on another computer (`\\host\share`) is treated as a linked design's is:
+**Reload from file** asks before it connects to that server, and `pointcloud.reload` is refused
+until the server is allowed in Preferences.
 
 ## Colours
 

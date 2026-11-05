@@ -409,6 +409,58 @@ fn update_links_and_open_linked_design_ask_before_a_network_location() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Reload from file on a cloud whose file a design names on another computer asks first, naming
+/// the server; Cancel reads nothing, and a local file does not ask.
+#[test]
+fn reloading_a_point_cloud_on_a_network_location_asks_first() {
+    use crate::network_prompt::{Answer, NetworkPrompt, Then, answer, reload_cloud};
+    let dir = scratch("reload-cloud-network");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    let local = h.app.session.doc.point_clouds[0].source.clone();
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the reload went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+
+    let crafted = r"\\evil.example\share\scan.xyz";
+    h.app.session.doc_mut().point_clouds[0].source = crafted.into();
+    let design = h.app.session.doc.clone();
+    reload_cloud(&mut h.app, id, crafted);
+    assert_eq!(h.app.network_prompt, Some(NetworkPrompt { hosts: vec!["evil.example".into()], then: Then::ReloadCloud(id) }));
+    assert!(h.app.file_load.idle(), "nothing is read while it asks");
+    answer(&mut h.app, Answer::Cancel);
+    h.frames(2);
+    assert!(h.app.network_prompt.is_none() && h.app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "Cancel changes nothing");
+
+    // Allow once holds for that reload alone, and the preferences keep nothing.
+    reload_cloud(&mut h.app, id, crafted);
+    answer(&mut h.app, Answer::Once);
+    assert!(!h.app.file_load.idle(), "the file operation runs");
+    until_idle(&mut h);
+    assert!(h.app.preferences.network_hosts.is_empty());
+    let refused = h.app.session.execute("pointcloud.reload", &json!({"cloud": id})).unwrap_err().to_string();
+    assert!(refused.contains("evil.example") && refused.contains("Reload from file"), "{refused}");
+
+    // A local file does not ask.
+    h.app.session.doc_mut().point_clouds[0].source = local.clone();
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    reload_cloud(&mut h.app, id, &local);
+    assert!(h.app.network_prompt.is_none());
+    until_idle(&mut h);
+    assert_eq!(h.app.session.doc.point_clouds[0].len(), 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A control-channel (MCP) open is answered when the file is in, with the synchronous
 /// command's reply, and the window draws frames while it waits. Commands sent meanwhile wait.
 #[test]

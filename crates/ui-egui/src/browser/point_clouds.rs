@@ -534,7 +534,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             if changed {
                 edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
             }
-            if !c.source.is_empty() && ui_kit::button(ui, crate::i18n::tr_label("Reload from file"), ui_kit::Button::Normal).clicked() {
+            if !c.source.is_empty() && ui_kit::button(ui, crate::i18n::tr("ui.point_cloud_reload"), ui_kit::Button::Normal).clicked() {
                 reload = true;
             }
         });
@@ -547,10 +547,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     if reload {
-        let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
-        request.options.insert("cloud".into(), json!(c.id));
-        // An error is said in the status line, as for any file operation.
-        let _ = crate::file_load::begin_request(app, request);
+        crate::network_prompt::reload_cloud(app, c.id, &c.source);
     }
     if let Some(p) = edit
         && app.run("pointcloud.edit", p).is_ok()

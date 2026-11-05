@@ -24,6 +24,11 @@
     "file_load.reloading_cloud": "正在重新加载点云",
     "ui.point_cloud_reload": "从文件重新加载"
   },
+  "ko": {
+    "cmd.pointcloud_reload": "포인트 클라우드 다시 불러오기",
+    "file_load.reloading_cloud": "포인트 클라우드 다시 불러오는 중",
+    "ui.point_cloud_reload": "파일에서 다시 불러오기"
+  },
   "ar": {
     "cmd.pointcloud_reload": "إعادة تحميل سحابة النقاط",
     "file_load.reloading_cloud": "جارٍ إعادة تحميل سحابة النقاط",
