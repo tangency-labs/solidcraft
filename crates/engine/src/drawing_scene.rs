@@ -3,9 +3,10 @@
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
 //! on the sheet by id, its lines as [`paper_group`] makes them, then the dimensions of those
 //! views, by view and id ([`crate::drawing_dimension_paper`]), then its title block's lines and
-//! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
-//! the sheet sit between the border and the views ([`groups`]), so a view's lines draw over a photo.
-//! Text and tables each join as one more kind of group. A shaded view's group holds
+//! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]), with its labels
+//! and values set on them ([`title_block_text`]). Images placed on the sheet sit between the border
+//! and the views ([`groups`]), so a view's lines draw over a photo. Tables join as one more kind of
+//! group. A shaded view's group holds
 //! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
@@ -49,11 +50,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::view::{ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
-use solidcraft_doc::{DocError, ModelState, ids};
+use solidcraft_doc::{DocError, Document, ModelState, ids};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::Source;
@@ -66,6 +68,7 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
 use crate::params::bad;
+use crate::title_block_text::{self, CellText};
 use crate::{EngineError, Result, Session};
 
 #[path = "drawing_scene_kept.rs"]
@@ -294,7 +297,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let mut assembly = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let block = (Lettering::of(s, drawing), cell_texts(s, drawing, sheet));
+    let mut assembly = assemble(record, drawing.projection, &block, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
@@ -566,23 +570,31 @@ impl Assembly {
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, with its title block, its symbol in `projection`, to go
-/// on top ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is
-/// left out and says why, and the views after it are still drawn when they fit.
+/// lines, in id order) moved to its centre, with its title block, its symbol in `projection` and
+/// its cells' text as `block` gives it in the drawing's lettering, to go on top
+/// ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is left out
+/// and says why, and the views after it are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
+    (lettering, cells): &(Lettering, Vec<CellText>),
     images: &[Group],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let layout = record.border.as_ref().map(|border| border.layout(&record.sheet)).transpose().map_err(|e| bad(CMD, e.to_string()))?;
     let mut border = layout.as_ref().map_or_else(Vec::new, |layout| layout.paper(record.id));
-    // The block sits on the border. It's painted over the views, but counted with the border, so no
-    // view takes its records.
-    let block = match (&record.title_block, &layout) {
-        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection)),
-        _ => None,
+    // The block sits on the border. It's painted over the views, but counted with the border (its
+    // text's fonts too), so no view takes its records.
+    let (block, fonts) = match (&record.title_block, &layout) {
+        (Some(block), Some(layout)) => {
+            let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
+            let mut group = placed.paper(record.id, projection);
+            let text = title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells).set();
+            group.items.extend(text.runs.into_iter().map(Item::Text));
+            (Some(group), text.fonts)
+        }
+        _ => (None, Vec::new()),
     };
     let mut objects = Vec::new();
     if !border.is_empty() {
@@ -593,8 +605,11 @@ fn assemble<D: Borrow<Drawn>>(
     }
     border.extend_from_slice(images);
     let records = border.iter().chain(&block).map(Group::records).fold(0usize, usize::saturating_add);
-    let scene = Scene::new(size_mm, border);
+    let mut scene = Scene::new(size_mm, border);
     let alone = Scene::new(size_mm, Vec::with_capacity(1));
+    // The block's fonts, each once: all they hold counts, as the table held none before.
+    scene.add_fonts(fonts);
+    let records = records.saturating_add(alone.font_records_beyond(&scene.fonts));
     let mut assembly = Assembly { scene, records, alone, states: Vec::new(), objects, placed: BTreeMap::new(), dimensions: Vec::new(), block };
     for (view, centre, drawn) in views {
         let drawn: &Drawn = drawn.borrow();
@@ -662,6 +677,13 @@ fn moved(group: &Group, by: Vec2) -> Group {
         Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
     });
     Group { object: group.object, kind: group.kind, items: items.collect() }
+}
+
+/// The text cells of sheet `sheet` of `d` as `s`'s design shows them ([`title_block_text::shown`]).
+fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
+    let Some(at) = d.sheets.iter().position(|x| x.id == sheet && x.title_block.is_some()) else { return Vec::new() };
+    let state = s.model.state();
+    title_block_text::shown(&s.doc, &mut Tree::new(&s.doc, &state), d, at)
 }
 
 /// Sheet `sheet` of `d`.
@@ -774,13 +796,16 @@ struct Inputs {
     dimensions: Vec<(u64, u64)>,
 }
 
-/// The last answer of [`extract`], for the sheet, drawing, world state, lettering and serial it was
-/// for: the same five again return it as it is.
+/// The last answer of [`extract`], for the sheet, drawing, design, world state, lettering and serial
+/// it was for: the same six again return it as it is. Its scene is used again for the same inputs
+/// and title block cells.
 struct Assembled {
     sheet: u64,
     drawing: Arc<Drawing>,
+    doc: Arc<Document>,
     state: Arc<ModelState>,
     lettering: Lettering,
+    cells: Vec<CellText>,
     serial: u64,
     inputs: Inputs,
     answer: SheetView,
@@ -904,26 +929,30 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let d = s.drawing(CMD)?.clone();
     let state = s.world_state()?;
     let lettering = Lettering::of(s, &d);
-    let cache = &mut s.drawing_scenes;
-    if let Some(last) = &cache.last
+    if let Some(last) = &s.drawing_scenes.last
         && last.sheet == sheet
-        && last.serial == cache.serial
+        && last.serial == s.drawing_scenes.serial
         && last.lettering == lettering
         && Arc::ptr_eq(&last.drawing, &d)
+        && Arc::ptr_eq(&last.doc, &s.doc)
         && Arc::ptr_eq(&last.state, &state)
     {
         return Ok(last.answer.clone());
     }
+    // What the title block's cells say: a change of the design (a name, a mass) can change them.
+    let block = (lettering, cell_texts(s, &d, sheet));
+    let doc = s.doc.clone();
+    let cache = &mut s.drawing_scenes;
     let record = sheet_of(&d, sheet)?;
     let on = views_on(&d, sheet)?;
     cache.sheet = Some(sheet);
     catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     let cache = &mut s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
-    let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &lettering).iter().map(|record| record.id).collect();
+    let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &block.0).iter().map(|record| record.id).collect();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, dimensions, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs => {
+        Some(last) if last.inputs == inputs && last.cells == block.1 => {
             (last.answer.scene, last.answer.views, last.answer.objects, last.answer.dimensions, last.answer.generation)
         }
         _ => {
@@ -932,14 +961,15 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &inputs.images, drawn)?;
+            let mut assembly = assemble(record, d.projection, &block, &inputs.images, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             let (scene, views, objects, dimensions) = assembly.finish()?;
             (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
     let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions };
-    cache.last = Some(Assembled { sheet, drawing: d, state, lettering, serial: cache.serial, inputs, answer: answer.clone() });
+    let (lettering, cells) = block;
+    cache.last = Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, serial: cache.serial, inputs, answer: answer.clone() });
     Ok(answer)
 }
 
